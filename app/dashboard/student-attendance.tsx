@@ -41,7 +41,7 @@ export default function StudentAttendance() {
     );
   };
 
-  // ================= LOAD ATTENDANCE (FIXED CONTEXT MATCH) =================
+  // ================= LOAD ATTENDANCE =================
   const loadAttendanceForDay = async () => {
     if (!selectedClassId || !date) return;
 
@@ -98,14 +98,10 @@ export default function StudentAttendance() {
         const payload = prepareSyncData({
           studentId: student.id,
           classId: student.classId,
-
           date,
           status,
-
-          // 🔥 CRITICAL FIX: USE STUDENT DATA, NOT SYSTEM
           academicYear: student.academicYear,
           term: student.term as TermType,
-
           synced: "pending" as any,
         });
 
@@ -122,22 +118,36 @@ export default function StudentAttendance() {
 
   // ================= COLOR =================
   const getColor = (status?: Status) => {
-    if (status === "present") return "green";
-    if (status === "absent") return "red";
-    if (status === "late") return "orange";
-    return "#eee";
+    if (status === "present") return "#16a34a";
+    if (status === "absent") return "#dc2626";
+    if (status === "late") return "#f59e0b";
+    return "#e5e7eb";
   };
 
   // ================= UI =================
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Student Attendance</h2>
+    <div
+      style={{
+        padding: 20,
+        color: "#111", // ✅ FIX TEXT VISIBILITY
+        background: "#f5f5f5", // ✅ FIX WHITE SCREEN ISSUE
+        minHeight: "100vh",
+      }}
+    >
+      <h2 style={{ color: "#111" }}>Student Attendance</h2>
 
       {/* SELECTORS */}
       <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
         <select
           value={selectedClassId}
           onChange={(e) => setSelectedClassId(e.target.value)}
+          style={{
+            padding: 8,
+            borderRadius: 6,
+            border: "1px solid #ccc",
+            color: "#111",
+            background: "#fff",
+          }}
         >
           <option value="">Select Class</option>
           {classes.map((c) => (
@@ -151,6 +161,13 @@ export default function StudentAttendance() {
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
+          style={{
+            padding: 8,
+            borderRadius: 6,
+            border: "1px solid #ccc",
+            color: "#111",
+            background: "#fff",
+          }}
         />
       </div>
 
@@ -169,12 +186,19 @@ export default function StudentAttendance() {
                 padding: 10,
                 marginBottom: 8,
                 borderRadius: 6,
-                background: status ? `${getColor(status)}15` : "#fff",
+                background: "#fff", // ✅ FIX VISIBILITY
+                color: "#111", // ✅ FIX TEXT
               }}
             >
-              <b>{student.fullName}</b>
+              <b style={{ color: "#111" }}>{student.fullName}</b>
 
-              <div style={{ fontSize: 12, opacity: 0.7 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#333", // FIXED FROM OPACITY ISSUE
+                  marginTop: 4,
+                }}
+              >
                 Class:{" "}
                 {classes.find((c) => c.id === student.classId)?.name}
                 {" | "}
@@ -188,8 +212,8 @@ export default function StudentAttendance() {
                   }
                   style={{
                     background:
-                      status === "present" ? "green" : "#eee",
-                    color: status === "present" ? "#fff" : "#000",
+                      status === "present" ? "#16a34a" : "#eee",
+                    color: status === "present" ? "#fff" : "#111",
                     marginRight: 5,
                     padding: "6px 10px",
                     border: "none",
@@ -205,8 +229,8 @@ export default function StudentAttendance() {
                   }
                   style={{
                     background:
-                      status === "absent" ? "red" : "#eee",
-                    color: status === "absent" ? "#fff" : "#000",
+                      status === "absent" ? "#dc2626" : "#eee",
+                    color: status === "absent" ? "#fff" : "#111",
                     marginRight: 5,
                     padding: "6px 10px",
                     border: "none",
@@ -222,8 +246,8 @@ export default function StudentAttendance() {
                   }
                   style={{
                     background:
-                      status === "late" ? "orange" : "#eee",
-                    color: status === "late" ? "#fff" : "#000",
+                      status === "late" ? "#f59e0b" : "#eee",
+                    color: status === "late" ? "#fff" : "#111",
                     padding: "6px 10px",
                     border: "none",
                     borderRadius: 4,

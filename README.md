@@ -1,36 +1,102 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+/lib
+  db.ts        → offline database (IndexedDB)
+  sync.ts      → sync engine (offline → server)
 
-## Getting Started
+  models/
+    student.ts
+    teacher.ts
+    class.ts
+    subject.ts
+    score.ts
+    assignment.ts
 
-First, run the development server:
+  calculations/
+    grading.ts
+    scoring.ts
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+ClassTeacher table = responsibility
+Teacher.role = identity
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Dashboard (UI only)
+   ↓
+Modules (Students, Teachers, Fees, Attendance, Promotion)
+   ↓
+Shared Database (Dexie)
+   ↓
+Shared “Academic State”
+   - term
+   - academicYear
+   - classId
+   - attendance
+   - payments
+   - scores
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+WHERE EACH MODULE ACTUALLY CONNECTS
 
-## Learn More
+Let’s map it properly:
 
-To learn more about Next.js, take a look at the following resources:
+👨‍🎓 STUDENTS (your current base)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+✔ Core entity
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Used by:
 
-## Deploy on Vercel
+attendance
+fees
+promotion
+scores
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+👉 This is your ROOT TABLE
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+📊 SCORES
+
+Connects to:
+
+promotion.tsx (decision engine)
+reports.tsx (report cards)
+
+👉 Drives academic decisions
+
+💰 FEES (VERY IMPORTANT)
+
+Connects to:
+
+students (classId → fee structure)
+receipts
+arrears system
+
+👉 Financial layer
+
+🕒 STUDENT ATTENDANCE
+
+Connects to:
+
+reports (attendance summary on report cards)
+promotion (optional future rule)
+parents dashboard (future)
+
+👉 Academic discipline tracking
+
+👨‍🏫 TEACHER ATTENDANCE
+
+Connects to:
+
+payroll (future upgrade)
+admin monitoring
+HR system
+
+👉 Staff accountability layer
+
+🔁 PROMOTION ENGINE
+
+Connects to EVERYTHING:
+
+students (class movement)
+scores (performance)
+academicHistory (audit trail)
+classes (nextClassMap)
+
+👉 This is your SYSTEM ENGINE
+
+npm install html2pdf.js

@@ -1,0 +1,118 @@
+:root {
+  --primary: #2f6fed;
+  --bg: #ffffff;
+  --card: #ffffff;
+  --text: #111111;
+  --border: #e5e5e5;
+}
+
+/* ================= CONTAINER ================= */
+.container {
+  padding: 20px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.title {
+  font-size: 22px;
+  margin-bottom: 10px;
+}
+
+/* ================= BUTTONS ================= */
+.button {
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: var(--card);
+  color: var(--text);
+}
+
+.primaryButton {
+  margin-top: 20px;
+  background: var(--primary);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: none;
+  width: 100%;
+  max-width: 300px;
+}
+
+/* ================= CARDS ================= */
+.cardGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--card);
+}
+
+.cardName {
+  font-weight: bold;
+}
+
+.cardText {
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.cardActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ================= TABLE ================= */
+.tableWrapper {
+  margin-top: 20px;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 800px;
+}
+
+.table th,
+.table td {
+  border: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+}
+
+.table th {
+  background: var(--card);
+}
+
+/* ================= STATUS COLORS ================= */
+.green {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.red {
+  color: #e74c3c;
+}
+
+.gray {
+  color: #888;
+}
+
+/* ================= RESPONSIVE ================= */
+@media (min-width: 768px) {
+  .cardGrid {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .tableWrapper {
+    display: none;
+  }
+}

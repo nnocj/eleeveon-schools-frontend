@@ -16,7 +16,7 @@ export default function Students() {
   const [attendance, setAttendance] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(null);
 
-  // ================= LOAD =================
+  // ================= LOAD (FIXED) =================
   const load = async () => {
     const [
       studentsData,
@@ -30,16 +30,63 @@ export default function Students() {
       db.settings.toArray(),
     ]);
 
-    setStudents(studentsData);
+    const sys = settingsData?.[0] || settings;
+
+    const academicYear = sys?.academicYear || "";
+    const currentTerm = sys?.currentTerm || "";
+
+    // 🔥 FILTER STUDENTS SAFELY
+    let filteredStudents = studentsData;
+
+    if (academicYear) {
+      filteredStudents = filteredStudents.filter(
+        (s) =>
+          !s.academicYear ||
+          s.academicYear === academicYear
+      );
+    }
+
+    if (currentTerm) {
+      filteredStudents = filteredStudents.filter(
+        (s) =>
+          !s.term ||
+          s.term === currentTerm
+      );
+    }
+
+    // 🔥 FALLBACK
+    if (filteredStudents.length === 0) {
+      filteredStudents = studentsData;
+    }
+
+    // 🔥 FILTER ATTENDANCE
+    let filteredAttendance = attendanceData;
+
+    if (academicYear) {
+      filteredAttendance = filteredAttendance.filter(
+        (a) =>
+          !a.academicYear ||
+          a.academicYear === academicYear
+      );
+    }
+
+    if (currentTerm) {
+      filteredAttendance = filteredAttendance.filter(
+        (a) =>
+          !a.term ||
+          a.term === currentTerm
+      );
+    }
+
+    setStudents(filteredStudents);
     setClasses(classesData);
-    setAttendance(attendanceData);
-    setSettings(settingsData[0] || null);
+    setAttendance(filteredAttendance);
+    setSettings(sys || null);
   };
 
   useEffect(() => {
     load();
 
-    // 🔥 live sync after promotion
     const interval = setInterval(load, 2000);
     return () => clearInterval(interval);
   }, []);
@@ -60,24 +107,23 @@ export default function Students() {
     };
   };
 
-  // ================= ADD STUDENT (FIXED) =================
+  // ================= ADD STUDENT =================
   const addStudent = async () => {
     if (!fullName || !classId) return;
 
-    // 🔥 SOURCE OF TRUTH (IMPORTANT FIX)
-    const current = settings || (await db.settings.toArray())[0];
+    const sysFromDB = await db.settings.toArray();
+    const current = sysFromDB?.[0] || settings;
 
     await db.students.add(
       prepareSyncData({
         fullName,
-        age,
+        age: Number(age || 0),
         parentName,
         parentPhone,
         classId: Number(classId),
 
-        // ✅ FIXED: no more hardcoding
-        academicYear: current?.academicYear,
-        term: current?.currentTerm,
+        academicYear: current?.academicYear || "",
+        term: current?.currentTerm || "",
 
         status: "active",
       })
@@ -178,8 +224,8 @@ export default function Students() {
             Class: {getClassName(s.classId)}
             <br />
 
-            {/* 🔥 NOW CONSISTENT WITH PROMOTION SYSTEM */}
-            Year: {s.academicYear} | Term: {s.term}
+            {/* 🔥 TRUTH FROM SYSTEM ONLY */}
+            Year: {settings?.academicYear || "N/A"} | Term: {settings?.currentTerm || "N/A"}
             <br />
 
             {/* ATTENDANCE */}

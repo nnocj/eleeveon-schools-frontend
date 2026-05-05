@@ -9,9 +9,14 @@ import {
 
 const PASS_MARK = 50;
 
+// ================= SYSTEM STATE (SINGLE SOURCE OF TRUTH) =================
+const getSystemState = async () => {
+  const settings = await db.settings.toArray();
+  return settings?.[0] || null;
+};
+
 // ================= SNAPSHOT =================
-const snapshotReportCards = async () => {
-  const current = (await db.settings.toArray())[0];
+const snapshotReportCards = async (current: any) => {
   if (!current) return;
 
   const [students, scores, subjects, teachers, assignments] =
@@ -132,13 +137,7 @@ const snapshotReportCards = async () => {
 };
 
 // ================= TERM PROMOTION =================
-export const processTermPromotion = async () => {
-  const [students, settings] = await Promise.all([
-    db.students.toArray(),
-    db.settings.toArray(),
-  ]);
-
-  const current = settings[0];
+export const processTermPromotion = async (current: any) => {
   if (!current) return;
 
   const nextIndex = TERMS.indexOf(current.currentTerm as TermType) + 1;
@@ -146,7 +145,9 @@ export const processTermPromotion = async () => {
 
   if (!nextTerm) return;
 
-  await snapshotReportCards();
+  await snapshotReportCards(current);
+
+  const students = await db.students.toArray();
 
   await db.transaction("rw", db.students, db.settings, async () => {
     for (const s of students) {
@@ -167,23 +168,22 @@ export const processTermPromotion = async () => {
 
 // ================= YEAR PROMOTION =================
 export const processYearPromotion = async (
+  current: any,
   overrides: Record<number, "promote" | "repeat" | "graduate"> = {},
   classSelections: Record<number, number> = {}
 ) => {
-  const [students, scores, classes, settings] = await Promise.all([
+  if (!current) return;
+
+  const [students, scores, classes] = await Promise.all([
     db.students.toArray(),
     db.scores.toArray(),
     db.classes.toArray(),
-    db.settings.toArray(),
   ]);
-
-  const current = settings[0];
-  if (!current) return;
 
   const classMap = buildNextClassMap(classes);
   const newYear = nextAcademicYear(current.academicYear);
 
-  await snapshotReportCards();
+  await snapshotReportCards(current);
 
   await db.transaction("rw", db.students, db.settings, async () => {
     for (const s of students) {
@@ -198,22 +198,19 @@ export const processYearPromotion = async (
 
       const avg = getAverage(studentScores);
 
-      // ✅ ABSOLUTE PRIORITY: USER SELECTED CLASS
+      // ================= MANUAL OVERRIDE =================
       if (classSelections[s.id] !== undefined) {
         await db.students.update(s.id, {
-          classId: classSelections[s.id], // 🔥 DIRECT FROM DB SELECTOR
+          classId: classSelections[s.id],
           academicYear: newYear,
           term: "Term 1" as TermType,
         });
         continue;
       }
 
-      // fallback system
       const nextClassId = classMap[s.classId];
       const safeNextClassId =
-        nextClassId === null || nextClassId === undefined
-          ? undefined
-          : nextClassId;
+        nextClassId ?? undefined;
 
       let decision = overrides[s.id];
 
@@ -250,20 +247,21 @@ export const processYearPromotion = async (
   });
 };
 
-// ================= ENTRY =================
+// ================= ENTRY POINT =================
 export const runAcademicEngine = async (
   overrides?: Record<number, "promote" | "repeat" | "graduate">,
   classSelections?: Record<number, number>
 ) => {
-  const current = (await db.settings.toArray())[0];
+  const current = await getSystemState();
   if (!current) return;
 
   if (current.currentTerm === "Term 3") {
     return processYearPromotion(
+      current,
       overrides || {},
       classSelections || {}
     );
   }
 
-  return processTermPromotion();
+  return processTermPromotion(current);
 };

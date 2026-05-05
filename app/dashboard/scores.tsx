@@ -41,7 +41,7 @@ export default function Scores() {
     load();
   }, []);
 
-  // ================= LOAD STUDENTS (FIXED + SAFE + ROBUST) =================
+  // ================= LOAD STUDENTS =================
   const handleClassChange = async (value: string) => {
     setClassId(value);
 
@@ -50,35 +50,39 @@ export default function Scores() {
       return;
     }
 
-    const sys =
-      system ||
-      (await db.settings.toArray()).find(Boolean) ||
-      settings;
+    // 🔥 ALWAYS use DB as truth
+    const sysFromDB = await db.settings.toArray();
+    const sys = sysFromDB?.[0];
 
-    const academicYear =
-      sys?.academicYear || settings?.academicYear || "";
+    const academicYear = sys?.academicYear || "";
+    const currentTerm = sys?.currentTerm || "";
 
-    // 🔥 IMPORTANT FIX: DO NOT HARD FAIL ON YEAR
     const allClassStudents = await db.students
       .where("classId")
       .equals(Number(value))
       .toArray();
 
-    // If no academic year set → show all class students
-    if (!academicYear) {
-      setStudents(allClassStudents);
+    if (!allClassStudents.length) {
+      setStudents([]);
       return;
     }
 
-    // Otherwise filter safely
-    const filtered = allClassStudents.filter((s) => {
-      return (
-        !s.academicYear || // allow legacy records
-        s.academicYear === academicYear
-      );
-    });
+    let filtered = allClassStudents;
 
-    setStudents(filtered);
+    if (academicYear) {
+      filtered = filtered.filter(
+        (s) => !s.academicYear || s.academicYear === academicYear
+      );
+    }
+
+    if (currentTerm) {
+      filtered = filtered.filter(
+        (s) => !s.term || s.term === currentTerm
+      );
+    }
+
+    // fallback
+    setStudents(filtered.length ? filtered : allClassStudents);
   };
 
   // ================= INPUT =================
@@ -117,10 +121,8 @@ export default function Scores() {
       return;
     }
 
-    const sys =
-      system ||
-      (await db.settings.toArray()).find(Boolean) ||
-      settings;
+    const sysFromDB = await db.settings.toArray();
+    const sys = sysFromDB?.[0];
 
     if (!sys) {
       alert("System settings not found");
@@ -134,8 +136,8 @@ export default function Scores() {
       .where({
         studentId,
         subjectId: Number(subjectId),
-        academicYear: sys.academicYear || settings?.academicYear,
-        term: sys.currentTerm || settings?.currentTerm,
+        academicYear: sys.academicYear,
+        term: sys.currentTerm,
       })
       .first();
 
@@ -151,8 +153,8 @@ export default function Scores() {
       total,
       grade,
 
-      academicYear: sys.academicYear || settings?.academicYear,
-      term: sys.currentTerm || settings?.currentTerm,
+      academicYear: sys.academicYear,
+      term: sys.currentTerm,
 
       synced: SyncStatus.PENDING,
     });
@@ -235,7 +237,6 @@ export default function Scores() {
         </select>
       </div>
 
-      {/* EMPTY STATE */}
       {classId && students.length === 0 && (
         <p>No students found for this class.</p>
       )}
@@ -243,8 +244,7 @@ export default function Scores() {
       {/* STUDENTS */}
       <div style={{ display: "grid", gap: 12 }}>
         {students.map((s) => {
-          const { classTest, project, exam, total, grade } =
-            compute(s.id);
+          const { total, grade } = compute(s.id);
 
           return (
             <div key={s.id} style={cardStyle}>
@@ -253,8 +253,8 @@ export default function Scores() {
               <div style={{ fontSize: 12, opacity: 0.8 }}>
                 Class:{" "}
                 {classes.find((c) => c.id === s.classId)?.name || "Unknown"}{" "}
-                | Term: {system?.currentTerm || settings?.currentTerm} |
-                Year: {system?.academicYear || settings?.academicYear || "N/A"}
+                | Term: {system?.currentTerm || "N/A"} | Year:{" "}
+                {system?.academicYear || "N/A"}
               </div>
 
               <div
@@ -294,8 +294,7 @@ export default function Scores() {
               </div>
 
               <div style={{ marginTop: 6 }}>
-                Total: <b>{total.toFixed(1)}</b> | Grade:{" "}
-                <b>{grade}</b>
+                Total: <b>{total.toFixed(1)}</b> | Grade: <b>{grade}</b>
               </div>
 
               <button onClick={() => saveScore(s.id)} style={buttonStyle}>

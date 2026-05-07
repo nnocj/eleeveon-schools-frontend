@@ -17,6 +17,9 @@ import StudentAttendance from "./student-attendance";
 import TeacherAttendance from "./teacher-attendance";
 import Settings from "./settings";
 
+// 🔥 NEW DASHBOARD HOME
+import DashboardHome from "./dashboardHome";
+
 // ================= STYLES =================
 import {
   layout,
@@ -41,6 +44,7 @@ const TABS = [
 
 // ================= ROUTES =================
 const ROUTES: Record<string, any> = {
+  dashboard: DashboardHome,
   students: Students,
   teachers: Teachers,
   classes: Classes,
@@ -56,39 +60,52 @@ const ROUTES: Record<string, any> = {
 };
 
 const LABELS: Record<string, string> = {
+  dashboard: "Dashboard",
   ...Object.fromEntries(TABS.map((t) => [t.key, t.label])),
   settings: "Settings",
 };
 
 export default function Dashboard() {
-  const [tab, setTab] = useState("students");
+  const [tab, setTab] = useState<string>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [isMobile, setIsMobile] = useState(false);
 
-  // 🔥 SCHOOL BRANDING
   const [settings, setSettings] = useState<any>(null);
 
+  // ================= LOAD SETTINGS =================
   useEffect(() => {
     const load = async () => {
       const data = await db.settings.toArray();
-      setSettings(data[0] || null);
+      setSettings(data[0] ?? null);
     };
     load();
   }, []);
 
+  // ================= APPLY GLOBAL FONT FAMILY =================
+  useEffect(() => {
+    if (!settings?.fontFamily) return;
+
+    document.documentElement.style.setProperty(
+      "--font-family",
+      settings.fontFamily
+    );
+  }, [settings?.fontFamily]);
+
   // ================= ACTIVE COMPONENT =================
   const ActiveComponent = useMemo(() => {
-    return ROUTES[tab] || Students;
+    return ROUTES[tab] ?? DashboardHome;
   }, [tab]);
 
-  const activeLabel = LABELS[tab] || "Dashboard";
+  const activeLabel = LABELS[tab] ?? "Dashboard";
 
-  // ================= RESPONSIVE =================
+  // ================= RESPONSIVE CHECK =================
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
+
     check();
     window.addEventListener("resize", check);
+
     return () => window.removeEventListener("resize", check);
   }, []);
 
@@ -98,17 +115,19 @@ export default function Dashboard() {
 
     if (isMobile) {
       setSidebarOpen(false);
-      window.scrollTo({ top: 0, behavior: "instant" as any });
+      window.scrollTo({ top: 0, behavior: "auto" });
     }
   };
 
-  // ================= RESIZE =================
+  // ================= RESIZE SIDEBAR =================
   const startResize = (e: React.MouseEvent) => {
     const startX = e.clientX;
     const startWidth = sidebarWidth;
 
     const onMove = (moveEvent: MouseEvent) => {
-      const newWidth = startWidth + (moveEvent.clientX - startX);
+      const newWidth =
+        startWidth + (moveEvent.clientX - startX);
+
       if (newWidth > 180 && newWidth < 420) {
         setSidebarWidth(newWidth);
       }
@@ -130,18 +149,33 @@ export default function Dashboard() {
   });
 
   return (
-    <div style={layout.container}>
-      {/* OVERLAY */}
+    <div
+      style={{
+        ...layout.container,
+        fontFamily: "var(--font-family, system-ui)",
+      }}
+    >
       {isMobile && sidebarOpen && (
-        <div style={styles.overlay} onClick={() => setSidebarOpen(false)} />
+        <div
+          style={styles.overlay}
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
-      {/* SIDEBAR */}
+      {/* ================= SIDEBAR ================= */}
       <aside style={styles.aside}>
-        {/* 🔥 BRAND HEADER */}
-        <div style={sidebarHeaderStyles.container}>
+        <div
+          style={{
+            ...sidebarHeaderStyles.container,
+            cursor: "pointer",
+          }}
+          onClick={() => navigate("dashboard")}
+        >
           {settings?.logo && (
-            <img src={settings.logo} style={sidebarHeaderStyles.logo} />
+            <img
+              src={settings.logo}
+              style={sidebarHeaderStyles.logo}
+            />
           )}
 
           <div style={sidebarHeaderStyles.text}>
@@ -165,16 +199,17 @@ export default function Dashboard() {
           ))}
         </nav>
 
-        {/* RESIZE */}
         {!isMobile && (
-          <div style={styles.resizeHandle} onMouseDown={startResize} />
+          <div
+            style={styles.resizeHandle}
+            onMouseDown={startResize}
+          />
         )}
       </aside>
 
-      {/* MAIN */}
+      {/* ================= MAIN ================= */}
       <main style={layout.main}>
         <div style={layout.topbar}>
-          {/* LEFT: HAMBURGER */}
           {isMobile && (
             <button
               style={layout.hamburger(isMobile)}
@@ -184,10 +219,10 @@ export default function Dashboard() {
             </button>
           )}
 
-          {/* TITLE */}
-          <h2 style={{ margin: 0, flex: 1 }}>{activeLabel}</h2>
+          <h2 style={{ margin: 0, flex: 1 }}>
+            {activeLabel}
+          </h2>
 
-          {/* 🔥 SETTINGS ICON (TOP RIGHT — NOT IN NAV) */}
           <button
             onClick={() => navigate("settings")}
             style={layout.settingsIcon(tab === "settings")}
@@ -196,7 +231,7 @@ export default function Dashboard() {
           </button>
         </div>
 
-        <ActiveComponent />
+        <ActiveComponent navigate={navigate} />
       </main>
     </div>
   );

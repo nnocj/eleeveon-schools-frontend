@@ -50,39 +50,26 @@ export default function Scores() {
       return;
     }
 
-    // 🔥 ALWAYS use DB as truth
-    const sysFromDB = await db.settings.toArray();
-    const sys = sysFromDB?.[0];
+    const sys = system || (await db.settings.toArray())[0];
 
-    const academicYear = sys?.academicYear || "";
-    const currentTerm = sys?.currentTerm || "";
-
-    const allClassStudents = await db.students
+    const all = await db.students
       .where("classId")
       .equals(Number(value))
       .toArray();
 
-    if (!allClassStudents.length) {
+    if (!all.length) {
       setStudents([]);
       return;
     }
 
-    let filtered = allClassStudents;
+    const filtered = all.filter((s) => {
+      const yearOk =
+        !sys?.academicYear || s.academicYear === sys.academicYear;
+      const termOk = !sys?.currentTerm || s.term === sys.currentTerm;
+      return yearOk && termOk;
+    });
 
-    if (academicYear) {
-      filtered = filtered.filter(
-        (s) => !s.academicYear || s.academicYear === academicYear
-      );
-    }
-
-    if (currentTerm) {
-      filtered = filtered.filter(
-        (s) => !s.term || s.term === currentTerm
-      );
-    }
-
-    // fallback
-    setStudents(filtered.length ? filtered : allClassStudents);
+    setStudents(filtered.length ? filtered : all);
   };
 
   // ================= INPUT =================
@@ -114,43 +101,47 @@ export default function Scores() {
     return { classTest, project, exam, total, grade };
   };
 
+  // ================= VALIDATION =================
+  const clamp = (v: number) => {
+    if (isNaN(v)) return 0;
+    return Math.max(0, Math.min(100, v));
+  };
+
   // ================= SAVE =================
   const saveScore = async (studentId: number) => {
-    if (!subjectId) {
-      alert("Please select a subject");
+    if (!classId || !subjectId) {
+      alert("Please select both class and subject");
       return;
     }
 
-    const sysFromDB = await db.settings.toArray();
-    const sys = sysFromDB?.[0];
+    const sys = system || (await db.settings.toArray())[0];
 
-    if (!sys) {
-      alert("System settings not found");
+    if (!sys?.academicYear || !sys?.currentTerm) {
+      alert("System not configured properly");
       return;
     }
 
-    const { classTest, project, exam, total, grade } =
-      compute(studentId);
+    const { classTest, project, exam } = compute(studentId);
 
-    const existing = await db.scores
-      .where({
-        studentId,
-        subjectId: Number(subjectId),
-        academicYear: sys.academicYear,
-        term: sys.currentTerm,
-      })
-      .first();
+    const safeTotal = calculateFinalScore(
+      clamp(classTest),
+      clamp(project),
+      clamp(exam)
+    );
+
+    const grade = getGrade(safeTotal);
 
     const payload = prepareSyncData({
       studentId,
+      classId: Number(classId),
       subjectId: Number(subjectId),
 
-      classTest,
-      project,
-      exam,
+      classTest: clamp(classTest),
+      project: clamp(project),
+      exam: clamp(exam),
 
-      ca: classTest + project,
-      total,
+      ca: clamp(classTest + project),
+      total: safeTotal,
       grade,
 
       academicYear: sys.academicYear,
@@ -158,6 +149,16 @@ export default function Scores() {
 
       synced: SyncStatus.PENDING,
     });
+
+    const existing = await db.scores
+      .where({
+        studentId,
+        subjectId: Number(subjectId),
+        classId: Number(classId),
+        academicYear: sys.academicYear,
+        term: sys.currentTerm,
+      })
+      .first();
 
     if (existing?.id) {
       await db.scores.update(existing.id, payload);
@@ -186,6 +187,12 @@ export default function Scores() {
     color: isDark ? "#fff" : "#111",
   };
 
+  const smallInput: React.CSSProperties = {
+    ...inputStyle,
+    padding: "8px 6px",
+    fontSize: 13,
+  };
+
   const buttonStyle: React.CSSProperties = {
     marginTop: 8,
     padding: "9px 10px",
@@ -198,12 +205,7 @@ export default function Scores() {
     width: "100%",
   };
 
-  const smallInput: React.CSSProperties = {
-    ...inputStyle,
-    padding: "8px 6px",
-    fontSize: 13,
-  };
-
+  // ================= UI =================
   return (
     <div style={{ padding: 12 }}>
       <h2 style={{ fontSize: 18 }}>Score Entry</h2>
@@ -236,10 +238,6 @@ export default function Scores() {
           ))}
         </select>
       </div>
-
-      {classId && students.length === 0 && (
-        <p>No students found for this class.</p>
-      )}
 
       {/* STUDENTS */}
       <div style={{ display: "grid", gap: 12 }}>

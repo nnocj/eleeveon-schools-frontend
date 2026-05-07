@@ -63,6 +63,9 @@ export default function Settings() {
     theme: "light",
     primaryColor: "#2f6fed",
     fontSize: "medium",
+
+    // ✅ ADD THIS (MINIMAL CHANGE ONLY)
+    fontFamily: "system-ui, -apple-system, sans-serif",
   });
 
   const [loading, setLoading] = useState(false);
@@ -107,6 +110,19 @@ export default function Settings() {
 
     setLoading(false);
   };
+
+  // ================= APPLY GLOBAL THEME (ONLY ADDITION) =================
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--primary-color",
+      form.primaryColor
+    );
+
+    document.documentElement.style.setProperty(
+      "--font-family",
+      form.fontFamily
+    );
+  }, [form.primaryColor, form.fontFamily]);
 
   // ================= DYNAMIC FAVICON =================
   useEffect(() => {
@@ -178,7 +194,6 @@ export default function Settings() {
           style={styles.input}
         />
 
-        {/* LOGO */}
         <input
           type="file"
           accept="image/*"
@@ -189,7 +204,6 @@ export default function Settings() {
           style={styles.input}
         />
 
-        {/* PREVIEW */}
         {form.logo && (
           <img
             src={form.logo}
@@ -238,6 +252,25 @@ export default function Settings() {
           style={{ ...styles.input, height: 50 }}
         />
 
+        {/* ✅ FONT FAMILY ADDED (MINIMAL CHANGE) */}
+        <select
+          value={form.fontFamily}
+          onChange={(e) => updateField("fontFamily", e.target.value)}
+          style={styles.input}
+        >
+          <option value="system-ui, -apple-system, sans-serif">
+            System Default
+          </option>
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="'Times New Roman', serif">
+            Times New Roman
+          </option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Courier New', monospace">
+            Courier New
+          </option>
+        </select>
+
         <select
           value={form.theme}
           onChange={(e) => updateField("theme", e.target.value)}
@@ -257,14 +290,18 @@ export default function Settings() {
           <option value="large">Large</option>
         </select>
 
-        {/* PREVIEW */}
         <div style={{ ...styles.preview, ...previewStyle }}>
           <b>Live Preview</b>
-          <div>{form.schoolName || "School Name"}</div>
+          <div
+            style={{
+              fontFamily: form.fontFamily, // IMPORTANT
+            }}
+          >
+            {form.schoolName || "School Name"}
+          </div>
         </div>
       </section>
 
-      {/* SAVE */}
       <button
         onClick={saveSettings}
         style={styles.button}

@@ -58,6 +58,7 @@ export interface Assignment extends BaseSync {
 export interface Score extends BaseSync {
   studentId: number;
   subjectId: number;
+  classId: number; // 🔥 REQUIRED FOR RELATIONSHIP SAFETY
   classTest: number;
   project: number;
   exam: number;
@@ -71,7 +72,7 @@ export interface Score extends BaseSync {
 // ================= ATTENDANCE =================
 export interface Attendance extends BaseSync {
   studentId: number;
-  classId: number;
+  classId: number; // 🔥 ensures class-level filtering
   academicYear: string;
   term: TermType;
   date: string;
@@ -153,6 +154,8 @@ export interface Setting extends BaseSync {
   motto?: string;
   logo?: string;
   address?: string;
+  fontFamily?: string;
+  primaryColor?: string;
 }
 
 // ================= DATABASE =================
@@ -181,14 +184,17 @@ class AppDB extends Dexie {
   constructor() {
     super("EleeveonDB");
 
-    this.version(17).stores({
+    // 🔥 VERSION UPGRADED FOR NEW INDEX STRUCTURE
+    this.version(18).stores({
       students: "++id, classId, academicYear, term",
       teachers: "++id, email, role",
       classes: "++id, name",
       subjects: "++id, name",
+
       assignments: "++id, teacherId, classId, subjectId",
 
-      scores: "++id, studentId, subjectId, academicYear, term",
+      // 🔥 FIXED RELATIONAL INDEXING
+      scores: "++id, studentId, subjectId, classId, academicYear, term",
 
       attendance: "++id, studentId, classId, academicYear, term, date",
       teacherAttendance: "++id, teacherId, date",

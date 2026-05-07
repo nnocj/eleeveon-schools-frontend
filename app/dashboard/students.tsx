@@ -5,237 +5,301 @@ import { db, Student } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
 
 export default function Students() {
+  // ================= UI STATE =================
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+
+  const [search, setSearch] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+
+  // ================= FORM =================
   const [fullName, setFullName] = useState("");
   const [age, setAge] = useState("");
   const [parentName, setParentName] = useState("");
   const [parentPhone, setParentPhone] = useState("");
   const [classId, setClassId] = useState("");
 
-  const [students, setStudents] = useState<Student[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
-  const [settings, setSettings] = useState<any>(null);
-
-  // ================= LOAD (FIXED) =================
+  // ================= LOAD =================
   const load = async () => {
-    const [
-      studentsData,
-      classesData,
-      attendanceData,
-      settingsData,
-    ] = await Promise.all([
+    const [studentsData, classesData, attendanceData] = await Promise.all([
       db.students.toArray(),
       db.classes.toArray(),
       db.attendance.toArray(),
-      db.settings.toArray(),
     ]);
 
-    const sys = settingsData?.[0] || settings;
-
-    const academicYear = sys?.academicYear || "";
-    const currentTerm = sys?.currentTerm || "";
-
-    // 🔥 FILTER STUDENTS SAFELY
-    let filteredStudents = studentsData;
-
-    if (academicYear) {
-      filteredStudents = filteredStudents.filter(
-        (s) =>
-          !s.academicYear ||
-          s.academicYear === academicYear
-      );
-    }
-
-    if (currentTerm) {
-      filteredStudents = filteredStudents.filter(
-        (s) =>
-          !s.term ||
-          s.term === currentTerm
-      );
-    }
-
-    // 🔥 FALLBACK
-    if (filteredStudents.length === 0) {
-      filteredStudents = studentsData;
-    }
-
-    // 🔥 FILTER ATTENDANCE
-    let filteredAttendance = attendanceData;
-
-    if (academicYear) {
-      filteredAttendance = filteredAttendance.filter(
-        (a) =>
-          !a.academicYear ||
-          a.academicYear === academicYear
-      );
-    }
-
-    if (currentTerm) {
-      filteredAttendance = filteredAttendance.filter(
-        (a) =>
-          !a.term ||
-          a.term === currentTerm
-      );
-    }
-
-    setStudents(filteredStudents);
+    setStudents(studentsData);
     setClasses(classesData);
-    setAttendance(filteredAttendance);
-    setSettings(sys || null);
+    setAttendance(attendanceData);
   };
 
   useEffect(() => {
     load();
-
-    const interval = setInterval(load, 2000);
-    return () => clearInterval(interval);
   }, []);
 
-  // ================= ATTENDANCE =================
-  const getAttendanceSummary = (studentId: number | undefined) => {
-    if (!studentId) return { present: 0, total: 0, percent: 0 };
-
-    const records = attendance.filter((a) => a.studentId === studentId);
-
-    const present = records.filter((r) => r.status === "present").length;
-    const total = records.length;
-
-    return {
-      present,
-      total,
-      percent: total === 0 ? 0 : (present / total) * 100,
-    };
-  };
-
-  // ================= ADD STUDENT =================
-  const addStudent = async () => {
-    if (!fullName || !classId) return;
-
-    const sysFromDB = await db.settings.toArray();
-    const current = sysFromDB?.[0] || settings;
-
-    await db.students.add(
-      prepareSyncData({
-        fullName,
-        age: Number(age || 0),
-        parentName,
-        parentPhone,
-        classId: Number(classId),
-
-        academicYear: current?.academicYear || "",
-        term: current?.currentTerm || "",
-
-        status: "active",
-      })
-    );
-
+  // ================= RESET =================
+  const resetForm = () => {
     setFullName("");
     setAge("");
     setParentName("");
     setParentPhone("");
     setClassId("");
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  // ================= SAVE =================
+  const saveStudent = async () => {
+    if (!fullName.trim() || !classId) return;
+
+    const sys = (await db.settings.toArray())[0];
+
+    const payload = prepareSyncData({
+      fullName,
+      age: Number(age || 0),
+      parentName,
+      parentPhone,
+      classId: Number(classId),
+      academicYear: sys?.academicYear || "",
+      term: sys?.currentTerm || "",
+      status: "active",
+    });
+
+    if (editingId) {
+      await db.students.update(editingId, payload);
+    } else {
+      await db.students.add(payload);
+    }
+
+    resetForm();
+    load();
+  };
+
+  // ================= EDIT =================
+  const editStudent = (s: Student) => {
+    setEditingId(s.id || null);
+    setFullName(s.fullName);
+    setAge(String(s.age));
+    setParentName(s.parentName);
+    setParentPhone(s.parentPhone);
+    setClassId(String(s.classId));
+    setShowForm(true);
+  };
+
+  // ================= DELETE (SAFE + BUSINESS LOGIC) =================
+  const deleteStudent = async (id: number) => {
+    const confirmDelete = confirm(
+      "Delete this student?\n\nAll current records (scores, attendance, payments) will be removed.\nPrevious report cards will remain."
+    );
+
+    if (!confirmDelete) return;
+
+    await db.transaction(
+      "rw",
+      db.students,
+      db.scores,
+      db.attendance,
+      db.payments,
+      async () => {
+        await db.students.delete(id);
+        await db.scores.where("studentId").equals(id).delete();
+        await db.attendance.where("studentId").equals(id).delete();
+        await db.payments.where("studentId").equals(id).delete();
+      }
+    );
 
     load();
   };
 
-  // ================= CLASS RESOLVER =================
-  const getClassName = (id: number | undefined) => {
-    if (!id) return "No Class";
-    return classes.find((c) => Number(c.id) === Number(id))?.name || "No Class";
+  // ================= FILTER =================
+  const filtered = students.filter((s) => {
+    const matchSearch = s.fullName
+      .toLowerCase()
+      .includes(search.toLowerCase());
+
+    const matchClass = filterClass
+      ? String(s.classId) === filterClass
+      : true;
+
+    return matchSearch && matchClass;
+  });
+
+  // ================= HELPERS =================
+  const getClassName = (id?: number) =>
+    classes.find((c) => c.id === id)?.name || "No Class";
+
+  const getAttendance = (id?: number) => {
+    const records = attendance.filter((a) => a.studentId === id);
+    const present = records.filter((r) => r.status === "present").length;
+    return records.length ? `${((present / records.length) * 100).toFixed(0)}%` : "0%";
+  };
+
+  // ================= STYLES =================
+  const card: React.CSSProperties = {
+    border: "1px solid rgba(0,0,0,0.08)",
+    background: "var(--surface)",
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 10,
+  };
+
+  const button: React.CSSProperties = {
+    padding: "7px 10px",
+    borderRadius: 8,
+    cursor: "pointer",
+    border: "1px solid var(--primary-color)",
+    background: "var(--surface)",
+    color: "var(--text)",
+  };
+
+  const primaryButton: React.CSSProperties = {
+    padding: "8px 12px",
+    borderRadius: 8,
+    cursor: "pointer",
+    border: "none",
+    background: "var(--primary-color)",
+    color: "#fff",
+  };
+
+  const input: React.CSSProperties = {
+    padding: 10,
+    borderRadius: 8,
+    border: "1px solid rgba(0,0,0,0.2)",
+    background: "var(--surface)",
+    color: "var(--text)",
   };
 
   // ================= UI =================
   return (
     <div style={{ padding: 20 }}>
-      <h2>Students</h2>
+      {/* HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <h2 style={{ margin: 0 }}>Students</h2>
 
-      {/* FORM */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          maxWidth: 300,
-        }}
-      >
+        <button style={primaryButton} onClick={() => setShowForm(!showForm)}>
+          {showForm ? "Close" : "+ Add Student"}
+        </button>
+      </div>
+
+      {/* FILTERS */}
+      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
         <input
-          placeholder="Full Name"
-          value={fullName}
-          onChange={(e) => setFullName(e.target.value)}
+          style={input}
+          placeholder="Search student..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
         />
 
-        <input
-          placeholder="Age"
-          value={age}
-          onChange={(e) => setAge(e.target.value)}
-        />
-
-        <input
-          placeholder="Parent Name"
-          value={parentName}
-          onChange={(e) => setParentName(e.target.value)}
-        />
-
-        <input
-          placeholder="Parent Phone"
-          value={parentPhone}
-          onChange={(e) => setParentPhone(e.target.value)}
-        />
-
-        <select value={classId} onChange={(e) => setClassId(e.target.value)}>
-          <option value="">Select Class</option>
+        <select
+          style={input}
+          value={filterClass}
+          onChange={(e) => setFilterClass(e.target.value)}
+        >
+          <option value="">All Classes</option>
           {classes.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
           ))}
         </select>
-
-        <button onClick={addStudent}>Add Student</button>
       </div>
 
-      <hr />
+      {/* FORM */}
+      {showForm && (
+        <div
+          style={{
+            marginTop: 15,
+            padding: 15,
+            borderRadius: 10,
+            background: "var(--surface)",
+            border: "1px solid rgba(0,0,0,0.1)",
+            maxWidth: 350,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <input
+            style={input}
+            placeholder="Full Name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+
+          <input
+            style={input}
+            placeholder="Age"
+            value={age}
+            onChange={(e) => setAge(e.target.value)}
+          />
+
+          <input
+            style={input}
+            placeholder="Parent Name"
+            value={parentName}
+            onChange={(e) => setParentName(e.target.value)}
+          />
+
+          <input
+            style={input}
+            placeholder="Parent Phone"
+            value={parentPhone}
+            onChange={(e) => setParentPhone(e.target.value)}
+          />
+
+          <select
+            style={input}
+            value={classId}
+            onChange={(e) => setClassId(e.target.value)}
+          >
+            <option value="">Select Class</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button style={primaryButton} onClick={saveStudent}>
+              {editingId ? "Update" : "Save"}
+            </button>
+
+            <button style={button} onClick={resetForm}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* LIST */}
-      {students.map((s) => {
-        if (!s.id) return null;
+      <div style={{ marginTop: 20 }}>
+        {filtered.map((s) => (
+          <div key={s.id} style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div>
+                <b>{s.fullName}</b>
+                <div style={{ fontSize: 12, opacity: 0.6 }}>
+                  {getClassName(s.classId)} • Age {s.age} • Attendance{" "}
+                  {getAttendance(s.id)}
+                </div>
+              </div>
 
-        const summary = getAttendanceSummary(s.id);
-
-        return (
-          <div
-            key={s.id}
-            style={{
-              border: "1px solid #ddd",
-              padding: 10,
-              marginBottom: 10,
-              borderRadius: 6,
-            }}
-          >
-            <b>{s.fullName}</b>
-            <br />
-
-            Age: {s.age}
-            <br />
-
-            Parent: {s.parentName} ({s.parentPhone})
-            <br />
-
-            Class: {getClassName(s.classId)}
-            <br />
-
-            {/* 🔥 TRUTH FROM SYSTEM ONLY */}
-            Year: {settings?.academicYear || "N/A"} | Term: {settings?.currentTerm || "N/A"}
-            <br />
-
-            {/* ATTENDANCE */}
-            <div style={{ marginTop: 5, color: "#333" }}>
-              Attendance: {summary.present} / {summary.total} (
-              {summary.percent.toFixed(1)}%)
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={button} onClick={() => editStudent(s)}>
+                  Edit
+                </button>
+                <button style={button} onClick={() => deleteStudent(s.id!)}>
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
-        );
-      })}
+        ))}
+      </div>
     </div>
   );
 }

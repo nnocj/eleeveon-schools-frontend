@@ -1,371 +1,1002 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { db, TermType } from "../lib/db";
+import React, { useEffect, useRef, useState } from "react";
+import html2canvas from "html2canvas";
+import jsPDF from "jspdf";
+
+import {
+  db,
+  TermType,
+  ReportCardItem,
+  Attendance,
+} from "../lib/db";
+
 import { getRemark } from "../lib/calculations/grading";
 import { useSettings } from "../context/settings-context";
 
-const TERMS: TermType[] = ["Term 1", "Term 2", "Term 3"];
+import { reportStyles as S } from "./styles/reportStyles";
 
-type TabType = "student" | "class" | "subject";
+type TabType = "student" | "class";
 
-const Reports: React.FC = () => {
+const TERMS: TermType[] = [
+  "Term 1",
+  "Term 2",
+  "Term 3",
+];
+
+type SafeReportItem = ReportCardItem & {
+  id: number;
+};
+
+export default function Reports() {
   const { settings } = useSettings();
 
-  const currentYear = settings?.academicYear || "";
-  const currentTerm = settings?.currentTerm;
+  const printRef =
+    useRef<HTMLDivElement>(null);
 
-  const [tab, setTab] = useState<TabType>("student");
+  const [tab, setTab] =
+    useState<TabType>("student");
 
-  const [students, setStudents] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [reportItems, setReportItems] = useState<any[]>([]);
-  const [classTeachers, setClassTeachers] = useState<any[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [years, setYears] = useState<string[]>([]);
+  const [students, setStudents] =
+    useState<any[]>([]);
 
-  // ================= FILTERS =================
-  const [studentId, setStudentId] = useState<number | null>(null);
-  const [classId, setClassId] = useState<number | null>(null);
-  const [year, setYear] = useState<string>("");
-  const [term, setTerm] = useState<TermType | "">("");
-  const [subjectId, setSubjectId] = useState<number | null>(null);
+  const [classes, setClasses] =
+    useState<any[]>([]);
 
-  // ================= LOAD =================
-  const loadData = async () => {
-    const [st, cl, sb, items, ct, te] = await Promise.all([
-      db.students.toArray(),
-      db.classes.toArray(),
-      db.subjects.toArray(),
-      db.reportCardItems.toArray(),
-      db.classTeachers.toArray(),
-      db.teachers.toArray(),
-    ]);
+  const [items, setItems] = useState<
+    SafeReportItem[]
+  >([]);
 
-    setStudents(st);
-    setClasses(cl);
-    setSubjects(sb);
-    setReportItems(items);
-    setClassTeachers(ct);
-    setTeachers(te);
+  const [attendance, setAttendance] =
+    useState<Attendance[]>([]);
 
-    // 🔥 IMPORTANT: ALWAYS INCLUDE CURRENT YEAR EVEN IF EMPTY IN ITEMS
-    const itemYears = items.map((r) => r.academicYear).filter(Boolean);
+  const [years, setYears] = useState<
+    string[]
+  >([]);
 
-    const mergedYears = Array.from(
-      new Set([currentYear, ...itemYears])
-    ).filter(Boolean);
+  // ================= STUDENT FILTERS =================
+  const [studentId, setStudentId] =
+    useState<number | null>(null);
 
-    setYears(mergedYears);
-  };
+  const [studentYear, setStudentYear] =
+    useState("");
 
+  const [studentTerm, setStudentTerm] =
+    useState<TermType | "">("");
+
+  // ================= CLASS FILTERS =================
+  const [classId, setClassId] =
+    useState<number | null>(null);
+
+  const [classYear, setClassYear] =
+    useState("");
+
+  const [classTerm, setClassTerm] =
+    useState<TermType | "">("");
+
+  // =====================================================
+  // APPLY FONT + PRIMARY COLOR
+  // =====================================================
   useEffect(() => {
-    loadData();
-  }, [currentYear]);
+    if (!settings) return;
 
-  // ================= HELPERS =================
-  const getClassTeacher = (classId: number) => {
-    const ct = classTeachers.find((c) => c.classId === classId);
-    if (!ct) return "N/A";
-    return teachers.find((t) => t.id === ct.teacherId)?.fullName || "N/A";
+    document.documentElement.style.setProperty(
+      "--font-family",
+      settings.fontFamily ||
+        "Arial, sans-serif"
+    );
+
+    document.documentElement.style.setProperty(
+      "--primary-color",
+      settings.primaryColor ||
+        "#2f6fed"
+    );
+  }, [settings]);
+
+  // =====================================================
+  // LOAD DATA
+  // =====================================================
+  useEffect(() => {
+    (async () => {
+      const [st, cl, rc, att] =
+        await Promise.all([
+          db.students.toArray(),
+          db.classes.toArray(),
+          db.reportCardItems.toArray(),
+          db.attendance.toArray(),
+        ]);
+
+      setStudents(st);
+
+      setClasses(cl);
+
+      setItems(
+        rc.filter(
+          r => r.id !== undefined
+        ) as SafeReportItem[]
+      );
+
+      setAttendance(att);
+
+      setYears([
+        ...new Set(
+          rc.map(r => r.academicYear)
+        ),
+      ]);
+    })();
+  }, []);
+
+  // =====================================================
+  // SCHOOL INFO
+  // =====================================================
+  const school = {
+    name:
+      settings?.schoolName ||
+      "School Name",
+
+    motto:
+      settings?.motto ||
+      "Knowledge is Power",
+
+    logo: settings?.logo,
   };
 
-  // ================= STUDENT VIEW =================
-  const renderStudent = () => {
-    if (!studentId) return null;
+  // =====================================================
+  // PDF EXPORT
+  // =====================================================
+  const handleExportPDF = async () => {
+    const element = printRef.current;
 
-    const student = students.find((s) => s.id === studentId);
+    if (!element) return;
 
-    const grouped: Record<string, any> = {};
+    const cards =
+      element.querySelectorAll(
+        ".report-card"
+      );
 
-    const studentItems = reportItems.filter((r) => r.studentId === studentId);
+    if (!cards.length) {
+      alert("No report cards available.");
+      return;
+    }
 
-    // 🔥 ENSURE ITEMS NEVER DROP WITHOUT YEAR
-    studentItems.forEach((r) => {
-      const y = r.academicYear || currentYear || "Unknown Year";
-
-      if (!grouped[y]) grouped[y] = {};
-      if (!grouped[y][r.classId]) grouped[y][r.classId] = {};
-      if (!grouped[y][r.classId][r.term]) grouped[y][r.classId][r.term] = [];
-
-      grouped[y][r.classId][r.term].push(r);
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
     });
 
+    for (
+      let i = 0;
+      i < cards.length;
+      i++
+    ) {
+      const card =
+        cards[i] as HTMLElement;
+
+      const canvas =
+        await html2canvas(card, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+        });
+
+      const imgData =
+        canvas.toDataURL("image/png");
+
+      const pdfWidth = 210;
+
+      const pdfHeight = 297;
+
+      const imgWidth = pdfWidth - 20;
+
+      const imgHeight =
+        (canvas.height * imgWidth) /
+        canvas.width;
+
+      if (i > 0) {
+        pdf.addPage();
+      }
+
+      pdf.addImage(
+        imgData,
+        "PNG",
+        10,
+        10,
+        imgWidth,
+        Math.min(
+          imgHeight,
+          pdfHeight - 20
+        )
+      );
+    }
+
+    pdf.save("report-cards.pdf");
+  };
+
+  // =====================================================
+  // WEIGHTED SCORES
+  // =====================================================
+  const getWeightedCA = (
+    ca: number
+  ) => {
+    return Number(
+      ((ca / 60) * 50).toFixed(1)
+    );
+  };
+
+  const getWeightedExam = (
+    exam: number
+  ) => {
+    return Number(
+      ((exam / 100) * 50).toFixed(1)
+    );
+  };
+
+  const getWeightedTotal = (
+    ca: number,
+    exam: number
+  ) => {
+    return Number(
+      (
+        getWeightedCA(ca) +
+        getWeightedExam(exam)
+      ).toFixed(1)
+    );
+  };
+
+  // =====================================================
+  // ATTENDANCE
+  // =====================================================
+  const getAttendance = (
+    studentId: number,
+    year: string,
+    term: TermType
+  ) => {
+    const records =
+      attendance.filter(
+        a =>
+          a.studentId === studentId &&
+          a.academicYear === year &&
+          a.term === term
+      );
+
+    const total = records.length;
+
+    const present = records.filter(
+      a => a.status === "present"
+    ).length;
+
+    return {
+      total,
+      present,
+
+      percent: total
+        ? Math.round(
+            (present / total) * 100
+          )
+        : 0,
+    };
+  };
+
+  // =====================================================
+  // SUBJECT POSITIONS
+  // =====================================================
+  const getSubjectPositions = (
+    classId: number,
+    subjectId: number,
+    year: string,
+    term: TermType
+  ) => {
+    const scores = items
+      .filter(
+        r =>
+          r.classId === classId &&
+          r.subjectId === subjectId &&
+          r.academicYear === year &&
+          r.term === term
+      )
+      .map(r => ({
+        studentId: r.studentId,
+
+        total: getWeightedTotal(
+          Number(r.ca || 0),
+          Number(r.exam || 0)
+        ),
+      }))
+      .sort(
+        (a, b) => b.total - a.total
+      );
+
+    return scores.map((s, i) => ({
+      studentId: s.studentId,
+      position: i + 1,
+    }));
+  };
+
+  // =====================================================
+  // CLASS RANKINGS
+  // =====================================================
+  const getClassRankings = (
+    classId: number,
+    year: string,
+    term: TermType
+  ) => {
+    const filtered = items.filter(
+      r =>
+        r.classId === classId &&
+        r.academicYear === year &&
+        r.term === term
+    );
+
+    const grouped: Record<
+      number,
+      number
+    > = {};
+
+    filtered.forEach(r => {
+      const total =
+        getWeightedTotal(
+          Number(r.ca || 0),
+          Number(r.exam || 0)
+        );
+
+      grouped[r.studentId] =
+        (grouped[r.studentId] || 0) +
+        total;
+    });
+
+    const ranked = Object.entries(
+      grouped
+    )
+      .map(([studentId, total]) => ({
+        studentId: Number(studentId),
+        total,
+      }))
+      .sort(
+        (a, b) => b.total - a.total
+      );
+
+    return ranked.map((r, i) => ({
+      studentId: r.studentId,
+      total: r.total,
+      position: i + 1,
+    }));
+  };
+
+  // =====================================================
+  // REPORT CARD
+  // =====================================================
+  const renderCard = (
+    student: any,
+    data: any[],
+    className: string,
+    year: string,
+    term: TermType,
+    classId: number
+  ) => {
+    const rankings =
+      getClassRankings(
+        classId,
+        year,
+        term
+      );
+
+    const classPosition =
+      rankings.find(
+        r =>
+          r.studentId === student.id
+      )?.position || "-";
+
+    const overallTotal =
+      rankings.find(
+        r =>
+          r.studentId === student.id
+      )?.total || 0;
+
+    const att = getAttendance(
+      student.id,
+      year,
+      term
+    );
+
     return (
-      <div>
-        <h2>{student?.fullName}</h2>
+      <div
+        key={`${student.id}-${classId}-${term}-${year}`}
+        className="report-card"
+        style={S.reportCard}
+      >
+        {/* HEADER */}
+        <div style={S.schoolHeader}>
+          {school.logo && (
+            <img
+              src={school.logo}
+              alt="logo"
+              style={S.logo}
+            />
+          )}
 
-        {Object.keys(grouped).map((y) => (
-          <div key={y} style={{ marginBottom: 30 }}>
-            <h3>📘 Academic Year: {y}</h3>
+          <div style={S.schoolName}>
+            {school.name}
+          </div>
 
-            {Object.keys(grouped[y]).map((cId) => {
-              const className =
-                classes.find((c) => c.id === Number(cId))?.name ||
-                "Unknown Class";
+          <div style={S.motto}>
+            {school.motto}
+          </div>
+        </div>
+
+        {/* META */}
+        <div style={S.metaRow}>
+          <span>
+            <b>Student:</b>{" "}
+            {student.fullName}
+          </span>
+
+          <span>
+            <b>
+              {className} | {term} |{" "}
+              {year}
+            </b>
+          </span>
+        </div>
+
+        {/* TABLE */}
+        <table style={S.table}>
+          <thead>
+            <tr>
+              <th style={S.th}>
+                Subject
+              </th>
+
+              <th style={S.th}>
+                CA
+                <br />
+                (50%)
+              </th>
+
+              <th style={S.th}>
+                Exam
+                <br />
+                (50%)
+              </th>
+
+              <th style={S.th}>
+                Total
+              </th>
+
+              <th style={S.th}>
+                Grade
+              </th>
+
+              <th style={S.th}>
+                Remark
+              </th>
+
+              <th style={S.th}>
+                Pos
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {data.map(r => {
+              const weightedCA =
+                getWeightedCA(
+                  Number(r.ca || 0)
+                );
+
+              const weightedExam =
+                getWeightedExam(
+                  Number(r.exam || 0)
+                );
+
+              const total =
+                getWeightedTotal(
+                  Number(r.ca || 0),
+                  Number(r.exam || 0)
+                );
+
+              const posMap =
+                getSubjectPositions(
+                  classId,
+                  r.subjectId,
+                  year,
+                  term
+                );
+
+              const pos =
+                posMap.find(
+                  p =>
+                    p.studentId ===
+                    r.studentId
+                )?.position || "-";
 
               return (
-                <div key={cId} style={{ marginBottom: 20 }}>
-                  <h4>
-                    🏫 {className}
-                  </h4>
+                <tr
+                  key={`${r.id}-${r.subjectId}`}
+                >
+                  <td style={S.td}>
+                    {r.subjectName}
+                  </td>
 
-                  <p>
-                    <strong>Head Teacher:</strong>{" "}
-                    {getClassTeacher(Number(cId))}
-                  </p>
+                  <td style={S.td}>
+                    {weightedCA}
+                  </td>
 
-                  {TERMS.map((t) => {
-                    const items = grouped[y][cId][t];
-                    if (!items) return null;
+                  <td style={S.td}>
+                    {weightedExam}
+                  </td>
 
-                    return (
-                      <div key={t} style={{ marginBottom: 15 }}>
-                        <h5>📄 {t}</h5>
+                  <td style={S.td}>
+                    {total}
+                  </td>
 
-                        <table border={1} cellPadding={6} width="100%">
-                          <thead>
-                            <tr>
-                              <th>Subject</th>
-                              <th>Teacher</th>
-                              <th>CT</th>
-                              <th>Proj</th>
-                              <th>CA</th>
-                              <th>Exam</th>
-                              <th>Total</th>
-                              <th>Grade</th>
-                              <th>Remark</th>
-                            </tr>
-                          </thead>
+                  <td style={S.td}>
+                    {r.grade}
+                  </td>
 
-                          <tbody>
-                            {items.map((r: any) => (
-                              <tr key={r.id}>
-                                <td>{r.subjectName}</td>
-                                <td>{r.teacherName || "N/A"}</td>
-                                <td>{r.classTest}</td>
-                                <td>{r.project}</td>
-                                <td>{r.ca}</td>
-                                <td>{r.exam}</td>
-                                <td>{r.total}</td>
-                                <td>{r.grade}</td>
-                                <td>{getRemark(r.grade)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    );
-                  })}
-                </div>
+                  <td style={S.td}>
+                    {getRemark(
+                      r.grade
+                    )}
+                  </td>
+
+                  <td style={S.td}>
+                    {pos}
+                  </td>
+                </tr>
               );
             })}
+          </tbody>
+        </table>
+
+        {/* SUMMARY */}
+        <div style={S.summaryGrid}>
+          {/* CARD 1 */}
+          <div style={S.summaryCard}>
+            <div style={S.summaryRow}>
+              <span
+                style={S.summaryLabel}
+              >
+                Overall Total
+              </span>
+
+              <span
+                style={S.summaryValue}
+              >
+                {overallTotal.toFixed(
+                  1
+                )}
+              </span>
+            </div>
+
+            <div
+              style={S.summaryRowLast}
+            >
+              <span
+                style={S.summaryLabel}
+              >
+                Class Position
+              </span>
+
+              <span
+                style={S.summaryValue}
+              >
+                {classPosition}
+              </span>
+            </div>
           </div>
-        ))}
+
+          {/* CARD 2 */}
+          <div style={S.summaryCard}>
+            <div style={S.summaryRow}>
+              <span
+                style={S.summaryLabel}
+              >
+                Attendance
+              </span>
+
+              <span
+                style={S.summaryValue}
+              >
+                {att.present}/
+                {att.total}
+              </span>
+            </div>
+
+            <div
+              style={S.summaryRowLast}
+            >
+              <span
+                style={S.summaryLabel}
+              >
+                Percentage
+              </span>
+
+              <span
+                style={S.summaryValue}
+              >
+                {att.percent}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* REMARKS */}
+        <div style={S.remarkBox}>
+          <b>
+            Class Teacher’s Remark:
+          </b>
+
+          <p>
+            ________________________________
+          </p>
+
+          <p>
+            Signature:
+            __________________
+          </p>
+        </div>
+
+        <div style={S.remarkBox}>
+          <b>
+            Head Teacher’s Remark:
+          </b>
+
+          <p>
+            ________________________________
+          </p>
+
+          <p>
+            Signature:
+            __________________
+          </p>
+        </div>
       </div>
     );
   };
 
-  // ================= CLASS VIEW =================
-  const renderClass = () => {
-    if (!classId || !year || !term) return null;
+  // =====================================================
+  // STUDENT VIEW
+  // =====================================================
+  const renderStudent = () => {
+    if (!studentId) return null;
 
-    const classStudents = students.filter((s) => s.classId === classId);
+    const student =
+      students.find(
+        s => s.id === studentId
+      );
+
+    if (!student) return null;
+
+    const filtered = items.filter(
+      r =>
+        r.studentId === studentId &&
+        (!studentYear ||
+          r.academicYear ===
+            studentYear) &&
+        (!studentTerm ||
+          r.term === studentTerm)
+    );
+
+    const grouped: any = {};
+
+    filtered.forEach(r => {
+      grouped[r.academicYear] ??= {};
+
+      grouped[r.academicYear][
+        r.classId
+      ] ??= {};
+
+      grouped[r.academicYear][
+        r.classId
+      ][r.term] ??= [];
+
+      grouped[r.academicYear][
+        r.classId
+      ][r.term].push(r);
+    });
 
     return (
-      <div>
-        <h2>
-          {classes.find((c) => c.id === classId)?.name} | {year} ({term})
-        </h2>
+      <div
+        className="print-area"
+        style={S.printArea}
+      >
+        {Object.entries(grouped).map(
+          ([year, classObj]) => (
+            <React.Fragment
+              key={`year-${year}`}
+            >
+              {Object.entries(
+                classObj as any
+              ).map(
+                ([cid, termObj]) => (
+                  <React.Fragment
+                    key={`class-${cid}`}
+                  >
+                    {Object.entries(
+                      termObj as any
+                    ).map(
+                      (
+                        [
+                          term,
+                          data,
+                        ]: any
+                      ) => {
+                        const className =
+                          classes.find(
+                            c =>
+                              c.id ===
+                              Number(cid)
+                          )?.name || "";
 
-        <p>
-          <strong>Head Teacher:</strong> {getClassTeacher(classId)}
-        </p>
+                        return (
+                          <React.Fragment
+                            key={`term-${term}-${cid}-${year}`}
+                          >
+                            {renderCard(
+                              student,
+                              data,
+                              className,
+                              year,
+                              term as TermType,
+                              Number(cid)
+                            )}
+                          </React.Fragment>
+                        );
+                      }
+                    )}
+                  </React.Fragment>
+                )
+              )}
+            </React.Fragment>
+          )
+        )}
+      </div>
+    );
+  };
 
-        {classStudents.map((s) => {
-          const items = reportItems.filter(
-            (r) =>
-              r.studentId === s.id &&
+  // =====================================================
+  // CLASS VIEW
+  // =====================================================
+  const renderClass = () => {
+    if (!classId || !classTerm)
+      return null;
+
+    const classStudents =
+      students.filter(
+        s => s.classId === classId
+      );
+
+    return (
+      <div
+        className="print-area"
+        style={S.printArea}
+      >
+        {classStudents.map(student => {
+          const data = items.filter(
+            r =>
+              r.studentId ===
+                student.id &&
               r.classId === classId &&
-              (r.academicYear || currentYear) === year &&
-              r.term === term
+              (!classYear ||
+                r.academicYear ===
+                  classYear) &&
+              r.term === classTerm
           );
 
-          if (!items.length) return null;
+          if (!data.length)
+            return null;
 
           return (
-            <div key={s.id} style={{ marginBottom: 20 }}>
-              <h4>{s.fullName}</h4>
-
-              <table border={1} cellPadding={6} width="100%">
-                <thead>
-                  <tr>
-                    <th>Subject</th>
-                    <th>Total</th>
-                    <th>Grade</th>
-                    <th>Remark</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {items.map((r) => (
-                    <tr key={r.id}>
-                      <td>{r.subjectName}</td>
-                      <td>{r.total}</td>
-                      <td>{r.grade}</td>
-                      <td>{getRemark(r.grade)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <React.Fragment
+              key={`student-${student.id}`}
+            >
+              {renderCard(
+                student,
+                data,
+                classes.find(
+                  c =>
+                    c.id === classId
+                )?.name || "",
+                classYear,
+                classTerm as TermType,
+                classId
+              )}
+            </React.Fragment>
           );
         })}
       </div>
     );
   };
 
-  // ================= SUBJECT VIEW =================
-  const renderSubject = () => {
-    if (!classId || !year || !term || !subjectId) return null;
-
-    const classStudents = students.filter((s) => s.classId === classId);
-
-    return (
-      <div>
-        <h2>
-          {subjects.find((s) => s.id === subjectId)?.name} | {year} ({term})
-        </h2>
-
-        <table border={1} cellPadding={6} width="100%">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Total</th>
-              <th>Grade</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {classStudents.map((s) => {
-              const item = reportItems.find(
-                (r) =>
-                  r.studentId === s.id &&
-                  r.classId === classId &&
-                  r.subjectId === subjectId &&
-                  (r.academicYear || currentYear) === year &&
-                  r.term === term
-              );
-
-              return (
-                <tr key={s.id}>
-                  <td>{s.fullName}</td>
-                  <td>{item?.total || "-"}</td>
-                  <td>{item?.grade || "-"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
-
-  // ================= UI =================
+  // =====================================================
+  // UI
+  // =====================================================
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Reports Dashboard</h1>
+    <div style={S.page}>
+      <h1 style={S.title}>
+        Reports
+      </h1>
 
-      <div style={{ marginBottom: 15 }}>
-        <button onClick={() => setTab("student")}>Student</button>
-        <button onClick={() => setTab("class")}>Class</button>
-        <button onClick={() => setTab("subject")}>Subject</button>
+      <button
+        onClick={handleExportPDF}
+        style={S.exportBtn}
+      >
+        Export / Download PDF
+      </button>
+
+      {/* TABS */}
+      <div style={S.tabs}>
+        <button
+          style={
+            tab === "student"
+              ? S.activeTab
+              : S.tabBtn
+          }
+          onClick={() =>
+            setTab("student")
+          }
+        >
+          Student
+        </button>
+
+        <button
+          style={
+            tab === "class"
+              ? S.activeTab
+              : S.tabBtn
+          }
+          onClick={() =>
+            setTab("class")
+          }
+        >
+          Class
+        </button>
       </div>
 
+      {/* STUDENT FILTERS */}
       {tab === "student" && (
-        <>
-          <select onChange={(e) => setStudentId(Number(e.target.value))}>
-            <option value="">Select Student</option>
-            {students.map((s) => (
-              <option key={s.id} value={s.id}>
+        <div style={S.filters}>
+          <select
+            style={S.select}
+            onChange={e =>
+              setStudentId(
+                Number(
+                  e.target.value
+                )
+              )
+            }
+          >
+            <option>
+              Select Student
+            </option>
+
+            {students.map(s => (
+              <option
+                key={`student-option-${s.id}`}
+                value={s.id}
+              >
                 {s.fullName}
               </option>
             ))}
           </select>
 
-          {renderStudent()}
-        </>
+          <select
+            style={S.select}
+            onChange={e =>
+              setStudentYear(
+                e.target.value
+              )
+            }
+          >
+            <option>Year</option>
+
+            {years.map(y => (
+              <option
+                key={`year-${y}`}
+              >
+                {y}
+              </option>
+            ))}
+          </select>
+
+          <select
+            style={S.select}
+            onChange={e =>
+              setStudentTerm(
+                e.target
+                  .value as TermType
+              )
+            }
+          >
+            <option>Term</option>
+
+            {TERMS.map(t => (
+              <option
+                key={`term-${t}`}
+              >
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
       )}
 
+      {/* CLASS FILTERS */}
       {tab === "class" && (
-        <>
-          <select onChange={(e) => setClassId(Number(e.target.value))}>
-            <option value="">Class</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
+        <div style={S.filters}>
+          <select
+            style={S.select}
+            onChange={e =>
+              setClassId(
+                Number(
+                  e.target.value
+                )
+              )
+            }
+          >
+            <option>
+              Select Class
+            </option>
+
+            {classes.map(c => (
+              <option
+                key={`class-option-${c.id}`}
+                value={c.id}
+              >
                 {c.name}
               </option>
             ))}
           </select>
 
-          <select onChange={(e) => setYear(e.target.value)}>
-            <option value="">Year</option>
-            {years.map((y) => (
-              <option key={y}>{y}</option>
-            ))}
-          </select>
+          <select
+            style={S.select}
+            onChange={e =>
+              setClassYear(
+                e.target.value
+              )
+            }
+          >
+            <option>Year</option>
 
-          <select onChange={(e) => setTerm(e.target.value as TermType)}>
-            <option value="">Term</option>
-            {TERMS.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-
-          {renderClass()}
-        </>
-      )}
-
-      {tab === "subject" && (
-        <>
-          <select onChange={(e) => setClassId(Number(e.target.value))}>
-            <option value="">Class</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+            {years.map(y => (
+              <option
+                key={`class-year-${y}`}
+              >
+                {y}
               </option>
             ))}
           </select>
 
-          <select onChange={(e) => setYear(e.target.value)}>
-            <option value="">Year</option>
-            {years.map((y) => (
-              <option key={y}>{y}</option>
-            ))}
-          </select>
+          <select
+            style={S.select}
+            onChange={e =>
+              setClassTerm(
+                e.target
+                  .value as TermType
+              )
+            }
+          >
+            <option>Term</option>
 
-          <select onChange={(e) => setTerm(e.target.value as TermType)}>
-            <option value="">Term</option>
-            {TERMS.map((t) => (
-              <option key={t}>{t}</option>
-            ))}
-          </select>
-
-          <select onChange={(e) => setSubjectId(Number(e.target.value))}>
-            <option value="">Subject</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            {TERMS.map(t => (
+              <option
+                key={`class-term-${t}`}
+              >
+                {t}
               </option>
             ))}
           </select>
-
-          {renderSubject()}
-        </>
+        </div>
       )}
+
+      <div ref={printRef}>
+        {tab === "student" &&
+          renderStudent()}
+
+        {tab === "class" &&
+          renderClass()}
+      </div>
     </div>
   );
-};
-
-export default Reports;
+}

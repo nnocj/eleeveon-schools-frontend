@@ -1,11 +1,11 @@
-import { db } from "../db";
-import { TermType } from "../types/academic";
-import { prepareSyncData } from "../sync/syncUtils";
+/*import { db } from "../db";
+/*import { TermType } from "../types/academic";
+import { prepareSyncData } from "../sync/syncUtils";*/
 
 /**
  * 🔥 GLOBAL SCHOOL STATE
  */
-export const getSchoolState = async () => {
+/*export const getSchoolState = async () => {
   const settings = await db.settings.toArray();
   return settings[0] || null;
 };
@@ -28,4 +28,4 @@ export const updateSchoolState = async (
     currentTerm: term,
     academicYear,
   });
-};
+};*/

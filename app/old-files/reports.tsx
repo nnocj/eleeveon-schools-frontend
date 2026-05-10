@@ -1,4 +1,4 @@
-"use client";
+/*"use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import html2canvas from "html2canvas";
@@ -405,7 +405,7 @@ export default function Reports() {
         className="report-card"
         style={S.reportCard}
       >
-        {/* HEADER */}
+        {/* HEADER *//*}
         <div style={S.schoolHeader}>
           {school.logo && (
             <img
@@ -424,7 +424,7 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* META */}
+        {/* META *//*}
         <div style={S.metaRow}>
           <span>
             <b>Student:</b>{" "}
@@ -439,7 +439,7 @@ export default function Reports() {
           </span>
         </div>
 
-        {/* TABLE */}
+        {/* TABLE *//*}
         <table style={S.table}>
           <thead>
             <tr>
@@ -549,9 +549,9 @@ export default function Reports() {
           </tbody>
         </table>
 
-        {/* SUMMARY */}
+        {/* SUMMARY *//*
         <div style={S.summaryGrid}>
-          {/* CARD 1 */}
+          {/* CARD 1 *//*}
           <div style={S.summaryCard}>
             <div style={S.summaryRow}>
               <span
@@ -586,8 +586,8 @@ export default function Reports() {
             </div>
           </div>
 
-          {/* CARD 2 */}
-          <div style={S.summaryCard}>
+          {/* CARD 2 *//*}
+         /* <div style={S.summaryCard}>
             <div style={S.summaryRow}>
               <span
                 style={S.summaryLabel}
@@ -621,7 +621,7 @@ export default function Reports() {
           </div>
         </div>
 
-        {/* REMARKS */}
+        {/* REMARKS *//*}
         <div style={S.remarkBox}>
           <b>
             Class Teacher’s Remark:
@@ -825,7 +825,7 @@ export default function Reports() {
         Export / Download PDF
       </button>
 
-      {/* TABS */}
+      {/* TABS *//*}
       <div style={S.tabs}>
         <button
           style={
@@ -854,7 +854,7 @@ export default function Reports() {
         </button>
       </div>
 
-      {/* STUDENT FILTERS */}
+      {/* STUDENT FILTERS *//*}
       {tab === "student" && (
         <div style={S.filters}>
           <select
@@ -922,7 +922,7 @@ export default function Reports() {
         </div>
       )}
 
-      {/* CLASS FILTERS */}
+     /* {/* CLASS FILTERS *//*}
       {tab === "class" && (
         <div style={S.filters}>
           <select
@@ -999,4 +999,4 @@ export default function Reports() {
       </div>
     </div>
   );
-}
+}*/

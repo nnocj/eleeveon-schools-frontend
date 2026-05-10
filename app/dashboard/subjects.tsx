@@ -1,52 +1,129 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { db } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
+import { useSettings } from "../context/settings-context";
 
 export default function Subjects() {
-  const [name, setName] = useState("");
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
+  const { settings } = useSettings();
 
+  // ======================================================
+  // ORGANIZATION CONTEXT
+  // ======================================================
+  const organizationId = settings?.organizationId;
+  const branchId = settings?.branchId || 1;
+
+  // ======================================================
+  // DATA
+  // ======================================================
+  const [subjects, setSubjects] = useState<any[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
+  const [structures, setStructures] = useState<any[]>([]);
+  const [organizations, setOrganizations] = useState<any[]>([]);
+
+  const [loading, setLoading] = useState(true);
+
+  // ======================================================
+  // UI STATE
+  // ======================================================
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
-  // ================= LOAD =================
-  const loadSubjects = async () => {
-    const data = await db.subjects.toArray();
-    setSubjects(data);
+  // ======================================================
+  // FORM
+  // ======================================================
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [allowedClasses, setAllowedClasses] = useState<number[]>([]);
+  const [selectedOrganizationId, setSelectedOrganizationId] = useState<
+    number | ""
+  >(organizationId || "");
+
+  // ======================================================
+  // FILTERS
+  // ======================================================
+  const [search, setSearch] = useState("");
+  const [classFilter, setClassFilter] = useState<number | "">("");
+  const [structureFilter, setStructureFilter] = useState<number | "">("");
+  const [organizationFilter, setOrganizationFilter] = useState<number | "">(
+    organizationId || ""
+  );
+
+  // ======================================================
+  // LOAD
+  // ======================================================
+  const load = async () => {
+    try {
+      setLoading(true);
+
+      const [s, c, st, orgs] = await Promise.all([
+        db.subjects.toArray(),
+        db.classes.toArray(),
+        db.academicStructures.toArray(),
+        db.organizations?.toArray?.() || [],
+      ]);
+
+      setSubjects(s.filter((x: any) => !x.isDeleted));
+      setClasses(c);
+      setStructures(st);
+      setOrganizations(orgs);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    loadSubjects();
+    load();
   }, []);
 
-  // ================= RESET =================
+  // ======================================================
+  // FAST LOOKUPS
+  // ======================================================
+  const classMap = useMemo(
+    () => new Map(classes.map((c) => [c.id, c.name])),
+    [classes]
+  );
+
+  const orgMap = useMemo(
+    () => new Map(organizations.map((o) => [o.id, o.name])),
+    [organizations]
+  );
+
+  // ======================================================
+  // RESET
+  // ======================================================
   const reset = () => {
     setName("");
+    setCode("");
+    setAllowedClasses([]);
     setEditingId(null);
+
+    setSelectedOrganizationId(organizationId || "");
+
     setShowForm(false);
   };
 
-  // ================= SAVE =================
+  // ======================================================
+  // SAVE
+  // ======================================================
   const save = async () => {
     if (!name.trim()) {
-      alert("Please enter subject name");
-      return;
-    }
-
-    const exists = await db.subjects
-      .filter((s) => s.name.toLowerCase() === name.toLowerCase())
-      .first();
-
-    if (exists && !editingId) {
-      alert("Subject already exists");
+      alert("Subject name required");
       return;
     }
 
     const payload = prepareSyncData({
-      name,
+      branchId,
+      organizationId:
+        Number(selectedOrganizationId) || organizationId || undefined,
+
+      name: name.trim(),
+      code: code.trim(),
+
+      classIds: allowedClasses,
+
+      active: true,
     });
 
     if (editingId) {
@@ -56,42 +133,88 @@ export default function Subjects() {
     }
 
     reset();
-    loadSubjects();
+    load();
   };
 
-  // ================= EDIT =================
+  // ======================================================
+  // EDIT
+  // ======================================================
   const edit = (s: any) => {
-    setName(s.name);
     setEditingId(s.id);
+
+    setName(s.name || "");
+    setCode(s.code || "");
+    setAllowedClasses(s.classIds || []);
+
+    setSelectedOrganizationId(s.organizationId || "");
+
     setShowForm(true);
   };
 
-  // ================= SAFE DELETE =================
+  // ======================================================
+  // DELETE (SAFE)
+  // ======================================================
   const remove = async (id: number) => {
-    const confirmDelete = confirm(
-      "Are you sure you want to delete this subject?\n\nThis action cannot be undone."
-    );
+    const scoreCount = await db.scores
+      .where("subjectId")
+      .equals(id)
+      .count();
 
-    if (!confirmDelete) return;
+    const assignCount = await db.assignments
+      .where("subjectId")
+      .equals(id)
+      .count();
 
-    await db.subjects.delete(id);
-    loadSubjects();
+    if (scoreCount || assignCount) {
+      alert("Cannot delete subject with academic records");
+      return;
+    }
+
+    if (!confirm("Delete subject?")) return;
+
+    await db.subjects.update(id, {
+      isDeleted: true,
+      updatedAt: Date.now(),
+    });
+
+    load();
   };
 
-  // ================= FILTER =================
-  const filtered = subjects.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase())
-  );
+  // ======================================================
+  // FILTERING
+  // ======================================================
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
 
-  // ================= STYLES (MATCH CLASSES EXACTLY) =================
+    return subjects.filter((s) => {
+      const matchText =
+        s.name?.toLowerCase().includes(q) ||
+        s.code?.toLowerCase().includes(q);
+
+      const matchClass =
+        classFilter === "" ||
+        (s.classIds || []).includes(classFilter as number);
+
+      const matchOrganization =
+        organizationFilter === "" ||
+        s.organizationId === Number(organizationFilter);
+
+      return matchText && matchClass && matchOrganization;
+    });
+  }, [subjects, search, classFilter, organizationFilter]);
+
+  // ======================================================
+  // STYLES (UNCHANGED CLEAN STYLE)
+  // ======================================================
   const container: React.CSSProperties = {
     padding: 20,
+    color: "var(--text)",
   };
 
   const card: React.CSSProperties = {
     border: "1px solid rgba(0,0,0,0.08)",
     background: "var(--surface)",
-    padding: 12,
+    padding: 14,
     borderRadius: 10,
     marginBottom: 10,
   };
@@ -105,74 +228,214 @@ export default function Subjects() {
     color: "var(--text)",
   };
 
-  const primaryButton: React.CSSProperties = {
+  const primary: React.CSSProperties = {
     padding: "8px 12px",
     borderRadius: 8,
     cursor: "pointer",
     border: "none",
     background: "var(--primary-color)",
     color: "#fff",
+    fontWeight: 600,
   };
 
-  // ================= UI =================
+  const input: React.CSSProperties = {
+    padding: 10,
+    width: "100%",
+    borderRadius: 8,
+    border: "1px solid rgba(0,0,0,0.2)",
+    background: "var(--surface)",
+    color: "var(--text)",
+  };
+
+  const chip: React.CSSProperties = {
+    padding: "5px 8px",
+    borderRadius: 999,
+    fontSize: 12,
+    border: "1px solid rgba(0,0,0,0.2)",
+    cursor: "pointer",
+  };
+
+  // ======================================================
+  // UI
+  // ======================================================
+  if (loading) {
+    return <div style={container}>Loading subjects...</div>;
+  }
+
   return (
     <div style={container}>
-      {/* HEADER */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0 }}>Subjects</h2>
 
-        <button style={primaryButton} onClick={() => setShowForm(!showForm)}>
+      {/* HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Subjects</h2>
+
+          <p style={{ margin: 0, opacity: 0.6, fontSize: 13 }}>
+            Curriculum subject management
+          </p>
+        </div>
+
+        <button style={primary} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Close" : "+ Add Subject"}
         </button>
       </div>
 
-      {/* SEARCH */}
-      <div style={{ marginTop: 10 }}>
+      {/* FILTERS */}
+      <div
+        style={{
+          marginTop: 12,
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+
         <input
           placeholder="Search subject..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.2)",
-            width: "100%",
-            maxWidth: 300,
+            ...input,
+            width: 220,
           }}
         />
+
+        <select
+          style={button}
+          value={classFilter}
+          onChange={(e) => setClassFilter(Number(e.target.value) || "")}
+        >
+          <option value="">All Classes</option>
+
+          {classes.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          style={button}
+          value={organizationFilter}
+          onChange={(e) =>
+            setOrganizationFilter(Number(e.target.value) || "")
+          }
+        >
+          <option value="">All Organizations</option>
+
+          {organizations.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+
+        <select style={button} disabled>
+          <option>Structure filter (future)</option>
+        </select>
       </div>
 
       {/* FORM */}
       {showForm && (
-        <div
-          style={{
-            marginTop: 15,
-            padding: 15,
-            borderRadius: 10,
-            background: "var(--surface)",
-            border: "1px solid rgba(0,0,0,0.1)",
-            maxWidth: 350,
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>
+        <div style={{ ...card, maxWidth: 500, marginTop: 15 }}>
+          <h3>
             {editingId ? "Edit Subject" : "Create Subject"}
           </h3>
 
           <input
-            placeholder="Subject name (e.g. Mathematics)"
+            placeholder="Subject name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             style={{
-              padding: 10,
-              width: "100%",
-              borderRadius: 8,
-              border: "1px solid rgba(0,0,0,0.2)",
+              ...input,
               marginBottom: 10,
             }}
           />
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <button style={primaryButton} onClick={save}>
+          <input
+            placeholder="Subject code"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            style={{
+              ...input,
+              marginBottom: 10,
+            }}
+          />
+
+          {/* ORGANIZATION */}
+          <select
+            style={{
+              ...input,
+              marginBottom: 10,
+            }}
+            value={selectedOrganizationId}
+            onChange={(e) =>
+              setSelectedOrganizationId(
+                Number(e.target.value) || ""
+              )
+            }
+          >
+            <option value="">Select Organization</option>
+
+            {organizations.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+
+          {/* CLASS CHIPS */}
+          <div>
+            <small>Allowed Classes</small>
+
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 6,
+              }}
+            >
+              {classes.map((c) => {
+                const active = allowedClasses.includes(c.id);
+
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() =>
+                      setAllowedClasses((prev) =>
+                        active
+                          ? prev.filter((id) => id !== c.id)
+                          : [...prev, c.id]
+                      )
+                    }
+                    style={{
+                      ...chip,
+                      background: active
+                        ? "var(--primary-color)"
+                        : "transparent",
+
+                      color: active
+                        ? "#fff"
+                        : "var(--text)",
+                    }}
+                  >
+                    {c.name}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ACTIONS */}
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              marginTop: 10,
+            }}
+          >
+            <button style={primary} onClick={save}>
               {editingId ? "Update" : "Save"}
             </button>
 
@@ -186,26 +449,57 @@ export default function Subjects() {
       {/* LIST */}
       <div style={{ marginTop: 20 }}>
         {filtered.length === 0 && (
-          <p style={{ opacity: 0.6 }}>No subjects found</p>
+          <p style={{ opacity: 0.6 }}>
+            No subjects found
+          </p>
         )}
 
         {filtered.map((s) => (
           <div key={s.id} style={card}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+              }}
+            >
               <div>
                 <b>{s.name}</b>
-                <div style={{ fontSize: 12, opacity: 0.6 }}>
-                  ID: {s.id}
+
+                <div
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.6,
+                    marginTop: 4,
+                  }}
+                >
+                  Code: {s.code || "-"}
+                  <br />
+
+                  Organization:{" "}
+                  {orgMap.get(s.organizationId) || "None"}
+
+                  <br />
+
+                  Classes:{" "}
+                  {(s.classIds || [])
+                    .map((id: number) => classMap.get(id))
+                    .filter(Boolean)
+                    .join(", ") || "None"}
                 </div>
               </div>
 
-              {/* ACTIONS (MATCH CLASSES EXACTLY) */}
               <div style={{ display: "flex", gap: 8 }}>
-                <button style={button} onClick={() => edit(s)}>
+                <button
+                  style={button}
+                  onClick={() => edit(s)}
+                >
                   Edit
                 </button>
 
-                <button style={button} onClick={() => remove(s.id)}>
+                <button
+                  style={button}
+                  onClick={() => remove(s.id)}
+                >
                   Delete
                 </button>
               </div>
@@ -213,6 +507,7 @@ export default function Subjects() {
           </div>
         ))}
       </div>
+
     </div>
   );
 }

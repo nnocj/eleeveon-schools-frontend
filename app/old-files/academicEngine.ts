@@ -1,4 +1,4 @@
-import { db, TermType } from "../db";
+/*import { db, TermType } from "../db";
 import { SyncStatus } from "../constants/syncStatus";
 import {
   TERMS,
@@ -264,4 +264,4 @@ export const runAcademicEngine = async (
   }
 
   return processTermPromotion(current);
-};
+};*/

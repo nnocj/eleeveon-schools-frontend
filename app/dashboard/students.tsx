@@ -1,39 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { db, Student } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
+import { useSettings } from "../context/settings-context";
+
+type Status = "active" | "graduated" | "transferred" | "withdrawn";
 
 export default function Students() {
-  // ================= UI STATE =================
+  const { settings } = useSettings();
+  const primary = settings?.primaryColor || "#2f6fed";
+
+  // ================= DATA =================
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
-  const [attendance, setAttendance] = useState<any[]>([]);
+  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // ================= UI =================
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const [search, setSearch] = useState("");
+
   const [filterClass, setFilterClass] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterGender, setFilterGender] = useState("");
+  const [filterOrg, setFilterOrg] = useState("");
 
   // ================= FORM =================
-  const [fullName, setFullName] = useState("");
-  const [age, setAge] = useState("");
-  const [parentName, setParentName] = useState("");
-  const [parentPhone, setParentPhone] = useState("");
-  const [classId, setClassId] = useState("");
+  const [form, setForm] = useState<Partial<Student>>({
+    fullName: "",
+    age: undefined,
+    gender: "",
+    dateOfBirth: "",
+    admissionNumber: "",
+    parentName: "",
+    parentPhone: "",
+    parentEmail: "",
+    address: "",
+    status: "active",
+    currentClassId: undefined,
+    organizationId: undefined,
+  });
 
   // ================= LOAD =================
   const load = async () => {
-    const [studentsData, classesData, attendanceData] = await Promise.all([
+    setLoading(true);
+
+    const [s, c, o] = await Promise.all([
       db.students.toArray(),
       db.classes.toArray(),
-      db.attendance.toArray(),
+      db.organizations?.toArray?.() || [],
     ]);
 
-    setStudents(studentsData);
-    setClasses(classesData);
-    setAttendance(attendanceData);
+    setStudents(s);
+    setClasses(c);
+    setOrganizations(o);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -41,31 +65,38 @@ export default function Students() {
   }, []);
 
   // ================= RESET =================
-  const resetForm = () => {
-    setFullName("");
-    setAge("");
-    setParentName("");
-    setParentPhone("");
-    setClassId("");
+  const reset = () => {
+    setForm({
+      fullName: "",
+      age: undefined,
+      gender: "",
+      dateOfBirth: "",
+      admissionNumber: "",
+      parentName: "",
+      parentPhone: "",
+      parentEmail: "",
+      address: "",
+      status: "active",
+      currentClassId: undefined,
+      organizationId: undefined,
+    });
+
     setEditingId(null);
     setShowForm(false);
   };
 
   // ================= SAVE =================
-  const saveStudent = async () => {
-    if (!fullName.trim() || !classId) return;
-
-    const sys = (await db.settings.toArray())[0];
+  const save = async () => {
+    if (!form.fullName?.trim()) {
+      alert("Full name is required");
+      return;
+    }
 
     const payload = prepareSyncData({
-      fullName,
-      age: Number(age || 0),
-      parentName,
-      parentPhone,
-      classId: Number(classId),
-      academicYear: sys?.academicYear || "",
-      term: sys?.currentTerm || "",
-      status: "active",
+      ...form,
+      age: Number(form.age || 0),
+      currentClassId: Number(form.currentClassId),
+      organizationId: Number(form.organizationId),
     });
 
     if (editingId) {
@@ -74,28 +105,20 @@ export default function Students() {
       await db.students.add(payload);
     }
 
-    resetForm();
+    reset();
     load();
   };
 
   // ================= EDIT =================
-  const editStudent = (s: Student) => {
-    setEditingId(s.id || null);
-    setFullName(s.fullName);
-    setAge(String(s.age));
-    setParentName(s.parentName);
-    setParentPhone(s.parentPhone);
-    setClassId(String(s.classId));
+  const edit = (s: Student) => {
+    setEditingId(s.id!);
+    setForm(s);
     setShowForm(true);
   };
 
-  // ================= DELETE (SAFE + BUSINESS LOGIC) =================
-  const deleteStudent = async (id: number) => {
-    const confirmDelete = confirm(
-      "Delete this student?\n\nAll current records (scores, attendance, payments) will be removed.\nPrevious report cards will remain."
-    );
-
-    if (!confirmDelete) return;
+  // ================= DELETE =================
+  const remove = async (id: number) => {
+    if (!confirm("Delete student?")) return;
 
     await db.transaction(
       "rw",
@@ -114,161 +137,197 @@ export default function Students() {
     load();
   };
 
-  // ================= FILTER =================
-  const filtered = students.filter((s) => {
-    const matchSearch = s.fullName
-      .toLowerCase()
-      .includes(search.toLowerCase());
+  // ================= MAPS =================
+  const classMap = useMemo(
+    () => new Map(classes.map((c) => [c.id, c.name])),
+    [classes]
+  );
 
-    const matchClass = filterClass
-      ? String(s.classId) === filterClass
-      : true;
+  const orgMap = useMemo(
+    () => new Map(organizations.map((o) => [o.id, o.name])),
+    [organizations]
+  );
 
-    return matchSearch && matchClass;
-  });
+  // ================= FILTER ENGINE =================
+  const filtered = useMemo(() => {
+    return students.filter((s) => {
+      const matchSearch =
+        s.fullName?.toLowerCase().includes(search.toLowerCase()) ||
+        s.admissionNumber?.toLowerCase().includes(search.toLowerCase());
 
-  // ================= HELPERS =================
-  const getClassName = (id?: number) =>
-    classes.find((c) => c.id === id)?.name || "No Class";
+      const matchClass = filterClass
+        ? String(s.currentClassId) === filterClass
+        : true;
 
-  const getAttendance = (id?: number) => {
-    const records = attendance.filter((a) => a.studentId === id);
-    const present = records.filter((r) => r.status === "present").length;
-    return records.length ? `${((present / records.length) * 100).toFixed(0)}%` : "0%";
-  };
+      const matchStatus = filterStatus ? s.status === filterStatus : true;
+
+      const matchGender = filterGender ? s.gender === filterGender : true;
+
+      const matchOrg = filterOrg
+        ? String(s.organizationId) === filterOrg
+        : true;
+
+      return matchSearch && matchClass && matchStatus && matchGender && matchOrg;
+    });
+  }, [students, search, filterClass, filterStatus, filterGender, filterOrg]);
 
   // ================= STYLES =================
-  const card: React.CSSProperties = {
-    border: "1px solid rgba(0,0,0,0.08)",
-    background: "var(--surface)",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "7px 10px",
-    borderRadius: 8,
-    cursor: "pointer",
-    border: "1px solid var(--primary-color)",
-    background: "var(--surface)",
+  const page: React.CSSProperties = {
+    padding: 20,
     color: "var(--text)",
   };
 
-  const primaryButton: React.CSSProperties = {
-    padding: "8px 12px",
-    borderRadius: 8,
-    cursor: "pointer",
-    border: "none",
-    background: "var(--primary-color)",
-    color: "#fff",
+  const card: React.CSSProperties = {
+    background: "var(--surface)",
+    border: "1px solid rgba(0,0,0,0.08)",
+    padding: 12,
+    borderRadius: 12,
   };
 
   const input: React.CSSProperties = {
     padding: 10,
-    borderRadius: 8,
+    borderRadius: 10,
     border: "1px solid rgba(0,0,0,0.2)",
-    background: "var(--surface)",
+    background: "transparent",
     color: "var(--text)",
   };
 
+  const primaryBtn: React.CSSProperties = {
+    padding: "10px 14px",
+    borderRadius: 10,
+    border: "none",
+    background: primary,
+    color: "#fff",
+    fontWeight: 600,
+    cursor: "pointer",
+  };
+
+  const outlineBtn: React.CSSProperties = {
+    padding: "8px 10px",
+    borderRadius: 10,
+    border: `1px solid ${primary}`,
+    background: "transparent",
+    color: "var(--text)",
+    cursor: "pointer",
+  };
+
+  if (loading) return <div style={page}>Loading students...</div>;
+
   // ================= UI =================
   return (
-    <div style={{ padding: 20 }}>
+    <div style={page}>
+
       {/* HEADER */}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2 style={{ margin: 0 }}>Students</h2>
+        <h2>Students</h2>
 
-        <button style={primaryButton} onClick={() => setShowForm(!showForm)}>
+        <button style={primaryBtn} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Close" : "+ Add Student"}
         </button>
       </div>
 
-      {/* FILTERS */}
-      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+      {/* FILTER GRID (NOW INCLUDING ORG) */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr",
+          gap: 10,
+          marginTop: 10,
+        }}
+      >
         <input
           style={input}
-          placeholder="Search student..."
+          placeholder="Search student / admission no..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
 
-        <select
-          style={input}
-          value={filterClass}
-          onChange={(e) => setFilterClass(e.target.value)}
-        >
+        <select style={input} value={filterOrg} onChange={(e) => setFilterOrg(e.target.value)}>
+          <option value="">All Organizations</option>
+          {organizations.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </select>
+
+        <select style={input} value={filterClass} onChange={(e) => setFilterClass(e.target.value)}>
           <option value="">All Classes</option>
           {classes.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
+            <option key={c.id} value={c.id}>{c.name}</option>
           ))}
+        </select>
+
+        <select style={input} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">Status</option>
+          <option value="active">Active</option>
+          <option value="graduated">Graduated</option>
+          <option value="transferred">Transferred</option>
+          <option value="withdrawn">Withdrawn</option>
+        </select>
+
+        <select style={input} value={filterGender} onChange={(e) => setFilterGender(e.target.value)}>
+          <option value="">Gender</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
         </select>
       </div>
 
-      {/* FORM */}
+      {/* FORM (now includes org) */}
       {showForm && (
-        <div
-          style={{
-            marginTop: 15,
-            padding: 15,
-            borderRadius: 10,
-            background: "var(--surface)",
-            border: "1px solid rgba(0,0,0,0.1)",
-            maxWidth: 350,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          <input
-            style={input}
-            placeholder="Full Name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-          />
+        <div style={{ ...card, marginTop: 15, maxWidth: 520, display: "grid", gap: 8 }}>
 
-          <input
-            style={input}
-            placeholder="Age"
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-          />
-
-          <input
-            style={input}
-            placeholder="Parent Name"
-            value={parentName}
-            onChange={(e) => setParentName(e.target.value)}
-          />
-
-          <input
-            style={input}
-            placeholder="Parent Phone"
-            value={parentPhone}
-            onChange={(e) => setParentPhone(e.target.value)}
+          <input style={input} placeholder="Full Name"
+            value={form.fullName || ""}
+            onChange={(e) => setForm({ ...form, fullName: e.target.value })}
           />
 
           <select
             style={input}
-            value={classId}
-            onChange={(e) => setClassId(e.target.value)}
+            value={form.organizationId || ""}
+            onChange={(e) => setForm({ ...form, organizationId: Number(e.target.value) })}
           >
-            <option value="">Select Class</option>
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
+            <option value="">Organization</option>
+            {organizations.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
             ))}
           </select>
 
+          <select
+            style={input}
+            value={form.currentClassId || ""}
+            onChange={(e) => setForm({ ...form, currentClassId: Number(e.target.value) })}
+          >
+            <option value="">Class</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+
+          <input style={input} placeholder="Admission Number"
+            value={form.admissionNumber || ""}
+            onChange={(e) => setForm({ ...form, admissionNumber: e.target.value })}
+          />
+
+          <input style={input} placeholder="Parent Phone"
+            value={form.parentPhone || ""}
+            onChange={(e) => setForm({ ...form, parentPhone: e.target.value })}
+          />
+
+          <select style={input}
+            value={form.status || "active"}
+            onChange={(e) => setForm({ ...form, status: e.target.value as Status })}
+          >
+            <option value="active">Active</option>
+            <option value="graduated">Graduated</option>
+            <option value="transferred">Transferred</option>
+            <option value="withdrawn">Withdrawn</option>
+          </select>
+
           <div style={{ display: "flex", gap: 10 }}>
-            <button style={primaryButton} onClick={saveStudent}>
+            <button style={primaryBtn} onClick={save}>
               {editingId ? "Update" : "Save"}
             </button>
 
-            <button style={button} onClick={resetForm}>
+            <button style={outlineBtn} onClick={reset}>
               Cancel
             </button>
           </div>
@@ -276,30 +335,29 @@ export default function Students() {
       )}
 
       {/* LIST */}
-      <div style={{ marginTop: 20 }}>
+      <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
         {filtered.map((s) => (
           <div key={s.id} style={card}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
                 <b>{s.fullName}</b>
-                <div style={{ fontSize: 12, opacity: 0.6 }}>
-                  {getClassName(s.classId)} • Age {s.age} • Attendance{" "}
-                  {getAttendance(s.id)}
+
+                <div style={{ fontSize: 12, opacity: 0.7 }}>
+                  {orgMap.get(s.organizationId || 0) || "No Org"} •{" "}
+                  {classMap.get(s.currentClassId || 0) || "No Class"} •{" "}
+                  {s.status}
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
-                <button style={button} onClick={() => editStudent(s)}>
-                  Edit
-                </button>
-                <button style={button} onClick={() => deleteStudent(s.id!)}>
-                  Delete
-                </button>
+                <button style={outlineBtn} onClick={() => edit(s)}>Edit</button>
+                <button style={outlineBtn} onClick={() => remove(s.id!)}>Delete</button>
               </div>
             </div>
           </div>
         ))}
       </div>
+
     </div>
   );
 }

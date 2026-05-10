@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSettings } from "../context/settings-context";
+import { db } from "../lib/db";
 
 // ================= COLOR UTILITIES =================
 function darken(hex: string, factor = 0.35) {
@@ -43,9 +44,39 @@ function getContrastTextColor(hex: string) {
   return brightness > 140 ? "#111" : "#fff";
 }
 
+// ================= FONT OPTIONS =================
+const fontOptions = [
+  { label: "System Default", value: "system-ui, -apple-system, sans-serif" },
+  { label: "Arial", value: "Arial, sans-serif" },
+  { label: "Helvetica", value: "Helvetica, sans-serif" },
+  { label: "Verdana", value: "Verdana, sans-serif" },
+  { label: "Tahoma", value: "Tahoma, sans-serif" },
+  { label: "Trebuchet MS", value: "'Trebuchet MS', sans-serif" },
+  { label: "Segoe UI", value: "'Segoe UI', sans-serif" },
+  { label: "Roboto", value: "Roboto, sans-serif" },
+  { label: "Poppins", value: "Poppins, sans-serif" },
+  { label: "Inter", value: "Inter, sans-serif" },
+  { label: "Montserrat", value: "Montserrat, sans-serif" },
+  { label: "Open Sans", value: "'Open Sans', sans-serif" },
+  { label: "Lato", value: "Lato, sans-serif" },
+  { label: "Nunito", value: "Nunito, sans-serif" },
+  { label: "Ubuntu", value: "Ubuntu, sans-serif" },
+  { label: "Merriweather", value: "Merriweather, serif" },
+  { label: "Georgia", value: "Georgia, serif" },
+  { label: "Times New Roman", value: "'Times New Roman', serif" },
+  { label: "Garamond", value: "Garamond, serif" },
+  { label: "Palatino", value: "'Palatino Linotype', serif" },
+  { label: "Courier New", value: "'Courier New', monospace" },
+  { label: "Consolas", value: "Consolas, monospace" },
+  { label: "Monaco", value: "Monaco, monospace" },
+];
+
 // ================= COMPONENT =================
 export default function Settings() {
   const { settings, updateSettings } = useSettings();
+
+  const [academicStructures, setAcademicStructures] = useState<any[]>([]);
+  const [academicPeriods, setAcademicPeriods] = useState<any[]>([]);
 
   const [form, setForm] = useState<any>({
     currentTerm: "Term 1",
@@ -59,18 +90,23 @@ export default function Settings() {
     email: "",
     phone: "",
     address: "",
+    website: "",
 
     theme: "light",
     primaryColor: "#2f6fed",
-    fontSize: "medium",
 
-    // ✅ ADD THIS (MINIMAL CHANGE ONLY)
+    fontSize: 16,
     fontFamily: "system-ui, -apple-system, sans-serif",
+
+    schoolId: undefined,
+    branchId: undefined,
+    currentAcademicStructureId: undefined,
+    currentAcademicPeriodId: undefined,
   });
 
   const [loading, setLoading] = useState(false);
 
-  // ================= LOAD =================
+  // ================= LOAD SETTINGS =================
   useEffect(() => {
     if (!settings) return;
 
@@ -79,6 +115,19 @@ export default function Settings() {
       ...settings,
     }));
   }, [settings]);
+
+  // ================= LOAD ACADEMIC DATA (DB) =================
+  useEffect(() => {
+    const load = async () => {
+      const structures = await db.academicStructures.toArray();
+      const periods = await db.academicPeriods.toArray();
+
+      setAcademicStructures(structures);
+      setAcademicPeriods(periods);
+    };
+
+    load();
+  }, []);
 
   // ================= UPDATE FIELD =================
   const updateField = (key: string, value: any) => {
@@ -111,20 +160,19 @@ export default function Settings() {
     setLoading(false);
   };
 
-  // ================= APPLY GLOBAL THEME (ONLY ADDITION) =================
+  // ================= APPLY GLOBAL THEME =================
   useEffect(() => {
-    document.documentElement.style.setProperty(
-      "--primary-color",
-      form.primaryColor
-    );
+    document.documentElement.style.setProperty("--primary-color", form.primaryColor);
+    document.documentElement.style.setProperty("--font-family", form.fontFamily);
+    document.documentElement.style.setProperty("--font-size", `${form.fontSize}px`);
 
-    document.documentElement.style.setProperty(
-      "--font-family",
-      form.fontFamily
-    );
-  }, [form.primaryColor, form.fontFamily]);
+    document.body.style.fontFamily = form.fontFamily;
+    document.body.style.fontSize = `${form.fontSize}px`;
 
-  // ================= DYNAMIC FAVICON =================
+    document.documentElement.setAttribute("data-theme", form.theme);
+  }, [form.primaryColor, form.fontFamily, form.fontSize, form.theme]);
+
+  // ================= FAVICON =================
   useEffect(() => {
     if (!form.logo) return;
 
@@ -138,7 +186,6 @@ export default function Settings() {
     document.head.appendChild(link);
   }, [form.logo]);
 
-  // ================= THEME =================
   const darkBg = darken(form.primaryColor, 0.25);
 
   const textColor = getContrastTextColor(
@@ -173,6 +220,62 @@ export default function Settings() {
           <option>Term 1</option>
           <option>Term 2</option>
           <option>Term 3</option>
+          <option>Semester 1</option>
+          <option>Semester 2</option>
+        </select>
+
+        <select
+          value={form.mode}
+          onChange={(e) => updateField("mode", e.target.value)}
+          style={styles.input}
+        >
+          <option value="manual">Manual Mode</option>
+          <option value="auto">Auto Mode</option>
+        </select>
+
+        {/* ✅ ACADEMIC STRUCTURE FROM DB */}
+        <select
+          value={form.currentAcademicStructureId || ""}
+          onChange={(e) =>
+            updateField(
+              "currentAcademicStructureId",
+              Number(e.target.value)
+            )
+          }
+          style={styles.input}
+        >
+          <option value="">Select Academic Structure</option>
+          {academicStructures.map((s: any) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.level})
+            </option>
+          ))}
+        </select>
+
+        {/* ✅ ACADEMIC PERIOD FROM DB */}
+        <select
+          value={form.currentAcademicPeriodId || ""}
+          onChange={(e) =>
+            updateField(
+              "currentAcademicPeriodId",
+              Number(e.target.value)
+            )
+          }
+          style={styles.input}
+        >
+          <option value="">Select Academic Period</option>
+          {academicPeriods
+            .filter(
+              (p: any) =>
+                !form.currentAcademicStructureId ||
+                p.academicStructureId ===
+                  form.currentAcademicStructureId
+            )
+            .map((p: any) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
         </select>
       </section>
 
@@ -205,11 +308,7 @@ export default function Settings() {
         />
 
         {form.logo && (
-          <img
-            src={form.logo}
-            alt="logo"
-            style={{ height: 80, marginBottom: 10 }}
-          />
+          <img src={form.logo} alt="logo" style={{ height: 80, marginBottom: 10 }} />
         )}
 
         <input
@@ -234,6 +333,13 @@ export default function Settings() {
         />
 
         <input
+          placeholder="Website"
+          value={form.website}
+          onChange={(e) => updateField("website", e.target.value)}
+          style={styles.input}
+        />
+
+        <input
           placeholder="Address"
           value={form.address}
           onChange={(e) => updateField("address", e.target.value)}
@@ -252,24 +358,24 @@ export default function Settings() {
           style={{ ...styles.input, height: 50 }}
         />
 
-        {/* ✅ FONT FAMILY ADDED (MINIMAL CHANGE) */}
         <select
           value={form.fontFamily}
           onChange={(e) => updateField("fontFamily", e.target.value)}
-          style={styles.input}
+          style={{ ...styles.input, fontFamily: form.fontFamily }}
         >
-          <option value="system-ui, -apple-system, sans-serif">
-            System Default
-          </option>
-          <option value="Arial, sans-serif">Arial</option>
-          <option value="'Times New Roman', serif">
-            Times New Roman
-          </option>
-          <option value="Georgia, serif">Georgia</option>
-          <option value="'Courier New', monospace">
-            Courier New
-          </option>
+          {fontOptions.map((font) => (
+            <option key={font.value} value={font.value}>
+              {font.label}
+            </option>
+          ))}
         </select>
+
+        <input
+          placeholder="Custom Font Family"
+          value={form.fontFamily}
+          onChange={(e) => updateField("fontFamily", e.target.value)}
+          style={{ ...styles.input, fontFamily: form.fontFamily }}
+        />
 
         <select
           value={form.theme}
@@ -280,33 +386,38 @@ export default function Settings() {
           <option value="dark">Dark</option>
         </select>
 
-        <select
+        <input
+          type="number"
+          min={8}
+          max={72}
+          placeholder="Font Size"
           value={form.fontSize}
-          onChange={(e) => updateField("fontSize", e.target.value)}
+          onChange={(e) =>
+            updateField("fontSize", Number(e.target.value))
+          }
           style={styles.input}
-        >
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-          <option value="large">Large</option>
-        </select>
+        />
 
         <div style={{ ...styles.preview, ...previewStyle }}>
           <b>Live Preview</b>
+
           <div
             style={{
-              fontFamily: form.fontFamily, // IMPORTANT
+              fontFamily: form.fontFamily,
+              fontSize: `${form.fontSize}px`,
+              marginTop: 10,
             }}
           >
             {form.schoolName || "School Name"}
           </div>
+
+          <div style={{ marginTop: 10, opacity: 0.8 }}>
+            The quick brown fox jumps over the lazy dog
+          </div>
         </div>
       </section>
 
-      <button
-        onClick={saveSettings}
-        style={styles.button}
-        disabled={loading}
-      >
+      <button onClick={saveSettings} style={styles.button} disabled={loading}>
         {loading ? "Saving..." : "Save Settings"}
       </button>
     </div>
@@ -315,10 +426,7 @@ export default function Settings() {
 
 // ================= STYLES =================
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    maxWidth: 850,
-    padding: 20,
-  },
+  container: { maxWidth: 850, padding: 20 },
   title: { marginBottom: 20 },
   section: {
     marginBottom: 25,
@@ -334,6 +442,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: 10,
     borderRadius: 6,
     border: "1px solid #ddd",
+    outline: "none",
   },
   button: {
     padding: "12px 18px",

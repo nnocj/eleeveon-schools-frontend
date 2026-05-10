@@ -1,52 +1,127 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { db } from "../lib/db";
+import { useEffect, useMemo, useState } from "react";
+import { db, Class, Organization, AcademicStructure } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
 
-export default function Classes() {
-  const [name, setName] = useState("");
-  const [classes, setClasses] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
+// ======================================================
+// TYPES
+// ======================================================
 
+type Filters = {
+  search: string;
+  organizationId: number | "";
+  structureId: number | "";
+  level: string;
+};
+
+// ======================================================
+// PAGE
+// ======================================================
+
+export default function Classes() {
+  // ================= DATA STATE =================
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [structures, setStructures] = useState<AcademicStructure[]>([]);
+  const [settings, setSettings] = useState<any>(null);
+
+  const [loading, setLoading] = useState(true);
+
+  // ================= UI STATE =================
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
-  // ================= LOAD =================
-  const loadClasses = async () => {
-    const data = await db.classes.toArray();
-    setClasses(data);
+  // ================= FILTER STATE =================
+  const [filters, setFilters] = useState<Filters>({
+    search: "",
+    organizationId: "",
+    structureId: "",
+    level: "",
+  });
+
+  // ================= FORM STATE =================
+  const [name, setName] = useState("");
+  const [level, setLevel] = useState<string>("JHS");
+
+  // ======================================================
+  // LOAD DATA
+  // ======================================================
+
+  const load = async () => {
+    const [cls, orgs, structs, settingsData] = await Promise.all([
+      db.classes.toArray(),
+      db.organizations.toArray(),
+      db.academicStructures.toArray(),
+      db.settings.toArray(),
+    ]);
+
+    setClasses(cls.filter((c) => !c.isDeleted));
+    setOrganizations(orgs);
+    setStructures(structs);
+    setSettings(settingsData[0] || null);
+    setLoading(false);
   };
 
   useEffect(() => {
-    loadClasses();
+    load();
   }, []);
 
-  // ================= RESET =================
+  // ======================================================
+  // MAPS (FAST LOOKUPS)
+  // ======================================================
+
+  const orgMap = useMemo(() => new Map(organizations.map(o => [o.id, o.name])), [organizations]);
+  const structureMap = useMemo(() => new Map(structures.map(s => [s.id, s.name])), [structures]);
+
+  const getOrg = (id?: number) => (id ? orgMap.get(id) ?? "-" : "-");
+  const getStructure = (id?: number) => (id ? structureMap.get(id) ?? "-" : "-");
+
+  // ======================================================
+  // FILTERING
+  // ======================================================
+
+  const filtered = useMemo(() => {
+    const s = filters.search.toLowerCase();
+
+    return classes.filter((c) => {
+      return (
+        c.name.toLowerCase().includes(s) &&
+        (filters.organizationId === "" || c.organizationId === filters.organizationId) &&
+        (filters.structureId === "" || c.academicStructureId === filters.structureId) &&
+        (!filters.level || c.level === filters.level)
+      );
+    });
+  }, [classes, filters]);
+
+  const updateFilter = (key: keyof Filters, value: any) => {
+    setFilters((p) => ({ ...p, [key]: value }));
+  };
+
+  // ======================================================
+  // RESET FORM
+  // ======================================================
+
   const reset = () => {
     setName("");
+    setLevel("JHS");
     setEditingId(null);
     setShowForm(false);
   };
 
-  // ================= SAVE (ADD / UPDATE) =================
+  // ======================================================
+  // SAVE (CREATE / UPDATE)
+  // ======================================================
+
   const save = async () => {
-    if (!name.trim()) {
-      alert("Please enter class name");
-      return;
-    }
-
-    const exists = await db.classes
-      .filter((c) => c.name.toLowerCase() === name.toLowerCase())
-      .first();
-
-    if (exists && !editingId) {
-      alert("Class already exists");
-      return;
-    }
+    if (!name.trim()) return alert("Class name required");
 
     const payload = prepareSyncData({
-      name,
+      branchId: settings?.branchId || 1,
+      academicStructureId: settings?.currentAcademicStructureId || 1,
+      name: name.trim(),
+      level,
+      active: true,
     });
 
     if (editingId) {
@@ -56,184 +131,190 @@ export default function Classes() {
     }
 
     reset();
-    loadClasses();
+    load();
   };
 
-  // ================= EDIT =================
-  const edit = (c: any) => {
+  // ======================================================
+  // EDIT
+  // ======================================================
+
+  const edit = (c: Class) => {
+    setEditingId(c.id || null);
     setName(c.name);
-    setEditingId(c.id);
+    setLevel(c.level || "JHS");
     setShowForm(true);
   };
 
-  // ================= SAFE DELETE (IMPORTANT UPGRADE) =================
-  const remove = async (id: number) => {
-    // 🔥 1. CHECK STUDENTS
-    const studentsCount = await db.students
-      .where("classId")
-      .equals(id)
-      .count();
+  // ======================================================
+  // DELETE (SAFE + SOFT DELETE)
+  // ======================================================
 
-    if (studentsCount > 0) {
-      alert(
-        `❌ Cannot delete this class.\n\nThere are ${studentsCount} student(s) assigned to it.\nMove or delete students first before deleting this class.`
-      );
-      return;
-    }
+  const remove = async (id?: number) => {
+    if (!id) return;
 
-    // 🔥 2. CHECK SCORES (OPTIONAL BUT IMPORTANT SAFETY)
-    const scoresCount = await db.scores
-      .where("classId")
-      .equals(id)
-      .count();
+    const studentCount = await db.students.where("currentClassId").equals(id).count();
+    if (studentCount > 0) return alert(`Cannot delete: ${studentCount} students assigned`);
 
-    if (scoresCount > 0) {
-      alert(
-        "❌ Cannot delete this class.\n\nAcademic score records exist for this class."
-      );
-      return;
-    }
+    const scoreCount = await db.scores.where("classId").equals(id).count();
+    if (scoreCount > 0) return alert("Cannot delete: academic records exist");
 
-    // 🔥 3. FINAL CONFIRMATION
-    const confirmDelete = confirm(
-      "⚠️ Delete this class permanently?\n\nThis action cannot be undone."
-    );
+    if (!confirm("Delete this class?")) return;
 
-    if (!confirmDelete) return;
+    await db.classes.update(id, {
+      isDeleted: true,
+      updatedAt: Date.now(),
+    });
 
-    await db.classes.delete(id);
-    loadClasses();
+    load();
   };
 
-  // ================= FILTER =================
-  const filtered = classes.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase())
-  );
+  // ======================================================
+  // UI STATES
+  // ======================================================
 
-  // ================= STYLES =================
-  const container: React.CSSProperties = {
-    padding: 20,
-  };
+  if (loading) return <div className="p-6">Loading...</div>;
+
+  // ======================================================
+  // STYLES (consistent system design)
+  // ======================================================
 
   const card: React.CSSProperties = {
     border: "1px solid rgba(0,0,0,0.08)",
+    borderRadius: 12,
+    padding: 14,
     background: "var(--surface)",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
   };
 
-  const button: React.CSSProperties = {
+  const input: React.CSSProperties = {
+    padding: 10,
+    borderRadius: 8,
+    border: "1px solid rgba(0,0,0,0.2)",
+  };
+
+  const btn: React.CSSProperties = {
     padding: "7px 10px",
     borderRadius: 8,
-    cursor: "pointer",
     border: "1px solid var(--primary-color)",
     background: "var(--surface)",
-    color: "var(--text)",
+    cursor: "pointer",
   };
 
-  const primaryButton: React.CSSProperties = {
+  const primary: React.CSSProperties = {
     padding: "8px 12px",
     borderRadius: 8,
-    cursor: "pointer",
     border: "none",
     background: "var(--primary-color)",
     color: "#fff",
+    fontWeight: 600,
+    cursor: "pointer",
   };
 
-  // ================= UI =================
-  return (
-    <div style={container}>
-      {/* HEADER */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0 }}>Classes</h2>
+  // ======================================================
+  // UI
+  // ======================================================
 
-        <button style={primaryButton} onClick={() => setShowForm(!showForm)}>
+  return (
+    <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* HEADER */}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Classes</h2>
+          <p style={{ margin: 0, opacity: 0.6 }}>Manage academic classes</p>
+        </div>
+
+        <button style={primary} onClick={() => setShowForm(!showForm)}>
           {showForm ? "Close" : "+ Add Class"}
         </button>
       </div>
 
-      {/* SEARCH */}
-      <div style={{ marginTop: 10 }}>
+      {/* FILTERS */}
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(4, 1fr)" }}>
         <input
-          placeholder="Search class..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "1px solid rgba(0,0,0,0.2)",
-            width: "100%",
-            maxWidth: 300,
-          }}
+          placeholder="Search..."
+          value={filters.search}
+          onChange={(e) => updateFilter("search", e.target.value)}
+          style={input}
         />
+
+        <select
+          value={filters.organizationId}
+          onChange={(e) => updateFilter("organizationId", Number(e.target.value) || "")}
+          style={input}
+        >
+          <option value="">All Organizations</option>
+          {organizations.map((o) => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={filters.structureId}
+          onChange={(e) => updateFilter("structureId", Number(e.target.value) || "")}
+          style={input}
+        >
+          <option value="">All Structures</option>
+          {structures.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={filters.level}
+          onChange={(e) => updateFilter("level", e.target.value)}
+          style={input}
+        >
+          <option value="">All Levels</option>
+          <option value="Primary">Primary</option>
+          <option value="JHS">JHS</option>
+          <option value="SHS">SHS</option>
+          <option value="Tertiary">Tertiary</option>
+        </select>
       </div>
 
       {/* FORM */}
       {showForm && (
-        <div
-          style={{
-            marginTop: 15,
-            padding: 15,
-            borderRadius: 10,
-            background: "var(--surface)",
-            border: "1px solid rgba(0,0,0,0.1)",
-            maxWidth: 350,
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>
-            {editingId ? "Edit Class" : "Create Class"}
-          </h3>
+        <div style={card}>
+          <h3>{editingId ? "Edit Class" : "Create Class"}</h3>
 
           <input
-            placeholder="Class name (e.g. JHS 1)"
+            placeholder="Class name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{
-              padding: 10,
-              width: "100%",
-              borderRadius: 8,
-              border: "1px solid rgba(0,0,0,0.2)",
-              marginBottom: 10,
-            }}
+            style={{ ...input, width: "100%", marginBottom: 10 }}
           />
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <button style={primaryButton} onClick={save}>
+          <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ ...input, width: "100%" }}>
+            <option value="Primary">Primary</option>
+            <option value="JHS">JHS</option>
+            <option value="SHS">SHS</option>
+            <option value="Tertiary">Tertiary</option>
+          </select>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button style={primary} onClick={save}>
               {editingId ? "Update" : "Save"}
             </button>
-
-            <button style={button} onClick={reset}>
-              Cancel
-            </button>
+            <button style={btn} onClick={reset}>Cancel</button>
           </div>
         </div>
       )}
 
       {/* LIST */}
-      <div style={{ marginTop: 20 }}>
-        {filtered.length === 0 && (
-          <p style={{ opacity: 0.6 }}>No classes found</p>
-        )}
-
+      <div style={{ display: "grid", gap: 10 }}>
         {filtered.map((c) => (
           <div key={c.id} style={card}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
                 <b>{c.name}</b>
                 <div style={{ fontSize: 12, opacity: 0.6 }}>
-                  ID: {c.id}
+                  {c.level || "JHS"} • {getStructure(c.academicStructureId)} • {getOrg(c.organizationId)}
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
-                <button style={button} onClick={() => edit(c)}>
-                  Edit
-                </button>
-
-                <button style={button} onClick={() => remove(c.id)}>
-                  Delete
-                </button>
+                <button style={btn} onClick={() => edit(c)}>Edit</button>
+                <button style={btn} onClick={() => remove(c.id)}>Delete</button>
               </div>
             </div>
           </div>

@@ -13,13 +13,25 @@ import Classes from "./classes";
 import Subjects from "./subjects";
 import Assignments from "./assignments";
 import AcademicConfiguration from "./academicConfiguration";
-import AssessmentComponents from "./assessmentComponent";
-import AssessmentEntries from "./assessmentEntries";
-import Reports from "./reports/pageOriginal";
+import AcademicSubjectContext from "./academicSubjectContext";
+import AssessmentEntriesPage from "./assessmentEntry";
+import CurriculumManagement from "./curriculumManagement";
+import CurriculumSubjects from "./curriculumSubjects";
+import CurriculumPathways from "./curriculumPathways";
+import SubjectPrerequisites from "./subjectPrerequisites";
+import SubjectOfferings from "./subjectOfferings";
+import StudentCurriculumPage from "./studentCurriculum";
+import CourseOutline from "./courseOutline";
+import StudentRegistration from "./studentRegistration";
+import AcademicProgress from "./academicProgress";
+import Reports from "./reports/page";
 import Fees from "./fees";
 import Income from "./incomes";
 import Expenses from "./expenses";
-import Promotion from "./promotion";
+import Transcript from "./reports/transcipt";
+import CumulativeReports from "./reports/cumulativeReports";
+import GraduationAudit from "./graduationAudit";
+import Promotion from "./promotionNew";
 import StudentAttendance from "./student-attendance";
 import TeacherAttendance from "./teacher-attendance";
 import Settings from "./settings";
@@ -42,15 +54,30 @@ const ROUTES: Record<string, any> = {
   branches: Branches, // 🔥 ADD THIS
   organizations: Organizations, // 🔥 ADD THIS
   academicConfiguration: AcademicConfiguration, // 🔥 ADD THIS
-  assessmentComponents: AssessmentComponents, // 🔥 ADD THIS
-  assessmentEntries: AssessmentEntries,
+  academicSubjectContext: AcademicSubjectContext, // 🔥 ADD THIS
+  assessmentEntriesPage: AssessmentEntriesPage,
+  curriculumManagement: CurriculumManagement,
+  curriculumSubjects: CurriculumSubjects,
+  curriculumPathways: CurriculumPathways,
+  subjectPrerequisites: SubjectPrerequisites,
+  subjectOfferings: SubjectOfferings,
+  courseOutline: CourseOutline,
+  studentRegistration: StudentRegistration,
+  academicProgress: AcademicProgress,
   students: Students,
   teachers: Teachers,
   parents: Parents,
   classes: Classes,
   subjects: Subjects,
   assignments: Assignments,
+  studentCurriculum: StudentCurriculumPage,
+
+
   reports: Reports,
+    // 🔥 NEW INTERNAL DASHBOARD PAGES
+  transcript: Transcript,
+  cumulativeReports: CumulativeReports,
+  graduationAudit: GraduationAudit,
   promotion: Promotion,
 
   // ATTENDANCE
@@ -137,42 +164,113 @@ const NAV_SECTIONS = [
   },
 
   {
-    title: "Assessment",
+    title: "Curriculum",
     items: [
-      
-
       {
-        key: "academicConfiguration",
-        label: "Academic Config",
-        icon: "🎯",
+        key: "curriculumManagement",
+        label: "Curriculum Management",
+        icon: "📚",
       },
-
       {
-        key: "assessmentComponents",
-        label: "Assessment Compo",
-        icon: "⚙",
+        key: "curriculumSubjects",
+        label: "Curriculum Subjects",
+        icon: "📖",
       },
-
       {
-        key: "assessmentEntries",
-        label: "Assessment Entries",
+        key: "curriculumPathways",
+        label: "Curriculum Pathways",
+        icon: "🗺",
+      },
+      {
+        key: "subjectPrerequisites",
+        label: "Subject Prerequisites",
+        icon: "🔗",
+      },
+      {
+        key: "subjectOfferings",
+        label: "Subject Offerings",
+        icon: "📋",
+      },
+      {
+        key: "studentCurriculum",
+        label: "Student Curriculum",
+        icon: "🎓",
+      },
+      {
+        key: "courseOutline",
+        label: "Course Outline",
+        icon: "📖",
+      },
+      {
+        key: "studentRegistration",
+        label: "Student Registration",
         icon: "📝",
-      },
-
-      {
-        key: "reports",
-        label: "Reports",
-        icon: "📄",
-      },
-
-      {
-        key: "promotion",
-        label: "Promotion",
-        icon: "🚀",
-      },
-
+      }
     ],
   },
+
+  {
+  title: "Assessment",
+  items: [
+    {
+      key: "academicProgress",
+      label: "Academic Progress",
+      icon: "📊",
+    },
+    {
+      key: "academicConfiguration",
+      label: "Academic Config",
+      icon: "🎯",
+    },
+    {
+      key: "academicSubjectContext",
+      label: "Academic Subject Context",
+      icon: "📚",
+    },
+    {
+      key: "AssessmentApplicabilitiesPage",
+      label: "Assessment Applicabilities",
+      icon: "✅",
+    },
+    {
+      key: "AssessmentActivationManagerPage",
+      label: "Assessment Activation",
+      icon: "⚡",
+    },
+    {
+      key: "assessmentEntriesPage",
+      label: "Assessment Entry",
+      icon: "📝",
+    },
+    {
+      key: "reports",
+      label: "Reports",
+      icon: "📄",
+    },
+    {
+      key: "promotion",
+      label: "Promotion",
+      icon: "🚀",
+    },
+
+    // 🔥 NEW TABS (NO ROUTING, PURE DASHBOARD TABS)
+    {
+      key: "transcript",
+      label: "Transcript",
+      icon: "📜",
+    },
+    {
+      key: "cumulativeReports",
+      label: "Cumulative Reports",
+      icon: "📊",
+    },
+    {
+      key: "graduationAudit",
+      label: "Graduation Audit",
+      icon: "🎓",
+    },
+  ],
+},
 
   {
     title: "Attendance",

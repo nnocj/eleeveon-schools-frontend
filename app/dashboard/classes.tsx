@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { db, Class, Organization, AcademicStructure } from "../lib/db";
+import { db, Class, Organization, AcademicStructure, AssessmentEntry, StudentEnrollment } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
 
 // ======================================================
@@ -11,7 +11,6 @@ import { prepareSyncData } from "../lib/sync/syncUtils";
 type Filters = {
   search: string;
   organizationId: number | "";
-  structureId: number | "";
   level: string;
 };
 
@@ -23,7 +22,6 @@ export default function Classes() {
   // ================= DATA STATE =================
   const [classes, setClasses] = useState<Class[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [structures, setStructures] = useState<AcademicStructure[]>([]);
   const [settings, setSettings] = useState<any>(null);
 
   const [loading, setLoading] = useState(true);
@@ -36,30 +34,35 @@ export default function Classes() {
   const [filters, setFilters] = useState<Filters>({
     search: "",
     organizationId: "",
-    structureId: "",
     level: "",
   });
 
   // ================= FORM STATE =================
   const [name, setName] = useState("");
-  const [level, setLevel] = useState<string>("JHS");
+  const [level, setLevel] = useState<string>("Primary");
+  const [organizationId, setOrganizationId] = useState<number | "">("");
 
   // ======================================================
-  // LOAD DATA
+  // LOAD DATA (CONTEXT-AWARE)
   // ======================================================
 
   const load = async () => {
-    const [cls, orgs, structs, settingsData] = await Promise.all([
+    const [cls, orgs, settingsData] = await Promise.all([
       db.classes.toArray(),
       db.organizations.toArray(),
-      db.academicStructures.toArray(),
       db.settings.toArray(),
     ]);
 
-    setClasses(cls.filter((c) => !c.isDeleted));
+    const activeSettings = settingsData[0] || null;
+    const currentStructureId = activeSettings?.currentAcademicStructureId;
+
+    const filteredClasses = currentStructureId
+      ? cls.filter(c => c.academicStructureId === currentStructureId && !c.isDeleted)
+      : cls.filter(c => !c.isDeleted);
+
+    setClasses(filteredClasses);
     setOrganizations(orgs);
-    setStructures(structs);
-    setSettings(settingsData[0] || null);
+    setSettings(activeSettings);
     setLoading(false);
   };
 
@@ -68,14 +71,15 @@ export default function Classes() {
   }, []);
 
   // ======================================================
-  // MAPS (FAST LOOKUPS)
+  // MAPS
   // ======================================================
 
-  const orgMap = useMemo(() => new Map(organizations.map(o => [o.id, o.name])), [organizations]);
-  const structureMap = useMemo(() => new Map(structures.map(s => [s.id, s.name])), [structures]);
+  const orgMap = useMemo(
+    () => new Map(organizations.map(o => [o.id, o.name])),
+    [organizations]
+  );
 
   const getOrg = (id?: number) => (id ? orgMap.get(id) ?? "-" : "-");
-  const getStructure = (id?: number) => (id ? structureMap.get(id) ?? "-" : "-");
 
   // ======================================================
   // FILTERING
@@ -88,7 +92,6 @@ export default function Classes() {
       return (
         c.name.toLowerCase().includes(s) &&
         (filters.organizationId === "" || c.organizationId === filters.organizationId) &&
-        (filters.structureId === "" || c.academicStructureId === filters.structureId) &&
         (!filters.level || c.level === filters.level)
       );
     });
@@ -104,13 +107,14 @@ export default function Classes() {
 
   const reset = () => {
     setName("");
-    setLevel("JHS");
+    setLevel("Primary");
+    setOrganizationId("");
     setEditingId(null);
     setShowForm(false);
   };
 
   // ======================================================
-  // SAVE (CREATE / UPDATE)
+  // SAVE
   // ======================================================
 
   const save = async () => {
@@ -119,6 +123,7 @@ export default function Classes() {
     const payload = prepareSyncData({
       branchId: settings?.branchId || 1,
       academicStructureId: settings?.currentAcademicStructureId || 1,
+      organizationId: organizationId || undefined,
       name: name.trim(),
       level,
       active: true,
@@ -141,22 +146,29 @@ export default function Classes() {
   const edit = (c: Class) => {
     setEditingId(c.id || null);
     setName(c.name);
-    setLevel(c.level || "JHS");
+    setLevel(c.level || "Primary");
+    setOrganizationId(c.organizationId || "");
     setShowForm(true);
   };
 
   // ======================================================
-  // DELETE (SAFE + SOFT DELETE)
+  // DELETE (UPDATED TO NEW ARCHITECTURE)
   // ======================================================
 
   const remove = async (id?: number) => {
     if (!id) return;
 
-    const studentCount = await db.students.where("currentClassId").equals(id).count();
-    if (studentCount > 0) return alert(`Cannot delete: ${studentCount} students assigned`);
+    // ✅ structural safety check
+    const enrollmentCount = await db.studentEnrollments.where("classId").equals(id).count();
+    if (enrollmentCount > 0) {
+      return alert(`Cannot delete: ${enrollmentCount} students enrolled`);
+    }
 
-    const scoreCount = await db.scores.where("classId").equals(id).count();
-    if (scoreCount > 0) return alert("Cannot delete: academic records exist");
+    // ✅ academic integrity check (replaces OLD scores table)
+    const entryCount = await db.assessmentEntries.where("classId").equals(id).count();
+    if (entryCount > 0) {
+      return alert("Cannot delete: assessment records exist");
+    }
 
     if (!confirm("Delete this class?")) return;
 
@@ -168,14 +180,10 @@ export default function Classes() {
     load();
   };
 
-  // ======================================================
-  // UI STATES
-  // ======================================================
-
   if (loading) return <div className="p-6">Loading...</div>;
 
   // ======================================================
-  // STYLES (consistent system design)
+  // STYLES (UNCHANGED)
   // ======================================================
 
   const card: React.CSSProperties = {
@@ -229,7 +237,7 @@ export default function Classes() {
       </div>
 
       {/* FILTERS */}
-      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, 1fr)" }}>
         <input
           placeholder="Search..."
           value={filters.search}
@@ -245,17 +253,6 @@ export default function Classes() {
           <option value="">All Organizations</option>
           {organizations.map((o) => (
             <option key={o.id} value={o.id}>{o.name}</option>
-          ))}
-        </select>
-
-        <select
-          value={filters.structureId}
-          onChange={(e) => updateFilter("structureId", Number(e.target.value) || "")}
-          style={input}
-        >
-          <option value="">All Structures</option>
-          {structures.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
 
@@ -284,11 +281,26 @@ export default function Classes() {
             style={{ ...input, width: "100%", marginBottom: 10 }}
           />
 
-          <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ ...input, width: "100%" }}>
+          <select
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            style={{ ...input, width: "100%", marginBottom: 10 }}
+          >
             <option value="Primary">Primary</option>
             <option value="JHS">JHS</option>
             <option value="SHS">SHS</option>
             <option value="Tertiary">Tertiary</option>
+          </select>
+
+          <select
+            value={organizationId}
+            onChange={(e) => setOrganizationId(Number(e.target.value) || "")}
+            style={{ ...input, width: "100%" }}
+          >
+            <option value="">No Organization</option>
+            {organizations.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
           </select>
 
           <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
@@ -308,7 +320,7 @@ export default function Classes() {
               <div>
                 <b>{c.name}</b>
                 <div style={{ fontSize: 12, opacity: 0.6 }}>
-                  {c.level || "JHS"} • {getStructure(c.academicStructureId)} • {getOrg(c.organizationId)}
+                  {c.level || "Primary"} • {getOrg(c.organizationId)}
                 </div>
               </div>
 
@@ -320,6 +332,7 @@ export default function Classes() {
           </div>
         ))}
       </div>
+
     </div>
   );
 }

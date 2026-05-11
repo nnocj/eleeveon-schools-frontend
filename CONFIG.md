@@ -382,3 +382,200 @@ AssessmentEntries
       reportTypes.ts
 
   
+
+  I move to the next file.
+
+So the flow becomes:
+
+assessmentEntries.tsx
+report.tsx
+cumulativeReports.tsx
+transcript.tsx
+promotion.tsx
+graduationAudit.tsx
+
+And every file will:
+
+obey academic configuration
+obey assessment applicability
+obey grading systems
+obey curriculum subjects
+obey prerequisite logic
+obey academic periods
+obey enrollment history
+
+Exactly as your architecture intends.
+
+I’m ready for the first file now.
+
+
+
+Right now your current AssessmentEntries.tsx is only partially academic-aware.
+
+It currently:
+
+selects class
+selects subject
+loads assessment items
+stores scores
+
+BUT your new academic engine now requires this file to obey:
+
+Academic Configuration
+Curriculum Subjects
+Assessment Applicability
+Subject Offerings
+Student Enrollments
+Grading Systems
+Current Academic Period from Settings
+Organization hierarchy
+Assessment Structures attached through CurriculumSubject
+Component locking/publishing rules
+Existing entry restoration/editing
+Weighted scoring logic
+Transcript/report compatibility
+
+So the FULL rewrite we are about to do will transform this into a true enterprise academic assessment engine.
+
+The rewritten version will correctly:
+
+✅ use current academic structure + period from settings
+✅ only show valid classes
+✅ only show valid subjects for that class
+✅ obey curriculum subject mappings
+✅ obey assessment applicability rules
+✅ automatically detect grading system
+✅ automatically detect assessment structure
+✅ load assessment structure items correctly
+✅ only load enrolled students
+✅ restore already-saved scores into inputs
+✅ update existing entries instead of duplicating
+✅ support publish/lock state
+✅ support analytics
+✅ support cumulative reports later
+✅ support transcript generation later
+✅ support promotion logic later
+✅ support graduation audit later
+✅ support multi-organization setups
+✅ support SHS elective/core systems
+✅ support tertiary semester systems
+✅ support report cards automatically
+
+And most importantly:
+
+The rewritten file will become the SINGLE SOURCE OF TRUTH for raw academic performance data in your app.
+
+That means:
+
+report.tsx
+cumulative-report.tsx
+transcript.tsx
+promotion.tsx
+graduation-audit.tsx
+
+will all depend on the correctness of this file.
+
+So we are building the foundation properly first.
+
+I am ready to fully rewrite the complete AssessmentEntries.tsx file from top to bottom with the academic engine properly integrated.
+
+Say:
+
+“rewrite it”
+
+and I will begin the FULL production rewrite.
+
+
+✅ FULL FIXED TRANSCRIPT (TRUE MATRIX FORMAT)
+
+This version:
+
+Flattens all assessment items into columns
+Aligns scores per subject correctly
+Adds missing values safely
+Builds dynamic headers properly
+
+
+AssessmentApplicability
+    ↓
+CurriculumSubject
+    ↓
+AssessmentStructure
+    ↓
+AssessmentStructureItems
+    ↓
+Generate Dynamic Entry Form
+
+Not
+Subject
+   ↓
+Entry
+
+
+
+
+AssessmentEntry (actual data)
+
+CurriculumSubject
+        ↓
+AcademicSubjectContext
+        ↓
+AssessmentStructure + GradingSystem
+        ↓
+AssessmentEntry
+
+
+AcademicSubjectContext
+        ↓
+AssessmentStructure
+        ↓
+AssessmentStructureItems
+        ↓
+Students
+        ↓
+AssessmentEntries
+
+
+
+NEXT FILE WE WILL BUILD
+Your new:
+AssessmentEntries.tsx
+should therefore become:
+CONTEXT-DRIVEN ENTRY ENGINE
+with:
+
+
+cascading academic selectors
+
+
+context resolution
+
+
+auto structure loading
+
+
+auto grading
+
+
+enrollment-driven students
+
+
+bulk entry grid
+
+
+draft save
+
+
+publish lock support
+
+
+live analytics
+
+
+existing score preload
+
+
+context intelligence
+
+
+This is now becoming a real SIS/ERP academic engine.

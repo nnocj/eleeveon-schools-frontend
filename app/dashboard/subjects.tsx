@@ -1,27 +1,40 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { db } from "../lib/db";
+/**
+ * Subjects.tsx
+ * --------------------------------------------
+ * Master Academic Subject Registry.
+ * This file manages ONLY subject metadata:
+ * name, code, credits, department, description.
+ * NO curriculum logic, NO class assignment logic.
+ * --------------------------------------------
+ * This is a stable, production-ready UI module.
+ */
+
+import React, { useEffect, useMemo, useState } from "react";
+
+import { db, Subject, Organization } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
 import { useSettings } from "../context/settings-context";
+
+// ======================================================
+// SUBJECTS (MASTER ACADEMIC CATALOG)
+// ======================================================
 
 export default function Subjects() {
   const { settings } = useSettings();
 
   // ======================================================
-  // ORGANIZATION CONTEXT
+  // CONTEXT
   // ======================================================
-  const organizationId = settings?.organizationId;
   const branchId = settings?.branchId || 1;
+  const organizationId = settings?.organizationId;
 
   // ======================================================
-  // DATA
+  // STATE
   // ======================================================
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [structures, setStructures] = useState<any[]>([]);
-  const [organizations, setOrganizations] = useState<any[]>([]);
-
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ======================================================
@@ -31,46 +44,40 @@ export default function Subjects() {
   const [editingId, setEditingId] = useState<number | null>(null);
 
   // ======================================================
-  // FORM
+  // FORM STATE (STRING-FIRST SAFE MODEL)
   // ======================================================
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
-  const [allowedClasses, setAllowedClasses] = useState<number[]>([]);
-  const [selectedOrganizationId, setSelectedOrganizationId] = useState<
-    number | ""
-  >(organizationId || "");
+  const [description, setDescription] = useState("");
+  const [credits, setCredits] = useState<string>("");
+
+  const [selectedOrg, setSelectedOrg] = useState<string>(
+    organizationId ? String(organizationId) : ""
+  );
 
   // ======================================================
   // FILTERS
   // ======================================================
   const [search, setSearch] = useState("");
-  const [classFilter, setClassFilter] = useState<number | "">("");
-  const [structureFilter, setStructureFilter] = useState<number | "">("");
-  const [organizationFilter, setOrganizationFilter] = useState<number | "">(
-    organizationId || ""
+  const [orgFilter, setOrgFilter] = useState<string>(
+    organizationId ? String(organizationId) : ""
   );
 
   // ======================================================
-  // LOAD
+  // LOAD DATA
   // ======================================================
   const load = async () => {
-    try {
-      setLoading(true);
+    setLoading(true);
 
-      const [s, c, st, orgs] = await Promise.all([
-        db.subjects.toArray(),
-        db.classes.toArray(),
-        db.academicStructures.toArray(),
-        db.organizations?.toArray?.() || [],
-      ]);
+    const [s, orgs] = await Promise.all([
+      db.subjects.toArray(),
+      db.organizations.toArray(),
+    ]);
 
-      setSubjects(s.filter((x: any) => !x.isDeleted));
-      setClasses(c);
-      setStructures(st);
-      setOrganizations(orgs);
-    } finally {
-      setLoading(false);
-    }
+    setSubjects(s.filter((x) => !x.isDeleted));
+    setOrganizations(orgs);
+
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -78,29 +85,22 @@ export default function Subjects() {
   }, []);
 
   // ======================================================
-  // FAST LOOKUPS
+  // LOOKUPS
   // ======================================================
-  const classMap = useMemo(
-    () => new Map(classes.map((c) => [c.id, c.name])),
-    [classes]
-  );
-
-  const orgMap = useMemo(
-    () => new Map(organizations.map((o) => [o.id, o.name])),
-    [organizations]
-  );
+  const orgMap = useMemo(() => {
+    return new Map(organizations.map((o) => [o.id, o.name]));
+  }, [organizations]);
 
   // ======================================================
-  // RESET
+  // RESET FORM
   // ======================================================
   const reset = () => {
     setName("");
     setCode("");
-    setAllowedClasses([]);
+    setDescription("");
+    setCredits("");
+    setSelectedOrg(organizationId ? String(organizationId) : "");
     setEditingId(null);
-
-    setSelectedOrganizationId(organizationId || "");
-
     setShowForm(false);
   };
 
@@ -108,20 +108,17 @@ export default function Subjects() {
   // SAVE
   // ======================================================
   const save = async () => {
-    if (!name.trim()) {
-      alert("Subject name required");
-      return;
-    }
+    if (!name.trim()) return alert("Subject name is required");
 
     const payload = prepareSyncData({
       branchId,
-      organizationId:
-        Number(selectedOrganizationId) || organizationId || undefined,
+
+      organizationId: selectedOrg ? Number(selectedOrg) : undefined,
 
       name: name.trim(),
       code: code.trim(),
-
-      classIds: allowedClasses,
+      description: description.trim(),
+      credits: credits ? Number(credits) : undefined,
 
       active: true,
     });
@@ -139,34 +136,25 @@ export default function Subjects() {
   // ======================================================
   // EDIT
   // ======================================================
-  const edit = (s: any) => {
-    setEditingId(s.id);
+  const edit = (s: Subject) => {
+    setEditingId(s.id ?? null);
 
     setName(s.name || "");
     setCode(s.code || "");
-    setAllowedClasses(s.classIds || []);
-
-    setSelectedOrganizationId(s.organizationId || "");
-
+    setDescription(s.description || "");
+    setCredits(s.credits !== undefined ? String(s.credits) : "");
+    setSelectedOrg(s.organizationId ? String(s.organizationId) : "");
     setShowForm(true);
   };
 
   // ======================================================
-  // DELETE (SAFE)
+  // DELETE
   // ======================================================
   const remove = async (id: number) => {
-    const scoreCount = await db.scores
-      .where("subjectId")
-      .equals(id)
-      .count();
+    const usage = await db.assignments.where("subjectId").equals(id).count();
 
-    const assignCount = await db.assignments
-      .where("subjectId")
-      .equals(id)
-      .count();
-
-    if (scoreCount || assignCount) {
-      alert("Cannot delete subject with academic records");
+    if (usage > 0) {
+      alert("Cannot delete subject in use");
       return;
     }
 
@@ -181,7 +169,7 @@ export default function Subjects() {
   };
 
   // ======================================================
-  // FILTERING
+  // FILTERED LIST
   // ======================================================
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -191,20 +179,16 @@ export default function Subjects() {
         s.name?.toLowerCase().includes(q) ||
         s.code?.toLowerCase().includes(q);
 
-      const matchClass =
-        classFilter === "" ||
-        (s.classIds || []).includes(classFilter as number);
+      const matchOrg =
+        orgFilter === "" ||
+        s.organizationId === Number(orgFilter);
 
-      const matchOrganization =
-        organizationFilter === "" ||
-        s.organizationId === Number(organizationFilter);
-
-      return matchText && matchClass && matchOrganization;
+      return matchText && matchOrg;
     });
-  }, [subjects, search, classFilter, organizationFilter]);
+  }, [subjects, search, orgFilter]);
 
   // ======================================================
-  // STYLES (UNCHANGED CLEAN STYLE)
+  // STYLES (CONSISTENT SYSTEM UI)
   // ======================================================
   const container: React.CSSProperties = {
     padding: 20,
@@ -217,6 +201,15 @@ export default function Subjects() {
     padding: 14,
     borderRadius: 10,
     marginBottom: 10,
+  };
+
+  const input: React.CSSProperties = {
+    padding: 10,
+    width: "100%",
+    borderRadius: 8,
+    border: "1px solid rgba(0,0,0,0.2)",
+    background: "var(--surface)",
+    color: "var(--text)",
   };
 
   const button: React.CSSProperties = {
@@ -238,29 +231,10 @@ export default function Subjects() {
     fontWeight: 600,
   };
 
-  const input: React.CSSProperties = {
-    padding: 10,
-    width: "100%",
-    borderRadius: 8,
-    border: "1px solid rgba(0,0,0,0.2)",
-    background: "var(--surface)",
-    color: "var(--text)",
-  };
-
-  const chip: React.CSSProperties = {
-    padding: "5px 8px",
-    borderRadius: 999,
-    fontSize: 12,
-    border: "1px solid rgba(0,0,0,0.2)",
-    cursor: "pointer",
-  };
-
   // ======================================================
   // UI
   // ======================================================
-  if (loading) {
-    return <div style={container}>Loading subjects...</div>;
-  }
+  if (loading) return <div style={container}>Loading subjects...</div>;
 
   return (
     <div style={container}>
@@ -269,9 +243,8 @@ export default function Subjects() {
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <div>
           <h2 style={{ margin: 0 }}>Subjects</h2>
-
-          <p style={{ margin: 0, opacity: 0.6, fontSize: 13 }}>
-            Curriculum subject management
+          <p style={{ margin: 0, opacity: 0.6 }}>
+            Master academic subject registry
           </p>
         </div>
 
@@ -281,160 +254,75 @@ export default function Subjects() {
       </div>
 
       {/* FILTERS */}
-      <div
-        style={{
-          marginTop: 12,
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
-
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
         <input
+          style={{ ...input, width: 220 }}
           placeholder="Search subject..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{
-            ...input,
-            width: 220,
-          }}
         />
 
         <select
           style={button}
-          value={classFilter}
-          onChange={(e) => setClassFilter(Number(e.target.value) || "")}
+          value={orgFilter}
+          onChange={(e) => setOrgFilter(e.target.value)}
         >
-          <option value="">All Classes</option>
-
-          {classes.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          style={button}
-          value={organizationFilter}
-          onChange={(e) =>
-            setOrganizationFilter(Number(e.target.value) || "")
-          }
-        >
-          <option value="">All Organizations</option>
-
+          <option value="">All Departments</option>
           {organizations.map((o) => (
-            <option key={o.id} value={o.id}>
+            <option key={o.id} value={String(o.id)}>
               {o.name}
             </option>
           ))}
-        </select>
-
-        <select style={button} disabled>
-          <option>Structure filter (future)</option>
         </select>
       </div>
 
       {/* FORM */}
       {showForm && (
         <div style={{ ...card, maxWidth: 500, marginTop: 15 }}>
-          <h3>
-            {editingId ? "Edit Subject" : "Create Subject"}
-          </h3>
+          <h3>{editingId ? "Edit Subject" : "Create Subject"}</h3>
 
           <input
+            style={input}
             placeholder="Subject name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            style={{
-              ...input,
-              marginBottom: 10,
-            }}
           />
 
           <input
+            style={{ ...input, marginTop: 10 }}
             placeholder="Subject code"
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            style={{
-              ...input,
-              marginBottom: 10,
-            }}
           />
 
-          {/* ORGANIZATION */}
-          <select
-            style={{
-              ...input,
-              marginBottom: 10,
-            }}
-            value={selectedOrganizationId}
-            onChange={(e) =>
-              setSelectedOrganizationId(
-                Number(e.target.value) || ""
-              )
-            }
-          >
-            <option value="">Select Organization</option>
+          <input
+            style={{ ...input, marginTop: 10 }}
+            placeholder="Credits (optional)"
+            value={credits}
+            onChange={(e) => setCredits(e.target.value)}
+          />
 
+          <textarea
+            style={{ ...input, marginTop: 10, height: 80 }}
+            placeholder="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+
+          <select
+            style={{ ...input, marginTop: 10 }}
+            value={selectedOrg}
+            onChange={(e) => setSelectedOrg(e.target.value)}
+          >
+            <option value="">Select Department</option>
             {organizations.map((o) => (
-              <option key={o.id} value={o.id}>
+              <option key={o.id} value={String(o.id)}>
                 {o.name}
               </option>
             ))}
           </select>
 
-          {/* CLASS CHIPS */}
-          <div>
-            <small>Allowed Classes</small>
-
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: 8,
-                marginTop: 6,
-              }}
-            >
-              {classes.map((c) => {
-                const active = allowedClasses.includes(c.id);
-
-                return (
-                  <div
-                    key={c.id}
-                    onClick={() =>
-                      setAllowedClasses((prev) =>
-                        active
-                          ? prev.filter((id) => id !== c.id)
-                          : [...prev, c.id]
-                      )
-                    }
-                    style={{
-                      ...chip,
-                      background: active
-                        ? "var(--primary-color)"
-                        : "transparent",
-
-                      color: active
-                        ? "#fff"
-                        : "var(--text)",
-                    }}
-                  >
-                    {c.name}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ACTIONS */}
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 10,
-            }}
-          >
+          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
             <button style={primary} onClick={save}>
               {editingId ? "Update" : "Save"}
             </button>
@@ -449,57 +337,29 @@ export default function Subjects() {
       {/* LIST */}
       <div style={{ marginTop: 20 }}>
         {filtered.length === 0 && (
-          <p style={{ opacity: 0.6 }}>
-            No subjects found
-          </p>
+          <p style={{ opacity: 0.6 }}>No subjects found</p>
         )}
 
         {filtered.map((s) => (
           <div key={s.id} style={card}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
               <div>
                 <b>{s.name}</b>
 
-                <div
-                  style={{
-                    fontSize: 12,
-                    opacity: 0.6,
-                    marginTop: 4,
-                  }}
-                >
-                  Code: {s.code || "-"}
-                  <br />
-
-                  Organization:{" "}
-                  {orgMap.get(s.organizationId) || "None"}
-
-                  <br />
-
-                  Classes:{" "}
-                  {(s.classIds || [])
-                    .map((id: number) => classMap.get(id))
-                    .filter(Boolean)
-                    .join(", ") || "None"}
+                <div style={{ fontSize: 12, opacity: 0.6 }}>
+                  Code: {s.code || "-"} <br />
+                  Credits: {s.credits ?? "-"} <br />
+                  Department:{" "}
+                  {orgMap.get(s.organizationId || 0) || "None"}
                 </div>
               </div>
 
               <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  style={button}
-                  onClick={() => edit(s)}
-                >
+                <button style={button} onClick={() => edit(s)}>
                   Edit
                 </button>
 
-                <button
-                  style={button}
-                  onClick={() => remove(s.id)}
-                >
+                <button style={button} onClick={() => remove(s.id!)}>
                   Delete
                 </button>
               </div>

@@ -138,7 +138,7 @@ export interface Parent extends BaseSync {
 }
 
 // ======================================================
-// CLASS = UNIVERSAL LEARNING UNIT (SCHOOL OR UNIVERSITY)
+// CLASS (UNIVERSAL UNIT: SCHOOL + UNIVERSITY)
 // ======================================================
 
 export interface Class extends BaseSync {
@@ -146,17 +146,17 @@ export interface Class extends BaseSync {
   academicStructureId: number;
   organizationId?: number;
 
-  name: string;          // e.g. "Basic 6", "BSc Computer Science Year 2"
+  name: string; // e.g. "Basic 6", "BSc CS Year 2", "Level 300 Law"
   code?: string;
 
-  level?: string;        // optional descriptor
+  level?: string;
   capacity?: number;
 
   active?: boolean;
 }
 
 // ======================================================
-// CURRICULUM LAYER
+// CURRICULUM SYSTEM
 // ======================================================
 
 export interface Subject extends BaseSync {
@@ -174,9 +174,25 @@ export interface Curriculum extends BaseSync {
   active?: boolean;
 }
 
+/**
+ * 🔥 PATHWAYS RESTORED (IMPORTANT FOR SPECIALIZATION)
+ */
+export interface CurriculumPathway extends BaseSync {
+  branchId: number;
+  curriculumId: number;
+
+  name: string;
+  code?: string;
+
+  description?: string;
+  active?: boolean;
+}
+
 export interface CurriculumSubject extends BaseSync {
   branchId: number;
   curriculumId: number;
+  pathwayId?: number;
+
   subjectId: number;
   classId?: number;
   academicPeriodId?: number;
@@ -189,7 +205,7 @@ export interface CurriculumSubject extends BaseSync {
 }
 
 // ======================================================
-// STUDENT CLASS ENROLLMENT (RENAMED + CLEANED)
+// STUDENT CLASS ENROLLMENT (RENAMED + CLEAN)
 // ======================================================
 
 export interface StudentClassEnrollment extends BaseSync {
@@ -208,7 +224,7 @@ export interface StudentClassEnrollment extends BaseSync {
 }
 
 // ======================================================
-// 🔥 SINGLE SUBJECT ENGINE (CORE LOGIC)
+// SINGLE ACADEMIC CONTEXT ENGINE
 // ======================================================
 
 export interface AcademicSubjectContext extends BaseSync {
@@ -238,7 +254,7 @@ export interface AcademicSubjectContext extends BaseSync {
 }
 
 // ======================================================
-// GRADING SYSTEM
+// GRADING
 // ======================================================
 
 export interface GradingSystem extends BaseSync {
@@ -392,6 +408,7 @@ class AppDB extends Dexie {
   classes!: Table<Class>;
   subjects!: Table<Subject>;
   curriculums!: Table<Curriculum>;
+  curriculumPathways!: Table<CurriculumPathway>;
   curriculumSubjects!: Table<CurriculumSubject>;
 
   studentClassEnrollments!: Table<StudentClassEnrollment>;
@@ -419,7 +436,7 @@ class AppDB extends Dexie {
   constructor() {
     super("EleeveonDB");
 
-    this.version(26).stores({
+    this.version(27).stores({
       schools: "++id,name,updatedAt",
       branches: "++id,schoolId,name,updatedAt",
 
@@ -435,13 +452,16 @@ class AppDB extends Dexie {
       subjects: "++id,branchId,name,code",
 
       curriculums: "++id,branchId,name,academicStructureId",
-      curriculumSubjects: "++id,branchId,curriculumId,subjectId,classId,academicPeriodId",
+      curriculumPathways: "++id,branchId,curriculumId,name",
+
+      curriculumSubjects:
+        "++id,branchId,curriculumId,subjectId,classId,academicPeriodId",
 
       studentClassEnrollments:
         "++id,branchId,studentId,classId,academicPeriodId,status",
 
       academicSubjectContexts:
-        "++id,branchId,curriculumSubjectId,classId,subjectId,academicPeriodId,active",
+        "++id,branchId,curriculumSubjectId,classId,subjectId,academicPeriodId",
 
       gradingSystems: "++id,branchId,name,type",
       gradeRules: "++id,branchId,gradingSystemId,minScore,maxScore",
@@ -449,23 +469,14 @@ class AppDB extends Dexie {
       assessmentStructures: "++id,branchId,name",
       assessmentStructureItems: "++id,branchId,assessmentStructureId,order",
 
-      assessmentComponents:
-        "++id,branchId,classId,subjectId,academicPeriodId",
+      assessmentComponents: "++id,branchId,classId,subjectId,academicPeriodId",
+      assessmentEntries: "++id,branchId,studentId,classId,subjectId,academicPeriodId",
+      computedResults: "++id,branchId,studentId,classId,subjectId,academicPeriodId",
 
-      assessmentEntries:
-        "++id,branchId,studentId,classId,subjectId,academicPeriodId",
+      attendance: "++id,branchId,studentId,classId,academicPeriodId,date",
 
-      computedResults:
-        "++id,branchId,studentId,classId,subjectId,academicPeriodId",
-
-      attendance:
-        "++id,branchId,studentId,classId,academicPeriodId,date",
-
-      reportCards:
-        "++id,branchId,studentId,classId,academicPeriodId",
-
-      reportCardItems:
-        "++id,branchId,reportCardId,subjectId",
+      reportCards: "++id,branchId,studentId,classId,academicPeriodId",
+      reportCardItems: "++id,branchId,reportCardId,subjectId",
 
       payments: "++id,branchId,studentId,method,date",
 
@@ -475,13 +486,3 @@ class AppDB extends Dexie {
 }
 
 export const db = new AppDB();
-
-(async () => {
-  try {
-    await db.open();
-  } catch (err) {
-    console.error("DB INIT ERROR:", err);
-    await db.delete();
-    location.reload();
-  }
-})();

@@ -19,7 +19,6 @@ import CurriculumManagement from "./curriculumManagement";
 import CurriculumSubjects from "./curriculumSubjects";
 import CurriculumPathways from "./curriculumPathways";
 import SubjectPrerequisites from "./subjectPrerequisites";
-import SubjectOfferings from "./subjectOfferings";
 import StudentCurriculumPage from "./studentCurriculum";
 import CourseOutline from "./courseOutline";
 import StudentRegistration from "./studentRegistration";
@@ -60,7 +59,6 @@ const ROUTES: Record<string, any> = {
   curriculumSubjects: CurriculumSubjects,
   curriculumPathways: CurriculumPathways,
   subjectPrerequisites: SubjectPrerequisites,
-  subjectOfferings: SubjectOfferings,
   courseOutline: CourseOutline,
   studentRegistration: StudentRegistration,
   academicProgress: AcademicProgress,
@@ -186,11 +184,7 @@ const NAV_SECTIONS = [
         label: "Subject Prerequisites",
         icon: "🔗",
       },
-      {
-        key: "subjectOfferings",
-        label: "Subject Offerings",
-        icon: "📋",
-      },
+  
       {
         key: "studentCurriculum",
         label: "Student Curriculum",

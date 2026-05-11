@@ -222,16 +222,6 @@ const NAV_SECTIONS = [
       icon: "📚",
     },
     {
-      key: "AssessmentApplicabilitiesPage",
-      label: "Assessment Applicabilities",
-      icon: "✅",
-    },
-    {
-      key: "AssessmentActivationManagerPage",
-      label: "Assessment Activation",
-      icon: "⚡",
-    },
-    {
       key: "assessmentEntriesPage",
       label: "Assessment Entry",
       icon: "📝",

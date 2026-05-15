@@ -1469,16 +1469,16 @@ export default function AcademicAndAssessmentConfiguration() {
 
   const setAsCurrentStructure = async (id?: number) => {
     if (!id) return;
-    const setting = (await db.settings.toArray())[0];
+    const setting = (await db.schoolBranchSettings.toArray())[0];
     if (!setting?.id) return;
-    await db.settings.update(setting.id, { currentAcademicStructureId: id, updatedAt: Date.now() });
+    await db.schoolBranchSettings.update(setting.id, { currentAcademicStructureId: id, updatedAt: Date.now() });
     await load();
   };
 
   const setAsCurrentPeriod = async (period: AcademicPeriod) => {
-    const setting = (await db.settings.toArray())[0];
+    const setting = (await db.schoolBranchSettings.toArray())[0];
     if (!setting?.id) return;
-    await db.settings.update(setting.id, {
+    await db.schoolBranchSettings.update(setting.id, {
       currentAcademicStructureId: period.academicStructureId,
       currentAcademicPeriodId: period.id,
       updatedAt: Date.now(),

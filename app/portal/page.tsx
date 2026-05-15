@@ -1,7 +1,7 @@
 // =========================
 // app/portal/page.tsx
 // =========================
-"use client";
+/*"use client";
 
 import { useState } from "react";
 import { loginStudent } from "@/app/lib/auth";
@@ -31,4 +31,8 @@ export default function PortalLogin() {
       <button onClick={handleLogin}>Login</button>
     </div>
   );
+}*/
+
+export default function PortalPage(){
+  <div>Portal</div>
 }

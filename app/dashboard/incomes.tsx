@@ -1,219 +1,189 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { db } from "../lib/db";
+/**
+ * incomes.tsx
+ * ---------------------------------------------------------
+ * PROFESSIONAL INCOME MANAGEMENT PAGE
+ * ---------------------------------------------------------
+ *
+ * DB-safe rewrite for current db.ts.
+ *
+ * ACTUAL FINANCE MODEL
+ * ---------------------------------------------------------
+ * Income:
+ * - branchId
+ * - organizationId?
+ * - title
+ * - description?
+ * - amount
+ * - paymentMethod?
+ * - date
+ * - source?
+ * - receivedBy?
+ * - referenceNumber?
+ * - receiptNumber?
+ * - photo?
+ *
+ * IMPORTANT ARCHITECTURE
+ * ---------------------------------------------------------
+ * Active School -> Active Branch -> Organizations -> Income Records
+ *
+ * Income records belong to a branch and may optionally be attached to
+ * an organization such as department, house, club, committee or administration.
+ */
 
-import type {
+import React, { useEffect, useMemo, useState } from "react";
+
+import {
+  db,
   Income,
-  IncomeSourceType,
+  Organization,
   PaymentMethod,
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-
 import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
+
+// ======================================================
+// TYPES
+// ======================================================
+
+type FormState = {
+  id?: number;
+  organizationId?: number;
+  title: string;
+  description?: string;
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  date: string;
+  source?: string;
+  receivedBy?: string;
+  referenceNumber?: string;
+  receiptNumber?: string;
+  photo?: string;
+};
+
+type IncomeView = {
+  row: Income;
+  organizationName: string;
+  organizationType?: Organization["type"];
+};
+
+type DateFilter = "all" | "today" | "week" | "month" | "custom";
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const money = (value: number) => {
+  return `GHS ${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const dateValue = (value: string) => {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+
+const startOfWeekISO = () => {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const start = new Date(now.setDate(diff));
+  return start.toISOString().slice(0, 10);
+};
+
+const startOfMonthISO = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+};
+
+const paymentMethodLabel = (method?: PaymentMethod) => {
+  if (!method) return "Unspecified";
+  if (method === "momo") return "MoMo";
+  return method.charAt(0).toUpperCase() + method.slice(1);
+};
+
+// ======================================================
+// COMPONENT
+// ======================================================
 
 export default function IncomesPage() {
   const { settings } = useSettings();
+  const {
+    activeSchool,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
+
+  const branchId = activeBranchId || settings?.branchId || 1;
+  const primary = settings?.primaryColor || "var(--primary-color)";
 
   // ======================================================
-  // ORGANIZATION CONTEXT
-  // ======================================================
-
-  const branchId = settings?.branchId ?? 1;
-  const organizationId = settings?.organizationId;
-
-  const primary =
-    settings?.primaryColor ||
-    "var(--primary-color)";
-
-  // ======================================================
-  // DATA
+  // STATE
   // ======================================================
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const [incomes, setIncomes] = useState<Income[]>(
-    []
-  );
-
-  const [students, setStudents] = useState<any[]>(
-    []
-  );
-
-  const [parents, setParents] = useState<any[]>([]);
-
-  const [teachers, setTeachers] = useState<any[]>(
-    []
-  );
-
-  const [classes, setClasses] = useState<any[]>([]);
-
-  const [
-    academicPeriods,
-    setAcademicPeriods,
-  ] = useState<any[]>([]);
-
-  const [
-    academicStructures,
-    setAcademicStructures,
-  ] = useState<any[]>([]);
-
-  // ======================================================
-  // UI
-  // ======================================================
-
-  const [showForm, setShowForm] =
-    useState(false);
-
-  const [editingId, setEditingId] = useState<
-    number | null
-  >(null);
-
-  // ======================================================
-  // FILTERS
-  // ======================================================
+  const [rows, setRows] = useState<Income[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
 
   const [search, setSearch] = useState("");
+  const [filterOrganizationId, setFilterOrganizationId] = useState<number | undefined>();
+  const [filterMethod, setFilterMethod] = useState<"all" | PaymentMethod>("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("month");
+  const [fromDate, setFromDate] = useState(startOfMonthISO());
+  const [toDate, setToDate] = useState(todayISO());
 
-  const [sourceFilter, setSourceFilter] =
-    useState<IncomeSourceType | "">("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
-  const [methodFilter, setMethodFilter] =
-    useState<PaymentMethod | "">("");
-
-  const [statusFilter, setStatusFilter] =
-    useState("");
-
-  const [dateFilter, setDateFilter] =
-    useState("");
-
-  // ======================================================
-  // FORM
-  // ======================================================
-
-  const [title, setTitle] = useState("");
-
-  const [category, setCategory] = useState("");
-
-  const [amount, setAmount] = useState("");
-
-  const [method, setMethod] =
-    useState<PaymentMethod | "">("");
-
-  const [date, setDate] = useState("");
-
-  const [note, setNote] = useState("");
-
-  const [sourceType, setSourceType] =
-    useState<IncomeSourceType>("external");
-
-  const [status, setStatus] = useState<
-    Income["status"]
-  >("completed");
-
-  const [studentId, setStudentId] =
-    useState<number>();
-
-  const [parentId, setParentId] =
-    useState<number>();
-
-  const [teacherId, setTeacherId] =
-    useState<number>();
-
-  const [classId, setClassId] =
-    useState<number>();
-
-  const [
-    academicStructureId,
-    setAcademicStructureId,
-  ] = useState<number>();
-
-  const [
-    academicPeriodId,
-    setAcademicPeriodId,
-  ] = useState<number>();
-
-  const [externalSource, setExternalSource] =
-    useState("");
-
-  const [
-    externalContact,
-    setExternalContact,
-  ] = useState("");
-
-  const [receiptNumber, setReceiptNumber] =
-    useState("");
-
-  const [transactionId, setTransactionId] =
-    useState("");
-
-  const [referenceNumber, setReferenceNumber] =
-    useState("");
+  const [form, setForm] = useState<FormState>({
+    organizationId: undefined,
+    title: "",
+    description: "",
+    amount: 0,
+    paymentMethod: "cash",
+    date: todayISO(),
+    source: "",
+    receivedBy: "",
+    referenceNumber: "",
+    receiptNumber: "",
+    photo: "",
+  });
 
   // ======================================================
-  // LOAD
+  // LOAD DATA
   // ======================================================
 
   const load = async () => {
-    setLoading(true);
-
     try {
-      const [
-        incomeData,
-        studentData,
-        parentData,
-        teacherData,
-        classData,
-        periodData,
-        structureData,
-      ] = await Promise.all([
+      setLoading(true);
+
+      const [incomeRows, organizationRows] = await Promise.all([
         db.incomes.toArray(),
-        db.students.toArray(),
-        db.parents.toArray(),
-        db.teachers.toArray(),
-        db.classes.toArray(),
-        db.academicPeriods.toArray(),
-        db.academicStructures.toArray(),
+        db.organizations.toArray(),
       ]);
 
-      const filtered = incomeData.filter(
-        (x: any) => {
-          const branchMatch =
-            x.branchId === branchId;
-
-          const orgMatch = organizationId
-            ? x.organizationId ===
-              organizationId
-            : true;
-
-          return (
-            branchMatch &&
-            orgMatch &&
-            !x.isDeleted
-          );
-        }
+      setRows(
+        incomeRows.filter(row => row.branchId === branchId && !row.isDeleted)
       );
 
-      filtered.sort(
-        (a, b) =>
-          new Date(b.date).getTime() -
-          new Date(a.date).getTime()
+      setOrganizations(
+        organizationRows
+          .filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
-
-      setIncomes(filtered);
-
-      setStudents(studentData);
-
-      setParents(parentData);
-
-      setTeachers(teacherData);
-
-      setClasses(classData);
-
-      setAcademicPeriods(periodData);
-
-      setAcademicStructures(structureData);
+    } catch (error) {
+      console.error("Failed to load incomes:", error);
+      alert("Failed to load incomes");
     } finally {
       setLoading(false);
     }
@@ -221,443 +191,392 @@ export default function IncomesPage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [branchId]);
 
   // ======================================================
-  // RESET
+  // LOOKUPS
   // ======================================================
 
-  const reset = () => {
-    setEditingId(null);
-
-    setTitle("");
-
-    setCategory("");
-
-    setAmount("");
-
-    setMethod("");
-
-    setDate("");
-
-    setNote("");
-
-    setSourceType("external");
-
-    setStatus("completed");
-
-    setStudentId(undefined);
-
-    setParentId(undefined);
-
-    setTeacherId(undefined);
-
-    setClassId(undefined);
-
-    setAcademicStructureId(undefined);
-
-    setAcademicPeriodId(undefined);
-
-    setExternalSource("");
-
-    setExternalContact("");
-
-    setReceiptNumber("");
-
-    setTransactionId("");
-
-    setReferenceNumber("");
-
-    setShowForm(false);
-  };
+  const organizationMap = useMemo(
+    () => new Map(organizations.map(row => [row.id, row])),
+    [organizations]
+  );
 
   // ======================================================
-  // SAVE
+  // VIEW MODEL
   // ======================================================
 
-  const save = async () => {
-    if (!title.trim()) {
-      alert("Title required");
-      return;
-    }
+  const viewRows = useMemo<IncomeView[]>(() => {
+    return rows.map(row => {
+      const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
 
-    if (!amount || Number(amount) <= 0) {
-      alert("Valid amount required");
-      return;
-    }
+      return {
+        row,
+        organizationName: organization?.name || "General Income",
+        organizationType: organization?.type,
+      };
+    });
+  }, [rows, organizationMap]);
 
-    if (!date) {
-      alert("Date required");
-      return;
-    }
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-    const payload = prepareSyncData({
-      branchId,
-      organizationId,
+    const today = todayISO();
+    const weekStart = startOfWeekISO();
+    const monthStart = startOfMonthISO();
 
-      title: title.trim(),
+    return viewRows
+      .filter(item => {
+        const row = item.row;
 
-      category: category.trim(),
+        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
+        if (filterMethod !== "all" && row.paymentMethod !== filterMethod) return false;
 
-      amount: Number(amount),
+        if (dateFilter === "today" && row.date !== today) return false;
+        if (dateFilter === "week" && (row.date < weekStart || row.date > today)) return false;
+        if (dateFilter === "month" && (row.date < monthStart || row.date > today)) return false;
+        if (dateFilter === "custom") {
+          if (fromDate && row.date < fromDate) return false;
+          if (toDate && row.date > toDate) return false;
+        }
 
-      method: method || undefined,
+        if (!query) return true;
 
-      date,
+        return `
+          ${row.title}
+          ${row.description || ""}
+          ${row.source || ""}
+          ${row.receivedBy || ""}
+          ${row.referenceNumber || ""}
+          ${row.receiptNumber || ""}
+          ${row.paymentMethod || ""}
+          ${item.organizationName}
+          ${item.organizationType || ""}
+        `
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((a, b) => dateValue(b.row.date) - dateValue(a.row.date) || a.row.title.localeCompare(b.row.title));
+  }, [viewRows, search, filterOrganizationId, filterMethod, dateFilter, fromDate, toDate]);
 
-      note: note.trim(),
+  // ======================================================
+  // SUMMARY
+  // ======================================================
 
-      sourceType,
+  const summary = useMemo(() => {
+    const total = filteredRows.reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const cash = filteredRows
+      .filter(item => item.row.paymentMethod === "cash")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const momo = filteredRows
+      .filter(item => item.row.paymentMethod === "momo")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const bank = filteredRows
+      .filter(item => item.row.paymentMethod === "bank")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const cardTotal = filteredRows
+      .filter(item => item.row.paymentMethod === "card")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
 
-      studentId,
+    const uniqueSources = new Set(
+      filteredRows
+        .map(item => item.row.source?.trim())
+        .filter(Boolean)
+    ).size;
 
-      parentId,
+    return {
+      records: filteredRows.length,
+      total,
+      cash,
+      momo,
+      bank,
+      cardTotal,
+      uniqueSources,
+    };
+  }, [filteredRows]);
 
-      teacherId,
+  const organizationTotals = useMemo(() => {
+    const map = new Map<string, { name: string; amount: number; count: number }>();
 
-      classId,
+    filteredRows.forEach(item => {
+      const key = item.row.organizationId ? String(item.row.organizationId) : "general";
+      const existing = map.get(key) || {
+        name: item.organizationName,
+        amount: 0,
+        count: 0,
+      };
 
-      academicStructureId,
-
-      academicPeriodId,
-
-      externalSource:
-        externalSource.trim() || undefined,
-
-      externalContact:
-        externalContact.trim() || undefined,
-
-      receiptNumber:
-        receiptNumber.trim() || undefined,
-
-      transactionId:
-        transactionId.trim() || undefined,
-
-      referenceNumber:
-        referenceNumber.trim() || undefined,
-
-      status,
+      existing.amount += Number(item.row.amount || 0);
+      existing.count += 1;
+      map.set(key, existing);
     });
 
-    if (editingId) {
-      await db.incomes.update(
-        editingId,
-        payload
-      );
-    } else {
-      await db.incomes.add(payload);
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  }, [filteredRows]);
+
+  // ======================================================
+  // FORM HELPERS
+  // ======================================================
+
+  const updateForm = (patch: Partial<FormState>) => {
+    setForm(prev => ({ ...prev, ...patch }));
+  };
+
+  const fileToBase64 = (file: File) => {
+    return new Promise<string>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleImageUpload = async (file?: File) => {
+    if (!file) return;
+    const value = await fileToBase64(file);
+    updateForm({ photo: value });
+  };
+
+  const openCreate = () => {
+    if (!activeBranchId) {
+      alert("Select a branch first before recording income.");
+      return;
     }
 
-    reset();
+    setEditMode(false);
 
-    load();
+    setForm({
+      organizationId: undefined,
+      title: "",
+      description: "",
+      amount: 0,
+      paymentMethod: "cash",
+      date: todayISO(),
+      source: "",
+      receivedBy: "",
+      referenceNumber: "",
+      receiptNumber: "",
+      photo: "",
+    });
+
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (row: Income) => {
+    setEditMode(true);
+
+    setForm({
+      id: row.id,
+      organizationId: row.organizationId,
+      title: row.title,
+      description: row.description || "",
+      amount: row.amount,
+      paymentMethod: row.paymentMethod || "cash",
+      date: row.date,
+      source: row.source || "",
+      receivedBy: row.receivedBy || "",
+      referenceNumber: row.referenceNumber || "",
+      receiptNumber: row.receiptNumber || "",
+      photo: row.photo || "",
+    });
+
+    setDrawerOpen(true);
   };
 
   // ======================================================
-  // EDIT
+  // VALIDATION + SAVE
   // ======================================================
 
-  const edit = (i: Income) => {
-    setEditingId(i.id || null);
+  const validate = () => {
+    if (!activeBranchId) return "Select a branch first";
+    if (!form.title.trim()) return "Enter income title";
+    if (Number(form.amount) <= 0) return "Income amount must be greater than zero";
+    if (!form.date) return "Select income date";
 
-    setTitle(i.title || "");
+    const duplicateReceipt = form.receiptNumber?.trim()
+      ? rows.find(row => {
+          if (editMode && row.id === form.id) return false;
+          return row.receiptNumber?.trim().toLowerCase() === form.receiptNumber?.trim().toLowerCase();
+        })
+      : undefined;
 
-    setCategory(i.category || "");
+    if (duplicateReceipt) return "An income record with this receipt number already exists";
 
-    setAmount(String(i.amount || ""));
+    const duplicateReference = form.referenceNumber?.trim()
+      ? rows.find(row => {
+          if (editMode && row.id === form.id) return false;
+          return row.referenceNumber?.trim().toLowerCase() === form.referenceNumber?.trim().toLowerCase();
+        })
+      : undefined;
 
-    setMethod(i.method || "");
+    if (duplicateReference) return "An income record with this reference number already exists";
 
-    setDate(i.date || "");
-
-    setNote(i.note || "");
-
-    setSourceType(
-      i.sourceType || "external"
-    );
-
-    setStatus(i.status || "completed");
-
-    setStudentId(i.studentId);
-
-    setParentId(i.parentId);
-
-    setTeacherId(i.teacherId);
-
-    setClassId(i.classId);
-
-    setAcademicStructureId(
-      i.academicStructureId
-    );
-
-    setAcademicPeriodId(
-      i.academicPeriodId
-    );
-
-    setExternalSource(
-      i.externalSource || ""
-    );
-
-    setExternalContact(
-      i.externalContact || ""
-    );
-
-    setReceiptNumber(
-      i.receiptNumber || ""
-    );
-
-    setTransactionId(
-      i.transactionId || ""
-    );
-
-    setReferenceNumber(
-      i.referenceNumber || ""
-    );
-
-    setShowForm(true);
+    return null;
   };
 
-  // ======================================================
-  // DELETE
-  // ======================================================
+  const save = async () => {
+    const error = validate();
 
-  const remove = async (id: number) => {
-    const ok = confirm(
-      "Delete income record?"
-    );
+    if (error) {
+      alert(error);
+      return;
+    }
 
-    if (!ok) return;
+    try {
+      setSaving(true);
+
+      const payload = prepareSyncData({
+        branchId,
+        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
+        title: form.title.trim(),
+        description: form.description?.trim() || undefined,
+        amount: Number(form.amount || 0),
+        paymentMethod: form.paymentMethod || undefined,
+        date: form.date,
+        source: form.source?.trim() || undefined,
+        receivedBy: form.receivedBy?.trim() || undefined,
+        referenceNumber: form.referenceNumber?.trim() || undefined,
+        receiptNumber: form.receiptNumber?.trim() || undefined,
+        photo: form.photo || undefined,
+      }) as Income;
+
+      if (editMode && form.id) {
+        await db.incomes.update(form.id, {
+          organizationId: payload.organizationId,
+          title: payload.title,
+          description: payload.description,
+          amount: payload.amount,
+          paymentMethod: payload.paymentMethod,
+          date: payload.date,
+          source: payload.source,
+          receivedBy: payload.receivedBy,
+          referenceNumber: payload.referenceNumber,
+          receiptNumber: payload.receiptNumber,
+          photo: payload.photo,
+          updatedAt: payload.updatedAt,
+          version: payload.version,
+          deviceId: payload.deviceId,
+          synced: payload.synced,
+          isDeleted: false,
+        });
+      } else {
+        await db.incomes.add(payload);
+      }
+
+      setDrawerOpen(false);
+      await load();
+    } catch (error) {
+      console.error("Failed to save income:", error);
+      alert("Failed to save income");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (id?: number) => {
+    if (!id) return;
+    if (!confirm("Delete this income record?")) return;
 
     await db.incomes.update(id, {
       isDeleted: true,
       updatedAt: Date.now(),
     });
 
-    load();
+    await load();
   };
-
-  // ======================================================
-  // HELPERS
-  // ======================================================
-
-  const getStudentName = (id?: number) =>
-    students.find((x) => x.id === id)
-      ?.fullName || "Student";
-
-  const getParentName = (id?: number) =>
-    parents.find((x) => x.id === id)
-      ?.fullName || "Parent";
-
-  const getTeacherName = (id?: number) =>
-    teachers.find((x) => x.id === id)
-      ?.fullName || "Teacher";
-
-  const getClassName = (id?: number) =>
-    classes.find((x) => x.id === id)
-      ?.name || "Class";
-
-  const getPeriodName = (id?: number) =>
-    academicPeriods.find(
-      (x) => x.id === id
-    )?.name || "Period";
-
-  const getSourceLabel = (i: Income) => {
-    switch (i.sourceType) {
-      case "student":
-        return getStudentName(i.studentId);
-
-      case "parent":
-        return getParentName(i.parentId);
-
-      case "teacher":
-        return getTeacherName(i.teacherId);
-
-      case "school_fee":
-        return "School Fees";
-
-      case "pta":
-        return "PTA";
-
-      case "transport":
-        return "Transport";
-
-      case "canteen":
-        return "Canteen";
-
-      case "uniform":
-        return "Uniform";
-
-      case "boarding":
-        return "Boarding";
-
-      case "donation":
-        return "Donation";
-
-      case "external":
-        return (
-          i.externalSource ||
-          "External Source"
-        );
-
-      default:
-        return (
-          i.sourceType || "Other"
-        );
-    }
-  };
-
-  // ======================================================
-  // FILTERED
-  // ======================================================
-
-  const filtered = useMemo(() => {
-    return incomes.filter((i) => {
-      const q = search.toLowerCase();
-
-      const matchSearch =
-        i.title
-          ?.toLowerCase()
-          .includes(q) ||
-        i.category
-          ?.toLowerCase()
-          .includes(q) ||
-        i.note
-          ?.toLowerCase()
-          .includes(q) ||
-        getSourceLabel(i)
-          .toLowerCase()
-          .includes(q);
-
-      const matchSource = sourceFilter
-        ? i.sourceType === sourceFilter
-        : true;
-
-      const matchMethod = methodFilter
-        ? i.method === methodFilter
-        : true;
-
-      const matchStatus = statusFilter
-        ? i.status === statusFilter
-        : true;
-
-      const matchDate = dateFilter
-        ? i.date === dateFilter
-        : true;
-
-      return (
-        matchSearch &&
-        matchSource &&
-        matchMethod &&
-        matchStatus &&
-        matchDate
-      );
-    });
-  }, [
-    incomes,
-    search,
-    sourceFilter,
-    methodFilter,
-    statusFilter,
-    dateFilter,
-  ]);
-
-  // ======================================================
-  // ANALYTICS
-  // ======================================================
-
-  const totalIncome = filtered.reduce(
-    (sum, i) =>
-      sum + Number(i.amount || 0),
-    0
-  );
-
-  const completedIncome =
-    filtered
-      .filter(
-        (x) => x.status === "completed"
-      )
-      .reduce(
-        (sum, i) =>
-          sum + Number(i.amount || 0),
-        0
-      );
-
-  const pendingIncome = filtered
-    .filter((x) => x.status === "pending")
-    .reduce(
-      (sum, i) =>
-        sum + Number(i.amount || 0),
-      0
-    );
-
-  const todayIncome = filtered
-    .filter(
-      (x) =>
-        x.date ===
-        new Date()
-          .toISOString()
-          .split("T")[0]
-    )
-    .reduce(
-      (sum, i) =>
-        sum + Number(i.amount || 0),
-      0
-    );
 
   // ======================================================
   // STYLES
   // ======================================================
 
-  const page: React.CSSProperties = {
-    padding: 20,
-    color: "var(--text)",
-  };
-
   const card: React.CSSProperties = {
     background: "var(--surface)",
-    border:
-      "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 14,
-    padding: 14,
+    color: "var(--text)",
+    border: "1px solid rgba(0,0,0,0.08)",
+    borderRadius: 22,
+    padding: 18,
+    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
   };
 
   const input: React.CSSProperties = {
-    padding: 10,
-    borderRadius: 10,
-    border:
-      "1px solid rgba(0,0,0,0.2)",
     width: "100%",
-    background: "transparent",
+    padding: "12px 13px",
+    borderRadius: 14,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "var(--surface)",
     color: "var(--text)",
+    outline: "none",
+    fontWeight: 650,
   };
 
-  const primaryBtn: React.CSSProperties = {
-    padding: "10px 14px",
-    borderRadius: 10,
+  const label: React.CSSProperties = {
+    display: "block",
+    marginBottom: 6,
+    fontSize: 12,
+    opacity: 0.72,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  };
+
+  const button: React.CSSProperties = {
+    padding: "12px 16px",
+    borderRadius: 14,
     border: "none",
     background: primary,
     color: "#fff",
+    fontWeight: 850,
     cursor: "pointer",
-    fontWeight: 700,
   };
 
-  const outlineBtn: React.CSSProperties = {
-    padding: "8px 12px",
-    borderRadius: 10,
-    border: `1px solid ${primary}`,
-    background: "transparent",
+  const ghostButton: React.CSSProperties = {
+    padding: "10px 13px",
+    borderRadius: 12,
+    border: "1px solid rgba(0,0,0,0.10)",
+    background: "var(--surface)",
     color: "var(--text)",
+    fontWeight: 750,
     cursor: "pointer",
   };
 
+  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
+    const tones = {
+      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
+      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
+      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
+      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
+      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
+      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
+    }[tone];
+
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "5px 9px",
+      borderRadius: 999,
+      background: tones.bg,
+      color: tones.color,
+      fontSize: 11,
+      fontWeight: 850,
+    };
+  };
+
   // ======================================================
-  // LOADING
+  // LOADING / NO BRANCH
   // ======================================================
 
-  if (loading) {
+  if (loading || contextLoading) {
+    return <div style={{ padding: 20 }}>Loading incomes...</div>;
+  }
+
+  if (!activeBranchId) {
     return (
-      <div style={page}>
-        Loading income records...
+      <div style={{ padding: 20, color: "var(--text)" }}>
+        <div style={{ ...card, textAlign: "center", padding: 34 }}>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
+          <p style={{ marginTop: 8, opacity: 0.7 }}>
+            Income records belong to a branch. Select a school and branch from the sidebar before managing income.
+          </p>
+        </div>
       </div>
     );
   }
@@ -667,778 +586,432 @@ export default function IncomesPage() {
   // ======================================================
 
   return (
-    <div style={page}>
+    <div style={{ padding: 20, color: "var(--text)" }}>
       {/* HEADER */}
-
       <div
         style={{
           display: "flex",
-          justifyContent:
-            "space-between",
-          gap: 10,
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
           flexWrap: "wrap",
         }}
       >
         <div>
-          <h2 style={{ margin: 0 }}>
-            Income Management
-          </h2>
-
-          <p
-            style={{
-              marginTop: 4,
-              opacity: 0.7,
-            }}
-          >
-            Fully tracked institutional
-            income system
-          </p>
+          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Incomes</h2>
+          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
+            Managing income records in <b>{activeBranch?.name || "selected branch"}</b>
+            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+          </div>
         </div>
 
-        <button
-          style={primaryBtn}
-          onClick={() =>
-            setShowForm((p) => !p)
-          }
-        >
-          {showForm
-            ? "Close"
-            : "+ Add Income"}
+        <button onClick={openCreate} style={button}>
+          + Record Income
         </button>
       </div>
 
-      {/* SUMMARY */}
-
+      {/* FILTERS */}
       <div
         style={{
+          ...card,
           marginTop: 20,
           display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit,minmax(220px,1fr))",
+          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
           gap: 12,
         }}
       >
-        <div style={card}>
-          <div>Total Income</div>
+        <input
+          placeholder="Search title, source, receipt, reference, received by..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={input}
+        />
 
-          <h1>
-            GHS{" "}
-            {totalIncome.toFixed(2)}
-          </h1>
-        </div>
+        <select
+          value={filterOrganizationId || ""}
+          onChange={e => setFilterOrganizationId(Number(e.target.value) || undefined)}
+          style={input}
+        >
+          <option value="">All Organizations</option>
+          {organizations.map(row => (
+            <option key={row.id} value={row.id}>
+              {row.name} • {row.type}
+            </option>
+          ))}
+        </select>
 
-        <div style={card}>
-          <div>Completed</div>
+        <select
+          value={filterMethod}
+          onChange={e => setFilterMethod(e.target.value as "all" | PaymentMethod)}
+          style={input}
+        >
+          <option value="all">All Payment Methods</option>
+          <option value="cash">Cash</option>
+          <option value="momo">MoMo</option>
+          <option value="bank">Bank</option>
+          <option value="card">Card</option>
+        </select>
 
-          <h1>
-            GHS{" "}
-            {completedIncome.toFixed(2)}
-          </h1>
-        </div>
+        <select
+          value={dateFilter}
+          onChange={e => setDateFilter(e.target.value as DateFilter)}
+          style={input}
+        >
+          <option value="all">All Dates</option>
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
 
-        <div style={card}>
-          <div>Pending</div>
-
-          <h1>
-            GHS{" "}
-            {pendingIncome.toFixed(2)}
-          </h1>
-        </div>
-
-        <div style={card}>
-          <div>Today</div>
-
-          <h1>
-            GHS{" "}
-            {todayIncome.toFixed(2)}
-          </h1>
-        </div>
+        {dateFilter === "custom" && (
+          <>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={input} />
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={input} />
+          </>
+        )}
       </div>
 
-      {/* FILTERS */}
-
+      {/* SUMMARY */}
       <div
         style={{
-          marginTop: 20,
           display: "grid",
-          gridTemplateColumns:
-            "2fr 1fr 1fr 1fr 1fr",
-          gap: 10,
+          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
+          gap: 14,
+          marginTop: 20,
         }}
       >
-        <input
-          style={input}
-          placeholder="Search..."
-          value={search}
-          onChange={(e) =>
-            setSearch(e.target.value)
-          }
-        />
-
-        <select
-          style={input}
-          value={sourceFilter}
-          onChange={(e) =>
-            setSourceFilter(
-              e.target.value as IncomeSourceType
-            )
-          }
-        >
-          <option value="">
-            All Sources
-          </option>
-
-          <option value="student">
-            Student
-          </option>
-
-          <option value="school_fee">
-            School Fee
-          </option>
-
-          <option value="donation">
-            Donation
-          </option>
-
-          <option value="external">
-            External
-          </option>
-        </select>
-
-        <select
-          style={input}
-          value={methodFilter}
-          onChange={(e) =>
-            setMethodFilter(
-              e.target.value as PaymentMethod
-            )
-          }
-        >
-          <option value="">
-            All Methods
-          </option>
-
-          <option value="cash">
-            Cash
-          </option>
-
-          <option value="momo">
-            Mobile Money
-          </option>
-
-          <option value="bank">
-            Bank
-          </option>
-
-          <option value="card">
-            Card
-          </option>
-        </select>
-
-        <select
-          style={input}
-          value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(
-              e.target.value
-            )
-          }
-        >
-          <option value="">
-            All Status
-          </option>
-
-          <option value="pending">
-            Pending
-          </option>
-
-          <option value="completed">
-            Completed
-          </option>
-
-          <option value="cancelled">
-            Cancelled
-          </option>
-
-          <option value="refunded">
-            Refunded
-          </option>
-        </select>
-
-        <input
-          type="date"
-          style={input}
-          value={dateFilter}
-          onChange={(e) =>
-            setDateFilter(
-              e.target.value
-            )
-          }
-        />
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Records</div>
+          <div style={{ fontSize: 28, fontWeight: 950, marginTop: 6 }}>{summary.records}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Total Income</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.total)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Cash</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.cash)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>MoMo</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.momo)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Sources</div>
+          <div style={{ fontSize: 28, fontWeight: 950, marginTop: 6 }}>{summary.uniqueSources}</div>
+        </div>
       </div>
 
-      {/* FORM */}
+      {/* ORGANIZATION BREAKDOWN */}
+      <section style={{ marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Organization Breakdown</h3>
+          <span style={badge("gray")}>{organizationTotals.length} source group(s)</span>
+        </div>
 
-      {showForm && (
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          {organizationTotals.map(item => (
+            <div key={item.name} style={card}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
+                <div>
+                  <strong style={{ fontSize: 17 }}>{item.name}</strong>
+                  <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span style={badge("gray")}>{item.count} record(s)</span>
+                    <span style={badge("green")}>{money(item.amount)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {!organizationTotals.length && (
+            <div style={{ ...card, textAlign: "center", padding: 28 }}>
+              No income breakdown available for the selected filters.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* INCOME RECORDS */}
+      <section style={{ marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Income Records</h3>
+          <span style={badge("gray")}>{filteredRows.length} record(s)</span>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          {filteredRows.map(item => {
+            const row = item.row;
+
+            return (
+              <div key={row.id} style={card}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 16,
+                        background: row.photo
+                          ? `url(${row.photo}) center/cover`
+                          : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 950,
+                        flex: "0 0 48px",
+                      }}
+                    >
+                      {!row.photo && row.title.slice(0, 1).toUpperCase()}
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 17, fontWeight: 900 }}>{row.title}</div>
+                      <div style={{ marginTop: 4, display: "flex", gap: 7, flexWrap: "wrap" }}>
+                        <span style={badge("green")}>{money(row.amount)}</span>
+                        <span style={badge("blue")}>{paymentMethodLabel(row.paymentMethod)}</span>
+                        <span style={badge("gray")}>{row.date}</span>
+                        <span style={badge(row.organizationId ? "purple" : "gray")}>{item.organizationName}</span>
+                      </div>
+
+                      <div style={{ marginTop: 8, display: "flex", gap: 7, flexWrap: "wrap" }}>
+                        {row.source && <span style={badge("gray")}>Source: {row.source}</span>}
+                        {row.receivedBy && <span style={badge("gray")}>Received by: {row.receivedBy}</span>}
+                        {row.receiptNumber && <span style={badge("orange")}>Receipt: {row.receiptNumber}</span>}
+                        {row.referenceNumber && <span style={badge("orange")}>Ref: {row.referenceNumber}</span>}
+                      </div>
+
+                      {row.description && (
+                        <div style={{ marginTop: 8, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
+                          {row.description}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button style={ghostButton} onClick={() => openEdit(row)}>
+                      Edit
+                    </button>
+                    <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {!filteredRows.length && (
+            <div style={{ ...card, textAlign: "center", padding: 28 }}>
+              No income records found in this branch for the selected filters.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* DRAWER */}
+      {drawerOpen && (
         <div
           style={{
-            ...card,
-            marginTop: 20,
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            justifyContent: "flex-end",
+            background: "rgba(15,23,42,0.45)",
+            backdropFilter: "blur(4px)",
           }}
+          onClick={() => setDrawerOpen(false)}
         >
-          <h3>
-            {editingId
-              ? "Edit Income"
-              : "Create Income"}
-          </h3>
-
           <div
             style={{
-              display: "grid",
-              gap: 10,
-              gridTemplateColumns:
-                "repeat(auto-fit,minmax(220px,1fr))",
+              width: "min(620px, 100vw)",
+              height: "100vh",
+              background: "var(--surface)",
+              color: "var(--text)",
+              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
+              padding: 22,
+              overflowY: "auto",
             }}
+            onClick={e => e.stopPropagation()}
           >
-            <input
-              style={input}
-              placeholder="Title"
-              value={title}
-              onChange={(e) =>
-                setTitle(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Category"
-              value={category}
-              onChange={(e) =>
-                setCategory(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              type="number"
-              style={input}
-              placeholder="Amount"
-              value={amount}
-              onChange={(e) =>
-                setAmount(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              type="date"
-              style={input}
-              value={date}
-              onChange={(e) =>
-                setDate(
-                  e.target.value
-                )
-              }
-            />
-
-            <select
-              style={input}
-              value={sourceType}
-              onChange={(e) =>
-                setSourceType(
-                  e.target
-                    .value as IncomeSourceType
-                )
-              }
-            >
-              <option value="external">
-                External
-              </option>
-
-              <option value="student">
-                Student
-              </option>
-
-              <option value="parent">
-                Parent
-              </option>
-
-              <option value="teacher">
-                Teacher
-              </option>
-
-              <option value="school_fee">
-                School Fee
-              </option>
-
-              <option value="donation">
-                Donation
-              </option>
-            </select>
-
-            <select
-              style={input}
-              value={method}
-              onChange={(e) =>
-                setMethod(
-                  e.target
-                    .value as PaymentMethod
-                )
-              }
-            >
-              <option value="">
-                Method
-              </option>
-
-              <option value="cash">
-                Cash
-              </option>
-
-              <option value="momo">
-                Mobile Money
-              </option>
-
-              <option value="bank">
-                Bank
-              </option>
-
-              <option value="card">
-                Card
-              </option>
-            </select>
-
-            <select
-              style={input}
-              value={status}
-              onChange={(e) =>
-                setStatus(
-                  e.target
-                    .value as Income["status"]
-                )
-              }
-            >
-              <option value="completed">
-                Completed
-              </option>
-
-              <option value="pending">
-                Pending
-              </option>
-
-              <option value="cancelled">
-                Cancelled
-              </option>
-
-              <option value="refunded">
-                Refunded
-              </option>
-            </select>
-
-            {/* STUDENT */}
-
-            {sourceType ===
-              "student" && (
-              <select
-                style={input}
-                value={studentId}
-                onChange={(e) =>
-                  setStudentId(
-                    Number(
-                      e.target.value
-                    )
-                  )
-                }
-              >
-                <option>
-                  Select Student
-                </option>
-
-                {students.map((s) => (
-                  <option
-                    key={s.id}
-                    value={s.id}
-                  >
-                    {s.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {/* PARENT */}
-
-            {sourceType ===
-              "parent" && (
-              <select
-                style={input}
-                value={parentId}
-                onChange={(e) =>
-                  setParentId(
-                    Number(
-                      e.target.value
-                    )
-                  )
-                }
-              >
-                <option>
-                  Select Parent
-                </option>
-
-                {parents.map((p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                  >
-                    {p.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {/* TEACHER */}
-
-            {sourceType ===
-              "teacher" && (
-              <select
-                style={input}
-                value={teacherId}
-                onChange={(e) =>
-                  setTeacherId(
-                    Number(
-                      e.target.value
-                    )
-                  )
-                }
-              >
-                <option>
-                  Select Teacher
-                </option>
-
-                {teachers.map((t) => (
-                  <option
-                    key={t.id}
-                    value={t.id}
-                  >
-                    {t.fullName}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {/* CLASS */}
-
-            <select
-              style={input}
-              value={classId}
-              onChange={(e) =>
-                setClassId(
-                  Number(
-                    e.target.value
-                  )
-                )
-              }
-            >
-              <option>
-                Select Class
-              </option>
-
-              {classes.map((c) => (
-                <option
-                  key={c.id}
-                  value={c.id}
-                >
-                  {c.name}
-                </option>
-              ))}
-            </select>
-
-            {/* ACADEMIC PERIOD */}
-
-            <select
-              style={input}
-              value={
-                academicPeriodId
-              }
-              onChange={(e) =>
-                setAcademicPeriodId(
-                  Number(
-                    e.target.value
-                  )
-                )
-              }
-            >
-              <option>
-                Academic Period
-              </option>
-
-              {academicPeriods.map(
-                (p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                  >
-                    {p.name}
-                  </option>
-                )
-              )}
-            </select>
-
-            {/* EXTERNAL */}
-
-            {sourceType ===
-              "external" && (
-              <>
-                <input
-                  style={input}
-                  placeholder="External Source"
-                  value={
-                    externalSource
-                  }
-                  onChange={(e) =>
-                    setExternalSource(
-                      e.target.value
-                    )
-                  }
-                />
-
-                <input
-                  style={input}
-                  placeholder="External Contact"
-                  value={
-                    externalContact
-                  }
-                  onChange={(e) =>
-                    setExternalContact(
-                      e.target.value
-                    )
-                  }
-                />
-              </>
-            )}
-
-            <input
-              style={input}
-              placeholder="Receipt Number"
-              value={receiptNumber}
-              onChange={(e) =>
-                setReceiptNumber(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Transaction ID"
-              value={transactionId}
-              onChange={(e) =>
-                setTransactionId(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Reference Number"
-              value={referenceNumber}
-              onChange={(e) =>
-                setReferenceNumber(
-                  e.target.value
-                )
-              }
-            />
-
-            <textarea
-              style={{
-                ...input,
-                minHeight: 100,
-                gridColumn:
-                  "1 / -1",
-              }}
-              placeholder="Notes..."
-              value={note}
-              onChange={(e) =>
-                setNote(
-                  e.target.value
-                )
-              }
-            />
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              marginTop: 15,
-            }}
-          >
-            <button
-              style={primaryBtn}
-              onClick={save}
-            >
-              {editingId
-                ? "Update Income"
-                : "Save Income"}
-            </button>
-
-            <button
-              style={outlineBtn}
-              onClick={reset}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* LIST */}
-
-      <div
-        style={{
-          marginTop: 20,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        {filtered.length === 0 && (
-          <div style={card}>
-            No income records found
-          </div>
-        )}
-
-        {filtered.map((i) => (
-          <div
-            key={i.id}
-            style={card}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
               <div>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 18,
-                  }}
-                >
-                  {i.title}
+                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
+                  {editMode ? "Edit Income" : "Record Income"}
+                </h3>
+                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
+                  This income record will be saved under {activeBranch?.name || "the selected branch"}
+                  {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
                 </div>
+              </div>
+              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>Close</button>
+            </div>
 
-                <div
-                  style={{
-                    marginTop: 4,
-                    opacity: 0.7,
-                    fontSize: 13,
-                  }}
-                >
-                  {getSourceLabel(i)} •{" "}
-                  {i.method || "N/A"} •{" "}
-                  {i.date}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 4,
-                    opacity: 0.7,
-                    fontSize: 13,
-                  }}
-                >
-                  {getClassName(
-                    i.classId
-                  )}{" "}
-                  •{" "}
-                  {getPeriodName(
-                    i.academicPeriodId
-                  )}
-                </div>
-
-                {i.note && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      opacity: 0.7,
-                    }}
-                  >
-                    {i.note}
-                  </div>
-                )}
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label style={label}>Income Title</label>
+                <input
+                  value={form.title}
+                  onChange={e => updateForm({ title: e.target.value })}
+                  placeholder="e.g. Donation, PTA contribution, Facility rental"
+                  style={input}
+                />
               </div>
 
               <div
                 style={{
-                  textAlign: "right",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 24,
-                    fontWeight: 700,
-                  }}
-                >
-                  GHS{" "}
-                  {Number(
-                    i.amount
-                  ).toFixed(2)}
+                <div>
+                  <label style={label}>Amount</label>
+                  <input
+                    type="number"
+                    value={form.amount}
+                    onChange={e => updateForm({ amount: Number(e.target.value) })}
+                    style={input}
+                  />
                 </div>
 
-                <div
-                  style={{
-                    marginTop: 4,
-                    fontSize: 12,
-                    opacity: 0.7,
-                  }}
-                >
-                  {i.status}
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    justifyContent:
-                      "flex-end",
-                    marginTop: 10,
-                  }}
-                >
-                  <button
-                    style={
-                      outlineBtn
-                    }
-                    onClick={() =>
-                      edit(i)
-                    }
-                  >
-                    Edit
-                  </button>
-
-                  <button
-                    style={
-                      outlineBtn
-                    }
-                    onClick={() =>
-                      remove(
-                        i.id!
-                      )
-                    }
-                  >
-                    Delete
-                  </button>
+                <div>
+                  <label style={label}>Date</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={e => updateForm({ date: e.target.value })}
+                    style={input}
+                  />
                 </div>
               </div>
+
+              <div>
+                <label style={label}>Payment Method</label>
+                <select
+                  value={form.paymentMethod || ""}
+                  onChange={e => updateForm({ paymentMethod: (e.target.value || undefined) as PaymentMethod | undefined })}
+                  style={input}
+                >
+                  <option value="">Unspecified</option>
+                  <option value="cash">Cash</option>
+                  <option value="momo">MoMo</option>
+                  <option value="bank">Bank</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={label}>Organization</label>
+                <select
+                  value={form.organizationId || ""}
+                  onChange={e => updateForm({ organizationId: Number(e.target.value) || undefined })}
+                  style={input}
+                >
+                  <option value="">General Income / No Organization</option>
+                  {organizations.map(row => (
+                    <option key={row.id} value={row.id}>
+                      {row.name} • {row.type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <label style={label}>Source</label>
+                  <input
+                    value={form.source || ""}
+                    onChange={e => updateForm({ source: e.target.value })}
+                    placeholder="Who or where the income came from"
+                    style={input}
+                  />
+                </div>
+
+                <div>
+                  <label style={label}>Received By</label>
+                  <input
+                    value={form.receivedBy || ""}
+                    onChange={e => updateForm({ receivedBy: e.target.value })}
+                    placeholder="Staff/person who received it"
+                    style={input}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <label style={label}>Receipt Number</label>
+                  <input
+                    value={form.receiptNumber || ""}
+                    onChange={e => updateForm({ receiptNumber: e.target.value })}
+                    placeholder="Receipt number"
+                    style={input}
+                  />
+                </div>
+
+                <div>
+                  <label style={label}>Reference Number</label>
+                  <input
+                    value={form.referenceNumber || ""}
+                    onChange={e => updateForm({ referenceNumber: e.target.value })}
+                    placeholder="Bank/MoMo/reference number"
+                    style={input}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={label}>Description</label>
+                <textarea
+                  value={form.description || ""}
+                  onChange={e => updateForm({ description: e.target.value })}
+                  placeholder="Brief note about this income"
+                  rows={4}
+                  style={{ ...input, resize: "vertical" }}
+                />
+              </div>
+
+              <div>
+                <label style={label}>Receipt / Proof Image</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handleImageUpload(e.target.files?.[0])}
+                  style={input}
+                />
+                {form.photo && (
+                  <img
+                    src={form.photo}
+                    alt="Income proof"
+                    style={{ width: "100%", height: 140, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
+                  />
+                )}
+              </div>
+
+              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "Saving..." : editMode ? "Save Changes" : "Record Income"}
+              </button>
             </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

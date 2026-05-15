@@ -1,6 +1,6 @@
 //promotion.tsx
 
-
+/*
 "use client";
 
 import React, {
@@ -1466,4 +1466,9 @@ export default function PromotionsPage() {
     </div>
   );
 }
+*/
 
+
+export default function PromotionOld(){
+  <div>Promotion New</div>
+}

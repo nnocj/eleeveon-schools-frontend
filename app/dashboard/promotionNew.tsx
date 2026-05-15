@@ -1,4 +1,4 @@
-"use client";
+/*"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 
@@ -231,11 +231,11 @@ export default function PromotionPage({ navigate }: Props) {
   return (
     <div style={{ padding: 20, color: "var(--text)" }}>
 
-      {/* HEADER */}
+      {/* HEADER *//*}
       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <h2>Student Promotion Engine</h2>
 
-        {/* TAB-STYLE NAV BUTTON */}
+        {/* TAB-STYLE NAV BUTTON *//*}
         <button
           onClick={goToGraduationAudit}
           style={{
@@ -252,7 +252,7 @@ export default function PromotionPage({ navigate }: Props) {
         </button>
       </div>
 
-      {/* CLASS SELECT */}
+      {/* CLASS SELECT *//*}
       <div style={{ marginTop: 20 }}>
         <select
           value={selectedClass}
@@ -283,7 +283,7 @@ export default function PromotionPage({ navigate }: Props) {
         </button>
       </div>
 
-      {/* TABLE */}
+      {/* TABLE *//*}
       <div style={{ marginTop: 20, overflowX: "auto" }}>
         <table style={{ width: "100%", minWidth: 700 }}>
           <thead>
@@ -314,4 +314,8 @@ export default function PromotionPage({ navigate }: Props) {
 
     </div>
   );
+}*/
+
+export default function PromotionNew(){
+  <div>Promotion New</div>
 }

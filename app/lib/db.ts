@@ -21,7 +21,10 @@ export type TermType =
   | "Semester 1"
   | "Semester 2";
 
-export type SystemMode = "active" | "locked" | "promotion";
+export type SystemMode =
+  | "active"
+  | "locked"
+  | "promotion";
 
 export type AcademicLevel =
   | "nursery"
@@ -30,15 +33,45 @@ export type AcademicLevel =
   | "senior_high"
   | "tertiary";
 
-export type AttendanceStatus = "present" | "absent" | "late";
+export type AttendanceStatus =
+  | "present"
+  | "absent"
+  | "late";
 
-export type PaymentMethod = "cash" | "momo" | "bank" | "card";
+export type PaymentMethod =
+  | "cash"
+  | "momo"
+  | "bank"
+  | "card";
 
-export type TransactionType = "income" | "expense";
+export type TransactionType =
+  | "income"
+  | "expense";
 
-export type CurriculumSubjectType = "core" | "elective" | "optional";
+export type CurriculumSubjectType =
+  | "core"
+  | "elective"
+  | "optional";
 
-export type DeliveryMode = "physical" | "online" | "hybrid";
+export type DeliveryMode =
+  | "physical"
+  | "online"
+  | "hybrid";
+
+export type ExpenseSourceType =
+  | "utilities"
+  | "salary"
+  | "transport"
+  | "feeding"
+  | "maintenance"
+  | "procurement"
+  | "events"
+  | "academic"
+  | "administration"
+  | "technology"
+  | "marketing"
+  | "security"
+  | "other";
 
 // ======================================================
 // BASE SYNC
@@ -55,7 +88,7 @@ export interface BaseSync {
 }
 
 // ======================================================
-// CORE STRUCTURE
+// CORE (SCHOOL STRUCTURE)
 // ======================================================
 
 export interface School extends BaseSync {
@@ -66,13 +99,22 @@ export interface School extends BaseSync {
   email?: string;
   address?: string;
   website?: string;
+  photo?: string;
+  bannerImage?: string;
+  galleryImages?: string[];
 }
 
 export interface Branch extends BaseSync {
   schoolId: number;
   name: string;
   code?: string;
+  logo?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
   city?: string;
+  photo?: string;
+  bannerImage?: string;
   active?: boolean;
 }
 
@@ -82,6 +124,8 @@ export interface AcademicStructure extends BaseSync {
   level: AcademicLevel;
   startDate: string;
   endDate: string;
+  photo?: string;
+  bannerImage?: string;
   active?: boolean;
 }
 
@@ -92,6 +136,7 @@ export interface AcademicPeriod extends BaseSync {
   type?: TermType;
   startDate: string;
   endDate: string;
+  photo?: string;
   order: number;
   active?: boolean;
 }
@@ -107,6 +152,9 @@ export interface Organization extends BaseSync {
     | "club"
     | "committee"
     | "administration";
+  description?: string;
+  photo?: string;
+  bannerImage?: string;
   active?: boolean;
 }
 
@@ -120,13 +168,34 @@ export interface Student extends BaseSync {
   currentClassId?: number;
   admissionNumber?: string;
   fullName: string;
+  gender?: string;
+  age?: number;
+  dateOfBirth?: string;
+  photo?: string;
+  coverPhoto?: string;
+  parentName?: string;
+  parentPhone?: string;
+  parentEmail?: string;
+  address?: string;
   status?: "active" | "graduated" | "transferred" | "withdrawn";
 }
 
 export interface Teacher extends BaseSync {
   branchId: number;
+  organizationId?: number;
   fullName: string;
+  gender?: string;
+  age?: number;
+  photo?: string;
+  coverPhoto?: string;
+  email?: string;
+  phone?: string;
+  relativePhone?: string;
+  employmentDate?: string;
+  salary?: number;
   role: "teacher" | "head_teacher" | "lecturer" | "principal";
+  qualification?: string;
+  signature?: string;
   active?: boolean;
 }
 
@@ -134,134 +203,270 @@ export interface Parent extends BaseSync {
   branchId: number;
   fullName: string;
   phone: string;
+  photo?: string;
+  coverPhoto?: string;
   email?: string;
+  address?: string;
+  occupation?: string;
+  emergencyContact?: string;
+  relationship?: "father" | "mother" | "guardian";
+}
+
+export interface StudentParent extends BaseSync {
+  branchId: number;
+  studentId: number;
+  parentId: number;
+  relationship: "father" | "mother" | "guardian" | "other";
+  isPrimary?: boolean;
 }
 
 // ======================================================
-// CLASS (UNIVERSAL UNIT: SCHOOL + UNIVERSITY)
+// ACADEMIC STRUCTURE
 // ======================================================
 
 export interface Class extends BaseSync {
   branchId: number;
-  academicStructureId: number;
   organizationId?: number;
-
-  name: string; // e.g. "Basic 6", "BSc CS Year 2", "Level 300 Law"
+  name: string;
   code?: string;
-
   level?: string;
+  photo?: string;
+  bannerImage?: string;
   capacity?: number;
-
   active?: boolean;
 }
 
-// ======================================================
-// CURRICULUM SYSTEM
-// ======================================================
-
 export interface Subject extends BaseSync {
   branchId: number;
+  organizationId?: number;
   name: string;
   code?: string;
+  description?: string;
+  photo?: string;
+  bannerImage?: string;
+  credits?: number;
   category?: "academic" | "technical" | "vocational" | "elective" | "core";
+  active?: boolean;
+}
+
+export interface Program extends BaseSync {
+  branchId: number;
+  organizationId?: number;
+  name: string;
+  code?: string;
+  photo?: string;
+  bannerImage?: string;
+  awardType?: string;
+  durationYears?: number;
+  description?: string;
   active?: boolean;
 }
 
 export interface Curriculum extends BaseSync {
   branchId: number;
-  name: string;
+  organizationId?: number;
+  programId?: number;
   academicStructureId: number;
+  name: string;
+  code?: string;
+  photo?: string;
+  bannerImage?: string;
+  description?: string;
+  curriculumVersion?: string;
+  totalCredits?: number;
+  durationPeriods?: number;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   active?: boolean;
+  locked?: boolean;
 }
 
-/**
- * 🔥 PATHWAYS RESTORED (IMPORTANT FOR SPECIALIZATION)
- */
 export interface CurriculumPathway extends BaseSync {
   branchId: number;
   curriculumId: number;
-
   name: string;
   code?: string;
-
+  photo?: string;
+  bannerImage?: string;
   description?: string;
   active?: boolean;
 }
 
 export interface CurriculumSubject extends BaseSync {
   branchId: number;
+
   curriculumId: number;
+  subjectId: number;
+
   pathwayId?: number;
 
-  subjectId: number;
-  classId?: number;
-  academicPeriodId?: number;
+  organizationId?: number;
 
+  // =========================
+  // ACADEMIC RULES (GLOBAL)
+  // =========================
   type?: CurriculumSubjectType;
-  orderIndex?: number;
+
+  credits?: number;
+  contactHours?: number;
+
   minimumPassScore?: number;
+
+  orderIndex?: number;
 
   active?: boolean;
 }
 
-// ======================================================
-// STUDENT CLASS ENROLLMENT (RENAMED + CLEAN)
-// ======================================================
-
-export interface StudentClassEnrollment extends BaseSync {
+export interface ClassSubject extends BaseSync {
   branchId: number;
 
+  classId: number;
+  subjectId: number;
+
+  curriculumSubjectId: number;
+
+  // =========================
+  // ACADEMIC CONTEXT
+  // =========================
+  academicStructureId: number;
+  academicPeriodId?: number;
+
+  // =========================
+  // TEACHING ASSIGNMENT
+  // =========================
+  teacherId?: number;
+
+  // =========================
+  // OVERRIDES (ONLY IF NEEDED)
+  // =========================
+  name?: string;
+  code?: string;
+
+  // override curriculum defaults if school customizes
+  credits?: number;
+  contactHours?: number;
+  type?: CurriculumSubjectType;
+
+  compulsory?: boolean;
+  elective?: boolean;
+
+  // =========================
+  // MEDIA
+  // =========================
+  photo?: string;
+  bannerImage?: string;
+
+  // =========================
+  // STATUS
+  // =========================
+  active?: boolean;
+  locked?: boolean;
+}
+
+export interface SubjectPrerequisite extends BaseSync {
+  branchId: number;
+  curriculumSubjectId: number;
+  prerequisiteSubjectId: number;
+  minimumGrade?: string;
+  minimumScore?: number;
+  type?: "prerequisite" | "corequisite" | "recommended";
+  groupCode?: string;
+  active?: boolean;
+}
+
+export interface StudentCurriculum extends BaseSync {
+  branchId: number;
+  studentId: number;
+  curriculumId: number;
+  pathwayId?: number;
+  startAcademicPeriodId?: number;
+  endAcademicPeriodId?: number;
+  status?: "active" | "completed" | "withdrawn";
+  active?: boolean;
+}
+
+export interface SubjectOffering extends BaseSync {
+  branchId: number;
+  curriculumSubjectId?: number;
+  classSubjectId?: number;
+  subjectId: number;
+  classId?: number;
+  academicPeriodId?: number;
+  organizationId?: number;
+  teacherId?: number;
+  room?: string;
+  deliveryMode?: DeliveryMode;
+  capacity?: number;
+  compulsory?: boolean;
+  active?: boolean;
+}
+
+export interface Assignment extends BaseSync {
+  branchId: number;
+  teacherId: number;
+  classId: number;
+  subjectId: number;
+}
+
+export interface ClassTeacher extends BaseSync {
+  branchId: number;
+  classId: number;
+  teacherId: number;
+}
+
+export interface StudentEnrollment extends BaseSync {
+  branchId: number;
   studentId: number;
   classId: number;
-
   academicStructureId: number;
   academicPeriodId: number;
-
   startDate: string;
   endDate?: string;
-
   status: "active" | "completed" | "promoted" | "withdrawn";
 }
 
 // ======================================================
-// SINGLE ACADEMIC CONTEXT ENGINE
+// ASSESSMENT ACTIVATION ENGINE
 // ======================================================
 
-export interface AcademicSubjectContext extends BaseSync {
+export interface AssessmentApplicability extends BaseSync {
   branchId: number;
 
-  curriculumSubjectId: number;
-
-  classId: number;
-  subjectId: number;
-  academicPeriodId: number;
-
-  organizationId?: number;
-
-  credits?: number;
-  type?: CurriculumSubjectType;
-  orderIndex?: number;
-  minimumPassScore?: number;
+  classSubjectId: number; // 🔥 ONLY source of truth
 
   assessmentStructureId: number;
   gradingSystemId?: number;
 
+  organizationId?: number;
+
   active: boolean;
   locked?: boolean;
 
+  // optional metadata (NOT relational)
   isElective?: boolean;
   groupCode?: string;
 }
 
 // ======================================================
-// GRADING
+// GRADING & ASSESSMENT
 // ======================================================
+
+export type GradingSystemType =
+  | "percentage"
+  | "gpa"
+  | "competency"
+  | "custom";
 
 export interface GradingSystem extends BaseSync {
   branchId: number;
+  organizationId?: number;
   name: string;
-  type: "percentage" | "gpa" | "competency" | "custom";
+  type: GradingSystemType;
+  description?: string;
+  photo?: string;
   active?: boolean;
+  default?: boolean;
+  locked?: boolean;
 }
 
 export interface GradeRule extends BaseSync {
@@ -270,17 +475,24 @@ export interface GradeRule extends BaseSync {
   minScore: number;
   maxScore: number;
   grade: string;
+  remark?: string;
+  gpa?: number;
+  color?: string;
   order: number;
+  active?: boolean;
 }
-
-// ======================================================
-// ASSESSMENT
-// ======================================================
 
 export interface AssessmentStructure extends BaseSync {
   branchId: number;
+  organizationId?: number;
+  academicStructureId: number;
   name: string;
+  description?: string;
+  photo?: string;
+  bannerImage?: string;
   totalScore?: number;
+  active?: boolean;
+  locked?: boolean;
 }
 
 export interface AssessmentStructureItem extends BaseSync {
@@ -290,45 +502,78 @@ export interface AssessmentStructureItem extends BaseSync {
   weight: number;
   maxScore: number;
   order: number;
+  compulsory?: boolean;
+  active?: boolean;
 }
 
 // ======================================================
-// EXECUTION
+// ASSESSMENT EXECUTION
 // ======================================================
 
 export interface AssessmentComponent extends BaseSync {
   branchId: number;
+  organizationId?: number;
   classId: number;
   subjectId: number;
   academicPeriodId: number;
   assessmentStructureId: number;
+  gradingSystemId?: number;
   active: boolean;
 }
 
 export interface AssessmentEntry extends BaseSync {
+  schoolId?: number;
   branchId: number;
+
+  classSubjectId?: number;
+
+  organizationId?: number;
+  academicStructureId?: number;
+  academicPeriodId: number;
+
+  gradingSystemId?: number;
+  assessmentStructureId?: number;
+  assessmentStructureItemId: number;
+
   studentId: number;
   classId: number;
   subjectId: number;
-  academicPeriodId: number;
-  assessmentStructureItemId: number;
+
   score: number;
   grade?: string;
-}
+  remark?: string;
 
-// ======================================================
-// RESULTS
-// ======================================================
+  published?: boolean;
+  locked?: boolean;
+  active?: boolean;
+}
 
 export interface ComputedResult extends BaseSync {
   branchId: number;
+  organizationId?: number;
+
+  classSubjectId?: number;
+
   studentId: number;
   classId: number;
   subjectId: number;
+
+  academicStructureId: number;
   academicPeriodId: number;
+
+  gradingSystemId?: number;
+
   total: number;
   average?: number;
+  percentage?: number;
+
   grade: string;
+  remark?: string;
+  gpa?: number;
+  position?: number;
+
+  published?: boolean;
+  locked?: boolean;
 }
 
 // ======================================================
@@ -339,9 +584,18 @@ export interface Attendance extends BaseSync {
   branchId: number;
   studentId: number;
   classId: number;
+  academicStructureId: number;
   academicPeriodId: number;
   date: string;
   status: AttendanceStatus;
+}
+
+export interface TeacherAttendance extends BaseSync {
+  branchId: number;
+  teacherId: number;
+  date: string;
+  clockIn?: string;
+  clockOut?: string;
 }
 
 // ======================================================
@@ -352,23 +606,46 @@ export interface ReportCard extends BaseSync {
   branchId: number;
   studentId: number;
   classId: number;
+  academicStructureId: number;
   academicPeriodId: number;
   total: number;
   average: number;
+  position?: number;
+  attendancePercent?: number;
+  classTeacherRemark?: string;
+  headTeacherRemark?: string;
+  published?: boolean;
 }
 
 export interface ReportCardItem extends BaseSync {
   branchId: number;
   reportCardId: number;
+  studentId: number;
+  classId: number;
+  academicStructureId: number;
+  academicPeriodId: number;
   subjectId: number;
   subjectName: string;
+  teacherId?: number;
+  teacherName?: string;
   total: number;
+  average?: number;
   grade: string;
+  remark?: string;
+  position?: number;
 }
 
 // ======================================================
 // FINANCE
 // ======================================================
+
+export interface FeeStructure extends BaseSync {
+  branchId: number;
+  classId?: number;
+  academicStructureId: number;
+  academicPeriodId: number;
+  items: { name: string; amount: number }[];
+}
 
 export interface Payment extends BaseSync {
   branchId: number;
@@ -376,18 +653,73 @@ export interface Payment extends BaseSync {
   amount: number;
   method: PaymentMethod;
   date: string;
+  receiptNumber?: string;
+  note?: string;
+}
+
+export interface Income extends BaseSync {
+  branchId: number;
+  organizationId?: number;
+  title: string;
+  description?: string;
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  date: string;
+  source?: string;
+  receivedBy?: string;
+  referenceNumber?: string;
+  receiptNumber?: string;
+  photo?: string;
+}
+
+export interface Expense extends BaseSync {
+  branchId: number;
+  organizationId?: number;
+  title: string;
+  description?: string;
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  expenseSourceType?: ExpenseSourceType;
+  date: string;
+  paidTo?: string;
+  approvedBy?: string;
+  receiptNumber?: string;
+  referenceNumber?: string;
+  photo?: string;
 }
 
 // ======================================================
 // SETTINGS
 // ======================================================
 
-export interface Setting extends BaseSync {
-  branchId?: number;
+export interface SchoolBranchSetting extends BaseSync {
+  schoolId: number;
+  branchId: number;
+
+  mode?: string;
+  theme?: "light" | "dark";
+  primaryColor?: string;
+  fontFamily?: string;
+  fontSize?: number;
+
+  academicYear?: string;
+  currentTerm?: string;
   currentAcademicStructureId?: number;
   currentAcademicPeriodId?: number;
-  mode: "auto" | "manual";
-  theme?: "light" | "dark";
+
+  logo?: string;
+  reportCardBackgroundImage?: string;
+  reportCardWatermark?: string;
+  reportCardSignatureImage?: string;
+
+  dashboardHeroImage?: string;
+  dashboardBannerImage?: string;
+  studentPortalImage?: string;
+  teacherPortalImage?: string;
+  classroomPlaceholderImage?: string;
+  subjectPlaceholderImage?: string;
+
+  schoolGalleryImages?: string[];
 }
 
 // ======================================================
@@ -404,16 +736,25 @@ class AppDB extends Dexie {
   students!: Table<Student>;
   teachers!: Table<Teacher>;
   parents!: Table<Parent>;
+  studentParents!: Table<StudentParent>;
 
   classes!: Table<Class>;
   subjects!: Table<Subject>;
+  programs!: Table<Program>;
+
   curriculums!: Table<Curriculum>;
   curriculumPathways!: Table<CurriculumPathway>;
   curriculumSubjects!: Table<CurriculumSubject>;
 
-  studentClassEnrollments!: Table<StudentClassEnrollment>;
+  classSubjects!: Table<ClassSubject>;
 
-  academicSubjectContexts!: Table<AcademicSubjectContext>;
+  subjectPrerequisites!: Table<SubjectPrerequisite>;
+  studentCurriculums!: Table<StudentCurriculum>;
+  subjectOfferings!: Table<SubjectOffering>;
+
+  assignments!: Table<Assignment>;
+  classTeachers!: Table<ClassTeacher>;
+  studentEnrollments!: Table<StudentEnrollment>;
 
   gradingSystems!: Table<GradingSystem>;
   gradeRules!: Table<GradeRule>;
@@ -421,68 +762,160 @@ class AppDB extends Dexie {
   assessmentStructures!: Table<AssessmentStructure>;
   assessmentStructureItems!: Table<AssessmentStructureItem>;
 
+  assessmentApplicabilities!: Table<AssessmentApplicability>;
+
   assessmentComponents!: Table<AssessmentComponent>;
   assessmentEntries!: Table<AssessmentEntry>;
   computedResults!: Table<ComputedResult>;
 
   attendance!: Table<Attendance>;
+  teacherAttendance!: Table<TeacherAttendance>;
 
   reportCards!: Table<ReportCard>;
   reportCardItems!: Table<ReportCardItem>;
 
+  feeStructures!: Table<FeeStructure>;
   payments!: Table<Payment>;
-  settings!: Table<Setting>;
+
+  incomes!: Table<Income>;
+  expenses!: Table<Expense>;
+
+  schoolBranchSettings!: Table<SchoolBranchSetting>;
 
   constructor() {
     super("EleeveonDB");
 
-    this.version(27).stores({
+    this.version(25).stores({
       schools: "++id,name,updatedAt",
-      branches: "++id,schoolId,name,updatedAt",
 
-      academicStructures: "++id,branchId,level",
-      academicPeriods: "++id,branchId,academicStructureId,order",
+      branches:
+        "++id,schoolId,name,updatedAt",
 
-      organizations: "++id,branchId,type,parentOrganizationId",
+      academicStructures:
+        "++id,branchId,level,updatedAt",
 
-      students: "++id,branchId,currentClassId,admissionNumber,fullName,status",
-      teachers: "++id,branchId,role,fullName",
+      academicPeriods:
+        "++id,branchId,academicStructureId,order,updatedAt",
 
-      classes: "++id,branchId,academicStructureId,name",
-      subjects: "++id,branchId,name,code",
+      organizations:
+        "++id,branchId,parentOrganizationId,type,updatedAt",
 
-      curriculums: "++id,branchId,name,academicStructureId",
-      curriculumPathways: "++id,branchId,curriculumId,name",
+      students:
+        "++id,branchId,currentClassId,admissionNumber,fullName,status,updatedAt",
 
-      curriculumSubjects:
-        "++id,branchId,curriculumId,subjectId,classId,academicPeriodId",
+      teachers:
+        "++id,branchId,role,fullName,updatedAt",
 
-      studentClassEnrollments:
-        "++id,branchId,studentId,classId,academicPeriodId,status",
+      parents:
+        "++id,branchId,phone,email,fullName",
 
-      academicSubjectContexts:
-        "++id,branchId,curriculumSubjectId,classId,subjectId,academicPeriodId",
+      studentParents:
+        "++id,branchId,studentId,parentId",
 
-      gradingSystems: "++id,branchId,name,type",
-      gradeRules: "++id,branchId,gradingSystemId,minScore,maxScore",
+      classes:
+        "++id,branchId,organizationId,name,updatedAt",
 
-      assessmentStructures: "++id,branchId,name",
-      assessmentStructureItems: "++id,branchId,assessmentStructureId,order",
+      subjects:
+        "++id,branchId,organizationId,name,code,category,updatedAt",
 
-      assessmentComponents: "++id,branchId,classId,subjectId,academicPeriodId",
-      assessmentEntries: "++id,branchId,studentId,classId,subjectId,academicPeriodId",
-      computedResults: "++id,branchId,studentId,classId,subjectId,academicPeriodId",
+      programs:
+        "++id,branchId,organizationId,code,name,active,updatedAt",
 
-      attendance: "++id,branchId,studentId,classId,academicPeriodId,date",
+      curriculums:
+        "++id,branchId,organizationId,programId,academicStructureId,name,active,updatedAt",
 
-      reportCards: "++id,branchId,studentId,classId,academicPeriodId",
-      reportCardItems: "++id,branchId,reportCardId,subjectId",
+      curriculumPathways:
+        "++id,branchId,curriculumId,active,updatedAt",
 
-      payments: "++id,branchId,studentId,method,date",
+      curriculumSubjects: "++id,branchId,curriculumId,subjectId,pathwayId,organizationId,active",
 
-      settings: "++id,branchId",
+      classSubjects: 
+        "++id, branchId, classId, subjectId, curriculumSubjectId,academicStructureId, academicPeriodId, teacherId, active, locked",
+        
+        
+      subjectPrerequisites:
+        "++id,branchId,curriculumSubjectId,prerequisiteSubjectId,type,active,updatedAt",
+
+      studentCurriculums:
+        "++id,branchId,studentId,curriculumId,status,active,updatedAt",
+
+      subjectOfferings:
+        "++id,branchId,classSubjectId,curriculumSubjectId,subjectId,classId,academicPeriodId,teacherId,active,updatedAt",
+
+      assignments:
+        "++id,branchId,teacherId,classId,subjectId",
+
+      classTeachers:
+        "++id,branchId,classId,teacherId",
+
+      studentEnrollments:
+        "++id,branchId,studentId,classId,academicPeriodId,status,updatedAt",
+
+      gradingSystems:
+        "++id,branchId,organizationId,name,type,active,updatedAt",
+
+      gradeRules:
+        "++id,branchId,gradingSystemId,minScore,maxScore,grade,order,updatedAt",
+
+      assessmentStructures:
+        "++id,branchId,organizationId,academicStructureId,name,active,updatedAt",
+
+      assessmentStructureItems:
+        "++id,branchId,assessmentStructureId,order,active,updatedAt",
+
+      assessmentApplicabilities:
+        "++id,branchId,classSubjectId,assessmentStructureId,gradingSystemId,active,locked",
+
+      assessmentComponents:
+        "++id,branchId,classId,subjectId,academicPeriodId,assessmentStructureId,active",
+
+      assessmentEntries:
+        "++id,branchId,classSubjectId,studentId,assessmentStructureItemId,published,active",
+
+      computedResults:
+        "++id,branchId,classSubjectId,studentId,grade,gpa,position,published",
+
+      attendance:
+        "++id,branchId,studentId,classId,academicPeriodId,date",
+
+      teacherAttendance:
+        "++id,branchId,teacherId,date",
+
+      reportCards:
+        "++id,branchId,studentId,classId,academicPeriodId",
+
+      reportCardItems:
+        "++id,branchId,reportCardId,subjectId,academicPeriodId",
+
+      feeStructures:
+        "++id,branchId,classId,academicPeriodId",
+
+      payments:
+        "++id,branchId,studentId,method,date",
+
+      incomes:
+        "++id,branchId,organizationId,title,date,amount,paymentMethod,updatedAt",
+
+      expenses:
+        "++id,branchId,organizationId,title,date,amount,expenseSourceType,paymentMethod,updatedAt",
+
+      schoolBranchSettings:
+        "++id, schoolId, branchId, currentAcademicStructureId, currentAcademicPeriodId, synced, isDeleted, updatedAt",
     });
   }
 }
 
 export const db = new AppDB();
+
+(async () => {
+  try {
+    await db.open();
+  } catch (err) {
+    console.error("DB INIT ERROR:", err);
+
+    await db.delete();
+
+    location.reload();
+  }
+})();
+

@@ -1,4 +1,4 @@
-"use client";
+/*"use client";
 
 import React, { useEffect, useMemo, useState } from "react";
 import { db, Student, Class } from "../lib/db";
@@ -196,7 +196,7 @@ export default function PromotionPage() {
 
   return (
     <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
+      {/* HEADER *//*}
       <div style={{ ...card }}>
         <h2>Promotion Engine</h2>
 
@@ -214,7 +214,7 @@ export default function PromotionPage() {
         </select>
       </div>
 
-      {/* TABLE */}
+      {/* TABLE *//*}
       <div style={{ ...card, marginTop: 20, overflowX: "auto" }}>
         <table style={{ width: "100%" }}>
           <thead>
@@ -281,4 +281,7 @@ export default function PromotionPage() {
       </div>
     </div>
   );
+}*/
+export default function Promotion(){
+  <div>Promotion</div>
 }

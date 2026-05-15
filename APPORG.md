@@ -156,13 +156,9 @@ LMS integration	YES
 
 You are now at enterprise SIS level architecture:
 
-🧠 CORE ENGINES
-PromotionEngine
-GraduationAuditEngine
-TranscriptEngine
-DegreePlanner
-TimetableEngine
-CreditTransferEngine
+
+
+
 
 
 
@@ -183,3 +179,54 @@ Assessment Entries
 Computed Results
     ↓
 Report Cards
+
+
+Critical insight:
+👉 Your app is NOT route-based (Next.js routing) — it’s a single-page module switcher
+
+
+CurriculumSubject (definition layer)
+        ↓
+ClassSubject (operational layer)
+        ↓
+AssessmentApplicability (rules engine)
+        ↓
+AssessmentEntry / Results
+
+
+10. FINAL ARCHITECTURE AFTER REWRITE
+
+The page will effectively become:
+
+Assessment Applicability
+    belongs to
+        ClassSubject
+            belongs to
+                CurriculumSubject
+                    belongs to
+                        Curriculum
+
+This is the correct layered academic engine.
+
+11. VERY IMPORTANT OBSERVATION
+
+You are gradually moving toward a proper enterprise SIS architecture similar to:
+
+PowerSchool
+Infinite Campus
+OpenSIS
+Blackboard backend models
+
+because you are separating:
+
+ACADEMIC DEFINITION
+
+from
+
+DELIVERY EXECUTION
+
+from
+
+ASSESSMENT EXECUTION
+
+That is the correct direction.

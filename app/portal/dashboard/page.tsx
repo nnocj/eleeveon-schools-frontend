@@ -1,7 +1,7 @@
 // =========================
 // app/portal/dashboard/page.tsx
 // =========================
-"use client";
+/*"use client";
 
 import { useEffect, useState } from "react";
 import { db } from "@/app/lib/db";
@@ -77,4 +77,8 @@ export default function PortalDashboard() {
 export function requireAuth(router: any) {
   const user = getPortalUser();
   if (!user) router.push("/portal");
+}*/
+
+export default function Home() {
+  <div>Page</div>
 }

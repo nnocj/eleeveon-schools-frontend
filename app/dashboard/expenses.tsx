@@ -1,268 +1,202 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { db } from "../lib/db";
+/**
+ * expenses.tsx
+ * ---------------------------------------------------------
+ * PROFESSIONAL EXPENSE MANAGEMENT PAGE
+ * ---------------------------------------------------------
+ *
+ * DB-safe rewrite for current db.ts.
+ *
+ * ACTUAL FINANCE MODEL
+ * ---------------------------------------------------------
+ * Expense:
+ * - branchId
+ * - organizationId?
+ * - title
+ * - description?
+ * - amount
+ * - paymentMethod?
+ * - expenseSourceType?
+ * - date
+ * - paidTo?
+ * - approvedBy?
+ * - receiptNumber?
+ * - referenceNumber?
+ * - photo?
+ *
+ * IMPORTANT ARCHITECTURE
+ * ---------------------------------------------------------
+ * Active School -> Active Branch -> Organizations -> Expense Records
+ *
+ * Expense records belong to a branch and may optionally be attached to
+ * an organization such as department, house, club, committee or administration.
+ */
 
-import type {
+import React, { useEffect, useMemo, useState } from "react";
+
+import {
+  db,
   Expense,
   ExpenseSourceType,
+  Organization,
+  PaymentMethod,
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
 import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
-export default function Expenses() {
+// ======================================================
+// TYPES
+// ======================================================
+
+type FormState = {
+  id?: number;
+  organizationId?: number;
+  title: string;
+  description?: string;
+  amount: number;
+  paymentMethod?: PaymentMethod;
+  expenseSourceType?: ExpenseSourceType;
+  date: string;
+  paidTo?: string;
+  approvedBy?: string;
+  receiptNumber?: string;
+  referenceNumber?: string;
+  photo?: string;
+};
+
+type ExpenseView = {
+  row: Expense;
+  organizationName: string;
+  organizationType?: Organization["type"];
+};
+
+type DateFilter = "all" | "today" | "week" | "month" | "custom";
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const money = (value: number) => {
+  return `GHS ${Number(value || 0).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+};
+
+const dateValue = (value: string) => {
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+};
+
+const startOfWeekISO = () => {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const start = new Date(now.setDate(diff));
+  return start.toISOString().slice(0, 10);
+};
+
+const startOfMonthISO = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+};
+
+const paymentMethodLabel = (method?: PaymentMethod) => {
+  if (!method) return "Unspecified";
+  if (method === "momo") return "MoMo";
+  return method.charAt(0).toUpperCase() + method.slice(1);
+};
+
+const expenseSourceLabel = (type?: ExpenseSourceType) => {
+  if (!type) return "Unspecified";
+  return type
+    .split("_")
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+};
+
+// ======================================================
+// COMPONENT
+// ======================================================
+
+export default function ExpensesPage() {
   const { settings } = useSettings();
+  const {
+    activeSchool,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
+
+  const branchId = activeBranchId || settings?.branchId || 1;
+  const primary = settings?.primaryColor || "var(--primary-color)";
 
   // ======================================================
-  // ORGANIZATION CONTEXT
+  // STATE
   // ======================================================
-  const branchId = settings?.branchId ?? 1;
-  const organizationId = settings?.organizationId;
 
-  const primary =
-    settings?.primaryColor ||
-    "var(--primary-color)";
-
-  // ======================================================
-  // DATA
-  // ======================================================
-  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // ======================================================
-  // RELATED ENTITIES
-  // ======================================================
-  const [students, setStudents] = useState<any[]>([]);
-  const [parents, setParents] = useState<any[]>([]);
-  const [teachers, setTeachers] = useState<any[]>([]);
-  const [classes, setClasses] = useState<any[]>([]);
-  const [subjects, setSubjects] = useState<any[]>([]);
-  const [academicStructures, setAcademicStructures] =
-    useState<any[]>([]);
-  const [academicPeriods, setAcademicPeriods] =
-    useState<any[]>([]);
+  const [rows, setRows] = useState<Expense[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
 
-  // ======================================================
-  // UI STATE
-  // ======================================================
-  const [showForm, setShowForm] = useState(false);
-
-  const [editingId, setEditingId] =
-    useState<number | null>(null);
-
-  // ======================================================
-  // FILTERS
-  // ======================================================
   const [search, setSearch] = useState("");
+  const [filterOrganizationId, setFilterOrganizationId] = useState<number | undefined>();
+  const [filterMethod, setFilterMethod] = useState<"all" | PaymentMethod>("all");
+  const [filterSourceType, setFilterSourceType] = useState<"all" | ExpenseSourceType>("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("month");
+  const [fromDate, setFromDate] = useState(startOfMonthISO());
+  const [toDate, setToDate] = useState(todayISO());
 
-  const [sourceFilter, setSourceFilter] =
-    useState<ExpenseSourceType | "">("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
-  const [methodFilter, setMethodFilter] =
-    useState("");
-
-  const [statusFilter, setStatusFilter] =
-    useState("");
-
-  const [dateFilter, setDateFilter] =
-    useState("");
-
-  // ======================================================
-  // FORM
-  // ======================================================
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("");
-
-  const [amount, setAmount] = useState("");
-
-  const [method, setMethod] = useState("");
-
-  const [date, setDate] = useState("");
-
-  const [note, setNote] = useState("");
+  const [form, setForm] = useState<FormState>({
+    organizationId: undefined,
+    title: "",
+    description: "",
+    amount: 0,
+    paymentMethod: "cash",
+    expenseSourceType: "other",
+    date: todayISO(),
+    paidTo: "",
+    approvedBy: "",
+    receiptNumber: "",
+    referenceNumber: "",
+    photo: "",
+  });
 
   // ======================================================
-  // CLASSIFICATION
+  // LOAD DATA
   // ======================================================
-  const [sourceType, setSourceType] =
-    useState<ExpenseSourceType>("other");
 
-  // ======================================================
-  // RELATIONAL LINKS
-  // ======================================================
-  const [studentId, setStudentId] =
-    useState<number | undefined>();
-
-  const [parentId, setParentId] =
-    useState<number | undefined>();
-
-  const [teacherId, setTeacherId] =
-    useState<number | undefined>();
-
-  const [classId, setClassId] =
-    useState<number | undefined>();
-
-  const [subjectId, setSubjectId] =
-    useState<number | undefined>();
-
-  // ======================================================
-  // ACADEMIC
-  // ======================================================
-  const [
-    academicStructureId,
-    setAcademicStructureId,
-  ] = useState<number | undefined>();
-
-  const [
-    academicPeriodId,
-    setAcademicPeriodId,
-  ] = useState<number | undefined>();
-
-  // ======================================================
-  // STAFF / APPROVAL
-  // ======================================================
-  const [approvedBy, setApprovedBy] =
-    useState<number | undefined>();
-
-  const [requestedBy, setRequestedBy] =
-    useState<number | undefined>();
-
-  const [paidBy, setPaidBy] =
-    useState<number | undefined>();
-
-  // ======================================================
-  // PROCUREMENT
-  // ======================================================
-  const [vendor, setVendor] = useState("");
-  const [vendorContact, setVendorContact] =
-    useState("");
-
-  const [vendorAddress, setVendorAddress] =
-    useState("");
-
-  // ======================================================
-  // TRANSACTION
-  // ======================================================
-  const [receiptNumber, setReceiptNumber] =
-    useState("");
-
-  const [invoiceNumber, setInvoiceNumber] =
-    useState("");
-
-  const [transactionId, setTransactionId] =
-    useState("");
-
-  const [referenceNumber, setReferenceNumber] =
-    useState("");
-
-  // ======================================================
-  // LOCATION / DEPARTMENT
-  // ======================================================
-  const [department, setDepartment] =
-    useState("");
-
-  const [destination, setDestination] =
-    useState("");
-
-  const [expenseLocation, setExpenseLocation] =
-    useState("");
-
-  // ======================================================
-  // EVENT / PROJECT
-  // ======================================================
-  const [eventName, setEventName] =
-    useState("");
-
-  const [projectName, setProjectName] =
-    useState("");
-
-  // ======================================================
-  // FLAGS
-  // ======================================================
-  const [recurring, setRecurring] =
-    useState(false);
-
-  const [autoGenerated, setAutoGenerated] =
-    useState(false);
-
-  const [reimbursable, setReimbursable] =
-    useState(false);
-
-  const [refunded, setRefunded] =
-    useState(false);
-
-  // ======================================================
-  // STATUS
-  // ======================================================
-  const [status, setStatus] = useState<
-    | "pending"
-    | "approved"
-    | "paid"
-    | "cancelled"
-    | "rejected"
-    | "refunded"
-  >("paid");
-
-  // ======================================================
-  // LOAD
-  // ======================================================
   const load = async () => {
-    setLoading(true);
-
     try {
-      const [
-        exp,
-        st,
-        pa,
-        te,
-        cl,
-        su,
-        acs,
-        acp,
-      ] = await Promise.all([
+      setLoading(true);
+
+      const [expenseRows, organizationRows] = await Promise.all([
         db.expenses.toArray(),
-        db.students.toArray(),
-        db.parents.toArray(),
-        db.teachers.toArray(),
-        db.classes.toArray(),
-        db.subjects.toArray(),
-        db.academicStructures.toArray(),
-        db.academicPeriods.toArray(),
+        db.organizations.toArray(),
       ]);
 
-      const filtered = exp.filter((x: any) => {
-        const branchMatch =
-          x.branchId === branchId;
-
-        const orgMatch = organizationId
-          ? x.organizationId ===
-            organizationId
-          : true;
-
-        return (
-          branchMatch &&
-          orgMatch &&
-          !x.isDeleted
-        );
-      });
-
-      filtered.sort(
-        (a: any, b: any) =>
-          new Date(b.date).getTime() -
-          new Date(a.date).getTime()
+      setRows(
+        expenseRows.filter(row => row.branchId === branchId && !row.isDeleted)
       );
 
-      setExpenses(filtered);
-
-      setStudents(st);
-      setParents(pa);
-      setTeachers(te);
-      setClasses(cl);
-      setSubjects(su);
-
-      setAcademicStructures(acs);
-      setAcademicPeriods(acp);
+      setOrganizations(
+        organizationRows
+          .filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    } catch (error) {
+      console.error("Failed to load expenses:", error);
+      alert("Failed to load expenses");
     } finally {
       setLoading(false);
     }
@@ -270,1380 +204,928 @@ export default function Expenses() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [branchId]);
 
   // ======================================================
-  // RESET
+  // LOOKUPS
   // ======================================================
-  const reset = () => {
-    setTitle("");
-    setCategory("");
 
-    setAmount("");
-    setMethod("");
-    setDate("");
-    setNote("");
-
-    setSourceType("other");
-
-    setStudentId(undefined);
-    setParentId(undefined);
-    setTeacherId(undefined);
-
-    setClassId(undefined);
-    setSubjectId(undefined);
-
-    setAcademicStructureId(undefined);
-    setAcademicPeriodId(undefined);
-
-    setApprovedBy(undefined);
-    setRequestedBy(undefined);
-    setPaidBy(undefined);
-
-    setVendor("");
-    setVendorContact("");
-    setVendorAddress("");
-
-    setReceiptNumber("");
-    setInvoiceNumber("");
-    setTransactionId("");
-    setReferenceNumber("");
-
-    setDepartment("");
-    setDestination("");
-    setExpenseLocation("");
-
-    setEventName("");
-    setProjectName("");
-
-    setRecurring(false);
-    setAutoGenerated(false);
-    setReimbursable(false);
-    setRefunded(false);
-
-    setStatus("paid");
-
-    setEditingId(null);
-    setShowForm(false);
-  };
+  const organizationMap = useMemo(
+    () => new Map(organizations.map(row => [row.id, row])),
+    [organizations]
+  );
 
   // ======================================================
-  // SAVE
+  // VIEW MODEL
   // ======================================================
-  const save = async () => {
-    if (!title.trim()) {
-      alert("Expense title required");
-      return;
-    }
 
-    if (!amount || Number(amount) <= 0) {
-      alert("Valid amount required");
-      return;
-    }
+  const viewRows = useMemo<ExpenseView[]>(() => {
+    return rows.map(row => {
+      const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
 
-    if (!date) {
-      alert("Date required");
-      return;
-    }
+      return {
+        row,
+        organizationName: organization?.name || "General Expense",
+        organizationType: organization?.type,
+      };
+    });
+  }, [rows, organizationMap]);
 
-    const payload = prepareSyncData({
-      branchId,
-      organizationId,
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-      title: title.trim(),
-      category: category.trim(),
+    const today = todayISO();
+    const weekStart = startOfWeekISO();
+    const monthStart = startOfMonthISO();
 
-      amount: Number(amount),
+    return viewRows
+      .filter(item => {
+        const row = item.row;
 
-      method: method || undefined,
+        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
+        if (filterMethod !== "all" && row.paymentMethod !== filterMethod) return false;
+        if (filterSourceType !== "all" && row.expenseSourceType !== filterSourceType) return false;
 
-      date,
+        if (dateFilter === "today" && row.date !== today) return false;
+        if (dateFilter === "week" && (row.date < weekStart || row.date > today)) return false;
+        if (dateFilter === "month" && (row.date < monthStart || row.date > today)) return false;
+        if (dateFilter === "custom") {
+          if (fromDate && row.date < fromDate) return false;
+          if (toDate && row.date > toDate) return false;
+        }
 
-      note: note.trim(),
+        if (!query) return true;
 
-      sourceType,
+        return `
+          ${row.title}
+          ${row.description || ""}
+          ${row.paidTo || ""}
+          ${row.approvedBy || ""}
+          ${row.referenceNumber || ""}
+          ${row.receiptNumber || ""}
+          ${row.paymentMethod || ""}
+          ${row.expenseSourceType || ""}
+          ${item.organizationName}
+          ${item.organizationType || ""}
+        `
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((a, b) => dateValue(b.row.date) - dateValue(a.row.date) || a.row.title.localeCompare(b.row.title));
+  }, [viewRows, search, filterOrganizationId, filterMethod, filterSourceType, dateFilter, fromDate, toDate]);
 
-      studentId,
-      parentId,
-      teacherId,
+  // ======================================================
+  // SUMMARY
+  // ======================================================
 
-      classId,
-      subjectId,
+  const summary = useMemo(() => {
+    const total = filteredRows.reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const cash = filteredRows
+      .filter(item => item.row.paymentMethod === "cash")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const momo = filteredRows
+      .filter(item => item.row.paymentMethod === "momo")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const bank = filteredRows
+      .filter(item => item.row.paymentMethod === "bank")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
+    const cardTotal = filteredRows
+      .filter(item => item.row.paymentMethod === "card")
+      .reduce((sum, item) => sum + Number(item.row.amount || 0), 0);
 
-      academicStructureId,
-      academicPeriodId,
+    const categories = new Set(
+      filteredRows
+        .map(item => item.row.expenseSourceType)
+        .filter(Boolean)
+    ).size;
 
-      approvedBy,
-      requestedBy,
-      paidBy,
+    return {
+      records: filteredRows.length,
+      total,
+      cash,
+      momo,
+      bank,
+      cardTotal,
+      categories,
+    };
+  }, [filteredRows]);
 
-      vendor: vendor.trim(),
-      vendorContact:
-        vendorContact.trim(),
+  const sourceTotals = useMemo(() => {
+    const map = new Map<string, { name: string; amount: number; count: number }>();
 
-      vendorAddress:
-        vendorAddress.trim(),
+    filteredRows.forEach(item => {
+      const key = item.row.expenseSourceType || "unspecified";
+      const existing = map.get(key) || {
+        name: expenseSourceLabel(item.row.expenseSourceType),
+        amount: 0,
+        count: 0,
+      };
 
-      receiptNumber:
-        receiptNumber.trim(),
-
-      invoiceNumber:
-        invoiceNumber.trim(),
-
-      transactionId:
-        transactionId.trim(),
-
-      referenceNumber:
-        referenceNumber.trim(),
-
-      department:
-        department.trim(),
-
-      destination:
-        destination.trim(),
-
-      expenseLocation:
-        expenseLocation.trim(),
-
-      eventName:
-        eventName.trim(),
-
-      projectName:
-        projectName.trim(),
-
-      recurring,
-      autoGenerated,
-      reimbursable,
-      refunded,
-
-      status,
+      existing.amount += Number(item.row.amount || 0);
+      existing.count += 1;
+      map.set(key, existing);
     });
 
-    if (editingId) {
-      await db.expenses.update(
-        editingId,
-        payload
-      );
-    } else {
-      await db.expenses.add(payload);
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  }, [filteredRows]);
+
+  const organizationTotals = useMemo(() => {
+    const map = new Map<string, { name: string; amount: number; count: number }>();
+
+    filteredRows.forEach(item => {
+      const key = item.row.organizationId ? String(item.row.organizationId) : "general";
+      const existing = map.get(key) || {
+        name: item.organizationName,
+        amount: 0,
+        count: 0,
+      };
+
+      existing.amount += Number(item.row.amount || 0);
+      existing.count += 1;
+      map.set(key, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount);
+  }, [filteredRows]);
+
+  // ======================================================
+  // FORM HELPERS
+  // ======================================================
+
+  const updateForm = (patch: Partial<FormState>) => {
+    setForm(prev => ({ ...prev, ...patch }));
+  };
+
+  const fileToBase64 = (file: File) => {
+    return new Promise<string>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleImageUpload = async (file?: File) => {
+    if (!file) return;
+    const value = await fileToBase64(file);
+    updateForm({ photo: value });
+  };
+
+  const openCreate = () => {
+    if (!activeBranchId) {
+      alert("Select a branch first before recording expense.");
+      return;
     }
 
-    reset();
-    load();
+    setEditMode(false);
+
+    setForm({
+      organizationId: undefined,
+      title: "",
+      description: "",
+      amount: 0,
+      paymentMethod: "cash",
+      expenseSourceType: "other",
+      date: todayISO(),
+      paidTo: "",
+      approvedBy: "",
+      receiptNumber: "",
+      referenceNumber: "",
+      photo: "",
+    });
+
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (row: Expense) => {
+    setEditMode(true);
+
+    setForm({
+      id: row.id,
+      organizationId: row.organizationId,
+      title: row.title,
+      description: row.description || "",
+      amount: row.amount,
+      paymentMethod: row.paymentMethod || "cash",
+      expenseSourceType: row.expenseSourceType || "other",
+      date: row.date,
+      paidTo: row.paidTo || "",
+      approvedBy: row.approvedBy || "",
+      receiptNumber: row.receiptNumber || "",
+      referenceNumber: row.referenceNumber || "",
+      photo: row.photo || "",
+    });
+
+    setDrawerOpen(true);
   };
 
   // ======================================================
-  // EDIT
+  // VALIDATION + SAVE
   // ======================================================
-  const edit = (item: Expense) => {
-    setEditingId(item.id || null);
 
-    setTitle(item.title || "");
-    setCategory(item.category || "");
+  const validate = () => {
+    if (!activeBranchId) return "Select a branch first";
+    if (!form.title.trim()) return "Enter expense title";
+    if (Number(form.amount) <= 0) return "Expense amount must be greater than zero";
+    if (!form.date) return "Select expense date";
 
-    setAmount(String(item.amount || ""));
-    setMethod(item.method || "");
+    const duplicateReceipt = form.receiptNumber?.trim()
+      ? rows.find(row => {
+          if (editMode && row.id === form.id) return false;
+          return row.receiptNumber?.trim().toLowerCase() === form.receiptNumber?.trim().toLowerCase();
+        })
+      : undefined;
 
-    setDate(item.date || "");
+    if (duplicateReceipt) return "An expense record with this receipt number already exists";
 
-    setNote(item.note || "");
+    const duplicateReference = form.referenceNumber?.trim()
+      ? rows.find(row => {
+          if (editMode && row.id === form.id) return false;
+          return row.referenceNumber?.trim().toLowerCase() === form.referenceNumber?.trim().toLowerCase();
+        })
+      : undefined;
 
-    setSourceType(
-      item.sourceType || "other"
-    );
+    if (duplicateReference) return "An expense record with this reference number already exists";
 
-    setStudentId(item.studentId);
-    setParentId(item.parentId);
-    setTeacherId(item.teacherId);
-
-    setClassId(item.classId);
-
-    setSubjectId(item.subjectId);
-
-    setAcademicStructureId(
-      item.academicStructureId
-    );
-
-    setAcademicPeriodId(
-      item.academicPeriodId
-    );
-
-    setApprovedBy(item.approvedBy);
-
-    setRequestedBy(item.requestedBy);
-
-    setPaidBy(item.paidBy);
-
-    setVendor(item.vendor || "");
-
-    setVendorContact(
-      item.vendorContact || ""
-    );
-
-    setVendorAddress(
-      item.vendorAddress || ""
-    );
-
-    setReceiptNumber(
-      item.receiptNumber || ""
-    );
-
-    setInvoiceNumber(
-      item.invoiceNumber || ""
-    );
-
-    setTransactionId(
-      item.transactionId || ""
-    );
-
-    setReferenceNumber(
-      item.referenceNumber || ""
-    );
-
-    setDepartment(
-      item.department || ""
-    );
-
-    setDestination(
-      item.destination || ""
-    );
-
-    setExpenseLocation(
-      item.expenseLocation || ""
-    );
-
-    setEventName(
-      item.eventName || ""
-    );
-
-    setProjectName(
-      item.projectName || ""
-    );
-
-    setRecurring(
-      item.recurring || false
-    );
-
-    setAutoGenerated(
-      item.autoGenerated || false
-    );
-
-    setReimbursable(
-      item.reimbursable || false
-    );
-
-    setRefunded(
-      item.refunded || false
-    );
-
-    setStatus(item.status || "paid");
-
-    setShowForm(true);
+    return null;
   };
 
-  // ======================================================
-  // DELETE
-  // ======================================================
-  const remove = async (id: number) => {
-    if (!confirm("Delete expense?")) return;
+  const save = async () => {
+    const error = validate();
+
+    if (error) {
+      alert(error);
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const payload = prepareSyncData({
+        branchId,
+        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
+        title: form.title.trim(),
+        description: form.description?.trim() || undefined,
+        amount: Number(form.amount || 0),
+        paymentMethod: form.paymentMethod || undefined,
+        expenseSourceType: form.expenseSourceType || undefined,
+        date: form.date,
+        paidTo: form.paidTo?.trim() || undefined,
+        approvedBy: form.approvedBy?.trim() || undefined,
+        receiptNumber: form.receiptNumber?.trim() || undefined,
+        referenceNumber: form.referenceNumber?.trim() || undefined,
+        photo: form.photo || undefined,
+      }) as Expense;
+
+      if (editMode && form.id) {
+        await db.expenses.update(form.id, {
+          organizationId: payload.organizationId,
+          title: payload.title,
+          description: payload.description,
+          amount: payload.amount,
+          paymentMethod: payload.paymentMethod,
+          expenseSourceType: payload.expenseSourceType,
+          date: payload.date,
+          paidTo: payload.paidTo,
+          approvedBy: payload.approvedBy,
+          receiptNumber: payload.receiptNumber,
+          referenceNumber: payload.referenceNumber,
+          photo: payload.photo,
+          updatedAt: payload.updatedAt,
+          version: payload.version,
+          deviceId: payload.deviceId,
+          synced: payload.synced,
+          isDeleted: false,
+        });
+      } else {
+        await db.expenses.add(payload);
+      }
+
+      setDrawerOpen(false);
+      await load();
+    } catch (error) {
+      console.error("Failed to save expense:", error);
+      alert("Failed to save expense");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (id?: number) => {
+    if (!id) return;
+    if (!confirm("Delete this expense record?")) return;
 
     await db.expenses.update(id, {
       isDeleted: true,
       updatedAt: Date.now(),
     });
 
-    load();
+    await load();
   };
-
-  // ======================================================
-  // SOURCE LABEL
-  // ======================================================
-  const getSourceLabel = (
-    item: Expense
-  ) => {
-    switch (item.sourceType) {
-      case "salary":
-        return "Salary";
-
-      case "maintenance":
-        return "Maintenance";
-
-      case "transport":
-        return "Transport";
-
-      case "academic":
-        return "Academic";
-
-      case "technology":
-        return "Technology";
-
-      case "feeding":
-        return "Feeding";
-
-      case "construction":
-        return "Construction";
-
-      case "internet":
-        return "Internet";
-
-      default:
-        return (
-          item.sourceType || "Other"
-        );
-    }
-  };
-
-  // ======================================================
-  // FILTERED
-  // ======================================================
-  const filtered = useMemo(() => {
-    return expenses.filter((e) => {
-      const q = search.toLowerCase();
-
-      const matchSearch =
-        e.title
-          ?.toLowerCase()
-          .includes(q) ||
-        e.category
-          ?.toLowerCase()
-          .includes(q) ||
-        e.note
-          ?.toLowerCase()
-          .includes(q) ||
-        getSourceLabel(e)
-          .toLowerCase()
-          .includes(q) ||
-        e.vendor
-          ?.toLowerCase()
-          .includes(q) ||
-        e.department
-          ?.toLowerCase()
-          .includes(q);
-
-      const matchSource =
-        sourceFilter
-          ? e.sourceType ===
-            sourceFilter
-          : true;
-
-      const matchMethod =
-        methodFilter
-          ? e.method ===
-            methodFilter
-          : true;
-
-      const matchStatus =
-        statusFilter
-          ? e.status ===
-            statusFilter
-          : true;
-
-      const matchDate =
-        dateFilter
-          ? e.date === dateFilter
-          : true;
-
-      return (
-        matchSearch &&
-        matchSource &&
-        matchMethod &&
-        matchStatus &&
-        matchDate
-      );
-    });
-  }, [
-    expenses,
-    search,
-    sourceFilter,
-    methodFilter,
-    statusFilter,
-    dateFilter,
-  ]);
-
-  // ======================================================
-  // ANALYTICS
-  // ======================================================
-  const totalExpense =
-    filtered.reduce(
-      (sum, item) =>
-        sum +
-        Number(item.amount || 0),
-      0
-    );
-
-  const todayExpense =
-    filtered
-      .filter(
-        (x) =>
-          x.date ===
-          new Date()
-            .toISOString()
-            .split("T")[0]
-      )
-      .reduce(
-        (sum, item) =>
-          sum +
-          Number(item.amount || 0),
-        0
-      );
-
-  const pendingExpense =
-    filtered
-      .filter(
-        (x) =>
-          x.status === "pending"
-      )
-      .reduce(
-        (sum, item) =>
-          sum +
-          Number(item.amount || 0),
-        0
-      );
 
   // ======================================================
   // STYLES
   // ======================================================
-  const page: React.CSSProperties = {
-    padding: 20,
-    color: "var(--text)",
-  };
 
   const card: React.CSSProperties = {
-    border:
-      "1px solid rgba(0,0,0,0.08)",
-
     background: "var(--surface)",
-
-    padding: 14,
-
-    borderRadius: 12,
+    color: "var(--text)",
+    border: "1px solid rgba(0,0,0,0.08)",
+    borderRadius: 22,
+    padding: 18,
+    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
   };
 
   const input: React.CSSProperties = {
-    padding: 10,
-
-    borderRadius: 10,
-
-    border:
-      "1px solid rgba(0,0,0,0.15)",
-
-    background: "transparent",
-
-    color: "var(--text)",
-
     width: "100%",
+    padding: "12px 13px",
+    borderRadius: 14,
+    border: "1px solid rgba(0,0,0,0.12)",
+    background: "var(--surface)",
+    color: "var(--text)",
+    outline: "none",
+    fontWeight: 650,
   };
 
-  const primaryBtn: React.CSSProperties =
-    {
-      padding: "10px 14px",
+  const label: React.CSSProperties = {
+    display: "block",
+    marginBottom: 6,
+    fontSize: 12,
+    opacity: 0.72,
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  };
 
-      borderRadius: 10,
+  const button: React.CSSProperties = {
+    padding: "12px 16px",
+    borderRadius: 14,
+    border: "none",
+    background: primary,
+    color: "#fff",
+    fontWeight: 850,
+    cursor: "pointer",
+  };
 
-      border: "none",
+  const ghostButton: React.CSSProperties = {
+    padding: "10px 13px",
+    borderRadius: 12,
+    border: "1px solid rgba(0,0,0,0.10)",
+    background: "var(--surface)",
+    color: "var(--text)",
+    fontWeight: 750,
+    cursor: "pointer",
+  };
 
-      background: primary,
+  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
+    const tones = {
+      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
+      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
+      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
+      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
+      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
+      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
+    }[tone];
 
-      color: "#fff",
-
-      cursor: "pointer",
-
-      fontWeight: 600,
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      padding: "5px 9px",
+      borderRadius: 999,
+      background: tones.bg,
+      color: tones.color,
+      fontSize: 11,
+      fontWeight: 850,
     };
-
-  const outlineBtn: React.CSSProperties =
-    {
-      padding: "8px 12px",
-
-      borderRadius: 10,
-
-      border: `1px solid ${primary}`,
-
-      background: "transparent",
-
-      color: "var(--text)",
-
-      cursor: "pointer",
-    };
+  };
 
   // ======================================================
-  // UI
+  // LOADING / NO BRANCH
   // ======================================================
-  if (loading) {
+
+  if (loading || contextLoading) {
+    return <div style={{ padding: 20 }}>Loading expenses...</div>;
+  }
+
+  if (!activeBranchId) {
     return (
-      <div style={page}>
-        Loading expenses...
+      <div style={{ padding: 20, color: "var(--text)" }}>
+        <div style={{ ...card, textAlign: "center", padding: 34 }}>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
+          <p style={{ marginTop: 8, opacity: 0.7 }}>
+            Expense records belong to a branch. Select a school and branch from the sidebar before managing expenses.
+          </p>
+        </div>
       </div>
     );
   }
 
+  // ======================================================
+  // UI
+  // ======================================================
+
   return (
-    <div style={page}>
+    <div style={{ padding: 20, color: "var(--text)" }}>
       {/* HEADER */}
       <div
         style={{
           display: "flex",
-          justifyContent:
-            "space-between",
-
-          gap: 10,
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 16,
           flexWrap: "wrap",
         }}
       >
         <div>
-          <h2 style={{ margin: 0 }}>
-            Expenses
-          </h2>
-
-          <p
-            style={{
-              margin: "4px 0 0",
-              opacity: 0.7,
-              fontSize: 13,
-            }}
-          >
-            Full institutional
-            expense tracking &
-            management
-          </p>
+          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Expenses</h2>
+          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
+            Managing expense records in <b>{activeBranch?.name || "selected branch"}</b>
+            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+          </div>
         </div>
 
-        <button
-          style={primaryBtn}
-          onClick={() =>
-            setShowForm((p) => !p)
-          }
-        >
-          {showForm
-            ? "Close"
-            : "+ Add Expense"}
+        <button onClick={openCreate} style={button}>
+          + Record Expense
         </button>
-      </div>
-
-      {/* SUMMARY */}
-      <div
-        style={{
-          marginTop: 15,
-
-          display: "grid",
-
-          gridTemplateColumns:
-            "repeat(auto-fit,minmax(220px,1fr))",
-
-          gap: 12,
-        }}
-      >
-        <div style={card}>
-          <div
-            style={{
-              fontSize: 12,
-              opacity: 0.7,
-            }}
-          >
-            Total Expenses
-          </div>
-
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              marginTop: 4,
-            }}
-          >
-            GHS{" "}
-            {totalExpense.toFixed(2)}
-          </div>
-        </div>
-
-        <div style={card}>
-          <div
-            style={{
-              fontSize: 12,
-              opacity: 0.7,
-            }}
-          >
-            Today's Expenses
-          </div>
-
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              marginTop: 4,
-            }}
-          >
-            GHS{" "}
-            {todayExpense.toFixed(2)}
-          </div>
-        </div>
-
-        <div style={card}>
-          <div
-            style={{
-              fontSize: 12,
-              opacity: 0.7,
-            }}
-          >
-            Pending Expenses
-          </div>
-
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              marginTop: 4,
-            }}
-          >
-            GHS{" "}
-            {pendingExpense.toFixed(2)}
-          </div>
-        </div>
-
-        <div style={card}>
-          <div
-            style={{
-              fontSize: 12,
-              opacity: 0.7,
-            }}
-          >
-            Records
-          </div>
-
-          <div
-            style={{
-              fontSize: 28,
-              fontWeight: 700,
-              marginTop: 4,
-            }}
-          >
-            {filtered.length}
-          </div>
-        </div>
       </div>
 
       {/* FILTERS */}
       <div
         style={{
-          marginTop: 15,
-
+          ...card,
+          marginTop: 20,
           display: "grid",
-
-          gridTemplateColumns:
-            "2fr 1fr 1fr 1fr 1fr",
-
-          gap: 10,
+          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
+          gap: 12,
         }}
       >
         <input
-          style={input}
-          placeholder="Search expenses..."
+          placeholder="Search title, paid to, receipt, reference, approved by..."
           value={search}
-          onChange={(e) =>
-            setSearch(
-              e.target.value
-            )
-          }
+          onChange={e => setSearch(e.target.value)}
+          style={input}
         />
 
         <select
+          value={filterOrganizationId || ""}
+          onChange={e => setFilterOrganizationId(Number(e.target.value) || undefined)}
           style={input}
-          value={sourceFilter}
-          onChange={(e) =>
-            setSourceFilter(
-              e.target
-                .value as ExpenseSourceType
-            )
-          }
         >
-          <option value="">
-            All Types
-          </option>
-
-          <option value="salary">
-            Salary
-          </option>
-
-          <option value="maintenance">
-            Maintenance
-          </option>
-
-          <option value="utility">
-            Utility
-          </option>
-
-          <option value="transport">
-            Transport
-          </option>
-
-          <option value="technology">
-            Technology
-          </option>
-
-          <option value="academic">
-            Academic
-          </option>
-
-          <option value="feeding">
-            Feeding
-          </option>
-
-          <option value="construction">
-            Construction
-          </option>
-
-          <option value="external">
-            External
-          </option>
-
-          <option value="other">
-            Other
-          </option>
+          <option value="">All Organizations</option>
+          {organizations.map(row => (
+            <option key={row.id} value={row.id}>
+              {row.name} • {row.type}
+            </option>
+          ))}
         </select>
 
         <select
+          value={filterSourceType}
+          onChange={e => setFilterSourceType(e.target.value as "all" | ExpenseSourceType)}
           style={input}
-          value={methodFilter}
-          onChange={(e) =>
-            setMethodFilter(
-              e.target.value
-            )
-          }
         >
-          <option value="">
-            All Methods
-          </option>
-
-          <option value="cash">
-            Cash
-          </option>
-
-          <option value="momo">
-            Mobile Money
-          </option>
-
-          <option value="bank">
-            Bank
-          </option>
-
-          <option value="card">
-            Card
-          </option>
+          <option value="all">All Expense Types</option>
+          <option value="utilities">Utilities</option>
+          <option value="salary">Salary</option>
+          <option value="transport">Transport</option>
+          <option value="feeding">Feeding</option>
+          <option value="maintenance">Maintenance</option>
+          <option value="procurement">Procurement</option>
+          <option value="events">Events</option>
+          <option value="academic">Academic</option>
+          <option value="administration">Administration</option>
+          <option value="technology">Technology</option>
+          <option value="marketing">Marketing</option>
+          <option value="security">Security</option>
+          <option value="other">Other</option>
         </select>
 
         <select
+          value={filterMethod}
+          onChange={e => setFilterMethod(e.target.value as "all" | PaymentMethod)}
           style={input}
-          value={statusFilter}
-          onChange={(e) =>
-            setStatusFilter(
-              e.target.value
-            )
-          }
         >
-          <option value="">
-            All Status
-          </option>
-
-          <option value="pending">
-            Pending
-          </option>
-
-          <option value="approved">
-            Approved
-          </option>
-
-          <option value="paid">
-            Paid
-          </option>
-
-          <option value="cancelled">
-            Cancelled
-          </option>
-
-          <option value="rejected">
-            Rejected
-          </option>
-
-          <option value="refunded">
-            Refunded
-          </option>
+          <option value="all">All Payment Methods</option>
+          <option value="cash">Cash</option>
+          <option value="momo">MoMo</option>
+          <option value="bank">Bank</option>
+          <option value="card">Card</option>
         </select>
 
-        <input
-          type="date"
-          style={input}
+        <select
           value={dateFilter}
-          onChange={(e) =>
-            setDateFilter(
-              e.target.value
-            )
-          }
-        />
+          onChange={e => setDateFilter(e.target.value as DateFilter)}
+          style={input}
+        >
+          <option value="all">All Dates</option>
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
+
+        {dateFilter === "custom" && (
+          <>
+            <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={input} />
+            <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={input} />
+          </>
+        )}
       </div>
 
-      {/* FORM */}
-      {showForm && (
+      {/* SUMMARY */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
+          gap: 14,
+          marginTop: 20,
+        }}
+      >
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Records</div>
+          <div style={{ fontSize: 28, fontWeight: 950, marginTop: 6 }}>{summary.records}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Total Expenses</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.total)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Cash</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.cash)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>MoMo</div>
+          <div style={{ fontSize: 24, fontWeight: 950, marginTop: 6 }}>{money(summary.momo)}</div>
+        </div>
+        <div style={card}>
+          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Categories</div>
+          <div style={{ fontSize: 28, fontWeight: 950, marginTop: 6 }}>{summary.categories}</div>
+        </div>
+      </div>
+
+      {/* EXPENSE TYPE BREAKDOWN */}
+      <section style={{ marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Expense Type Breakdown</h3>
+          <span style={badge("gray")}>{sourceTotals.length} type group(s)</span>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          {sourceTotals.map(item => (
+            <div key={item.name} style={card}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
+                <div>
+                  <strong style={{ fontSize: 17 }}>{item.name}</strong>
+                  <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span style={badge("gray")}>{item.count} record(s)</span>
+                    <span style={badge("red")}>{money(item.amount)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {!sourceTotals.length && (
+            <div style={{ ...card, textAlign: "center", padding: 28 }}>
+              No expense type breakdown available for the selected filters.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ORGANIZATION BREAKDOWN */}
+      <section style={{ marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Organization Breakdown</h3>
+          <span style={badge("gray")}>{organizationTotals.length} organization group(s)</span>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          {organizationTotals.map(item => (
+            <div key={item.name} style={card}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "center" }}>
+                <div>
+                  <strong style={{ fontSize: 17 }}>{item.name}</strong>
+                  <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span style={badge("gray")}>{item.count} record(s)</span>
+                    <span style={badge("orange")}>{money(item.amount)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {!organizationTotals.length && (
+            <div style={{ ...card, textAlign: "center", padding: 28 }}>
+              No organization breakdown available for the selected filters.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* EXPENSE RECORDS */}
+      <section style={{ marginTop: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Expense Records</h3>
+          <span style={badge("gray")}>{filteredRows.length} record(s)</span>
+        </div>
+
+        <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+          {filteredRows.map(item => {
+            const row = item.row;
+
+            return (
+              <div key={row.id} style={card}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 16,
+                        background: row.photo
+                          ? `url(${row.photo}) center/cover`
+                          : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 950,
+                        flex: "0 0 48px",
+                      }}
+                    >
+                      {!row.photo && row.title.slice(0, 1).toUpperCase()}
+                    </div>
+
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 17, fontWeight: 900 }}>{row.title}</div>
+                      <div style={{ marginTop: 4, display: "flex", gap: 7, flexWrap: "wrap" }}>
+                        <span style={badge("red")}>{money(row.amount)}</span>
+                        <span style={badge("blue")}>{paymentMethodLabel(row.paymentMethod)}</span>
+                        <span style={badge("orange")}>{expenseSourceLabel(row.expenseSourceType)}</span>
+                        <span style={badge("gray")}>{row.date}</span>
+                        <span style={badge(row.organizationId ? "purple" : "gray")}>{item.organizationName}</span>
+                      </div>
+
+                      <div style={{ marginTop: 8, display: "flex", gap: 7, flexWrap: "wrap" }}>
+                        {row.paidTo && <span style={badge("gray")}>Paid to: {row.paidTo}</span>}
+                        {row.approvedBy && <span style={badge("gray")}>Approved by: {row.approvedBy}</span>}
+                        {row.receiptNumber && <span style={badge("orange")}>Receipt: {row.receiptNumber}</span>}
+                        {row.referenceNumber && <span style={badge("orange")}>Ref: {row.referenceNumber}</span>}
+                      </div>
+
+                      {row.description && (
+                        <div style={{ marginTop: 8, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
+                          {row.description}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button style={ghostButton} onClick={() => openEdit(row)}>
+                      Edit
+                    </button>
+                    <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row.id)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {!filteredRows.length && (
+            <div style={{ ...card, textAlign: "center", padding: 28 }}>
+              No expense records found in this branch for the selected filters.
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* DRAWER */}
+      {drawerOpen && (
         <div
           style={{
-            ...card,
-            marginTop: 20,
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            display: "flex",
+            justifyContent: "flex-end",
+            background: "rgba(15,23,42,0.45)",
+            backdropFilter: "blur(4px)",
           }}
+          onClick={() => setDrawerOpen(false)}
         >
-          <h3 style={{ marginTop: 0 }}>
-            {editingId
-              ? "Edit Expense"
-              : "Create Expense"}
-          </h3>
-
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit,minmax(240px,1fr))",
-
-              gap: 12,
+              width: "min(620px, 100vw)",
+              height: "100vh",
+              background: "var(--surface)",
+              color: "var(--text)",
+              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
+              padding: 22,
+              overflowY: "auto",
             }}
+            onClick={e => e.stopPropagation()}
           >
-            <input
-              style={input}
-              placeholder="Expense Title"
-              value={title}
-              onChange={(e) =>
-                setTitle(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Category"
-              value={category}
-              onChange={(e) =>
-                setCategory(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              type="number"
-              placeholder="Amount"
-              value={amount}
-              onChange={(e) =>
-                setAmount(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              type="date"
-              style={input}
-              value={date}
-              onChange={(e) =>
-                setDate(
-                  e.target.value
-                )
-              }
-            />
-
-            <select
-              style={input}
-              value={method}
-              onChange={(e) =>
-                setMethod(
-                  e.target.value
-                )
-              }
-            >
-              <option value="">
-                Payment Method
-              </option>
-
-              <option value="cash">
-                Cash
-              </option>
-
-              <option value="momo">
-                Mobile Money
-              </option>
-
-              <option value="bank">
-                Bank
-              </option>
-
-              <option value="card">
-                Card
-              </option>
-            </select>
-
-            <select
-              style={input}
-              value={sourceType}
-              onChange={(e) =>
-                setSourceType(
-                  e.target
-                    .value as ExpenseSourceType
-                )
-              }
-            >
-              <option value="salary">
-                Salary
-              </option>
-
-              <option value="maintenance">
-                Maintenance
-              </option>
-
-              <option value="utility">
-                Utility
-              </option>
-
-              <option value="transport">
-                Transport
-              </option>
-
-              <option value="technology">
-                Technology
-              </option>
-
-              <option value="academic">
-                Academic
-              </option>
-
-              <option value="feeding">
-                Feeding
-              </option>
-
-              <option value="construction">
-                Construction
-              </option>
-
-              <option value="external">
-                External
-              </option>
-
-              <option value="other">
-                Other
-              </option>
-            </select>
-
-            {/* CLASS */}
-            <select
-              style={input}
-              value={classId || ""}
-              onChange={(e) =>
-                setClassId(
-                  Number(
-                    e.target.value
-                  ) || undefined
-                )
-              }
-            >
-              <option value="">
-                Select Class
-              </option>
-
-              {classes.map((c) => (
-                <option
-                  key={c.id}
-                  value={c.id}
-                >
-                  {c.name}
-                </option>
-              ))}
-            </select>
-
-            {/* SUBJECT */}
-            <select
-              style={input}
-              value={subjectId || ""}
-              onChange={(e) =>
-                setSubjectId(
-                  Number(
-                    e.target.value
-                  ) || undefined
-                )
-              }
-            >
-              <option value="">
-                Select Subject
-              </option>
-
-              {subjects.map((s) => (
-                <option
-                  key={s.id}
-                  value={s.id}
-                >
-                  {s.name}
-                </option>
-              ))}
-            </select>
-
-            {/* VENDOR */}
-            <input
-              style={input}
-              placeholder="Vendor"
-              value={vendor}
-              onChange={(e) =>
-                setVendor(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Vendor Contact"
-              value={vendorContact}
-              onChange={(e) =>
-                setVendorContact(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Department"
-              value={department}
-              onChange={(e) =>
-                setDepartment(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Project Name"
-              value={projectName}
-              onChange={(e) =>
-                setProjectName(
-                  e.target.value
-                )
-              }
-            />
-
-            <input
-              style={input}
-              placeholder="Receipt Number"
-              value={receiptNumber}
-              onChange={(e) =>
-                setReceiptNumber(
-                  e.target.value
-                )
-              }
-            />
-
-            <select
-              style={input}
-              value={status}
-              onChange={(e) =>
-                setStatus(
-                  e.target.value as any
-                )
-              }
-            >
-              <option value="pending">
-                Pending
-              </option>
-
-              <option value="approved">
-                Approved
-              </option>
-
-              <option value="paid">
-                Paid
-              </option>
-
-              <option value="cancelled">
-                Cancelled
-              </option>
-
-              <option value="rejected">
-                Rejected
-              </option>
-
-              <option value="refunded">
-                Refunded
-              </option>
-            </select>
-
-            {/* NOTE */}
-            <textarea
-              style={{
-                ...input,
-                minHeight: 120,
-                gridColumn:
-                  "1 / -1",
-              }}
-              placeholder="Expense notes..."
-              value={note}
-              onChange={(e) =>
-                setNote(
-                  e.target.value
-                )
-              }
-            />
-
-            {/* FLAGS */}
-            <div
-              style={{
-                display: "flex",
-                gap: 15,
-                flexWrap: "wrap",
-                gridColumn:
-                  "1 / -1",
-              }}
-            >
-              <label>
-                <input
-                  type="checkbox"
-                  checked={
-                    recurring
-                  }
-                  onChange={(e) =>
-                    setRecurring(
-                      e.target.checked
-                    )
-                  }
-                />{" "}
-                Recurring
-              </label>
-
-              <label>
-                <input
-                  type="checkbox"
-                  checked={
-                    reimbursable
-                  }
-                  onChange={(e) =>
-                    setReimbursable(
-                      e.target.checked
-                    )
-                  }
-                />{" "}
-                Reimbursable
-              </label>
-
-              <label>
-                <input
-                  type="checkbox"
-                  checked={
-                    refunded
-                  }
-                  onChange={(e) =>
-                    setRefunded(
-                      e.target.checked
-                    )
-                  }
-                />{" "}
-                Refunded
-              </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
+                  {editMode ? "Edit Expense" : "Record Expense"}
+                </h3>
+                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
+                  This expense record will be saved under {activeBranch?.name || "the selected branch"}
+                  {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+                </div>
+              </div>
+              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>Close</button>
             </div>
 
-            {/* ACTIONS */}
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                marginTop: 10,
-                gridColumn:
-                  "1 / -1",
-              }}
-            >
-              <button
-                style={primaryBtn}
-                onClick={save}
-              >
-                {editingId
-                  ? "Update Expense"
-                  : "Save Expense"}
-              </button>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label style={label}>Expense Title</label>
+                <input
+                  value={form.title}
+                  onChange={e => updateForm({ title: e.target.value })}
+                  placeholder="e.g. Electricity bill, Staff salary, Stationery"
+                  style={input}
+                />
+              </div>
 
-              <button
-                style={outlineBtn}
-                onClick={reset}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
+                }}
               >
-                Cancel
+                <div>
+                  <label style={label}>Amount</label>
+                  <input
+                    type="number"
+                    value={form.amount}
+                    onChange={e => updateForm({ amount: Number(e.target.value) })}
+                    style={input}
+                  />
+                </div>
+
+                <div>
+                  <label style={label}>Date</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={e => updateForm({ date: e.target.value })}
+                    style={input}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={label}>Expense Type</label>
+                <select
+                  value={form.expenseSourceType || ""}
+                  onChange={e => updateForm({ expenseSourceType: (e.target.value || undefined) as ExpenseSourceType | undefined })}
+                  style={input}
+                >
+                  <option value="">Unspecified</option>
+                  <option value="utilities">Utilities</option>
+                  <option value="salary">Salary</option>
+                  <option value="transport">Transport</option>
+                  <option value="feeding">Feeding</option>
+                  <option value="maintenance">Maintenance</option>
+                  <option value="procurement">Procurement</option>
+                  <option value="events">Events</option>
+                  <option value="academic">Academic</option>
+                  <option value="administration">Administration</option>
+                  <option value="technology">Technology</option>
+                  <option value="marketing">Marketing</option>
+                  <option value="security">Security</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={label}>Payment Method</label>
+                <select
+                  value={form.paymentMethod || ""}
+                  onChange={e => updateForm({ paymentMethod: (e.target.value || undefined) as PaymentMethod | undefined })}
+                  style={input}
+                >
+                  <option value="">Unspecified</option>
+                  <option value="cash">Cash</option>
+                  <option value="momo">MoMo</option>
+                  <option value="bank">Bank</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={label}>Organization</label>
+                <select
+                  value={form.organizationId || ""}
+                  onChange={e => updateForm({ organizationId: Number(e.target.value) || undefined })}
+                  style={input}
+                >
+                  <option value="">General Expense / No Organization</option>
+                  {organizations.map(row => (
+                    <option key={row.id} value={row.id}>
+                      {row.name} • {row.type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <label style={label}>Paid To</label>
+                  <input
+                    value={form.paidTo || ""}
+                    onChange={e => updateForm({ paidTo: e.target.value })}
+                    placeholder="Vendor, staff, supplier or payee"
+                    style={input}
+                  />
+                </div>
+
+                <div>
+                  <label style={label}>Approved By</label>
+                  <input
+                    value={form.approvedBy || ""}
+                    onChange={e => updateForm({ approvedBy: e.target.value })}
+                    placeholder="Approving officer"
+                    style={input}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <label style={label}>Receipt Number</label>
+                  <input
+                    value={form.receiptNumber || ""}
+                    onChange={e => updateForm({ receiptNumber: e.target.value })}
+                    placeholder="Receipt number"
+                    style={input}
+                  />
+                </div>
+
+                <div>
+                  <label style={label}>Reference Number</label>
+                  <input
+                    value={form.referenceNumber || ""}
+                    onChange={e => updateForm({ referenceNumber: e.target.value })}
+                    placeholder="Bank/MoMo/reference number"
+                    style={input}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={label}>Description</label>
+                <textarea
+                  value={form.description || ""}
+                  onChange={e => updateForm({ description: e.target.value })}
+                  placeholder="Brief note about this expense"
+                  rows={4}
+                  style={{ ...input, resize: "vertical" }}
+                />
+              </div>
+
+              <div>
+                <label style={label}>Receipt / Proof Image</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handleImageUpload(e.target.files?.[0])}
+                  style={input}
+                />
+                {form.photo && (
+                  <img
+                    src={form.photo}
+                    alt="Expense proof"
+                    style={{ width: "100%", height: 140, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
+                  />
+                )}
+              </div>
+
+              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "Saving..." : editMode ? "Save Changes" : "Record Expense"}
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* LIST */}
-      <div
-        style={{
-          marginTop: 20,
-          display: "grid",
-          gap: 10,
-        }}
-      >
-        {filtered.length === 0 && (
-          <div style={card}>
-            No expense records found
-          </div>
-        )}
-
-        {filtered.map((item) => (
-          <div
-            key={item.id}
-            style={card}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-
-                gap: 10,
-
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 16,
-                  }}
-                >
-                  {item.title}
-                </div>
-
-                <div
-                  style={{
-                    fontSize: 13,
-                    opacity: 0.7,
-                    marginTop: 4,
-                  }}
-                >
-                  {getSourceLabel(
-                    item
-                  )}{" "}
-                  •{" "}
-                  {item.method ||
-                    "N/A"}{" "}
-                  • {item.date}
-                </div>
-
-                {item.department && (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      marginTop: 5,
-                    }}
-                  >
-                    Department:{" "}
-                    {
-                      item.department
-                    }
-                  </div>
-                )}
-
-                {item.vendor && (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      marginTop: 5,
-                    }}
-                  >
-                    Vendor:{" "}
-                    {item.vendor}
-                  </div>
-                )}
-
-                {item.projectName && (
-                  <div
-                    style={{
-                      fontSize: 13,
-                      marginTop: 5,
-                    }}
-                  >
-                    Project:{" "}
-                    {
-                      item.projectName
-                    }
-                  </div>
-                )}
-
-                {item.note && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 13,
-                      opacity: 0.75,
-                    }}
-                  >
-                    {item.note}
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  textAlign: "right",
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 22,
-                  }}
-                >
-                  GHS{" "}
-                  {Number(
-                    item.amount
-                  ).toFixed(2)}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 5,
-                    fontSize: 12,
-                    opacity: 0.7,
-                  }}
-                >
-                  {item.status}
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 10,
-                    justifyContent:
-                      "flex-end",
-                  }}
-                >
-                  <button
-                    style={outlineBtn}
-                    onClick={() =>
-                      edit(item)
-                    }
-                  >
-                    Edit
-                  </button>
-
-                  <button
-                    style={outlineBtn}
-                    onClick={() =>
-                      remove(
-                        item.id!
-                      )
-                    }
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

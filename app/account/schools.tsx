@@ -1,27 +1,34 @@
 "use client";
 
 /**
- * Schools.tsx
+ * schools.tsx
  * ---------------------------------------------------------
- * INSTITUTION PROFILE & BRANDING CENTER
+ * MOBILE-FIRST SECURE SCHOOL MANAGEMENT PAGE
  * ---------------------------------------------------------
  *
  * DB table: schools
  *
- * PURPOSE
- * ---------------------------------------------------------
- * This page creates and manages School records.
- * It also gives true school-level insight.
+ * Purpose:
+ * - Create and manage school profiles under the signed-in account.
+ * - Show true school-level analytics per school.
+ * - Keep page-level analytics as account portfolio overview.
  *
- * Important distinction:
- * - Page-level analytics = institution portfolio overview
- * - Each school card = counts only for that specific school
- *
- * This avoids confusing totals where branches, students and teachers
- * from different schools appear as if they belong to one school.
+ * Production rules:
+ * - Signed-in account required.
+ * - Reads/writes are account scoped.
+ * - Soft delete only.
+ * - Mobile-first cards and drawer UI.
+ * - Account/dashboard shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
+
+import { SyncStatus } from "../lib/constants/syncStatus";
 
 import {
   db,
@@ -37,12 +44,17 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
 // ======================================================
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -73,20 +85,43 @@ type SchoolView = {
   completeness: number;
 };
 
+const emptyForm = (): FormState => ({
+  name: "",
+  logo: "",
+  motto: "",
+  phone: "",
+  email: "",
+  address: "",
+  website: "",
+  photo: "",
+  bannerImage: "",
+  galleryImages: [],
+});
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function SchoolsPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchoolId,
     activeSchool,
     setActiveSchoolId,
     refreshInstitution,
+    loading: contextLoading,
   } = useActiveBranch();
 
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -106,28 +141,49 @@ export default function SchoolsPage() {
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
 
   const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"all" | "current" | "ready" | "needs_branch">("all");
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
-  const [form, setForm] = useState<FormState>({
-    name: "",
-    logo: "",
-    motto: "",
-    phone: "",
-    email: "",
-    address: "",
-    website: "",
-    photo: "",
-    bannerImage: "",
-    galleryImages: [],
-  });
+  // ======================================================
+  // AUTH PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+    }
+  }, [accountLoading, contextLoading, authenticated, accountId, router]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const clearData = () => {
+    setRows([]);
+    setBranches([]);
+    setStudents([]);
+    setTeachers([]);
+    setClasses([]);
+    setSubjects([]);
+    setAcademicStructures([]);
+    setAcademicPeriods([]);
+    setClassSubjects([]);
+  };
+
+  const sameAccount = (row: TenantRow) => row.accountId === accountId && !row.isDeleted;
+
   const load = async () => {
+    if (!authenticated || !accountId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -153,17 +209,22 @@ export default function SchoolsPage() {
         db.classSubjects.toArray(),
       ]);
 
-      setRows(schoolRows.filter(row => !row.isDeleted));
-      setBranches(branchRows.filter(row => !row.isDeleted));
-      setStudents(studentRows.filter(row => !row.isDeleted && row.status !== "withdrawn"));
-      setTeachers(teacherRows.filter(row => !row.isDeleted));
-      setClasses(classRows.filter(row => !row.isDeleted));
-      setSubjects(subjectRows.filter(row => !row.isDeleted));
-      setAcademicStructures(structureRows.filter(row => !row.isDeleted));
-      setAcademicPeriods(periodRows.filter(row => !row.isDeleted));
-      setClassSubjects(classSubjectRows.filter(row => !row.isDeleted));
+      setRows(
+        schoolRows
+          .filter(sameAccount)
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setBranches(branchRows.filter(sameAccount));
+      setStudents(studentRows.filter((row) => sameAccount(row) && row.status !== "withdrawn"));
+      setTeachers(teacherRows.filter(sameAccount));
+      setClasses(classRows.filter(sameAccount));
+      setSubjects(subjectRows.filter(sameAccount));
+      setAcademicStructures(structureRows.filter(sameAccount));
+      setAcademicPeriods(periodRows.filter(sameAccount));
+      setClassSubjects(classSubjectRows.filter(sameAccount));
     } catch (error) {
       console.error("Failed to load schools:", error);
+      clearData();
       alert("Failed to load schools");
     } finally {
       setLoading(false);
@@ -172,25 +233,28 @@ export default function SchoolsPage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId]);
 
   // ======================================================
   // SCHOOL-SPECIFIC VIEW MODEL
   // ======================================================
 
   const viewRows = useMemo<SchoolView[]>(() => {
-    return rows.map(row => {
-      const schoolBranches = branches.filter(branch => branch.schoolId === row.id);
-      const activeBranches = schoolBranches.filter(branch => branch.active !== false);
-      const branchIds = new Set(schoolBranches.map(branch => branch.id));
+    return rows.map((row) => {
+      const schoolBranches = branches.filter((branch) => branch.schoolId === row.id);
+      const activeBranches = schoolBranches.filter((branch) => branch.active !== false);
+      const branchIds = new Set(
+        schoolBranches.map((branch) => branch.id).filter(Boolean) as number[]
+      );
 
-      const schoolStudents = students.filter(student => branchIds.has(student.branchId));
-      const schoolTeachers = teachers.filter(teacher => branchIds.has(teacher.branchId));
-      const schoolClasses = classes.filter(classRow => branchIds.has(classRow.branchId));
-      const schoolSubjects = subjects.filter(subject => branchIds.has(subject.branchId));
-      const schoolStructures = academicStructures.filter(structure => branchIds.has(structure.branchId));
-      const schoolPeriods = academicPeriods.filter(period => branchIds.has(period.branchId));
-      const schoolClassSubjects = classSubjects.filter(classSubject => branchIds.has(classSubject.branchId));
+      const schoolStudents = students.filter((student) => branchIds.has(student.branchId));
+      const schoolTeachers = teachers.filter((teacher) => branchIds.has(teacher.branchId));
+      const schoolClasses = classes.filter((classRow) => branchIds.has(classRow.branchId));
+      const schoolSubjects = subjects.filter((subject) => branchIds.has(subject.branchId));
+      const schoolStructures = academicStructures.filter((structure) => branchIds.has(structure.branchId));
+      const schoolPeriods = academicPeriods.filter((period) => branchIds.has(period.branchId));
+      const schoolClassSubjects = classSubjects.filter((classSubject) => branchIds.has(classSubject.branchId));
 
       const completenessChecks = [
         !!row.name,
@@ -220,29 +284,24 @@ export default function SchoolsPage() {
         academicStructureCount: schoolStructures.length,
         academicPeriodCount: schoolPeriods.length,
         classSubjectCount: schoolClassSubjects.length,
-        branchNames: schoolBranches.map(branch => branch.name).slice(0, 4),
+        branchNames: schoolBranches.map((branch) => branch.name).slice(0, 4),
         completeness,
       };
     });
-  }, [
-    rows,
-    branches,
-    students,
-    teachers,
-    classes,
-    subjects,
-    academicStructures,
-    academicPeriods,
-    classSubjects,
-  ]);
+  }, [rows, branches, students, teachers, classes, subjects, academicStructures, academicPeriods, classSubjects]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
-        if (!query) return true;
+      .filter((item) => {
         const row = item.row;
+
+        if (filterStatus === "current" && activeSchoolId !== row.id) return false;
+        if (filterStatus === "ready" && item.completeness < 70) return false;
+        if (filterStatus === "needs_branch" && item.branchCount > 0) return false;
+
+        if (!query) return true;
 
         return `
           ${row.name}
@@ -257,17 +316,17 @@ export default function SchoolsPage() {
           .includes(query);
       })
       .sort((a, b) => a.row.name.localeCompare(b.row.name));
-  }, [viewRows, search]);
+  }, [viewRows, search, filterStatus, activeSchoolId]);
 
   // ======================================================
   // PORTFOLIO INSIGHTS
   // ======================================================
 
   const portfolio = useMemo(() => {
-    const activeBranches = branches.filter(branch => branch.active !== false);
-    const schoolsWithBranches = viewRows.filter(item => item.branchCount > 0).length;
-    const schoolsReadyForOperations = viewRows.filter(item => item.completeness >= 70).length;
-    const unassignedSchools = viewRows.filter(item => item.branchCount === 0).length;
+    const activeBranches = branches.filter((branch) => branch.active !== false);
+    const schoolsWithBranches = viewRows.filter((item) => item.branchCount > 0).length;
+    const schoolsReadyForOperations = viewRows.filter((item) => item.completeness >= 70).length;
+    const unassignedSchools = viewRows.filter((item) => item.branchCount === 0).length;
 
     return {
       schools: rows.length,
@@ -283,11 +342,11 @@ export default function SchoolsPage() {
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
   };
 
   const fileToBase64 = (file: File) => {
-    return new Promise<string>(resolve => {
+    return new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
       reader.readAsDataURL(file);
@@ -308,35 +367,32 @@ export default function SchoolsPage() {
 
     const images = await Promise.all(Array.from(files).map(fileToBase64));
 
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
       galleryImages: [...(prev.galleryImages || []), ...images],
     }));
   };
 
   const removeGalleryImage = (index: number) => {
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
       galleryImages: (prev.galleryImages || []).filter((_, i) => i !== index),
     }));
   };
 
+  const requireAccount = () => {
+    if (!authenticated || !accountId) {
+      alert("Sign in first.");
+      return false;
+    }
+    return true;
+  };
+
   const openCreate = () => {
+    if (!requireAccount()) return;
+
     setEditMode(false);
-
-    setForm({
-      name: "",
-      logo: "",
-      motto: "",
-      phone: "",
-      email: "",
-      address: "",
-      website: "",
-      photo: "",
-      bannerImage: "",
-      galleryImages: [],
-    });
-
+    setForm(emptyForm());
     setDrawerOpen(true);
   };
 
@@ -365,9 +421,10 @@ export default function SchoolsPage() {
   // ======================================================
 
   const validate = () => {
+    if (!authenticated || !accountId) return "Sign in first";
     if (!form.name.trim()) return "Enter school name";
 
-    const duplicate = rows.find(row => {
+    const duplicate = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
       return row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
@@ -379,31 +436,43 @@ export default function SchoolsPage() {
 
   const save = async () => {
     const error = validate();
+
     if (error) {
       alert(error);
       return;
     }
 
+    if (!authenticated || !accountId) return;
+
     try {
       setSaving(true);
 
-      const payload = prepareSyncData({
-        name: form.name.trim(),
-        logo: form.logo || undefined,
-        motto: form.motto?.trim() || undefined,
-        phone: form.phone?.trim() || undefined,
-        email: form.email?.trim() || undefined,
-        address: form.address?.trim() || undefined,
-        website: form.website?.trim() || undefined,
-        photo: form.photo || undefined,
-        bannerImage: form.bannerImage || undefined,
-        galleryImages: form.galleryImages || [],
-      }) as School;
+      const existing = editMode && form.id ? rows.find((row) => row.id === form.id) : undefined;
+
+      const payload = prepareSyncData(
+        {
+          accountId,
+          name: form.name.trim(),
+          logo: form.logo || undefined,
+          motto: form.motto?.trim() || undefined,
+          phone: form.phone?.trim() || undefined,
+          email: form.email?.trim() || undefined,
+          address: form.address?.trim() || undefined,
+          website: form.website?.trim() || undefined,
+          photo: form.photo || undefined,
+          bannerImage: form.bannerImage || undefined,
+          galleryImages: form.galleryImages || [],
+        },
+        existing
+      ) as School;
 
       let savedSchoolId = form.id;
 
       if (editMode && form.id) {
         await db.schools.update(form.id, {
+          accountId: payload.accountId,
+          cloudId: payload.cloudId,
+          createdAt: payload.createdAt,
           name: payload.name,
           logo: payload.logo,
           motto: payload.motto,
@@ -418,8 +487,8 @@ export default function SchoolsPage() {
           version: payload.version,
           deviceId: payload.deviceId,
           synced: payload.synced,
-          isDeleted: payload.isDeleted,
-        } as any);
+          isDeleted: false,
+        } as Partial<School>);
       } else {
         const id = await db.schools.add(payload);
         savedSchoolId = Number(id);
@@ -444,22 +513,21 @@ export default function SchoolsPage() {
   const remove = async (id?: number) => {
     if (!id) return;
 
-    const schoolView = viewRows.find(item => item.row.id === id);
+    const schoolView = viewRows.find((item) => item.row.id === id);
     const branchCount = schoolView?.branchCount || 0;
 
     if (branchCount) {
-      const proceed = confirm(
-        `This school has ${branchCount} branch(es). Delete anyway?`
-      );
+      const proceed = confirm(`This school has ${branchCount} branch(es). Delete anyway?`);
       if (!proceed) return;
-    } else {
-      if (!confirm("Delete this school?")) return;
+    } else if (!confirm("Delete this school?")) {
+      return;
     }
 
     await db.schools.update(id, {
       isDeleted: true,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<School>);
 
     if (activeSchoolId === id) {
       await setActiveSchoolId(null);
@@ -473,121 +541,36 @@ export default function SchoolsPage() {
     if (!id) return;
     await setActiveSchoolId(id);
     await refreshInstitution();
+    await load();
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="sc-page" style={{ "--sc-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="sc-state-card">
+          <div className="sc-spinner" />
+          <h2>Opening schools...</h2>
+          <p>Checking account, school profiles, branches, students, teachers and academic data.</p>
+        </section>
+      </main>
+    );
+  }
 
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const renderImageInput = (
-    title: string,
-    field: "logo" | "photo" | "bannerImage",
-    fit: "contain" | "cover" = "cover"
-  ) => (
-    <div>
-      <label style={label}>{title}</label>
-      <input
-        type="file"
-        accept="image/*"
-        onChange={e => handleImageUpload(field, e.target.files?.[0])}
-        style={input}
-      />
-      {form[field] && (
-        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
-          <img
-            src={form[field]}
-            alt={title}
-            style={{
-              height: field === "bannerImage" ? 120 : 86,
-              width: field === "bannerImage" ? "100%" : 120,
-              borderRadius: 14,
-              objectFit: fit,
-              background: "#fff",
-              border: "1px solid rgba(0,0,0,0.08)",
-            }}
-          />
-        </div>
-      )}
-    </div>
-  );
-
-  // ======================================================
-  // LOADING
-  // ======================================================
-
-  if (loading) {
-    return <div style={{ padding: 20 }}>Loading schools...</div>;
+  if (!authenticated || !accountId) {
+    return (
+      <main className="sc-page" style={{ "--sc-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="sc-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing schools.</p>
+        </section>
+      </main>
+    );
   }
 
   // ======================================================
@@ -595,368 +578,1102 @@ export default function SchoolsPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Schools</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Manage school identity and view true school-level reach across branches.
+    <main className="sc-page" style={{ "--sc-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="sc-hero">
+        <div className="sc-hero-left">
+          <div className="sc-hero-icon">🏫</div>
+          <div className="sc-title-wrap">
+            <p>Institution Identity</p>
+            <h2>Schools</h2>
+            <span>Manage school profiles, branding, and school-level reach.</span>
           </div>
         </div>
 
-        <button onClick={openCreate} style={button}>
+        <button type="button" className="sc-primary-btn" onClick={openCreate}>
           + Create School
         </button>
-      </div>
+      </section>
 
-      {/* PORTFOLIO ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>School Profiles</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{portfolio.schools}</div>
-          <div style={{ marginTop: 4, opacity: 0.58, fontSize: 12 }}>Total institutions created</div>
-        </div>
+      <section className="sc-summary-grid" aria-label="School portfolio summary">
+        <SummaryCard label="School Profiles" value={portfolio.schools} icon="🏫" />
+        <SummaryCard label="Active Branches" value={portfolio.activeBranches} icon="🏢" />
+        <SummaryCard label="With Branches" value={portfolio.schoolsWithBranches} icon="✅" />
+        <SummaryCard label="Ready" value={portfolio.schoolsReadyForOperations} icon="🚀" />
+        <SummaryCard label="Needs Branch" value={portfolio.unassignedSchools} icon="⚠️" />
+      </section>
 
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active Branches</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{portfolio.activeBranches}</div>
-          <div style={{ marginTop: 4, opacity: 0.58, fontSize: 12 }}>Across all schools</div>
-        </div>
-
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Schools With Branches</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{portfolio.schoolsWithBranches}</div>
-          <div style={{ marginTop: 4, opacity: 0.58, fontSize: 12 }}>Ready for branch operations</div>
-        </div>
-
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Needs Branch Setup</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{portfolio.unassignedSchools}</div>
-          <div style={{ marginTop: 4, opacity: 0.58, fontSize: 12 }}>Schools without branches</div>
-        </div>
-      </div>
-
-      {/* FILTER */}
-      <div style={{ ...card, marginTop: 18 }}>
+      <section className="sc-filter-card">
         <input
           placeholder="Search school, motto, phone, email, website, branch..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
-      </div>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 14 }}>
-        {filteredRows.map(item => {
+        <select
+          value={filterStatus}
+          onChange={(event) => setFilterStatus(event.target.value as "all" | "current" | "ready" | "needs_branch")}
+        >
+          <option value="all">All Schools</option>
+          <option value="current">Current School</option>
+          <option value="ready">Ready Schools</option>
+          <option value="needs_branch">Needs Branch Setup</option>
+        </select>
+      </section>
+
+      <section className="sc-list">
+        {filteredRows.map((item) => {
           const row = item.row;
           const isActiveSchool = activeSchoolId === row.id;
 
           return (
-            <div key={row.id} style={{ ...card, padding: 0, overflow: "hidden" }}>
+            <article key={row.id} className={`sc-entity-card ${isActiveSchool ? "current" : ""}`}>
               {(row.bannerImage || row.photo) && (
                 <div
+                  className="sc-card-banner"
                   style={{
-                    height: 130,
-                    backgroundImage: `linear-gradient(135deg, rgba(15,23,42,0.58), rgba(15,23,42,0.14)), url(${row.bannerImage || row.photo})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
+                    backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.58), rgba(15,23,42,.14)), url(${row.bannerImage || row.photo})`,
                   }}
                 />
               )}
 
-              <div
-                style={{
-                  padding: 18,
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 15, minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: 68,
-                      height: 68,
-                      borderRadius: 22,
-                      background: row.logo
-                        ? `#fff url(${row.logo}) center/contain no-repeat`
-                        : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 950,
-                      flex: "0 0 68px",
-                      border: "1px solid rgba(0,0,0,0.06)",
-                    }}
-                  >
-                    {!row.logo && row.name.slice(0, 2).toUpperCase()}
-                  </div>
+              <div className="sc-card-body">
+                <div className="sc-card-top">
+                  <Avatar name={row.name} photo={row.logo} primary={primary} />
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 950 }}>{row.name}</div>
-                      {isActiveSchool && <span style={badge("blue")}>Current school</span>}
-                      <span style={badge(item.completeness >= 70 ? "green" : "orange")}>
+                  <div className="sc-card-main">
+                    <h3>{row.name}</h3>
+                    {row.motto ? <p className="motto">“{row.motto}”</p> : <p>No motto added</p>}
+
+                    <div className="sc-chip-row">
+                      {isActiveSchool && <Chip tone="blue">Current school</Chip>}
+                      <Chip tone={item.completeness >= 70 ? "green" : "orange"}>
                         {item.completeness}% complete
-                      </span>
+                      </Chip>
                     </div>
-
-                    {row.motto && (
-                      <div style={{ marginTop: 4, opacity: 0.75, fontSize: 13, fontStyle: "italic" }}>
-                        “{row.motto}”
-                      </div>
-                    )}
-
-                    <div style={{ marginTop: 8, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                      {row.address || "No address"} {row.website ? `• ${row.website}` : ""}
-                    </div>
-
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>{item.branchCount} branch(es)</span>
-                      <span style={badge("green")}>{item.activeBranchCount} active</span>
-                      <span style={badge("gray")}>{item.studentCount} students</span>
-                      <span style={badge("gray")}>{item.teacherCount} teachers</span>
-                      <span style={badge("gray")}>{item.classCount} classes</span>
-                      <span style={badge("gray")}>{item.subjectCount} subjects</span>
-                      <span style={badge("orange")}>{item.classSubjectCount} class subjects</span>
-                    </div>
-
-                    {!!item.branchNames.length && (
-                      <div style={{ marginTop: 8, fontSize: 12, opacity: 0.65 }}>
-                        Branches: {item.branchNames.join(", ")}
-                        {item.branchCount > item.branchNames.length ? "..." : ""}
-                      </div>
-                    )}
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {(row.address || row.website || row.phone || row.email) && (
+                  <div className="sc-contact-card">
+                    {row.address && <p>{row.address}</p>}
+                    <div className="sc-chip-row compact">
+                      {row.website && <Chip tone="gray">{row.website}</Chip>}
+                      {row.phone && <Chip tone="gray">{row.phone}</Chip>}
+                      {row.email && <Chip tone="gray">{row.email}</Chip>}
+                    </div>
+                  </div>
+                )}
+
+                <div className="sc-stat-grid">
+                  <MiniStat label="Branches" value={item.branchCount} />
+                  <MiniStat label="Active" value={item.activeBranchCount} />
+                  <MiniStat label="Students" value={item.studentCount} />
+                  <MiniStat label="Teachers" value={item.teacherCount} />
+                  <MiniStat label="Classes" value={item.classCount} />
+                  <MiniStat label="Subjects" value={item.subjectCount} />
+                </div>
+
+                <div className="sc-extra-row">
+                  <Chip tone="gray">{item.academicStructureCount} structures</Chip>
+                  <Chip tone="gray">{item.academicPeriodCount} periods</Chip>
+                  <Chip tone="orange">{item.classSubjectCount} class subjects</Chip>
+                </div>
+
+                {!!item.branchNames.length && (
+                  <div className="sc-branch-names">
+                    Branches: {item.branchNames.join(", ")}
+                    {item.branchCount > item.branchNames.length ? "..." : ""}
+                  </div>
+                )}
+
+                <div className="sc-action-row">
                   {!isActiveSchool && (
-                    <button style={ghostButton} onClick={() => makeActiveSchool(row.id)}>
-                      Switch to School
+                    <button type="button" className="primary-soft" onClick={() => makeActiveSchool(row.id)}>
+                      Switch
                     </button>
                   )}
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
-                    Edit
-                  </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row.id)}>
-                    Delete
-                  </button>
+                  <button type="button" onClick={() => openEdit(row)}>Edit</button>
+                  <button type="button" className="danger" onClick={() => remove(row.id)}>Delete</button>
                 </div>
               </div>
-            </div>
+            </article>
           );
         })}
 
-        {!filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>No schools found.</div>
-        )}
-      </div>
+        {!filteredRows.length && <EmptyCard text="No schools found under this account." />}
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(580px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 18,
-              }}
-            >
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit School" : "Create School"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Define the official institutional identity and branding.
-                </div>
-              </div>
+        <div className="sc-drawer-layer">
+          <button type="button" className="sc-drawer-overlay" aria-label="Close drawer" onClick={() => setDrawerOpen(false)} />
 
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+          <aside className="sc-drawer">
+            <div className="sc-drawer-head">
+              <div>
+                <p>School Profile</p>
+                <h2>{editMode ? "Edit School" : "Create School"}</h2>
+                <span>Define the official institutional identity and branding for this account.</span>
+              </div>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>School Name</label>
+            <div className="sc-form-grid">
+              <Field label="School Name">
                 <input
                   value={form.name}
-                  onChange={e => updateForm({ name: e.target.value })}
+                  onChange={(event) => updateForm({ name: event.target.value })}
                   placeholder="Official school name"
-                  style={input}
                 />
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Motto</label>
+              <Field label="Motto">
                 <input
                   value={form.motto || ""}
-                  onChange={e => updateForm({ motto: e.target.value })}
+                  onChange={(event) => updateForm({ motto: event.target.value })}
                   placeholder="School motto"
-                  style={input}
                 />
-              </div>
+              </Field>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <label style={label}>Phone</label>
+              <div className="sc-form-two">
+                <Field label="Phone">
                   <input
                     value={form.phone || ""}
-                    onChange={e => updateForm({ phone: e.target.value })}
+                    onChange={(event) => updateForm({ phone: event.target.value })}
                     placeholder="Phone number"
-                    style={input}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label style={label}>Email</label>
+                <Field label="Email">
                   <input
                     value={form.email || ""}
-                    onChange={e => updateForm({ email: e.target.value })}
+                    onChange={(event) => updateForm({ email: event.target.value })}
                     placeholder="Email address"
-                    style={input}
                   />
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label style={label}>Website</label>
+              <Field label="Website">
                 <input
                   value={form.website || ""}
-                  onChange={e => updateForm({ website: e.target.value })}
+                  onChange={(event) => updateForm({ website: event.target.value })}
                   placeholder="Website"
-                  style={input}
                 />
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Address</label>
+              <Field label="Address">
                 <textarea
                   value={form.address || ""}
-                  onChange={e => updateForm({ address: e.target.value })}
+                  onChange={(event) => updateForm({ address: event.target.value })}
                   placeholder="School address"
                   rows={3}
-                  style={{ ...input, resize: "vertical" }}
                 />
-              </div>
+              </Field>
 
-              {renderImageInput("School Logo", "logo", "contain")}
-              {renderImageInput("School Photo", "photo", "cover")}
-              {renderImageInput("School Banner Image", "bannerImage", "cover")}
+              <ImageField
+                label="School Logo"
+                value={form.logo}
+                alt="School logo"
+                fit="contain"
+                onChange={(file) => handleImageUpload("logo", file)}
+              />
 
-              <div>
-                <label style={label}>School Gallery</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={e => handleGalleryUpload(e.target.files)}
-                  style={input}
-                />
+              <ImageField
+                label="School Photo"
+                value={form.photo}
+                alt="School"
+                fit="cover"
+                onChange={(file) => handleImageUpload("photo", file)}
+              />
+
+              <ImageField
+                label="School Banner Image"
+                value={form.bannerImage}
+                alt="School banner"
+                fit="cover"
+                wide
+                onChange={(file) => handleImageUpload("bannerImage", file)}
+              />
+
+              <Field label="School Gallery">
+                <input type="file" accept="image/*" multiple onChange={(event) => handleGalleryUpload(event.target.files)} />
 
                 {!!form.galleryImages?.length && (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))",
-                      gap: 10,
-                    }}
-                  >
+                  <div className="sc-gallery-grid">
                     {form.galleryImages.map((image, index) => (
-                      <div key={`${image}-${index}`} style={{ position: "relative" }}>
-                        <img
-                          src={image}
-                          alt={`Gallery ${index + 1}`}
-                          style={{
-                            width: "100%",
-                            height: 90,
-                            borderRadius: 12,
-                            objectFit: "cover",
-                            border: "1px solid rgba(0,0,0,0.08)",
-                          }}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeGalleryImage(index)}
-                          style={{
-                            position: "absolute",
-                            top: 6,
-                            right: 6,
-                            border: "none",
-                            borderRadius: 999,
-                            width: 24,
-                            height: 24,
-                            background: "rgba(220,38,38,0.92)",
-                            color: "#fff",
-                            cursor: "pointer",
-                          }}
-                        >
-                          ×
-                        </button>
+                      <div key={`${image}-${index}`} className="sc-gallery-item">
+                        <img src={image} alt={`Gallery ${index + 1}`} />
+                        <button type="button" onClick={() => removeGalleryImage(index)}>×</button>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </Field>
 
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+              <button type="button" onClick={save} disabled={saving} className="sc-save-btn">
                 {saving ? "Saving..." : editMode ? "Save Changes" : "Create School"}
               </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
+    </main>
+  );
+}
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="sc-summary-card">
+      <div className="sc-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+  return (
+    <div
+      className="sc-avatar"
+      style={{
+        background: photo
+          ? `#fff url(${photo}) center/contain no-repeat`
+          : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))`,
+      }}
+    >
+      {!photo && name.slice(0, 2).toUpperCase()}
     </div>
   );
 }
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" }) {
+  return <span className={`sc-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="sc-mini-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="sc-empty-card">
+      <div className="sc-empty-icon">🏫</div>
+      <h3>No schools found</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="sc-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ImageField({
+  label,
+  value,
+  alt,
+  fit,
+  wide,
+  onChange,
+}: {
+  label: string;
+  value?: string;
+  alt: string;
+  fit: "contain" | "cover";
+  wide?: boolean;
+  onChange: (file?: File) => void;
+}) {
+  return (
+    <Field label={label}>
+      <input type="file" accept="image/*" onChange={(event) => onChange(event.target.files?.[0])} />
+      {value && (
+        <img
+          src={value}
+          alt={alt}
+          className={wide ? "sc-preview-banner" : "sc-preview-photo"}
+          style={{ objectFit: fit }}
+        />
+      )}
+    </Field>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes scSpin {
+  to { transform: rotate(360deg); }
+}
+
+.sc-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+
+.sc-page *,
+.sc-page *::before,
+.sc-page *::after {
+  box-sizing: border-box;
+}
+
+.sc-page button,
+.sc-page input,
+.sc-page select,
+.sc-page textarea {
+  font: inherit;
+  max-width: 100%;
+}
+
+.sc-page input,
+.sc-page select,
+.sc-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.sc-page textarea {
+  padding: 12px;
+  min-height: 94px;
+  resize: vertical;
+}
+
+.sc-page img {
+  max-width: 100%;
+}
+
+.sc-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+
+.sc-state-card h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.sc-state-card p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sc-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 4px solid color-mix(in srgb, var(--sc-primary) 18%, transparent);
+  border-top-color: var(--sc-primary);
+  animation: scSpin .8s linear infinite;
+}
+
+.sc-primary-btn,
+.sc-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--sc-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.sc-primary-btn:disabled,
+.sc-save-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.sc-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sc-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+
+.sc-hero-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.sc-hero-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--sc-primary);
+  color: #fff;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--sc-primary) 28%, transparent);
+  font-size: 22px;
+}
+
+.sc-title-wrap {
+  min-width: 0;
+}
+
+.sc-title-wrap p,
+.sc-title-wrap h2,
+.sc-title-wrap span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-title-wrap p {
+  margin: 0 0 2px;
+  color: var(--sc-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.sc-title-wrap h2 {
+  margin: 0;
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 1000;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
+
+.sc-title-wrap span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sc-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sc-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+
+.sc-summary-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--sc-primary) 12%, #fff);
+}
+
+.sc-summary-card div:last-child {
+  min-width: 0;
+}
+
+.sc-summary-card strong,
+.sc-summary-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-summary-card strong {
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.sc-summary-card span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.sc-filter-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .055);
+}
+
+.sc-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sc-entity-card,
+.sc-empty-card {
+  min-width: 0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #fff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+}
+
+.sc-entity-card.current {
+  border-color: color-mix(in srgb, var(--sc-primary) 42%, rgba(148, 163, 184, .2));
+  box-shadow: 0 18px 44px color-mix(in srgb, var(--sc-primary) 10%, transparent);
+}
+
+.sc-card-banner {
+  height: 104px;
+  background-size: cover;
+  background-position: center;
+}
+
+.sc-card-body {
+  padding: 13px;
+}
+
+.sc-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sc-avatar {
+  width: 60px;
+  height: 60px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 20px;
+  color: #fff;
+  font-weight: 1000;
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, .12);
+}
+
+.sc-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.sc-card-main h3,
+.sc-card-main p {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-card-main h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 1000;
+  letter-spacing: -.035em;
+}
+
+.sc-card-main p {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.sc-card-main p.motto {
+  font-style: italic;
+}
+
+.sc-chip-row,
+.sc-action-row,
+.sc-extra-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.sc-chip-row.compact {
+  margin-top: 7px;
+}
+
+.sc-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.sc-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.sc-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.sc-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.sc-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+
+.sc-contact-card {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 17px;
+  background: rgba(148, 163, 184, .08);
+  border: 1px solid rgba(148, 163, 184, .12);
+  overflow: hidden;
+}
+
+.sc-contact-card p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.sc-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.sc-mini-stat {
+  min-width: 0;
+  padding: 9px;
+  border-radius: 17px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .13);
+  overflow: hidden;
+}
+
+.sc-mini-stat strong,
+.sc-mini-stat span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sc-mini-stat strong {
+  font-size: 18px;
+  font-weight: 1000;
+}
+
+.sc-mini-stat span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.sc-branch-names {
+  margin-top: 8px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.sc-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.sc-action-row button.primary-soft {
+  color: var(--sc-primary);
+  background: color-mix(in srgb, var(--sc-primary) 10%, #fff);
+  border-color: color-mix(in srgb, var(--sc-primary) 18%, rgba(148, 163, 184, .2));
+}
+
+.sc-action-row button.danger {
+  color: #dc2626;
+  background: rgba(239, 68, 68, .08);
+  border-color: rgba(239, 68, 68, .12);
+}
+
+.sc-empty-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 210px;
+  padding: 22px;
+  text-align: center;
+  border-style: dashed;
+}
+
+.sc-empty-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--sc-primary) 12%, #fff);
+  font-size: 28px;
+}
+
+.sc-empty-card h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 1000;
+}
+
+.sc-empty-card p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.sc-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.sc-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, .52);
+}
+
+.sc-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(94vw, 580px);
+  max-width: 100vw;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  padding: 14px;
+  box-shadow: -24px 0 70px rgba(15, 23, 42, .22);
+}
+
+.sc-drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0 12px;
+  background: var(--surface, #fff);
+}
+
+.sc-drawer-head div {
+  min-width: 0;
+}
+
+.sc-drawer-head p {
+  margin: 0;
+  color: var(--sc-primary);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.sc-drawer-head h2,
+.sc-drawer-head span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sc-drawer-head h2 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.sc-drawer-head span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.sc-drawer-head button {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 15px;
+  background: #fff;
+  font-weight: 1000;
+  cursor: pointer;
+}
+
+.sc-form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.sc-form-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.sc-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sc-field > span {
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.sc-preview-photo {
+  width: 120px;
+  height: 86px;
+  border-radius: 16px;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, .2);
+}
+
+.sc-preview-banner {
+  width: 100%;
+  height: 126px;
+  border-radius: 16px;
+  margin-top: 8px;
+  background: #fff;
+  border: 1px solid rgba(148, 163, 184, .2);
+}
+
+.sc-gallery-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.sc-gallery-item {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, .2);
+}
+
+.sc-gallery-item img {
+  width: 100%;
+  height: 90px;
+  display: block;
+  object-fit: cover;
+}
+
+.sc-gallery-item button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(220, 38, 38, .92);
+  color: #fff;
+  font-weight: 1000;
+  cursor: pointer;
+}
+
+.sc-save-btn {
+  width: 100%;
+}
+
+@media (min-width: 680px) {
+  .sc-page {
+    padding: 12px;
+  }
+
+  .sc-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sc-filter-card {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, .45fr);
+  }
+
+  .sc-form-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sc-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .sc-gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .sc-page {
+    padding: 16px;
+  }
+
+  .sc-summary-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .sc-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .sc-page {
+    padding: 6px;
+  }
+
+  .sc-hero {
+    flex-direction: column;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .sc-primary-btn {
+    width: 100%;
+  }
+
+  .sc-summary-grid {
+    gap: 6px;
+  }
+
+  .sc-summary-card {
+    padding: 10px;
+    border-radius: 19px;
+  }
+
+  .sc-entity-card,
+  .sc-empty-card {
+    border-radius: 20px;
+  }
+
+  .sc-card-body {
+    padding: 11px;
+  }
+
+  .sc-card-top {
+    align-items: flex-start;
+  }
+
+  .sc-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sc-action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sc-action-row button {
+    width: 100%;
+    padding: 0 8px;
+  }
+
+  .sc-action-row button.danger {
+    grid-column: 1 / -1;
+  }
+
+  .sc-drawer {
+    width: min(96vw, 580px);
+    padding: 12px;
+  }
+}
+`;

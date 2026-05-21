@@ -1,51 +1,69 @@
-// lib/sync/syncEngine.ts
-import { db } from "../db";
-import { resolveConflict } from "./syncUtils";
+import { pullSync } from "./pullSync";
+import { pushSync } from "./pushSync";
+import { isOnline, SyncResult } from "./syncConfig";
 
-// 🔥 SAFELY GET TABLE (Dexie typing fix)
-function getTable(tableName: string): any {
-  return (db as any)[tableName];
-}
+let syncing = false;
 
-// 🔥 CORE SYNC FUNCTION
-export async function syncTable(
-  tableName: string,
-  remoteData: any[]
-) {
-  const table = getTable(tableName);
-
-  if (!table) {
-    console.error(`❌ Table ${tableName} not found`);
-    return;
+export async function runSync(): Promise<SyncResult> {
+  if (syncing) {
+    return {
+      ok: false,
+      pushed: 0,
+      pulled: 0,
+      errors: ["Sync already running."],
+    };
   }
 
-  await db.transaction("rw", table, async () => {
-    for (const remote of remoteData) {
-      try {
-        if (!remote?.id) continue;
+  if (!isOnline()) {
+    return {
+      ok: false,
+      pushed: 0,
+      pulled: 0,
+      errors: ["Device is offline."],
+    };
+  }
 
-        const local = await table.get(remote.id);
+  syncing = true;
 
-        // ---------------- INSERT ----------------
-        if (!local) {
-          await table.put({
-            ...remote,
-            synced: "synced",
-          });
-          continue;
-        }
+  try {
+    const push = await pushSync();
+    const pull = await pullSync();
 
-        // ---------------- RESOLVE ----------------
-        const resolved = resolveConflict(local, remote);
+    const errors = [...push.errors, ...pull.errors];
 
-        await table.put({
-          ...resolved,
-          synced: "synced",
-        });
+    return {
+      ok: errors.length === 0,
+      pushed: push.pushed,
+      pulled: pull.pulled,
+      errors,
+    };
+  } catch (error: any) {
+    return {
+      ok: false,
+      pushed: 0,
+      pulled: 0,
+      errors: [error?.message || String(error)],
+    };
+  } finally {
+    syncing = false;
+  }
+}
 
-      } catch (err) {
-        console.error("❌ Sync row error:", err, remote);
-      }
+export function startAutoSync(intervalMs = 60_000) {
+  if (typeof window === "undefined") return () => {};
+
+  const sync = () => {
+    if (navigator.onLine) {
+      runSync().catch(console.error);
     }
-  });
+  };
+
+  window.addEventListener("online", sync);
+
+  const interval = window.setInterval(sync, intervalMs);
+
+  return () => {
+    window.removeEventListener("online", sync);
+    window.clearInterval(interval);
+  };
 }

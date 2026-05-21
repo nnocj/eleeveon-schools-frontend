@@ -3,7 +3,7 @@
 /**
  * StudentCurriculum.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL STUDENT CURRICULUM PLACEMENT PAGE
+ * MOBILE-FIRST SECURE STUDENT CURRICULUM PLACEMENT PAGE
  * ---------------------------------------------------------
  *
  * DB table: studentCurriculums
@@ -13,15 +13,28 @@
  * - curriculumPathways
  * - academicPeriods
  *
- * ARCHITECTURE
- * ---------------------------------------------------------
+ * Architecture:
+ * Active Account -> Active School -> Active Branch
+ * -> Student -> Curriculum -> Pathway
+ *
  * StudentCurriculum says:
  * "This student is following this curriculum/pathway from this period."
  *
- * Active School -> Active Branch -> Student -> Curriculum -> Pathway
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Prevent duplicate active placements for the same student/curriculum/pathway.
+ * - Mobile-first placement cards and responsive drawer.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -33,14 +46,21 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
+import { SyncStatus } from "../lib/constants/syncStatus";
 
 // ======================================================
 // TYPES
 // ======================================================
 
 type PlacementStatus = "active" | "completed" | "withdrawn";
+type ActivityFilter = "all" | "active" | "inactive";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -55,6 +75,7 @@ type FormState = {
 
 type StudentCurriculumView = {
   row: StudentCurriculum;
+  student?: Student;
   studentName: string;
   admissionNumber?: string;
   curriculumName: string;
@@ -63,21 +84,58 @@ type StudentCurriculumView = {
   endPeriodName: string;
 };
 
+const emptyForm: FormState = {
+  studentId: undefined,
+  curriculumId: undefined,
+  pathwayId: undefined,
+  startAcademicPeriodId: undefined,
+  endAcademicPeriodId: undefined,
+  status: "active",
+  active: true,
+};
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+function statusTone(status?: PlacementStatus): "green" | "blue" | "red" | "gray" {
+  if (status === "completed") return "blue";
+  if (status === "withdrawn") return "red";
+  if (status === "active" || !status) return "green";
+  return "gray";
+}
+
+function statusLabel(status?: PlacementStatus) {
+  if (!status) return "Active";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function StudentCurriculumPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -96,26 +154,62 @@ export default function StudentCurriculumPage() {
   const [filterCurriculumId, setFilterCurriculumId] = useState<number | undefined>();
   const [filterPathwayId, setFilterPathwayId] = useState<number | undefined>();
   const [filterStatus, setFilterStatus] = useState<"all" | PlacementStatus>("all");
-  const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">("all");
+  const [filterActive, setFilterActive] = useState<ActivityFilter>("all");
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
-  const [form, setForm] = useState<FormState>({
-    studentId: undefined,
-    curriculumId: undefined,
-    pathwayId: undefined,
-    startAcademicPeriodId: undefined,
-    endAcademicPeriodId: undefined,
-    status: "active",
-    active: true,
-  });
+  // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setRows([]);
+    setStudents([]);
+    setCurriculums([]);
+    setPathways([]);
+    setPeriods([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -128,25 +222,34 @@ export default function StudentCurriculumPage() {
           db.academicPeriods.toArray(),
         ]);
 
-      setRows(placementRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setRows(placementRows.filter(sameTenant));
+
       setStudents(
-        studentRows.filter(
-          row => row.branchId === branchId && !row.isDeleted && row.status !== "withdrawn"
-        )
+        studentRows
+          .filter((row) => sameTenant(row) && row.status !== "withdrawn" && row.status !== "graduated")
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
       );
+
       setCurriculums(
-        curriculumRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        curriculumRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
+
       setPathways(
-        pathwayRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        pathwayRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
+
       setPeriods(
         periodRows
-          .filter(row => row.branchId === branchId && !row.isDeleted)
+          .filter((row) => sameTenant(row) && row.active !== false)
           .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
       );
     } catch (error) {
       console.error("Failed to load student curriculum placements:", error);
+      clearData();
       alert("Failed to load student curriculum placements");
     } finally {
       setLoading(false);
@@ -155,40 +258,26 @@ export default function StudentCurriculumPage() {
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
-  const studentMap = useMemo(
-    () => new Map(students.map(row => [row.id, row])),
-    [students]
-  );
-
-  const curriculumMap = useMemo(
-    () => new Map(curriculums.map(row => [row.id, row])),
-    [curriculums]
-  );
-
-  const pathwayMap = useMemo(
-    () => new Map(pathways.map(row => [row.id, row])),
-    [pathways]
-  );
-
-  const periodMap = useMemo(
-    () => new Map(periods.map(row => [row.id, row])),
-    [periods]
-  );
+  const studentMap = useMemo(() => new Map(students.map((row) => [row.id, row])), [students]);
+  const curriculumMap = useMemo(() => new Map(curriculums.map((row) => [row.id, row])), [curriculums]);
+  const pathwayMap = useMemo(() => new Map(pathways.map((row) => [row.id, row])), [pathways]);
+  const periodMap = useMemo(() => new Map(periods.map((row) => [row.id, row])), [periods]);
 
   const filteredPathwaysForForm = useMemo(() => {
     if (!form.curriculumId) return pathways;
-    return pathways.filter(row => row.curriculumId === form.curriculumId);
+    return pathways.filter((row) => row.curriculumId === form.curriculumId);
   }, [pathways, form.curriculumId]);
 
   const filteredPathwaysForFilter = useMemo(() => {
     if (!filterCurriculumId) return pathways;
-    return pathways.filter(row => row.curriculumId === filterCurriculumId);
+    return pathways.filter((row) => row.curriculumId === filterCurriculumId);
   }, [pathways, filterCurriculumId]);
 
   // ======================================================
@@ -196,19 +285,16 @@ export default function StudentCurriculumPage() {
   // ======================================================
 
   const viewRows = useMemo<StudentCurriculumView[]>(() => {
-    return rows.map(row => {
+    return rows.map((row) => {
       const student = studentMap.get(row.studentId);
       const curriculum = curriculumMap.get(row.curriculumId);
       const pathway = row.pathwayId ? pathwayMap.get(row.pathwayId) : undefined;
-      const startPeriod = row.startAcademicPeriodId
-        ? periodMap.get(row.startAcademicPeriodId)
-        : undefined;
-      const endPeriod = row.endAcademicPeriodId
-        ? periodMap.get(row.endAcademicPeriodId)
-        : undefined;
+      const startPeriod = row.startAcademicPeriodId ? periodMap.get(row.startAcademicPeriodId) : undefined;
+      const endPeriod = row.endAcademicPeriodId ? periodMap.get(row.endAcademicPeriodId) : undefined;
 
       return {
         row,
+        student,
         studentName: student?.fullName || `Student #${row.studentId}`,
         admissionNumber: student?.admissionNumber,
         curriculumName: curriculum?.name || "Unknown curriculum",
@@ -223,7 +309,7 @@ export default function StudentCurriculumPage() {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
+      .filter((item) => {
         const row = item.row;
 
         if (filterCurriculumId && row.curriculumId !== filterCurriculumId) return false;
@@ -250,36 +336,42 @@ export default function StudentCurriculumPage() {
   }, [viewRows, search, filterCurriculumId, filterPathwayId, filterStatus, filterActive]);
 
   const summary = useMemo(() => {
-    return {
-      total: rows.length,
-      activePlacements: rows.filter(row => row.status === "active" && row.active !== false).length,
-      completed: rows.filter(row => row.status === "completed").length,
-      withdrawn: rows.filter(row => row.status === "withdrawn").length,
-      studentsPlaced: new Set(rows.map(row => row.studentId)).size,
-    };
-  }, [rows]);
+    const total = rows.length;
+    const activePlacements = rows.filter((row) => row.status === "active" && row.active !== false).length;
+    const completed = rows.filter((row) => row.status === "completed").length;
+    const withdrawn = rows.filter((row) => row.status === "withdrawn").length;
+    const inactiveRecords = rows.filter((row) => row.active === false).length;
+    const studentsPlaced = new Set(rows.map((row) => row.studentId)).size;
+    const curriculumCoverage = curriculums.length ? Math.round((new Set(rows.map((row) => row.curriculumId)).size / curriculums.length) * 100) : 0;
+
+    return { total, activePlacements, completed, withdrawn, inactiveRecords, studentsPlaced, curriculumCoverage };
+  }, [rows, curriculums.length]);
 
   // ======================================================
   // FORM HELPERS
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const requireTenant = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return false;
+    }
+    return true;
   };
 
   const openCreate = () => {
-    if (!activeBranchId) {
-      alert("Select a branch first before assigning curriculum.");
-      return;
-    }
+    if (!requireTenant()) return;
 
     setEditMode(false);
     setForm({
-      studentId: undefined,
+      ...emptyForm,
       curriculumId: filterCurriculumId,
       pathwayId: filterPathwayId,
       startAcademicPeriodId: settings?.currentAcademicPeriodId,
-      endAcademicPeriodId: undefined,
       status: "active",
       active: true,
     });
@@ -306,16 +398,33 @@ export default function StudentCurriculumPage() {
   // ======================================================
 
   const validate = () => {
+    if (!authenticated || !accountId) return "Sign in first";
+    if (!schoolId) return "Select a school first";
     if (!branchId) return "Select a branch first";
     if (!form.studentId) return "Select student";
     if (!form.curriculumId) return "Select curriculum";
+
+    const selectedStudent = studentMap.get(form.studentId);
+    if (!selectedStudent) return "Selected student is not in this branch";
+
+    const selectedCurriculum = curriculumMap.get(form.curriculumId);
+    if (!selectedCurriculum) return "Selected curriculum is not in this branch";
 
     const selectedPathway = form.pathwayId ? pathwayMap.get(form.pathwayId) : undefined;
     if (selectedPathway && selectedPathway.curriculumId !== form.curriculumId) {
       return "Selected pathway does not belong to the selected curriculum";
     }
 
-    const duplicateActive = rows.find(row => {
+    if (
+      form.startAcademicPeriodId &&
+      form.endAcademicPeriodId &&
+      Number(form.endAcademicPeriodId) === Number(form.startAcademicPeriodId) &&
+      form.status === "active"
+    ) {
+      return "An active placement should not have the same start and end period";
+    }
+
+    const duplicateActive = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
 
       return (
@@ -347,35 +456,24 @@ export default function StudentCurriculumPage() {
       setSaving(true);
 
       const payload = prepareSyncData({
-        branchId,
+        accountId,
+        schoolId: Number(schoolId),
+        branchId: Number(branchId),
         studentId: Number(form.studentId),
         curriculumId: Number(form.curriculumId),
         pathwayId: form.pathwayId ? Number(form.pathwayId) : undefined,
-        startAcademicPeriodId: form.startAcademicPeriodId
-          ? Number(form.startAcademicPeriodId)
-          : undefined,
-        endAcademicPeriodId: form.endAcademicPeriodId
-          ? Number(form.endAcademicPeriodId)
-          : undefined,
+        startAcademicPeriodId: form.startAcademicPeriodId ? Number(form.startAcademicPeriodId) : undefined,
+        endAcademicPeriodId: form.endAcademicPeriodId ? Number(form.endAcademicPeriodId) : undefined,
         status: form.status || "active",
         active: form.active !== false,
       }) as StudentCurriculum;
 
       if (editMode && form.id) {
         await db.studentCurriculums.update(form.id, {
-          studentId: payload.studentId,
-          curriculumId: payload.curriculumId,
-          pathwayId: payload.pathwayId,
-          startAcademicPeriodId: payload.startAcademicPeriodId,
-          endAcademicPeriodId: payload.endAcademicPeriodId,
-          status: payload.status,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: form.id,
           isDeleted: false,
-        });
+        } as Partial<StudentCurriculum>);
       } else {
         await db.studentCurriculums.add(payload);
       }
@@ -396,8 +494,9 @@ export default function StudentCurriculumPage() {
 
     await db.studentCurriculums.update(row.id, {
       isDeleted: true,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<StudentCurriculum>);
 
     await load();
   };
@@ -408,8 +507,9 @@ export default function StudentCurriculumPage() {
     await db.studentCurriculums.update(row.id, {
       status,
       active: status === "active",
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<StudentCurriculum>);
 
     await load();
   };
@@ -419,113 +519,54 @@ export default function StudentCurriculumPage() {
 
     await db.studentCurriculums.update(row.id, {
       active: row.active === false,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<StudentCurriculum>);
 
     await load();
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const statusTone = (status?: PlacementStatus): "green" | "blue" | "red" | "gray" => {
-    if (status === "completed") return "blue";
-    if (status === "withdrawn") return "red";
-    if (status === "active" || !status) return "green";
-    return "gray";
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading student curriculum placements...</div>;
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="scu-page" style={{ "--scu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="scu-state-card">
+          <div className="scu-spinner" />
+          <h2>Opening student curriculum...</h2>
+          <p>Checking account, branch, students, curriculums, pathways, and placements.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Student curriculum placements belong to a branch. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="scu-page" style={{ "--scu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="scu-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing student curriculum placements.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="scu-page" style={{ "--scu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="scu-state-card">
+          <h2>Select a branch first</h2>
+          <p>Student curriculum placements belong to one active school branch.</p>
+          <button type="button" className="scu-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -534,359 +575,503 @@ export default function StudentCurriculumPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Student Curriculum</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Assigning students to curriculums in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="scu-page" style={{ "--scu-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="scu-hero">
+        <div className="scu-hero-left">
+          <div className="scu-hero-icon">🎓</div>
+          <div className="scu-title-wrap">
+            <p>Curriculum Placement</p>
+            <h2>Student Curriculum</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button onClick={openCreate} style={button}>
+        <button type="button" className="scu-primary-btn" onClick={openCreate}>
           + Assign Curriculum
         </button>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Placements</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.total}</div>
+      <section className="scu-context-card">
+        <div>
+          <p>Placement Scope</p>
+          <h3>{summary.studentsPlaced} student(s) placed</h3>
+          <span>{summary.activePlacements} active placement(s) across {curriculums.length} curriculum(s)</span>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.activePlacements}</div>
+        <div className="scu-pill-row">
+          <Chip tone="blue">Same Tenant</Chip>
+          <Chip tone="green">Branch Scoped</Chip>
+          <Chip tone={summary.curriculumCoverage >= 60 ? "green" : "orange"}>{summary.curriculumCoverage}% Curriculum Coverage</Chip>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Completed</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.completed}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Withdrawn</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.withdrawn}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Students Placed</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.studentsPlaced}</div>
-        </div>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="scu-summary-grid" aria-label="Student curriculum summary">
+        <SummaryCard label="Placements" value={summary.total} icon="📌" />
+        <SummaryCard label="Active" value={summary.activePlacements} icon="✅" />
+        <SummaryCard label="Completed" value={summary.completed} icon="🎯" />
+        <SummaryCard label="Withdrawn" value={summary.withdrawn} icon="🚪" />
+        <SummaryCard label="Inactive" value={summary.inactiveRecords} icon="⏸️" />
+        <SummaryCard label="Students Placed" value={summary.studentsPlaced} icon="🎓" />
+      </section>
+
+      <section className="scu-filter-card">
         <input
           placeholder="Search student, admission number, curriculum, pathway..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
         <select
           value={filterCurriculumId || ""}
-          onChange={e => {
-            setFilterCurriculumId(Number(e.target.value) || undefined);
+          onChange={(event) => {
+            setFilterCurriculumId(Number(event.target.value) || undefined);
             setFilterPathwayId(undefined);
           }}
-          style={input}
         >
           <option value="">All Curriculums</option>
-          {curriculums.map(row => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
+          {curriculums.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select
-          value={filterPathwayId || ""}
-          onChange={e => setFilterPathwayId(Number(e.target.value) || undefined)}
-          style={input}
-        >
+        <select value={filterPathwayId || ""} onChange={(event) => setFilterPathwayId(Number(event.target.value) || undefined)}>
           <option value="">All Pathways</option>
-          {filteredPathwaysForFilter.map(row => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
+          {filteredPathwaysForFilter.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as any)}
-          style={input}
-        >
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as any)}>
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="completed">Completed</option>
           <option value="withdrawn">Withdrawn</option>
         </select>
 
-        <select
-          value={filterActive}
-          onChange={e => setFilterActive(e.target.value as any)}
-          style={input}
-        >
+        <select value={filterActive} onChange={(event) => setFilterActive(event.target.value as ActivityFilter)}>
           <option value="all">All Activity</option>
           <option value="active">Active Records</option>
           <option value="inactive">Inactive Records</option>
         </select>
-      </div>
+      </section>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredRows.map(item => {
+      <section className="scu-list">
+        {filteredRows.map((item) => {
           const row = item.row;
 
           return (
-            <div key={row.id} style={card}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <div style={{ fontSize: 18, fontWeight: 900 }}>{item.studentName}</div>
-                    {item.admissionNumber && <span style={badge("gray")}>{item.admissionNumber}</span>}
-                    <span style={badge(statusTone(row.status))}>{row.status || "active"}</span>
-                    <span style={badge(row.active === false ? "red" : "green")}>
-                      {row.active === false ? "Inactive Record" : "Active Record"}
-                    </span>
-                  </div>
-
-                  <div style={{ marginTop: 7, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                    {item.curriculumName} • {item.pathwayName}
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={badge("blue")}>Start: {item.startPeriodName}</span>
-                    <span style={badge("orange")}>End: {item.endPeriodName}</span>
-                  </div>
+            <article key={row.id} className="scu-placement-card">
+              <div className="scu-card-top">
+                <div
+                  className="scu-avatar"
+                  style={{
+                    background: item.student?.photo
+                      ? `url(${item.student.photo}) center/cover`
+                      : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))`,
+                  }}
+                >
+                  {!item.student?.photo && item.studentName.slice(0, 1).toUpperCase()}
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  {row.status !== "active" && (
-                    <button style={ghostButton} onClick={() => setStatus(row, "active")}>
-                      Mark Active
-                    </button>
-                  )}
-                  {row.status !== "completed" && (
-                    <button style={ghostButton} onClick={() => setStatus(row, "completed")}>
-                      Complete
-                    </button>
-                  )}
-                  <button style={ghostButton} onClick={() => toggleActive(row)}>
-                    {row.active === false ? "Reactivate" : "Deactivate"}
-                  </button>
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
-                    Edit
-                  </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row)}>
-                    Delete
-                  </button>
+                <div className="scu-card-main">
+                  <h3>{item.studentName}</h3>
+                  <p>{item.admissionNumber || "No admission number"}</p>
+                  <div className="scu-chip-row">
+                    <Chip tone={statusTone(row.status)}>{statusLabel(row.status)}</Chip>
+                    <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive Record" : "Active Record"}</Chip>
+                  </div>
                 </div>
               </div>
-            </div>
+
+              <div className="scu-placement-body">
+                <div className="scu-program-line">
+                  <strong>{item.curriculumName}</strong>
+                  <span>{item.pathwayName}</span>
+                </div>
+
+                <div className="scu-mini-grid">
+                  <MiniStat label="Start Period" value={item.startPeriodName} />
+                  <MiniStat label="End Period" value={item.endPeriodName} />
+                </div>
+              </div>
+
+              <div className="scu-action-row">
+                {row.status !== "active" && <button type="button" onClick={() => setStatus(row, "active")}>Mark Active</button>}
+                {row.status !== "completed" && <button type="button" onClick={() => setStatus(row, "completed")}>Complete</button>}
+                {row.status !== "withdrawn" && <button type="button" onClick={() => setStatus(row, "withdrawn")}>Withdraw</button>}
+                <button type="button" onClick={() => toggleActive(row)}>{row.active === false ? "Reactivate" : "Deactivate"}</button>
+                <button type="button" onClick={() => openEdit(row)}>Edit</button>
+                <button type="button" className="danger" onClick={() => remove(row)}>Delete</button>
+              </div>
+            </article>
           );
         })}
 
-        {!filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No student curriculum placements found in this branch.
-          </div>
-        )}
-      </div>
+        {!filteredRows.length && <EmptyCard text="No student curriculum placements found in this branch." />}
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(620px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit Student Curriculum" : "Assign Student Curriculum"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Place a student into a curriculum and optional pathway.
-                </div>
-              </div>
+        <div className="scu-drawer-layer">
+          <button type="button" aria-label="Close drawer" className="scu-drawer-overlay" onClick={() => setDrawerOpen(false)} />
 
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+          <aside className="scu-drawer">
+            <div className="scu-drawer-head">
+              <div>
+                <p>Student Curriculum</p>
+                <h2>{editMode ? "Edit Placement" : "Assign Curriculum"}</h2>
+                <span>
+                  Placement will be saved under {activeBranch?.name || "the selected branch"}
+                  {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+                </span>
+              </div>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>Student</label>
-                <select
-                  value={form.studentId || ""}
-                  onChange={e => updateForm({ studentId: Number(e.target.value) || undefined })}
-                  style={input}
-                >
+            <div className="scu-form-grid">
+              <Field label="Student">
+                <select value={form.studentId || ""} onChange={(event) => updateForm({ studentId: Number(event.target.value) || undefined })}>
                   <option value="">Select Student</option>
-                  {students.map(row => (
+                  {students.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.fullName} {row.admissionNumber ? `• ${row.admissionNumber}` : ""}
+                      {row.fullName} {row.admissionNumber ? `· ${row.admissionNumber}` : ""}
                     </option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Curriculum</label>
+              <Field label="Curriculum">
                 <select
                   value={form.curriculumId || ""}
-                  onChange={e =>
-                    updateForm({
-                      curriculumId: Number(e.target.value) || undefined,
-                      pathwayId: undefined,
-                    })
-                  }
-                  style={input}
+                  onChange={(event) => updateForm({ curriculumId: Number(event.target.value) || undefined, pathwayId: undefined })}
                 >
                   <option value="">Select Curriculum</option>
-                  {curriculums.map(row => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
+                  {curriculums.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Pathway</label>
-                <select
-                  value={form.pathwayId || ""}
-                  onChange={e => updateForm({ pathwayId: Number(e.target.value) || undefined })}
-                  style={input}
-                >
+              <Field label="Pathway">
+                <select value={form.pathwayId || ""} onChange={(event) => updateForm({ pathwayId: Number(event.target.value) || undefined })}>
                   <option value="">No pathway</option>
-                  {filteredPathwaysForForm.map(row => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
+                  {filteredPathwaysForForm.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
                 </select>
-              </div>
+              </Field>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                <div>
-                  <label style={label}>Start Academic Period</label>
-                  <select
-                    value={form.startAcademicPeriodId || ""}
-                    onChange={e =>
-                      updateForm({ startAcademicPeriodId: Number(e.target.value) || undefined })
-                    }
-                    style={input}
-                  >
+              <div className="scu-form-two">
+                <Field label="Start Academic Period">
+                  <select value={form.startAcademicPeriodId || ""} onChange={(event) => updateForm({ startAcademicPeriodId: Number(event.target.value) || undefined })}>
                     <option value="">No start period</option>
-                    {periods.map(row => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
+                    {periods.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
                   </select>
-                </div>
+                </Field>
 
-                <div>
-                  <label style={label}>End Academic Period</label>
-                  <select
-                    value={form.endAcademicPeriodId || ""}
-                    onChange={e =>
-                      updateForm({ endAcademicPeriodId: Number(e.target.value) || undefined })
-                    }
-                    style={input}
-                  >
+                <Field label="End Academic Period">
+                  <select value={form.endAcademicPeriodId || ""} onChange={(event) => updateForm({ endAcademicPeriodId: Number(event.target.value) || undefined })}>
                     <option value="">No end period</option>
-                    {periods.map(row => (
-                      <option key={row.id} value={row.id}>
-                        {row.name}
-                      </option>
-                    ))}
+                    {periods.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
                   </select>
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label style={label}>Status</label>
-                <select
-                  value={form.status || "active"}
-                  onChange={e => updateForm({ status: e.target.value as PlacementStatus })}
-                  style={input}
-                >
+              <Field label="Status">
+                <select value={form.status || "active"} onChange={(event) => updateForm({ status: event.target.value as PlacementStatus })}>
                   <option value="active">Active</option>
                   <option value="completed">Completed</option>
                   <option value="withdrawn">Withdrawn</option>
                 </select>
-              </div>
+              </Field>
 
-              <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={form.active !== false}
-                  onChange={e => updateForm({ active: e.target.checked })}
-                />
-                Active Record
+              <label className="scu-check">
+                <input type="checkbox" checked={form.active !== false} onChange={(event) => updateForm({ active: event.target.checked })} />
+                <span>Active Record</span>
               </label>
 
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+              <button type="button" onClick={save} disabled={saving} className="scu-save-btn">
                 {saving ? "Saving..." : editMode ? "Save Changes" : "Assign Curriculum"}
               </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
+    </main>
+  );
+}
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="scu-summary-card">
+      <div className="scu-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`scu-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="scu-mini-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
     </div>
   );
 }
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="scu-empty-card">
+      <div className="scu-empty-icon">🎓</div>
+      <h3>No placements found</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="scu-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes scuSpin { to { transform: rotate(360deg); } }
+
+.scu-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.scu-page *, .scu-page *::before, .scu-page *::after { box-sizing: border-box; }
+.scu-page button, .scu-page input, .scu-page select, .scu-page textarea { font: inherit; max-width: 100%; }
+.scu-page img { max-width: 100%; }
+.scu-page input,
+.scu-page select,
+.scu-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.scu-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.scu-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.scu-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.scu-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--scu-primary) 18%, transparent); border-top-color: var(--scu-primary); animation: scuSpin .8s linear infinite; }
+
+.scu-primary-btn,
+.scu-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--scu-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.scu-save-btn { width: 100%; }
+.scu-primary-btn:disabled,
+.scu-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.scu-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--scu-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+.scu-hero-left { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.scu-hero-icon { width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: var(--scu-primary); color: #fff; box-shadow: 0 12px 26px color-mix(in srgb, var(--scu-primary) 28%, transparent); font-size: 22px; }
+.scu-title-wrap { min-width: 0; }
+.scu-title-wrap p, .scu-title-wrap h2, .scu-title-wrap span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scu-title-wrap p { margin: 0 0 2px; color: var(--scu-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.scu-title-wrap h2 { margin: 0; font-size: clamp(19px, 5vw, 28px); font-weight: 1000; letter-spacing: -.06em; line-height: 1; }
+.scu-title-wrap span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+.scu-context-card,
+.scu-filter-card,
+.scu-placement-card,
+.scu-empty-card {
+  min-width: 0;
+  margin-top: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+  padding: 13px;
+}
+.scu-context-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--scu-primary) 10%, #fff), #fff 68%);
+}
+.scu-context-card p { margin: 0; color: var(--scu-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.scu-context-card h3 { margin: 4px 0 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.05em; }
+.scu-context-card span { display: block; margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.scu-pill-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.scu-filter-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+
+.scu-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.scu-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+.scu-summary-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--scu-primary) 12%, #fff); }
+.scu-summary-card div:last-child { min-width: 0; }
+.scu-summary-card strong, .scu-summary-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scu-summary-card strong { font-size: 20px; font-weight: 1000; letter-spacing: -.05em; }
+.scu-summary-card span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 850; }
+
+.scu-list { display: grid; gap: 10px; margin-top: 10px; }
+.scu-placement-card { background: linear-gradient(135deg, #fff, #f8fafc); }
+.scu-card-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.scu-avatar { width: 56px; height: 56px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 19px; color: #fff; font-weight: 1000; box-shadow: 0 12px 24px rgba(15, 23, 42, .12); }
+.scu-card-main { min-width: 0; flex: 1; }
+.scu-card-main h3, .scu-card-main p { display: block; overflow: hidden; text-overflow: ellipsis; }
+.scu-card-main h3 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -.035em; }
+.scu-card-main p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.4; }
+.scu-chip-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.scu-chip { max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 950; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scu-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.scu-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.scu-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.scu-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.scu-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.scu-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+.scu-placement-body { margin-top: 12px; }
+.scu-program-line { min-width: 0; padding: 11px; border-radius: 18px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .12); }
+.scu-program-line strong, .scu-program-line span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.scu-program-line strong { font-size: 14px; font-weight: 1000; }
+.scu-program-line span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.scu-mini-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 8px; }
+.scu-mini-stat { min-width: 0; padding: 10px; border-radius: 17px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .12); }
+.scu-mini-stat strong, .scu-mini-stat span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scu-mini-stat strong { font-size: 13px; font-weight: 1000; }
+.scu-mini-stat span { margin-top: 2px; color: var(--muted, #64748b); font-size: 10px; font-weight: 850; }
+.scu-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.scu-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+.scu-action-row button.danger { color: #dc2626; background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.13); }
+.scu-empty-card { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; text-align: center; border-style: dashed; }
+.scu-empty-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 22px; background: color-mix(in srgb, var(--scu-primary) 12%, #fff); font-size: 28px; }
+.scu-empty-card h3 { margin: 0; font-size: 18px; font-weight: 1000; }
+.scu-empty-card p { margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+
+.scu-drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.scu-drawer-overlay { position: absolute; inset: 0; border: 0; background: rgba(15, 23, 42, .52); }
+.scu-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: min(94vw, 620px); max-width: 100vw; overflow-y: auto; overflow-x: hidden; background: var(--surface, #fff); color: var(--text, #0f172a); padding: 14px; box-shadow: -24px 0 70px rgba(15, 23, 42, .22); }
+.scu-drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 0 12px; background: var(--surface, #fff); }
+.scu-drawer-head div { min-width: 0; }
+.scu-drawer-head p { margin: 0; color: var(--scu-primary); font-size: 11px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.scu-drawer-head h2, .scu-drawer-head span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.scu-drawer-head h2 { margin: 2px 0 0; font-size: 22px; font-weight: 1000; letter-spacing: -.05em; }
+.scu-drawer-head span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.45; }
+.scu-drawer-head button { width: 38px; height: 38px; flex: 0 0 auto; border: 1px solid rgba(148, 163, 184, .24); border-radius: 15px; background: #fff; font-weight: 1000; cursor: pointer; }
+.scu-form-grid { display: grid; gap: 12px; }
+.scu-form-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.scu-field { display: grid; gap: 6px; min-width: 0; }
+.scu-field > span { color: var(--muted, #64748b); font-size: 11px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.scu-check { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 18px; background: rgba(148, 163, 184, .09); border: 1px solid rgba(148, 163, 184, .14); font-weight: 850; }
+.scu-check input { width: 18px; min-height: 18px; flex: 0 0 auto; }
+
+@media (min-width: 680px) {
+  .scu-page { padding: 12px; }
+  .scu-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .scu-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scu-mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scu-action-row { display: flex; flex-wrap: wrap; }
+  .scu-action-row button { padding: 0 14px; }
+  .scu-form-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1040px) {
+  .scu-page { padding: 16px; }
+  .scu-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .scu-filter-card { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .scu-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .scu-page { padding: 6px; }
+  .scu-hero { flex-direction: column; border-radius: 22px; padding: 10px; }
+  .scu-primary-btn { width: 100%; }
+  .scu-context-card, .scu-filter-card, .scu-placement-card, .scu-empty-card { border-radius: 20px; padding: 11px; }
+  .scu-summary-grid { gap: 6px; }
+  .scu-summary-card { padding: 10px; border-radius: 19px; }
+  .scu-summary-card strong { font-size: 16px; }
+  .scu-avatar { width: 50px; height: 50px; flex-basis: 50px; }
+  .scu-action-row { grid-template-columns: 1fr; }
+  .scu-drawer { width: min(96vw, 620px); padding: 12px; }
+}
+`;

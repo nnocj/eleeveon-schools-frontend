@@ -3,7 +3,7 @@
 /**
  * SubjectPrerequisites.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL SUBJECT PREREQUISITE RULES PAGE
+ * MOBILE-FIRST SECURE SUBJECT PREREQUISITE RULES PAGE
  * ---------------------------------------------------------
  *
  * DB table: subjectPrerequisites
@@ -13,18 +13,26 @@
  * - subjects
  * - curriculumPathways
  *
- * ARCHITECTURE
- * ---------------------------------------------------------
- * SubjectPrerequisite belongs to a CurriculumSubject.
- * It defines academic relationship rules such as:
- * - prerequisite
- * - corequisite
- * - recommended
+ * Architecture:
+ * Active Account -> Active School -> Active Branch
+ * -> CurriculumSubject -> SubjectPrerequisite
  *
- * Active School -> Active Branch -> CurriculumSubject -> SubjectPrerequisite
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Soft delete only.
+ * - Mobile-first rule cards and responsive drawer.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { SyncStatus } from "../lib/constants/syncStatus";
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -36,14 +44,19 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
 // ======================================================
 
 type RuleType = "prerequisite" | "corequisite" | "recommended";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -76,21 +89,54 @@ type PrerequisiteView = {
   pathwayName: string;
 };
 
+const emptyForm: FormState = {
+  curriculumSubjectId: undefined,
+  prerequisiteSubjectId: undefined,
+  minimumGrade: "",
+  minimumScore: undefined,
+  type: "prerequisite",
+  groupCode: "",
+  active: true,
+};
+
+function typeTone(type?: RuleType): "green" | "orange" | "purple" {
+  if (type === "corequisite") return "purple";
+  if (type === "recommended") return "orange";
+  return "green";
+}
+
+function typeLabel(type?: RuleType) {
+  if (type === "corequisite") return "Corequisite";
+  if (type === "recommended") return "Recommended";
+  return "Prerequisite";
+}
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function SubjectPrerequisitesPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -113,22 +159,58 @@ export default function SubjectPrerequisitesPage() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
-  const [form, setForm] = useState<FormState>({
-    curriculumSubjectId: undefined,
-    prerequisiteSubjectId: undefined,
-    minimumGrade: "",
-    minimumScore: undefined,
-    type: "prerequisite",
-    groupCode: "",
-    active: true,
-  });
+  // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setRows([]);
+    setCurriculumSubjects([]);
+    setCurriculums([]);
+    setSubjects([]);
+    setPathways([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -141,21 +223,34 @@ export default function SubjectPrerequisitesPage() {
           db.curriculumPathways.toArray(),
         ]);
 
-      setRows(ruleRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setRows(ruleRows.filter(sameTenant));
+
       setCurriculumSubjects(
-        curriculumSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        curriculumSubjectRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => Number(a.orderIndex || 0) - Number(b.orderIndex || 0))
       );
+
       setCurriculums(
-        curriculumRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        curriculumRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
+
       setSubjects(
-        subjectRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        subjectRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
+
       setPathways(
-        pathwayRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+        pathwayRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
     } catch (error) {
       console.error("Failed to load subject prerequisites:", error);
+      clearData();
       alert("Failed to load subject prerequisites");
     } finally {
       setLoading(false);
@@ -164,30 +259,31 @@ export default function SubjectPrerequisitesPage() {
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
   const curriculumMap = useMemo(
-    () => new Map(curriculums.map(row => [row.id, row])),
+    () => new Map(curriculums.map((row) => [row.id, row])),
     [curriculums]
   );
 
   const subjectMap = useMemo(
-    () => new Map(subjects.map(row => [row.id, row])),
+    () => new Map(subjects.map((row) => [row.id, row])),
     [subjects]
   );
 
   const pathwayMap = useMemo(
-    () => new Map(pathways.map(row => [row.id, row])),
+    () => new Map(pathways.map((row) => [row.id, row])),
     [pathways]
   );
 
   const curriculumSubjectOptions = useMemo<CurriculumSubjectOption[]>(() => {
     return curriculumSubjects
-      .map(row => {
+      .map((row) => {
         const curriculum = curriculumMap.get(row.curriculumId);
         const subject = subjectMap.get(row.subjectId);
         const pathway = row.pathwayId ? pathwayMap.get(row.pathwayId) : undefined;
@@ -208,14 +304,14 @@ export default function SubjectPrerequisitesPage() {
           subjectName,
           subjectCode,
           pathwayName,
-          label: `${curriculumName} • ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} • ${pathwayName}`,
+          label: `${curriculumName} · ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} · ${pathwayName}`,
         };
       })
       .filter(Boolean) as CurriculumSubjectOption[];
   }, [curriculumSubjects, curriculumMap, subjectMap, pathwayMap]);
 
   const curriculumSubjectOptionMap = useMemo(
-    () => new Map(curriculumSubjectOptions.map(row => [row.id, row])),
+    () => new Map(curriculumSubjectOptions.map((row) => [row.id, row])),
     [curriculumSubjectOptions]
   );
 
@@ -227,16 +323,14 @@ export default function SubjectPrerequisitesPage() {
   const prerequisiteOptions = useMemo(() => {
     if (!selectedOwner) return curriculumSubjectOptions;
 
-    return curriculumSubjectOptions.filter(option => {
+    return curriculumSubjectOptions.filter((option) => {
       if (option.id === selectedOwner.id) return false;
       return option.curriculumId === selectedOwner.curriculumId;
     });
   }, [curriculumSubjectOptions, selectedOwner]);
 
   const groupCodes = useMemo(() => {
-    return Array.from(
-      new Set(rows.map(row => row.groupCode).filter(Boolean) as string[])
-    ).sort();
+    return Array.from(new Set(rows.map((row) => row.groupCode).filter(Boolean) as string[])).sort();
   }, [rows]);
 
   // ======================================================
@@ -244,7 +338,7 @@ export default function SubjectPrerequisitesPage() {
   // ======================================================
 
   const viewRows = useMemo<PrerequisiteView[]>(() => {
-    return rows.map(row => {
+    return rows.map((row) => {
       const owner = curriculumSubjectOptionMap.get(row.curriculumSubjectId);
       const prerequisite = curriculumSubjectOptionMap.get(row.prerequisiteSubjectId);
 
@@ -262,7 +356,7 @@ export default function SubjectPrerequisitesPage() {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
+      .filter((item) => {
         const row = item.row;
         const owner = curriculumSubjectOptionMap.get(row.curriculumSubjectId);
 
@@ -305,11 +399,12 @@ export default function SubjectPrerequisitesPage() {
   const summary = useMemo(() => {
     return {
       total: rows.length,
-      active: rows.filter(row => row.active !== false).length,
-      prerequisite: rows.filter(row => row.type === "prerequisite" || !row.type).length,
-      corequisite: rows.filter(row => row.type === "corequisite").length,
-      recommended: rows.filter(row => row.type === "recommended").length,
-      grouped: rows.filter(row => !!row.groupCode).length,
+      active: rows.filter((row) => row.active !== false).length,
+      inactive: rows.filter((row) => row.active === false).length,
+      prerequisite: rows.filter((row) => row.type === "prerequisite" || !row.type).length,
+      corequisite: rows.filter((row) => row.type === "corequisite").length,
+      recommended: rows.filter((row) => row.type === "recommended").length,
+      grouped: rows.filter((row) => !!row.groupCode).length,
     };
   }, [rows]);
 
@@ -318,25 +413,22 @@ export default function SubjectPrerequisitesPage() {
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
+  };
+
+  const requireTenant = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return false;
+    }
+    return true;
   };
 
   const openCreate = () => {
-    if (!activeBranchId) {
-      alert("Select a branch first before creating prerequisite rules.");
-      return;
-    }
+    if (!requireTenant()) return;
 
     setEditMode(false);
-    setForm({
-      curriculumSubjectId: undefined,
-      prerequisiteSubjectId: undefined,
-      minimumGrade: "",
-      minimumScore: undefined,
-      type: "prerequisite",
-      groupCode: "",
-      active: true,
-    });
+    setForm(emptyForm);
     setDrawerOpen(true);
   };
 
@@ -360,9 +452,12 @@ export default function SubjectPrerequisitesPage() {
   // ======================================================
 
   const validate = () => {
+    if (!authenticated || !accountId) return "Sign in first";
+    if (!schoolId) return "Select a school first";
     if (!branchId) return "Select a branch first";
     if (!form.curriculumSubjectId) return "Select subject rule owner";
     if (!form.prerequisiteSubjectId) return "Select required/related subject";
+
     if (form.curriculumSubjectId === form.prerequisiteSubjectId) {
       return "A subject cannot require itself";
     }
@@ -370,11 +465,14 @@ export default function SubjectPrerequisitesPage() {
     const owner = curriculumSubjectOptionMap.get(Number(form.curriculumSubjectId));
     const required = curriculumSubjectOptionMap.get(Number(form.prerequisiteSubjectId));
 
-    if (owner && required && owner.curriculumId !== required.curriculumId) {
+    if (!owner) return "Selected subject rule owner is not in this branch";
+    if (!required) return "Selected required subject is not in this branch";
+
+    if (owner.curriculumId !== required.curriculumId) {
       return "Prerequisite relationship must stay within the same curriculum";
     }
 
-    const duplicate = rows.find(row => {
+    const duplicate = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
 
       return (
@@ -385,9 +483,7 @@ export default function SubjectPrerequisitesPage() {
       );
     });
 
-    if (duplicate) {
-      return "This subject relationship already exists";
-    }
+    if (duplicate) return "This subject relationship already exists";
 
     return null;
   };
@@ -400,22 +496,36 @@ export default function SubjectPrerequisitesPage() {
       return;
     }
 
+    if (!authenticated || !accountId || !schoolId || !branchId) return;
+
     try {
       setSaving(true);
 
-      const payload = prepareSyncData({
-        branchId,
-        curriculumSubjectId: Number(form.curriculumSubjectId),
-        prerequisiteSubjectId: Number(form.prerequisiteSubjectId),
-        minimumGrade: form.minimumGrade?.trim() || undefined,
-        minimumScore: form.minimumScore == null ? undefined : Number(form.minimumScore),
-        type: form.type || "prerequisite",
-        groupCode: form.groupCode?.trim() || undefined,
-        active: form.active !== false,
-      }) as SubjectPrerequisite;
+      const existing = editMode && form.id ? rows.find((row) => row.id === form.id) : undefined;
+
+      const payload = prepareSyncData(
+        {
+          accountId,
+          schoolId: Number(schoolId),
+          branchId: Number(branchId),
+          curriculumSubjectId: Number(form.curriculumSubjectId),
+          prerequisiteSubjectId: Number(form.prerequisiteSubjectId),
+          minimumGrade: form.minimumGrade?.trim() || undefined,
+          minimumScore: form.minimumScore == null ? undefined : Number(form.minimumScore),
+          type: form.type || "prerequisite",
+          groupCode: form.groupCode?.trim() || undefined,
+          active: form.active !== false,
+        },
+        existing
+      ) as SubjectPrerequisite;
 
       if (editMode && form.id) {
         await db.subjectPrerequisites.update(form.id, {
+          accountId: payload.accountId,
+          schoolId: payload.schoolId,
+          branchId: payload.branchId,
+          cloudId: payload.cloudId,
+          createdAt: payload.createdAt,
           curriculumSubjectId: payload.curriculumSubjectId,
           prerequisiteSubjectId: payload.prerequisiteSubjectId,
           minimumGrade: payload.minimumGrade,
@@ -428,7 +538,7 @@ export default function SubjectPrerequisitesPage() {
           deviceId: payload.deviceId,
           synced: payload.synced,
           isDeleted: false,
-        });
+        } as Partial<SubjectPrerequisite>);
       } else {
         await db.subjectPrerequisites.add(payload);
       }
@@ -449,8 +559,9 @@ export default function SubjectPrerequisitesPage() {
 
     await db.subjectPrerequisites.update(row.id, {
       isDeleted: true,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<SubjectPrerequisite>);
 
     await load();
   };
@@ -460,118 +571,54 @@ export default function SubjectPrerequisitesPage() {
 
     await db.subjectPrerequisites.update(row.id, {
       active: row.active === false,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<SubjectPrerequisite>);
 
     await load();
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const typeTone = (type?: RuleType): "green" | "orange" | "purple" => {
-    if (type === "corequisite") return "purple";
-    if (type === "recommended") return "orange";
-    return "green";
-  };
-
-  const typeLabel = (type?: RuleType) => {
-    if (type === "corequisite") return "Corequisite";
-    if (type === "recommended") return "Recommended";
-    return "Prerequisite";
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading subject prerequisites...</div>;
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="spr-page" style={{ "--spr-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="spr-state-card">
+          <div className="spr-spinner" />
+          <h2>Opening subject prerequisites...</h2>
+          <p>Checking account, branch, curriculum subjects, subjects, pathways, and prerequisite rules.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Subject prerequisite rules belong to a branch. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="spr-page" style={{ "--spr-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="spr-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing subject prerequisite rules.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="spr-page" style={{ "--spr-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="spr-state-card">
+          <h2>Select a branch first</h2>
+          <p>Subject prerequisite rules belong to one active school branch.</p>
+          <button type="button" className="spr-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -580,85 +627,62 @@ export default function SubjectPrerequisitesPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Subject Prerequisites</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Managing curriculum subject relationship rules in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="spr-page" style={{ "--spr-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="spr-hero">
+        <div className="spr-hero-left">
+          <div className="spr-hero-icon">🔗</div>
+          <div className="spr-title-wrap">
+            <p>Curriculum Rules</p>
+            <h2>Subject Prerequisites</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button onClick={openCreate} style={button}>
+        <button type="button" className="spr-primary-btn" onClick={openCreate}>
           + Add Rule
         </button>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Rules</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.total}</div>
+      <section className="spr-context-card">
+        <div>
+          <p>Rule Scope</p>
+          <h3>{summary.active} active rule(s)</h3>
+          <span>{summary.total} subject relationship rule(s) in this branch</span>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.active}</div>
+        <div className="spr-pill-row">
+          <Chip tone="blue">Same Tenant</Chip>
+          <Chip tone="green">Branch Scoped</Chip>
+          <Chip tone="purple">Curriculum Linked</Chip>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Prerequisite</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.prerequisite}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Corequisite</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.corequisite}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Grouped Rules</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.grouped}</div>
-        </div>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="spr-summary-grid" aria-label="Subject prerequisite summary">
+        <SummaryCard label="Rules" value={summary.total} icon="📌" />
+        <SummaryCard label="Active" value={summary.active} icon="✅" />
+        <SummaryCard label="Inactive" value={summary.inactive} icon="⏸️" />
+        <SummaryCard label="Prerequisite" value={summary.prerequisite} icon="🔐" />
+        <SummaryCard label="Corequisite" value={summary.corequisite} icon="🔄" />
+        <SummaryCard label="Grouped" value={summary.grouped} icon="🧩" />
+      </section>
+
+      <section className="spr-filter-card">
         <input
           placeholder="Search subject, required subject, grade, group..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
         <select
           value={filterCurriculumId || ""}
-          onChange={e => setFilterCurriculumId(Number(e.target.value) || undefined)}
-          style={input}
+          onChange={(event) => setFilterCurriculumId(Number(event.target.value) || undefined)}
         >
           <option value="">All Curriculums</option>
-          {curriculums.map(row => (
+          {curriculums.map((row) => (
             <option key={row.id} value={row.id}>
               {row.name}
             </option>
@@ -667,8 +691,7 @@ export default function SubjectPrerequisitesPage() {
 
         <select
           value={filterType}
-          onChange={e => setFilterType(e.target.value as any)}
-          style={input}
+          onChange={(event) => setFilterType(event.target.value as "all" | RuleType)}
         >
           <option value="all">All Rule Types</option>
           <option value="prerequisite">Prerequisite</option>
@@ -676,13 +699,9 @@ export default function SubjectPrerequisitesPage() {
           <option value="recommended">Recommended</option>
         </select>
 
-        <select
-          value={filterGroupCode}
-          onChange={e => setFilterGroupCode(e.target.value)}
-          style={input}
-        >
+        <select value={filterGroupCode} onChange={(event) => setFilterGroupCode(event.target.value)}>
           <option value="">All Groups</option>
-          {groupCodes.map(code => (
+          {groupCodes.map((code) => (
             <option key={code} value={code}>
               {code}
             </option>
@@ -691,219 +710,426 @@ export default function SubjectPrerequisitesPage() {
 
         <select
           value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as any)}
-          style={input}
+          onChange={(event) => setFilterStatus(event.target.value as "all" | "active" | "inactive")}
         >
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
-      </div>
+      </section>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredRows.map(item => {
+      <section className="spr-list">
+        {filteredRows.map((item) => {
           const row = item.row;
 
           return (
-            <div key={row.id} style={card}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <div style={{ fontSize: 18, fontWeight: 900 }}>{item.ownerLabel}</div>
-                    <span style={badge(typeTone(row.type))}>{typeLabel(row.type)}</span>
-                    <span style={badge(row.active === false ? "red" : "green")}>
-                      {row.active === false ? "Inactive" : "Active"}
-                    </span>
-                    {row.groupCode && <span style={badge("purple")}>Group: {row.groupCode}</span>}
-                  </div>
+            <article key={row.id} className="spr-rule-card">
+              <div className="spr-rule-main">
+                <div className="spr-rule-icon">{row.type === "corequisite" ? "🔄" : row.type === "recommended" ? "💡" : "🔐"}</div>
 
-                  <div style={{ marginTop: 7, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                    {item.curriculumName} • {item.pathwayName}
-                  </div>
+                <div className="spr-rule-content">
+                  <h3>{item.ownerLabel}</h3>
+                  <p>{item.curriculumName} · {item.pathwayName}</p>
 
-                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={badge("blue")}>Requires: {item.prerequisiteLabel}</span>
-                    <span style={badge("gray")}>Minimum Grade: {row.minimumGrade || "-"}</span>
-                    <span style={badge("gray")}>Minimum Score: {row.minimumScore ?? "-"}</span>
+                  <div className="spr-chip-row">
+                    <Chip tone={typeTone(row.type)}>{typeLabel(row.type)}</Chip>
+                    <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                    {row.groupCode && <Chip tone="purple">Group: {row.groupCode}</Chip>}
                   </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <button style={ghostButton} onClick={() => toggleActive(row)}>
-                    {row.active === false ? "Activate" : "Deactivate"}
-                  </button>
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
-                    Edit
-                  </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row)}>
-                    Delete
-                  </button>
                 </div>
               </div>
-            </div>
+
+              <div className="spr-requirement-box">
+                <strong>Requires: {item.prerequisiteLabel}</strong>
+                <span>Minimum Grade: {row.minimumGrade || "-"} · Minimum Score: {row.minimumScore ?? "-"}</span>
+              </div>
+
+              <div className="spr-action-row">
+                <button type="button" onClick={() => toggleActive(row)}>
+                  {row.active === false ? "Activate" : "Deactivate"}
+                </button>
+                <button type="button" onClick={() => openEdit(row)}>
+                  Edit
+                </button>
+                <button type="button" className="danger" onClick={() => remove(row)}>
+                  Delete
+                </button>
+              </div>
+            </article>
           );
         })}
 
-        {!filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No subject prerequisite rules found in this branch.
-          </div>
-        )}
-      </div>
+        {!filteredRows.length && <EmptyCard text="No subject prerequisite rules found in this branch." />}
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(650px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit Subject Rule" : "Add Subject Rule"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Define prerequisite, corequisite or recommended subject relationships.
-                </div>
-              </div>
+        <div className="spr-drawer-layer">
+          <button type="button" aria-label="Close drawer" className="spr-drawer-overlay" onClick={() => setDrawerOpen(false)} />
 
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+          <aside className="spr-drawer">
+            <div className="spr-drawer-head">
+              <div>
+                <p>Subject Rule</p>
+                <h2>{editMode ? "Edit Subject Rule" : "Add Subject Rule"}</h2>
+                <span>
+                  Define prerequisite, corequisite, or recommended subject relationships under {activeBranch?.name || "the selected branch"}.
+                </span>
+              </div>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>Subject Being Controlled</label>
+            <div className="spr-form-grid">
+              <Field label="Subject Being Controlled">
                 <select
                   value={form.curriculumSubjectId || ""}
-                  onChange={e =>
+                  onChange={(event) =>
                     updateForm({
-                      curriculumSubjectId: Number(e.target.value) || undefined,
+                      curriculumSubjectId: Number(event.target.value) || undefined,
                       prerequisiteSubjectId: undefined,
                     })
                   }
-                  style={input}
                 >
                   <option value="">Select Curriculum Subject</option>
-                  {curriculumSubjectOptions.map(option => (
+                  {curriculumSubjectOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.label}
                     </option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Required / Related Subject</label>
+              <Field label="Required / Related Subject">
                 <select
                   value={form.prerequisiteSubjectId || ""}
-                  onChange={e => updateForm({ prerequisiteSubjectId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ prerequisiteSubjectId: Number(event.target.value) || undefined })}
                 >
                   <option value="">Select Required Subject</option>
-                  {prerequisiteOptions.map(option => (
+                  {prerequisiteOptions.map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.label}
                     </option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Rule Type</label>
+              <Field label="Rule Type">
                 <select
                   value={form.type || "prerequisite"}
-                  onChange={e => updateForm({ type: e.target.value as RuleType })}
-                  style={input}
+                  onChange={(event) => updateForm({ type: event.target.value as RuleType })}
                 >
                   <option value="prerequisite">Prerequisite</option>
                   <option value="corequisite">Corequisite</option>
                   <option value="recommended">Recommended</option>
                 </select>
-              </div>
+              </Field>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                <div>
-                  <label style={label}>Minimum Grade</label>
+              <div className="spr-form-two">
+                <Field label="Minimum Grade">
                   <input
                     value={form.minimumGrade || ""}
-                    onChange={e => updateForm({ minimumGrade: e.target.value })}
+                    onChange={(event) => updateForm({ minimumGrade: event.target.value })}
                     placeholder="e.g. C6, B3, Pass"
-                    style={input}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label style={label}>Minimum Score</label>
+                <Field label="Minimum Score">
                   <input
                     type="number"
                     value={form.minimumScore ?? ""}
-                    onChange={e =>
+                    onChange={(event) =>
                       updateForm({
-                        minimumScore: e.target.value === "" ? undefined : Number(e.target.value),
+                        minimumScore: event.target.value === "" ? undefined : Number(event.target.value),
                       })
                     }
                     placeholder="e.g. 50"
-                    style={input}
                   />
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label style={label}>Group Code</label>
+              <Field label="Group Code">
                 <input
                   value={form.groupCode || ""}
-                  onChange={e => updateForm({ groupCode: e.target.value })}
+                  onChange={(event) => updateForm({ groupCode: event.target.value })}
                   placeholder="Optional group code for alternative prerequisite groups"
-                  style={input}
                 />
-              </div>
+              </Field>
 
-              <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
+              <label className="spr-check">
                 <input
                   type="checkbox"
                   checked={form.active !== false}
-                  onChange={e => updateForm({ active: e.target.checked })}
+                  onChange={(event) => updateForm({ active: event.target.checked })}
                 />
-                Active
+                <span>Active</span>
               </label>
 
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+              <button type="button" onClick={save} disabled={saving} className="spr-save-btn">
                 {saving ? "Saving..." : editMode ? "Save Changes" : "Save Rule"}
               </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
-    </div>
+    </main>
   );
 }
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="spr-summary-card">
+      <div className="spr-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`spr-chip ${tone}`}>{children}</span>;
+}
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="spr-empty-card">
+      <div className="spr-empty-icon">🔗</div>
+      <h3>No rules found</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="spr-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes sprSpin { to { transform: rotate(360deg); } }
+
+.spr-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.spr-page *, .spr-page *::before, .spr-page *::after { box-sizing: border-box; }
+.spr-page button, .spr-page input, .spr-page select, .spr-page textarea { font: inherit; max-width: 100%; }
+.spr-page input,
+.spr-page select,
+.spr-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.spr-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.spr-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.spr-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.spr-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--spr-primary) 18%, transparent); border-top-color: var(--spr-primary); animation: sprSpin .8s linear infinite; }
+
+.spr-primary-btn,
+.spr-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--spr-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.spr-save-btn { width: 100%; }
+.spr-primary-btn:disabled,
+.spr-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.spr-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--spr-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+.spr-hero-left { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.spr-hero-icon { width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: var(--spr-primary); color: #fff; box-shadow: 0 12px 26px color-mix(in srgb, var(--spr-primary) 28%, transparent); font-size: 22px; }
+.spr-title-wrap { min-width: 0; }
+.spr-title-wrap p, .spr-title-wrap h2, .spr-title-wrap span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spr-title-wrap p { margin: 0 0 2px; color: var(--spr-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.spr-title-wrap h2 { margin: 0; font-size: clamp(19px, 5vw, 28px); font-weight: 1000; letter-spacing: -.06em; line-height: 1; }
+.spr-title-wrap span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+.spr-context-card,
+.spr-filter-card,
+.spr-rule-card,
+.spr-empty-card {
+  min-width: 0;
+  margin-top: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+  padding: 13px;
+}
+.spr-context-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--spr-primary) 10%, #fff), #fff 68%);
+}
+.spr-context-card p { margin: 0; color: var(--spr-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.spr-context-card h3 { margin: 4px 0 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.05em; }
+.spr-context-card span { display: block; margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.spr-pill-row { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.spr-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.spr-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+.spr-summary-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--spr-primary) 12%, #fff); }
+.spr-summary-card div:last-child { min-width: 0; }
+.spr-summary-card strong, .spr-summary-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spr-summary-card strong { font-size: 20px; font-weight: 1000; letter-spacing: -.05em; }
+.spr-summary-card span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 850; }
+
+.spr-filter-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.spr-list { display: grid; gap: 10px; margin-top: 10px; }
+.spr-rule-card { background: linear-gradient(135deg, #fff, #f8fafc); }
+.spr-rule-main { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.spr-rule-icon { width: 50px; height: 50px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: color-mix(in srgb, var(--spr-primary) 12%, #fff); font-size: 23px; }
+.spr-rule-content { min-width: 0; flex: 1; }
+.spr-rule-content h3, .spr-rule-content p { display: block; overflow: hidden; text-overflow: ellipsis; }
+.spr-rule-content h3 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -.035em; }
+.spr-rule-content p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.4; }
+.spr-chip-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.spr-chip { max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 950; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spr-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.spr-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.spr-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.spr-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.spr-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.spr-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+.spr-requirement-box { min-width: 0; margin-top: 12px; padding: 11px; border-radius: 18px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .12); }
+.spr-requirement-box strong, .spr-requirement-box span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.spr-requirement-box strong { font-size: 14px; font-weight: 1000; }
+.spr-requirement-box span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.spr-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.spr-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+.spr-action-row button.danger { color: #dc2626; background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.13); }
+.spr-empty-card { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; text-align: center; border-style: dashed; }
+.spr-empty-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 22px; background: color-mix(in srgb, var(--spr-primary) 12%, #fff); font-size: 28px; }
+.spr-empty-card h3 { margin: 0; font-size: 18px; font-weight: 1000; }
+.spr-empty-card p { margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+
+.spr-drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.spr-drawer-overlay { position: absolute; inset: 0; border: 0; background: rgba(15, 23, 42, .52); }
+.spr-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: min(94vw, 650px); max-width: 100vw; overflow-y: auto; overflow-x: hidden; background: var(--surface, #fff); color: var(--text, #0f172a); padding: 14px; box-shadow: -24px 0 70px rgba(15, 23, 42, .22); }
+.spr-drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 0 12px; background: var(--surface, #fff); }
+.spr-drawer-head div { min-width: 0; }
+.spr-drawer-head p { margin: 0; color: var(--spr-primary); font-size: 11px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.spr-drawer-head h2, .spr-drawer-head span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.spr-drawer-head h2 { margin: 2px 0 0; font-size: 24px; font-weight: 1000; letter-spacing: -.05em; }
+.spr-drawer-head span { margin-top: 5px; color: var(--muted, #64748b); font-size: 12px; line-height: 1.4; font-weight: 700; }
+.spr-drawer-head button { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 999px; border: 1px solid rgba(148, 163, 184, .24); background: var(--surface, #fff); color: var(--text, #0f172a); font-weight: 1000; cursor: pointer; }
+.spr-form-grid { display: grid; gap: 12px; }
+.spr-form-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.spr-field { display: grid; gap: 6px; min-width: 0; }
+.spr-field > span { color: var(--muted, #64748b); font-size: 11px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.spr-check { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 12px; border-radius: 18px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .14); font-size: 13px; font-weight: 850; }
+.spr-check input { width: 18px; min-height: 18px; flex: 0 0 auto; }
+
+@media (max-width: 390px) {
+  .spr-page { padding: 6px; }
+  .spr-hero { padding: 10px; border-radius: 24px; flex-wrap: wrap; }
+  .spr-hero-icon { width: 42px; height: 42px; border-radius: 16px; }
+  .spr-hero .spr-primary-btn { width: 100%; }
+  .spr-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .spr-rule-main { flex-direction: column; }
+  .spr-action-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 560px) {
+  .spr-page { padding: 14px; }
+  .spr-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .spr-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .spr-form-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .spr-action-row { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+  .spr-action-row button { padding: 0 14px; }
+}
+
+@media (min-width: 980px) {
+  .spr-page { padding: 18px; }
+  .spr-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .spr-filter-card { grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(150px, 1fr)); }
+  .spr-rule-card { padding: 16px; }
+}
+`;

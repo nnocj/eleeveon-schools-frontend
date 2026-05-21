@@ -3,28 +3,20 @@
 /**
  * reports/Report.tsx
  * ---------------------------------------------------------
- * ENTERPRISE ACADEMIC REPORT ORCHESTRATOR
+ * MOBILE-FIRST SECURE ACADEMIC REPORT ORCHESTRATOR
  * ---------------------------------------------------------
- *
- * Context-aware rewrite for current db.ts.
- *
- * IMPORTANT UX DECISION
- * ---------------------------------------------------------
- * This page does NOT expose a campus/branch selector.
- * The active school + active branch are already selected globally
- * from the dashboard shell/context.
- *
- * Reports are locked to the current Active School -> Active Branch.
- * The report filters only choose academic reporting dimensions:
- * - Academic Structure
- * - Academic Period
- * - Class
- * - Class Subject / Subject
- * - Student
- * - Report Mode
+ * Production goals:
+ * - Requires signed-in account context.
+ * - Requires active school + active branch context.
+ * - Loads only same-tenant records: accountId + schoolId + branchId.
+ * - Keeps all existing report components and report engine behavior.
+ * - WhatsApp-like compact shell, card surfaces, mobile-first layout.
+ * - No unreachable actions on small screens.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAccount } from "@/app/context/account-context";
 
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
@@ -73,11 +65,52 @@ import type {
 } from "./engine/report-types";
 
 // ======================================================
+// HELPERS
+// ======================================================
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
+
+type SchoolRow = {
+  accountId?: string;
+  id?: number;
+  isDeleted?: boolean;
+};
+
+type BranchRow = {
+  accountId?: string;
+  schoolId?: number;
+  id?: number;
+  isDeleted?: boolean;
+};
+
+function firstExistingId<T extends { id?: number }>(rows: T[]) {
+  return rows.find((row) => typeof row.id === "number")?.id;
+}
+
+function formatCount(value: number, label: string) {
+  return `${value.toLocaleString()} ${label}${value === 1 ? "" : "s"}`;
+}
+
+// ======================================================
 // COMPONENT
 // ======================================================
 
 export default function ReportPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
     activeSchoolId,
@@ -86,16 +119,18 @@ export default function ReportPage() {
     loading: contextLoading,
   } = useActiveBranch();
 
-  const primary = settings?.primaryColor || "var(--primary-color)";
-  const branchId = activeBranchId || settings?.branchId;
-  const schoolId = activeSchoolId || settings?.schoolId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
 
   // ======================================================
   // SESSION STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [mode, setMode] = useState<ReportMode>("student-report");
+  const [showFilters, setShowFilters] = useState(true);
+  const [showAnalytics, setShowAnalytics] = useState(true);
 
   const [filters, setFilters] = useState<ReportFiltersState>({
     branchId: branchId || 0,
@@ -127,6 +162,7 @@ export default function ReportPage() {
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
   const [studentEnrollments, setStudentEnrollments] = useState<StudentEnrollment[]>([]);
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
+
   const [assessmentApplicabilities, setAssessmentApplicabilities] =
     useState<AssessmentApplicability[]>([]);
   const [assessmentStructures, setAssessmentStructures] =
@@ -143,12 +179,70 @@ export default function ReportPage() {
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
 
   // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!schoolId || !branchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
+
+  // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const clearState = () => {
+    setSchools([]);
+    setBranches([]);
+    setSchoolBranchSettings([]);
+    setAcademicStructures([]);
+    setAcademicPeriods([]);
+    setStudents([]);
+    setTeachers([]);
+    setParents([]);
+    setClassTeachers([]);
+    setClasses([]);
+    setSubjects([]);
+    setClassSubjects([]);
+    setStudentEnrollments([]);
+    setStudentParents([]);
+    setAssessmentApplicabilities([]);
+    setAssessmentStructures([]);
+    setAssessmentStructureItems([]);
+    setAssessmentEntries([]);
+    setGradingSystems([]);
+    setGradeRules([]);
+    setAttendance([]);
+    setComputedResults([]);
+    setReportCards([]);
+    setReportCardItems([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearState();
+      setPageLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
+      setPageLoading(true);
 
       const [
         schoolRows,
@@ -210,79 +304,90 @@ export default function ReportPage() {
         db.reportCardItems.toArray(),
       ]);
 
-      const activeSchools = schoolRows.filter(row => !row.isDeleted);
+      const sameSchool = (row: SchoolRow) =>
+        row.accountId === accountId &&
+        row.id === schoolId &&
+        !row.isDeleted;
 
-      const currentSchool = schoolId
-        ? activeSchools.find(row => row.id === schoolId)
-        : activeSchool || activeSchools[0];
+      const sameBranch = (row: BranchRow) =>
+        row.accountId === accountId &&
+        row.schoolId === schoolId &&
+        row.id === branchId &&
+        !row.isDeleted;
 
-      const currentBranch = branchId
-        ? branchRows.find(row => row.id === branchId && !row.isDeleted)
-        : activeBranch || undefined;
+      const sameTenant = (row: TenantRow) =>
+        row.accountId === accountId &&
+        row.schoolId === schoolId &&
+        row.branchId === branchId &&
+        !row.isDeleted;
 
-      const branchScoped = <T extends { branchId: number; isDeleted?: boolean }>(rows: T[]) => {
-        return rows.filter(row => {
-          if (row.isDeleted) return false;
-          if (!branchId) return false;
-          return row.branchId === branchId;
-        });
-      };
+      const currentSchool =
+        schoolRows.find(sameSchool) ||
+        (activeSchool?.accountId === accountId && activeSchool?.id === schoolId
+          ? activeSchool
+          : undefined);
+
+      const currentBranch =
+        branchRows.find(sameBranch) ||
+        (activeBranch?.accountId === accountId &&
+        activeBranch?.schoolId === schoolId &&
+        activeBranch?.id === branchId
+          ? activeBranch
+          : undefined);
+
+      const scopedAcademicPeriods = academicPeriodRows.filter(sameTenant);
+      const scopedReportCards = reportCardRows.filter(sameTenant);
 
       const branchPeriodIds = new Set(
-        academicPeriodRows
-          .filter(row => !row.isDeleted && branchId && row.branchId === branchId)
-          .map(row => row.id)
-          .filter(Boolean) as number[]
+        scopedAcademicPeriods.map((row) => row.id).filter(Boolean) as number[]
       );
 
       const branchReportCardIds = new Set(
-        reportCardRows
-          .filter(row => !row.isDeleted && branchId && row.branchId === branchId)
-          .map(row => row.id)
-          .filter(Boolean) as number[]
+        scopedReportCards.map((row) => row.id).filter(Boolean) as number[]
       );
 
-      // Keep only the globally selected school and branch in the report dataset.
-      // This prevents ReportFilters from behaving like a branch/campus switcher.
       setSchools(currentSchool ? [currentSchool] : []);
       setBranches(currentBranch ? [currentBranch] : []);
+      setSchoolBranchSettings(schoolBranchSettingRows.filter(sameTenant));
 
-      setSchoolBranchSettings(
-        schoolBranchSettingRows.filter(row => {
-          if (row.isDeleted) return false;
-          if (schoolId && row.schoolId && row.schoolId !== schoolId) return false;
-          if (branchId && row.branchId && row.branchId !== branchId) return false;
-          return true;
-        })
+      setAcademicStructures(academicStructureRows.filter(sameTenant));
+      setAcademicPeriods(scopedAcademicPeriods);
+
+      setStudents(studentRows.filter(sameTenant));
+      setParents(parentRows.filter(sameTenant));
+      setTeachers(teacherRows.filter(sameTenant));
+
+      setClasses(classRows.filter((row) => sameTenant(row) && row.active !== false));
+      setSubjects(subjectRows.filter((row) => sameTenant(row) && row.active !== false));
+      setClassSubjects(classSubjectRows.filter((row) => sameTenant(row) && row.active !== false));
+
+      setStudentParents(studentParentRows.filter(sameTenant));
+      setStudentEnrollments(enrollmentRows.filter(sameTenant));
+      setClassTeachers(classTeacherRows.filter(sameTenant));
+
+      setAssessmentApplicabilities(
+        applicabilityRows.filter((row) => sameTenant(row) && row.active !== false)
       );
 
-      setAcademicStructures(branchScoped(academicStructureRows));
-      setAcademicPeriods(branchScoped(academicPeriodRows));
+      setAssessmentStructures(
+        structureRows.filter((row) => sameTenant(row) && row.active !== false)
+      );
 
-      setStudents(branchScoped(studentRows));
-      setParents(branchScoped(parentRows));
-      setTeachers(branchScoped(teacherRows));
-      setClasses(branchScoped(classRows));
-      setSubjects(branchScoped(subjectRows));
-      setClassSubjects(branchScoped(classSubjectRows));
-      setStudentParents(branchScoped(studentParentRows));
-      setStudentEnrollments(branchScoped(enrollmentRows));
-      setClassTeachers(branchScoped(classTeacherRows));
-      setAssessmentApplicabilities(branchScoped(applicabilityRows));
-      setAssessmentStructures(branchScoped(structureRows));
-      setAssessmentStructureItems(branchScoped(structureItemRows));
-      setAssessmentEntries(branchScoped(entryRows));
-      setGradingSystems(branchScoped(gradingRows));
-      setGradeRules(branchScoped(ruleRows));
+      setAssessmentStructureItems(
+        structureItemRows.filter((row) => sameTenant(row) && row.active !== false)
+      );
 
-      setAttendance(branchScoped(attendanceRows));
-      setComputedResults(branchScoped(computedRows));
-      setReportCards(branchScoped(reportCardRows));
+      setAssessmentEntries(entryRows.filter(sameTenant));
+      setGradingSystems(gradingRows.filter((row) => sameTenant(row) && row.active !== false));
+      setGradeRules(ruleRows.filter((row) => sameTenant(row) && row.active !== false));
+
+      setAttendance(attendanceRows.filter(sameTenant));
+      setComputedResults(computedRows.filter(sameTenant));
+      setReportCards(scopedReportCards);
+
       setReportCardItems(
-        reportCardItemRows.filter(row => {
-          if (row.isDeleted) return false;
-          if (!branchId) return false;
-          if (row.branchId !== branchId) return false;
+        reportCardItemRows.filter((row) => {
+          if (!sameTenant(row)) return false;
           if (row.reportCardId && !branchReportCardIds.has(row.reportCardId)) return false;
           if (row.academicPeriodId && !branchPeriodIds.has(row.academicPeriodId)) return false;
           return true;
@@ -290,30 +395,35 @@ export default function ReportPage() {
       );
     } catch (error) {
       console.error("Failed to load report data:", error);
+      clearState();
     } finally {
-      setLoading(false);
+      setPageLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-  }, [branchId, schoolId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // KEEP FILTERS LOCKED TO ACTIVE BRANCH
   // ======================================================
 
   useEffect(() => {
-    setFilters(prev => {
-      const branchChanged = prev.branchId !== (branchId || 0);
+    setFilters((prev) => {
+      const nextBranchId = branchId || 0;
+      const branchChanged = prev.branchId !== nextBranchId;
 
       return {
         ...prev,
-        branchId: branchId || 0,
-        academicStructureId:
-          branchChanged ? settings?.currentAcademicStructureId : prev.academicStructureId || settings?.currentAcademicStructureId,
-        academicPeriodId:
-          branchChanged ? settings?.currentAcademicPeriodId : prev.academicPeriodId || settings?.currentAcademicPeriodId,
+        branchId: nextBranchId,
+        academicStructureId: branchChanged
+          ? settings?.currentAcademicStructureId
+          : prev.academicStructureId || settings?.currentAcademicStructureId,
+        academicPeriodId: branchChanged
+          ? settings?.currentAcademicPeriodId
+          : prev.academicPeriodId || settings?.currentAcademicPeriodId,
         classId: branchChanged ? undefined : prev.classId,
         classSubjectId: branchChanged ? undefined : prev.classSubjectId,
         studentId: branchChanged ? undefined : prev.studentId,
@@ -322,51 +432,47 @@ export default function ReportPage() {
   }, [branchId, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
 
   useEffect(() => {
-    if (!filters.academicStructureId && academicStructures[0]?.id) {
-      setFilters(prev => ({ ...prev, academicStructureId: academicStructures[0].id }));
+    if (!filters.academicStructureId) {
+      const fallbackId = settings?.currentAcademicStructureId || firstExistingId(academicStructures);
+      if (fallbackId) setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
     }
-  }, [filters.academicStructureId, academicStructures]);
+  }, [filters.academicStructureId, settings?.currentAcademicStructureId, academicStructures]);
 
   useEffect(() => {
-    if (!filters.academicPeriodId && academicPeriods[0]?.id) {
-      setFilters(prev => ({ ...prev, academicPeriodId: academicPeriods[0].id }));
+    if (!filters.academicPeriodId) {
+      const fallbackId = settings?.currentAcademicPeriodId || firstExistingId(academicPeriods);
+      if (fallbackId) setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
     }
-  }, [filters.academicPeriodId, academicPeriods]);
+  }, [filters.academicPeriodId, settings?.currentAcademicPeriodId, academicPeriods]);
 
   // ======================================================
-  // FILTER DATA PASSED TO REPORTFILTERS
+  // FILTER DATA PASSED TO REPORT FILTERS
   // ======================================================
 
   const lockedBranches = useMemo(() => {
-    return activeBranch ? [activeBranch] : branches;
-  }, [activeBranch, branches]);
+    return activeBranch && activeBranch.id === branchId ? [activeBranch] : branches;
+  }, [activeBranch, branchId, branches]);
 
   const filteredClasses = useMemo(() => {
-    // Class does NOT have academicStructureId in the current db.ts.
-    // So we infer academic-structure/period relevance through:
-    // - studentEnrollments
-    // - classSubjects
     const allowedClassIds = new Set<number>();
 
-    studentEnrollments.forEach(row => {
+    studentEnrollments.forEach((row) => {
       if (row.status !== "active") return;
       if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
       if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
       allowedClassIds.add(row.classId);
     });
 
-    classSubjects.forEach(row => {
+    classSubjects.forEach((row) => {
       if (row.active === false) return;
       if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
       if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
       allowedClassIds.add(row.classId);
     });
 
-    if (!filters.academicStructureId && !filters.academicPeriodId) {
-      return classes;
-    }
+    if (!filters.academicStructureId && !filters.academicPeriodId) return classes;
 
-    return classes.filter(row => row.id && allowedClassIds.has(row.id));
+    return classes.filter((row) => row.id && allowedClassIds.has(row.id));
   }, [
     classes,
     studentEnrollments,
@@ -376,7 +482,7 @@ export default function ReportPage() {
   ]);
 
   const filteredClassSubjects = useMemo(() => {
-    return classSubjects.filter(row => {
+    return classSubjects.filter((row) => {
       if (filters.classId && row.classId !== filters.classId) return false;
       if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
       if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
@@ -389,18 +495,24 @@ export default function ReportPage() {
 
     const allowedStudentIds = new Set(
       studentEnrollments
-        .filter(row => {
+        .filter((row) => {
           if (row.status !== "active") return false;
           if (filters.classId && row.classId !== filters.classId) return false;
           if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
           if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
           return true;
         })
-        .map(row => row.studentId)
+        .map((row) => row.studentId)
     );
 
-    return students.filter(row => row.id && allowedStudentIds.has(row.id));
-  }, [students, studentEnrollments, filters.classId, filters.academicStructureId, filters.academicPeriodId]);
+    return students.filter((row) => row.id && allowedStudentIds.has(row.id));
+  }, [
+    students,
+    studentEnrollments,
+    filters.classId,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   // ======================================================
   // DATASET
@@ -446,8 +558,8 @@ export default function ReportPage() {
       classes,
       subjects,
       classSubjects,
-      classTeachers,
       studentEnrollments,
+      classTeachers,
       assessmentApplicabilities,
       assessmentStructures,
       assessmentStructureItems,
@@ -465,102 +577,32 @@ export default function ReportPage() {
     return buildReportEngineOutput(dataset, filters);
   }, [dataset, filters]);
 
-  // ======================================================
-  // STYLES
-  // ======================================================
+  const hasCoreSetup = Boolean(
+    academicStructures.length && academicPeriods.length && classes.length && students.length
+  );
 
-  const pageStyle: React.CSSProperties = {
-    padding: 20,
-    color: "var(--text)",
-    background: "var(--bg)",
-    minHeight: "100vh",
-  };
-
-  const surfaceCard: React.CSSProperties = {
-    padding: 24,
-    borderRadius: 22,
-    background: "var(--surface)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const headerCard: React.CSSProperties = {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 16,
-    flexWrap: "wrap",
-    marginBottom: 18,
-  };
-
-  const titleStyle: React.CSSProperties = {
-    margin: 0,
-    fontSize: 26,
-    fontWeight: 900,
-    letterSpacing: -0.4,
-  };
-
-  const subtitleStyle: React.CSSProperties = {
-    marginTop: 4,
-    fontSize: 13,
-    opacity: 0.72,
-    fontWeight: 650,
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  // ======================================================
-  // LOADING / NO CONTEXT
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return (
-      <div style={pageStyle}>
-        <div style={{ ...surfaceCard, fontWeight: 800 }}>
-          Loading enterprise report engine...
-        </div>
-      </div>
-    );
-  }
-
-  if (!branchId) {
-    return (
-      <div style={pageStyle}>
-        <div style={{ ...surfaceCard, textAlign: "center" }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.72 }}>
-            Reports are generated inside a branch context. Select a school and branch from the global dashboard context first.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const activeContextName = `${activeSchool?.name || schools[0]?.name || "Selected School"} · ${
+    activeBranch?.name || branches[0]?.name || "Selected Branch"
+  }`;
 
   // ======================================================
   // RENDER ACTIVE REPORT
   // ======================================================
 
   const renderActiveReport = () => {
+    if (!hasCoreSetup) {
+      return (
+        <section className="rp-empty-card report-no-print">
+          <div className="rp-empty-icon">📄</div>
+          <h3>Reports need academic data first</h3>
+          <p>
+            Add academic periods, classes, students, enrollments, class subjects, assessment
+            entries, or computed results before generating publishable reports.
+          </p>
+        </section>
+      );
+    }
+
     if (mode === "student-report") {
       return <StudentReportCard dataset={output.studentReport} pageBreakAfter={false} />;
     }
@@ -600,63 +642,682 @@ export default function ReportPage() {
   };
 
   // ======================================================
+  // LOADING / PROTECTED STATES
+  // ======================================================
+
+  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+    return (
+      <main className="rp-page" style={{ "--rp-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="rp-state-card">
+          <div className="rp-spinner" />
+          <h2>Opening report engine...</h2>
+          <p>Checking account, school, branch, and academic report data.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!authenticated || !accountId) {
+    return (
+      <main className="rp-page" style={{ "--rp-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="rp-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before opening reports.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="rp-page" style={{ "--rp-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="rp-state-card">
+          <h2>Select a school branch first</h2>
+          <p>Reports are generated inside one active school and branch workspace.</p>
+          <button type="button" className="rp-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  // ======================================================
   // UI
   // ======================================================
 
   return (
-    <div style={pageStyle}>
-      <div className="report-no-print" style={headerCard}>
-        <div>
-          <h2 style={titleStyle}>Academic Report Publishing Engine</h2>
-          <div style={subtitleStyle}>
-            ClassSubject-driven report cards, broadsheets and A4 export tools.
+    <main className="rp-page" style={{ "--rp-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="rp-hero report-no-print">
+        <div className="rp-hero-main">
+          <div className="rp-avatar" aria-hidden="true">
+            📄
           </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={badge("purple")}>{activeSchool?.name || schools[0]?.name || "Selected School"}</span>
-            <span style={badge("blue")}>{activeBranch?.name || branches[0]?.name || "Selected Branch"}</span>
-            <span style={badge("gray")}>Branch locked</span>
-            <span style={badge("gray")}>{students.length} student(s)</span>
-            <span style={badge("gray")}>{classSubjects.length} class subject(s)</span>
+
+          <div className="rp-title-wrap">
+            <p>Academic Publishing</p>
+            <h2>Report Engine</h2>
+            <span>{activeContextName}</span>
           </div>
         </div>
 
-        <ReportExportTools targetId="report-print-zone" primaryColor={primary} />
-      </div>
+        <div className="rp-export-wrap">
+          <ReportExportTools targetId="report-print-zone" primaryColor={primary} />
+        </div>
+      </section>
 
-      <div className="report-no-print" style={{ display: "grid", gap: 16 }}>
-        <ReportFilters
-          mode={mode}
-          setMode={setMode}
-          filters={filters}
-          setFilters={setFilters}
-          branches={lockedBranches}
-          academicStructures={academicStructures}
-          academicPeriods={academicPeriods}
-          classes={filteredClasses}
-          classSubjects={filteredClassSubjects}
-          subjects={subjects}
-          students={filteredStudents}
-          studentEnrollments={studentEnrollments}
-          primaryColor={primary}
-        />
+      <section className="rp-metrics report-no-print" aria-label="Report context summary">
+        <article className="rp-mini-card">
+          <strong>{students.length}</strong>
+          <span>Students</span>
+        </article>
+        <article className="rp-mini-card">
+          <strong>{classes.length}</strong>
+          <span>Classes</span>
+        </article>
+        <article className="rp-mini-card">
+          <strong>{classSubjects.length}</strong>
+          <span>Class Subjects</span>
+        </article>
+        <article className="rp-mini-card">
+          <strong>{computedResults.length}</strong>
+          <span>Results</span>
+        </article>
+      </section>
 
-        <ReportAnalytics
-          analytics={output.analytics}
-          warnings={output.warnings}
-          primaryColor={primary}
-        />
-      </div>
+      <section className="rp-mobile-actions report-no-print" aria-label="Quick report controls">
+        <button
+          type="button"
+          className={showFilters ? "active" : ""}
+          onClick={() => setShowFilters((prev) => !prev)}
+        >
+          Filters
+        </button>
+        <button
+          type="button"
+          className={showAnalytics ? "active" : ""}
+          onClick={() => setShowAnalytics((prev) => !prev)}
+        >
+          Analytics
+        </button>
+        <button type="button" onClick={load}>
+          Refresh
+        </button>
+      </section>
 
-      <div
-        id="report-print-zone"
-        style={{
-          marginTop: 20,
-          display: "grid",
-          gap: 20,
-        }}
-      >
-        {renderActiveReport()}
-      </div>
-    </div>
+      <section className="rp-workspace report-no-print">
+        {showFilters && (
+          <div className="rp-panel rp-filter-panel">
+            <div className="rp-panel-head">
+              <div>
+                <p>Step 1</p>
+                <h3>Choose report scope</h3>
+              </div>
+              <span>{formatCount(filteredStudents.length, "student")}</span>
+            </div>
+
+            <ReportFilters
+              mode={mode}
+              setMode={setMode}
+              filters={filters}
+              setFilters={setFilters}
+              branches={lockedBranches}
+              academicStructures={academicStructures}
+              academicPeriods={academicPeriods}
+              classes={filteredClasses}
+              classSubjects={filteredClassSubjects}
+              subjects={subjects}
+              students={filteredStudents}
+              studentEnrollments={studentEnrollments}
+              primaryColor={primary}
+            />
+          </div>
+        )}
+
+        {showAnalytics && (
+          <div className="rp-panel rp-analytics-panel">
+            <div className="rp-panel-head">
+              <div>
+                <p>Step 2</p>
+                <h3>Review readiness</h3>
+              </div>
+              <span>{output.warnings.length ? `${output.warnings.length} warning(s)` : "Ready"}</span>
+            </div>
+
+            <ReportAnalytics
+              analytics={output.analytics}
+              warnings={output.warnings}
+              primaryColor={primary}
+            />
+          </div>
+        )}
+      </section>
+
+      <section className="rp-print-shell">
+        <div className="rp-print-head report-no-print">
+          <div>
+            <p>Step 3</p>
+            <h3>Preview output</h3>
+          </div>
+          <span>{mode.replace(/-/g, " ")}</span>
+        </div>
+
+        <div id="report-print-zone" className="rp-print-zone">
+          {renderActiveReport()}
+        </div>
+      </section>
+    </main>
   );
 }
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes rpSpin {
+  to { transform: rotate(360deg); }
+}
+
+.rp-page {
+  min-height: 100dvh;
+  width: 100%;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+
+.rp-page *,
+.rp-page *::before,
+.rp-page *::after {
+  box-sizing: border-box;
+}
+
+.rp-page button,
+.rp-page input,
+.rp-page select,
+.rp-page textarea {
+  font: inherit;
+}
+
+.rp-page table {
+  max-width: 100%;
+}
+
+.rp-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #ffffff);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+  text-align: center;
+}
+
+.rp-state-card h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 950;
+  letter-spacing: -0.04em;
+}
+
+.rp-state-card p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.rp-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 4px solid color-mix(in srgb, var(--rp-primary) 18%, transparent);
+  border-top-color: var(--rp-primary);
+  animation: rpSpin .8s linear infinite;
+}
+
+.rp-primary-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--rp-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.rp-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--rp-primary) 12%, #ffffff), #ffffff 64%);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.07);
+}
+
+.rp-hero-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.rp-avatar {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--rp-primary);
+  color: #fff;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--rp-primary) 28%, transparent);
+  font-size: 22px;
+}
+
+.rp-title-wrap {
+  min-width: 0;
+}
+
+.rp-title-wrap p,
+.rp-title-wrap h2,
+.rp-title-wrap span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-title-wrap p {
+  margin: 0 0 2px;
+  color: var(--rp-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rp-title-wrap h2 {
+  margin: 0;
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 1000;
+  letter-spacing: -0.06em;
+  line-height: 1;
+}
+
+.rp-title-wrap span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.rp-export-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.rp-export-wrap > * {
+  max-width: 100%;
+}
+
+.rp-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.rp-mini-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #ffffff);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+}
+
+.rp-mini-card strong,
+.rp-mini-card span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-mini-card strong {
+  font-size: 21px;
+  font-weight: 1000;
+  letter-spacing: -0.05em;
+}
+
+.rp-mini-card span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.rp-mobile-actions {
+  position: sticky;
+  top: 50px;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg, #f8fafc) 88%, #ffffff);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+.rp-mobile-actions button {
+  min-width: 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: transparent;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-mobile-actions button.active {
+  background: var(--rp-primary);
+  color: #fff;
+}
+
+.rp-workspace {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.rp-panel,
+.rp-print-shell {
+  min-width: 0;
+  border-radius: 26px;
+  background: var(--surface, #ffffff);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.055);
+  overflow: hidden;
+}
+
+.rp-panel {
+  padding: 10px;
+}
+
+.rp-panel-head,
+.rp-print-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.rp-panel-head div,
+.rp-print-head div {
+  min-width: 0;
+}
+
+.rp-panel-head p,
+.rp-print-head p {
+  margin: 0;
+  color: var(--rp-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.rp-panel-head h3,
+.rp-print-head h3 {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 1000;
+  letter-spacing: -0.04em;
+}
+
+.rp-panel-head span,
+.rp-print-head span {
+  max-width: 48%;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rp-primary) 10%, #ffffff);
+  color: var(--rp-primary);
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-filter-panel :is(input, select, textarea),
+.rp-analytics-panel :is(input, select, textarea) {
+  min-height: 42px;
+}
+
+.rp-filter-panel :is(button),
+.rp-analytics-panel :is(button) {
+  min-height: 38px;
+}
+
+.rp-print-shell {
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.rp-print-zone {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rp-print-zone > * {
+  min-width: 0;
+}
+
+.rp-empty-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 260px;
+  padding: 22px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
+  border: 1px dashed rgba(148, 163, 184, 0.5);
+  text-align: center;
+}
+
+.rp-empty-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--rp-primary) 12%, #ffffff);
+  font-size: 28px;
+}
+
+.rp-empty-card h3 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 1000;
+  letter-spacing: -0.04em;
+}
+
+.rp-empty-card p {
+  max-width: 40rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+@media (min-width: 720px) {
+  .rp-page {
+    padding: 14px;
+  }
+
+  .rp-hero {
+    padding: 16px;
+  }
+
+  .rp-avatar {
+    width: 54px;
+    height: 54px;
+    border-radius: 20px;
+  }
+
+  .rp-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .rp-panel,
+  .rp-print-shell {
+    padding: 14px;
+    border-radius: 30px;
+  }
+}
+
+@media (min-width: 1040px) {
+  .rp-page {
+    padding: 18px;
+  }
+
+  .rp-workspace {
+    grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+    align-items: start;
+  }
+
+  .rp-mobile-actions {
+    position: static;
+    width: min(420px, 100%);
+  }
+}
+
+@media (max-width: 520px) {
+  .rp-hero {
+    flex-direction: column;
+  }
+
+  .rp-export-wrap {
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .rp-export-wrap > * {
+    width: 100%;
+  }
+
+  .rp-title-wrap h2 {
+    font-size: 21px;
+  }
+
+  .rp-metrics {
+    gap: 6px;
+  }
+
+  .rp-mini-card {
+    padding: 10px;
+    border-radius: 19px;
+  }
+
+  .rp-mini-card strong {
+    font-size: 18px;
+  }
+
+  .rp-mobile-actions {
+    top: 46px;
+    border-radius: 22px;
+  }
+
+  .rp-mobile-actions button {
+    min-height: 36px;
+    font-size: 11px;
+  }
+
+  .rp-panel,
+  .rp-print-shell {
+    border-radius: 22px;
+    padding: 8px;
+  }
+
+  .rp-panel-head,
+  .rp-print-head {
+    align-items: flex-start;
+  }
+
+  .rp-panel-head span,
+  .rp-print-head span {
+    max-width: 44%;
+    font-size: 10px;
+    padding: 5px 8px;
+  }
+
+  .rp-panel-head h3,
+  .rp-print-head h3 {
+    font-size: 15px;
+  }
+}
+
+@media print {
+  .report-no-print,
+  .rp-hero,
+  .rp-metrics,
+  .rp-mobile-actions,
+  .rp-workspace,
+  .rp-print-head {
+    display: none !important;
+  }
+
+  .rp-page,
+  .rp-print-shell,
+  .rp-print-zone {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    overflow: visible !important;
+  }
+}
+`;

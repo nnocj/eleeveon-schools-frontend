@@ -17,13 +17,15 @@
  * - dynamic assessment item columns
  * - attendance, positions, remarks and signatures
  *
- * Update:
- * - UI/design preserved.
- * - Signature labels now populate class teacher, headteacher/principal,
- *   and parent/guardian from report/header/student dataset where available.
+ * Mobile update:
+ * - Printable A4 design is preserved.
+ * - Screen rendering is wrapped in a responsive preview shell.
+ * - On mobile, the same report is scaled down beautifully.
+ * - Users can expand the preview to inspect full details.
+ * - Print layout remains original A4 and is not scaled.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 
 import ReportHeader from "./ReportHeader";
 
@@ -41,6 +43,11 @@ type Props = {
   compact?: boolean;
   showWatermark?: boolean;
   pageBreakAfter?: boolean;
+  /**
+   * When true, shows the responsive preview controls.
+   * Print output is unchanged either way.
+   */
+  mobilePreview?: boolean;
 };
 
 // ======================================================
@@ -59,9 +66,7 @@ const ordinal = (value?: number) => {
   const mod100 = value % 100;
 
   return `${value}${
-    suffixes[(mod100 - 20) % 10] ||
-    suffixes[mod100] ||
-    suffixes[0]
+    suffixes[(mod100 - 20) % 10] || suffixes[mod100] || suffixes[0]
   }`;
 };
 
@@ -81,7 +86,10 @@ export default function StudentReportCard({
   compact = false,
   showWatermark = true,
   pageBreakAfter = true,
+  mobilePreview = true,
 }: Props) {
+  const [expanded, setExpanded] = useState(false);
+
   const report = dataset?.report;
   const header = dataset?.header;
   const student = dataset?.student;
@@ -151,8 +159,8 @@ export default function StudentReportCard({
   const assessmentColumns = useMemo<ReportAssessmentColumn[]>(() => {
     const map = new Map<number, ReportAssessmentColumn>();
 
-    report?.subjectResults.forEach(subject => {
-      subject.breakdown.forEach(item => {
+    report?.subjectResults.forEach((subject) => {
+      subject.breakdown.forEach((item) => {
         if (!map.has(item.assessmentStructureItemId)) {
           map.set(item.assessmentStructureItemId, {
             assessmentStructureItemId: item.assessmentStructureItemId,
@@ -170,15 +178,8 @@ export default function StudentReportCard({
 
   if (!dataset || !report || !header) {
     return (
-      <div
-        style={{
-          padding: 20,
-          border: "1px dashed #ccc",
-          borderRadius: 16,
-          background: "var(--surface)",
-          color: "var(--text)",
-        }}
-      >
+      <div className="src-empty-card">
+        <style>{css}</style>
         Select a student, class and academic period to generate a report card.
       </div>
     );
@@ -251,13 +252,11 @@ export default function StudentReportCard({
     color: "#111",
   };
 
-  return (
+  const reportPage = (
     <section
-      className="print-page report-page-break student-report-card-page"
+      className="print-page report-page-break student-report-card-page src-a4-page"
       style={page}
     >
-      {/* BACKGROUND */}
-
       {branding?.reportCardBackgroundImage && (
         <img
           src={branding.reportCardBackgroundImage}
@@ -273,8 +272,6 @@ export default function StudentReportCard({
           }}
         />
       )}
-
-      {/* WATERMARK */}
 
       {showWatermark && (branding?.reportCardWatermark || branding?.logo) && (
         <div
@@ -308,8 +305,6 @@ export default function StudentReportCard({
           compact={compact}
           orientation="portrait"
         />
-
-        {/* STUDENT DETAILS */}
 
         <div
           style={{
@@ -353,16 +348,12 @@ export default function StudentReportCard({
 
             <div style={infoBox}>
               <div style={label}>Attendance</div>
-              <div style={value}>
-                {report.attendance.presentDays}/{report.attendance.totalDays}
-              </div>
+              <div style={value}>{report.attendance.presentDays}/{report.attendance.totalDays}</div>
             </div>
 
             <div style={infoBox}>
               <div style={label}>Attendance %</div>
-              <div style={value}>
-                {formatNumber(report.attendance.attendancePercent, 1)}%
-              </div>
+              <div style={value}>{formatNumber(report.attendance.attendancePercent, 1)}%</div>
             </div>
           </div>
 
@@ -382,37 +373,21 @@ export default function StudentReportCard({
               <img
                 src={report.studentPhoto || student?.photo}
                 alt="Student"
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                }}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             ) : (
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: "#777",
-                }}
-              >
-                PHOTO
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "#777" }}>PHOTO</span>
             )}
           </div>
         </div>
-
-        {/* RESULTS TABLE */}
 
         <div style={{ marginTop: 10 }}>
           <table style={table}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: "left", minWidth: 95 }}>
-                  Subject
-                </th>
+                <th style={{ ...th, textAlign: "left", minWidth: 95 }}>Subject</th>
 
-                {assessmentColumns.map(column => (
+                {assessmentColumns.map((column) => (
                   <th key={column.assessmentStructureItemId} style={th}>
                     {column.name}
                     <div style={{ fontSize: 8, marginTop: 2, opacity: 0.95 }}>
@@ -430,72 +405,40 @@ export default function StudentReportCard({
             </thead>
 
             <tbody>
-              {report.subjectResults.map(subject => (
+              {report.subjectResults.map((subject) => (
                 <tr key={subject.classSubjectId}>
                   <td style={{ ...td, fontWeight: 800 }}>
                     {subject.subjectName}
                     {subject.teacherName && (
-                      <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 8,
-                          opacity: 0.72,
-                          fontWeight: 500,
-                        }}
-                      >
+                      <div style={{ marginTop: 2, fontSize: 8, opacity: 0.72, fontWeight: 500 }}>
                         {subject.teacherName}
                       </div>
                     )}
                   </td>
 
-                  {assessmentColumns.map(column => {
+                  {assessmentColumns.map((column) => {
                     const item = subject.breakdown.find(
-                      row =>
-                        row.assessmentStructureItemId ===
-                        column.assessmentStructureItemId
+                      (row) => row.assessmentStructureItemId === column.assessmentStructureItemId
                     );
 
                     return (
-                      <td
-                        key={column.assessmentStructureItemId}
-                        style={{ ...td, textAlign: "center" }}
-                      >
-                        {item
-                          ? `${formatNumber(item.score, 0)}/${formatNumber(
-                              item.maxScore,
-                              0
-                            )}`
-                          : "-"}
+                      <td key={column.assessmentStructureItemId} style={{ ...td, textAlign: "center" }}>
+                        {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
                       </td>
                     );
                   })}
 
-                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
-                    {formatNumber(subject.weightedTotal, 1)}
-                  </td>
-
-                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
-                    {formatNumber(subject.percentage, 1)}%
-                  </td>
-
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
-                    {subject.grade}
-                  </td>
-
-                  <td style={{ ...td, textAlign: "center" }}>
-                    {ordinal(subject.subjectPosition)}
-                  </td>
-
+                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(subject.weightedTotal, 1)}</td>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(subject.percentage, 1)}%</td>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>{subject.grade}</td>
+                  <td style={{ ...td, textAlign: "center" }}>{ordinal(subject.subjectPosition)}</td>
                   <td style={td}>{subject.remark}</td>
                 </tr>
               ))}
 
               {!report.subjectResults.length && (
                 <tr>
-                  <td
-                    style={{ ...td, textAlign: "center", padding: 16 }}
-                    colSpan={assessmentColumns.length + 6}
-                  >
+                  <td style={{ ...td, textAlign: "center", padding: 16 }} colSpan={assessmentColumns.length + 6}>
                     No subject results available for this selected period.
                   </td>
                 </tr>
@@ -504,16 +447,7 @@ export default function StudentReportCard({
           </table>
         </div>
 
-        {/* SUMMARY */}
-
-        <div
-          style={{
-            marginTop: 10,
-            display: "grid",
-            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-            gap: 7,
-          }}
-        >
+        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 7 }}>
           <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
             <div style={label}>Total</div>
             <div style={{ ...value, fontSize: 16 }}>{formatNumber(report.total, 1)}</div>
@@ -521,9 +455,7 @@ export default function StudentReportCard({
 
           <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
             <div style={label}>Average</div>
-            <div style={{ ...value, fontSize: 16 }}>
-              {formatNumber(report.average, 1)}%
-            </div>
+            <div style={{ ...value, fontSize: 16 }}>{formatNumber(report.average, 1)}%</div>
           </div>
 
           <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
@@ -533,111 +465,224 @@ export default function StudentReportCard({
 
           <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
             <div style={label}>GPA</div>
-            <div style={{ ...value, fontSize: 16 }}>
-              {report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-"}
-            </div>
+            <div style={{ ...value, fontSize: 16 }}>{report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-"}</div>
           </div>
         </div>
 
-        {/* REMARKS */}
-
-        <div
-          style={{
-            marginTop: 10,
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 8,
-          }}
-        >
-          <div
-            style={{
-              border: "1px solid #222",
-              minHeight: 54,
-              padding: 7,
-            }}
-          >
+        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ border: "1px solid #222", minHeight: 54, padding: 7 }}>
             <div style={label}>Class Teacher's Remark</div>
-            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>
-              {report.classTeacherRemark || ""}
-            </div>
+            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>{report.classTeacherRemark || ""}</div>
           </div>
 
-          <div
-            style={{
-              border: "1px solid #222",
-              minHeight: 54,
-              padding: 7,
-            }}
-          >
+          <div style={{ border: "1px solid #222", minHeight: 54, padding: 7 }}>
             <div style={label}>Headteacher's Remark</div>
-            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>
-              {report.headTeacherRemark || ""}
-            </div>
+            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>{report.headTeacherRemark || ""}</div>
           </div>
         </div>
 
-        {/* SIGNATURES */}
-
-        <div
-          style={{
-            marginTop: 18,
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 22,
-            alignItems: "end",
-          }}
-        >
+        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 22, alignItems: "end" }}>
           <div style={{ textAlign: "center" }}>
             <div style={signatureNameStyle}>{classTeacherName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>
-              Class Teacher
-            </div>
+            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Class Teacher</div>
           </div>
 
           <div style={{ textAlign: "center" }}>
             {branding?.reportCardSignatureImage && (
-              <img
-                src={branding.reportCardSignatureImage}
-                alt="Official signature"
-                style={{
-                  height: 34,
-                  objectFit: "contain",
-                  marginBottom: 2,
-                }}
-              />
+              <img src={branding.reportCardSignatureImage} alt="Official signature" style={{ height: 34, objectFit: "contain", marginBottom: 2 }} />
             )}
             <div style={signatureNameStyle}>{headTeacherName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>
-              Headteacher / Principal
-            </div>
+            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Headteacher / Principal</div>
           </div>
 
           <div style={{ textAlign: "center" }}>
             <div style={signatureNameStyle}>{parentName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>
-              Parent / Guardian
-            </div>
+            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Parent / Guardian</div>
           </div>
         </div>
 
-        {/* FOOTER */}
-
-        <div
-          style={{
-            marginTop: 10,
-            borderTop: `2px solid ${primary}`,
-            paddingTop: 5,
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 10,
-            fontSize: 8.5,
-            color: "#555",
-          }}
-        >
+        <div style={{ marginTop: 10, borderTop: `2px solid ${primary}`, paddingTop: 5, display: "flex", justifyContent: "space-between", gap: 10, fontSize: 8.5, color: "#555" }}>
           <span>Official academic report generated for {branding?.schoolName}</span>
           <span>Powered by Eleeveon School Management System</span>
         </div>
       </div>
     </section>
   );
+
+  if (!mobilePreview) return reportPage;
+
+  return (
+    <div className={`src-preview-shell ${expanded ? "expanded" : ""}`}>
+      <style>{css}</style>
+
+      <div className="src-mobile-toolbar report-no-print">
+        <div>
+          <strong>{report.studentName}</strong>
+          <span>{report.className} · {header.academicPeriod?.name || "Academic Period"}</span>
+        </div>
+
+        <button type="button" onClick={() => setExpanded((prev) => !prev)}>
+          {expanded ? "Fit Preview" : "Expand"}
+        </button>
+      </div>
+
+      <div className="src-preview-scroll report-screen-scroll">
+        <div className="src-preview-scale">{reportPage}</div>
+      </div>
+    </div>
+  );
 }
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+.src-empty-card {
+  padding: 20px;
+  border: 1px dashed #ccc;
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-weight: 750;
+}
+
+.src-preview-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 24px;
+}
+
+.src-mobile-toolbar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 10px;
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148,163,184,.22);
+  box-shadow: 0 10px 24px rgba(15,23,42,.06);
+}
+
+.src-mobile-toolbar div {
+  min-width: 0;
+}
+
+.src-mobile-toolbar strong,
+.src-mobile-toolbar span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.src-mobile-toolbar strong {
+  font-size: 13px;
+  font-weight: 950;
+  color: var(--text, #0f172a);
+}
+
+.src-mobile-toolbar span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.src-mobile-toolbar button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.src-preview-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px;
+  border-radius: 22px;
+  background: rgba(148,163,184,.08);
+  border: 1px solid rgba(148,163,184,.18);
+}
+
+.src-preview-scale {
+  width: max-content;
+  min-width: 100%;
+  transform-origin: top left;
+}
+
+@media screen and (max-width: 720px) {
+  .src-mobile-toolbar {
+    display: flex;
+  }
+
+  .src-preview-shell:not(.expanded) .src-preview-scroll {
+    overflow: hidden;
+    max-height: 76vh;
+  }
+
+  .src-preview-shell:not(.expanded) .src-preview-scale {
+    width: 210mm;
+    transform: scale(calc((100vw - 28px) / 793.7008));
+    transform-origin: top left;
+  }
+
+  .src-preview-shell:not(.expanded) .src-preview-scroll::after {
+    content: "";
+    display: block;
+    height: calc(1122.5197px * ((100vw - 28px) / 793.7008));
+    max-height: 76vh;
+  }
+
+  .src-preview-shell.expanded .src-preview-scroll {
+    overflow-x: auto;
+    max-height: none;
+  }
+
+  .src-preview-shell.expanded .src-preview-scale {
+    transform: none;
+  }
+}
+
+@media screen and (min-width: 721px) {
+  .src-preview-scroll {
+    overflow-x: auto;
+  }
+}
+
+@media print {
+  .src-preview-shell,
+  .src-preview-scroll,
+  .src-preview-scale {
+    display: contents !important;
+    transform: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .src-mobile-toolbar {
+    display: none !important;
+  }
+
+  .student-report-card-page {
+    transform: none !important;
+    margin: 0 auto !important;
+  }
+}
+`;

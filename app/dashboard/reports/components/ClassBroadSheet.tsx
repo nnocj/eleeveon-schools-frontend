@@ -6,15 +6,16 @@
  * PROFESSIONAL CLASS BROADSHEET
  * ---------------------------------------------------------
  *
- * This renders the master class performance sheet.
- * Rows = students.
- * Columns = subjects + total + average + GPA + position + attendance.
- *
- * Subject cells are already computed by the report engine from:
- * ClassSubject -> AssessmentApplicability -> AssessmentStructureItems.
+ * Mobile Enhancement:
+ * - Original landscape print layout preserved.
+ * - Mobile-first responsive preview shell added.
+ * - Small-screen optimized preview.
+ * - Expand mode for inspection.
+ * - Dashboard overflow protection.
+ * - Safe isolated horizontal scrolling.
  */
 
-import React from "react";
+import React, { useState } from "react";
 
 import ReportHeader from "./ReportHeader";
 
@@ -32,6 +33,7 @@ type Props = {
   header: ReportHeaderData;
   compact?: boolean;
   pageBreakAfter?: boolean;
+  mobilePreview?: boolean;
 };
 
 // ======================================================
@@ -65,7 +67,10 @@ export default function ClassBroadsheet({
   header,
   compact = false,
   pageBreakAfter = true,
+  mobilePreview = true,
 }: Props) {
+  const [expanded, setExpanded] = useState(false);
+
   const branding = header.branding;
   const primary = branding.primaryColor || "var(--primary-color)";
 
@@ -108,34 +113,41 @@ export default function ClassBroadsheet({
     whiteSpace: "nowrap",
   };
 
+  const emptyState = (
+    <section style={page}>
+      <ReportHeader
+        header={header}
+        title="Class Broadsheet"
+        orientation="landscape"
+        compact={compact}
+      />
+
+      <div
+        style={{
+          padding: 20,
+          border: "1px dashed #bbb",
+          borderRadius: 12,
+          textAlign: "center",
+          fontWeight: 700,
+        }}
+      >
+        Select a branch, academic period and class to generate the class broadsheet.
+      </div>
+    </section>
+  );
+
   if (!broadsheet) {
     return (
-      <section style={page}>
-        <ReportHeader
-          header={header}
-          title="Class Broadsheet"
-          orientation="landscape"
-          compact={compact}
-        />
-
-        <div
-          style={{
-            padding: 20,
-            border: "1px dashed #bbb",
-            borderRadius: 12,
-            textAlign: "center",
-            fontWeight: 700,
-          }}
-        >
-          Select a branch, academic period and class to generate the class broadsheet.
-        </div>
-      </section>
+      <div className="cb-shell">
+        <style>{css}</style>
+        {emptyState}
+      </div>
     );
   }
 
-  return (
+  const reportPage = (
     <section
-      className="print-page report-page-break class-broadsheet-page"
+      className="print-page report-page-break class-broadsheet-page cb-a4-page"
       style={page}
     >
       <ReportHeader
@@ -145,8 +157,6 @@ export default function ClassBroadsheet({
         orientation="landscape"
         compact={compact}
       />
-
-      {/* SUMMARY STRIP */}
 
       <div
         style={{
@@ -178,8 +188,6 @@ export default function ClassBroadsheet({
         </div>
       </div>
 
-      {/* TABLE */}
-
       <div style={{ overflowX: "auto" }}>
         <table style={table}>
           <thead>
@@ -196,9 +204,10 @@ export default function ClassBroadsheet({
                 Student Name
               </th>
 
-              {broadsheet.subjectColumns.map(subject => (
+              {broadsheet.subjectColumns.map((subject) => (
                 <th key={subject.classSubjectId} style={th}>
                   {subject.shortName || subject.subjectCode || subject.subjectName}
+
                   <div
                     style={{
                       marginTop: 2,
@@ -228,6 +237,7 @@ export default function ClassBroadsheet({
 
                 <td style={{ ...td, fontWeight: 800 }}>
                   {student.studentName}
+
                   {student.admissionNumber && (
                     <div
                       style={{
@@ -242,9 +252,9 @@ export default function ClassBroadsheet({
                   )}
                 </td>
 
-                {broadsheet.subjectColumns.map(subjectColumn => {
+                {broadsheet.subjectColumns.map((subjectColumn) => {
                   const subject = student.subjects.find(
-                    item => item.classSubjectId === subjectColumn.classSubjectId
+                    (item) => item.classSubjectId === subjectColumn.classSubjectId
                   );
 
                   return (
@@ -259,6 +269,7 @@ export default function ClassBroadsheet({
                       {subject ? (
                         <>
                           <div>{formatNumber(subject.percentage, 1)}</div>
+
                           <div
                             style={{
                               fontSize: 7,
@@ -311,8 +322,6 @@ export default function ClassBroadsheet({
           </tbody>
         </table>
       </div>
-
-      {/* FOOTER ANALYTICS */}
 
       <div
         style={{
@@ -368,4 +377,169 @@ export default function ClassBroadsheet({
       </div>
     </section>
   );
+
+  if (!mobilePreview) {
+    return (
+      <div className="cb-shell">
+        <style>{css}</style>
+        {reportPage}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`cb-shell ${expanded ? "expanded" : ""}`}>
+      <style>{css}</style>
+
+      <div className="cb-toolbar report-no-print">
+        <div>
+          <strong>{broadsheet.className}</strong>
+          <span>
+            {broadsheet.students.length} students · {broadsheet.subjectColumns.length} subjects
+          </span>
+        </div>
+
+        <button type="button" onClick={() => setExpanded((prev) => !prev)}>
+          {expanded ? "Fit Preview" : "Expand"}
+        </button>
+      </div>
+
+      <div className="cb-preview-scroll report-screen-scroll">
+        <div className="cb-preview-scale">
+          {reportPage}
+        </div>
+      </div>
+    </div>
+  );
 }
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+.cb-shell {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cb-toolbar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 10px;
+  border-radius: 18px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148,163,184,.22);
+  box-shadow: 0 10px 24px rgba(15,23,42,.06);
+}
+
+.cb-toolbar div {
+  min-width: 0;
+}
+
+.cb-toolbar strong,
+.cb-toolbar span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cb-toolbar strong {
+  font-size: 13px;
+  font-weight: 950;
+  color: var(--text, #0f172a);
+}
+
+.cb-toolbar span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.cb-toolbar button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.cb-preview-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px;
+  border-radius: 22px;
+  background: rgba(148,163,184,.08);
+  border: 1px solid rgba(148,163,184,.18);
+}
+
+.cb-preview-scale {
+  width: max-content;
+  min-width: 100%;
+  transform-origin: top left;
+}
+
+@media screen and (max-width: 720px) {
+  .cb-toolbar {
+    display: flex;
+  }
+
+  .cb-shell:not(.expanded) .cb-preview-scroll {
+    overflow: hidden;
+    max-height: 78vh;
+  }
+
+  .cb-shell:not(.expanded) .cb-preview-scale {
+    width: 297mm;
+    transform: scale(calc((100vw - 28px) / 1122.5197));
+    transform-origin: top left;
+  }
+
+  .cb-shell:not(.expanded) .cb-preview-scroll::after {
+    content: "";
+    display: block;
+    height: calc(793.7008px * ((100vw - 28px) / 1122.5197));
+  }
+
+  .cb-shell.expanded .cb-preview-scroll {
+    overflow-x: auto;
+    max-height: none;
+  }
+
+  .cb-shell.expanded .cb-preview-scale {
+    transform: none;
+  }
+}
+
+@media print {
+  .cb-shell,
+  .cb-preview-scroll,
+  .cb-preview-scale {
+    display: contents !important;
+    transform: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  .cb-toolbar {
+    display: none !important;
+  }
+}`;

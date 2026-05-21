@@ -3,23 +3,31 @@
 /**
  * app/dashboard/page.tsx
  * ---------------------------------------------------------
- * SCHOOL-FIRST DASHBOARD SHELL
+ * SECURE SCHOOL-BRANCH DASHBOARD SHELL
  * ---------------------------------------------------------
  *
- * School -> Branch -> Academic Structure -> Period -> ClassSubject
- *
- * IMPORTANT FIX
- * ---------------------------------------------------------
- * Sidebar now has TWO visible context switchers:
- * 1. School selector
- * 2. Branch selector filtered by selected school
- *
- * This allows intelligent switching without deactivating branches.
+ * Rules:
+ * - User must be signed in.
+ * - accountId is required.
+ * - activeSchoolId and activeBranchId are required.
+ * - If account exists but school/branch context is missing, go to /account.
+ * - WhatsApp-like compact app shell.
+ * - Mobile-first layout.
+ * - School logo/name returns to dashboard home.
+ * - Desktop close button hides the sidebar into hamburger mode.
+ * - Sidebar can be resized by dragging its right edge on desktop.
+ * - No horizontal page scrollbar: every tab is contained inside the shell.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { db } from "../lib/db";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
 import { useActiveBranch } from "../context/active-branch-context";
+import { useSyncBootstrap } from "../context/sync-bootstrap-context";
+import SyncStatusStrip from "../components/SyncStatusStrip";
+import { db } from "../lib/db";
 
 // ================= MODULES =================
 
@@ -49,173 +57,209 @@ import ReportRemarks from "./reportRemarks";
 import Fees from "./fees";
 import Income from "./incomes";
 import Expenses from "./expenses";
-//import Promotion from "./promotionNew";
+import PromotionPage from "./promotion";
+import CumulativeRecordsPage from "./cumulativeRecords";
 import StudentAttendance from "./studentAttendance";
 import TeacherAttendance from "./teacherAttendance";
 import SchoolBranchSettings from "./schoolBranchSettings";
 import SchoolBranchDashboard from "./schoolBranchDashboard";
 
-// ================= STYLES =================
-
-import {
-  layout,
-  sidebarStyles,
-  sidebarHeaderStyles,
-} from "./styles/dashboard.styles";
-
 // ================= ROUTES =================
 
-const ROUTES: Record<string, any> = {
+const ROUTES: Record<string, React.ComponentType<any>> = {
   schoolBranchDashboard: SchoolBranchDashboard,
-
-  organizations: Organizations,
-
-  classes: Classes,
-  subjects: Subjects,
-  classSubjects: ClassSubjectPage,
-  assignments: Assignments,
-
   students: Students,
   teachers: Teachers,
   parents: Parents,
+  classes: Classes,
+  "student-attendance": StudentAttendance,
+  "teacher-attendance": TeacherAttendance,
+  assessmentEntriesPage: AssessmentEntriesPage,
+  fees: Fees,
+  income: Income,
+  expenses: Expenses,
 
+  studentEnrollments: StudentEnrollmentsPage,
+  studentRegistration: StudentRegistration,
+  academicProgress: AcademicProgress,
+  reports: Reports,
+  reportRemarks: ReportRemarks,
+  promotion: PromotionPage,
+  cumulativeRecords: CumulativeRecordsPage,
+
+  subjects: Subjects,
+  classSubjects: ClassSubjectPage,
+  assignments: Assignments,
+  courseOutline: CourseOutline,
+  studentCurriculum: StudentCurriculumPage,
+
+  organizations: Organizations,
   programs: ProgramsPage,
   curriculumManagement: CurriculumManagement,
   curriculumSubjects: CurriculumSubjects,
   curriculumPathways: CurriculumPathways,
   subjectPrerequisites: SubjectPrerequisites,
-  studentCurriculum: StudentCurriculumPage,
-  courseOutline: CourseOutline,
-  studentRegistration: StudentRegistration,
-  studentEnrollments: StudentEnrollmentsPage,
-
-  academicProgress: AcademicProgress,
   academicAndAssessmentConfiguration: AcademicAndAssessmentConfiguration,
   assessmentApplicability: AssessmentApplicabilityPage,
-  assessmentEntriesPage: AssessmentEntriesPage,
-  //promotion: Promotion,
-  reportRemarks: ReportRemarks,
-  reports: Reports,
-
-  "student-attendance": StudentAttendance,
-  "teacher-attendance": TeacherAttendance,
-
-  fees: Fees,
-  income: Income,
-  expenses: Expenses,
-
   schoolBranchSettings: SchoolBranchSettings,
 };
 
-// ================= SIDEBAR GROUPS =================
+// ================= APP NAV GROUPS =================
 
 const NAV_SECTIONS = [
   {
-    title: "Start",
+    title: "Administration",
+    defaultOpen: true,
     items: [
-      { key: "schoolBranchDashboard", label: "School Branch Dashboard", icon: "🏠" }
-    ],
-  },
-  {
-    title: "Institution",
-    items: [
-      { key: "organizations", label: "Organizations", icon: "🏛" },
-    ],
-  },
-  {
-    title: "Academic Delivery",
-    items: [
-      { key: "classes", label: "Classes", icon: "🏷" },
-      { key: "subjects", label: "Subjects", icon: "📘" },
-      { key: "programs", label: "Programs", icon: "🎓" },
-      { key: "classSubjects", label: "Class Subjects", icon: "📖" },
-      { key: "assignments", label: "Assignments", icon: "🧩" },
-    ],
-  },
-  {
-    title: "People",
-    items: [
-      { key: "students", label: "Students", icon: "🧑‍🎓" },
-      { key: "teachers", label: "Teachers", icon: "👨‍🏫" },
+      { key: "schoolBranchDashboard", label: "Dashboard", icon: "🏠" },
+
+      { key: "studentRegistration", label: "Registration", icon: "📝" },
+
+      { key: "studentEnrollments", label: "Enrollments", icon: "📋" },
+
       { key: "parents", label: "Parents", icon: "👨‍👩‍👧" },
-    ],
-  },
-  {
-    title: "Curriculum",
-    items: [
-      { key: "curriculumManagement", label: "Curriculum Management", icon: "📚" },
-      { key: "curriculumSubjects", label: "Curriculum Subjects", icon: "📖" },
-      { key: "curriculumPathways", label: "Curriculum Pathways", icon: "🗺" },
-      { key: "subjectPrerequisites", label: "Subject Prerequisites", icon: "🔗" },
-      { key: "studentCurriculum", label: "Student Curriculum", icon: "🎓" },
-      { key: "courseOutline", label: "Course Outline", icon: "📖" },
-      { key: "studentRegistration", label: "Student Registration", icon: "📝" },
-      { key: "studentEnrollments", label: "Student Enrollments", icon: "📋" },
-    ],
-  },
-  {
-    title: "Assessment & Publishing",
-    items: [
-      { key: "academicProgress", label: "Academic Progress", icon: "📊" },
-      {
-        key: "academicAndAssessmentConfiguration",
-        label: "Academic & Assessment Config",
-        icon: "🎯",
-      },
-      { key: "assessmentApplicability", label: "Assessment Applicability", icon: "📚" },
-      { key: "assessmentEntriesPage", label: "Assessment Entry", icon: "📝" },
-      { key: "reports", label: "Reports", icon: "📄" },
-      { key: "reportRemarks", label: "Report Remarks", icon: "💬" },
-     // { key: "promotion", label: "Promotion", icon: "🚀" },
-      
-    ],
-  },
-  {
-    title: "Attendance",
-    items: [
-      { key: "student-attendance", label: "Student Attendance", icon: "📅" },
+
+      { key: "students", label: "Student Organization", icon: "🧑‍🎓" },
+
       { key: "teacher-attendance", label: "Teacher Attendance", icon: "🕒" },
     ],
   },
+
+  {
+    title: "Teaching & Classroom",
+    defaultOpen: true,
+    items: [
+      { key: "student-attendance", label: "Student Attendance", icon: "📅" },
+
+      {
+        key: "assessmentEntriesPage",
+        label: "Assessment Entry",
+        icon: "📝",
+      },
+    ],
+  },
+
   {
     title: "Finance",
+    defaultOpen: false,
     items: [
       { key: "fees", label: "Fees", icon: "💳" },
       { key: "income", label: "Income", icon: "📈" },
       { key: "expenses", label: "Expenses", icon: "📉" },
     ],
   },
+
   {
-    title: "Administration",
-    items: [{ key: "schoolBranchSettings", label: "School Branch Settings", icon: "⚙" }],
+    title: "Academic Records",
+    defaultOpen: false,
+    items: [
+      { key: "academicProgress", label: "Academic Progress", icon: "📊" },
+      { key: "reports", label: "Reports", icon: "📄" },
+      { key: "reportRemarks", label: "Report Remarks", icon: "💬" },
+      { key: "promotion", label: "Promotion", icon: "🚀" },
+      { key: "cumulativeRecords", label: "Cumulative Records", icon: "📚" },
+    ],
+  },
+
+  {
+    title: "Teaching Setup",
+    defaultOpen: false,
+    items: [
+      { key: "teachers", label: "Teachers", icon: "👨‍🏫" },
+      { key: "assignments", label: "Assignments", icon: "🧩" },
+      { key: "courseOutline", label: "Course Outline", icon: "📖" },
+      { key: "studentCurriculum", label: "Student Curriculum", icon: "🎓" },
+    ],
+  },
+
+  {
+    title: "Setup",
+    defaultOpen: false,
+    items: [
+      { key: "organizations", label: "Organizations", icon: "🏛" },
+      { key: "programs", label: "Programs", icon: "🎓" },
+      { key: "classes", label: "Classes", icon: "🏷" },
+
+      { key: "subjects", label: "Subjects", icon: "📘" },
+
+      {
+        key: "curriculumManagement",
+        label: "Curriculum Management",
+        icon: "📚",
+      },
+
+      {
+        key: "curriculumSubjects",
+        label: "Curriculum Subjects",
+        icon: "📖",
+      },
+
+      {
+        key: "curriculumPathways",
+        label: "Curriculum Pathways",
+        icon: "🗺",
+      },
+
+      {
+        key: "subjectPrerequisites",
+        label: "Subject Prerequisites",
+        icon: "🔗",
+      },
+
+      {
+        key: "classSubjects",
+        label: "Class Subjects",
+        icon: "📖",
+      },
+
+      {
+        key: "academicAndAssessmentConfiguration",
+        label: "Academic & Assessment Config",
+        icon: "🎯",
+      },
+
+      {
+        key: "assessmentApplicability",
+        label: "Assessment Applicability",
+        icon: "📚",
+      },
+
+      {
+        key: "schoolBranchSettings",
+        label: "Branch Settings",
+        icon: "⚙",
+      },
+    ],
   },
 ];
-
-// ================= LABELS =================
 
 const LABELS: Record<string, string> = {};
 const GROUPS: Record<string, string> = {};
 
-NAV_SECTIONS.forEach(section => {
-  section.items.forEach(item => {
+NAV_SECTIONS.forEach((section) => {
+  section.items.forEach((item) => {
     LABELS[item.key] = item.label;
     GROUPS[item.key] = section.title;
   });
 });
 
-// ======================================================
-// COMPONENT
-// ======================================================
-
 export default function Dashboard() {
-  const [tab, setTab] = useState<string>("schools");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
-  const [sidebarCompact, setSidebarCompact] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
-  const [settings, setSettings] = useState<any>(null);
-  const [schoolCount, setSchoolCount] = useState(0);
+  const router = useRouter();
+  const { initialSyncDone, initialSyncing } = useSyncBootstrap();
+
+  
+
+  const {
+    accountId,
+    user,
+    account,
+    logout,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+
+  const { settings, loading: settingsLoading } = useSettings();
 
   const {
     activeSchoolId,
@@ -227,38 +271,61 @@ export default function Dashboard() {
     activeBranch,
     branches,
     setActiveBranchId,
+
     loading: contextLoading,
   } = useActiveBranch();
 
-  // ================= LOAD SETTINGS + SCHOOL COUNT =================
+
+  // ======================================================
+  // FILE 5: UPDATE app/dashboard/page.tsx REDIRECT GATE
+  // ======================================================
+
+  /*Then update the redirect effect so it DOES NOT redirect to /account
+  * while first sync is still running.
+  */
 
   useEffect(() => {
-    const load = async () => {
-      const [settingRows, schoolRows] = await Promise.all([
-        db.schoolBranchSettings.toArray(),
-        db.schools.toArray(),
-      ]);
+    if (accountLoading || contextLoading || initialSyncing) return;
 
-      const activeSettings = settingRows.filter(row => !row.isDeleted);
-      const firstSetting = activeSettings.sort(
-        (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
-      )[0] ?? null;
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
 
-      const activeSchools = schoolRows.filter(row => !row.isDeleted);
+    if (initialSyncDone && (!activeSchoolId || !activeBranchId)) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    initialSyncing,
+    initialSyncDone,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
-      setSettings(firstSetting);
-      setSchoolCount(activeSchools.length);
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-      if (!activeSchools.length) {
-        setTab("schools");
-      }
-    };
+  const [tab, setTab] = useState("schoolBranchDashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [schoolCount, setSchoolCount] = useState(0);
 
-    load();
-  }, []);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
+    NAV_SECTIONS.reduce((acc, section) => {
+      acc[section.title] = section.defaultOpen;
+      return acc;
+    }, {} as Record<string, boolean>)
+  );
 
-  // ================= APPLY BRANDING =================
-
+  
   useEffect(() => {
     if (settings?.fontFamily) {
       document.documentElement.style.setProperty("--font-family", settings.fontFamily);
@@ -269,65 +336,95 @@ export default function Dashboard() {
     }
   }, [settings?.fontFamily, settings?.primaryColor]);
 
-  // ================= ONLINE / OFFLINE =================
-
   useEffect(() => {
-    const updateOnlineState = () => {
-      setIsOnline(navigator.onLine);
-    };
+    const update = () => setIsOnline(navigator.onLine);
+    update();
 
-    updateOnlineState();
-
-    window.addEventListener("online", updateOnlineState);
-    window.addEventListener("offline", updateOnlineState);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
 
     return () => {
-      window.removeEventListener("online", updateOnlineState);
-      window.removeEventListener("offline", updateOnlineState);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
-
-  // ================= RESPONSIVE =================
 
   useEffect(() => {
-    const check = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
+    const loadCount = async () => {
+      if (!accountId) return;
 
-      if (mobile) {
-        setSidebarCompact(false);
-      }
+      const rows = await db.schools.toArray();
+
+      setSchoolCount(
+        rows.filter((row) => row.accountId === accountId && !row.isDeleted).length
+      );
     };
 
-    check();
-
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
-
-  // ================= ACTIVE PAGE =================
+    loadCount();
+  }, [accountId, activeSchoolId]);
 
   const ActiveComponent = useMemo(() => {
     return ROUTES[tab] ?? SchoolBranchDashboard;
   }, [tab]);
 
-  const activeLabel = LABELS[tab] ?? "School";
-  const activeGroup = GROUPS[tab] ?? "Start";
+  const activeLabel = LABELS[tab] ?? "Dashboard";
+  const activeGroup = GROUPS[tab] ?? "Daily Work";
+  /** Then update your checking const:
+   * This is to ensute that everything is synced before the page opens
+  */
+  const checking = accountLoading || contextLoading || settingsLoading || initialSyncing;
 
-  const primary = settings?.primaryColor || "var(--primary-color)";
-
-  // ================= NAVIGATION =================
 
   const navigate = (key: string) => {
     setTab(key);
+    setSidebarOpen(false);
+    setMoreOpen(false);
 
-    if (isMobile) {
-      setSidebarOpen(false);
+    if (typeof window !== "undefined") {
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
 
-  // ================= SCHOOL + BRANCH SWITCHING =================
+  const openDashboardHome = () => {
+    navigate("schoolBranchDashboard");
+  };
+
+  const toggleSection = (title: string) => {
+    setOpenSections((prev) => ({
+      ...prev,
+      [title]: !prev[title],
+    }));
+  };
+
+  const closeSidebar = () => {
+    setSidebarOpen(false);
+    setSidebarHidden(true);
+  };
+
+  const openSidebar = () => {
+    setSidebarHidden(false);
+    setSidebarOpen(true);
+  };
+
+  const handleSidebarResizeStart = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    const handleMove = (moveEvent: MouseEvent) => {
+      const nextWidth = Math.min(380, Math.max(240, startWidth + moveEvent.clientX - startX));
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleUp = () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+  }, [sidebarWidth]);
 
   const handleSchoolChange = async (value: string) => {
     const nextId = value ? Number(value) : null;
@@ -339,430 +436,913 @@ export default function Dashboard() {
     await setActiveBranchId(nextId);
   };
 
-  // ================= SIDEBAR RESIZE =================
+  if (checking) {
+    return (
+      <main style={safeStyles.centerPage}>
+        <section style={safeStyles.loadingCard}>
+          <div style={safeStyles.spinner} />
+      
+          <h2 style={safeStyles.loadingTitle}>Opening dashboard...</h2>
+          <p style={safeStyles.mutedText}>Checking account, school, and branch context.</p>
+          <p style={safeStyles.mutedText}>Syncing account data and checking school branch context.</p>
+        </section>
+      </main>
+    );
+  }
 
-  const startResize = (e: React.MouseEvent) => {
-    if (sidebarCompact) return;
+  if (!authenticated || !accountId) {
+    return (
+      <main style={safeStyles.centerPage}>
+        <section style={safeStyles.loadingCard}>
+          <h2 style={safeStyles.loadingTitle}>Redirecting to login...</h2>
+          <p style={safeStyles.mutedText}>You must sign in to continue.</p>
+        </section>
+      </main>
+    );
+  }
 
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
-
-    const onMove = (moveEvent: MouseEvent) => {
-      const newWidth = startWidth + (moveEvent.clientX - startX);
-
-      if (newWidth >= 170 && newWidth <= 420) {
-        setSidebarWidth(newWidth);
-      }
-    };
-
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  const toggleSidebarCompact = () => {
-    if (isMobile) {
-      setSidebarOpen(prev => !prev);
-      return;
-    }
-
-    setSidebarCompact(prev => !prev);
-  };
-
-  const effectiveSidebarWidth = sidebarCompact && !isMobile ? 64 : sidebarWidth;
-
-  const styles = sidebarStyles({
-    width: effectiveSidebarWidth,
-    isMobile,
-    open: sidebarOpen,
-  });
-
-  // ======================================================
-  // UI HELPERS
-  // ======================================================
-
-  const statusPill: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: sidebarCompact ? "8px 0" : "8px 10px",
-    borderRadius: 999,
-    background: isOnline ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)",
-    color: isOnline ? "#16a34a" : "#dc2626",
-    fontSize: 12,
-    fontWeight: 800,
-    justifyContent: sidebarCompact ? "center" : "flex-start",
-    marginTop: 10,
-  };
-
-  const contextPill: React.CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: sidebarCompact ? "8px 0" : "8px 10px",
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.08)",
-    color: "inherit",
-    fontSize: 12,
-    fontWeight: 800,
-    justifyContent: sidebarCompact ? "center" : "flex-start",
-    marginTop: 8,
-  };
-
-  const selectStyle: React.CSSProperties = {
-    width: "100%",
-    minWidth: 0,
-    border: "none",
-    outline: "none",
-    background: "transparent",
-    color: "inherit",
-    fontSize: 12,
-    fontWeight: 800,
-    cursor: "pointer",
-  };
-
-  const contextLabel: React.CSSProperties = {
-    fontSize: 9,
-    fontWeight: 900,
-    letterSpacing: 0.7,
-    opacity: 0.56,
-    textTransform: "uppercase",
-    margin: "10px 10px 0",
-  };
-
-  const sidebarToggleButton: React.CSSProperties = {
-    width: "100%",
-    border: "1px solid rgba(255,255,255,0.14)",
-    borderRadius: 12,
-    padding: sidebarCompact ? "10px 0" : "10px 12px",
-    background: "rgba(255,255,255,0.08)",
-    color: "inherit",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: sidebarCompact ? "center" : "space-between",
-    gap: 10,
-    fontWeight: 800,
-    marginTop: 12,
-  };
-
-  const navButton = (active: boolean): React.CSSProperties => ({
-    ...styles.button(active),
-    justifyContent: sidebarCompact ? "center" : undefined,
-    paddingLeft: sidebarCompact ? 0 : undefined,
-    paddingRight: sidebarCompact ? 0 : undefined,
-    transition: "all 180ms ease",
-  });
-
-  const sectionTitle = (title: string): React.CSSProperties => ({
-    ...styles.sectionTitle,
-    textAlign: sidebarCompact ? "center" : undefined,
-    fontSize: sidebarCompact ? 10 : undefined,
-    letterSpacing: sidebarCompact ? 0 : undefined,
-  });
-
-  // ======================================================
-  // RENDER
-  // ======================================================
+  if (!activeSchoolId || !activeBranchId) {
+    return (
+      <main style={safeStyles.centerPage}>
+        <section style={safeStyles.loadingCard}>
+          <h2 style={safeStyles.loadingTitle}>School branch required</h2>
+          <p style={safeStyles.mutedText}>Redirecting you to account setup.</p>
+        </section>
+      </main>
+    );
+  }
 
   return (
-    <div
-      style={{
-        ...layout.container,
-        fontFamily: "var(--font-family, system-ui)",
-      }}
+    <main
+      style={
+        {
+          ...safeStyles.page,
+          "--dashboard-primary": primary,
+          "--sidebar-width": `${sidebarWidth}px`,
+        } as React.CSSProperties
+      }
     >
-      {isMobile && sidebarOpen && (
-        <div style={styles.overlay} onClick={() => setSidebarOpen(false)} />
+      <style>{css}</style>
+
+      {(sidebarOpen || contextOpen) && (
+        <button
+          aria-label="Close drawer"
+          className="app-overlay"
+          onClick={() => {
+            setSidebarOpen(false);
+            setContextOpen(false);
+            setMoreOpen(false);
+          }}
+        />
       )}
 
-      {/* SIDEBAR */}
-      <aside
-        style={{
-          ...styles.aside,
-          transition: "width 220ms ease, transform 220ms ease",
-          overflowX: "hidden",
-        }}
-      >
-        <div
-          style={{
-            ...sidebarHeaderStyles.container,
-            marginBottom: 18,
-            cursor: "pointer",
-            alignItems: sidebarCompact ? "center" : undefined,
-            justifyContent: sidebarCompact ? "center" : undefined,
-          }}
-          onClick={() => navigate("schools")}
-        >
-          {!sidebarCompact && (
-            <div style={sidebarHeaderStyles.text}>
-              <h3 style={{ margin: 0, fontSize: 18 }}>
-                {activeSchool?.name || settings?.schoolName || "School Setup"}
-              </h3>
-
-              <small style={{ opacity: 0.7, fontSize: 12 }}>
-                Institution first workspace
-              </small>
-            </div>
-          )}
-
-          {sidebarCompact && (
-            <div
-              title={activeSchool?.name || settings?.schoolName || "School"}
-              style={{
-                width: 42,
-                height: 42,
-                borderRadius: 16,
-                background: primary,
-                color: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 900,
-                fontSize: 16,
-              }}
-            >
-              🏫
-            </div>
-          )}
-        </div>
-
-        {/* SCHOOL + BRANCH + SYNC STATUS */}
-        <div style={{ padding: sidebarCompact ? "0 10px" : "0 4px", marginBottom: 16 }}>
-          {!sidebarCompact && <div style={contextLabel}>School Context</div>}
-
-          <div style={contextPill} title={activeSchool?.name || "No active school"}>
-            <span style={{ color: primary }}>🏫</span>
-
-            {!sidebarCompact && (
-              <select
-                value={activeSchoolId || ""}
-                onChange={e => handleSchoolChange(e.target.value)}
-                disabled={contextLoading || !schools.length}
-                style={selectStyle}
-              >
-                <option value="">
-                  {contextLoading
-                    ? "Loading schools..."
-                    : schools.length
-                    ? "Select school"
-                    : "Create school profile"}
-                </option>
-
-                {schools.map(school => (
-                  <option key={school.id} value={school.id}>
-                    {school.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {sidebarCompact && <span title={activeSchool?.name || "No active school"}>●</span>}
-          </div>
-
-          {!sidebarCompact && <div style={contextLabel}>Branch Context</div>}
-
-          <div style={contextPill} title={activeBranch?.name || "No active branch"}>
-            <span style={{ color: primary }}>🏢</span>
-
-            {!sidebarCompact && (
-              <select
-                value={activeBranchId || ""}
-                onChange={e => handleBranchChange(e.target.value)}
-                disabled={contextLoading || !activeSchoolId || !branches.length}
-                style={selectStyle}
-              >
-                <option value="">
-                  {contextLoading
-                    ? "Loading branches..."
-                    : !activeSchoolId
-                    ? "Select school first"
-                    : branches.length
-                    ? "Select branch"
-                    : "No branch under school"}
-                </option>
-
-                {branches.map(branch => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {sidebarCompact && <span title={activeBranch?.name || "No active branch"}>●</span>}
-          </div>
-
-          <div style={contextPill} title="School profiles">
-            <span style={{ color: primary }}>●</span>
-            {!sidebarCompact && (
-              <span
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {schoolCount ? `${schoolCount} school profile(s)` : "Create school profile"}
-              </span>
-            )}
-          </div>
-
-          <div style={statusPill} title={isOnline ? "Online" : "Offline"}>
-            <span>●</span>
-            {!sidebarCompact && (
-              <span>{isOnline ? "Online - Sync Ready" : "Offline - Local Mode"}</span>
-            )}
-          </div>
-
-          {!isMobile && (
-            <button
-              type="button"
-              onClick={toggleSidebarCompact}
-              style={sidebarToggleButton}
-              title={sidebarCompact ? "Expand sidebar" : "Slim sidebar"}
-            >
-              <span>{sidebarCompact ? "☰" : "⇤"}</span>
-              {!sidebarCompact && <span>Slim sidebar</span>}
-            </button>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: sidebarCompact ? 14 : 18,
-          }}
-        >
-          {NAV_SECTIONS.map(section => (
-            <div key={section.title}>
-              <div style={sectionTitle(section.title)} title={section.title}>
-                {sidebarCompact ? section.title.slice(0, 3).toUpperCase() : section.title}
-              </div>
-
-              <nav style={styles.nav}>
-                {section.items.map(item => {
-                  const active = tab === item.key;
-
-                  return (
-                    <button
-                      key={item.key}
-                      onClick={() => navigate(item.key)}
-                      style={navButton(active)}
-                      title={sidebarCompact ? item.label : undefined}
-                    >
-                      <span
-                        style={{
-                          fontSize: 18,
-                          width: sidebarCompact ? "auto" : 24,
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        {item.icon}
-                      </span>
-
-                      {!sidebarCompact && <span>{item.label}</span>}
-                    </button>
-                  );
-                })}
-              </nav>
-            </div>
-          ))}
-        </div>
-
-        {!isMobile && !sidebarCompact && (
-          <div style={styles.resizeHandle} onMouseDown={startResize} />
-        )}
-      </aside>
-
-      {/* MAIN */}
-      <main style={layout.main}>
-        <div
-          style={{
-            ...layout.topbar,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {isMobile && (
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-                style={{
-                  border: "1px solid rgba(0,0,0,0.12)",
-                  borderRadius: 10,
-                  background: "var(--surface)",
-                  color: "var(--text)",
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                }}
-              >
-                ☰
-              </button>
-            )}
-
-            <div>
-              <div
-                style={{
-                  fontSize: 11,
-                  opacity: 0.62,
-                  fontWeight: 900,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.6,
-                }}
-              >
-                {activeGroup}
-              </div>
-              <h2 style={{ margin: 0 }}>{activeLabel}</h2>
-            </div>
-          </div>
-        </div>
-
-        <ActiveComponent navigate={navigate} />
-
-        {/* QUICK SETTINGS TAB */}
-        {tab !== "settings" && (
+      <aside className={`app-sidebar ${sidebarOpen ? "open" : ""} ${sidebarHidden ? "hidden" : ""}`}>
+        <div className="sidebar-head">
           <button
             type="button"
-            onClick={() => navigate("schoolBranchSettings")}
-            title="Quick Settings"
-            style={{
-              position: "fixed",
-              right: 0,
-              top: "48%",
-              transform: "translateY(-50%)",
-              zIndex: 60,
-              width: 46,
-              height: 96,
-              border: "none",
-              borderTopLeftRadius: 18,
-              borderBottomLeftRadius: 18,
-              background: primary,
-              color: "#fff",
-              cursor: "pointer",
-              boxShadow: "-8px 12px 28px rgba(0,0,0,0.20)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 22,
-              fontWeight: 900,
-            }}
+            className="school-home"
+            onClick={openDashboardHome}
+            title="Go to dashboard"
           >
-            ⚙
+            <span className="avatar" style={{ background: primary }}>
+              {activeSchool?.name?.[0] || "S"}
+            </span>
+
+            <span className="sidebar-title">
+              <strong>{activeSchool?.name || "School"}</strong>
+              <span>{activeBranch?.name || "Branch"}</span>
+            </span>
           </button>
-        )}
-      </main>
-    </div>
+        </div>
+
+        <nav className="nav-list">
+          {NAV_SECTIONS.map((section) => {
+            const open = openSections[section.title];
+
+            return (
+              <section key={section.title} className="nav-section">
+                <button
+                  type="button"
+                  className="nav-section-title"
+                  onClick={() => toggleSection(section.title)}
+                >
+                  <span>{section.title}</span>
+                  <b>{open ? "−" : "+"}</b>
+                </button>
+
+                {open && (
+                  <div className="nav-items">
+                    {section.items.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => navigate(item.key)}
+                        className={`nav-item ${tab === item.key ? "active" : ""}`}
+                      >
+                        <span>{item.icon}</span>
+                        <strong>{item.label}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </nav>
+
+        <button
+          type="button"
+          className="sidebar-resize-handle"
+          onMouseDown={handleSidebarResizeStart}
+          aria-label="Resize sidebar"
+        />
+      </aside>
+
+      <aside className={`context-drawer ${contextOpen ? "open" : ""}`}>
+        <div className="drawer-head">
+          <div>
+            <p>School Context</p>
+            <h2>Switch Workspace</h2>
+          </div>
+
+          <button className="icon-btn" onClick={() => setContextOpen(false)} type="button">
+            ✕
+          </button>
+        </div>
+
+        <div className="drawer-card">
+          <label>School</label>
+          <select
+            value={activeSchoolId || ""}
+            onChange={(e) => handleSchoolChange(e.target.value)}
+            disabled={!schools.length}
+          >
+            <option value="">{schools.length ? "Select school" : "No school found"}</option>
+
+            {schools.map((school) => (
+              <option key={school.id} value={school.id}>
+                {school.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="drawer-card">
+          <label>Branch</label>
+          <select
+            value={activeBranchId || ""}
+            onChange={(e) => handleBranchChange(e.target.value)}
+            disabled={!activeSchoolId || !branches.length}
+          >
+            <option value="">
+              {!activeSchoolId
+                ? "Select school first"
+                : branches.length
+                ? "Select branch"
+                : "No branch under school"}
+            </option>
+
+            {branches.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="drawer-info">
+          <div>
+            <strong>{schoolCount}</strong>
+            <span>School profile(s)</span>
+          </div>
+
+          <div>
+            <strong>{isOnline ? "Online" : "Offline"}</strong>
+            <span>{isOnline ? "Sync ready" : "Local mode"}</span>
+          </div>
+        </div>
+
+        <button className="drawer-action" type="button" onClick={() => router.push("/account")}>
+          Go to Account Setup
+        </button>
+
+        <button className="drawer-danger" type="button" onClick={logout}>
+          Logout
+        </button>
+      </aside>
+
+      <section className={`app-main ${sidebarHidden ? "full" : ""}`}>
+        <header className="app-header">
+          <button
+            className="icon-btn primary"
+            onClick={() => {
+              if (sidebarHidden) {
+                openSidebar();
+              } else {
+                closeSidebar();
+              }
+            }}
+            type="button"
+            aria-label="Toggle sidebar"
+          >
+            ☰
+          </button>
+
+          <div className="header-title">
+            <strong>{activeLabel}</strong>
+            <span>
+              {activeGroup} · {activeBranch?.name || "Branch"}
+            </span>
+          </div>
+
+          <div className="more-wrap">
+            <button
+              className="icon-btn"
+              onClick={() => setMoreOpen((prev) => !prev)}
+              aria-label="More actions"
+              type="button"
+            >
+              ⋮
+            </button>
+
+            {moreOpen && (
+              <div className="more-menu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setContextOpen(true);
+                    setMoreOpen(false);
+                  }}
+                >
+                  Switch context
+                </button>
+                <button type="button" onClick={() => router.push("/account")}>
+                  Account setup
+                </button>
+                <button type="button" onClick={() => navigate("schoolBranchSettings")}>
+                  Branch settings
+                </button>
+                <button type="button" onClick={logout} className="danger">
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        <section style={{ marginBottom: 10 }}>
+                        <SyncStatusStrip />
+                      </section>
+        <section className="app-content">
+          <div className="app-content-inner">
+            <ActiveComponent navigate={navigate} />
+          </div>
+        </section>
+      </section>
+    </main>
   );
 }
+
+const safeStyles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: "100dvh",
+    width: "100%",
+    maxWidth: "100vw",
+    overflowX: "hidden",
+    background: "var(--bg, #f8fafc)",
+    color: "var(--text, #0f172a)",
+    fontFamily: "var(--font-family, system-ui)",
+  },
+
+  centerPage: {
+    minHeight: "100dvh",
+    width: "100%",
+    maxWidth: "100vw",
+    overflowX: "hidden",
+    display: "grid",
+    placeItems: "center",
+    padding: 18,
+    background: "var(--bg, #f8fafc)",
+    color: "var(--text, #0f172a)",
+    fontFamily: "var(--font-family, system-ui)",
+  },
+
+  loadingCard: {
+    width: "min(430px, 100%)",
+    maxWidth: "100%",
+    borderRadius: 26,
+    padding: 24,
+    background: "var(--card, #ffffff)",
+    border: "1px solid rgba(148,163,184,0.25)",
+    boxShadow: "0 24px 60px rgba(15,23,42,0.10)",
+    textAlign: "center",
+    overflow: "hidden",
+  },
+
+  loadingTitle: {
+    margin: "12px 0 6px",
+    fontSize: 20,
+    fontWeight: 950,
+  },
+
+  mutedText: {
+    margin: 0,
+    color: "var(--muted, #64748b)",
+    fontSize: 14,
+    lineHeight: 1.6,
+  },
+
+  spinner: {
+    width: 36,
+    height: 36,
+    margin: "0 auto",
+    borderRadius: "50%",
+    border: "4px solid rgba(37,99,235,0.18)",
+    borderTopColor: "var(--dashboard-primary, #2563eb)",
+    animation: "spin 0.8s linear infinite",
+  },
+};
+
+const css = `
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.app-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: rgba(15,23,42,.5);
+}
+
+.app-sidebar,
+.context-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  height: 100dvh;
+  max-width: 100vw;
+  background: #fff;
+  color: #0f172a;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  box-shadow: 0 24px 70px rgba(15,23,42,.22);
+  transition: transform .22s ease, width .22s ease;
+}
+
+.app-sidebar {
+  left: 0;
+  width: min(88vw, 330px);
+  transform: translateX(-105%);
+  padding: 12px;
+}
+
+.app-sidebar.open {
+  transform: translateX(0);
+}
+
+.context-drawer {
+  right: 0;
+  width: min(90vw, 370px);
+  transform: translateX(105%);
+  padding: 16px;
+}
+
+.context-drawer.open {
+  transform: translateX(0);
+}
+
+.sidebar-head,
+.drawer-head,
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.sidebar-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fff;
+  padding: 4px 0 10px;
+}
+
+.school-home {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.school-home:hover .sidebar-title strong {
+  color: var(--dashboard-primary);
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 15px;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  flex: 0 0 auto;
+}
+
+.sidebar-title,
+.header-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.sidebar-title strong,
+.sidebar-title span,
+.header-title strong,
+.header-title span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sidebar-title strong,
+.header-title strong {
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.sidebar-title span,
+.header-title span {
+  margin-top: 1px;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.1;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(148,163,184,.25);
+  border-radius: 14px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 19px;
+  font-weight: 950;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.icon-btn.primary {
+  background: var(--dashboard-primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+.icon-btn.ghost {
+  background: rgba(148,163,184,.12);
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 24px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.nav-section {
+  border-radius: 20px;
+  background: #f8fafc;
+  border: 1px solid rgba(148,163,184,.18);
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.nav-section-title {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  cursor: pointer;
+}
+
+.nav-section-title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-items {
+  display: grid;
+  gap: 4px;
+  padding: 5px;
+  max-width: 100%;
+}
+
+.nav-item {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  padding: 9px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-item.active {
+  background: var(--dashboard-primary);
+  color: #fff;
+}
+
+.nav-item span {
+  width: 24px;
+  flex: 0 0 auto;
+  font-size: 17px;
+  text-align: center;
+}
+
+.nav-item strong {
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sidebar-resize-handle {
+  display: none;
+}
+
+.app-main {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  transition: margin-left .22s ease, width .22s ease;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 5px 14px;
+  background: color-mix(in srgb, var(--bg, #f8fafc) 93%, white);
+  border-bottom: 1px solid rgba(148,163,184,.18);
+  backdrop-filter: blur(14px);
+  overflow: visible;
+}
+
+.more-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.more-menu {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: min(230px, calc(100vw - 18px));
+  border-radius: 18px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid rgba(148,163,184,.22);
+  box-shadow: 0 24px 60px rgba(15,23,42,.18);
+  display: grid;
+  gap: 4px;
+  z-index: 60;
+  overflow: hidden;
+}
+
+.more-menu button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  text-align: left;
+  padding: 0 12px;
+  font-weight: 850;
+  cursor: pointer;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-menu button:hover {
+  background: #f1f5f9;
+}
+
+.more-menu .danger {
+  color: #dc2626;
+}
+
+.app-content {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  overflow-x: hidden;
+}
+
+.app-content-inner {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.app-content *,
+.app-content *::before,
+.app-content *::after {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.app-content button,
+.app-content input,
+.app-content select,
+.app-content textarea {
+  font: inherit;
+  max-width: 100%;
+}
+
+.app-content img,
+.app-content svg,
+.app-content canvas,
+.app-content video {
+  max-width: 100%;
+  height: auto;
+}
+
+.app-content table {
+  max-width: 100%;
+}
+
+.drawer-head {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.drawer-head div {
+  min-width: 0;
+}
+
+.drawer-head p {
+  margin: 0;
+  color: var(--dashboard-primary);
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.drawer-head h2 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  letter-spacing: -.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-card {
+  border-radius: 22px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(148,163,184,.2);
+  margin-bottom: 12px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.drawer-card label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 900;
+}
+
+.drawer-card select {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid rgba(148,163,184,.28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: #fff;
+  color: #0f172a;
+  outline: none;
+}
+
+.drawer-info {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0;
+  max-width: 100%;
+}
+
+.drawer-info div {
+  min-width: 0;
+  border-radius: 20px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(148,163,184,.18);
+  overflow: hidden;
+}
+
+.drawer-info strong,
+.drawer-info span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-info strong {
+  font-size: 18px;
+  font-weight: 950;
+}
+
+.drawer-info span {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.drawer-action,
+.drawer-danger {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 950;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.drawer-action {
+  background: var(--dashboard-primary);
+  color: #fff;
+}
+
+.drawer-danger {
+  background: rgba(239,68,68,.1);
+  color: #dc2626;
+}
+
+@media (min-width: 980px) {
+  .app-overlay {
+    display: none;
+  }
+
+  .app-sidebar {
+    transform: none;
+    width: var(--sidebar-width, 300px);
+    min-width: 240px;
+    max-width: 380px;
+    box-shadow: none;
+    border-right: 1px solid rgba(148,163,184,.18);
+  }
+
+  .app-sidebar.hidden {
+    transform: translateX(-110%);
+    pointer-events: none;
+  }
+
+  .app-sidebar.hidden.open {
+    transform: none;
+    pointer-events: auto;
+  }
+
+  .app-main {
+    margin-left: var(--sidebar-width, 300px);
+    width: calc(100% - var(--sidebar-width, 300px));
+    max-width: calc(100% - var(--sidebar-width, 300px));
+  }
+
+  .app-main.full {
+    margin-left: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .app-content {
+    padding: 12px;
+  }
+
+  .sidebar-resize-handle {
+    display: block;
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: col-resize;
+    z-index: 4;
+  }
+
+  .sidebar-resize-handle:hover {
+    background: rgba(37,99,235,.16);
+  }
+}
+
+@media (max-width: 420px) {
+  .app-content {
+    padding: 6px;
+  }
+
+  .app-header {
+    min-height: 46px;
+    padding: 5px 6px;
+  }
+
+  .icon-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 13px;
+    font-size: 18px;
+  }
+
+  .header-title strong {
+    font-size: 13px;
+  }
+
+  .header-title span {
+    font-size: 10px;
+  }
+
+  .app-sidebar {
+    width: min(92vw, 320px);
+  }
+
+  .context-drawer {
+    width: min(94vw, 370px);
+    padding: 12px;
+  }
+
+  .drawer-info {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-item {
+    min-height: 43px;
+  }
+}
+`;

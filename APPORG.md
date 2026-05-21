@@ -230,3 +230,15 @@ from
 ASSESSMENT EXECUTION
 
 That is the correct direction.
+
+The next big step is not adding many pages. It is polishing:
+
+
+permissions and roles
+backend cloud storage reliability
+subscription/billing control
+data export/import
+onboarding flow
+testing with one real school
+
+Honestly, this can become a strong paid school management platform if you keep it stable and simple for users.

@@ -12,8 +12,12 @@
  */
 
 import { useEffect } from "react";
+import { AccountProvider } from "./context/account-context";
 import { SettingsProvider, useSettings } from "./context/settings-context";
+import { SyncBootstrapProvider } from "./context/sync-bootstrap-context";
+import SyncBootstrap from "./components/SyncBootstrap";
 import { ActiveBranchProvider } from "./context/active-branch-context";
+import { startAutoSync } from "./lib/sync/syncEngine";
 
 // ======================================================
 // COLOR UTILITY
@@ -121,9 +125,16 @@ function AppWrapper({ children }: { children: React.ReactNode }) {
     applyTheme(settings);
   }, [settings]);
 
+  useEffect(() => {
+    const stopAutoSync = startAutoSync(60_000);
+
+    return () => {
+      stopAutoSync();// this isto create a cs wj
+    };
+  }, []);
+
   return <>{children}</>;
 }
-
 // ======================================================
 // ROOT LAYOUT
 // ======================================================
@@ -153,12 +164,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           fontFamily: "var(--font-family, system-ui)",
           transition: "background 0.3s ease, color 0.3s ease",
         }}
-      >
-        <SettingsProvider>
-          <ActiveBranchProvider>
-            <AppWrapper>{children}</AppWrapper>
-          </ActiveBranchProvider>
-        </SettingsProvider>
+      ><AccountProvider>
+          <SettingsProvider>
+            <ActiveBranchProvider>
+              <SyncBootstrapProvider>
+                <SyncBootstrap />
+                {children}
+              </SyncBootstrapProvider>
+            </ActiveBranchProvider>
+          </SettingsProvider>
+        </AccountProvider>
       </body>
     </html>
   );

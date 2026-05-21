@@ -1,127 +1,141 @@
-// lib/sync/syncUtils.ts
-import { db } from "../db";
-import { syncTable } from "./syncEngine";
+/**
+ * app/lib/sync/syncUtils.ts
+ * ---------------------------------------------------------
+ * LOCAL SYNC HELPERS
+ * ---------------------------------------------------------
+ */
 
-// ---------------- DEVICE ID ----------------
-export const getDeviceId = () => {
-  if (typeof window === "undefined") return "server";
+import { getAccountId, getDeviceId, SYNC_STATUS_VALUE } from "./syncConfig";
 
-  let id = localStorage.getItem("deviceId");
+// ======================================================
+// PREPARE DATA BEFORE SAVING TO DEXIE
+// ======================================================
 
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("deviceId", id);
-  }
-
-  return id;
-};
-
-// ---------------- PREPARE DATA ----------------
-export const prepareSyncData = (data: any, existing?: any) => {
+export function prepareSyncData<T extends Record<string, any>>(
+  data: T,
+  existing?: Partial<T>
+): T {
   return {
     ...data,
-    updatedAt: Date.now(),
-    version: existing ? existing.version + 1 : 1,
-    deviceId: getDeviceId(),
-    synced: "pending",
-    isDeleted: data.isDeleted ?? false,
-  };
-};
 
-// ---------------- CONFLICT RESOLUTION ----------------
-export function resolveConflict(local: any, remote: any) {
-  if (!local) return remote;
+    accountId: data.accountId || existing?.accountId || getAccountId(),
+
+    schoolId:
+      data.schoolId ??
+      existing?.schoolId,
+
+    branchId:
+      data.branchId ??
+      existing?.branchId,
+
+    cloudId: data.cloudId || existing?.cloudId,
+
+    createdAt: existing?.createdAt || data.createdAt || Date.now(),
+    updatedAt: Date.now(),
+
+    version: Number(existing?.version || data.version || 0) + 1,
+    deviceId: getDeviceId(),
+
+    synced: SYNC_STATUS_VALUE.PENDING,
+    isDeleted: data.isDeleted ?? existing?.isDeleted ?? false,
+  } as T;
+}
+
+// ======================================================
+// SOFT DELETE DATA
+// ======================================================
+
+export function prepareSoftDelete<T extends Record<string, any>>(
+  existing: T
+): T {
+  return {
+    ...existing,
+    updatedAt: Date.now(),
+    version: Number(existing.version || 0) + 1,
+    deviceId: getDeviceId(),
+    synced: SYNC_STATUS_VALUE.PENDING,
+    isDeleted: true,
+  };
+}
+
+// ======================================================
+// MARK SYNCED
+// ======================================================
+
+export function markSynced<T extends Record<string, any>>(
+  data: T,
+  patch?: Partial<T>
+): T {
+  return {
+    ...data,
+    ...(patch || {}),
+    synced: SYNC_STATUS_VALUE.SYNCED,
+  };
+}
+
+// ======================================================
+// MARK ERROR
+// ======================================================
+
+export function markSyncError<T extends Record<string, any>>(data: T): T {
+  return {
+    ...data,
+    synced: SYNC_STATUS_VALUE.ERROR,
+  };
+}
+
+// ======================================================
+// CONFLICT RESOLUTION
+// ======================================================
+
+export function resolveConflict<T extends Record<string, any>>(
+  local?: T | null,
+  remote?: T | null
+): T | null {
+  if (!local && !remote) return null;
+  if (!local) return remote || null;
   if (!remote) return local;
 
-  // VERSION FIRST
-  if ((remote.version ?? 0) > (local.version ?? 0)) return remote;
-  if ((local.version ?? 0) > (remote.version ?? 0)) return local;
+  const localVersion = Number(local.version || 0);
+  const remoteVersion = Number(remote.version || 0);
 
-  // TIMESTAMP NEXT
-  if ((remote.updatedAt ?? 0) > (local.updatedAt ?? 0)) return remote;
-  if ((local.updatedAt ?? 0) > (remote.updatedAt ?? 0)) return local;
+  if (remoteVersion > localVersion) return remote;
+  if (localVersion > remoteVersion) return local;
 
-  // FINAL TIE BREAKER
-  return remote.deviceId > local.deviceId ? remote : local;
+  const localUpdatedAt = Number(local.updatedAt || 0);
+  const remoteUpdatedAt = Number(remote.updatedAt || 0);
+
+  if (remoteUpdatedAt > localUpdatedAt) return remote;
+  if (localUpdatedAt > remoteUpdatedAt) return local;
+
+  const localDevice = String(local.deviceId || "");
+  const remoteDevice = String(remote.deviceId || "");
+
+  return remoteDevice > localDevice ? remote : local;
 }
 
-// ---------------- TABLE LIST ----------------
-const TABLES = ["students", "scores", "classes"] as const;
+// ======================================================
+// ACTIVE RECORD HELPER
+// ======================================================
 
-// ---------------- PUSH ----------------
-export async function pushChanges() {
-  for (const tableName of TABLES) {
-    const table = (db as any)[tableName];
-
-    try {
-      const pending = await table
-        .where("synced")
-        .equals("pending")
-        .limit(100) // 🔥 batching
-        .toArray();
-
-      if (!pending.length) continue;
-
-      const res = await fetch(`/api/sync/${tableName}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(pending),
-      });
-
-      if (!res.ok) throw new Error("Push failed");
-
-      const serverData = await res.json();
-
-      await syncTable(tableName, serverData);
-
-    } catch (err) {
-      console.error(`❌ Push failed (${tableName})`, err);
-    }
-  }
+export function isActiveRecord<T extends { isDeleted?: boolean; active?: boolean }>(
+  row: T
+) {
+  return !row.isDeleted && row.active !== false;
 }
 
-// ---------------- PULL ----------------
-export async function pullChanges() {
-  for (const tableName of TABLES) {
-    try {
-      const res = await fetch(`/api/sync/${tableName}`);
+// ======================================================
+// SYNC STATUS HELPERS
+// ======================================================
 
-      if (!res.ok) throw new Error("Pull failed");
-
-      const remoteData = await res.json();
-
-      if (!Array.isArray(remoteData)) continue;
-
-      await syncTable(tableName, remoteData);
-
-    } catch (err) {
-      console.error(`❌ Pull failed (${tableName})`, err);
-    }
-  }
+export function isPendingSync(row: any) {
+  return String(row?.synced || "").toLowerCase() === SYNC_STATUS_VALUE.PENDING;
 }
 
-// ---------------- AUTO SYNC ----------------
-let syncRunning = false;
+export function isSynced(row: any) {
+  return String(row?.synced || "").toLowerCase() === SYNC_STATUS_VALUE.SYNCED;
+}
 
-export function startAutoSync() {
-  if (syncRunning) return; // 🔥 prevent duplicates
-  syncRunning = true;
-
-  setInterval(async () => {
-    if (!navigator.onLine) {
-      console.log("📴 Offline - skipping sync");
-      return;
-    }
-
-    try {
-      await pushChanges();
-      await pullChanges();
-
-      console.log("✅ Sync complete");
-    } catch (err) {
-      console.error("❌ Sync cycle failed", err);
-    }
-  }, 10000);
+export function isSyncError(row: any) {
+  return String(row?.synced || "").toLowerCase() === SYNC_STATUS_VALUE.ERROR;
 }

@@ -1,38 +1,22 @@
 "use client";
 
 /**
- * context/active-branch-context.tsx
+ * active-branch-context.tsx
  * ---------------------------------------------------------
- * ACTIVE SCHOOL + BRANCH CONTEXT
+ * SECURE ACTIVE SCHOOL / BRANCH CONTROLLER
  * ---------------------------------------------------------
  *
- * This file intentionally keeps the old filename and hook name:
- * - ActiveBranchProvider
- * - useActiveBranch
+ * Purpose:
+ * - Prevent logged-out users from seeing active school/branch data.
+ * - Scope all institution context by signed-in accountId.
+ * - Keep Dexie + localStorage + settings context aligned.
+ * - Avoid maximum update depth loops during sync bootstrap.
  *
- * So existing imports do not need to change.
- *
- * ARCHITECTURE
- * ---------------------------------------------------------
- * Active School -> Active Branch
- *
- * Rules:
- * 1. School is selected first.
- * 2. Branches are filtered by selected school.
- * 3. If selected branch does not belong to selected school,
- *    the provider auto-selects the first active branch under that school.
- * 4. localStorage keeps the live selected school/branch.
- * 5. settings.schoolId and settings.branchId are kept in sync for older pages.
- *
- * IMPORTANT LAYOUT ORDER
- * ---------------------------------------------------------
- * Since this provider uses useSettings(), your RootLayout should wrap providers as:
- *
- * <SettingsProvider>
- *   <ActiveBranchProvider>
- *     <AppWrapper>{children}</AppWrapper>
- *   </ActiveBranchProvider>
- * </SettingsProvider>
+ * Important fixes:
+ * - refreshInstitution no longer depends on settings.schoolId/settings.branchId.
+ * - updateSettings is guarded and not allowed to create a refresh loop.
+ * - State setters avoid updates when the value is already the same.
+ * - Logged-out state clears local institution context safely.
  */
 
 import React, {
@@ -41,37 +25,40 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
 import { db, Branch, School } from "../lib/db";
 import { useSettings } from "./settings-context";
+import { useAccount } from "./account-context";
 
 // ======================================================
 // TYPES
 // ======================================================
 
 export type ActiveInstitutionContextType = {
-  // School context
   activeSchoolId: number | null;
   activeSchool: School | null;
   schools: School[];
   setActiveSchoolId: (id: number | null) => Promise<void>;
 
-  // Branch context
   activeBranchId: number | null;
   activeBranch: Branch | null;
   branches: Branch[];
   allBranches: Branch[];
   setActiveBranchId: (id: number | null) => Promise<void>;
 
-  // State
   loading: boolean;
   refreshInstitution: () => Promise<void>;
 };
 
-// Backward-compatible name.
 export type ActiveBranchContextType = ActiveInstitutionContextType;
+
+type SettingsLike = {
+  schoolId?: number;
+  branchId?: number;
+};
 
 // ======================================================
 // CONSTANTS
@@ -80,20 +67,59 @@ export type ActiveBranchContextType = ActiveInstitutionContextType;
 const SCHOOL_STORAGE_KEY = "activeSchoolId";
 const BRANCH_STORAGE_KEY = "activeBranchId";
 
-// ======================================================
-// CONTEXT
-// ======================================================
-
 const ActiveBranchContext = createContext<ActiveBranchContextType | undefined>(
   undefined
 );
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+function sameSchoolList(a: School[], b: School[]) {
+  if (a.length !== b.length) return false;
+  return a.every((row, index) => row.id === b[index]?.id && row.updatedAt === b[index]?.updatedAt);
+}
+
+function sameBranchList(a: Branch[], b: Branch[]) {
+  if (a.length !== b.length) return false;
+  return a.every((row, index) => row.id === b[index]?.id && row.updatedAt === b[index]?.updatedAt);
+}
+
+function readStorageNumber(key: string) {
+  if (typeof window === "undefined") return null;
+
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return null;
+
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function writeStorageNumber(key: string, value: number | null) {
+  if (typeof window === "undefined") return;
+
+  if (value) {
+    window.localStorage.setItem(key, String(value));
+  } else {
+    window.localStorage.removeItem(key);
+  }
+}
+
+function normalizeId(value?: number | null) {
+  return Number(value || 0);
+}
 
 // ======================================================
 // PROVIDER
 // ======================================================
 
 export function ActiveBranchProvider({ children }: { children: React.ReactNode }) {
+  const { accountId, loading: accountLoading } = useAccount();
   const { settings, updateSettings } = useSettings();
+
+  const settingsRef = useRef<SettingsLike>({});
+  const refreshRunningRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const [activeSchoolId, setActiveSchoolIdState] = useState<number | null>(null);
   const [activeBranchId, setActiveBranchIdState] = useState<number | null>(null);
@@ -102,44 +128,120 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   const [allBranches, setAllBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Keep latest settings in a ref so refreshInstitution does not depend on
+  // settings.schoolId/settings.branchId and recreate itself repeatedly.
+  useEffect(() => {
+    settingsRef.current = {
+      schoolId: settings?.schoolId,
+      branchId: settings?.branchId,
+    };
+  }, [settings?.schoolId, settings?.branchId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   // ======================================================
-  // LOAD + RESOLVE CONTEXT
+  // SAFE STATE HELPERS
+  // ======================================================
+
+  const setSchoolIdSafely = useCallback((next: number | null) => {
+    setActiveSchoolIdState((prev) => (prev === next ? prev : next));
+  }, []);
+
+  const setBranchIdSafely = useCallback((next: number | null) => {
+    setActiveBranchIdState((prev) => (prev === next ? prev : next));
+  }, []);
+
+  const setSchoolsSafely = useCallback((next: School[]) => {
+    setSchools((prev) => (sameSchoolList(prev, next) ? prev : next));
+  }, []);
+
+  const setBranchesSafely = useCallback((next: Branch[]) => {
+    setAllBranches((prev) => (sameBranchList(prev, next) ? prev : next));
+  }, []);
+
+  // ======================================================
+  // CLEAR CONTEXT
+  // ======================================================
+
+  const clearInstitutionContext = useCallback(async () => {
+    setSchoolIdSafely(null);
+    setBranchIdSafely(null);
+    setSchoolsSafely([]);
+    setBranchesSafely([]);
+
+    writeStorageNumber(SCHOOL_STORAGE_KEY, null);
+    writeStorageNumber(BRANCH_STORAGE_KEY, null);
+
+    const currentSchoolId = normalizeId(settingsRef.current.schoolId);
+    const currentBranchId = normalizeId(settingsRef.current.branchId);
+
+    if (currentSchoolId || currentBranchId) {
+      await updateSettings({
+        schoolId: undefined,
+        branchId: undefined,
+        updatedAt: Date.now(),
+      });
+    }
+  }, [setSchoolIdSafely, setBranchIdSafely, setSchoolsSafely, setBranchesSafely, updateSettings]);
+
+  // ======================================================
+  // REFRESH INSTITUTION
   // ======================================================
 
   const refreshInstitution = useCallback(async () => {
+    if (refreshRunningRef.current) return;
+
+    refreshRunningRef.current = true;
     setLoading(true);
 
     try {
+      if (accountLoading) return;
+
+      if (!accountId) {
+        await clearInstitutionContext();
+        return;
+      }
+
       const [schoolRows, branchRows] = await Promise.all([
         db.schools.toArray(),
         db.branches.toArray(),
       ]);
 
+      if (!mountedRef.current) return;
+
       const activeSchools = schoolRows
-        .filter(row => !row.isDeleted)
+        .filter((row) => row.accountId === accountId && !row.isDeleted)
         .sort((a, b) => a.name.localeCompare(b.name));
 
       const activeBranches = branchRows
-        .filter(row => !row.isDeleted && row.active !== false)
+        .filter(
+          (row) =>
+            row.accountId === accountId &&
+            !row.isDeleted &&
+            row.active !== false
+        )
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      setSchools(activeSchools);
-      setAllBranches(activeBranches);
+      setSchoolsSafely(activeSchools);
+      setBranchesSafely(activeBranches);
 
-      // ------------------------------
-      // Resolve school
-      // ------------------------------
-
-      const storedSchoolRaw = localStorage.getItem(SCHOOL_STORAGE_KEY);
-      const storedSchoolId = storedSchoolRaw ? Number(storedSchoolRaw) : null;
-      const settingsSchoolId = settings?.schoolId ? Number(settings.schoolId) : null;
+      const storedSchoolId = readStorageNumber(SCHOOL_STORAGE_KEY);
+      const settingsSchoolId = settingsRef.current.schoolId
+        ? Number(settingsRef.current.schoolId)
+        : null;
 
       const storedSchoolExists = storedSchoolId
-        ? activeSchools.some(school => school.id === storedSchoolId)
+        ? activeSchools.some((school) => school.id === storedSchoolId)
         : false;
 
       const settingsSchoolExists = settingsSchoolId
-        ? activeSchools.some(school => school.id === settingsSchoolId)
+        ? activeSchools.some((school) => school.id === settingsSchoolId)
         : false;
 
       const resolvedSchoolId = storedSchoolExists
@@ -148,24 +250,21 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
         ? settingsSchoolId
         : activeSchools[0]?.id || null;
 
-      // ------------------------------
-      // Resolve branch under school
-      // ------------------------------
-
       const branchesForSchool = resolvedSchoolId
-        ? activeBranches.filter(branch => branch.schoolId === resolvedSchoolId)
+        ? activeBranches.filter((branch) => branch.schoolId === resolvedSchoolId)
         : [];
 
-      const storedBranchRaw = localStorage.getItem(BRANCH_STORAGE_KEY);
-      const storedBranchId = storedBranchRaw ? Number(storedBranchRaw) : null;
-      const settingsBranchId = settings?.branchId ? Number(settings.branchId) : null;
+      const storedBranchId = readStorageNumber(BRANCH_STORAGE_KEY);
+      const settingsBranchId = settingsRef.current.branchId
+        ? Number(settingsRef.current.branchId)
+        : null;
 
       const storedBranchExists = storedBranchId
-        ? branchesForSchool.some(branch => branch.id === storedBranchId)
+        ? branchesForSchool.some((branch) => branch.id === storedBranchId)
         : false;
 
       const settingsBranchExists = settingsBranchId
-        ? branchesForSchool.some(branch => branch.id === settingsBranchId)
+        ? branchesForSchool.some((branch) => branch.id === settingsBranchId)
         : false;
 
       const resolvedBranchId = storedBranchExists
@@ -174,27 +273,23 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
         ? settingsBranchId
         : branchesForSchool[0]?.id || null;
 
-      setActiveSchoolIdState(resolvedSchoolId);
-      setActiveBranchIdState(resolvedBranchId);
+      setSchoolIdSafely(resolvedSchoolId);
+      setBranchIdSafely(resolvedBranchId);
 
-      if (resolvedSchoolId) {
-        localStorage.setItem(SCHOOL_STORAGE_KEY, String(resolvedSchoolId));
-      } else {
-        localStorage.removeItem(SCHOOL_STORAGE_KEY);
-      }
+      writeStorageNumber(SCHOOL_STORAGE_KEY, resolvedSchoolId);
+      writeStorageNumber(BRANCH_STORAGE_KEY, resolvedBranchId);
 
-      if (resolvedBranchId) {
-        localStorage.setItem(BRANCH_STORAGE_KEY, String(resolvedBranchId));
-      } else {
-        localStorage.removeItem(BRANCH_STORAGE_KEY);
-      }
+      const currentSchoolId = normalizeId(settingsRef.current.schoolId);
+      const currentBranchId = normalizeId(settingsRef.current.branchId);
+      const nextSchoolId = normalizeId(resolvedSchoolId);
+      const nextBranchId = normalizeId(resolvedBranchId);
 
-      // Keep legacy settings in sync without forcing a loop every render.
-      const settingsAlreadySynced =
-        Number(settings?.schoolId || 0) === Number(resolvedSchoolId || 0) &&
-        Number(settings?.branchId || 0) === Number(resolvedBranchId || 0);
+      if (currentSchoolId !== nextSchoolId || currentBranchId !== nextBranchId) {
+        settingsRef.current = {
+          schoolId: resolvedSchoolId || undefined,
+          branchId: resolvedBranchId || undefined,
+        };
 
-      if (!settingsAlreadySynced) {
         await updateSettings({
           schoolId: resolvedSchoolId || undefined,
           branchId: resolvedBranchId || undefined,
@@ -204,193 +299,220 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
     } catch (error) {
       console.error("Failed to refresh active school/branch context:", error);
     } finally {
-      setLoading(false);
+      refreshRunningRef.current = false;
+      if (mountedRef.current) setLoading(false);
     }
-  }, [settings?.schoolId, settings?.branchId, updateSettings]);
-
-  useEffect(() => {
-    refreshInstitution();
-  }, [refreshInstitution]);
+  }, [
+    accountId,
+    accountLoading,
+    clearInstitutionContext,
+    setSchoolIdSafely,
+    setBranchIdSafely,
+    setSchoolsSafely,
+    setBranchesSafely,
+    updateSettings,
+  ]);
 
   // ======================================================
-  // DERIVED DATA
+  // BOOT / ACCOUNT CHANGE
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading) return;
+
+    if (!accountId) {
+      clearInstitutionContext().finally(() => setLoading(false));
+      return;
+    }
+
+    refreshInstitution();
+    // Deliberately depend only on account identity/loading.
+    // refreshInstitution is stable enough, but it updates settings, so we avoid
+    // using settings changes as refresh triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountLoading, accountId]);
+
+  // ======================================================
+  // DERIVED VALUES
   // ======================================================
 
   const activeSchool = useMemo(() => {
-    if (!activeSchoolId) return null;
-    return schools.find(school => school.id === activeSchoolId) || null;
-  }, [schools, activeSchoolId]);
+    if (!accountId || !activeSchoolId) return null;
+    return schools.find((school) => school.id === activeSchoolId) || null;
+  }, [accountId, schools, activeSchoolId]);
 
   const branches = useMemo(() => {
-    if (!activeSchoolId) return [];
-    return allBranches.filter(branch => branch.schoolId === activeSchoolId);
-  }, [allBranches, activeSchoolId]);
+    if (!accountId || !activeSchoolId) return [];
+    return allBranches.filter((branch) => branch.schoolId === activeSchoolId);
+  }, [accountId, allBranches, activeSchoolId]);
 
   const activeBranch = useMemo(() => {
-    if (!activeBranchId) return null;
-    return branches.find(branch => branch.id === activeBranchId) || null;
-  }, [branches, activeBranchId]);
+    if (!accountId || !activeBranchId) return null;
+    return branches.find((branch) => branch.id === activeBranchId) || null;
+  }, [accountId, branches, activeBranchId]);
 
   // ======================================================
-  // SCHOOL SWITCHER
+  // MANUAL SCHOOL SWITCH
   // ======================================================
 
   const setActiveSchoolId = useCallback(
     async (id: number | null) => {
-      const nextSchoolId = id;
-
-      setActiveSchoolIdState(nextSchoolId);
-
-      if (nextSchoolId) {
-        localStorage.setItem(SCHOOL_STORAGE_KEY, String(nextSchoolId));
-      } else {
-        localStorage.removeItem(SCHOOL_STORAGE_KEY);
+      if (!accountId) {
+        await clearInstitutionContext();
+        return;
       }
 
-      // When school changes, branch must belong to that school.
+      const nextSchoolId = id;
+
+      const schoolExists = nextSchoolId
+        ? schools.some((school) => school.id === nextSchoolId)
+        : true;
+
+      if (!schoolExists) return;
+
       const branchesForSchool = nextSchoolId
-        ? allBranches.filter(branch => branch.schoolId === nextSchoolId)
+        ? allBranches.filter((branch) => branch.schoolId === nextSchoolId)
         : [];
 
       const currentBranchStillValid = activeBranchId
-        ? branchesForSchool.some(branch => branch.id === activeBranchId)
+        ? branchesForSchool.some((branch) => branch.id === activeBranchId)
         : false;
 
       const nextBranchId = currentBranchStillValid
         ? activeBranchId
         : branchesForSchool[0]?.id || null;
 
-      setActiveBranchIdState(nextBranchId);
+      setSchoolIdSafely(nextSchoolId);
+      setBranchIdSafely(nextBranchId);
 
-      if (nextBranchId) {
-        localStorage.setItem(BRANCH_STORAGE_KEY, String(nextBranchId));
-      } else {
-        localStorage.removeItem(BRANCH_STORAGE_KEY);
+      writeStorageNumber(SCHOOL_STORAGE_KEY, nextSchoolId);
+      writeStorageNumber(BRANCH_STORAGE_KEY, nextBranchId);
+
+      const currentSchoolId = normalizeId(settingsRef.current.schoolId);
+      const currentBranchId = normalizeId(settingsRef.current.branchId);
+      const normalizedNextSchoolId = normalizeId(nextSchoolId);
+      const normalizedNextBranchId = normalizeId(nextBranchId);
+
+      if (
+        currentSchoolId !== normalizedNextSchoolId ||
+        currentBranchId !== normalizedNextBranchId
+      ) {
+        settingsRef.current = {
+          schoolId: nextSchoolId || undefined,
+          branchId: nextBranchId || undefined,
+        };
+
+        await updateSettings({
+          schoolId: nextSchoolId || undefined,
+          branchId: nextBranchId || undefined,
+          updatedAt: Date.now(),
+        });
       }
-
-      await updateSettings({
-        schoolId: nextSchoolId || undefined,
-        branchId: nextBranchId || undefined,
-        currentAcademicStructureId: undefined,
-        currentAcademicPeriodId: undefined,
-        updatedAt: Date.now(),
-      });
     },
-    [allBranches, activeBranchId, updateSettings]
+    [
+      accountId,
+      activeBranchId,
+      allBranches,
+      schools,
+      clearInstitutionContext,
+      setSchoolIdSafely,
+      setBranchIdSafely,
+      updateSettings,
+    ]
   );
 
   // ======================================================
-  // BRANCH SWITCHER
+  // MANUAL BRANCH SWITCH
   // ======================================================
 
   const setActiveBranchId = useCallback(
     async (id: number | null) => {
-      let nextBranchId = id;
-      let nextSchoolId = activeSchoolId;
-
-      if (nextBranchId) {
-        const branch = allBranches.find(row => row.id === nextBranchId) || null;
-
-        if (!branch) {
-          nextBranchId = null;
-        } else {
-          // If user picks a branch from another school, switch school too.
-          nextSchoolId = branch.schoolId || null;
-        }
+      if (!accountId) {
+        await clearInstitutionContext();
+        return;
       }
 
-      setActiveSchoolIdState(nextSchoolId);
-      setActiveBranchIdState(nextBranchId);
+      const nextBranchId = id;
 
-      if (nextSchoolId) {
-        localStorage.setItem(SCHOOL_STORAGE_KEY, String(nextSchoolId));
-      } else {
-        localStorage.removeItem(SCHOOL_STORAGE_KEY);
+      const branchBelongsToSchool = nextBranchId
+        ? branches.some((branch) => branch.id === nextBranchId)
+        : true;
+
+      if (!branchBelongsToSchool) return;
+
+      setBranchIdSafely(nextBranchId);
+      writeStorageNumber(BRANCH_STORAGE_KEY, nextBranchId);
+
+      const currentSchoolId = normalizeId(settingsRef.current.schoolId);
+      const currentBranchId = normalizeId(settingsRef.current.branchId);
+      const nextSchoolId = normalizeId(activeSchoolId);
+      const normalizedNextBranchId = normalizeId(nextBranchId);
+
+      if (currentSchoolId !== nextSchoolId || currentBranchId !== normalizedNextBranchId) {
+        settingsRef.current = {
+          schoolId: activeSchoolId || undefined,
+          branchId: nextBranchId || undefined,
+        };
+
+        await updateSettings({
+          schoolId: activeSchoolId || undefined,
+          branchId: nextBranchId || undefined,
+          updatedAt: Date.now(),
+        });
       }
-
-      if (nextBranchId) {
-        localStorage.setItem(BRANCH_STORAGE_KEY, String(nextBranchId));
-      } else {
-        localStorage.removeItem(BRANCH_STORAGE_KEY);
-      }
-
-      await updateSettings({
-        schoolId: nextSchoolId || undefined,
-        branchId: nextBranchId || undefined,
-        currentAcademicStructureId: undefined,
-        currentAcademicPeriodId: undefined,
-        updatedAt: Date.now(),
-      });
     },
-    [activeSchoolId, allBranches, updateSettings]
+    [
+      accountId,
+      branches,
+      activeSchoolId,
+      clearInstitutionContext,
+      setBranchIdSafely,
+      updateSettings,
+    ]
   );
 
   // ======================================================
-  // SAFETY: ACTIVE BRANCH MUST BELONG TO ACTIVE SCHOOL
-  // ======================================================
-
-  useEffect(() => {
-    if (!activeSchoolId) return;
-    if (!activeBranchId) return;
-
-    const branchStillValid = branches.some(branch => branch.id === activeBranchId);
-
-    if (!branchStillValid) {
-      const nextBranchId = branches[0]?.id || null;
-      setActiveBranchIdState(nextBranchId);
-
-      if (nextBranchId) {
-        localStorage.setItem(BRANCH_STORAGE_KEY, String(nextBranchId));
-      } else {
-        localStorage.removeItem(BRANCH_STORAGE_KEY);
-      }
-
-      updateSettings({
-        schoolId: activeSchoolId || undefined,
-        branchId: nextBranchId || undefined,
-        currentAcademicStructureId: undefined,
-        currentAcademicPeriodId: undefined,
-        updatedAt: Date.now(),
-      });
-    }
-  }, [activeSchoolId, activeBranchId, branches, updateSettings]);
-
-  // ======================================================
-  // VALUE
+  // CONTEXT VALUE
   // ======================================================
 
   const value = useMemo<ActiveBranchContextType>(
     () => ({
-      activeSchoolId,
-      activeSchool,
-      schools,
+      activeSchoolId: accountId ? activeSchoolId : null,
+      activeSchool: accountId ? activeSchool : null,
+      schools: accountId ? schools : [],
       setActiveSchoolId,
 
-      activeBranchId,
-      activeBranch,
-      branches,
-      allBranches,
+      activeBranchId: accountId ? activeBranchId : null,
+      activeBranch: accountId ? activeBranch : null,
+      branches: accountId ? branches : [],
+      allBranches: accountId ? allBranches : [],
       setActiveBranchId,
 
-      loading,
+      loading: accountLoading || loading,
       refreshInstitution,
     }),
     [
+      accountId,
+      accountLoading,
       activeSchoolId,
       activeSchool,
       schools,
-      setActiveSchoolId,
       activeBranchId,
       activeBranch,
       branches,
       allBranches,
-      setActiveBranchId,
       loading,
+      setActiveSchoolId,
+      setActiveBranchId,
       refreshInstitution,
     ]
   );
 
-  return <ActiveBranchContext.Provider value={value}>{children}</ActiveBranchContext.Provider>;
+  return (
+    <ActiveBranchContext.Provider value={value}>
+      {children}
+    </ActiveBranchContext.Provider>
+  );
 }
 
 // ======================================================

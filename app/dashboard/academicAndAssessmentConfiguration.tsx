@@ -3,10 +3,9 @@
 /**
  * academicAndAssessmentConfiguration.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL ACADEMIC + ASSESSMENT CONFIGURATION COCKPIT
+ * MOBILE-FIRST SECURE ACADEMIC + ASSESSMENT CONFIGURATION COCKPIT
  * ---------------------------------------------------------
- *
- * DB tables managed here:
+ * Manages:
  * - academicStructures
  * - academicPeriods
  * - assessmentStructures
@@ -14,42 +13,19 @@
  * - gradingSystems
  * - gradeRules
  *
- * DB tables read for safety/usage:
- * - organizations
- * - assessmentApplicabilities
- * - assessmentEntries
- * - computedResults
- * - classes
- * - classSubjects
- *
- * ARCHITECTURE
- * ---------------------------------------------------------
- * Active School -> Active Branch -> Academic Configuration
- *
- * This page does NOT enter marks.
- * This page does NOT activate assessment for class subjects.
- * This page defines the reusable academic and assessment frameworks:
- *
- * 1. Academic Structure
- *    e.g. 2026 Basic School Year, JHS Academic Year, Semester System
- *
- * 2. Academic Period
- *    e.g. Term 1, Term 2, Semester 1
- *
- * 3. Assessment Structure
- *    e.g. Class Score + Exam, Project + Practical + Exam
- *
- * 4. Assessment Structure Items
- *    e.g. Class Test 30%, Exam 70%
- *
- * 5. Grading System
- *    e.g. Percentage, GPA, Competency, Custom
- *
- * 6. Grade Rules
- *    e.g. 80-100 = A1, 70-79 = B2
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Cards are mobile-first and dashboard-shell safe.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -71,8 +47,6 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
@@ -87,6 +61,13 @@ type DrawerMode =
   | "assessmentItem"
   | "gradingSystem"
   | "gradeRule";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type AcademicStructureForm = {
   id?: number;
@@ -160,75 +141,107 @@ type GradeRuleForm = {
   active?: boolean;
 };
 
-type AcademicStructureView = {
-  row: AcademicStructure;
-  periodCount: number;
-  classSubjectCount: number;
-  assessmentStructureCount: number;
-  enrollmentCount: number;
-};
-
-type AcademicPeriodView = {
-  row: AcademicPeriod;
-  structureName: string;
-  enrollmentCount: number;
-  classSubjectCount: number;
-  entryCount: number;
-};
-
-type AssessmentStructureView = {
-  row: AssessmentStructure;
-  academicStructureName: string;
-  organizationName: string;
-  itemCount: number;
-  totalWeight: number;
-  applicabilityCount: number;
-  entryCount: number;
-};
-
-type AssessmentItemView = {
-  row: AssessmentStructureItem;
-  assessmentStructureName: string;
-  entryCount: number;
-};
-
-type GradingSystemView = {
-  row: GradingSystem;
-  organizationName: string;
-  ruleCount: number;
-  applicabilityCount: number;
-  computedResultCount: number;
-};
-
-type GradeRuleView = {
-  row: GradeRule;
-  gradingSystemName: string;
-};
-
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const endOfYearISO = () => `${new Date().getFullYear()}-12-31`;
+
+const emptyAcademicStructure = (): AcademicStructureForm => ({
+  name: "",
+  level: "primary",
+  startDate: todayISO(),
+  endDate: endOfYearISO(),
+  photo: "",
+  bannerImage: "",
+  active: true,
+});
+
+const emptyAcademicPeriod = (): AcademicPeriodForm => ({
+  academicStructureId: undefined,
+  name: "",
+  type: "Term 1",
+  startDate: todayISO(),
+  endDate: endOfYearISO(),
+  photo: "",
+  order: 1,
+  active: true,
+});
+
+const emptyAssessmentStructure = (): AssessmentStructureForm => ({
+  organizationId: undefined,
+  academicStructureId: undefined,
+  name: "",
+  description: "",
+  photo: "",
+  bannerImage: "",
+  totalScore: 100,
+  active: true,
+  locked: false,
+});
+
+const emptyAssessmentItem = (): AssessmentItemForm => ({
+  assessmentStructureId: undefined,
+  name: "",
+  weight: 0,
+  maxScore: 100,
+  order: 1,
+  compulsory: true,
+  active: true,
+});
+
+const emptyGradingSystem = (): GradingSystemForm => ({
+  organizationId: undefined,
+  name: "",
+  type: "percentage",
+  description: "",
+  photo: "",
+  active: true,
+  default: false,
+  locked: false,
+});
+
+const emptyGradeRule = (): GradeRuleForm => ({
+  gradingSystemId: undefined,
+  minScore: 0,
+  maxScore: 100,
+  grade: "",
+  remark: "",
+  gpa: undefined,
+  color: "",
+  order: 1,
+  active: true,
+});
 
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function AcademicAndAssessmentConfiguration() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<TabKey>("academic");
 
@@ -257,79 +270,72 @@ export default function AcademicAndAssessmentConfiguration() {
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("academicStructure");
   const [editMode, setEditMode] = useState(false);
 
-  const [academicStructureForm, setAcademicStructureForm] = useState<AcademicStructureForm>({
-    name: "",
-    level: "primary",
-    startDate: todayISO(),
-    endDate: endOfYearISO(),
-    photo: "",
-    bannerImage: "",
-    active: true,
-  });
+  const [academicStructureForm, setAcademicStructureForm] = useState<AcademicStructureForm>(emptyAcademicStructure);
+  const [academicPeriodForm, setAcademicPeriodForm] = useState<AcademicPeriodForm>(emptyAcademicPeriod);
+  const [assessmentStructureForm, setAssessmentStructureForm] = useState<AssessmentStructureForm>(emptyAssessmentStructure);
+  const [assessmentItemForm, setAssessmentItemForm] = useState<AssessmentItemForm>(emptyAssessmentItem);
+  const [gradingSystemForm, setGradingSystemForm] = useState<GradingSystemForm>(emptyGradingSystem);
+  const [gradeRuleForm, setGradeRuleForm] = useState<GradeRuleForm>(emptyGradeRule);
 
-  const [academicPeriodForm, setAcademicPeriodForm] = useState<AcademicPeriodForm>({
-    academicStructureId: undefined,
-    name: "",
-    type: "Term 1",
-    startDate: todayISO(),
-    endDate: endOfYearISO(),
-    photo: "",
-    order: 1,
-    active: true,
-  });
+  // ======================================================
+  // AUTH PROTECTION
+  // ======================================================
 
-  const [assessmentStructureForm, setAssessmentStructureForm] = useState<AssessmentStructureForm>({
-    organizationId: undefined,
-    academicStructureId: undefined,
-    name: "",
-    description: "",
-    photo: "",
-    bannerImage: "",
-    totalScore: 100,
-    active: true,
-    locked: false,
-  });
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
 
-  const [assessmentItemForm, setAssessmentItemForm] = useState<AssessmentItemForm>({
-    assessmentStructureId: undefined,
-    name: "",
-    weight: 0,
-    maxScore: 100,
-    order: 1,
-    compulsory: true,
-    active: true,
-  });
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
 
-  const [gradingSystemForm, setGradingSystemForm] = useState<GradingSystemForm>({
-    organizationId: undefined,
-    name: "",
-    type: "percentage",
-    description: "",
-    photo: "",
-    active: true,
-    default: false,
-    locked: false,
-  });
-
-  const [gradeRuleForm, setGradeRuleForm] = useState<GradeRuleForm>({
-    gradingSystemId: undefined,
-    minScore: 0,
-    maxScore: 100,
-    grade: "",
-    remark: "",
-    gpa: undefined,
-    color: "",
-    order: 1,
-    active: true,
-  });
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const clearData = () => {
+    setAcademicStructures([]);
+    setAcademicPeriods([]);
+    setAssessmentStructures([]);
+    setAssessmentItems([]);
+    setGradingSystems([]);
+    setGradeRules([]);
+    setOrganizations([]);
+    setAssessmentApplicabilities([]);
+    setAssessmentEntries([]);
+    setComputedResults([]);
+    setClasses([]);
+    setClassSubjects([]);
+  };
+
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setPageLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
+      setPageLoading(true);
 
       const [
         academicStructureRows,
@@ -359,397 +365,78 @@ export default function AcademicAndAssessmentConfiguration() {
         db.classSubjects.toArray(),
       ]);
 
-      setAcademicStructures(
-        academicStructureRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setAcademicStructures(academicStructureRows.filter(sameTenant));
       setAcademicPeriods(
         academicPeriodRows
-          .filter(row => row.branchId === branchId && !row.isDeleted)
+          .filter(sameTenant)
           .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
       );
-      setAssessmentStructures(
-        assessmentStructureRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setAssessmentStructures(assessmentStructureRows.filter(sameTenant));
       setAssessmentItems(
         assessmentItemRows
-          .filter(row => row.branchId === branchId && !row.isDeleted)
+          .filter(sameTenant)
           .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
       );
-      setGradingSystems(
-        gradingSystemRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setGradingSystems(gradingSystemRows.filter(sameTenant));
       setGradeRules(
         gradeRuleRows
-          .filter(row => row.branchId === branchId && !row.isDeleted)
+          .filter(sameTenant)
           .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
       );
-      setOrganizations(
-        organizationRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-      setAssessmentApplicabilities(
-        applicabilityRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-      setAssessmentEntries(
-        entryRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-      setComputedResults(
-        computedRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-      setClasses(classRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClassSubjects(
-        classSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setOrganizations(organizationRows.filter(sameTenant));
+      setAssessmentApplicabilities(applicabilityRows.filter(sameTenant));
+      setAssessmentEntries(entryRows.filter(sameTenant));
+      setComputedResults(computedRows.filter(sameTenant));
+      setClasses(classRows.filter(sameTenant));
+      setClassSubjects(classSubjectRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load academic and assessment configuration:", error);
+      clearData();
       alert("Failed to load academic and assessment configuration");
     } finally {
-      setLoading(false);
+      setPageLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
-  // LOOKUPS
+  // LOOKUPS + STATS
   // ======================================================
 
   const academicStructureMap = useMemo(
-    () => new Map(academicStructures.map(row => [row.id, row])),
+    () => new Map(academicStructures.map((row) => [row.id, row])),
     [academicStructures]
   );
 
   const organizationMap = useMemo(
-    () => new Map(organizations.map(row => [row.id, row])),
+    () => new Map(organizations.map((row) => [row.id, row])),
     [organizations]
   );
 
   const assessmentStructureMap = useMemo(
-    () => new Map(assessmentStructures.map(row => [row.id, row])),
+    () => new Map(assessmentStructures.map((row) => [row.id, row])),
     [assessmentStructures]
   );
 
   const gradingSystemMap = useMemo(
-    () => new Map(gradingSystems.map(row => [row.id, row])),
+    () => new Map(gradingSystems.map((row) => [row.id, row])),
     [gradingSystems]
   );
 
-  const periodCountByStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    academicPeriods.forEach(row => {
-      map.set(row.academicStructureId, (map.get(row.academicStructureId) || 0) + 1);
-    });
-    return map;
-  }, [academicPeriods]);
-
-  const classSubjectCountByStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    classSubjects.forEach(row => {
-      map.set(row.academicStructureId, (map.get(row.academicStructureId) || 0) + 1);
-    });
-    return map;
-  }, [classSubjects]);
-
-  const assessmentStructureCountByAcademicStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentStructures.forEach(row => {
-      map.set(row.academicStructureId, (map.get(row.academicStructureId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentStructures]);
-
-  const enrollmentCountByStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    classes.forEach(() => undefined);
-    return map;
-  }, [classes]);
-
-  const classSubjectCountByPeriod = useMemo(() => {
-    const map = new Map<number, number>();
-    classSubjects.forEach(row => {
-      if (!row.academicPeriodId) return;
-      map.set(row.academicPeriodId, (map.get(row.academicPeriodId) || 0) + 1);
-    });
-    return map;
-  }, [classSubjects]);
-
-  const entryCountByPeriod = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentEntries.forEach(row => {
-      map.set(row.academicPeriodId, (map.get(row.academicPeriodId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentEntries]);
-
-  const itemStatsByAssessmentStructure = useMemo(() => {
-    const map = new Map<number, { count: number; weight: number }>();
-    assessmentItems.forEach(row => {
-      const current = map.get(row.assessmentStructureId) || { count: 0, weight: 0 };
-      current.count += 1;
-      if (row.active !== false) current.weight += Number(row.weight || 0);
-      map.set(row.assessmentStructureId, current);
-    });
-    return map;
-  }, [assessmentItems]);
-
-  const applicabilityCountByAssessmentStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentApplicabilities.forEach(row => {
-      map.set(row.assessmentStructureId, (map.get(row.assessmentStructureId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentApplicabilities]);
-
-  const entryCountByAssessmentStructure = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentEntries.forEach(row => {
-      if (!row.assessmentStructureId) return;
-      map.set(row.assessmentStructureId, (map.get(row.assessmentStructureId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentEntries]);
-
-  const entryCountByAssessmentItem = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentEntries.forEach(row => {
-      map.set(row.assessmentStructureItemId, (map.get(row.assessmentStructureItemId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentEntries]);
-
-  const ruleCountByGradingSystem = useMemo(() => {
-    const map = new Map<number, number>();
-    gradeRules.forEach(row => {
-      map.set(row.gradingSystemId, (map.get(row.gradingSystemId) || 0) + 1);
-    });
-    return map;
-  }, [gradeRules]);
-
-  const applicabilityCountByGradingSystem = useMemo(() => {
-    const map = new Map<number, number>();
-    assessmentApplicabilities.forEach(row => {
-      if (!row.gradingSystemId) return;
-      map.set(row.gradingSystemId, (map.get(row.gradingSystemId) || 0) + 1);
-    });
-    return map;
-  }, [assessmentApplicabilities]);
-
-  const computedCountByGradingSystem = useMemo(() => {
-    const map = new Map<number, number>();
-    computedResults.forEach(row => {
-      if (!row.gradingSystemId) return;
-      map.set(row.gradingSystemId, (map.get(row.gradingSystemId) || 0) + 1);
-    });
-    return map;
-  }, [computedResults]);
-
-  // ======================================================
-  // VIEW MODELS
-  // ======================================================
-
-  const academicStructureViews = useMemo<AcademicStructureView[]>(() => {
-    return academicStructures.map(row => {
-      const id = row.id || 0;
-      return {
-        row,
-        periodCount: periodCountByStructure.get(id) || 0,
-        classSubjectCount: classSubjectCountByStructure.get(id) || 0,
-        assessmentStructureCount: assessmentStructureCountByAcademicStructure.get(id) || 0,
-        enrollmentCount: enrollmentCountByStructure.get(id) || 0,
-      };
-    });
-  }, [
-    academicStructures,
-    periodCountByStructure,
-    classSubjectCountByStructure,
-    assessmentStructureCountByAcademicStructure,
-    enrollmentCountByStructure,
-  ]);
-
-  const academicPeriodViews = useMemo<AcademicPeriodView[]>(() => {
-    return academicPeriods.map(row => {
-      const structure = academicStructureMap.get(row.academicStructureId);
-      const id = row.id || 0;
-      return {
-        row,
-        structureName: structure?.name || "Unknown academic structure",
-        enrollmentCount: 0,
-        classSubjectCount: classSubjectCountByPeriod.get(id) || 0,
-        entryCount: entryCountByPeriod.get(id) || 0,
-      };
-    });
-  }, [academicPeriods, academicStructureMap, classSubjectCountByPeriod, entryCountByPeriod]);
-
-  const assessmentStructureViews = useMemo<AssessmentStructureView[]>(() => {
-    return assessmentStructures.map(row => {
-      const structure = academicStructureMap.get(row.academicStructureId);
-      const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
-      const stats = itemStatsByAssessmentStructure.get(row.id || 0) || { count: 0, weight: 0 };
-      return {
-        row,
-        academicStructureName: structure?.name || "Unknown academic structure",
-        organizationName: organization?.name || "No organization",
-        itemCount: stats.count,
-        totalWeight: stats.weight,
-        applicabilityCount: applicabilityCountByAssessmentStructure.get(row.id || 0) || 0,
-        entryCount: entryCountByAssessmentStructure.get(row.id || 0) || 0,
-      };
-    });
-  }, [
-    assessmentStructures,
-    academicStructureMap,
-    organizationMap,
-    itemStatsByAssessmentStructure,
-    applicabilityCountByAssessmentStructure,
-    entryCountByAssessmentStructure,
-  ]);
-
-  const assessmentItemViews = useMemo<AssessmentItemView[]>(() => {
-    return assessmentItems.map(row => {
-      const structure = assessmentStructureMap.get(row.assessmentStructureId);
-      return {
-        row,
-        assessmentStructureName: structure?.name || "Unknown assessment structure",
-        entryCount: entryCountByAssessmentItem.get(row.id || 0) || 0,
-      };
-    });
-  }, [assessmentItems, assessmentStructureMap, entryCountByAssessmentItem]);
-
-  const gradingSystemViews = useMemo<GradingSystemView[]>(() => {
-    return gradingSystems.map(row => {
-      const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
-      const id = row.id || 0;
-      return {
-        row,
-        organizationName: organization?.name || "No organization",
-        ruleCount: ruleCountByGradingSystem.get(id) || 0,
-        applicabilityCount: applicabilityCountByGradingSystem.get(id) || 0,
-        computedResultCount: computedCountByGradingSystem.get(id) || 0,
-      };
-    });
-  }, [
-    gradingSystems,
-    organizationMap,
-    ruleCountByGradingSystem,
-    applicabilityCountByGradingSystem,
-    computedCountByGradingSystem,
-  ]);
-
-  const gradeRuleViews = useMemo<GradeRuleView[]>(() => {
-    return gradeRules.map(row => {
-      const system = gradingSystemMap.get(row.gradingSystemId);
-      return {
-        row,
-        gradingSystemName: system?.name || "Unknown grading system",
-      };
-    });
-  }, [gradeRules, gradingSystemMap]);
-
-  // ======================================================
-  // FILTERED VIEWS
-  // ======================================================
-
-  const query = search.trim().toLowerCase();
-
-  const filteredAcademicStructures = useMemo(() => {
-    return academicStructureViews
-      .filter(item => {
-        const row = item.row;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (!query) return true;
-        return `${row.name} ${row.level} ${row.startDate} ${row.endDate}`.toLowerCase().includes(query);
-      })
-      .sort((a, b) => a.row.name.localeCompare(b.row.name));
-  }, [academicStructureViews, filterStatus, query]);
-
-  const filteredAcademicPeriods = useMemo(() => {
-    return academicPeriodViews
-      .filter(item => {
-        const row = item.row;
-        if (filterStructureId && row.academicStructureId !== filterStructureId) return false;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (!query) return true;
-        return `${row.name} ${row.type || ""} ${item.structureName} ${row.startDate} ${row.endDate}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => Number(a.row.order || 0) - Number(b.row.order || 0));
-  }, [academicPeriodViews, filterStructureId, filterStatus, query]);
-
-  const filteredAssessmentStructures = useMemo(() => {
-    return assessmentStructureViews
-      .filter(item => {
-        const row = item.row;
-        if (filterStructureId && row.academicStructureId !== filterStructureId) return false;
-        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (filterStatus === "locked" && row.locked !== true) return false;
-        if (!query) return true;
-        return `${row.name} ${row.description || ""} ${item.academicStructureName} ${item.organizationName}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => a.row.name.localeCompare(b.row.name));
-  }, [assessmentStructureViews, filterStructureId, filterOrganizationId, filterStatus, query]);
-
-  const filteredAssessmentItems = useMemo(() => {
-    return assessmentItemViews
-      .filter(item => {
-        const row = item.row;
-        if (filterAssessmentStructureId && row.assessmentStructureId !== filterAssessmentStructureId) return false;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (!query) return true;
-        return `${row.name} ${item.assessmentStructureName} ${row.weight} ${row.maxScore}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => Number(a.row.order || 0) - Number(b.row.order || 0));
-  }, [assessmentItemViews, filterAssessmentStructureId, filterStatus, query]);
-
-  const filteredGradingSystems = useMemo(() => {
-    return gradingSystemViews
-      .filter(item => {
-        const row = item.row;
-        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (filterStatus === "locked" && row.locked !== true) return false;
-        if (!query) return true;
-        return `${row.name} ${row.type} ${row.description || ""} ${item.organizationName}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => a.row.name.localeCompare(b.row.name));
-  }, [gradingSystemViews, filterOrganizationId, filterStatus, query]);
-
-  const filteredGradeRules = useMemo(() => {
-    return gradeRuleViews
-      .filter(item => {
-        const row = item.row;
-        if (filterGradingSystemId && row.gradingSystemId !== filterGradingSystemId) return false;
-        if (filterStatus === "active" && row.active === false) return false;
-        if (filterStatus === "inactive" && row.active !== false) return false;
-        if (!query) return true;
-        return `${row.grade} ${row.remark || ""} ${row.minScore} ${row.maxScore} ${item.gradingSystemName}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => Number(a.row.order || 0) - Number(b.row.order || 0));
-  }, [gradeRuleViews, filterGradingSystemId, filterStatus, query]);
-
-  // ======================================================
-  // SUMMARY
-  // ======================================================
-
   const summary = useMemo(() => {
-    const completeAssessmentStructures = assessmentStructureViews.filter(row => row.totalWeight === 100).length;
-    const incompleteAssessmentStructures = assessmentStructureViews.filter(row => row.totalWeight !== 100).length;
-    const gradingReady = gradingSystemViews.filter(row => row.ruleCount > 0).length;
+    const itemStats = new Map<number, number>();
+    assessmentItems.forEach((row) => {
+      if (row.active === false) return;
+      itemStats.set(row.assessmentStructureId, (itemStats.get(row.assessmentStructureId) || 0) + Number(row.weight || 0));
+    });
+
+    const completeAssessmentStructures = assessmentStructures.filter((row) => itemStats.get(row.id || 0) === 100).length;
+    const incompleteAssessmentStructures = assessmentStructures.length - completeAssessmentStructures;
+    const gradingReady = gradingSystems.filter((row) => gradeRules.some((rule) => rule.gradingSystemId === row.id)).length;
 
     return {
       academicStructures: academicStructures.length,
@@ -763,24 +450,122 @@ export default function AcademicAndAssessmentConfiguration() {
       gradingReady,
       applicabilities: assessmentApplicabilities.length,
     };
-  }, [
-    academicStructures,
-    academicPeriods,
-    assessmentStructures,
-    assessmentItems,
-    gradingSystems,
-    gradeRules,
-    assessmentStructureViews,
-    gradingSystemViews,
-    assessmentApplicabilities,
-  ]);
+  }, [academicStructures, academicPeriods, assessmentStructures, assessmentItems, gradingSystems, gradeRules, assessmentApplicabilities]);
+
+  const query = search.trim().toLowerCase();
+
+  const periodCountByStructure = useMemo(() => countBy(academicPeriods, (row) => row.academicStructureId), [academicPeriods]);
+  const classSubjectCountByStructure = useMemo(() => countBy(classSubjects, (row) => row.academicStructureId), [classSubjects]);
+  const assessmentCountByStructure = useMemo(() => countBy(assessmentStructures, (row) => row.academicStructureId), [assessmentStructures]);
+  const classSubjectCountByPeriod = useMemo(() => countBy(classSubjects.filter((row) => !!row.academicPeriodId), (row) => row.academicPeriodId || 0), [classSubjects]);
+  const entryCountByPeriod = useMemo(() => countBy(assessmentEntries, (row) => row.academicPeriodId), [assessmentEntries]);
+  const itemCountByAssessment = useMemo(() => countBy(assessmentItems, (row) => row.assessmentStructureId), [assessmentItems]);
+  const entryCountByAssessment = useMemo(() => countBy(assessmentEntries.filter((row) => !!row.assessmentStructureId), (row) => row.assessmentStructureId || 0), [assessmentEntries]);
+  const applicabilityCountByAssessment = useMemo(() => countBy(assessmentApplicabilities, (row) => row.assessmentStructureId), [assessmentApplicabilities]);
+  const entryCountByItem = useMemo(() => countBy(assessmentEntries, (row) => row.assessmentStructureItemId), [assessmentEntries]);
+  const ruleCountByGrading = useMemo(() => countBy(gradeRules, (row) => row.gradingSystemId), [gradeRules]);
+  const applicabilityCountByGrading = useMemo(() => countBy(assessmentApplicabilities.filter((row) => !!row.gradingSystemId), (row) => row.gradingSystemId || 0), [assessmentApplicabilities]);
+  const computedCountByGrading = useMemo(() => countBy(computedResults.filter((row) => !!row.gradingSystemId), (row) => row.gradingSystemId || 0), [computedResults]);
+
+  const weightByAssessment = useMemo(() => {
+    const map = new Map<number, number>();
+    assessmentItems.forEach((row) => {
+      if (row.active === false) return;
+      map.set(row.assessmentStructureId, (map.get(row.assessmentStructureId) || 0) + Number(row.weight || 0));
+    });
+    return map;
+  }, [assessmentItems]);
+
+  // ======================================================
+  // FILTERED DATA
+  // ======================================================
+
+  const filteredAcademicStructures = useMemo(() => {
+    return academicStructures
+      .filter((row) => {
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (!query) return true;
+        return `${row.name} ${row.level} ${row.startDate} ${row.endDate}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [academicStructures, filterStatus, query]);
+
+  const filteredAcademicPeriods = useMemo(() => {
+    return academicPeriods
+      .filter((row) => {
+        const structure = academicStructureMap.get(row.academicStructureId);
+        if (filterStructureId && row.academicStructureId !== filterStructureId) return false;
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (!query) return true;
+        return `${row.name} ${row.type || ""} ${structure?.name || ""} ${row.startDate} ${row.endDate}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }, [academicPeriods, academicStructureMap, filterStructureId, filterStatus, query]);
+
+  const filteredAssessmentStructures = useMemo(() => {
+    return assessmentStructures
+      .filter((row) => {
+        const structure = academicStructureMap.get(row.academicStructureId);
+        const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
+        if (filterStructureId && row.academicStructureId !== filterStructureId) return false;
+        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (filterStatus === "locked" && row.locked !== true) return false;
+        if (!query) return true;
+        return `${row.name} ${row.description || ""} ${structure?.name || ""} ${organization?.name || ""}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [assessmentStructures, academicStructureMap, organizationMap, filterStructureId, filterOrganizationId, filterStatus, query]);
+
+  const filteredAssessmentItems = useMemo(() => {
+    return assessmentItems
+      .filter((row) => {
+        const structure = assessmentStructureMap.get(row.assessmentStructureId);
+        if (filterAssessmentStructureId && row.assessmentStructureId !== filterAssessmentStructureId) return false;
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (!query) return true;
+        return `${row.name} ${structure?.name || ""} ${row.weight} ${row.maxScore}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }, [assessmentItems, assessmentStructureMap, filterAssessmentStructureId, filterStatus, query]);
+
+  const filteredGradingSystems = useMemo(() => {
+    return gradingSystems
+      .filter((row) => {
+        const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
+        if (filterOrganizationId && row.organizationId !== filterOrganizationId) return false;
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (filterStatus === "locked" && row.locked !== true) return false;
+        if (!query) return true;
+        return `${row.name} ${row.type} ${row.description || ""} ${organization?.name || ""}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [gradingSystems, organizationMap, filterOrganizationId, filterStatus, query]);
+
+  const filteredGradeRules = useMemo(() => {
+    return gradeRules
+      .filter((row) => {
+        const system = gradingSystemMap.get(row.gradingSystemId);
+        if (filterGradingSystemId && row.gradingSystemId !== filterGradingSystemId) return false;
+        if (filterStatus === "active" && row.active === false) return false;
+        if (filterStatus === "inactive" && row.active !== false) return false;
+        if (!query) return true;
+        return `${row.grade} ${row.remark || ""} ${row.minScore} ${row.maxScore} ${system?.name || ""}`.toLowerCase().includes(query);
+      })
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+  }, [gradeRules, gradingSystemMap, filterGradingSystemId, filterStatus, query]);
 
   // ======================================================
   // FORM HELPERS
   // ======================================================
 
   const fileToBase64 = (file: File) => {
-    return new Promise<string>(resolve => {
+    return new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
       reader.readAsDataURL(file);
@@ -800,24 +585,12 @@ export default function AcademicAndAssessmentConfiguration() {
     if (!file) return;
     const value = await fileToBase64(file);
 
-    if (target === "academicStructurePhoto") {
-      setAcademicStructureForm(prev => ({ ...prev, photo: value }));
-    }
-    if (target === "academicStructureBanner") {
-      setAcademicStructureForm(prev => ({ ...prev, bannerImage: value }));
-    }
-    if (target === "academicPeriodPhoto") {
-      setAcademicPeriodForm(prev => ({ ...prev, photo: value }));
-    }
-    if (target === "assessmentStructurePhoto") {
-      setAssessmentStructureForm(prev => ({ ...prev, photo: value }));
-    }
-    if (target === "assessmentStructureBanner") {
-      setAssessmentStructureForm(prev => ({ ...prev, bannerImage: value }));
-    }
-    if (target === "gradingSystemPhoto") {
-      setGradingSystemForm(prev => ({ ...prev, photo: value }));
-    }
+    if (target === "academicStructurePhoto") setAcademicStructureForm((prev) => ({ ...prev, photo: value }));
+    if (target === "academicStructureBanner") setAcademicStructureForm((prev) => ({ ...prev, bannerImage: value }));
+    if (target === "academicPeriodPhoto") setAcademicPeriodForm((prev) => ({ ...prev, photo: value }));
+    if (target === "assessmentStructurePhoto") setAssessmentStructureForm((prev) => ({ ...prev, photo: value }));
+    if (target === "assessmentStructureBanner") setAssessmentStructureForm((prev) => ({ ...prev, bannerImage: value }));
+    if (target === "gradingSystemPhoto") setGradingSystemForm((prev) => ({ ...prev, photo: value }));
   };
 
   const closeDrawer = () => {
@@ -826,7 +599,7 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const openCreate = (mode: DrawerMode) => {
-    if (!activeBranchId) {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
       alert("Select a branch first.");
       return;
     }
@@ -834,88 +607,59 @@ export default function AcademicAndAssessmentConfiguration() {
     setEditMode(false);
     setDrawerMode(mode);
 
-    if (mode === "academicStructure") {
-      setAcademicStructureForm({
-        name: "",
-        level: "primary",
-        startDate: todayISO(),
-        endDate: endOfYearISO(),
-        photo: "",
-        bannerImage: "",
-        active: true,
-      });
-    }
+    if (mode === "academicStructure") setAcademicStructureForm(emptyAcademicStructure());
 
     if (mode === "academicPeriod") {
-      const selectedStructure = filterStructureId || settings?.currentAcademicStructureId;
+      const selectedStructure = filterStructureId || settings?.currentAcademicStructureId || academicStructures[0]?.id;
       const structure = selectedStructure ? academicStructureMap.get(selectedStructure) : undefined;
       setAcademicPeriodForm({
+        ...emptyAcademicPeriod(),
         academicStructureId: selectedStructure,
-        name: "",
-        type: "Term 1",
         startDate: structure?.startDate || todayISO(),
         endDate: structure?.endDate || endOfYearISO(),
-        photo: "",
-        order: academicPeriods.filter(row => row.academicStructureId === selectedStructure).length + 1,
-        active: true,
+        order: academicPeriods.filter((row) => row.academicStructureId === selectedStructure).length + 1,
       });
     }
 
     if (mode === "assessmentStructure") {
       setAssessmentStructureForm({
+        ...emptyAssessmentStructure(),
         organizationId: filterOrganizationId,
-        academicStructureId: filterStructureId || settings?.currentAcademicStructureId,
-        name: "",
-        description: "",
-        photo: "",
-        bannerImage: "",
-        totalScore: 100,
-        active: true,
-        locked: false,
+        academicStructureId: filterStructureId || settings?.currentAcademicStructureId || academicStructures[0]?.id,
       });
     }
 
     if (mode === "assessmentItem") {
+      const selectedAssessment = filterAssessmentStructureId || assessmentStructures[0]?.id;
       setAssessmentItemForm({
-        assessmentStructureId: filterAssessmentStructureId,
-        name: "",
-        weight: 0,
-        maxScore: 100,
-        order: assessmentItems.filter(row => row.assessmentStructureId === filterAssessmentStructureId).length + 1,
-        compulsory: true,
-        active: true,
+        ...emptyAssessmentItem(),
+        assessmentStructureId: selectedAssessment,
+        order: assessmentItems.filter((row) => row.assessmentStructureId === selectedAssessment).length + 1,
       });
     }
 
     if (mode === "gradingSystem") {
       setGradingSystemForm({
+        ...emptyGradingSystem(),
         organizationId: filterOrganizationId,
-        name: "",
-        type: "percentage",
-        description: "",
-        photo: "",
-        active: true,
-        default: false,
-        locked: false,
       });
     }
 
     if (mode === "gradeRule") {
+      const selectedSystem = filterGradingSystemId || gradingSystems[0]?.id;
       setGradeRuleForm({
-        gradingSystemId: filterGradingSystemId,
-        minScore: 0,
-        maxScore: 100,
-        grade: "",
-        remark: "",
-        gpa: undefined,
-        color: "",
-        order: gradeRules.filter(row => row.gradingSystemId === filterGradingSystemId).length + 1,
-        active: true,
+        ...emptyGradeRule(),
+        gradingSystemId: selectedSystem,
+        order: gradeRules.filter((row) => row.gradingSystemId === selectedSystem).length + 1,
       });
     }
 
     setDrawerOpen(true);
   };
+
+  // ======================================================
+  // EDIT OPENERS
+  // ======================================================
 
   const openEditAcademicStructure = (row: AcademicStructure) => {
     setEditMode(true);
@@ -1030,7 +774,7 @@ export default function AcademicAndAssessmentConfiguration() {
     if (!form.endDate) return "Select end date";
     if (form.endDate < form.startDate) return "End date cannot be before start date";
 
-    const duplicate = academicStructures.find(row => {
+    const duplicate = academicStructures.find((row) => {
       if (editMode && row.id === form.id) return false;
       return row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
@@ -1047,12 +791,9 @@ export default function AcademicAndAssessmentConfiguration() {
     if (!form.endDate) return "Select end date";
     if (form.endDate < form.startDate) return "End date cannot be before start date";
 
-    const duplicate = academicPeriods.find(row => {
+    const duplicate = academicPeriods.find((row) => {
       if (editMode && row.id === form.id) return false;
-      return (
-        row.academicStructureId === Number(form.academicStructureId) &&
-        row.name.trim().toLowerCase() === form.name.trim().toLowerCase()
-      );
+      return row.academicStructureId === Number(form.academicStructureId) && row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
 
     if (duplicate) return "Academic period with this name already exists under this structure";
@@ -1064,12 +805,9 @@ export default function AcademicAndAssessmentConfiguration() {
     if (!form.academicStructureId) return "Select academic structure";
     if (!form.name.trim()) return "Enter assessment structure name";
 
-    const duplicate = assessmentStructures.find(row => {
+    const duplicate = assessmentStructures.find((row) => {
       if (editMode && row.id === form.id) return false;
-      return (
-        row.academicStructureId === Number(form.academicStructureId) &&
-        row.name.trim().toLowerCase() === form.name.trim().toLowerCase()
-      );
+      return row.academicStructureId === Number(form.academicStructureId) && row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
 
     if (duplicate) return "Assessment structure with this name already exists under this academic structure";
@@ -1083,12 +821,9 @@ export default function AcademicAndAssessmentConfiguration() {
     if (Number(form.weight) <= 0) return "Weight must be greater than zero";
     if (Number(form.maxScore) <= 0) return "Max score must be greater than zero";
 
-    const duplicate = assessmentItems.find(row => {
+    const duplicate = assessmentItems.find((row) => {
       if (editMode && row.id === form.id) return false;
-      return (
-        row.assessmentStructureId === Number(form.assessmentStructureId) &&
-        row.name.trim().toLowerCase() === form.name.trim().toLowerCase()
-      );
+      return row.assessmentStructureId === Number(form.assessmentStructureId) && row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
 
     if (duplicate) return "Assessment item with this name already exists in this structure";
@@ -1099,7 +834,7 @@ export default function AcademicAndAssessmentConfiguration() {
     const form = gradingSystemForm;
     if (!form.name.trim()) return "Enter grading system name";
 
-    const duplicate = gradingSystems.find(row => {
+    const duplicate = gradingSystems.find((row) => {
       if (editMode && row.id === form.id) return false;
       return row.name.trim().toLowerCase() === form.name.trim().toLowerCase();
     });
@@ -1114,7 +849,7 @@ export default function AcademicAndAssessmentConfiguration() {
     if (!form.grade.trim()) return "Enter grade";
     if (Number(form.maxScore) < Number(form.minScore)) return "Max score cannot be lower than min score";
 
-    const duplicate = gradeRules.find(row => {
+    const duplicate = gradeRules.find((row) => {
       if (editMode && row.id === form.id) return false;
       return (
         row.gradingSystemId === Number(form.gradingSystemId) &&
@@ -1132,13 +867,24 @@ export default function AcademicAndAssessmentConfiguration() {
   // SAVE HANDLERS
   // ======================================================
 
+  const requireTenant = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return false;
+    }
+    return true;
+  };
+
   const saveAcademicStructure = async () => {
+    if (!requireTenant()) return;
     const error = validateAcademicStructure();
     if (error) return alert(error);
 
     try {
       setSaving(true);
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         name: academicStructureForm.name.trim(),
         level: academicStructureForm.level,
@@ -1151,17 +897,8 @@ export default function AcademicAndAssessmentConfiguration() {
 
       if (editMode && academicStructureForm.id) {
         await db.academicStructures.update(academicStructureForm.id, {
-          name: payload.name,
-          level: payload.level,
-          startDate: payload.startDate,
-          endDate: payload.endDate,
-          photo: payload.photo,
-          bannerImage: payload.bannerImage,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: academicStructureForm.id,
           isDeleted: false,
         });
       } else {
@@ -1179,12 +916,15 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const saveAcademicPeriod = async () => {
+    if (!requireTenant()) return;
     const error = validateAcademicPeriod();
     if (error) return alert(error);
 
     try {
       setSaving(true);
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         academicStructureId: Number(academicPeriodForm.academicStructureId),
         name: academicPeriodForm.name.trim(),
@@ -1198,18 +938,8 @@ export default function AcademicAndAssessmentConfiguration() {
 
       if (editMode && academicPeriodForm.id) {
         await db.academicPeriods.update(academicPeriodForm.id, {
-          academicStructureId: payload.academicStructureId,
-          name: payload.name,
-          type: payload.type,
-          startDate: payload.startDate,
-          endDate: payload.endDate,
-          photo: payload.photo,
-          order: payload.order,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: academicPeriodForm.id,
           isDeleted: false,
         });
       } else {
@@ -1227,44 +957,31 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const saveAssessmentStructure = async () => {
+    if (!requireTenant()) return;
     const error = validateAssessmentStructure();
     if (error) return alert(error);
 
     try {
       setSaving(true);
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
-        organizationId: assessmentStructureForm.organizationId
-          ? Number(assessmentStructureForm.organizationId)
-          : undefined,
+        organizationId: assessmentStructureForm.organizationId ? Number(assessmentStructureForm.organizationId) : undefined,
         academicStructureId: Number(assessmentStructureForm.academicStructureId),
         name: assessmentStructureForm.name.trim(),
         description: assessmentStructureForm.description?.trim() || undefined,
         photo: assessmentStructureForm.photo || undefined,
         bannerImage: assessmentStructureForm.bannerImage || undefined,
-        totalScore:
-          assessmentStructureForm.totalScore == null
-            ? undefined
-            : Number(assessmentStructureForm.totalScore),
+        totalScore: assessmentStructureForm.totalScore == null ? undefined : Number(assessmentStructureForm.totalScore),
         active: assessmentStructureForm.active !== false,
         locked: !!assessmentStructureForm.locked,
       }) as AssessmentStructure;
 
       if (editMode && assessmentStructureForm.id) {
         await db.assessmentStructures.update(assessmentStructureForm.id, {
-          organizationId: payload.organizationId,
-          academicStructureId: payload.academicStructureId,
-          name: payload.name,
-          description: payload.description,
-          photo: payload.photo,
-          bannerImage: payload.bannerImage,
-          totalScore: payload.totalScore,
-          active: payload.active,
-          locked: payload.locked,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: assessmentStructureForm.id,
           isDeleted: false,
         });
       } else {
@@ -1282,12 +999,15 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const saveAssessmentItem = async () => {
+    if (!requireTenant()) return;
     const error = validateAssessmentItem();
     if (error) return alert(error);
 
     try {
       setSaving(true);
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         assessmentStructureId: Number(assessmentItemForm.assessmentStructureId),
         name: assessmentItemForm.name.trim(),
@@ -1300,17 +1020,8 @@ export default function AcademicAndAssessmentConfiguration() {
 
       if (editMode && assessmentItemForm.id) {
         await db.assessmentStructureItems.update(assessmentItemForm.id, {
-          assessmentStructureId: payload.assessmentStructureId,
-          name: payload.name,
-          weight: payload.weight,
-          maxScore: payload.maxScore,
-          order: payload.order,
-          compulsory: payload.compulsory,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: assessmentItemForm.id,
           isDeleted: false,
         });
       } else {
@@ -1328,6 +1039,7 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const saveGradingSystem = async () => {
+    if (!requireTenant()) return;
     const error = validateGradingSystem();
     if (error) return alert(error);
 
@@ -1337,16 +1049,16 @@ export default function AcademicAndAssessmentConfiguration() {
       if (gradingSystemForm.default) {
         await Promise.all(
           gradingSystems
-            .filter(row => row.id && row.id !== gradingSystemForm.id)
-            .map(row => db.gradingSystems.update(row.id!, { default: false, updatedAt: Date.now() }))
+            .filter((row) => row.id && row.id !== gradingSystemForm.id)
+            .map((row) => db.gradingSystems.update(row.id!, { default: false, updatedAt: Date.now() }))
         );
       }
 
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
-        organizationId: gradingSystemForm.organizationId
-          ? Number(gradingSystemForm.organizationId)
-          : undefined,
+        organizationId: gradingSystemForm.organizationId ? Number(gradingSystemForm.organizationId) : undefined,
         name: gradingSystemForm.name.trim(),
         type: gradingSystemForm.type,
         description: gradingSystemForm.description?.trim() || undefined,
@@ -1358,18 +1070,8 @@ export default function AcademicAndAssessmentConfiguration() {
 
       if (editMode && gradingSystemForm.id) {
         await db.gradingSystems.update(gradingSystemForm.id, {
-          organizationId: payload.organizationId,
-          name: payload.name,
-          type: payload.type,
-          description: payload.description,
-          photo: payload.photo,
-          active: payload.active,
-          default: payload.default,
-          locked: payload.locked,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: gradingSystemForm.id,
           isDeleted: false,
         });
       } else {
@@ -1387,12 +1089,15 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   const saveGradeRule = async () => {
+    if (!requireTenant()) return;
     const error = validateGradeRule();
     if (error) return alert(error);
 
     try {
       setSaving(true);
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         gradingSystemId: Number(gradeRuleForm.gradingSystemId),
         minScore: Number(gradeRuleForm.minScore),
@@ -1407,19 +1112,8 @@ export default function AcademicAndAssessmentConfiguration() {
 
       if (editMode && gradeRuleForm.id) {
         await db.gradeRules.update(gradeRuleForm.id, {
-          gradingSystemId: payload.gradingSystemId,
-          minScore: payload.minScore,
-          maxScore: payload.maxScore,
-          grade: payload.grade,
-          remark: payload.remark,
-          gpa: payload.gpa,
-          color: payload.color,
-          order: payload.order,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
+          ...payload,
+          id: gradeRuleForm.id,
           isDeleted: false,
         });
       } else {
@@ -1446,7 +1140,7 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   // ======================================================
-  // DELETE / TOGGLE HELPERS
+  // DELETE / TOGGLE / SETTINGS
   // ======================================================
 
   const softDelete = async (table: keyof typeof db, id?: number, message = "Delete this record?") => {
@@ -1467,17 +1161,32 @@ export default function AcademicAndAssessmentConfiguration() {
     await load();
   };
 
+  const getBranchSetting = async () => {
+    if (!accountId || !schoolId || !branchId) return undefined;
+    const rows = await db.schoolBranchSettings.toArray();
+    return rows.find((row) => sameTenant(row));
+  };
+
   const setAsCurrentStructure = async (id?: number) => {
     if (!id) return;
-    const setting = (await db.schoolBranchSettings.toArray())[0];
-    if (!setting?.id) return;
-    await db.schoolBranchSettings.update(setting.id, { currentAcademicStructureId: id, updatedAt: Date.now() });
+    const setting = await getBranchSetting();
+    if (!setting?.id) {
+      alert("Create branch settings first before setting current academic structure.");
+      return;
+    }
+    await db.schoolBranchSettings.update(setting.id, {
+      currentAcademicStructureId: id,
+      updatedAt: Date.now(),
+    });
     await load();
   };
 
   const setAsCurrentPeriod = async (period: AcademicPeriod) => {
-    const setting = (await db.schoolBranchSettings.toArray())[0];
-    if (!setting?.id) return;
+    const setting = await getBranchSetting();
+    if (!setting?.id) {
+      alert("Create branch settings first before setting current academic period.");
+      return;
+    }
     await db.schoolBranchSettings.update(setting.id, {
       currentAcademicStructureId: period.academicStructureId,
       currentAcademicPeriodId: period.id,
@@ -1487,115 +1196,62 @@ export default function AcademicAndAssessmentConfiguration() {
   };
 
   // ======================================================
-  // STYLES
+  // UI HELPERS
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
+  const drawerTitle = {
+    academicStructure: editMode ? "Edit Academic Structure" : "Create Academic Structure",
+    academicPeriod: editMode ? "Edit Academic Period" : "Create Academic Period",
+    assessmentStructure: editMode ? "Edit Assessment Structure" : "Create Assessment Structure",
+    assessmentItem: editMode ? "Edit Assessment Item" : "Create Assessment Item",
+    gradingSystem: editMode ? "Edit Grading System" : "Create Grading System",
+    gradeRule: editMode ? "Edit Grade Rule" : "Create Grade Rule",
+  }[drawerMode];
 
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const tabButton = (active: boolean): React.CSSProperties => ({
-    padding: "12px 16px",
-    borderRadius: 16,
-    border: active ? `2px solid ${primary}` : "1px solid rgba(0,0,0,0.10)",
-    background: active ? "rgba(59,130,246,0.08)" : "var(--surface)",
-    color: "var(--text)",
-    cursor: "pointer",
-    fontWeight: 900,
-  });
-
-  const gridList: React.CSSProperties = {
-    marginTop: 18,
-    display: "grid",
-    gap: 12,
-  };
+  const currentStructureId = settings?.currentAcademicStructureId;
+  const currentPeriodId = settings?.currentAcademicPeriodId;
 
   // ======================================================
-  // LOADING / NO BRANCH
+  // LOADING / PROTECTED STATES
   // ======================================================
 
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading academic and assessment configuration...</div>;
+  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+    return (
+      <main className="aac-page" style={{ "--aac-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aac-state-card">
+          <div className="aac-spinner" />
+          <h2>Opening configuration...</h2>
+          <p>Checking account, school, branch, and academic configuration data.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Academic and assessment configuration belongs to a branch. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="aac-page" style={{ "--aac-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aac-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing academic configuration.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="aac-page" style={{ "--aac-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aac-state-card">
+          <h2>Select a branch first</h2>
+          <p>Academic and assessment configuration belongs to one active school branch.</p>
+          <button type="button" className="aac-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -1604,101 +1260,61 @@ export default function AcademicAndAssessmentConfiguration() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>
-            Academic & Assessment Configuration
-          </h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Configuring academic and assessment frameworks in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="aac-page" style={{ "--aac-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="aac-hero">
+        <div className="aac-hero-left">
+          <div className="aac-hero-icon">🎯</div>
+          <div className="aac-title-wrap">
+            <p>Branch Configuration</p>
+            <h2>Academic & Assessment</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button type="button" onClick={load} style={ghostButton}>
+        <button type="button" className="aac-ghost-btn" onClick={load}>
           Refresh
         </button>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Academic Structures</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.academicStructures}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Periods</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.academicPeriods}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Assessment Structures</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.assessmentStructures}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Complete Weights</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.completeAssessmentStructures}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Grading Ready</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.gradingReady}</div>
-        </div>
-      </div>
+      <section className="aac-summary-grid" aria-label="Configuration summary">
+        <SummaryCard label="Academic Structures" value={summary.academicStructures} icon="📘" />
+        <SummaryCard label="Periods" value={summary.academicPeriods} icon="📅" />
+        <SummaryCard label="Assessment Structures" value={summary.assessmentStructures} icon="🧩" />
+        <SummaryCard label="Complete Weights" value={summary.completeAssessmentStructures} icon="✅" />
+        <SummaryCard label="Grading Ready" value={summary.gradingReady} icon="🏅" />
+      </section>
 
-      {/* TABS */}
-      <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button type="button" onClick={() => setTab("academic")} style={tabButton(tab === "academic")}>
+      <section className="aac-tabs" aria-label="Configuration sections">
+        <button type="button" className={tab === "academic" ? "active" : ""} onClick={() => setTab("academic")}>
           Academic Calendar
         </button>
-        <button type="button" onClick={() => setTab("assessment")} style={tabButton(tab === "assessment")}>
-          Assessment Structures
+        <button type="button" className={tab === "assessment" ? "active" : ""} onClick={() => setTab("assessment")}>
+          Assessment
         </button>
-        <button type="button" onClick={() => setTab("grading")} style={tabButton(tab === "grading")}>
-          Grading Systems
+        <button type="button" className={tab === "grading" ? "active" : ""} onClick={() => setTab("grading")}>
+          Grading
         </button>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="aac-filter-card">
         <input
           placeholder="Search configuration..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
         {(tab === "academic" || tab === "assessment") && (
           <select
             value={filterStructureId || ""}
-            onChange={e => setFilterStructureId(Number(e.target.value) || undefined)}
-            style={input}
+            onChange={(event) => setFilterStructureId(Number(event.target.value) || undefined)}
           >
             <option value="">All Academic Structures</option>
-            {academicStructures.map(row => (
+            {academicStructures.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.name} • {row.level}
               </option>
@@ -1709,11 +1325,10 @@ export default function AcademicAndAssessmentConfiguration() {
         {(tab === "assessment" || tab === "grading") && (
           <select
             value={filterOrganizationId || ""}
-            onChange={e => setFilterOrganizationId(Number(e.target.value) || undefined)}
-            style={input}
+            onChange={(event) => setFilterOrganizationId(Number(event.target.value) || undefined)}
           >
             <option value="">All Organizations</option>
-            {organizations.map(row => (
+            {organizations.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.name} • {row.type}
               </option>
@@ -1724,11 +1339,10 @@ export default function AcademicAndAssessmentConfiguration() {
         {tab === "assessment" && (
           <select
             value={filterAssessmentStructureId || ""}
-            onChange={e => setFilterAssessmentStructureId(Number(e.target.value) || undefined)}
-            style={input}
+            onChange={(event) => setFilterAssessmentStructureId(Number(event.target.value) || undefined)}
           >
             <option value="">All Assessment Structures</option>
-            {assessmentStructures.map(row => (
+            {assessmentStructures.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.name}
               </option>
@@ -1739,11 +1353,10 @@ export default function AcademicAndAssessmentConfiguration() {
         {tab === "grading" && (
           <select
             value={filterGradingSystemId || ""}
-            onChange={e => setFilterGradingSystemId(Number(e.target.value) || undefined)}
-            style={input}
+            onChange={(event) => setFilterGradingSystemId(Number(event.target.value) || undefined)}
           >
             <option value="">All Grading Systems</option>
-            {gradingSystems.map(row => (
+            {gradingSystems.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.name}
               </option>
@@ -1751,774 +1364,1290 @@ export default function AcademicAndAssessmentConfiguration() {
           </select>
         )}
 
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as any)}
-          style={input}
-        >
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as any)}>
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="locked">Locked</option>
         </select>
-      </div>
+      </section>
 
-      {/* ACADEMIC TAB */}
       {tab === "academic" && (
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Academic Structures</h3>
-              <button style={button} onClick={() => openCreate("academicStructure")}>+ Structure</button>
-            </div>
+        <section className="aac-two-col">
+          <EntitySection
+            title="Academic Structures"
+            subtitle="Define the academic year, semester system, or level calendar."
+            actionLabel="+ Structure"
+            onAction={() => openCreate("academicStructure")}
+            emptyText="No academic structures found."
+          >
+            {filteredAcademicStructures.map((row) => {
+              const current = currentStructureId === row.id;
+              const id = row.id || 0;
+              return (
+                <article key={row.id} className="aac-entity-card with-banner">
+                  {row.bannerImage && (
+                    <div
+                      className="aac-card-banner"
+                      style={{ backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.48), rgba(15,23,42,.08)), url(${row.bannerImage})` }}
+                    />
+                  )}
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.name}</h3>
+                        <p>{row.startDate} → {row.endDate}</p>
+                      </div>
+                      <div className="aac-card-avatar">📘</div>
+                    </div>
 
-            <div style={gridList}>
-              {filteredAcademicStructures.map(item => {
-                const row = item.row;
-                const current = settings?.currentAcademicStructureId === row.id;
-                return (
-                  <div key={row.id} style={{ ...card, padding: 0, overflow: "hidden" }}>
-                    {row.bannerImage && (
-                      <div
-                        style={{
-                          height: 80,
-                          backgroundImage: `linear-gradient(135deg, rgba(15,23,42,0.45), rgba(15,23,42,0.08)), url(${row.bannerImage})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
-                        }}
-                      />
-                    )}
-                    <div style={{ padding: 16 }}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <strong style={{ fontSize: 17 }}>{row.name}</strong>
-                        <span style={badge("blue")}>{row.level}</span>
-                        <span style={badge(row.active === false ? "red" : "green")}>
-                          {row.active === false ? "Inactive" : "Active"}
-                        </span>
-                        {current && <span style={badge("purple")}>Current</span>}
-                      </div>
-                      <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                        {row.startDate} → {row.endDate}
-                      </div>
-                      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <span style={badge("gray")}>{item.periodCount} period(s)</span>
-                        <span style={badge("gray")}>{item.classSubjectCount} class subject(s)</span>
-                        <span style={badge("gray")}>{item.assessmentStructureCount} assessment structure(s)</span>
-                      </div>
-                      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {!current && <button style={ghostButton} onClick={() => setAsCurrentStructure(row.id)}>Set Current</button>}
-                        <button style={ghostButton} onClick={() => toggleField("academicStructures", row.id, "active", row.active !== false)}>
-                          {row.active === false ? "Activate" : "Deactivate"}
-                        </button>
-                        <button style={ghostButton} onClick={() => openEditAcademicStructure(row)}>Edit</button>
-                        <button
-                          style={{ ...ghostButton, color: "#dc2626" }}
-                          onClick={() => softDelete("academicStructures", row.id, "Delete this academic structure?")}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                    <div className="aac-chip-row">
+                      <Chip tone="blue">{row.level}</Chip>
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      {current && <Chip tone="purple">Current</Chip>}
                     </div>
-                  </div>
-                );
-              })}
-              {!filteredAcademicStructures.length && <div style={{ ...card, textAlign: "center" }}>No academic structures found.</div>}
-            </div>
-          </section>
 
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Academic Periods</h3>
-              <button style={button} onClick={() => openCreate("academicPeriod")}>+ Period</button>
-            </div>
+                    <div className="aac-stat-row">
+                      <MiniStat label="Periods" value={periodCountByStructure.get(id) || 0} />
+                      <MiniStat label="Class Subjects" value={classSubjectCountByStructure.get(id) || 0} />
+                      <MiniStat label="Assessments" value={assessmentCountByStructure.get(id) || 0} />
+                    </div>
 
-            <div style={gridList}>
-              {filteredAcademicPeriods.map(item => {
-                const row = item.row;
-                const current = settings?.currentAcademicPeriodId === row.id;
-                return (
-                  <div key={row.id} style={card}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong style={{ fontSize: 17 }}>{row.name}</strong>
-                      {row.type && <span style={badge("blue")}>{row.type}</span>}
-                      <span style={badge(row.active === false ? "red" : "green")}>
-                        {row.active === false ? "Inactive" : "Active"}
-                      </span>
-                      {current && <span style={badge("purple")}>Current</span>}
-                    </div>
-                    <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                      {item.structureName} • {row.startDate} → {row.endDate}
-                    </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("gray")}>Order: {row.order}</span>
-                      <span style={badge("gray")}>{item.classSubjectCount} class subject(s)</span>
-                      <span style={badge("gray")}>{item.entryCount} entry record(s)</span>
-                    </div>
-                    <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      {!current && <button style={ghostButton} onClick={() => setAsCurrentPeriod(row)}>Set Current</button>}
-                      <button style={ghostButton} onClick={() => toggleField("academicPeriods", row.id, "active", row.active !== false)}>
+                    <div className="aac-action-row">
+                      {!current && <button type="button" onClick={() => setAsCurrentStructure(row.id)}>Set Current</button>}
+                      <button type="button" onClick={() => toggleField("academicStructures", row.id, "active", row.active !== false)}>
                         {row.active === false ? "Activate" : "Deactivate"}
                       </button>
-                      <button style={ghostButton} onClick={() => openEditAcademicPeriod(row)}>Edit</button>
-                      <button
-                        style={{ ...ghostButton, color: "#dc2626" }}
-                        onClick={() => softDelete("academicPeriods", row.id, "Delete this academic period?")}
-                      >
+                      <button type="button" onClick={() => openEditAcademicStructure(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("academicStructures", row.id, "Delete this academic structure?")}>
                         Delete
                       </button>
                     </div>
                   </div>
-                );
-              })}
-              {!filteredAcademicPeriods.length && <div style={{ ...card, textAlign: "center" }}>No academic periods found.</div>}
-            </div>
-          </section>
-        </div>
+                </article>
+              );
+            })}
+          </EntitySection>
+
+          <EntitySection
+            title="Academic Periods"
+            subtitle="Create terms or semesters inside an academic structure."
+            actionLabel="+ Period"
+            onAction={() => openCreate("academicPeriod")}
+            emptyText="No academic periods found."
+          >
+            {filteredAcademicPeriods.map((row) => {
+              const current = currentPeriodId === row.id;
+              const id = row.id || 0;
+              const structure = academicStructureMap.get(row.academicStructureId);
+              return (
+                <article key={row.id} className="aac-entity-card">
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.name}</h3>
+                        <p>{structure?.name || "Unknown academic structure"} · {row.startDate} → {row.endDate}</p>
+                      </div>
+                      <div className="aac-card-avatar">📅</div>
+                    </div>
+
+                    <div className="aac-chip-row">
+                      {row.type && <Chip tone="blue">{row.type}</Chip>}
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      {current && <Chip tone="purple">Current</Chip>}
+                      <Chip tone="gray">Order {row.order}</Chip>
+                    </div>
+
+                    <div className="aac-stat-row">
+                      <MiniStat label="Class Subjects" value={classSubjectCountByPeriod.get(id) || 0} />
+                      <MiniStat label="Entry Records" value={entryCountByPeriod.get(id) || 0} />
+                    </div>
+
+                    <div className="aac-action-row">
+                      {!current && <button type="button" onClick={() => setAsCurrentPeriod(row)}>Set Current</button>}
+                      <button type="button" onClick={() => toggleField("academicPeriods", row.id, "active", row.active !== false)}>
+                        {row.active === false ? "Activate" : "Deactivate"}
+                      </button>
+                      <button type="button" onClick={() => openEditAcademicPeriod(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("academicPeriods", row.id, "Delete this academic period?")}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </EntitySection>
+        </section>
       )}
 
-      {/* ASSESSMENT TAB */}
       {tab === "assessment" && (
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Assessment Structures</h3>
-              <button style={button} onClick={() => openCreate("assessmentStructure")}>+ Structure</button>
-            </div>
-
-            <div style={gridList}>
-              {filteredAssessmentStructures.map(item => {
-                const row = item.row;
-                return (
-                  <div key={row.id} style={{ ...card, padding: 0, overflow: "hidden" }}>
-                    {row.bannerImage && (
-                      <div
-                        style={{
-                          height: 80,
-                          backgroundImage: `linear-gradient(135deg, rgba(15,23,42,0.45), rgba(15,23,42,0.08)), url(${row.bannerImage})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
-                        }}
-                      />
-                    )}
-                    <div style={{ padding: 16 }}>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <strong style={{ fontSize: 17 }}>{row.name}</strong>
-                        <span style={badge(row.active === false ? "red" : "green")}>
-                          {row.active === false ? "Inactive" : "Active"}
-                        </span>
-                        {row.locked && <span style={badge("orange")}>Locked</span>}
-                        <span style={badge(item.totalWeight === 100 ? "green" : "orange")}>Weight: {item.totalWeight}%</span>
+        <section className="aac-two-col">
+          <EntitySection
+            title="Assessment Structures"
+            subtitle="Define reusable scoring frameworks like class score + exam."
+            actionLabel="+ Structure"
+            onAction={() => openCreate("assessmentStructure")}
+            emptyText="No assessment structures found."
+          >
+            {filteredAssessmentStructures.map((row) => {
+              const id = row.id || 0;
+              const totalWeight = weightByAssessment.get(id) || 0;
+              const structure = academicStructureMap.get(row.academicStructureId);
+              const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
+              return (
+                <article key={row.id} className="aac-entity-card with-banner">
+                  {row.bannerImage && (
+                    <div
+                      className="aac-card-banner"
+                      style={{ backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.48), rgba(15,23,42,.08)), url(${row.bannerImage})` }}
+                    />
+                  )}
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.name}</h3>
+                        <p>{structure?.name || "Unknown academic structure"} · {organization?.name || "No organization"}</p>
                       </div>
-                      <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                        {item.academicStructureName} • {item.organizationName}
-                      </div>
-                      {row.description && <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>{row.description}</div>}
-                      <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <span style={badge("gray")}>{item.itemCount} item(s)</span>
-                        <span style={badge("gray")}>{item.applicabilityCount} applicability link(s)</span>
-                        <span style={badge("gray")}>{item.entryCount} entry record(s)</span>
-                        <span style={badge("blue")}>Total score: {row.totalScore ?? 100}</span>
-                      </div>
-                      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={ghostButton} onClick={() => toggleField("assessmentStructures", row.id, "locked", !!row.locked)}>
-                          {row.locked ? "Unlock" : "Lock"}
-                        </button>
-                        <button style={ghostButton} onClick={() => toggleField("assessmentStructures", row.id, "active", row.active !== false)}>
-                          {row.active === false ? "Activate" : "Deactivate"}
-                        </button>
-                        <button style={ghostButton} onClick={() => openEditAssessmentStructure(row)}>Edit</button>
-                        <button
-                          style={{ ...ghostButton, color: "#dc2626" }}
-                          onClick={() => softDelete("assessmentStructures", row.id, "Delete this assessment structure?")}
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      <div className="aac-card-avatar">🧩</div>
                     </div>
-                  </div>
-                );
-              })}
-              {!filteredAssessmentStructures.length && <div style={{ ...card, textAlign: "center" }}>No assessment structures found.</div>}
-            </div>
-          </section>
 
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Structure Items</h3>
-              <button style={button} onClick={() => openCreate("assessmentItem")}>+ Item</button>
-            </div>
+                    {row.description && <p className="aac-description">{row.description}</p>}
 
-            <div style={gridList}>
-              {filteredAssessmentItems.map(item => {
-                const row = item.row;
-                return (
-                  <div key={row.id} style={card}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong style={{ fontSize: 17 }}>{row.name}</strong>
-                      <span style={badge(row.active === false ? "red" : "green")}>
-                        {row.active === false ? "Inactive" : "Active"}
-                      </span>
-                      {row.compulsory !== false && <span style={badge("purple")}>Compulsory</span>}
+                    <div className="aac-chip-row">
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      {row.locked && <Chip tone="orange">Locked</Chip>}
+                      <Chip tone={totalWeight === 100 ? "green" : "orange"}>Weight {totalWeight}%</Chip>
+                      <Chip tone="blue">Total {row.totalScore ?? 100}</Chip>
                     </div>
-                    <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                      {item.assessmentStructureName}
-                    </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>Weight: {row.weight}%</span>
-                      <span style={badge("blue")}>Max: {row.maxScore}</span>
-                      <span style={badge("gray")}>Order: {row.order}</span>
-                      <span style={badge("gray")}>{item.entryCount} entry record(s)</span>
-                    </div>
-                    <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button style={ghostButton} onClick={() => toggleField("assessmentStructureItems", row.id, "active", row.active !== false)}>
-                        {row.active === false ? "Activate" : "Deactivate"}
-                      </button>
-                      <button style={ghostButton} onClick={() => openEditAssessmentItem(row)}>Edit</button>
-                      <button
-                        style={{ ...ghostButton, color: "#dc2626" }}
-                        onClick={() => softDelete("assessmentStructureItems", row.id, "Delete this assessment item?")}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {!filteredAssessmentItems.length && <div style={{ ...card, textAlign: "center" }}>No assessment structure items found.</div>}
-            </div>
-          </section>
-        </div>
-      )}
 
-      {/* GRADING TAB */}
-      {tab === "grading" && (
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Grading Systems</h3>
-              <button style={button} onClick={() => openCreate("gradingSystem")}>+ System</button>
-            </div>
+                    <div className="aac-stat-row">
+                      <MiniStat label="Items" value={itemCountByAssessment.get(id) || 0} />
+                      <MiniStat label="Links" value={applicabilityCountByAssessment.get(id) || 0} />
+                      <MiniStat label="Entries" value={entryCountByAssessment.get(id) || 0} />
+                    </div>
 
-            <div style={gridList}>
-              {filteredGradingSystems.map(item => {
-                const row = item.row;
-                return (
-                  <div key={row.id} style={card}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong style={{ fontSize: 17 }}>{row.name}</strong>
-                      <span style={badge("blue")}>{row.type}</span>
-                      <span style={badge(row.active === false ? "red" : "green")}>
-                        {row.active === false ? "Inactive" : "Active"}
-                      </span>
-                      {row.default && <span style={badge("purple")}>Default</span>}
-                      {row.locked && <span style={badge("orange")}>Locked</span>}
-                    </div>
-                    <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                      {item.organizationName}
-                    </div>
-                    {row.description && <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>{row.description}</div>}
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("gray")}>{item.ruleCount} rule(s)</span>
-                      <span style={badge("gray")}>{item.applicabilityCount} applicability link(s)</span>
-                      <span style={badge("gray")}>{item.computedResultCount} computed result(s)</span>
-                    </div>
-                    <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button style={ghostButton} onClick={() => toggleField("gradingSystems", row.id, "locked", !!row.locked)}>
+                    <div className="aac-action-row">
+                      <button type="button" onClick={() => toggleField("assessmentStructures", row.id, "locked", !!row.locked)}>
                         {row.locked ? "Unlock" : "Lock"}
                       </button>
-                      <button style={ghostButton} onClick={() => toggleField("gradingSystems", row.id, "active", row.active !== false)}>
+                      <button type="button" onClick={() => toggleField("assessmentStructures", row.id, "active", row.active !== false)}>
                         {row.active === false ? "Activate" : "Deactivate"}
                       </button>
-                      <button style={ghostButton} onClick={() => openEditGradingSystem(row)}>Edit</button>
-                      <button
-                        style={{ ...ghostButton, color: "#dc2626" }}
-                        onClick={() => softDelete("gradingSystems", row.id, "Delete this grading system?")}
-                      >
+                      <button type="button" onClick={() => openEditAssessmentStructure(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("assessmentStructures", row.id, "Delete this assessment structure?")}>
                         Delete
                       </button>
                     </div>
                   </div>
-                );
-              })}
-              {!filteredGradingSystems.length && <div style={{ ...card, textAlign: "center" }}>No grading systems found.</div>}
-            </div>
-          </section>
+                </article>
+              );
+            })}
+          </EntitySection>
 
-          <section>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Grade Rules</h3>
-              <button style={button} onClick={() => openCreate("gradeRule")}>+ Rule</button>
-            </div>
+          <EntitySection
+            title="Structure Items"
+            subtitle="Break assessment structures into weighted items."
+            actionLabel="+ Item"
+            onAction={() => openCreate("assessmentItem")}
+            emptyText="No assessment structure items found."
+          >
+            {filteredAssessmentItems.map((row) => {
+              const id = row.id || 0;
+              const structure = assessmentStructureMap.get(row.assessmentStructureId);
+              return (
+                <article key={row.id} className="aac-entity-card">
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.name}</h3>
+                        <p>{structure?.name || "Unknown assessment structure"}</p>
+                      </div>
+                      <div className="aac-card-avatar">📝</div>
+                    </div>
 
-            <div style={gridList}>
-              {filteredGradeRules.map(item => {
-                const row = item.row;
-                return (
-                  <div key={row.id} style={card}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong style={{ fontSize: 17 }}>{row.grade}</strong>
-                      <span style={badge(row.active === false ? "red" : "green")}>
-                        {row.active === false ? "Inactive" : "Active"}
-                      </span>
-                      {row.color && <span style={{ ...badge("gray"), borderLeft: `12px solid ${row.color}` }}>{row.color}</span>}
+                    <div className="aac-chip-row">
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      {row.compulsory !== false && <Chip tone="purple">Compulsory</Chip>}
+                      <Chip tone="blue">Weight {row.weight}%</Chip>
+                      <Chip tone="blue">Max {row.maxScore}</Chip>
+                      <Chip tone="gray">Order {row.order}</Chip>
                     </div>
-                    <div style={{ marginTop: 8, opacity: 0.68, fontSize: 13 }}>
-                      {item.gradingSystemName}
+
+                    <div className="aac-stat-row">
+                      <MiniStat label="Entry Records" value={entryCountByItem.get(id) || 0} />
                     </div>
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>{row.minScore} - {row.maxScore}</span>
-                      <span style={badge("gray")}>Order: {row.order}</span>
-                      <span style={badge("purple")}>GPA: {row.gpa ?? "-"}</span>
-                      {row.remark && <span style={badge("orange")}>{row.remark}</span>}
-                    </div>
-                    <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button style={ghostButton} onClick={() => toggleField("gradeRules", row.id, "active", row.active !== false)}>
+
+                    <div className="aac-action-row">
+                      <button type="button" onClick={() => toggleField("assessmentStructureItems", row.id, "active", row.active !== false)}>
                         {row.active === false ? "Activate" : "Deactivate"}
                       </button>
-                      <button style={ghostButton} onClick={() => openEditGradeRule(row)}>Edit</button>
-                      <button
-                        style={{ ...ghostButton, color: "#dc2626" }}
-                        onClick={() => softDelete("gradeRules", row.id, "Delete this grade rule?")}
-                      >
+                      <button type="button" onClick={() => openEditAssessmentItem(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("assessmentStructureItems", row.id, "Delete this assessment item?")}>
                         Delete
                       </button>
                     </div>
                   </div>
-                );
-              })}
-              {!filteredGradeRules.length && <div style={{ ...card, textAlign: "center" }}>No grade rules found.</div>}
-            </div>
-          </section>
-        </div>
+                </article>
+              );
+            })}
+          </EntitySection>
+        </section>
       )}
 
-      {/* DRAWER */}
-      {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={closeDrawer}
-        >
-          <div
-            style={{
-              width: "min(650px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
+      {tab === "grading" && (
+        <section className="aac-two-col">
+          <EntitySection
+            title="Grading Systems"
+            subtitle="Create percentage, GPA, competency, or custom grading schemes."
+            actionLabel="+ System"
+            onAction={() => openCreate("gradingSystem")}
+            emptyText="No grading systems found."
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit" : "Create"} {drawerMode.replace(/([A-Z])/g, " $1")}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Saved under {activeBranch?.name || "the selected branch"}.
-                </div>
-              </div>
+            {filteredGradingSystems.map((row) => {
+              const id = row.id || 0;
+              const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
+              return (
+                <article key={row.id} className="aac-entity-card">
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.name}</h3>
+                        <p>{organization?.name || "No organization"}</p>
+                      </div>
+                      <div className="aac-card-avatar">🏅</div>
+                    </div>
 
-              <button type="button" style={ghostButton} onClick={closeDrawer}>Close</button>
+                    {row.description && <p className="aac-description">{row.description}</p>}
+
+                    <div className="aac-chip-row">
+                      <Chip tone="blue">{row.type}</Chip>
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      {row.default && <Chip tone="purple">Default</Chip>}
+                      {row.locked && <Chip tone="orange">Locked</Chip>}
+                    </div>
+
+                    <div className="aac-stat-row">
+                      <MiniStat label="Rules" value={ruleCountByGrading.get(id) || 0} />
+                      <MiniStat label="Links" value={applicabilityCountByGrading.get(id) || 0} />
+                      <MiniStat label="Results" value={computedCountByGrading.get(id) || 0} />
+                    </div>
+
+                    <div className="aac-action-row">
+                      <button type="button" onClick={() => toggleField("gradingSystems", row.id, "locked", !!row.locked)}>
+                        {row.locked ? "Unlock" : "Lock"}
+                      </button>
+                      <button type="button" onClick={() => toggleField("gradingSystems", row.id, "active", row.active !== false)}>
+                        {row.active === false ? "Activate" : "Deactivate"}
+                      </button>
+                      <button type="button" onClick={() => openEditGradingSystem(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("gradingSystems", row.id, "Delete this grading system?")}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </EntitySection>
+
+          <EntitySection
+            title="Grade Rules"
+            subtitle="Define score bands and remarks for each grading system."
+            actionLabel="+ Rule"
+            onAction={() => openCreate("gradeRule")}
+            emptyText="No grade rules found."
+          >
+            {filteredGradeRules.map((row) => {
+              const system = gradingSystemMap.get(row.gradingSystemId);
+              return (
+                <article key={row.id} className="aac-entity-card">
+                  <div className="aac-card-body">
+                    <div className="aac-card-top">
+                      <div>
+                        <h3>{row.grade}</h3>
+                        <p>{system?.name || "Unknown grading system"}</p>
+                      </div>
+                      <div className="aac-grade-badge" style={{ background: row.color || primary }}>
+                        {row.grade}
+                      </div>
+                    </div>
+
+                    <div className="aac-chip-row">
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
+                      <Chip tone="blue">{row.minScore} - {row.maxScore}</Chip>
+                      {row.gpa != null && <Chip tone="purple">GPA {row.gpa}</Chip>}
+                      <Chip tone="gray">Order {row.order}</Chip>
+                    </div>
+
+                    {row.remark && <p className="aac-description">{row.remark}</p>}
+
+                    <div className="aac-action-row">
+                      <button type="button" onClick={() => toggleField("gradeRules", row.id, "active", row.active !== false)}>
+                        {row.active === false ? "Activate" : "Deactivate"}
+                      </button>
+                      <button type="button" onClick={() => openEditGradeRule(row)}>Edit</button>
+                      <button type="button" className="danger" onClick={() => softDelete("gradeRules", row.id, "Delete this grade rule?")}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </EntitySection>
+        </section>
+      )}
+
+      {drawerOpen && (
+        <div className="aac-drawer-layer">
+          <button type="button" className="aac-drawer-overlay" aria-label="Close drawer" onClick={closeDrawer} />
+
+          <aside className="aac-drawer">
+            <div className="aac-drawer-head">
+              <div>
+                <p>{editMode ? "Update record" : "New record"}</p>
+                <h2>{drawerTitle}</h2>
+              </div>
+              <button type="button" onClick={closeDrawer}>✕</button>
             </div>
 
-            {/* ACADEMIC STRUCTURE FORM */}
-            {drawerMode === "academicStructure" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Name</label>
-                  <input
-                    value={academicStructureForm.name}
-                    onChange={e => setAcademicStructureForm(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. 2026 Basic School Academic Year"
-                    style={input}
-                  />
-                </div>
+            <div className="aac-form-grid">
+              {drawerMode === "academicStructure" && (
+                <>
+                  <Field label="Name"><input value={academicStructureForm.name} onChange={(e) => setAcademicStructureForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. 2026 Basic School Year" /></Field>
+                  <Field label="Level"><select value={academicStructureForm.level} onChange={(e) => setAcademicStructureForm((p) => ({ ...p, level: e.target.value as AcademicLevel }))}><option value="nursery">Nursery</option><option value="primary">Primary</option><option value="junior_high">Junior High</option><option value="senior_high">Senior High</option><option value="tertiary">Tertiary</option></select></Field>
+                  <div className="aac-form-two"><Field label="Start Date"><input type="date" value={academicStructureForm.startDate} onChange={(e) => setAcademicStructureForm((p) => ({ ...p, startDate: e.target.value }))} /></Field><Field label="End Date"><input type="date" value={academicStructureForm.endDate} onChange={(e) => setAcademicStructureForm((p) => ({ ...p, endDate: e.target.value }))} /></Field></div>
+                  <Field label="Photo"><input type="file" accept="image/*" onChange={(e) => uploadImage("academicStructurePhoto", e.target.files?.[0])} /></Field>
+                  <Field label="Banner Image"><input type="file" accept="image/*" onChange={(e) => uploadImage("academicStructureBanner", e.target.files?.[0])} /></Field>
+                  <Check label="Active" checked={academicStructureForm.active !== false} onChange={(checked) => setAcademicStructureForm((p) => ({ ...p, active: checked }))} />
+                </>
+              )}
 
-                <div>
-                  <label style={label}>Level</label>
-                  <select
-                    value={academicStructureForm.level}
-                    onChange={e => setAcademicStructureForm(prev => ({ ...prev, level: e.target.value as AcademicLevel }))}
-                    style={input}
-                  >
-                    <option value="nursery">Nursery</option>
-                    <option value="primary">Primary</option>
-                    <option value="junior_high">Junior High</option>
-                    <option value="senior_high">Senior High</option>
-                    <option value="tertiary">Tertiary</option>
-                  </select>
-                </div>
+              {drawerMode === "academicPeriod" && (
+                <>
+                  <Field label="Academic Structure"><select value={academicPeriodForm.academicStructureId || ""} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, academicStructureId: Number(e.target.value) || undefined }))}><option value="">Select Academic Structure</option>{academicStructures.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field>
+                  <Field label="Name"><input value={academicPeriodForm.name} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Term 1" /></Field>
+                  <Field label="Type"><select value={academicPeriodForm.type || ""} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, type: e.target.value as TermType }))}><option value="Term 1">Term 1</option><option value="Term 2">Term 2</option><option value="Term 3">Term 3</option><option value="Semester 1">Semester 1</option><option value="Semester 2">Semester 2</option></select></Field>
+                  <div className="aac-form-two"><Field label="Start Date"><input type="date" value={academicPeriodForm.startDate} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, startDate: e.target.value }))} /></Field><Field label="End Date"><input type="date" value={academicPeriodForm.endDate} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, endDate: e.target.value }))} /></Field></div>
+                  <Field label="Order"><input type="number" value={academicPeriodForm.order} onChange={(e) => setAcademicPeriodForm((p) => ({ ...p, order: Number(e.target.value) }))} /></Field>
+                  <Field label="Photo"><input type="file" accept="image/*" onChange={(e) => uploadImage("academicPeriodPhoto", e.target.files?.[0])} /></Field>
+                  <Check label="Active" checked={academicPeriodForm.active !== false} onChange={(checked) => setAcademicPeriodForm((p) => ({ ...p, active: checked }))} />
+                </>
+              )}
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                  <div>
-                    <label style={label}>Start Date</label>
-                    <input
-                      type="date"
-                      value={academicStructureForm.startDate}
-                      onChange={e => setAcademicStructureForm(prev => ({ ...prev, startDate: e.target.value }))}
-                      style={input}
-                    />
-                  </div>
-                  <div>
-                    <label style={label}>End Date</label>
-                    <input
-                      type="date"
-                      value={academicStructureForm.endDate}
-                      onChange={e => setAcademicStructureForm(prev => ({ ...prev, endDate: e.target.value }))}
-                      style={input}
-                    />
-                  </div>
-                </div>
+              {drawerMode === "assessmentStructure" && (
+                <>
+                  <Field label="Name"><input value={assessmentStructureForm.name} onChange={(e) => setAssessmentStructureForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Class Score + Exam" /></Field>
+                  <Field label="Academic Structure"><select value={assessmentStructureForm.academicStructureId || ""} onChange={(e) => setAssessmentStructureForm((p) => ({ ...p, academicStructureId: Number(e.target.value) || undefined }))}><option value="">Select Academic Structure</option>{academicStructures.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field>
+                  <Field label="Organization"><select value={assessmentStructureForm.organizationId || ""} onChange={(e) => setAssessmentStructureForm((p) => ({ ...p, organizationId: Number(e.target.value) || undefined }))}><option value="">No organization</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} • {row.type}</option>)}</select></Field>
+                  <Field label="Description"><textarea value={assessmentStructureForm.description || ""} onChange={(e) => setAssessmentStructureForm((p) => ({ ...p, description: e.target.value }))} rows={3} /></Field>
+                  <Field label="Total Score"><input type="number" value={assessmentStructureForm.totalScore ?? ""} onChange={(e) => setAssessmentStructureForm((p) => ({ ...p, totalScore: e.target.value === "" ? undefined : Number(e.target.value) }))} /></Field>
+                  <Field label="Photo"><input type="file" accept="image/*" onChange={(e) => uploadImage("assessmentStructurePhoto", e.target.files?.[0])} /></Field>
+                  <Field label="Banner Image"><input type="file" accept="image/*" onChange={(e) => uploadImage("assessmentStructureBanner", e.target.files?.[0])} /></Field>
+                  <Check label="Active" checked={assessmentStructureForm.active !== false} onChange={(checked) => setAssessmentStructureForm((p) => ({ ...p, active: checked }))} />
+                  <Check label="Locked" checked={!!assessmentStructureForm.locked} onChange={(checked) => setAssessmentStructureForm((p) => ({ ...p, locked: checked }))} />
+                </>
+              )}
 
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input
-                    type="checkbox"
-                    checked={academicStructureForm.active !== false}
-                    onChange={e => setAcademicStructureForm(prev => ({ ...prev, active: e.target.checked }))}
-                  />
-                  Active
-                </label>
+              {drawerMode === "assessmentItem" && (
+                <>
+                  <Field label="Assessment Structure"><select value={assessmentItemForm.assessmentStructureId || ""} onChange={(e) => setAssessmentItemForm((p) => ({ ...p, assessmentStructureId: Number(e.target.value) || undefined }))}><option value="">Select Assessment Structure</option>{assessmentStructures.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field>
+                  <Field label="Name"><input value={assessmentItemForm.name} onChange={(e) => setAssessmentItemForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Class Test" /></Field>
+                  <div className="aac-form-three"><Field label="Weight"><input type="number" value={assessmentItemForm.weight} onChange={(e) => setAssessmentItemForm((p) => ({ ...p, weight: Number(e.target.value) }))} /></Field><Field label="Max Score"><input type="number" value={assessmentItemForm.maxScore} onChange={(e) => setAssessmentItemForm((p) => ({ ...p, maxScore: Number(e.target.value) }))} /></Field><Field label="Order"><input type="number" value={assessmentItemForm.order} onChange={(e) => setAssessmentItemForm((p) => ({ ...p, order: Number(e.target.value) }))} /></Field></div>
+                  <Check label="Compulsory" checked={assessmentItemForm.compulsory !== false} onChange={(checked) => setAssessmentItemForm((p) => ({ ...p, compulsory: checked }))} />
+                  <Check label="Active" checked={assessmentItemForm.active !== false} onChange={(checked) => setAssessmentItemForm((p) => ({ ...p, active: checked }))} />
+                </>
+              )}
 
-                <div>
-                  <label style={label}>Photo</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("academicStructurePhoto", e.target.files?.[0])} style={input} />
-                </div>
-                <div>
-                  <label style={label}>Banner Image</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("academicStructureBanner", e.target.files?.[0])} style={input} />
-                </div>
-              </div>
-            )}
+              {drawerMode === "gradingSystem" && (
+                <>
+                  <Field label="Name"><input value={gradingSystemForm.name} onChange={(e) => setGradingSystemForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. NaCCA Percentage Grading" /></Field>
+                  <Field label="Type"><select value={gradingSystemForm.type} onChange={(e) => setGradingSystemForm((p) => ({ ...p, type: e.target.value as GradingSystemType }))}><option value="percentage">Percentage</option><option value="gpa">GPA</option><option value="competency">Competency</option><option value="custom">Custom</option></select></Field>
+                  <Field label="Organization"><select value={gradingSystemForm.organizationId || ""} onChange={(e) => setGradingSystemForm((p) => ({ ...p, organizationId: Number(e.target.value) || undefined }))}><option value="">No organization</option>{organizations.map((row) => <option key={row.id} value={row.id}>{row.name} • {row.type}</option>)}</select></Field>
+                  <Field label="Description"><textarea value={gradingSystemForm.description || ""} onChange={(e) => setGradingSystemForm((p) => ({ ...p, description: e.target.value }))} rows={3} /></Field>
+                  <Field label="Photo"><input type="file" accept="image/*" onChange={(e) => uploadImage("gradingSystemPhoto", e.target.files?.[0])} /></Field>
+                  <Check label="Active" checked={gradingSystemForm.active !== false} onChange={(checked) => setGradingSystemForm((p) => ({ ...p, active: checked }))} />
+                  <Check label="Default grading system" checked={!!gradingSystemForm.default} onChange={(checked) => setGradingSystemForm((p) => ({ ...p, default: checked }))} />
+                  <Check label="Locked" checked={!!gradingSystemForm.locked} onChange={(checked) => setGradingSystemForm((p) => ({ ...p, locked: checked }))} />
+                </>
+              )}
 
-            {/* ACADEMIC PERIOD FORM */}
-            {drawerMode === "academicPeriod" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Academic Structure</label>
-                  <select
-                    value={academicPeriodForm.academicStructureId || ""}
-                    onChange={e => {
-                      const id = Number(e.target.value) || undefined;
-                      const structure = id ? academicStructureMap.get(id) : undefined;
-                      setAcademicPeriodForm(prev => ({
-                        ...prev,
-                        academicStructureId: id,
-                        startDate: structure?.startDate || prev.startDate,
-                        endDate: structure?.endDate || prev.endDate,
-                      }));
-                    }}
-                    style={input}
-                  >
-                    <option value="">Select Academic Structure</option>
-                    {academicStructures.map(row => (
-                      <option key={row.id} value={row.id}>{row.name} • {row.level}</option>
-                    ))}
-                  </select>
-                </div>
+              {drawerMode === "gradeRule" && (
+                <>
+                  <Field label="Grading System"><select value={gradeRuleForm.gradingSystemId || ""} onChange={(e) => setGradeRuleForm((p) => ({ ...p, gradingSystemId: Number(e.target.value) || undefined }))}><option value="">Select Grading System</option>{gradingSystems.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></Field>
+                  <Field label="Grade"><input value={gradeRuleForm.grade} onChange={(e) => setGradeRuleForm((p) => ({ ...p, grade: e.target.value }))} placeholder="e.g. A1" /></Field>
+                  <div className="aac-form-three"><Field label="Min Score"><input type="number" value={gradeRuleForm.minScore} onChange={(e) => setGradeRuleForm((p) => ({ ...p, minScore: Number(e.target.value) }))} /></Field><Field label="Max Score"><input type="number" value={gradeRuleForm.maxScore} onChange={(e) => setGradeRuleForm((p) => ({ ...p, maxScore: Number(e.target.value) }))} /></Field><Field label="Order"><input type="number" value={gradeRuleForm.order} onChange={(e) => setGradeRuleForm((p) => ({ ...p, order: Number(e.target.value) }))} /></Field></div>
+                  <div className="aac-form-two"><Field label="GPA"><input type="number" value={gradeRuleForm.gpa ?? ""} onChange={(e) => setGradeRuleForm((p) => ({ ...p, gpa: e.target.value === "" ? undefined : Number(e.target.value) }))} /></Field><Field label="Color"><input value={gradeRuleForm.color || ""} onChange={(e) => setGradeRuleForm((p) => ({ ...p, color: e.target.value }))} placeholder="#16a34a" /></Field></div>
+                  <Field label="Remark"><input value={gradeRuleForm.remark || ""} onChange={(e) => setGradeRuleForm((p) => ({ ...p, remark: e.target.value }))} placeholder="e.g. Excellent" /></Field>
+                  <Check label="Active" checked={gradeRuleForm.active !== false} onChange={(checked) => setGradeRuleForm((p) => ({ ...p, active: checked }))} />
+                </>
+              )}
+            </div>
 
-                <div>
-                  <label style={label}>Period Name</label>
-                  <input
-                    value={academicPeriodForm.name}
-                    onChange={e => setAcademicPeriodForm(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. Term 1"
-                    style={input}
-                  />
-                </div>
-
-                <div>
-                  <label style={label}>Type</label>
-                  <select
-                    value={academicPeriodForm.type || ""}
-                    onChange={e => setAcademicPeriodForm(prev => ({ ...prev, type: (e.target.value || undefined) as TermType | undefined }))}
-                    style={input}
-                  >
-                    <option value="">No type</option>
-                    <option value="Term 1">Term 1</option>
-                    <option value="Term 2">Term 2</option>
-                    <option value="Term 3">Term 3</option>
-                    <option value="Semester 1">Semester 1</option>
-                    <option value="Semester 2">Semester 2</option>
-                  </select>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                  <div>
-                    <label style={label}>Start Date</label>
-                    <input type="date" value={academicPeriodForm.startDate} onChange={e => setAcademicPeriodForm(prev => ({ ...prev, startDate: e.target.value }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>End Date</label>
-                    <input type="date" value={academicPeriodForm.endDate} onChange={e => setAcademicPeriodForm(prev => ({ ...prev, endDate: e.target.value }))} style={input} />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={label}>Order</label>
-                  <input
-                    type="number"
-                    value={academicPeriodForm.order}
-                    onChange={e => setAcademicPeriodForm(prev => ({ ...prev, order: Number(e.target.value) }))}
-                    style={input}
-                  />
-                </div>
-
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={academicPeriodForm.active !== false} onChange={e => setAcademicPeriodForm(prev => ({ ...prev, active: e.target.checked }))} />
-                  Active
-                </label>
-
-                <div>
-                  <label style={label}>Photo</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("academicPeriodPhoto", e.target.files?.[0])} style={input} />
-                </div>
-              </div>
-            )}
-
-            {/* ASSESSMENT STRUCTURE FORM */}
-            {drawerMode === "assessmentStructure" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Academic Structure</label>
-                  <select
-                    value={assessmentStructureForm.academicStructureId || ""}
-                    onChange={e => setAssessmentStructureForm(prev => ({ ...prev, academicStructureId: Number(e.target.value) || undefined }))}
-                    style={input}
-                  >
-                    <option value="">Select Academic Structure</option>
-                    {academicStructures.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Organization</label>
-                  <select
-                    value={assessmentStructureForm.organizationId || ""}
-                    onChange={e => setAssessmentStructureForm(prev => ({ ...prev, organizationId: Number(e.target.value) || undefined }))}
-                    style={input}
-                  >
-                    <option value="">No organization</option>
-                    {organizations.map(row => <option key={row.id} value={row.id}>{row.name} • {row.type}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Name</label>
-                  <input
-                    value={assessmentStructureForm.name}
-                    onChange={e => setAssessmentStructureForm(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. Class Score + Exam"
-                    style={input}
-                  />
-                </div>
-
-                <div>
-                  <label style={label}>Total Score</label>
-                  <input
-                    type="number"
-                    value={assessmentStructureForm.totalScore ?? ""}
-                    onChange={e => setAssessmentStructureForm(prev => ({ ...prev, totalScore: e.target.value === "" ? undefined : Number(e.target.value) }))}
-                    style={input}
-                  />
-                </div>
-
-                <div>
-                  <label style={label}>Description</label>
-                  <textarea
-                    value={assessmentStructureForm.description || ""}
-                    onChange={e => setAssessmentStructureForm(prev => ({ ...prev, description: e.target.value }))}
-                    rows={3}
-                    style={{ ...input, resize: "vertical" }}
-                  />
-                </div>
-
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={assessmentStructureForm.active !== false} onChange={e => setAssessmentStructureForm(prev => ({ ...prev, active: e.target.checked }))} />
-                  Active
-                </label>
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={!!assessmentStructureForm.locked} onChange={e => setAssessmentStructureForm(prev => ({ ...prev, locked: e.target.checked }))} />
-                  Locked
-                </label>
-
-                <div>
-                  <label style={label}>Photo</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("assessmentStructurePhoto", e.target.files?.[0])} style={input} />
-                </div>
-                <div>
-                  <label style={label}>Banner Image</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("assessmentStructureBanner", e.target.files?.[0])} style={input} />
-                </div>
-              </div>
-            )}
-
-            {/* ASSESSMENT ITEM FORM */}
-            {drawerMode === "assessmentItem" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Assessment Structure</label>
-                  <select
-                    value={assessmentItemForm.assessmentStructureId || ""}
-                    onChange={e => setAssessmentItemForm(prev => ({ ...prev, assessmentStructureId: Number(e.target.value) || undefined }))}
-                    style={input}
-                  >
-                    <option value="">Select Assessment Structure</option>
-                    {assessmentStructures.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Item Name</label>
-                  <input value={assessmentItemForm.name} onChange={e => setAssessmentItemForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g. Class Test" style={input} />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
-                  <div>
-                    <label style={label}>Weight</label>
-                    <input type="number" value={assessmentItemForm.weight} onChange={e => setAssessmentItemForm(prev => ({ ...prev, weight: Number(e.target.value) }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>Max Score</label>
-                    <input type="number" value={assessmentItemForm.maxScore} onChange={e => setAssessmentItemForm(prev => ({ ...prev, maxScore: Number(e.target.value) }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>Order</label>
-                    <input type="number" value={assessmentItemForm.order} onChange={e => setAssessmentItemForm(prev => ({ ...prev, order: Number(e.target.value) }))} style={input} />
-                  </div>
-                </div>
-
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={assessmentItemForm.compulsory !== false} onChange={e => setAssessmentItemForm(prev => ({ ...prev, compulsory: e.target.checked }))} />
-                  Compulsory
-                </label>
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={assessmentItemForm.active !== false} onChange={e => setAssessmentItemForm(prev => ({ ...prev, active: e.target.checked }))} />
-                  Active
-                </label>
-              </div>
-            )}
-
-            {/* GRADING SYSTEM FORM */}
-            {drawerMode === "gradingSystem" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Name</label>
-                  <input value={gradingSystemForm.name} onChange={e => setGradingSystemForm(prev => ({ ...prev, name: e.target.value }))} placeholder="e.g. NaCCA Percentage Grading" style={input} />
-                </div>
-
-                <div>
-                  <label style={label}>Type</label>
-                  <select value={gradingSystemForm.type} onChange={e => setGradingSystemForm(prev => ({ ...prev, type: e.target.value as GradingSystemType }))} style={input}>
-                    <option value="percentage">Percentage</option>
-                    <option value="gpa">GPA</option>
-                    <option value="competency">Competency</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Organization</label>
-                  <select value={gradingSystemForm.organizationId || ""} onChange={e => setGradingSystemForm(prev => ({ ...prev, organizationId: Number(e.target.value) || undefined }))} style={input}>
-                    <option value="">No organization</option>
-                    {organizations.map(row => <option key={row.id} value={row.id}>{row.name} • {row.type}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Description</label>
-                  <textarea value={gradingSystemForm.description || ""} onChange={e => setGradingSystemForm(prev => ({ ...prev, description: e.target.value }))} rows={3} style={{ ...input, resize: "vertical" }} />
-                </div>
-
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={gradingSystemForm.active !== false} onChange={e => setGradingSystemForm(prev => ({ ...prev, active: e.target.checked }))} />
-                  Active
-                </label>
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={!!gradingSystemForm.default} onChange={e => setGradingSystemForm(prev => ({ ...prev, default: e.target.checked }))} />
-                  Default grading system
-                </label>
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={!!gradingSystemForm.locked} onChange={e => setGradingSystemForm(prev => ({ ...prev, locked: e.target.checked }))} />
-                  Locked
-                </label>
-
-                <div>
-                  <label style={label}>Photo</label>
-                  <input type="file" accept="image/*" onChange={e => uploadImage("gradingSystemPhoto", e.target.files?.[0])} style={input} />
-                </div>
-              </div>
-            )}
-
-            {/* GRADE RULE FORM */}
-            {drawerMode === "gradeRule" && (
-              <div style={{ display: "grid", gap: 14 }}>
-                <div>
-                  <label style={label}>Grading System</label>
-                  <select value={gradeRuleForm.gradingSystemId || ""} onChange={e => setGradeRuleForm(prev => ({ ...prev, gradingSystemId: Number(e.target.value) || undefined }))} style={input}>
-                    <option value="">Select Grading System</option>
-                    {gradingSystems.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={label}>Grade</label>
-                  <input value={gradeRuleForm.grade} onChange={e => setGradeRuleForm(prev => ({ ...prev, grade: e.target.value }))} placeholder="e.g. A1" style={input} />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
-                  <div>
-                    <label style={label}>Min Score</label>
-                    <input type="number" value={gradeRuleForm.minScore} onChange={e => setGradeRuleForm(prev => ({ ...prev, minScore: Number(e.target.value) }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>Max Score</label>
-                    <input type="number" value={gradeRuleForm.maxScore} onChange={e => setGradeRuleForm(prev => ({ ...prev, maxScore: Number(e.target.value) }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>Order</label>
-                    <input type="number" value={gradeRuleForm.order} onChange={e => setGradeRuleForm(prev => ({ ...prev, order: Number(e.target.value) }))} style={input} />
-                  </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                  <div>
-                    <label style={label}>GPA</label>
-                    <input type="number" value={gradeRuleForm.gpa ?? ""} onChange={e => setGradeRuleForm(prev => ({ ...prev, gpa: e.target.value === "" ? undefined : Number(e.target.value) }))} style={input} />
-                  </div>
-                  <div>
-                    <label style={label}>Color</label>
-                    <input value={gradeRuleForm.color || ""} onChange={e => setGradeRuleForm(prev => ({ ...prev, color: e.target.value }))} placeholder="#16a34a" style={input} />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={label}>Remark</label>
-                  <input value={gradeRuleForm.remark || ""} onChange={e => setGradeRuleForm(prev => ({ ...prev, remark: e.target.value }))} placeholder="e.g. Excellent" style={input} />
-                </div>
-
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input type="checkbox" checked={gradeRuleForm.active !== false} onChange={e => setGradeRuleForm(prev => ({ ...prev, active: e.target.checked }))} />
-                  Active
-                </label>
-              </div>
-            )}
-
-            <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1, marginTop: 18 }}>
+            <button type="button" onClick={save} disabled={saving} className="aac-save-btn">
               {saving ? "Saving..." : editMode ? "Save Changes" : "Create"}
             </button>
-          </div>
+          </aside>
         </div>
       )}
-    </div>
+    </main>
   );
 }
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function countBy<T>(rows: T[], getKey: (row: T) => number) {
+  const map = new Map<number, number>();
+  rows.forEach((row) => {
+    const key = getKey(row);
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return map;
+}
+
+function SummaryCard({ label, value, icon }: { label: string; value: number; icon: string }) {
+  return (
+    <article className="aac-summary-card">
+      <div className="aac-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function EntitySection({
+  title,
+  subtitle,
+  actionLabel,
+  onAction,
+  emptyText,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  actionLabel: string;
+  onAction: () => void;
+  emptyText: string;
+  children: React.ReactNode;
+}) {
+  const count = React.Children.count(children);
+  return (
+    <section className="aac-section-card">
+      <div className="aac-section-head">
+        <div>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+        <button type="button" onClick={onAction}>{actionLabel}</button>
+      </div>
+
+      <div className="aac-list">
+        {count ? children : <div className="aac-empty-card">{emptyText}</div>}
+      </div>
+    </section>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`aac-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="aac-mini-stat">
+      <strong>{value}</strong>
+      <em>{label}</em>
+    </span>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="aac-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="aac-check">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes aacSpin {
+  to { transform: rotate(360deg); }
+}
+
+.aac-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+
+.aac-page *,
+.aac-page *::before,
+.aac-page *::after {
+  box-sizing: border-box;
+}
+
+.aac-page button,
+.aac-page input,
+.aac-page select,
+.aac-page textarea {
+  font: inherit;
+  max-width: 100%;
+}
+
+.aac-page input,
+.aac-page select,
+.aac-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.aac-page textarea {
+  min-height: 88px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.aac-page img,
+.aac-page svg,
+.aac-page canvas,
+.aac-page video {
+  max-width: 100%;
+  height: auto;
+}
+
+.aac-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+
+.aac-state-card h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.aac-state-card p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.aac-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 4px solid color-mix(in srgb, var(--aac-primary) 18%, transparent);
+  border-top-color: var(--aac-primary);
+  animation: aacSpin .8s linear infinite;
+}
+
+.aac-primary-btn,
+.aac-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--aac-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.aac-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--aac-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+
+.aac-hero-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.aac-hero-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--aac-primary);
+  color: #fff;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--aac-primary) 28%, transparent);
+  font-size: 22px;
+}
+
+.aac-title-wrap {
+  min-width: 0;
+}
+
+.aac-title-wrap p,
+.aac-title-wrap h2,
+.aac-title-wrap span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aac-title-wrap p {
+  margin: 0 0 2px;
+  color: var(--aac-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.aac-title-wrap h2 {
+  margin: 0;
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 1000;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
+
+.aac-title-wrap span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.aac-ghost-btn,
+.aac-section-head button,
+.aac-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.aac-section-head button {
+  background: var(--aac-primary);
+  color: #fff;
+  border-color: transparent;
+}
+
+.aac-action-row button.danger {
+  color: #dc2626;
+  background: rgba(239, 68, 68, .08);
+  border-color: rgba(239, 68, 68, .12);
+}
+
+.aac-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.aac-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+
+.aac-summary-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--aac-primary) 12%, #fff);
+}
+
+.aac-summary-card div:last-child {
+  min-width: 0;
+}
+
+.aac-summary-card strong,
+.aac-summary-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aac-summary-card strong {
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.aac-summary-card span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.aac-tabs {
+  position: sticky;
+  top: 50px;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg, #f8fafc) 88%, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  backdrop-filter: blur(12px);
+}
+
+.aac-tabs button {
+  min-width: 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: transparent;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aac-tabs button.active {
+  background: var(--aac-primary);
+  color: #fff;
+}
+
+.aac-filter-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .055);
+}
+
+.aac-two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.aac-section-card {
+  min-width: 0;
+  border-radius: 26px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .055);
+  padding: 10px;
+  overflow: hidden;
+}
+
+.aac-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.aac-section-head div {
+  min-width: 0;
+}
+
+.aac-section-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.aac-section-head p {
+  margin: 3px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aac-list {
+  display: grid;
+  gap: 10px;
+}
+
+.aac-entity-card,
+.aac-empty-card {
+  min-width: 0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #fff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+}
+
+.aac-empty-card {
+  padding: 22px;
+  text-align: center;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  font-weight: 800;
+  border-style: dashed;
+}
+
+.aac-card-banner {
+  height: 82px;
+  background-size: cover;
+  background-position: center;
+}
+
+.aac-card-body {
+  padding: 13px;
+}
+
+.aac-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.aac-card-top div:first-child {
+  min-width: 0;
+}
+
+.aac-card-top h3,
+.aac-card-top p {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aac-card-top h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 1000;
+  letter-spacing: -.035em;
+}
+
+.aac-card-top p {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.aac-card-avatar,
+.aac-grade-badge {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--aac-primary) 12%, #fff);
+  font-weight: 1000;
+}
+
+.aac-grade-badge {
+  color: #fff;
+}
+
+.aac-description {
+  margin: 9px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.aac-chip-row,
+.aac-action-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.aac-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aac-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.aac-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.aac-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.aac-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.aac-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.aac-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+
+.aac-stat-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.aac-mini-stat {
+  min-width: 0;
+  display: block;
+  padding: 9px;
+  border-radius: 17px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .13);
+  overflow: hidden;
+}
+
+.aac-mini-stat strong,
+.aac-mini-stat em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aac-mini-stat strong {
+  font-size: 17px;
+  font-weight: 1000;
+  font-style: normal;
+}
+
+.aac-mini-stat em {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 850;
+  font-style: normal;
+}
+
+.aac-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.aac-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, .52);
+}
+
+.aac-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(94vw, 520px);
+  max-width: 100vw;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  padding: 14px;
+  box-shadow: -24px 0 70px rgba(15, 23, 42, .22);
+}
+
+.aac-drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0 12px;
+  background: var(--surface, #fff);
+}
+
+.aac-drawer-head div {
+  min-width: 0;
+}
+
+.aac-drawer-head p {
+  margin: 0;
+  color: var(--aac-primary);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.aac-drawer-head h2 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aac-drawer-head button {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 15px;
+  background: #fff;
+  font-weight: 1000;
+  cursor: pointer;
+}
+
+.aac-form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.aac-form-two,
+.aac-form-three {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.aac-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aac-field > span {
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.aac-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .14);
+  font-weight: 850;
+}
+
+.aac-check input {
+  width: 18px;
+  min-height: 18px;
+  flex: 0 0 auto;
+}
+
+.aac-save-btn {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.aac-save-btn:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+@media (min-width: 680px) {
+  .aac-page {
+    padding: 12px;
+  }
+
+  .aac-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aac-filter-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aac-stat-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aac-form-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aac-form-three {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .aac-page {
+    padding: 16px;
+  }
+
+  .aac-summary-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .aac-filter-card {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+
+  .aac-two-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .aac-tabs {
+    position: static;
+    width: min(560px, 100%);
+  }
+
+  .aac-section-card {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .aac-page {
+    padding: 6px;
+  }
+
+  .aac-hero {
+    flex-direction: column;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .aac-ghost-btn {
+    width: 100%;
+  }
+
+  .aac-tabs {
+    top: 46px;
+    border-radius: 22px;
+  }
+
+  .aac-tabs button {
+    min-height: 36px;
+    font-size: 11px;
+  }
+
+  .aac-summary-grid {
+    gap: 6px;
+  }
+
+  .aac-summary-card {
+    padding: 10px;
+    border-radius: 19px;
+  }
+
+  .aac-section-card {
+    border-radius: 22px;
+    padding: 8px;
+  }
+
+  .aac-section-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .aac-section-head button {
+    width: 100%;
+  }
+
+  .aac-card-body {
+    padding: 11px;
+  }
+
+  .aac-action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aac-action-row button {
+    width: 100%;
+    padding: 0 8px;
+  }
+
+  .aac-drawer {
+    width: min(96vw, 520px);
+    padding: 12px;
+  }
+}
+`;

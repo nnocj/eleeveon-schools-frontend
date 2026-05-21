@@ -3,13 +3,13 @@
 /**
  * SchoolBranchDashboard.tsx
  * ---------------------------------------------------------
- * SELECTED SCHOOL + BRANCH COMMAND CENTER
+ * MOBILE-FIRST SECURE SCHOOL + BRANCH COMMAND CENTER
  * ---------------------------------------------------------
  *
- * Uses the new architecture:
- * School -> Branch -> SchoolBranchSettings
+ * Uses the architecture:
+ * Account -> School -> Branch -> SchoolBranchSettings
  *
- * Important correction:
+ * Important correction preserved:
  * ONLY these stat cards use image backgrounds:
  * - Students
  * - Teachers
@@ -17,9 +17,21 @@
  * - Subjects
  *
  * All other stat cards remain clean normal cards without image backgrounds.
+ *
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads are scoped by accountId + schoolId + branchId.
+ * - Mobile-first dashboard cards.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -41,15 +53,19 @@ import {
   Teacher,
 } from "../lib/db";
 
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
-
 // ======================================================
 // TYPES
 // ======================================================
 
 type Props = {
   navigate?: (key: string) => void;
+};
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
 };
 
 type ReadinessItem = {
@@ -74,6 +90,15 @@ type StatCardItem = {
   route: string;
   icon: string;
   imageType: DashboardImageType;
+};
+
+type ActivityItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  icon: string;
+  time: number;
+  route: string;
 };
 
 // ======================================================
@@ -102,12 +127,26 @@ const firstImage = (...values: unknown[]) => {
   return "";
 };
 
+const safeTime = (value: unknown) => {
+  const time = Number(value || 0);
+  return Number.isFinite(time) ? time : 0;
+};
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function SchoolBranchDashboard({ navigate }: Props) {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
     activeSchoolId,
@@ -116,20 +155,16 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const schoolId = activeSchoolId || settings?.schoolId;
-  const primary = settings?.primaryColor || "var(--primary-color)";
-
-  const schoolAny = activeSchool as any;
-  const branchAny = activeBranch as any;
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(true);
-  const [viewportWidth, setViewportWidth] = useState(1200);
 
   const [settingsRows, setSettingsRows] = useState<SchoolBranchSetting[]>([]);
   const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
@@ -149,7 +184,32 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
   // ======================================================
-  // ONLINE + VIEWPORT
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
+
+  // ======================================================
+  // ONLINE STATUS
   // ======================================================
 
   useEffect(() => {
@@ -165,22 +225,44 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
     };
   }, []);
 
-  useEffect(() => {
-    const updateViewport = () => setViewportWidth(window.innerWidth);
-
-    updateViewport();
-    window.addEventListener("resize", updateViewport);
-
-    return () => window.removeEventListener("resize", updateViewport);
-  }, []);
-
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setSettingsRows([]);
+    setAcademicStructures([]);
+    setAcademicPeriods([]);
+    setStudents([]);
+    setTeachers([]);
+    setClasses([]);
+    setSubjects([]);
+    setClassSubjects([]);
+    setAssessmentApplicabilities([]);
+    setAssessmentEntries([]);
+    setComputedResults([]);
+    setReportCards([]);
+    setAttendance([]);
+    setPayments([]);
+    setIncomes([]);
+    setExpenses([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setPageLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
+      setPageLoading(true);
 
       const [
         settingRows,
@@ -218,32 +300,34 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
         db.expenses.toArray(),
       ]);
 
-      setSettingsRows(settingRows.filter(row => !row.isDeleted));
-      setAcademicStructures(structureRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAcademicPeriods(periodRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setStudents(studentRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setTeachers(teacherRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClasses(classRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setSubjects(subjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClassSubjects(classSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAssessmentApplicabilities(applicabilityRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAssessmentEntries(entryRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setComputedResults(computedRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setReportCards(reportRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAttendance(attendanceRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setPayments(paymentRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setIncomes(incomeRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setExpenses(expenseRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setSettingsRows(settingRows.filter(sameTenant));
+      setAcademicStructures(structureRows.filter(sameTenant));
+      setAcademicPeriods(periodRows.filter(sameTenant));
+      setStudents(studentRows.filter(sameTenant));
+      setTeachers(teacherRows.filter(sameTenant));
+      setClasses(classRows.filter(sameTenant));
+      setSubjects(subjectRows.filter(sameTenant));
+      setClassSubjects(classSubjectRows.filter(sameTenant));
+      setAssessmentApplicabilities(applicabilityRows.filter(sameTenant));
+      setAssessmentEntries(entryRows.filter(sameTenant));
+      setComputedResults(computedRows.filter(sameTenant));
+      setReportCards(reportRows.filter(sameTenant));
+      setAttendance(attendanceRows.filter(sameTenant));
+      setPayments(paymentRows.filter(sameTenant));
+      setIncomes(incomeRows.filter(sameTenant));
+      setExpenses(expenseRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load school branch dashboard:", error);
+      clearData();
     } finally {
-      setLoading(false);
+      setPageLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   useEffect(() => {
     const refresh = () => load();
@@ -254,7 +338,8 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
       window.removeEventListener("school-branch-settings-updated", refresh);
       window.removeEventListener("school-branch-context-changed", refresh);
     };
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // CURRENT SCHOOL-BRANCH SETTINGS + ACADEMIC CONTEXT
@@ -262,7 +347,7 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
 
   const currentSetting = useMemo(() => {
     return (
-      settingsRows.find(row => row.schoolId === schoolId && row.branchId === branchId) ||
+      settingsRows.find((row) => row.schoolId === schoolId && row.branchId === branchId) ||
       settings ||
       undefined
     );
@@ -270,46 +355,25 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
 
   const currentAcademicStructure = useMemo(() => {
     return academicStructures.find(
-      row => row.id === currentSetting?.currentAcademicStructureId
+      (row) => row.id === currentSetting?.currentAcademicStructureId
     );
   }, [academicStructures, currentSetting?.currentAcademicStructureId]);
 
   const currentAcademicPeriod = useMemo(() => {
-    return academicPeriods.find(row => row.id === currentSetting?.currentAcademicPeriodId);
+    return academicPeriods.find((row) => row.id === currentSetting?.currentAcademicPeriodId);
   }, [academicPeriods, currentSetting?.currentAcademicPeriodId]);
 
   // ======================================================
   // CONTEXT-AWARE IMAGE RESOLUTION
   // ======================================================
-  // NOTE: Only students, teachers, classes and subjects stat cards use images.
-  // Other cards intentionally return empty images.
 
   const getDashboardImage = (type: DashboardImageType) => {
-    
-
-    if (type === "hero") {
-      return firstImage(currentSetting?.dashboardHeroImage)
-    }
-    if (type === "banner") {
-      return firstImage(currentSetting?.dashboardBannerImage)
-    }
-
-    if (type === "students") {
-      return firstImage(currentSetting?.studentPortalImage)
-    }
-
-    if (type === "teachers") {
-      return firstImage(currentSetting?.teacherPortalImage)
-    }
-
-    if (type === "classes") {
-      return firstImage(currentSetting?.classroomPlaceholderImage)
-    }
-
-    if (type === "subjects") {
-      return firstImage(currentSetting?.subjectPlaceholderImage)
-    }
-
+    if (type === "hero") return firstImage(currentSetting?.dashboardHeroImage);
+    if (type === "banner") return firstImage(currentSetting?.dashboardBannerImage);
+    if (type === "students") return firstImage(currentSetting?.studentPortalImage);
+    if (type === "teachers") return firstImage(currentSetting?.teacherPortalImage);
+    if (type === "classes") return firstImage(currentSetting?.classroomPlaceholderImage);
+    if (type === "subjects") return firstImage(currentSetting?.subjectPlaceholderImage);
     return "";
   };
 
@@ -321,47 +385,47 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
   // ======================================================
 
   const activeStudents = useMemo(
-    () => students.filter(row => row.status === "active" || !row.status),
+    () => students.filter((row) => row.status === "active" || !row.status),
     [students]
   );
 
   const activeTeachers = useMemo(
-    () => teachers.filter(row => row.active !== false),
+    () => teachers.filter((row) => row.active !== false),
     [teachers]
   );
 
   const activeClasses = useMemo(
-    () => classes.filter(row => row.active !== false),
+    () => classes.filter((row) => row.active !== false),
     [classes]
   );
 
   const activeSubjects = useMemo(
-    () => subjects.filter(row => row.active !== false),
+    () => subjects.filter((row) => row.active !== false),
     [subjects]
   );
 
   const activeClassSubjects = useMemo(
-    () => classSubjects.filter(row => row.active !== false),
+    () => classSubjects.filter((row) => row.active !== false),
     [classSubjects]
   );
 
   const activeApplicabilities = useMemo(
-    () => assessmentApplicabilities.filter(row => row.active !== false),
+    () => assessmentApplicabilities.filter((row) => row.active !== false),
     [assessmentApplicabilities]
   );
 
   const todayAttendance = useMemo(() => {
     const today = todayISO();
-    return attendance.filter(row => row.date === today);
+    return attendance.filter((row) => row.date === today);
   }, [attendance]);
 
   const presentToday = useMemo(
-    () => todayAttendance.filter(row => row.status === "present").length,
+    () => todayAttendance.filter((row) => row.status === "present").length,
     [todayAttendance]
   );
 
   const absentToday = useMemo(
-    () => todayAttendance.filter(row => row.status === "absent").length,
+    () => todayAttendance.filter((row) => row.status === "absent").length,
     [todayAttendance]
   );
 
@@ -388,14 +452,14 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
       {
         label: "School profile",
         ready: !!activeSchool,
-        route: "schools",
-        help: "Create the official school identity.",
+        route: "organizations",
+        help: "Confirm the official school identity.",
       },
       {
         label: "Branch selected",
         ready: !!activeBranch,
-        route: "branches",
-        help: "Create and select a branch/campus.",
+        route: "schoolBranchSettings",
+        help: "Confirm the active campus or branch.",
       },
       {
         label: "Academic period",
@@ -407,7 +471,7 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
         label: "Classes",
         ready: activeClasses.length > 0,
         route: "classes",
-        help: "Create classes for the selected branch.",
+        help: "Create classes for this branch.",
       },
       {
         label: "Subjects",
@@ -425,7 +489,7 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
         label: "Assessment applicability",
         ready: activeApplicabilities.length > 0,
         route: "assessmentApplicability",
-        help: "Apply assessment structure and grading rules to class subjects.",
+        help: "Apply structures and grading rules to class subjects.",
       },
       {
         label: "Scores entered",
@@ -455,27 +519,39 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
   ]);
 
   const readinessPercent = useMemo(() => {
-    const ready = reportReadiness.filter(item => item.ready).length;
+    const ready = reportReadiness.filter((item) => item.ready).length;
     return percent(ready, reportReadiness.length);
   }, [reportReadiness]);
 
   const recentStudents = useMemo(() => {
     return [...activeStudents]
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+      .sort((a, b) => safeTime(b.updatedAt) - safeTime(a.updatedAt))
       .slice(0, 5);
   }, [activeStudents]);
 
-  const recentPayments = useMemo(() => {
-    return [...payments]
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-      .slice(0, 5);
-  }, [payments]);
+  const recentActivities = useMemo<ActivityItem[]>(() => {
+    const entryActivities = assessmentEntries.map((entry) => ({
+      id: `entry-${entry.id}`,
+      title: `Score entered: ${entry.score}`,
+      subtitle: `Student #${entry.studentId} · Subject #${entry.subjectId}`,
+      icon: "📝",
+      time: safeTime(entry.updatedAt),
+      route: "assessmentEntriesPage",
+    }));
 
-  const recentEntries = useMemo(() => {
-    return [...assessmentEntries]
-      .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
-      .slice(0, 5);
-  }, [assessmentEntries]);
+    const paymentActivities = payments.map((payment) => ({
+      id: `payment-${payment.id}`,
+      title: `Payment: ${money(Number(payment.amount || 0))}`,
+      subtitle: `${payment.method || "payment"} · ${payment.date || "No date"}`,
+      icon: "💳",
+      time: safeTime(payment.updatedAt),
+      route: "fees",
+    }));
+
+    return [...entryActivities, ...paymentActivities]
+      .sort((a, b) => b.time - a.time)
+      .slice(0, 6);
+  }, [assessmentEntries, payments]);
 
   const statCards = useMemo<StatCardItem[]>(() => {
     return [
@@ -501,169 +577,46 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
   ]);
 
   // ======================================================
-  // RESPONSIVE LAYOUT
+  // PROTECTED STATES
   // ======================================================
 
-  const isMobile = viewportWidth < 720;
-  const isSmallMobile = viewportWidth < 420;
-  const isTablet = viewportWidth >= 720 && viewportWidth < 1100;
-
-  const pagePadding = isSmallMobile ? 10 : isMobile ? 12 : 20;
-  const sectionGap = isMobile ? 12 : 20;
-  const cardPadding = isMobile ? 14 : 18;
-  const cardRadius = isMobile ? 18 : 22;
-
-  const statGridColumns = isSmallMobile
-    ? "1fr"
-    : isMobile
-    ? "repeat(2, minmax(0, 1fr))"
-    : "repeat(auto-fit,minmax(180px,1fr))";
-
-  const mainGridColumns = isTablet || isMobile
-    ? "1fr"
-    : "minmax(0,1.3fr) minmax(320px,0.7fr)";
-
-  const contextGridColumns = isMobile ? "1fr" : "repeat(auto-fit,minmax(190px,1fr))";
-
-  const financeGridColumns = isSmallMobile
-    ? "1fr"
-    : isMobile
-    ? "repeat(2, minmax(0, 1fr))"
-    : "repeat(auto-fit,minmax(150px,1fr))";
-
-  const todayGridColumns = isSmallMobile ? "1fr" : "1fr 1fr";
-
-  // ======================================================
-  // STYLES
-  // ======================================================
-
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: cardRadius,
-    padding: cardPadding,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const title: React.CSSProperties = {
-    margin: 0,
-    fontSize: isMobile ? 18 : 20,
-    fontWeight: 950,
-    letterSpacing: -0.3,
-  };
-
-  const muted: React.CSSProperties = {
-    opacity: 0.68,
-    fontSize: isMobile ? 12 : 13,
-    fontWeight: 650,
-  };
-
-  const button: React.CSSProperties = {
-    padding: isMobile ? "10px 12px" : "11px 15px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: isMobile ? "9px 11px" : "10px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 800,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: isMobile ? "4px 8px" : "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: isMobile ? 10.5 : 11,
-      fontWeight: 850,
-      lineHeight: 1.2,
-    };
-  };
-
-  const imagePanel = (image?: string): React.CSSProperties => ({
-    position: "relative",
-    overflow: "hidden",
-    borderRadius: isMobile ? 20 : 28,
-    padding: isMobile ? 16 : 22,
-    color: "#fff",
-    minHeight: isMobile ? 190 : 210,
-    background: image
-      ? `linear-gradient(135deg, rgba(15,23,42,0.78), rgba(15,23,42,0.38)), url(${image}) center/cover`
-      : `linear-gradient(135deg, ${primary}, #111827)`,
-    boxShadow: "0 18px 42px rgba(0,0,0,0.18)",
-  });
-
-  const statCardStyle = (image?: string): React.CSSProperties => {
-    if (!image) {
-      return {
-        ...card,
-        textAlign: "left",
-        cursor: "pointer",
-        minWidth: 0,
-      };
-    }
-
-    return {
-      ...card,
-      textAlign: "left",
-      cursor: "pointer",
-      position: "relative",
-      overflow: "hidden",
-      color: "#fff",
-      border: "1px solid rgba(255,255,255,0.16)",
-      background: `linear-gradient(135deg, rgba(15,23,42,0.82), rgba(15,23,42,0.42)), url(${image}) center/cover`,
-      boxShadow: "0 16px 34px rgba(15,23,42,0.16)",
-      minHeight: isMobile ? 118 : 128,
-      minWidth: 0,
-    };
-  };
-
-  const statMutedStyle = (hasImage: boolean): React.CSSProperties => ({
-    ...muted,
-    fontWeight: 850,
-    opacity: hasImage ? 0.9 : muted.opacity,
-    color: hasImage ? "#fff" : undefined,
-  });
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading school branch dashboard...</div>;
+  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+    return (
+      <main className="sbd-page" style={{ "--sbd-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="sbd-state-card">
+          <div className="sbd-spinner" />
+          <h2>Opening branch dashboard...</h2>
+          <p>Checking account, school, branch, academic context, and local branch records.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            This dashboard works inside a school and branch context. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="sbd-page" style={{ "--sbd-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="sbd-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before viewing the school branch dashboard.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="sbd-page" style={{ "--sbd-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="sbd-state-card">
+          <h2>Select a branch first</h2>
+          <p>This dashboard works inside a school and branch context.</p>
+          <button type="button" className="sbd-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -672,342 +625,563 @@ export default function SchoolBranchDashboard({ navigate }: Props) {
   // ======================================================
 
   return (
-    <div
-      style={{
-        padding: pagePadding,
-        color: "var(--text)",
-        display: "grid",
-        gap: sectionGap,
-        overflowX: "hidden",
-      }}
-    >
-      {/* HERO */}
-      <section style={imagePanel(heroImage)}>
-        <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            <span style={{ ...badge(isOnline ? "green" : "red"), background: "rgba(255,255,255,0.18)", color: "#fff" }}>
-              {isOnline ? "● Online - Sync Ready" : "● Offline - Local Mode"}
-            </span>
-            <span style={{ ...badge("blue"), background: "rgba(255,255,255,0.18)", color: "#fff" }}>
-              School: {activeSchool?.name || "No school selected"}
-            </span>
-            <span style={{ ...badge("blue"), background: "rgba(255,255,255,0.18)", color: "#fff" }}>
-              Branch: {activeBranch?.name || "No branch selected"}
-            </span>
+    <main className="sbd-page" style={{ "--sbd-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section
+        className="sbd-hero"
+        style={{
+          background: heroImage
+            ? `linear-gradient(135deg, rgba(15,23,42,.80), rgba(15,23,42,.42)), url(${heroImage}) center/cover`
+            : `linear-gradient(135deg, ${primary}, #111827)`,
+        }}
+      >
+        <div className="sbd-hero-content">
+          <div className="sbd-chip-row">
+            <Chip tone={isOnline ? "green" : "red"} inverse>{isOnline ? "● Online · Sync Ready" : "● Offline · Local Mode"}</Chip>
+            <Chip tone="blue" inverse>{activeSchool?.name || "No school selected"}</Chip>
+            <Chip tone="blue" inverse>{activeBranch?.name || "No branch selected"}</Chip>
           </div>
 
-          <h1
-            style={{
-              margin: 0,
-              fontSize: isSmallMobile ? 26 : isMobile ? 30 : 36,
-              lineHeight: 1.08,
-              fontWeight: 950,
-              letterSpacing: -1,
-              wordBreak: "break-word",
-            }}
-          >
-            {activeBranch?.name || activeSchool?.name || "School Branch Command Center"}
-          </h1>
-
-          <p style={{ margin: "10px 0 0", maxWidth: isMobile ? "100%" : 780, opacity: 0.92, lineHeight: 1.6, fontSize: isMobile ? 13 : 14 }}>
-            Daily operational view for the selected school and branch: academics, attendance,
-            assessment, reports, publishing readiness and finance.
+          <h1>{activeBranch?.name || activeSchool?.name || "School Branch Command Center"}</h1>
+          <p>
+            Daily operational view for academics, attendance, assessment, reports, publishing readiness, and finance.
           </p>
 
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
-            <button style={{ ...button, background: "#fff", color: "#111" }} onClick={() => navigate?.("reports")}>
-              Open Reports Studio
-            </button>
-            <button style={{ ...ghostButton, color: "#fff", borderColor: "rgba(255,255,255,0.28)", background: "rgba(255,255,255,0.14)" }} onClick={() => navigate?.("assessmentEntriesPage")}>
-              Enter Scores
-            </button>
-            <button style={{ ...ghostButton, color: "#fff", borderColor: "rgba(255,255,255,0.28)", background: "rgba(255,255,255,0.14)" }} onClick={() => navigate?.("student-attendance")}>
-              Take Attendance
-            </button>
+          <div className="sbd-hero-actions">
+            <button type="button" className="sbd-white-btn" onClick={() => navigate?.("reports")}>Open Reports Studio</button>
+            <button type="button" className="sbd-glass-btn" onClick={() => navigate?.("assessmentEntriesPage")}>Enter Scores</button>
+            <button type="button" className="sbd-glass-btn" onClick={() => navigate?.("student-attendance")}>Take Attendance</button>
           </div>
         </div>
       </section>
 
-      {/* MAIN STATS */}
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: statGridColumns,
-          gap: isMobile ? 10 : 14,
-        }}
-      >
-        {statCards.map(item => {
+      <section className="sbd-stat-grid" aria-label="Branch statistics">
+        {statCards.map((item) => {
           const image = getDashboardImage(item.imageType);
-          const hasImage = !!image;
 
           return (
             <button
               key={item.label}
+              type="button"
+              className={`sbd-stat-card ${image ? "with-image" : ""}`}
               onClick={() => navigate?.(item.route)}
-              style={statCardStyle(image)}
-              title={hasImage ? `${item.label} image loaded from school branch settings` : item.label}
+              style={
+                image
+                  ? { backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.82), rgba(15,23,42,.42)), url(${image})` }
+                  : undefined
+              }
+              title={image ? `${item.label} image loaded from branch settings` : item.label}
             >
-              <div style={{ position: "relative", zIndex: 1 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <div style={statMutedStyle(hasImage)}>{item.label}</div>
-                  <div style={{ fontSize: isMobile ? 19 : 22 }}>{item.icon}</div>
-                </div>
-                <div style={{ marginTop: 10, fontSize: isMobile ? 25 : 30, fontWeight: 950 }}>{item.value}</div>
+              <div className="sbd-stat-top">
+                <span>{item.label}</span>
+                <b>{item.icon}</b>
               </div>
+              <strong>{item.value}</strong>
             </button>
           );
         })}
       </section>
 
-      {/* MAIN GRID */}
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: mainGridColumns,
-          gap: isMobile ? 12 : 18,
-          alignItems: "start",
-        }}
-      >
-        <div style={{ display: "grid", gap: isMobile ? 12 : 18, minWidth: 0 }}>
-          {/* ACADEMIC CONTEXT */}
-          <div style={card}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <section className="sbd-main-grid">
+        <div className="sbd-left-stack">
+          <section className="sbd-card">
+            <div className="sbd-section-head">
               <div>
-                <h2 style={title}>Current Academic Context</h2>
-                <div style={{ ...muted, marginTop: 4 }}>
-                  This is the academic session used by reports, assessment and attendance.
-                </div>
+                <h2>Current Academic Context</h2>
+                <p>This academic session is used by reports, assessment and attendance.</p>
               </div>
-              <span style={badge(readinessPercent >= 75 ? "green" : readinessPercent >= 45 ? "orange" : "red")}>
+              <Chip tone={readinessPercent >= 75 ? "green" : readinessPercent >= 45 ? "orange" : "red"}>
                 {readinessPercent}% Publishing Ready
-              </span>
+              </Chip>
             </div>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: contextGridColumns,
-                gap: 12,
-                marginTop: 16,
-              }}
-            >
-              <div style={{ ...card, boxShadow: "none", borderRadius: 16 }}>
-                <div style={muted}>Academic Structure</div>
-                <div style={{ marginTop: 8, fontSize: isMobile ? 17 : 20, fontWeight: 900 }}>
-                  {currentAcademicStructure?.name || "Not selected"}
-                </div>
-              </div>
-              <div style={{ ...card, boxShadow: "none", borderRadius: 16 }}>
-                <div style={muted}>Academic Period</div>
-                <div style={{ marginTop: 8, fontSize: isMobile ? 17 : 20, fontWeight: 900 }}>
-                  {currentAcademicPeriod?.name || "Not selected"}
-                </div>
-              </div>
-              <div style={{ ...card, boxShadow: "none", borderRadius: 16 }}>
-                <div style={muted}>Branch</div>
-                <div style={{ marginTop: 8, fontSize: isMobile ? 17 : 20, fontWeight: 900 }}>
-                  {activeBranch?.name || "Not selected"}
-                </div>
+            <div className="sbd-context-grid">
+              <MiniPanel label="Academic Structure" value={currentAcademicStructure?.name || "Not selected"} />
+              <MiniPanel label="Academic Period" value={currentAcademicPeriod?.name || "Not selected"} />
+              <MiniPanel label="Branch" value={activeBranch?.name || "Not selected"} />
+            </div>
+          </section>
+
+          <section className="sbd-card">
+            <div className="sbd-section-head">
+              <div>
+                <h2>Academic Publishing Readiness</h2>
+                <p>A trusted report card needs these setup areas ready.</p>
               </div>
             </div>
-          </div>
 
-          {/* READINESS */}
-          <div style={card}>
-            <h2 style={title}>Academic Publishing Readiness</h2>
-            <div style={{ ...muted, marginTop: 4 }}>
-              A professional report card can only be trusted when these setup areas are ready.
-            </div>
-
-            <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-              {reportReadiness.map(item => (
-                <div
-                  key={item.label}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
-                    gap: 12,
-                    alignItems: "center",
-                    padding: isMobile ? 10 : 12,
-                    borderRadius: 16,
-                    background: "rgba(0,0,0,0.025)",
-                    border: "1px solid rgba(0,0,0,0.05)",
-                  }}
-                >
+            <div className="sbd-readiness-list">
+              {reportReadiness.map((item) => (
+                <article key={item.label} className="sbd-readiness-row">
                   <div>
-                    <div style={{ fontWeight: 900 }}>{item.label}</div>
-                    <div style={{ ...muted, marginTop: 2 }}>{item.help}</div>
+                    <h3>{item.label}</h3>
+                    <p>{item.help}</p>
                   </div>
-
-                  <button
-                    onClick={() => navigate?.(item.route)}
-                    style={{
-                      ...badge(item.ready ? "green" : "orange"),
-                      border: "none",
-                      cursor: "pointer",
-                      justifySelf: isMobile ? "start" : "end",
-                    }}
-                  >
+                  <button type="button" onClick={() => navigate?.(item.route)} className={item.ready ? "ready" : "setup"}>
                     {item.ready ? "Ready" : "Setup"}
                   </button>
-                </div>
+                </article>
               ))}
             </div>
-          </div>
+          </section>
 
-          {/* FINANCE */}
-          <div style={imagePanel(bannerImage)}>
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <h2 style={{ ...title, color: "#fff" }}>Finance Snapshot</h2>
-              <div style={{ marginTop: 5, opacity: 0.88 }}>
-                Payments, income and expenses for the selected branch.
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: financeGridColumns,
-                  gap: 12,
-                  marginTop: 16,
-                }}
-              >
-                <FinanceBox label="Payments" value={money(finance.totalPayments)} isMobile={isMobile} />
-                <FinanceBox label="Income" value={money(finance.totalIncome)} isMobile={isMobile} />
-                <FinanceBox label="Expenses" value={money(finance.totalExpenses)} isMobile={isMobile} />
-                <FinanceBox label="Balance" value={money(finance.balance)} isMobile={isMobile} />
+          <section
+            className="sbd-finance-card"
+            style={{
+              background: bannerImage
+                ? `linear-gradient(135deg, rgba(15,23,42,.82), rgba(15,23,42,.48)), url(${bannerImage}) center/cover`
+                : `linear-gradient(135deg, ${primary}, #111827)`,
+            }}
+          >
+            <div className="sbd-section-head inverse">
+              <div>
+                <h2>Finance Snapshot</h2>
+                <p>Payments, income and expenses for this branch.</p>
               </div>
             </div>
-          </div>
+
+            <div className="sbd-finance-grid">
+              <FinanceBox label="Payments" value={money(finance.totalPayments)} />
+              <FinanceBox label="Income" value={money(finance.totalIncome)} />
+              <FinanceBox label="Expenses" value={money(finance.totalExpenses)} />
+              <FinanceBox label="Balance" value={money(finance.balance)} />
+            </div>
+          </section>
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div style={{ display: "grid", gap: isMobile ? 12 : 18, alignContent: "start", minWidth: 0 }}>
-          <div style={card}>
-            <h2 style={title}>Today</h2>
-            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: todayGridColumns, gap: 10 }}>
-              <TodayBox label="Attendance Records" value={todayAttendance.length} muted={muted} isMobile={isMobile} />
-              <TodayBox label="Present Rate" value={`${attendancePercent}%`} muted={muted} isMobile={isMobile} />
-              <TodayBox label="Present" value={presentToday} muted={muted} isMobile={isMobile} />
-              <TodayBox label="Absent" value={absentToday} muted={muted} isMobile={isMobile} />
+        <div className="sbd-right-stack">
+          <section className="sbd-card">
+            <div className="sbd-section-head">
+              <div>
+                <h2>Today</h2>
+                <p>{todayISO()}</p>
+              </div>
             </div>
-          </div>
 
-          <div style={card}>
-            <h2 style={title}>Quick Work</h2>
-            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+            <div className="sbd-today-grid">
+              <TodayBox label="Attendance Records" value={todayAttendance.length} />
+              <TodayBox label="Present Rate" value={`${attendancePercent}%`} />
+              <TodayBox label="Present" value={presentToday} />
+              <TodayBox label="Absent" value={absentToday} />
+            </div>
+          </section>
+
+          <section className="sbd-card">
+            <div className="sbd-section-head">
+              <div>
+                <h2>Quick Work</h2>
+                <p>Common daily tasks.</p>
+              </div>
+            </div>
+
+            <div className="sbd-quick-list">
               {[
-                ["Take Attendance", "Record today’s student attendance", "student-attendance"],
-                ["Enter Scores", "Capture assessment item scores", "assessmentEntriesPage"],
-                ["Generate Reports", "Print report cards and broadsheets", "reports"],
-                ["Class Subjects", "Manage class academic delivery", "classSubjects"],
-                ["Assessment Setup", "Configure assessment applicability", "assessmentApplicability"],
-              ].map(([name, desc, route]) => (
-                <button
-                  key={name}
-                  onClick={() => navigate?.(String(route))}
-                  style={{
-                    textAlign: "left",
-                    padding: isMobile ? 11 : 13,
-                    borderRadius: 16,
-                    border: "1px solid rgba(0,0,0,0.07)",
-                    background: "var(--surface)",
-                    color: "var(--text)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div style={{ fontWeight: 900 }}>{name}</div>
-                  <div style={{ ...muted, marginTop: 3 }}>{desc}</div>
+                ["Take Attendance", "Record today’s student attendance", "student-attendance", "📅"],
+                ["Enter Scores", "Capture assessment item scores", "assessmentEntriesPage", "📝"],
+                ["Generate Reports", "Print report cards and broadsheets", "reports", "📄"],
+                ["Class Subjects", "Manage class academic delivery", "classSubjects", "📖"],
+                ["Assessment Setup", "Configure assessment applicability", "assessmentApplicability", "🎯"],
+              ].map(([name, desc, route, icon]) => (
+                <button key={name} type="button" onClick={() => navigate?.(String(route))}>
+                  <span>{icon}</span>
+                  <div>
+                    <strong>{name}</strong>
+                    <small>{desc}</small>
+                  </div>
                 </button>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div style={card}>
-            <h2 style={title}>Recent Students</h2>
-            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-              {recentStudents.map(student => (
-                <div key={student.id} style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+          <section className="sbd-card">
+            <div className="sbd-section-head">
+              <div>
+                <h2>Recent Students</h2>
+                <p>Recently updated student records.</p>
+              </div>
+              <button type="button" className="sbd-link-btn" onClick={() => navigate?.("students")}>View all</button>
+            </div>
+
+            <div className="sbd-person-list">
+              {recentStudents.map((student) => (
+                <button key={student.id} type="button" onClick={() => navigate?.("students")}>
                   <div
+                    className="sbd-person-avatar"
                     style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 15,
                       background: student.photo
                         ? `url(${student.photo}) center/cover`
                         : `linear-gradient(135deg, ${primary}, #111827)`,
-                      color: "#fff",
-                      display: "grid",
-                      placeItems: "center",
-                      fontWeight: 950,
-                      flex: "0 0 42px",
                     }}
                   >
                     {!student.photo && student.fullName.slice(0, 1).toUpperCase()}
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 850, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {student.fullName}
-                    </div>
-                    <div style={{ ...muted, marginTop: 2 }}>{student.admissionNumber || "No admission number"}</div>
+                  <div>
+                    <strong>{student.fullName}</strong>
+                    <small>{student.admissionNumber || "No admission number"}</small>
                   </div>
-                </div>
+                </button>
               ))}
-              {!recentStudents.length && <div style={muted}>No students yet.</div>}
+
+              {!recentStudents.length && <p className="sbd-muted-empty">No students yet.</p>}
             </div>
-          </div>
+          </section>
 
-          <div style={card}>
-            <h2 style={title}>Recent Activity</h2>
-            <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-              {recentEntries.map(entry => (
-                <div key={`entry-${entry.id}`} style={{ paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontWeight: 850 }}>Score entered: {entry.score}</div>
-                  <div style={{ ...muted, marginTop: 2 }}>Student #{entry.studentId} • Subject #{entry.subjectId}</div>
-                </div>
-              ))}
-
-              {recentPayments.map(payment => (
-                <div key={`payment-${payment.id}`} style={{ paddingBottom: 10, borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontWeight: 850 }}>Payment: {money(Number(payment.amount || 0))}</div>
-                  <div style={{ ...muted, marginTop: 2 }}>{payment.method} • {payment.date}</div>
-                </div>
-              ))}
-
-              {!recentEntries.length && !recentPayments.length && (
-                <div style={muted}>No recent activity yet.</div>
-              )}
+          <section className="sbd-card">
+            <div className="sbd-section-head">
+              <div>
+                <h2>Recent Activity</h2>
+                <p>Latest scores and payments.</p>
+              </div>
             </div>
-          </div>
+
+            <div className="sbd-activity-list">
+              {recentActivities.map((item) => (
+                <button key={item.id} type="button" onClick={() => navigate?.(item.route)}>
+                  <span>{item.icon}</span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <small>{item.subtitle}</small>
+                  </div>
+                </button>
+              ))}
+
+              {!recentActivities.length && <p className="sbd-muted-empty">No recent activity yet.</p>}
+            </div>
+          </section>
         </div>
       </section>
-    </div>
+    </main>
   );
 }
 
-function FinanceBox({ label, value, isMobile }: { label: string; value: string; isMobile: boolean }) {
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function Chip({ children, tone = "gray", inverse = false }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange"; inverse?: boolean }) {
+  return <span className={`sbd-chip ${tone} ${inverse ? "inverse" : ""}`}>{children}</span>;
+}
+
+function MiniPanel({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 16, padding: isMobile ? 12 : 14 }}>
-      <div style={{ opacity: 0.8, fontSize: 12, fontWeight: 850 }}>{label}</div>
-      <div style={{ marginTop: 6, fontSize: isMobile ? 18 : 22, fontWeight: 950 }}>{value}</div>
-    </div>
+    <article className="sbd-mini-panel">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
   );
 }
 
-function TodayBox({
-  label,
-  value,
-  muted,
-  isMobile,
-}: {
-  label: string;
-  value: string | number;
-  muted: React.CSSProperties;
-  isMobile: boolean;
-}) {
+function FinanceBox({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ padding: isMobile ? 12 : 14, borderRadius: 16, background: "rgba(0,0,0,0.025)" }}>
-      <div style={muted}>{label}</div>
-      <div style={{ marginTop: 6, fontSize: isMobile ? 24 : 28, fontWeight: 950 }}>{value}</div>
-    </div>
+    <article className="sbd-finance-box">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
   );
 }
+
+function TodayBox({ label, value }: { label: string; value: string | number }) {
+  return (
+    <article className="sbd-today-box">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes sbdSpin { to { transform: rotate(360deg); } }
+
+.sbd-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.sbd-page *, .sbd-page *::before, .sbd-page *::after { box-sizing: border-box; }
+.sbd-page button, .sbd-page input, .sbd-page select, .sbd-page textarea { font: inherit; max-width: 100%; }
+.sbd-page button { -webkit-tap-highlight-color: transparent; }
+
+.sbd-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.sbd-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.sbd-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.sbd-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--sbd-primary) 18%, transparent); border-top-color: var(--sbd-primary); animation: sbdSpin .8s linear infinite; }
+.sbd-primary-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--sbd-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.sbd-hero {
+  position: relative;
+  min-height: 196px;
+  display: flex;
+  align-items: flex-end;
+  border-radius: 28px;
+  padding: 16px;
+  color: #fff;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, .18);
+  overflow: hidden;
+}
+.sbd-hero-content { position: relative; z-index: 1; min-width: 0; width: 100%; }
+.sbd-hero h1 {
+  max-width: 860px;
+  margin: 12px 0 0;
+  font-size: clamp(26px, 8vw, 40px);
+  line-height: 1.04;
+  font-weight: 1000;
+  letter-spacing: -.07em;
+  overflow-wrap: anywhere;
+}
+.sbd-hero p {
+  max-width: 760px;
+  margin: 10px 0 0;
+  opacity: .92;
+  line-height: 1.58;
+  font-size: 13px;
+}
+.sbd-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.sbd-white-btn, .sbd-glass-btn {
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+.sbd-white-btn { border: 0; background: #fff; color: #111827; }
+.sbd-glass-btn { border: 1px solid rgba(255,255,255,.28); background: rgba(255,255,255,.14); color: #fff; }
+
+.sbd-chip-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.sbd-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sbd-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.sbd-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.sbd-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.sbd-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.sbd-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.sbd-chip.inverse { background: rgba(255,255,255,.18); color: #fff; }
+
+.sbd-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.sbd-stat-card {
+  min-width: 0;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 23px;
+  padding: 13px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+  background-position: center;
+  background-size: cover;
+}
+.sbd-stat-card.with-image { color: #fff; border-color: rgba(255,255,255,.16); box-shadow: 0 16px 34px rgba(15,23,42,.16); }
+.sbd-stat-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sbd-stat-top span, .sbd-stat-card strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbd-stat-top span { color: var(--muted, #64748b); font-size: 12px; font-weight: 950; }
+.sbd-stat-card.with-image .sbd-stat-top span { color: rgba(255,255,255,.92); }
+.sbd-stat-top b { font-size: 20px; flex: 0 0 auto; }
+.sbd-stat-card strong { margin-top: 10px; font-size: 28px; font-weight: 1000; letter-spacing: -.05em; }
+
+.sbd-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+.sbd-left-stack, .sbd-right-stack { min-width: 0; display: grid; gap: 10px; align-content: start; }
+.sbd-card, .sbd-finance-card {
+  min-width: 0;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+  padding: 13px;
+}
+.sbd-finance-card { color: #fff; background-size: cover; background-position: center; box-shadow: 0 18px 44px rgba(15,23,42,.18); }
+.sbd-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.sbd-section-head h2 { margin: 0; font-size: 18px; font-weight: 1000; letter-spacing: -.04em; }
+.sbd-section-head p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.45; }
+.sbd-section-head.inverse p { color: rgba(255,255,255,.86); }
+.sbd-context-grid, .sbd-finance-grid, .sbd-today-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.sbd-mini-panel, .sbd-finance-box, .sbd-today-box {
+  min-width: 0;
+  padding: 11px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .13);
+  overflow: hidden;
+}
+.sbd-finance-box { background: rgba(255,255,255,.15); border-color: rgba(255,255,255,.18); }
+.sbd-mini-panel span, .sbd-mini-panel strong,
+.sbd-finance-box span, .sbd-finance-box strong,
+.sbd-today-box span, .sbd-today-box strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sbd-mini-panel span, .sbd-finance-box span, .sbd-today-box span { color: var(--muted, #64748b); font-size: 11px; font-weight: 900; }
+.sbd-finance-box span { color: rgba(255,255,255,.8); }
+.sbd-mini-panel strong, .sbd-finance-box strong, .sbd-today-box strong { margin-top: 6px; font-size: 18px; font-weight: 1000; letter-spacing: -.04em; }
+.sbd-finance-box strong { color: #fff; }
+
+.sbd-readiness-list, .sbd-quick-list, .sbd-person-list, .sbd-activity-list { display: grid; gap: 8px; margin-top: 12px; }
+.sbd-readiness-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, .08);
+  border: 1px solid rgba(148, 163, 184, .12);
+}
+.sbd-readiness-row h3, .sbd-readiness-row p { margin: 0; display: block; overflow: hidden; text-overflow: ellipsis; }
+.sbd-readiness-row h3 { font-size: 13px; font-weight: 1000; }
+.sbd-readiness-row p { margin-top: 3px; color: var(--muted, #64748b); font-size: 11px; font-weight: 750; line-height: 1.45; }
+.sbd-readiness-row button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 11px;
+  font-size: 11px;
+  font-weight: 1000;
+  cursor: pointer;
+}
+.sbd-readiness-row button.ready { background: rgba(34,197,94,.12); color: #16a34a; }
+.sbd-readiness-row button.setup { background: rgba(245,158,11,.14); color: #b45309; }
+
+.sbd-quick-list button, .sbd-person-list button, .sbd-activity-list button {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 18px;
+  padding: 10px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  text-align: left;
+  cursor: pointer;
+}
+.sbd-quick-list button > span, .sbd-activity-list button > span {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--sbd-primary) 12%, #fff);
+}
+.sbd-person-avatar {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  color: #fff;
+  font-weight: 1000;
+}
+.sbd-quick-list div, .sbd-person-list div, .sbd-activity-list div { min-width: 0; }
+.sbd-quick-list strong, .sbd-quick-list small,
+.sbd-person-list strong, .sbd-person-list small,
+.sbd-activity-list strong, .sbd-activity-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sbd-quick-list strong, .sbd-person-list strong, .sbd-activity-list strong { font-size: 13px; font-weight: 1000; }
+.sbd-quick-list small, .sbd-person-list small, .sbd-activity-list small { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 750; }
+.sbd-link-btn { border: 0; background: transparent; color: var(--sbd-primary); font-size: 12px; font-weight: 1000; cursor: pointer; }
+.sbd-muted-empty { margin: 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+@media (min-width: 560px) {
+  .sbd-page { padding: 10px; }
+  .sbd-context-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sbd-finance-grid, .sbd-today-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 760px) {
+  .sbd-page { padding: 12px; }
+  .sbd-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sbd-main-grid { gap: 12px; }
+}
+
+@media (min-width: 1100px) {
+  .sbd-page { padding: 16px; }
+  .sbd-hero { min-height: 220px; padding: 22px; }
+  .sbd-stat-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; }
+  .sbd-main-grid { grid-template-columns: minmax(0, 1.32fr) minmax(320px, .68fr); gap: 14px; }
+  .sbd-left-stack, .sbd-right-stack { gap: 14px; }
+  .sbd-card, .sbd-finance-card { padding: 16px; }
+  .sbd-context-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sbd-finance-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 420px) {
+  .sbd-page { padding: 6px; }
+  .sbd-hero { border-radius: 22px; padding: 12px; min-height: 190px; }
+  .sbd-hero-actions { display: grid; grid-template-columns: 1fr; }
+  .sbd-white-btn, .sbd-glass-btn { width: 100%; }
+  .sbd-stat-grid { grid-template-columns: 1fr; gap: 7px; }
+  .sbd-stat-card { min-height: 98px; border-radius: 20px; padding: 12px; }
+  .sbd-card, .sbd-finance-card { border-radius: 20px; padding: 11px; }
+  .sbd-readiness-row { grid-template-columns: 1fr; }
+  .sbd-readiness-row button { justify-self: start; }
+  .sbd-chip { font-size: 10px; }
+}
+`;

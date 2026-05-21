@@ -3,32 +3,34 @@
 /**
  * assessmentApplicability.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL ASSESSMENT APPLICABILITY ENGINE
+ * MOBILE-FIRST SECURE ASSESSMENT APPLICABILITY ENGINE
  * ---------------------------------------------------------
  *
- * IMPORTANT DB ALIGNMENT FIX
- * ---------------------------------------------------------
- * This version fixes the TypeScript errors caused by assuming
- * fields that do NOT exist in your current db.ts:
- *
- * - ClassSubject does NOT have organizationId
- * - AssessmentEntry does NOT have assessmentApplicabilityId
- * - AssessmentEntry is linked by classSubjectId / assessmentStructureId / gradingSystemId
- * - Avoids mixing ?? and || without parentheses
- *
- * ACTUAL ARCHITECTURE
- * ---------------------------------------------------------
- * ClassSubject is the real delivery context.
+ * Architecture:
+ * ClassSubject is the delivery context.
  * AssessmentApplicability activates assessment rules for a ClassSubject.
  * AssessmentEntry records are counted by matching:
  * - classSubjectId
  * - assessmentStructureId
  * - gradingSystemId when available
  *
- * ClassSubject -> AssessmentApplicability -> AssessmentEntries -> ComputedResults -> Reports
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Mobile-first WhatsApp-style cards.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
+
+import { SyncStatus } from "../lib/constants/syncStatus";
+import { prepareSyncData } from "../lib/sync/syncUtils";
 
 import {
   db,
@@ -48,13 +50,16 @@ import {
   Teacher,
 } from "../lib/db";
 
-import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
-
 // ======================================================
 // TYPES
 // ======================================================
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -93,27 +98,49 @@ type ApplicabilityView = {
   entryCount: number;
 };
 
+const emptyForm = (): FormState => ({
+  classSubjectId: undefined,
+  organizationId: undefined,
+  assessmentStructureId: undefined,
+  gradingSystemId: undefined,
+  active: true,
+  locked: false,
+  isElective: false,
+  groupCode: "core",
+});
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function AssessmentApplicabilityPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [rows, setRows] = useState<AssessmentApplicability[]>([]);
@@ -140,29 +167,73 @@ export default function AssessmentApplicabilityPage() {
   const [filterGradingSystemId, setFilterGradingSystemId] = useState<number | undefined>();
   const [filterOrganizationId, setFilterOrganizationId] = useState<number | undefined>();
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive" | "locked">("all");
-  const [filterGroupCode, setFilterGroupCode] = useState<string>("");
+  const [filterGroupCode, setFilterGroupCode] = useState("");
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
-  const [form, setForm] = useState<FormState>({
-    classSubjectId: undefined,
-    organizationId: undefined,
-    assessmentStructureId: undefined,
-    gradingSystemId: undefined,
-    active: true,
-    locked: false,
-    isElective: false,
-    groupCode: "core",
-  });
+  // ======================================================
+  // AUTH PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const clearData = () => {
+    setRows([]);
+    setClassSubjects([]);
+    setCurriculumSubjects([]);
+    setCurriculums([]);
+    setPathways([]);
+    setSubjects([]);
+    setClasses([]);
+    setTeachers([]);
+    setAcademicStructures([]);
+    setPeriods([]);
+    setOrganizations([]);
+    setStructures([]);
+    setGradings([]);
+    setEntries([]);
+  };
+
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setPageLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
+      setPageLoading(true);
 
       const [
         applicabilityRows,
@@ -196,52 +267,54 @@ export default function AssessmentApplicabilityPage() {
         db.assessmentEntries.toArray(),
       ]);
 
-      setRows(applicabilityRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClassSubjects(classSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setCurriculumSubjects(curriculumSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setCurriculums(curriculumRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setPathways(pathwayRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setSubjects(subjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClasses(classRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setTeachers(teacherRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAcademicStructures(academicStructureRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setPeriods(periodRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setOrganizations(organizationRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setStructures(structureRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setGradings(gradingRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setEntries(entryRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setRows(applicabilityRows.filter(sameTenant));
+      setClassSubjects(classSubjectRows.filter(sameTenant));
+      setCurriculumSubjects(curriculumSubjectRows.filter(sameTenant));
+      setCurriculums(curriculumRows.filter(sameTenant));
+      setPathways(pathwayRows.filter(sameTenant));
+      setSubjects(subjectRows.filter(sameTenant));
+      setClasses(classRows.filter(sameTenant));
+      setTeachers(teacherRows.filter(sameTenant));
+      setAcademicStructures(academicStructureRows.filter(sameTenant));
+      setPeriods(periodRows.filter(sameTenant));
+      setOrganizations(organizationRows.filter(sameTenant));
+      setStructures(structureRows.filter(sameTenant));
+      setGradings(gradingRows.filter(sameTenant));
+      setEntries(entryRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load assessment applicability data:", error);
+      clearData();
       alert("Failed to load assessment applicability data");
     } finally {
-      setLoading(false);
+      setPageLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
-  const subjectMap = useMemo(() => new Map(subjects.map(row => [row.id, row])), [subjects]);
-  const classMap = useMemo(() => new Map(classes.map(row => [row.id, row])), [classes]);
-  const teacherMap = useMemo(() => new Map(teachers.map(row => [row.id, row])), [teachers]);
-  const structureMap = useMemo(() => new Map(academicStructures.map(row => [row.id, row])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(periods.map(row => [row.id, row])), [periods]);
-  const organizationMap = useMemo(() => new Map(organizations.map(row => [row.id, row])), [organizations]);
-  const assessmentStructureMap = useMemo(() => new Map(structures.map(row => [row.id, row])), [structures]);
-  const gradingMap = useMemo(() => new Map(gradings.map(row => [row.id, row])), [gradings]);
-  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map(row => [row.id, row])), [curriculumSubjects]);
-  const curriculumMap = useMemo(() => new Map(curriculums.map(row => [row.id, row])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map(row => [row.id, row])), [pathways]);
+  const subjectMap = useMemo(() => new Map(subjects.map((row) => [row.id, row])), [subjects]);
+  const classMap = useMemo(() => new Map(classes.map((row) => [row.id, row])), [classes]);
+  const teacherMap = useMemo(() => new Map(teachers.map((row) => [row.id, row])), [teachers]);
+  const structureMap = useMemo(() => new Map(academicStructures.map((row) => [row.id, row])), [academicStructures]);
+  const periodMap = useMemo(() => new Map(periods.map((row) => [row.id, row])), [periods]);
+  const organizationMap = useMemo(() => new Map(organizations.map((row) => [row.id, row])), [organizations]);
+  const assessmentStructureMap = useMemo(() => new Map(structures.map((row) => [row.id, row])), [structures]);
+  const gradingMap = useMemo(() => new Map(gradings.map((row) => [row.id, row])), [gradings]);
+  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map((row) => [row.id, row])), [curriculumSubjects]);
+  const curriculumMap = useMemo(() => new Map(curriculums.map((row) => [row.id, row])), [curriculums]);
+  const pathwayMap = useMemo(() => new Map(pathways.map((row) => [row.id, row])), [pathways]);
 
   const classSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
     return classSubjects
-      .filter(row => row.active !== false)
-      .map(row => {
+      .filter((row) => row.active !== false)
+      .map((row) => {
         const id = row.id || 0;
         const subject = subjectMap.get(row.subjectId);
         const classRow = classMap.get(row.classId);
@@ -286,7 +359,7 @@ export default function AssessmentApplicabilityPage() {
   ]);
 
   const classSubjectOptionMap = useMemo(
-    () => new Map(classSubjectOptions.map(row => [row.id, row])),
+    () => new Map(classSubjectOptions.map((row) => [row.id, row])),
     [classSubjectOptions]
   );
 
@@ -296,25 +369,25 @@ export default function AssessmentApplicabilityPage() {
   }, [form.classSubjectId, classSubjectOptionMap]);
 
   const availableStructures = useMemo(() => {
-    if (!selectedClassSubject) return structures.filter(row => row.active !== false);
+    if (!selectedClassSubject) return structures.filter((row) => row.active !== false);
 
-    return structures.filter(row => {
+    return structures.filter((row) => {
       if (row.active === false) return false;
       return row.academicStructureId === selectedClassSubject.raw.academicStructureId;
     });
   }, [selectedClassSubject, structures]);
 
   const availableGradings = useMemo(() => {
-    return gradings.filter(row => row.active !== false);
+    return gradings.filter((row) => row.active !== false);
   }, [gradings]);
 
   const entryCountByApplicability = useMemo(() => {
     const map = new Map<number, number>();
 
-    rows.forEach(app => {
+    rows.forEach((app) => {
       if (!app.id) return;
 
-      const count = entries.filter(entry => {
+      const count = entries.filter((entry) => {
         if (entry.classSubjectId !== app.classSubjectId) return false;
         if (entry.assessmentStructureId !== app.assessmentStructureId) return false;
 
@@ -332,7 +405,7 @@ export default function AssessmentApplicabilityPage() {
   }, [rows, entries]);
 
   const groupCodes = useMemo(() => {
-    return Array.from(new Set(rows.map(row => row.groupCode).filter(Boolean) as string[])).sort();
+    return Array.from(new Set(rows.map((row) => row.groupCode).filter(Boolean) as string[])).sort();
   }, [rows]);
 
   // ======================================================
@@ -345,7 +418,7 @@ export default function AssessmentApplicabilityPage() {
     const isSelectedElective =
       selectedClassSubject.curriculumType === "elective" || selectedClassSubject.raw.type === "elective";
 
-    setForm(prev => ({
+    setForm((prev) => ({
       ...prev,
       organizationId: prev.organizationId || selectedClassSubject.organizationId,
       isElective: prev.isElective || isSelectedElective,
@@ -353,7 +426,7 @@ export default function AssessmentApplicabilityPage() {
       assessmentStructureId: prev.assessmentStructureId || availableStructures[0]?.id,
       gradingSystemId:
         prev.gradingSystemId ||
-        availableGradings.find(row => row.default)?.id ||
+        availableGradings.find((row) => row.default)?.id ||
         availableGradings[0]?.id,
     }));
   }, [form.classSubjectId, selectedClassSubject, availableStructures, availableGradings]);
@@ -363,7 +436,7 @@ export default function AssessmentApplicabilityPage() {
   // ======================================================
 
   const viewRows = useMemo<ApplicabilityView[]>(() => {
-    return rows.map(row => {
+    return rows.map((row) => {
       const classSubject = classSubjectOptionMap.get(row.classSubjectId);
       const assessmentStructure = assessmentStructureMap.get(row.assessmentStructureId);
       const grading = row.gradingSystemId ? gradingMap.get(row.gradingSystemId) : undefined;
@@ -384,7 +457,7 @@ export default function AssessmentApplicabilityPage() {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
+      .filter((item) => {
         const row = item.row;
         const option = item.classSubject;
 
@@ -437,17 +510,17 @@ export default function AssessmentApplicabilityPage() {
   ]);
 
   const uncoveredClassSubjects = useMemo(() => {
-    const covered = new Set(rows.filter(row => row.active !== false).map(row => row.classSubjectId));
-    return classSubjectOptions.filter(option => !covered.has(option.id));
+    const covered = new Set(rows.filter((row) => row.active !== false).map((row) => row.classSubjectId));
+    return classSubjectOptions.filter((option) => !covered.has(option.id));
   }, [rows, classSubjectOptions]);
 
   const summary = useMemo(() => {
     return {
       total: rows.length,
-      active: rows.filter(row => row.active).length,
-      inactive: rows.filter(row => !row.active).length,
-      locked: rows.filter(row => row.locked).length,
-      elective: rows.filter(row => row.isElective).length,
+      active: rows.filter((row) => row.active).length,
+      inactive: rows.filter((row) => !row.active).length,
+      locked: rows.filter((row) => row.locked).length,
+      elective: rows.filter((row) => row.isElective).length,
       classSubjects: classSubjectOptions.length,
       uncovered: uncoveredClassSubjects.length,
       entries: entries.length,
@@ -459,25 +532,19 @@ export default function AssessmentApplicabilityPage() {
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
   };
 
   const openCreate = () => {
-    if (!activeBranchId) {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
       alert("Select a branch first before creating assessment applicability.");
       return;
     }
 
     setEditMode(false);
     setForm({
-      classSubjectId: undefined,
-      organizationId: undefined,
-      assessmentStructureId: undefined,
-      gradingSystemId: availableGradings.find(row => row.default)?.id || availableGradings[0]?.id,
-      active: true,
-      locked: false,
-      isElective: false,
-      groupCode: "core",
+      ...emptyForm(),
+      gradingSystemId: availableGradings.find((row) => row.default)?.id || availableGradings[0]?.id,
     });
     setDrawerOpen(true);
   };
@@ -503,7 +570,8 @@ export default function AssessmentApplicabilityPage() {
   // ======================================================
 
   const validate = () => {
-    if (!branchId) return "Select a branch first";
+    if (!authenticated || !accountId) return "Sign in first";
+    if (!schoolId || !branchId) return "Select a branch first";
     if (!form.classSubjectId) return "Select class subject";
     if (!form.assessmentStructureId) return "Select assessment structure";
 
@@ -517,7 +585,7 @@ export default function AssessmentApplicabilityPage() {
       return "Assessment structure must belong to the same academic structure as the class subject";
     }
 
-    const duplicate = rows.find(row => {
+    const duplicate = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
       return (
         row.classSubjectId === Number(form.classSubjectId) &&
@@ -535,10 +603,7 @@ export default function AssessmentApplicabilityPage() {
 
   const save = async () => {
     const error = validate();
-    if (error) {
-      alert(error);
-      return;
-    }
+    if (error) return alert(error);
 
     try {
       setSaving(true);
@@ -550,6 +615,8 @@ export default function AssessmentApplicabilityPage() {
         classSubject?.raw.type === "elective";
 
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         classSubjectId: Number(form.classSubjectId),
         assessmentStructureId: Number(form.assessmentStructureId),
@@ -563,6 +630,9 @@ export default function AssessmentApplicabilityPage() {
 
       if (editMode && form.id) {
         await db.assessmentApplicabilities.update(form.id, {
+          accountId: payload.accountId,
+          schoolId: payload.schoolId,
+          branchId: payload.branchId,
           classSubjectId: payload.classSubjectId,
           assessmentStructureId: payload.assessmentStructureId,
           gradingSystemId: payload.gradingSystemId,
@@ -599,12 +669,13 @@ export default function AssessmentApplicabilityPage() {
         `This applicability has ${item.entryCount} assessment entry record(s). Delete anyway?`
       );
       if (!confirmed) return;
-    } else {
-      if (!confirm("Delete this applicability?")) return;
+    } else if (!confirm("Delete this applicability?")) {
+      return;
     }
 
     await db.assessmentApplicabilities.update(item.row.id, {
       isDeleted: true,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
     });
 
@@ -615,6 +686,7 @@ export default function AssessmentApplicabilityPage() {
     if (!row.id) return;
     await db.assessmentApplicabilities.update(row.id, {
       active: !row.active,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
     });
     await load();
@@ -624,6 +696,7 @@ export default function AssessmentApplicabilityPage() {
     if (!row.id) return;
     await db.assessmentApplicabilities.update(row.id, {
       locked: !row.locked,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
     });
     await load();
@@ -631,6 +704,11 @@ export default function AssessmentApplicabilityPage() {
 
   const createMissingForUncovered = async () => {
     if (!uncoveredClassSubjects.length) return;
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Select a branch first.");
+      return;
+    }
+
     if (!confirm(`Create applicability records for ${uncoveredClassSubjects.length} uncovered class subject(s)?`)) return;
 
     try {
@@ -638,7 +716,7 @@ export default function AssessmentApplicabilityPage() {
 
       for (const option of uncoveredClassSubjects) {
         const structure = structures.find(
-          item => item.active !== false && item.academicStructureId === option.raw.academicStructureId
+          (item) => item.active !== false && item.academicStructureId === option.raw.academicStructureId
         );
 
         if (!structure?.id) continue;
@@ -646,10 +724,12 @@ export default function AssessmentApplicabilityPage() {
         const elective = option.curriculumType === "elective" || option.raw.type === "elective";
 
         const payload = prepareSyncData({
+          accountId,
+          schoolId,
           branchId,
           classSubjectId: option.id,
           assessmentStructureId: structure.id,
-          gradingSystemId: availableGradings.find(row => row.default)?.id || availableGradings[0]?.id,
+          gradingSystemId: availableGradings.find((row) => row.default)?.id || availableGradings[0]?.id,
           organizationId: option.organizationId,
           active: true,
           locked: false,
@@ -670,99 +750,46 @@ export default function AssessmentApplicabilityPage() {
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading assessment applicability engine...</div>;
+  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+    return (
+      <main className="aa-page" style={{ "--aa-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aa-state-card">
+          <div className="aa-spinner" />
+          <h2>Opening applicability engine...</h2>
+          <p>Checking account, school, branch, class subjects, and assessment rules.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Assessment applicability belongs to a branch. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="aa-page" style={{ "--aa-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aa-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing assessment applicability.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="aa-page" style={{ "--aa-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="aa-state-card">
+          <h2>Select a branch first</h2>
+          <p>Assessment applicability belongs to one active school branch.</p>
+          <button type="button" className="aa-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -771,376 +798,1011 @@ export default function AssessmentApplicabilityPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Assessment Applicability</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Activating assessment rules for class subjects in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="aa-page" style={{ "--aa-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="aa-hero">
+        <div className="aa-hero-left">
+          <div className="aa-hero-icon">📚</div>
+          <div className="aa-title-wrap">
+            <p>Activation Engine</p>
+            <h2>Assessment Applicability</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button type="button" onClick={createMissingForUncovered} style={ghostButton} disabled={saving}>
+        <div className="aa-hero-actions">
+          <button type="button" className="aa-ghost-btn" onClick={createMissingForUncovered} disabled={saving || !uncoveredClassSubjects.length}>
             Auto-cover Missing
           </button>
-          <button type="button" onClick={openCreate} style={button}>
-            + Create Applicability
+          <button type="button" className="aa-primary-btn" onClick={openCreate}>
+            + Create
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Applicability Records</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.total}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.active}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Class Subjects</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.classSubjects}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Uncovered</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.uncovered}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Entry Records</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.entries}</div>
-        </div>
-      </div>
+      <section className="aa-summary-grid" aria-label="Assessment applicability summary">
+        <SummaryCard label="Records" value={summary.total} icon="📌" />
+        <SummaryCard label="Active" value={summary.active} icon="✅" />
+        <SummaryCard label="Class Subjects" value={summary.classSubjects} icon="📖" />
+        <SummaryCard label="Uncovered" value={summary.uncovered} icon="⚠️" />
+        <SummaryCard label="Entries" value={summary.entries} icon="📝" />
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="aa-filter-card">
         <input
           placeholder="Search class, subject, structure, grading, group..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
-        <select value={filterClassId || ""} onChange={e => setFilterClassId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterClassId || ""} onChange={(event) => setFilterClassId(Number(event.target.value) || undefined)}>
           <option value="">All Classes</option>
-          {classes.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {classes.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterSubjectId || ""} onChange={e => setFilterSubjectId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterSubjectId || ""} onChange={(event) => setFilterSubjectId(Number(event.target.value) || undefined)}>
           <option value="">All Subjects</option>
-          {subjects.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {subjects.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterStructureId || ""} onChange={e => setFilterStructureId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterStructureId || ""} onChange={(event) => setFilterStructureId(Number(event.target.value) || undefined)}>
           <option value="">All Academic Structures</option>
-          {academicStructures.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {academicStructures.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterPeriodId || ""} onChange={e => setFilterPeriodId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterPeriodId || ""} onChange={(event) => setFilterPeriodId(Number(event.target.value) || undefined)}>
           <option value="">All Academic Periods</option>
-          {periods.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {periods.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterAssessmentStructureId || ""} onChange={e => setFilterAssessmentStructureId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterAssessmentStructureId || ""} onChange={(event) => setFilterAssessmentStructureId(Number(event.target.value) || undefined)}>
           <option value="">All Assessment Structures</option>
-          {structures.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {structures.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterGradingSystemId || ""} onChange={e => setFilterGradingSystemId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterGradingSystemId || ""} onChange={(event) => setFilterGradingSystemId(Number(event.target.value) || undefined)}>
           <option value="">All Grading Systems</option>
-          {gradings.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {gradings.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterOrganizationId || ""} onChange={e => setFilterOrganizationId(Number(e.target.value) || undefined)} style={input}>
+        <select value={filterOrganizationId || ""} onChange={(event) => setFilterOrganizationId(Number(event.target.value) || undefined)}>
           <option value="">All Organizations</option>
-          {organizations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
+          {organizations.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select value={filterGroupCode} onChange={e => setFilterGroupCode(e.target.value)} style={input}>
+        <select value={filterGroupCode} onChange={(event) => setFilterGroupCode(event.target.value)}>
           <option value="">All Groups</option>
-          {groupCodes.map(code => <option key={code} value={code}>{code}</option>)}
+          {groupCodes.map((code) => <option key={code} value={code}>{code}</option>)}
         </select>
 
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)} style={input}>
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as any)}>
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
           <option value="locked">Locked</option>
         </select>
-      </div>
+      </section>
 
       {!classSubjectOptions.length && (
-        <div style={{ ...card, marginTop: 18, textAlign: "center", padding: 30 }}>
-          No class subjects available. Create Class Subjects first before activating assessments.
-        </div>
+        <section className="aa-empty-card">
+          <div className="aa-empty-icon">📖</div>
+          <h3>No class subjects available</h3>
+          <p>Create Class Subjects first before activating assessments.</p>
+        </section>
       )}
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredRows.map(item => {
+      <section className="aa-list">
+        {filteredRows.map((item) => {
           const row = item.row;
           const option = item.classSubject;
 
           return (
-            <div key={row.id} style={card}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <div style={{ fontSize: 18, fontWeight: 900 }}>{option?.subjectName || "Unknown Subject"}</div>
-                    {option?.subjectCode && <span style={badge("gray")}>{option.subjectCode}</span>}
-                    <span style={badge(row.active ? "green" : "red")}>{row.active ? "Active" : "Inactive"}</span>
-                    {row.locked && <span style={badge("orange")}>Locked</span>}
-                    {row.isElective && <span style={badge("purple")}>Elective</span>}
-                    {row.groupCode && <span style={badge("blue")}>{row.groupCode}</span>}
-                  </div>
-
-                  <div style={{ marginTop: 7, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                    {option?.className || "Unknown Class"} • {option?.academicStructureName || "Unknown structure"} • {option?.academicPeriodName || "All Periods"}
-                  </div>
-
-                  <div style={{ marginTop: 7, opacity: 0.68, fontSize: 13 }}>
-                    {option?.curriculumName || "No curriculum"} • {option?.pathwayName || "No pathway"} • {option?.teacherName || "No teacher"}
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={badge("blue")}>{item.assessmentStructureName}</span>
-                    <span style={badge("purple")}>{item.gradingSystemName}</span>
-                    <span style={badge("gray")}>{item.organizationName}</span>
-                    <span style={badge(item.entryCount ? "green" : "gray")}>{item.entryCount} entry record(s)</span>
+            <article key={row.id} className="aa-entity-card">
+              <div className="aa-card-top">
+                <div className="aa-card-main">
+                  <div className="aa-card-icon">📝</div>
+                  <div>
+                    <h3>{option?.subjectName || "Unknown Subject"}</h3>
+                    <p>{option?.className || "Unknown Class"} · {option?.academicStructureName || "Unknown structure"} · {option?.academicPeriodName || "All Periods"}</p>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <button style={ghostButton} onClick={() => toggleLocked(row)}>
-                    {row.locked ? "Unlock" : "Lock"}
-                  </button>
-                  <button style={ghostButton} onClick={() => toggleActive(row)}>
-                    {row.active ? "Deactivate" : "Activate"}
-                  </button>
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
-                    Edit
-                  </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(item)}>
-                    Delete
-                  </button>
+                <div className="aa-card-status">
+                  <Chip tone={row.active ? "green" : "red"}>{row.active ? "Active" : "Inactive"}</Chip>
                 </div>
               </div>
-            </div>
+
+              <div className="aa-chip-row">
+                {option?.subjectCode && <Chip tone="gray">{option.subjectCode}</Chip>}
+                {row.locked && <Chip tone="orange">Locked</Chip>}
+                {row.isElective && <Chip tone="purple">Elective</Chip>}
+                {row.groupCode && <Chip tone="blue">{row.groupCode}</Chip>}
+              </div>
+
+              <p className="aa-subline">
+                {option?.curriculumName || "No curriculum"} · {option?.pathwayName || "No pathway"} · {option?.teacherName || "No teacher"}
+              </p>
+
+              <div className="aa-rule-grid">
+                <MiniStat label="Assessment" value={item.assessmentStructureName} />
+                <MiniStat label="Grading" value={item.gradingSystemName} />
+                <MiniStat label="Organization" value={item.organizationName} />
+                <MiniStat label="Entries" value={`${item.entryCount}`} />
+              </div>
+
+              <div className="aa-action-row">
+                <button type="button" onClick={() => toggleLocked(row)}>{row.locked ? "Unlock" : "Lock"}</button>
+                <button type="button" onClick={() => toggleActive(row)}>{row.active ? "Deactivate" : "Activate"}</button>
+                <button type="button" onClick={() => openEdit(row)}>Edit</button>
+                <button type="button" className="danger" onClick={() => remove(item)}>Delete</button>
+              </div>
+            </article>
           );
         })}
 
         {!!classSubjectOptions.length && !filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No applicability records found in this branch.
-          </div>
+          <section className="aa-empty-card">
+            <div className="aa-empty-icon">🔎</div>
+            <h3>No records found</h3>
+            <p>No applicability records match your current filters.</p>
+          </section>
         )}
-      </div>
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(650px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit Applicability" : "Create Applicability"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Activate assessment for a class subject delivery context.
-                </div>
-              </div>
+        <div className="aa-drawer-layer">
+          <button type="button" className="aa-drawer-overlay" aria-label="Close drawer" onClick={() => setDrawerOpen(false)} />
 
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+          <aside className="aa-drawer">
+            <div className="aa-drawer-head">
+              <div>
+                <p>{editMode ? "Update activation" : "New activation"}</p>
+                <h2>{editMode ? "Edit Applicability" : "Create Applicability"}</h2>
+                <span>Activate assessment rules for a class subject delivery context.</span>
+              </div>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>Class Subject</label>
+            <div className="aa-form-grid">
+              <Field label="Class Subject">
                 <select
                   value={form.classSubjectId || ""}
-                  onChange={e =>
+                  onChange={(event) =>
                     updateForm({
-                      classSubjectId: Number(e.target.value) || undefined,
+                      classSubjectId: Number(event.target.value) || undefined,
                       assessmentStructureId: undefined,
                       organizationId: undefined,
                     })
                   }
-                  style={input}
                 >
                   <option value="">Select Class Subject</option>
-                  {classSubjectOptions.map(option => (
-                    <option key={option.id} value={option.id}>
-                      {option.display}
-                    </option>
+                  {classSubjectOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{option.display}</option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
               {selectedClassSubject && (
-                <div style={{ ...card, boxShadow: "none", borderRadius: 16 }}>
-                  <div style={{ fontWeight: 900 }}>{selectedClassSubject.subjectName}</div>
-                  <div style={{ marginTop: 6, opacity: 0.7, fontSize: 13 }}>
-                    {selectedClassSubject.className} • {selectedClassSubject.academicStructureName} • {selectedClassSubject.academicPeriodName}
+                <section className="aa-selected-card">
+                  <h3>{selectedClassSubject.subjectName}</h3>
+                  <p>{selectedClassSubject.className} · {selectedClassSubject.academicStructureName} · {selectedClassSubject.academicPeriodName}</p>
+                  <div className="aa-chip-row">
+                    <Chip tone="blue">{selectedClassSubject.curriculumName}</Chip>
+                    <Chip tone="gray">{selectedClassSubject.teacherName}</Chip>
                   </div>
-                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={badge("blue")}>{selectedClassSubject.curriculumName}</span>
-                    <span style={badge("gray")}>{selectedClassSubject.teacherName}</span>
-                  </div>
-                </div>
+                </section>
               )}
 
-              <div>
-                <label style={label}>Assessment Structure</label>
+              <Field label="Assessment Structure">
                 <select
                   value={form.assessmentStructureId || ""}
-                  onChange={e => updateForm({ assessmentStructureId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ assessmentStructureId: Number(event.target.value) || undefined })}
                 >
                   <option value="">Select Assessment Structure</option>
-                  {availableStructures.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
+                  {availableStructures.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Grading System</label>
+              <Field label="Grading System">
                 <select
                   value={form.gradingSystemId || ""}
-                  onChange={e => updateForm({ gradingSystemId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ gradingSystemId: Number(event.target.value) || undefined })}
                 >
                   <option value="">No grading system</option>
-                  {availableGradings.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} {item.default ? "• Default" : ""}
-                    </option>
+                  {availableGradings.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} {item.default ? "• Default" : ""}</option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Organization</label>
+              <Field label="Organization">
                 <select
                   value={form.organizationId || ""}
-                  onChange={e => updateForm({ organizationId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ organizationId: Number(event.target.value) || undefined })}
                 >
                   <option value="">No organization</option>
-                  {organizations.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} • {item.type}
-                    </option>
+                  {organizations.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name} • {item.type}</option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
-                <div>
-                  <label style={label}>Group Code</label>
+              <div className="aa-form-two">
+                <Field label="Group Code">
                   <input
                     value={form.groupCode || ""}
-                    onChange={e => updateForm({ groupCode: e.target.value })}
+                    onChange={(event) => updateForm({ groupCode: event.target.value })}
                     placeholder="core / elective / custom"
-                    style={input}
                   />
-                </div>
+                </Field>
 
-                <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                  <input
-                    type="checkbox"
-                    checked={!!form.isElective}
-                    onChange={e => updateForm({ isElective: e.target.checked, groupCode: e.target.checked ? "elective" : form.groupCode || "core" })}
-                  />
-                  Elective
-                </label>
+                <Check
+                  label="Elective"
+                  checked={!!form.isElective}
+                  onChange={(checked) => updateForm({ isElective: checked, groupCode: checked ? "elective" : form.groupCode || "core" })}
+                />
               </div>
 
-              <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={form.active}
-                  onChange={e => updateForm({ active: e.target.checked })}
-                />
-                Active
-              </label>
-
-              <label style={{ ...card, display: "flex", gap: 10, alignItems: "center", boxShadow: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={!!form.locked}
-                  onChange={e => updateForm({ locked: e.target.checked })}
-                />
-                Locked
-              </label>
-
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
-                {saving ? "Saving..." : editMode ? "Save Changes" : "Create Applicability"}
-              </button>
+              <Check label="Active" checked={form.active} onChange={(checked) => updateForm({ active: checked })} />
+              <Check label="Locked" checked={!!form.locked} onChange={(checked) => updateForm({ locked: checked })} />
             </div>
-          </div>
+
+            <button type="button" onClick={save} disabled={saving} className="aa-save-btn">
+              {saving ? "Saving..." : editMode ? "Save Changes" : "Create Applicability"}
+            </button>
+          </aside>
         </div>
       )}
+    </main>
+  );
+}
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: number; icon: string }) {
+  return (
+    <article className="aa-summary-card">
+      <div className="aa-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`aa-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="aa-mini-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="aa-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="aa-check">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes aaSpin {
+  to { transform: rotate(360deg); }
+}
+
+.aa-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+
+.aa-page *,
+.aa-page *::before,
+.aa-page *::after {
+  box-sizing: border-box;
+}
+
+.aa-page button,
+.aa-page input,
+.aa-page select,
+.aa-page textarea {
+  font: inherit;
+  max-width: 100%;
+}
+
+.aa-page input,
+.aa-page select {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.aa-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+
+.aa-state-card h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.aa-state-card p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.aa-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 4px solid color-mix(in srgb, var(--aa-primary) 18%, transparent);
+  border-top-color: var(--aa-primary);
+  animation: aaSpin .8s linear infinite;
+}
+
+.aa-primary-btn,
+.aa-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--aa-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.aa-primary-btn:disabled,
+.aa-save-btn:disabled,
+.aa-ghost-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.aa-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--aa-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+
+.aa-hero-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.aa-hero-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--aa-primary);
+  color: #fff;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--aa-primary) 28%, transparent);
+  font-size: 22px;
+}
+
+.aa-title-wrap {
+  min-width: 0;
+}
+
+.aa-title-wrap p,
+.aa-title-wrap h2,
+.aa-title-wrap span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aa-title-wrap p {
+  margin: 0 0 2px;
+  color: var(--aa-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.aa-title-wrap h2 {
+  margin: 0;
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 1000;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
+
+.aa-title-wrap span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.aa-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aa-ghost-btn,
+.aa-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.aa-action-row button.danger {
+  color: #dc2626;
+  background: rgba(239, 68, 68, .08);
+  border-color: rgba(239, 68, 68, .12);
+}
+
+.aa-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.aa-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+
+.aa-summary-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--aa-primary) 12%, #fff);
+}
+
+.aa-summary-card div:last-child {
+  min-width: 0;
+}
+
+.aa-summary-card strong,
+.aa-summary-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aa-summary-card strong {
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.aa-summary-card span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.aa-filter-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .055);
+}
+
+.aa-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.aa-entity-card,
+.aa-empty-card {
+  min-width: 0;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #fff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+}
+
+.aa-entity-card {
+  padding: 13px;
+}
+
+.aa-empty-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 210px;
+  padding: 22px;
+  text-align: center;
+  border-style: dashed;
+}
+
+.aa-empty-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--aa-primary) 12%, #fff);
+  font-size: 28px;
+}
+
+.aa-empty-card h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 1000;
+}
+
+.aa-empty-card p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.aa-card-top,
+.aa-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.aa-card-top {
+  justify-content: space-between;
+}
+
+.aa-card-main {
+  flex: 1 1 auto;
+}
+
+.aa-card-main > div:last-child,
+.aa-card-status {
+  min-width: 0;
+}
+
+.aa-card-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--aa-primary) 12%, #fff);
+}
+
+.aa-card-main h3,
+.aa-card-main p,
+.aa-subline {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aa-card-main h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 1000;
+  letter-spacing: -.035em;
+}
+
+.aa-card-main p,
+.aa-subline {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.aa-subline {
+  margin-top: 9px;
+}
+
+.aa-chip-row,
+.aa-action-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.aa-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aa-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.aa-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.aa-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.aa-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.aa-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.aa-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+
+.aa-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.aa-mini-stat {
+  min-width: 0;
+  display: block;
+  padding: 9px;
+  border-radius: 17px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .13);
+  overflow: hidden;
+}
+
+.aa-mini-stat span,
+.aa-mini-stat strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aa-mini-stat span {
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.aa-mini-stat strong {
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.aa-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.aa-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, .52);
+}
+
+.aa-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(94vw, 560px);
+  max-width: 100vw;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  padding: 14px;
+  box-shadow: -24px 0 70px rgba(15, 23, 42, .22);
+}
+
+.aa-drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0 12px;
+  background: var(--surface, #fff);
+}
+
+.aa-drawer-head div {
+  min-width: 0;
+}
+
+.aa-drawer-head p {
+  margin: 0;
+  color: var(--aa-primary);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.aa-drawer-head h2,
+.aa-drawer-head span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.aa-drawer-head h2 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.aa-drawer-head span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.aa-drawer-head button {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 15px;
+  background: #fff;
+  font-weight: 1000;
+  cursor: pointer;
+}
+
+.aa-form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.aa-form-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.aa-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aa-field > span {
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.aa-check,
+.aa-selected-card {
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(148, 163, 184, .09);
+  border: 1px solid rgba(148, 163, 184, .14);
+}
+
+.aa-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 850;
+}
+
+.aa-check input {
+  width: 18px;
+  min-height: 18px;
+  flex: 0 0 auto;
+}
+
+.aa-selected-card h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 1000;
+}
+
+.aa-selected-card p {
+  margin: 5px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.aa-save-btn {
+  width: 100%;
+  margin-top: 14px;
+}
+
+@media (min-width: 680px) {
+  .aa-page {
+    padding: 12px;
+  }
+
+  .aa-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .aa-filter-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aa-rule-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .aa-form-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .aa-page {
+    padding: 16px;
+  }
+
+  .aa-summary-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .aa-filter-card {
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  }
+
+  .aa-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .aa-page {
+    padding: 6px;
+  }
+
+  .aa-hero {
+    flex-direction: column;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .aa-hero-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aa-summary-grid {
+    gap: 6px;
+  }
+
+  .aa-summary-card {
+    padding: 10px;
+    border-radius: 19px;
+  }
+
+  .aa-entity-card,
+  .aa-empty-card {
+    border-radius: 20px;
+  }
+
+  .aa-card-top {
+    flex-direction: column;
+  }
+
+  .aa-action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .aa-action-row button {
+    width: 100%;
+    padding: 0 8px;
+  }
+
+  .aa-drawer {
+    width: min(96vw, 560px);
+    padding: 12px;
+  }
+}
+`;

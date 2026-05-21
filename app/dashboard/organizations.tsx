@@ -1,30 +1,30 @@
 "use client";
 
 /**
- * Organizations.tsx
+ * organizations.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL ORGANIZATION MANAGEMENT PAGE
+ * MOBILE-FIRST SECURE ORGANIZATION MANAGEMENT PAGE
  * ---------------------------------------------------------
  *
  * DB table: organizations
  *
  * Organization represents departments, faculties, houses,
- * clubs, committees and administrative units inside a branch.
+ * clubs, committees, and administrative units inside a branch.
  *
- * It connects to:
- * - Classes
- * - Subjects
- * - Students
- * - Teachers
- * - Curriculums
- * - Finance records
- * - Assessment configuration
- *
- * Context-aware:
- * Active School -> Active Branch -> Organizations
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Mobile-first cards and drawer UI.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -40,8 +40,6 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
@@ -54,6 +52,13 @@ type OrganizationType =
   | "club"
   | "committee"
   | "administration";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -77,6 +82,44 @@ type OrganizationView = {
   curriculumCount: number;
   financeCount: number;
   assessmentStructureCount: number;
+  totalUsage: number;
+};
+
+const organizationTypes: OrganizationType[] = [
+  "department",
+  "faculty",
+  "house",
+  "club",
+  "committee",
+  "administration",
+];
+
+const emptyForm: FormState = {
+  parentOrganizationId: undefined,
+  name: "",
+  type: "department",
+  description: "",
+  photo: "",
+  bannerImage: "",
+  active: true,
+};
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+const typeLabel = (type?: string) => {
+  if (!type) return "Organization";
+  return type.charAt(0).toUpperCase() + type.slice(1);
+};
+
+const typeTone = (type?: OrganizationType): "green" | "blue" | "gray" | "orange" | "purple" => {
+  if (type === "department") return "blue";
+  if (type === "faculty") return "purple";
+  if (type === "house") return "green";
+  if (type === "club") return "orange";
+  if (type === "committee") return "gray";
+  return "blue";
 };
 
 // ======================================================
@@ -84,16 +127,27 @@ type OrganizationView = {
 // ======================================================
 
 export default function OrganizationsPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -119,22 +173,62 @@ export default function OrganizationsPage() {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
-  const [form, setForm] = useState<FormState>({
-    parentOrganizationId: undefined,
-    name: "",
-    type: "department",
-    description: "",
-    photo: "",
-    bannerImage: "",
-    active: true,
-  });
+  // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setRows([]);
+    setStudents([]);
+    setTeachers([]);
+    setClasses([]);
+    setSubjects([]);
+    setCurriculums([]);
+    setIncomes([]);
+    setExpenses([]);
+    setAssessmentStructures([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -160,43 +254,18 @@ export default function OrganizationsPage() {
         db.assessmentStructures.toArray(),
       ]);
 
-      setRows(
-        organizationRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setStudents(
-        studentRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setTeachers(
-        teacherRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setClasses(
-        classRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setSubjects(
-        subjectRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setCurriculums(
-        curriculumRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setIncomes(
-        incomeRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setExpenses(
-        expenseRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
-
-      setAssessmentStructures(
-        assessmentStructureRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setRows(organizationRows.filter(sameTenant));
+      setStudents(studentRows.filter(sameTenant));
+      setTeachers(teacherRows.filter(sameTenant));
+      setClasses(classRows.filter(sameTenant));
+      setSubjects(subjectRows.filter(sameTenant));
+      setCurriculums(curriculumRows.filter(sameTenant));
+      setIncomes(incomeRows.filter(sameTenant));
+      setExpenses(expenseRows.filter(sameTenant));
+      setAssessmentStructures(assessmentStructureRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load organizations:", error);
+      clearData();
       alert("Failed to load organizations");
     } finally {
       setLoading(false);
@@ -205,20 +274,21 @@ export default function OrganizationsPage() {
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
   const organizationMap = useMemo(
-    () => new Map(rows.map(row => [row.id, row])),
+    () => new Map(rows.map((row) => [row.id, row])),
     [rows]
   );
 
   const availableParents = useMemo(() => {
     return rows
-      .filter(row => {
+      .filter((row) => {
         if (editMode && form.id && row.id === form.id) return false;
         return row.active !== false;
       })
@@ -230,27 +300,45 @@ export default function OrganizationsPage() {
   // ======================================================
 
   const viewRows = useMemo<OrganizationView[]>(() => {
-    return rows.map(row => {
+    return rows.map((row) => {
       const id = row.id || 0;
       const parent = row.parentOrganizationId
         ? organizationMap.get(row.parentOrganizationId)
         : undefined;
 
+      const childrenCount = rows.filter((child) => child.parentOrganizationId === id).length;
+      const studentCount = students.filter((student) => student.organizationId === id).length;
+      const teacherCount = teachers.filter((teacher) => teacher.organizationId === id).length;
+      const classCount = classes.filter((item) => item.organizationId === id).length;
+      const subjectCount = subjects.filter((item) => item.organizationId === id).length;
+      const curriculumCount = curriculums.filter((item) => item.organizationId === id).length;
       const financeCount =
-        incomes.filter(income => income.organizationId === id).length +
-        expenses.filter(expense => expense.organizationId === id).length;
+        incomes.filter((income) => income.organizationId === id).length +
+        expenses.filter((expense) => expense.organizationId === id).length;
+      const assessmentStructureCount = assessmentStructures.filter(
+        (item) => item.organizationId === id
+      ).length;
 
       return {
         row,
         parentName: parent?.name || "No parent",
-        childrenCount: rows.filter(child => child.parentOrganizationId === id).length,
-        studentCount: students.filter(student => student.organizationId === id).length,
-        teacherCount: teachers.filter(teacher => teacher.organizationId === id).length,
-        classCount: classes.filter(item => item.organizationId === id).length,
-        subjectCount: subjects.filter(item => item.organizationId === id).length,
-        curriculumCount: curriculums.filter(item => item.organizationId === id).length,
+        childrenCount,
+        studentCount,
+        teacherCount,
+        classCount,
+        subjectCount,
+        curriculumCount,
         financeCount,
-        assessmentStructureCount: assessmentStructures.filter(item => item.organizationId === id).length,
+        assessmentStructureCount,
+        totalUsage:
+          childrenCount +
+          studentCount +
+          teacherCount +
+          classCount +
+          subjectCount +
+          curriculumCount +
+          financeCount +
+          assessmentStructureCount,
       };
     });
   }, [
@@ -270,7 +358,7 @@ export default function OrganizationsPage() {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
+      .filter((item) => {
         const row = item.row;
 
         if (filterParentId && row.parentOrganizationId !== filterParentId) return false;
@@ -295,16 +383,26 @@ export default function OrganizationsPage() {
       });
   }, [viewRows, search, filterParentId, filterType, filterStatus]);
 
+  const summary = useMemo(() => {
+    return {
+      total: rows.length,
+      active: rows.filter((row) => row.active !== false).length,
+      departments: rows.filter((row) => row.type === "department").length,
+      housesClubs: rows.filter((row) => row.type === "house" || row.type === "club").length,
+      linkedRecords: viewRows.reduce((sum, item) => sum + item.totalUsage, 0),
+    };
+  }, [rows, viewRows]);
+
   // ======================================================
   // FORM HELPERS
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
   };
 
   const fileToBase64 = (file: File) => {
-    return new Promise<string>(resolve => {
+    return new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
       reader.readAsDataURL(file);
@@ -317,41 +415,35 @@ export default function OrganizationsPage() {
     updateForm({ [field]: value });
   };
 
-  const openCreate = () => {
-    if (!activeBranchId) {
-      alert("Select a branch first before creating an organization.");
-      return;
+  const requireTenant = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return false;
     }
 
+    return true;
+  };
+
+  const openCreate = () => {
+    if (!requireTenant()) return;
+
     setEditMode(false);
-
-    setForm({
-      parentOrganizationId: undefined,
-      name: "",
-      type: "department",
-      description: "",
-      photo: "",
-      bannerImage: "",
-      active: true,
-    });
-
+    setForm(emptyForm);
     setDrawerOpen(true);
   };
 
   const openEdit = (row: Organization) => {
     setEditMode(true);
-
     setForm({
       id: row.id,
       parentOrganizationId: row.parentOrganizationId,
       name: row.name,
-      type: row.type,
+      type: row.type as OrganizationType,
       description: row.description || "",
       photo: row.photo || "",
       bannerImage: row.bannerImage || "",
       active: row.active ?? true,
     });
-
     setDrawerOpen(true);
   };
 
@@ -360,7 +452,8 @@ export default function OrganizationsPage() {
   // ======================================================
 
   const validate = () => {
-    if (!activeBranchId) return "Select a branch first";
+    if (!authenticated || !accountId) return "Sign in first";
+    if (!schoolId || !branchId) return "Select a branch first";
     if (!form.name.trim()) return "Enter organization name";
     if (!form.type) return "Select organization type";
 
@@ -368,7 +461,7 @@ export default function OrganizationsPage() {
       return "An organization cannot be its own parent";
     }
 
-    const duplicate = rows.find(row => {
+    const duplicate = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
 
       return (
@@ -379,9 +472,7 @@ export default function OrganizationsPage() {
       );
     });
 
-    if (duplicate) {
-      return "An organization with this name, type and parent already exists";
-    }
+    if (duplicate) return "An organization with this name, type and parent already exists";
 
     return null;
   };
@@ -398,6 +489,8 @@ export default function OrganizationsPage() {
       setSaving(true);
 
       const payload = prepareSyncData({
+        accountId,
+        schoolId,
         branchId,
         parentOrganizationId: form.parentOrganizationId
           ? Number(form.parentOrganizationId)
@@ -412,18 +505,9 @@ export default function OrganizationsPage() {
 
       if (editMode && form.id) {
         await db.organizations.update(form.id, {
-          parentOrganizationId: payload.parentOrganizationId,
-          name: payload.name,
-          type: payload.type,
-          description: payload.description,
-          photo: payload.photo,
-          bannerImage: payload.bannerImage,
-          active: payload.active,
-          updatedAt: payload.updatedAt,
-          version: payload.version,
-          deviceId: payload.deviceId,
-          synced: payload.synced,
-          isDeleted: payload.isDeleted,
+          ...payload,
+          id: form.id,
+          isDeleted: false,
         });
       } else {
         await db.organizations.add(payload);
@@ -439,31 +523,19 @@ export default function OrganizationsPage() {
     }
   };
 
-  const remove = async (id?: number) => {
-    if (!id) return;
+  const remove = async (item: OrganizationView) => {
+    if (!item.row.id) return;
 
-    const usage = viewRows.find(item => item.row.id === id);
-    const totalUsage = usage
-      ? usage.childrenCount +
-        usage.studentCount +
-        usage.teacherCount +
-        usage.classCount +
-        usage.subjectCount +
-        usage.curriculumCount +
-        usage.financeCount +
-        usage.assessmentStructureCount
-      : 0;
-
-    if (totalUsage) {
+    if (item.totalUsage) {
       const proceed = confirm(
-        `This organization has ${totalUsage} related record(s). Delete anyway?`
+        `This organization has ${item.totalUsage} related record(s). Delete anyway?`
       );
       if (!proceed) return;
-    } else {
-      if (!confirm("Delete this organization?")) return;
+    } else if (!confirm("Delete this organization?")) {
+      return;
     }
 
-    await db.organizations.update(id, {
+    await db.organizations.update(item.row.id, {
       isDeleted: true,
       updatedAt: Date.now(),
     });
@@ -483,108 +555,46 @@ export default function OrganizationsPage() {
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const typeTone = (type: OrganizationType): "green" | "blue" | "gray" | "orange" | "purple" => {
-    if (type === "department") return "blue";
-    if (type === "faculty") return "purple";
-    if (type === "house") return "green";
-    if (type === "club") return "orange";
-    if (type === "committee") return "gray";
-    return "blue";
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading organizations...</div>;
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="org-page" style={{ "--org-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="org-state-card">
+          <div className="org-spinner" />
+          <h2>Opening organizations...</h2>
+          <p>Checking account, branch, organizations, and related records.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Organizations belong to a branch. Select a school and branch from the sidebar before managing organizations.
-          </p>
-        </div>
-      </div>
+      <main className="org-page" style={{ "--org-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="org-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing organizations.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="org-page" style={{ "--org-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="org-state-card">
+          <h2>Select a branch first</h2>
+          <p>Organizations belong to one active school branch.</p>
+          <button type="button" className="org-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -593,371 +603,413 @@ export default function OrganizationsPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Organizations</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Managing organizations in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="org-page" style={{ "--org-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="org-hero">
+        <div className="org-hero-left">
+          <div className="org-hero-icon">🏛️</div>
+          <div className="org-title-wrap">
+            <p>Branch Structure</p>
+            <h2>Organizations</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button onClick={openCreate} style={button}>
+        <button type="button" className="org-primary-btn" onClick={openCreate}>
           + Create Organization
         </button>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Organizations</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{rows.length}</div>
-        </div>
+      <section className="org-summary-grid" aria-label="Organization summary">
+        <SummaryCard label="Organizations" value={summary.total} icon="🏛️" />
+        <SummaryCard label="Active" value={summary.active} icon="✅" />
+        <SummaryCard label="Departments" value={summary.departments} icon="📘" />
+        <SummaryCard label="Houses / Clubs" value={summary.housesClubs} icon="🎭" />
+        <SummaryCard label="Linked Records" value={summary.linkedRecords} icon="🔗" />
+      </section>
 
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Departments</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>
-            {rows.filter(row => row.type === "department").length}
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Houses / Clubs</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>
-            {rows.filter(row => row.type === "house" || row.type === "club").length}
-          </div>
-        </div>
-
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>
-            {rows.filter(row => row.active !== false).length}
-          </div>
-        </div>
-      </div>
-
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="org-filter-card">
         <input
-          placeholder="Search organization, type, description, parent..."
+          placeholder="Search organization, type, parent, description..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
-        <select
-          value={filterParentId || ""}
-          onChange={e => setFilterParentId(Number(e.target.value) || undefined)}
-          style={input}
-        >
+        <select value={filterParentId || ""} onChange={(event) => setFilterParentId(Number(event.target.value) || undefined)}>
           <option value="">All Parents</option>
-          {rows.map(row => (
-            <option key={row.id} value={row.id}>
-              {row.name}
-            </option>
-          ))}
+          {rows.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
         </select>
 
-        <select
-          value={filterType}
-          onChange={e => setFilterType(e.target.value as any)}
-          style={input}
-        >
+        <select value={filterType} onChange={(event) => setFilterType(event.target.value as "all" | OrganizationType)}>
           <option value="all">All Types</option>
-          <option value="department">Department</option>
-          <option value="faculty">Faculty</option>
-          <option value="house">House</option>
-          <option value="club">Club</option>
-          <option value="committee">Committee</option>
-          <option value="administration">Administration</option>
+          {organizationTypes.map((type) => <option key={type} value={type}>{typeLabel(type)}</option>)}
         </select>
 
-        <select
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as any)}
-          style={input}
-        >
+        <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as any)}>
           <option value="all">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
-      </div>
+      </section>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredRows.map(item => {
+      <section className="org-list">
+        {filteredRows.map((item) => {
           const row = item.row;
 
           return (
-            <div key={row.id} style={{ ...card, padding: 0, overflow: "hidden" }}>
+            <article key={row.id} className="org-entity-card">
               {row.bannerImage && (
                 <div
-                  style={{
-                    height: 84,
-                    backgroundImage: `linear-gradient(135deg, rgba(15,23,42,0.42), rgba(15,23,42,0.10)), url(${row.bannerImage})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
+                  className="org-card-banner"
+                  style={{ backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.44), rgba(15,23,42,.08)), url(${row.bannerImage})` }}
                 />
               )}
 
-              <div
-                style={{
-                  padding: 16,
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: 18,
-                      background: row.photo
-                        ? `url(${row.photo}) center/cover`
-                        : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 950,
-                      flex: "0 0 56px",
-                    }}
-                  >
-                    {!row.photo && row.name.slice(0, 2).toUpperCase()}
-                  </div>
+              <div className="org-card-body">
+                <div className="org-card-top">
+                  <Avatar name={row.name} photo={row.photo} primary={primary} />
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <div style={{ fontSize: 18, fontWeight: 900 }}>{row.name}</div>
-                      <span style={badge(typeTone(row.type))}>{row.type}</span>
-                      <span style={badge(row.active === false ? "red" : "green")}>
-                        {row.active === false ? "Inactive" : "Active"}
-                      </span>
-                    </div>
+                  <div className="org-card-main">
+                    <h3>{row.name}</h3>
+                    <p>Parent: {item.parentName}</p>
 
-                    <div style={{ marginTop: 6, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                      Parent: {item.parentName}
-                      {row.description ? ` • ${row.description}` : ""}
-                    </div>
-
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>{item.childrenCount} children</span>
-                      <span style={badge("green")}>{item.studentCount} students</span>
-                      <span style={badge("green")}>{item.teacherCount} teachers</span>
-                      <span style={badge("gray")}>{item.classCount} classes</span>
-                      <span style={badge("gray")}>{item.subjectCount} subjects</span>
-                      <span style={badge("orange")}>{item.financeCount} finance</span>
+                    <div className="org-chip-row">
+                      <Chip tone={typeTone(row.type as OrganizationType)}>{typeLabel(row.type)}</Chip>
+                      <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "Inactive" : "Active"}</Chip>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <button style={ghostButton} onClick={() => toggleActive(row)}>
-                    {row.active === false ? "Activate" : "Deactivate"}
-                  </button>
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
-                    Edit
-                  </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row.id)}>
-                    Delete
-                  </button>
+                {row.description && <p className="org-description">{row.description}</p>}
+
+                <div className="org-stat-grid">
+                  <MiniStat label="Children" value={item.childrenCount} />
+                  <MiniStat label="Students" value={item.studentCount} />
+                  <MiniStat label="Teachers" value={item.teacherCount} />
+                  <MiniStat label="Classes" value={item.classCount} />
+                  <MiniStat label="Subjects" value={item.subjectCount} />
+                  <MiniStat label="Finance" value={item.financeCount} />
+                </div>
+
+                <div className="org-action-row">
+                  <button type="button" onClick={() => toggleActive(row)}>{row.active === false ? "Activate" : "Deactivate"}</button>
+                  <button type="button" onClick={() => openEdit(row)}>Edit</button>
+                  <button type="button" className="danger" onClick={() => remove(item)}>Delete</button>
                 </div>
               </div>
-            </div>
+            </article>
           );
         })}
 
-        {!filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No organizations found in this branch.
-          </div>
-        )}
-      </div>
+        {!filteredRows.length && <EmptyCard text="No organizations found in this branch." />}
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(560px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 18,
-              }}
-            >
+        <div className="org-drawer-layer">
+          <button type="button" className="org-drawer-overlay" aria-label="Close drawer" onClick={() => setDrawerOpen(false)} />
+
+          <aside className="org-drawer">
+            <div className="org-drawer-head">
               <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit Organization" : "Create Organization"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
+                <p>Organization Setup</p>
+                <h2>{editMode ? "Edit Organization" : "Create Organization"}</h2>
+                <span>
                   This organization will be saved under {activeBranch?.name || "the selected branch"}
                   {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
-                </div>
+                </span>
               </div>
-
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>Organization Name</label>
-                <input
-                  value={form.name}
-                  onChange={e => updateForm({ name: e.target.value })}
-                  placeholder="e.g. Mathematics Department, Red House"
-                  style={input}
-                />
-              </div>
+            <div className="org-form-grid">
+              <Field label="Organization Name">
+                <input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} placeholder="e.g. Mathematics Department, Red House" />
+              </Field>
 
-              <div>
-                <label style={label}>Type</label>
-                <select
-                  value={form.type}
-                  onChange={e => updateForm({ type: e.target.value as OrganizationType })}
-                  style={input}
-                >
-                  <option value="department">Department</option>
-                  <option value="faculty">Faculty</option>
-                  <option value="house">House</option>
-                  <option value="club">Club</option>
-                  <option value="committee">Committee</option>
-                  <option value="administration">Administration</option>
+              <Field label="Type">
+                <select value={form.type} onChange={(event) => updateForm({ type: event.target.value as OrganizationType })}>
+                  {organizationTypes.map((type) => <option key={type} value={type}>{typeLabel(type)}</option>)}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Parent Organization</label>
-                <select
-                  value={form.parentOrganizationId || ""}
-                  onChange={e =>
-                    updateForm({ parentOrganizationId: Number(e.target.value) || undefined })
-                  }
-                  style={input}
-                >
+              <Field label="Parent Organization">
+                <select value={form.parentOrganizationId || ""} onChange={(event) => updateForm({ parentOrganizationId: Number(event.target.value) || undefined })}>
                   <option value="">No parent</option>
-                  {availableParents.map(row => (
-                    <option key={row.id} value={row.id}>
-                      {row.name} • {row.type}
-                    </option>
-                  ))}
+                  {availableParents.map((row) => <option key={row.id} value={row.id}>{row.name} • {typeLabel(row.type)}</option>)}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Description</label>
-                <textarea
-                  value={form.description || ""}
-                  onChange={e => updateForm({ description: e.target.value })}
-                  placeholder="Brief description"
-                  rows={4}
-                  style={{ ...input, resize: "vertical" }}
-                />
-              </div>
+              <Field label="Description">
+                <textarea value={form.description || ""} onChange={(event) => updateForm({ description: event.target.value })} placeholder="Brief description" rows={4} />
+              </Field>
 
-              <label style={{ ...card, display: "flex", gap: 10, alignItems: "center" }}>
-                <input
-                  type="checkbox"
-                  checked={form.active !== false}
-                  onChange={e => updateForm({ active: e.target.checked })}
-                />
-                Active
+              <label className="org-check">
+                <input type="checkbox" checked={form.active !== false} onChange={(event) => updateForm({ active: event.target.checked })} />
+                <span>Active</span>
               </label>
 
-              <div>
-                <label style={label}>Photo</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => handleImageUpload("photo", e.target.files?.[0])}
-                  style={input}
-                />
-                {form.photo && (
-                  <img
-                    src={form.photo}
-                    alt="Organization"
-                    style={{ height: 88, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
-                  />
-                )}
-              </div>
+              <Field label="Photo">
+                <input type="file" accept="image/*" onChange={(event) => handleImageUpload("photo", event.target.files?.[0])} />
+                {form.photo && <img src={form.photo} alt="Organization" className="org-preview-photo" />}
+              </Field>
 
-              <div>
-                <label style={label}>Banner Image</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => handleImageUpload("bannerImage", e.target.files?.[0])}
-                  style={input}
-                />
-                {form.bannerImage && (
-                  <img
-                    src={form.bannerImage}
-                    alt="Organization banner"
-                    style={{ width: "100%", height: 120, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
-                  />
-                )}
-              </div>
+              <Field label="Banner Image">
+                <input type="file" accept="image/*" onChange={(event) => handleImageUpload("bannerImage", event.target.files?.[0])} />
+                {form.bannerImage && <img src={form.bannerImage} alt="Organization banner" className="org-preview-banner" />}
+              </Field>
 
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+              <button type="button" onClick={save} disabled={saving} className="org-save-btn">
                 {saving ? "Saving..." : editMode ? "Save Changes" : "Create Organization"}
               </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
+    </main>
+  );
+}
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="org-summary-card">
+      <div className="org-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+  return (
+    <div
+      className="org-avatar"
+      style={{ background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))` }}
+    >
+      {!photo && name.slice(0, 2).toUpperCase()}
     </div>
   );
 }
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`org-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="org-mini-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="org-empty-card">
+      <div className="org-empty-icon">🏛️</div>
+      <h3>No organizations found</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="org-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes orgSpin { to { transform: rotate(360deg); } }
+
+.org-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.org-page *, .org-page *::before, .org-page *::after { box-sizing: border-box; }
+.org-page button, .org-page input, .org-page select, .org-page textarea { font: inherit; max-width: 100%; }
+.org-page img { max-width: 100%; }
+.org-page input,
+.org-page select,
+.org-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+.org-page textarea { padding-top: 10px; resize: vertical; }
+
+.org-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.org-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.org-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.org-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--org-primary) 18%, transparent); border-top-color: var(--org-primary); animation: orgSpin .8s linear infinite; }
+
+.org-primary-btn,
+.org-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--org-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.org-save-btn { width: 100%; }
+.org-primary-btn:disabled,
+.org-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.org-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--org-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+.org-hero-left { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.org-hero-icon { width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: var(--org-primary); color: #fff; box-shadow: 0 12px 26px color-mix(in srgb, var(--org-primary) 28%, transparent); font-size: 22px; }
+.org-title-wrap { min-width: 0; }
+.org-title-wrap p, .org-title-wrap h2, .org-title-wrap span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-title-wrap p { margin: 0 0 2px; color: var(--org-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.org-title-wrap h2 { margin: 0; font-size: clamp(19px, 5vw, 28px); font-weight: 1000; letter-spacing: -.06em; line-height: 1; }
+.org-title-wrap span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+.org-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.org-summary-card { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 22px; background: var(--surface, #fff); border: 1px solid rgba(148, 163, 184, .2); box-shadow: 0 12px 28px rgba(15, 23, 42, .04); overflow: hidden; }
+.org-summary-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--org-primary) 12%, #fff); }
+.org-summary-card div:last-child { min-width: 0; }
+.org-summary-card strong, .org-summary-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-summary-card strong { font-size: 22px; font-weight: 1000; letter-spacing: -.05em; }
+.org-summary-card span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 850; }
+
+.org-filter-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 10px; padding: 10px; border-radius: 24px; background: var(--surface, #fff); border: 1px solid rgba(148, 163, 184, .2); box-shadow: 0 16px 40px rgba(15, 23, 42, .055); }
+.org-list { display: grid; gap: 10px; margin-top: 10px; }
+.org-entity-card,
+.org-empty-card { min-width: 0; border-radius: 24px; background: linear-gradient(135deg, #fff, #f8fafc); border: 1px solid rgba(148, 163, 184, .2); box-shadow: 0 12px 28px rgba(15, 23, 42, .045); overflow: hidden; }
+.org-card-banner { height: 92px; background-size: cover; background-position: center; }
+.org-card-body { padding: 13px; }
+.org-card-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.org-avatar { width: 58px; height: 58px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 19px; color: #fff; font-weight: 1000; box-shadow: 0 12px 24px rgba(15, 23, 42, .12); }
+.org-card-main { min-width: 0; flex: 1; }
+.org-card-main h3, .org-card-main p, .org-description { display: block; overflow: hidden; text-overflow: ellipsis; }
+.org-card-main h3 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -.035em; }
+.org-card-main p, .org-description { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.4; }
+.org-description { margin-top: 9px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; white-space: normal; }
+.org-chip-row, .org-action-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.org-chip { max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 950; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.org-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.org-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.org-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.org-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.org-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.org-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+.org-stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.org-mini-stat { min-width: 0; padding: 9px; border-radius: 17px; background: rgba(148, 163, 184, .09); border: 1px solid rgba(148, 163, 184, .13); overflow: hidden; }
+.org-mini-stat strong, .org-mini-stat span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-mini-stat strong { font-size: 17px; font-weight: 1000; }
+.org-mini-stat span { margin-top: 2px; color: var(--muted, #64748b); font-size: 10px; font-weight: 850; }
+.org-action-row button { min-height: 40px; border: 1px solid rgba(148, 163, 184, .24); border-radius: 999px; padding: 0 13px; background: var(--surface, #fff); color: var(--text, #0f172a); font-size: 12px; font-weight: 950; cursor: pointer; }
+.org-action-row button.danger { color: #dc2626; background: rgba(239, 68, 68, .08); border-color: rgba(239, 68, 68, .12); }
+.org-empty-card { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; padding: 22px; text-align: center; border-style: dashed; }
+.org-empty-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 22px; background: color-mix(in srgb, var(--org-primary) 12%, #fff); font-size: 28px; }
+.org-empty-card h3 { margin: 0; font-size: 18px; font-weight: 1000; }
+.org-empty-card p { margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+
+.org-drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.org-drawer-overlay { position: absolute; inset: 0; border: 0; background: rgba(15, 23, 42, .52); }
+.org-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: min(94vw, 600px); max-width: 100vw; overflow-y: auto; overflow-x: hidden; background: var(--surface, #fff); color: var(--text, #0f172a); padding: 14px; box-shadow: -24px 0 70px rgba(15, 23, 42, .22); }
+.org-drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 0 12px; background: var(--surface, #fff); }
+.org-drawer-head div { min-width: 0; }
+.org-drawer-head p { margin: 0; color: var(--org-primary); font-size: 11px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.org-drawer-head h2, .org-drawer-head span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.org-drawer-head h2 { margin: 2px 0 0; font-size: 22px; font-weight: 1000; letter-spacing: -.05em; }
+.org-drawer-head span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.45; }
+.org-drawer-head button { width: 38px; height: 38px; flex: 0 0 auto; border: 1px solid rgba(148, 163, 184, .24); border-radius: 15px; background: #fff; font-weight: 1000; cursor: pointer; }
+.org-form-grid { display: grid; gap: 12px; }
+.org-field { display: grid; gap: 6px; min-width: 0; }
+.org-field > span { color: var(--muted, #64748b); font-size: 11px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.org-check { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 18px; background: rgba(148, 163, 184, .09); border: 1px solid rgba(148, 163, 184, .14); font-weight: 850; }
+.org-check input { width: 18px; min-height: 18px; flex: 0 0 auto; }
+.org-preview-photo { width: 94px; height: 82px; border-radius: 16px; margin-top: 8px; object-fit: cover; }
+.org-preview-banner { width: 100%; height: 126px; border-radius: 16px; margin-top: 8px; object-fit: cover; }
+.org-save-btn { width: 100%; }
+
+@media (min-width: 680px) {
+  .org-page { padding: 12px; }
+  .org-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .org-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1040px) {
+  .org-page { padding: 16px; }
+  .org-summary-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .org-filter-card { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .org-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .org-page { padding: 6px; }
+  .org-hero { flex-direction: column; border-radius: 22px; padding: 10px; }
+  .org-primary-btn { width: 100%; }
+  .org-summary-grid { gap: 6px; }
+  .org-summary-card { padding: 10px; border-radius: 19px; }
+  .org-entity-card, .org-empty-card { border-radius: 20px; }
+  .org-card-body { padding: 11px; }
+  .org-card-top { align-items: flex-start; }
+  .org-avatar { width: 52px; height: 52px; flex-basis: 52px; }
+  .org-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .org-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .org-action-row button { width: 100%; padding: 0 8px; }
+  .org-action-row button.danger { grid-column: 1 / -1; }
+  .org-drawer { width: min(96vw, 600px); padding: 12px; }
+}
+`;

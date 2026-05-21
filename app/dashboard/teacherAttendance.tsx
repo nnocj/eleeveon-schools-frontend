@@ -3,40 +3,43 @@
 /**
  * teacherAttendance.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL TEACHER ATTENDANCE PAGE
+ * MOBILE-FIRST SECURE TEACHER ATTENDANCE PAGE
  * ---------------------------------------------------------
  *
- * DB-safe, school/branch-context-aware rewrite.
+ * DB table: teacherAttendance
+ * Supporting table: teachers
  *
- * Expected architecture:
- * Active School -> Active Branch -> Teachers -> Teacher Attendance
- *
- * IMPORTANT:
- * TeacherAttendance in db.ts only supports:
+ * Actual DB model reminder:
+ * TeacherAttendance supports:
+ * - schoolId
  * - branchId
  * - teacherId
  * - date
  * - clockIn?
  * - clockOut?
  *
- * So this page does NOT use fake fields like:
- * - staffId
- * - subjectSpecialization
- * - departmentName
- * - status
+ * Architecture:
+ * Active Account -> Active School -> Active Branch -> Teachers -> Teacher Attendance
+ *
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Saves one row per teacher per selected date.
+ * - No fake fields like staffId, departmentName, status, subjectSpecialization.
+ * - Mobile-first attendance cards and responsive controls.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
-import {
-  db,
-  Teacher,
-  TeacherAttendance,
-} from "../lib/db";
-
-import { prepareSyncData } from "../lib/sync/syncUtils";
+import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useActiveBranch } from "../context/active-branch-context";
+
+import { db, Teacher, TeacherAttendance } from "../lib/db";
+import { prepareSyncData } from "../lib/sync/syncUtils";
 
 // ======================================================
 // TYPES
@@ -51,6 +54,13 @@ type AttendanceMap = Record<
 >;
 
 type TeacherStatus = "present" | "incomplete" | "not_marked";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 // ======================================================
 // HELPERS
@@ -67,7 +77,7 @@ const formatRole = (role?: Teacher["role"]) => {
   if (!role) return "Teacher";
   return role
     .split("_")
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 };
 
@@ -77,21 +87,44 @@ const getTeacherStatus = (row?: { clockIn?: string; clockOut?: string }): Teache
   return "not_marked";
 };
 
+function statusTone(status: TeacherStatus): "green" | "orange" | "gray" {
+  if (status === "present") return "green";
+  if (status === "incomplete") return "orange";
+  return "gray";
+}
+
+function statusLabel(status: TeacherStatus) {
+  if (status === "present") return "Present";
+  if (status === "incomplete") return "Incomplete";
+  return "Not Marked";
+}
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function TeacherAttendancePage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -110,10 +143,52 @@ export default function TeacherAttendancePage() {
   const [attendanceMap, setAttendanceMap] = useState<AttendanceMap>({});
 
   // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
+
+  // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setTeachers([]);
+    setAttendanceRows([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -124,15 +199,14 @@ export default function TeacherAttendancePage() {
 
       setTeachers(
         teacherRows
-          .filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
+          .filter((row) => sameTenant(row) && row.active !== false)
           .sort((a, b) => a.fullName.localeCompare(b.fullName))
       );
 
-      setAttendanceRows(
-        teacherAttendanceRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setAttendanceRows(teacherAttendanceRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load teacher attendance:", error);
+      clearData();
       alert("Failed to load teacher attendance");
     } finally {
       setLoading(false);
@@ -141,7 +215,8 @@ export default function TeacherAttendancePage() {
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // HYDRATE ATTENDANCE FOR SELECTED DATE
@@ -156,8 +231,8 @@ export default function TeacherAttendancePage() {
     const next: AttendanceMap = {};
 
     attendanceRows
-      .filter(row => row.date === date)
-      .forEach(row => {
+      .filter((row) => row.date === date)
+      .forEach((row) => {
         next[row.teacherId] = {
           clockIn: row.clockIn || "",
           clockOut: row.clockOut || "",
@@ -173,7 +248,7 @@ export default function TeacherAttendancePage() {
 
   const roles = useMemo(() => {
     const set = new Set<Teacher["role"]>();
-    teachers.forEach(row => {
+    teachers.forEach((row) => {
       if (row.role) set.add(row.role);
     });
     return Array.from(set);
@@ -182,7 +257,7 @@ export default function TeacherAttendancePage() {
   const filteredTeachers = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return teachers.filter(teacher => {
+    return teachers.filter((teacher) => {
       const row = attendanceMap[teacher.id || 0];
       const status = getTeacherStatus(row);
 
@@ -202,17 +277,17 @@ export default function TeacherAttendancePage() {
   const summary = useMemo(() => {
     const total = filteredTeachers.length;
 
-    const present = filteredTeachers.filter(teacher => {
+    const present = filteredTeachers.filter((teacher) => {
       const row = attendanceMap[teacher.id || 0];
       return getTeacherStatus(row) === "present";
     }).length;
 
-    const incomplete = filteredTeachers.filter(teacher => {
+    const incomplete = filteredTeachers.filter((teacher) => {
       const row = attendanceMap[teacher.id || 0];
       return getTeacherStatus(row) === "incomplete";
     }).length;
 
-    const notMarked = filteredTeachers.filter(teacher => {
+    const notMarked = filteredTeachers.filter((teacher) => {
       const row = attendanceMap[teacher.id || 0];
       return getTeacherStatus(row) === "not_marked";
     }).length;
@@ -239,7 +314,7 @@ export default function TeacherAttendancePage() {
     field: "clockIn" | "clockOut",
     value: string
   ) => {
-    setAttendanceMap(prev => ({
+    setAttendanceMap((prev) => ({
       ...prev,
       [teacherId]: {
         clockIn: prev[teacherId]?.clockIn || "",
@@ -258,7 +333,7 @@ export default function TeacherAttendancePage() {
   };
 
   const clearTeacherAttendance = (teacherId: number) => {
-    setAttendanceMap(prev => {
+    setAttendanceMap((prev) => {
       const next = { ...prev };
       delete next[teacherId];
       return next;
@@ -268,10 +343,10 @@ export default function TeacherAttendancePage() {
   const markAllClockIn = () => {
     const time = currentTime();
 
-    setAttendanceMap(prev => {
+    setAttendanceMap((prev) => {
       const next = { ...prev };
 
-      filteredTeachers.forEach(teacher => {
+      filteredTeachers.forEach((teacher) => {
         if (!teacher.id) return;
         next[teacher.id] = {
           clockIn: next[teacher.id]?.clockIn || time,
@@ -286,10 +361,10 @@ export default function TeacherAttendancePage() {
   const markAllClockOut = () => {
     const time = currentTime();
 
-    setAttendanceMap(prev => {
+    setAttendanceMap((prev) => {
       const next = { ...prev };
 
-      filteredTeachers.forEach(teacher => {
+      filteredTeachers.forEach((teacher) => {
         if (!teacher.id) return;
         next[teacher.id] = {
           clockIn: next[teacher.id]?.clockIn || "",
@@ -302,10 +377,10 @@ export default function TeacherAttendancePage() {
   };
 
   const clearAllVisible = () => {
-    setAttendanceMap(prev => {
+    setAttendanceMap((prev) => {
       const next = { ...prev };
 
-      filteredTeachers.forEach(teacher => {
+      filteredTeachers.forEach((teacher) => {
         if (teacher.id) delete next[teacher.id];
       });
 
@@ -314,37 +389,52 @@ export default function TeacherAttendancePage() {
   };
 
   const saveAttendance = async () => {
-    if (!date) return alert("Select date");
+    if (!date) {
+      alert("Select date");
+      return;
+    }
+
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return;
+    }
 
     try {
       setSaving(true);
 
       const visibleTeacherIds = new Set(
         filteredTeachers
-          .map(teacher => teacher.id)
+          .map((teacher) => teacher.id)
           .filter(Boolean) as number[]
       );
 
-      const existing = attendanceRows.filter(row => {
+      const existing = attendanceRows.filter((row) => {
         return row.date === date && visibleTeacherIds.has(row.teacherId);
       });
 
       for (const row of existing) {
-        if (row.id) await db.teacherAttendance.delete(row.id);
+        if (row.id) {
+          await db.teacherAttendance.update(row.id, {
+            isDeleted: true,
+            updatedAt: Date.now(),
+          } as Partial<TeacherAttendance>);
+        }
       }
 
       const payload = filteredTeachers
-        .filter(teacher => {
+        .filter((teacher) => {
           const id = teacher.id || 0;
           const row = attendanceMap[id];
           return !!id && !!row && (!!row.clockIn || !!row.clockOut);
         })
-        .map(teacher => {
+        .map((teacher) => {
           const id = teacher.id || 0;
           const row = attendanceMap[id];
 
           return prepareSyncData({
-            branchId,
+            accountId,
+            schoolId: Number(schoolId),
+            branchId: Number(branchId),
             teacherId: id,
             date,
             clockIn: row.clockIn || undefined,
@@ -367,115 +457,46 @@ export default function TeacherAttendancePage() {
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const timeButton: React.CSSProperties = {
-    padding: "9px 12px",
-    borderRadius: 999,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const timeInput: React.CSSProperties = {
-    width: 112,
-    padding: "9px 10px",
-    borderRadius: 999,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 800,
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const statusBadge = (status: TeacherStatus): React.CSSProperties => {
-    if (status === "present") return badge("green");
-    if (status === "incomplete") return badge("orange");
-    return badge("gray");
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading teacher attendance...</div>;
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="tat-page" style={{ "--tat-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="tat-state-card">
+          <div className="tat-spinner" />
+          <h2>Opening teacher attendance...</h2>
+          <p>Checking account, branch, teachers, and attendance records.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Teacher attendance belongs to a branch. Select a school and branch from the sidebar before managing teacher attendance.
-          </p>
-        </div>
-      </div>
+      <main className="tat-page" style={{ "--tat-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="tat-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing teacher attendance.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="tat-page" style={{ "--tat-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="tat-state-card">
+          <h2>Select a branch first</h2>
+          <p>Teacher attendance belongs to one active school branch.</p>
+          <button type="button" className="tat-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -484,49 +505,49 @@ export default function TeacherAttendancePage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Teacher Attendance</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Managing teacher attendance in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="tat-page" style={{ "--tat-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="tat-hero">
+        <div className="tat-hero-left">
+          <div className="tat-hero-icon">🕒</div>
+          <div className="tat-title-wrap">
+            <p>Staff Attendance</p>
+            <h2>Teacher Attendance</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button onClick={saveAttendance} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+        <button type="button" onClick={saveAttendance} disabled={saving} className="tat-primary-btn">
           {saving ? "Saving..." : "Save Attendance"}
         </button>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 20,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
-        <input type="date" value={date} onChange={e => setDate(e.target.value)} style={input} />
+      <section className="tat-context-card">
+        <div>
+          <p>Attendance Scope</p>
+          <h3>{summary.marked} marked teacher(s)</h3>
+          <span>{summary.total} visible teacher(s) for {date || "selected date"}</span>
+        </div>
+        <div className="tat-pill-row">
+          <Chip tone="blue">Same Tenant</Chip>
+          <Chip tone="green">Branch Scoped</Chip>
+          <Chip tone={summary.completion >= 70 ? "green" : "orange"}>{summary.completion}% Completion</Chip>
+        </div>
+      </section>
+
+      <section className="tat-filter-card">
+        <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
 
         <select
           value={roleFilter}
-          onChange={e => setRoleFilter(e.target.value as Teacher["role"] | "all")}
-          style={input}
+          onChange={(event) => setRoleFilter(event.target.value as Teacher["role"] | "all")}
         >
           <option value="all">All Roles</option>
-          {roles.map(role => (
+          {roles.map((role) => (
             <option key={role} value={role}>
               {formatRole(role)}
             </option>
@@ -535,8 +556,7 @@ export default function TeacherAttendancePage() {
 
         <select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value as TeacherStatus | "all")}
-          style={input}
+          onChange={(event) => setStatusFilter(event.target.value as TeacherStatus | "all")}
         >
           <option value="all">All Statuses</option>
           <option value="present">Present</option>
@@ -546,152 +566,322 @@ export default function TeacherAttendancePage() {
 
         <input
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search teacher, email, phone, qualification..."
-          style={input}
         />
-      </div>
+      </section>
 
-      {/* SUMMARY */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Teachers</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.total}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Marked</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.marked}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Present</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.present}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Incomplete</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.incomplete}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Completion</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{summary.completion}%</div>
-        </div>
-      </div>
+      <section className="tat-summary-grid" aria-label="Teacher attendance summary">
+        <SummaryCard label="Teachers" value={summary.total} icon="👥" />
+        <SummaryCard label="Marked" value={summary.marked} icon="📝" />
+        <SummaryCard label="Present" value={summary.present} icon="✅" />
+        <SummaryCard label="Incomplete" value={summary.incomplete} icon="⚠️" />
+        <SummaryCard label="Not Marked" value={summary.notMarked} icon="⭕" />
+        <SummaryCard label="Completion" value={`${summary.completion}%`} icon="📊" />
+      </section>
 
-      {/* BULK ACTIONS */}
-      <div style={{ ...card, marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button style={ghostButton} onClick={markAllClockIn}>Clock In Visible</button>
-        <button style={ghostButton} onClick={markAllClockOut}>Clock Out Visible</button>
-        <button style={ghostButton} onClick={clearAllVisible}>Clear Visible</button>
-      </div>
+      <section className="tat-bulk-card">
+        <button type="button" onClick={markAllClockIn}>Clock In Visible</button>
+        <button type="button" onClick={markAllClockOut}>Clock Out Visible</button>
+        <button type="button" onClick={clearAllVisible}>Clear Visible</button>
+      </section>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredTeachers.map(teacher => {
+      <section className="tat-list">
+        {filteredTeachers.map((teacher) => {
           const tid = teacher.id || 0;
           const row = attendanceMap[tid];
           const status = getTeacherStatus(row);
 
           return (
-            <div key={teacher.id} style={card}>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: 46,
-                      height: 46,
-                      borderRadius: 16,
-                      background: teacher.photo
-                        ? `url(${teacher.photo}) center/cover`
-                        : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 950,
-                      flex: "0 0 46px",
-                    }}
-                  >
-                    {!teacher.photo && teacher.fullName.slice(0, 1).toUpperCase()}
-                  </div>
-
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 17, fontWeight: 900 }}>{teacher.fullName}</div>
-                    <div style={{ marginTop: 4, display: "flex", gap: 7, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>{formatRole(teacher.role)}</span>
-                      {teacher.qualification && <span style={badge("gray")}>{teacher.qualification}</span>}
-                      {teacher.phone && <span style={badge("gray")}>{teacher.phone}</span>}
-                      <span style={statusBadge(status)}>
-                        {status === "present"
-                          ? "Present"
-                          : status === "incomplete"
-                            ? "Incomplete"
-                            : "Not Marked"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
+            <article key={teacher.id} className="tat-teacher-card">
+              <div className="tat-teacher-top">
                 <div
+                  className="tat-avatar"
                   style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    justifyContent: "flex-end",
-                    alignItems: "center",
+                    background: teacher.photo
+                      ? `url(${teacher.photo}) center/cover`
+                      : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))`,
                   }}
                 >
+                  {!teacher.photo && teacher.fullName.slice(0, 1).toUpperCase()}
+                </div>
+
+                <div className="tat-teacher-main">
+                  <h3>{teacher.fullName}</h3>
+                  <p>{teacher.email || teacher.phone || "No contact provided"}</p>
+                  <div className="tat-chip-row">
+                    <Chip tone="blue">{formatRole(teacher.role)}</Chip>
+                    {teacher.qualification && <Chip tone="gray">{teacher.qualification}</Chip>}
+                    {teacher.phone && <Chip tone="gray">{teacher.phone}</Chip>}
+                    <Chip tone={statusTone(status)}>{statusLabel(status)}</Chip>
+                  </div>
+                </div>
+              </div>
+
+              <div className="tat-time-grid">
+                <label>
+                  <span>Clock In</span>
                   <input
                     type="time"
                     value={row?.clockIn || ""}
-                    onChange={e => updateTeacherAttendance(tid, "clockIn", e.target.value)}
-                    style={timeInput}
-                    title="Clock in"
+                    onChange={(event) => updateTeacherAttendance(tid, "clockIn", event.target.value)}
                   />
+                </label>
 
+                <label>
+                  <span>Clock Out</span>
                   <input
                     type="time"
                     value={row?.clockOut || ""}
-                    onChange={e => updateTeacherAttendance(tid, "clockOut", e.target.value)}
-                    style={timeInput}
-                    title="Clock out"
+                    onChange={(event) => updateTeacherAttendance(tid, "clockOut", event.target.value)}
                   />
-
-                  <button type="button" onClick={() => clockInTeacher(tid)} style={timeButton}>
-                    Clock In
-                  </button>
-
-                  <button type="button" onClick={() => clockOutTeacher(tid)} style={timeButton}>
-                    Clock Out
-                  </button>
-
-                  <button type="button" onClick={() => clearTeacherAttendance(tid)} style={timeButton}>
-                    Clear
-                  </button>
-                </div>
+                </label>
               </div>
-            </div>
+
+              <div className="tat-action-row">
+                <button type="button" onClick={() => clockInTeacher(tid)}>Clock In</button>
+                <button type="button" onClick={() => clockOutTeacher(tid)}>Clock Out</button>
+                <button type="button" className="danger" onClick={() => clearTeacherAttendance(tid)}>Clear</button>
+              </div>
+            </article>
           );
         })}
 
-        {!filteredTeachers.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No active teachers found in this branch or for the selected filters.
-          </div>
-        )}
-      </div>
-    </div>
+        {!filteredTeachers.length && <EmptyCard text="No active teachers found in this branch or for the selected filters." />}
+      </section>
+    </main>
   );
 }
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="tat-summary-card">
+      <div className="tat-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" }) {
+  return <span className={`tat-chip ${tone}`}>{children}</span>;
+}
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="tat-empty-card">
+      <div className="tat-empty-icon">🕒</div>
+      <h3>No teacher attendance records</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes tatSpin { to { transform: rotate(360deg); } }
+
+.tat-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.tat-page *, .tat-page *::before, .tat-page *::after { box-sizing: border-box; }
+.tat-page button, .tat-page input, .tat-page select { font: inherit; max-width: 100%; }
+.tat-page input,
+.tat-page select {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.tat-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.tat-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.tat-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.tat-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--tat-primary) 18%, transparent); border-top-color: var(--tat-primary); animation: tatSpin .8s linear infinite; }
+
+.tat-primary-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--tat-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.tat-primary-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.tat-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tat-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+.tat-hero-left { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.tat-hero-icon { width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: var(--tat-primary); color: #fff; box-shadow: 0 12px 26px color-mix(in srgb, var(--tat-primary) 28%, transparent); font-size: 22px; }
+.tat-title-wrap { min-width: 0; }
+.tat-title-wrap p, .tat-title-wrap h2, .tat-title-wrap span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tat-title-wrap p { margin: 0 0 2px; color: var(--tat-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.tat-title-wrap h2 { margin: 0; font-size: clamp(19px, 5vw, 28px); font-weight: 1000; letter-spacing: -.06em; line-height: 1; }
+.tat-title-wrap span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+.tat-context-card,
+.tat-filter-card,
+.tat-bulk-card,
+.tat-teacher-card,
+.tat-empty-card {
+  min-width: 0;
+  margin-top: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+  padding: 13px;
+}
+.tat-context-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--tat-primary) 10%, #fff), #fff 68%);
+}
+.tat-context-card p { margin: 0; color: var(--tat-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.tat-context-card h3 { margin: 4px 0 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.05em; }
+.tat-context-card span { display: block; margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.tat-pill-row { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.tat-filter-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.tat-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.tat-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+.tat-summary-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--tat-primary) 12%, #fff); }
+.tat-summary-card div:last-child { min-width: 0; }
+.tat-summary-card strong, .tat-summary-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tat-summary-card strong { font-size: 20px; font-weight: 1000; letter-spacing: -.05em; }
+.tat-summary-card span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 850; }
+
+.tat-bulk-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.tat-bulk-card button,
+.tat-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+.tat-list { display: grid; gap: 10px; margin-top: 10px; }
+.tat-teacher-card { background: linear-gradient(135deg, #fff, #f8fafc); }
+.tat-teacher-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.tat-avatar { width: 56px; height: 56px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 19px; color: #fff; font-weight: 1000; box-shadow: 0 12px 24px rgba(15, 23, 42, .12); }
+.tat-teacher-main { min-width: 0; flex: 1; }
+.tat-teacher-main h3, .tat-teacher-main p { display: block; overflow: hidden; text-overflow: ellipsis; }
+.tat-teacher-main h3 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -.035em; }
+.tat-teacher-main p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.4; }
+.tat-chip-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.tat-chip { max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 950; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tat-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.tat-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.tat-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.tat-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.tat-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.tat-time-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.tat-time-grid label { display: grid; gap: 6px; }
+.tat-time-grid label span { color: var(--muted, #64748b); font-size: 10px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.tat-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.tat-action-row button.danger { color: #dc2626; background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.13); }
+.tat-empty-card { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; text-align: center; border-style: dashed; }
+.tat-empty-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 22px; background: color-mix(in srgb, var(--tat-primary) 12%, #fff); font-size: 28px; }
+.tat-empty-card h3 { margin: 0; font-size: 18px; font-weight: 1000; }
+.tat-empty-card p { margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+
+@media (max-width: 390px) {
+  .tat-page { padding: 6px; }
+  .tat-hero { padding: 10px; border-radius: 24px; flex-wrap: wrap; }
+  .tat-hero-icon { width: 42px; height: 42px; border-radius: 16px; }
+  .tat-hero .tat-primary-btn { width: 100%; }
+  .tat-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .tat-teacher-top { flex-direction: column; }
+  .tat-action-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 560px) {
+  .tat-page { padding: 14px; }
+  .tat-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tat-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tat-bulk-card { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tat-time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tat-action-row { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+  .tat-action-row button { padding: 0 14px; }
+}
+
+@media (min-width: 980px) {
+  .tat-page { padding: 18px; }
+  .tat-filter-card { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tat-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .tat-teacher-card { padding: 16px; }
+  .tat-teacher-top { align-items: center; }
+}
+`;

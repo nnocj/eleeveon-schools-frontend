@@ -3,20 +3,30 @@
 /**
  * Students.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL STUDENT MANAGEMENT PAGE
+ * MOBILE-FIRST SECURE STUDENT MANAGEMENT PAGE
  * ---------------------------------------------------------
  *
  * DB table: students
  *
- * Student belongs to a Branch.
- * School context is inherited through the selected branch:
+ * Architecture:
+ * Active Account -> Active School -> Active Branch -> Students
  *
- * Active School -> Active Branch -> Students
- *
- * This page only works inside the currently selected branch.
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
+ * - Soft delete only.
+ * - Mobile-first cards and responsive drawer.
+ * - Dashboard-shell safe: no horizontal overflow.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { SyncStatus } from "../lib/constants/syncStatus";
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -27,14 +37,19 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
 // ======================================================
 
 type StudentStatus = "active" | "graduated" | "transferred" | "withdrawn";
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type FormState = {
   id?: number;
@@ -62,27 +77,68 @@ type StudentView = {
   activeEnrollment?: StudentEnrollment;
 };
 
+const emptyForm: FormState = {
+  organizationId: undefined,
+  currentClassId: undefined,
+  admissionNumber: "",
+  fullName: "",
+  gender: "",
+  age: undefined,
+  dateOfBirth: "",
+  photo: "",
+  coverPhoto: "",
+  parentName: "",
+  parentPhone: "",
+  parentEmail: "",
+  address: "",
+  status: "active",
+};
+
+function statusTone(status?: StudentStatus): "green" | "red" | "blue" | "orange" | "gray" {
+  if (!status || status === "active") return "green";
+  if (status === "graduated") return "blue";
+  if (status === "transferred") return "orange";
+  if (status === "withdrawn") return "red";
+  return "gray";
+}
+
+function statusLabel(status?: StudentStatus) {
+  if (!status) return "Active";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function StudentsPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const [rows, setRows] = useState<Student[]>([]);
@@ -99,30 +155,59 @@ export default function StudentsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
 
-  const [form, setForm] = useState<FormState>({
-    organizationId: undefined,
-    currentClassId: undefined,
-    admissionNumber: "",
-    fullName: "",
-    gender: "",
-    age: undefined,
-    dateOfBirth: "",
-    photo: "",
-    coverPhoto: "",
-    parentName: "",
-    parentPhone: "",
-    parentEmail: "",
-    address: "",
-    status: "active",
-  });
+  const [form, setForm] = useState<FormState>(emptyForm);
+
+  // ======================================================
+  // AUTH + CONTEXT PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
 
   // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
+  const clearData = () => {
+    setRows([]);
+    setClasses([]);
+    setOrganizations([]);
+    setEnrollments([]);
+  };
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setPageLoading(false);
+      return;
+    }
+
     try {
-      setLoading(true);
+      setPageLoading(true);
 
       const [studentRows, classRows, organizationRows, enrollmentRows] = await Promise.all([
         db.students.toArray(),
@@ -131,50 +216,54 @@ export default function StudentsPage() {
         db.studentEnrollments.toArray(),
       ]);
 
-      setRows(studentRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setRows(
+        studentRows
+          .filter(sameTenant)
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+      );
 
       setClasses(
-        classRows.filter(
-          row => row.branchId === branchId && !row.isDeleted && row.active !== false
-        )
+        classRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
 
       setOrganizations(
-        organizationRows.filter(
-          row => row.branchId === branchId && !row.isDeleted && row.active !== false
-        )
+        organizationRows
+          .filter((row) => sameTenant(row) && row.active !== false)
+          .sort((a, b) => a.name.localeCompare(b.name))
       );
 
-      setEnrollments(
-        enrollmentRows.filter(row => row.branchId === branchId && !row.isDeleted)
-      );
+      setEnrollments(enrollmentRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load students:", error);
+      clearData();
       alert("Failed to load students");
     } finally {
-      setLoading(false);
+      setPageLoading(false);
     }
   };
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
-  const classMap = useMemo(() => new Map(classes.map(row => [row.id, row])), [classes]);
+  const classMap = useMemo(() => new Map(classes.map((row) => [row.id, row])), [classes]);
 
   const organizationMap = useMemo(
-    () => new Map(organizations.map(row => [row.id, row])),
+    () => new Map(organizations.map((row) => [row.id, row])),
     [organizations]
   );
 
   const enrollmentMap = useMemo(() => {
     const map = new Map<number, StudentEnrollment[]>();
 
-    enrollments.forEach(row => {
+    enrollments.forEach((row) => {
       const list = map.get(row.studentId) || [];
       list.push(row);
       map.set(row.studentId, list);
@@ -188,9 +277,9 @@ export default function StudentsPage() {
   // ======================================================
 
   const viewRows = useMemo<StudentView[]>(() => {
-    return rows.map(row => {
+    return rows.map((row) => {
       const studentEnrollments = enrollmentMap.get(row.id || 0) || [];
-      const activeEnrollment = studentEnrollments.find(e => e.status === "active");
+      const activeEnrollment = studentEnrollments.find((item) => item.status === "active");
       const resolvedClassId = activeEnrollment?.classId || row.currentClassId;
       const classData = resolvedClassId ? classMap.get(resolvedClassId) : undefined;
       const organization = row.organizationId ? organizationMap.get(row.organizationId) : undefined;
@@ -209,7 +298,7 @@ export default function StudentsPage() {
     const query = search.trim().toLowerCase();
 
     return viewRows
-      .filter(item => {
+      .filter((item) => {
         const row = item.row;
 
         if (filterClassId) {
@@ -243,15 +332,16 @@ export default function StudentsPage() {
 
   const statusCounts = useMemo(() => {
     return {
-      active: rows.filter(row => row.status === "active" || !row.status).length,
-      graduated: rows.filter(row => row.status === "graduated").length,
-      transferred: rows.filter(row => row.status === "transferred").length,
-      withdrawn: rows.filter(row => row.status === "withdrawn").length,
+      active: rows.filter((row) => row.status === "active" || !row.status).length,
+      graduated: rows.filter((row) => row.status === "graduated").length,
+      transferred: rows.filter((row) => row.status === "transferred").length,
+      withdrawn: rows.filter((row) => row.status === "withdrawn").length,
+      withClass: new Set(enrollments.filter((row) => row.status === "active").map((row) => row.studentId)).size,
     };
-  }, [rows]);
+  }, [rows, enrollments]);
 
   const genderOptions = useMemo(() => {
-    return Array.from(new Set(rows.map(row => row.gender).filter(Boolean))) as string[];
+    return Array.from(new Set(rows.map((row) => row.gender).filter(Boolean))) as string[];
   }, [rows]);
 
   // ======================================================
@@ -259,11 +349,11 @@ export default function StudentsPage() {
   // ======================================================
 
   const updateForm = (patch: Partial<FormState>) => {
-    setForm(prev => ({ ...prev, ...patch }));
+    setForm((prev) => ({ ...prev, ...patch }));
   };
 
   const fileToBase64 = (file: File) => {
-    return new Promise<string>(resolve => {
+    return new Promise<string>((resolve) => {
       const reader = new FileReader();
       reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
       reader.readAsDataURL(file);
@@ -276,31 +366,19 @@ export default function StudentsPage() {
     updateForm({ [field]: value });
   };
 
-  const openCreate = () => {
-    if (!activeBranchId) {
-      alert("Select a branch first before creating a student.");
-      return;
+  const requireTenant = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a school branch first.");
+      return false;
     }
+    return true;
+  };
+
+  const openCreate = () => {
+    if (!requireTenant()) return;
 
     setEditMode(false);
-
-    setForm({
-      organizationId: undefined,
-      currentClassId: undefined,
-      admissionNumber: "",
-      fullName: "",
-      gender: "",
-      age: undefined,
-      dateOfBirth: "",
-      photo: "",
-      coverPhoto: "",
-      parentName: "",
-      parentPhone: "",
-      parentEmail: "",
-      address: "",
-      status: "active",
-    });
-
+    setForm(emptyForm);
     setDrawerOpen(true);
   };
 
@@ -333,10 +411,12 @@ export default function StudentsPage() {
   // ======================================================
 
   const validate = () => {
+    if (!authenticated || !accountId) return "Sign in first";
+    if (!schoolId) return "Select a school first";
     if (!branchId) return "Select a branch first";
     if (!form.fullName.trim()) return "Enter student full name";
 
-    const duplicate = rows.find(row => {
+    const duplicate = rows.find((row) => {
       if (editMode && row.id === form.id) return false;
 
       const sameAdmission =
@@ -347,6 +427,14 @@ export default function StudentsPage() {
     });
 
     if (duplicate) return "A student with this admission number already exists in this branch";
+
+    if (form.currentClassId && !classMap.get(Number(form.currentClassId))) {
+      return "Selected class is not in this branch";
+    }
+
+    if (form.organizationId && !organizationMap.get(Number(form.organizationId))) {
+      return "Selected organization is not in this branch";
+    }
 
     return null;
   };
@@ -359,29 +447,43 @@ export default function StudentsPage() {
       return;
     }
 
+    if (!authenticated || !accountId || !schoolId || !branchId) return;
+
     try {
       setSaving(true);
 
-      const payload = prepareSyncData({
-        branchId,
-        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
-        currentClassId: form.currentClassId ? Number(form.currentClassId) : undefined,
-        admissionNumber: form.admissionNumber?.trim() || undefined,
-        fullName: form.fullName.trim(),
-        gender: form.gender?.trim() || undefined,
-        age: form.age == null ? undefined : Number(form.age),
-        dateOfBirth: form.dateOfBirth || undefined,
-        photo: form.photo || undefined,
-        coverPhoto: form.coverPhoto || undefined,
-        parentName: form.parentName?.trim() || undefined,
-        parentPhone: form.parentPhone?.trim() || undefined,
-        parentEmail: form.parentEmail?.trim() || undefined,
-        address: form.address?.trim() || undefined,
-        status: form.status || "active",
-      }) as Student;
+      const existing = editMode && form.id ? rows.find((row) => row.id === form.id) : undefined;
+
+      const payload = prepareSyncData(
+        {
+          accountId,
+          schoolId: Number(schoolId),
+          branchId: Number(branchId),
+          organizationId: form.organizationId ? Number(form.organizationId) : undefined,
+          currentClassId: form.currentClassId ? Number(form.currentClassId) : undefined,
+          admissionNumber: form.admissionNumber?.trim() || undefined,
+          fullName: form.fullName.trim(),
+          gender: form.gender?.trim() || undefined,
+          age: form.age == null ? undefined : Number(form.age),
+          dateOfBirth: form.dateOfBirth || undefined,
+          photo: form.photo || undefined,
+          coverPhoto: form.coverPhoto || undefined,
+          parentName: form.parentName?.trim() || undefined,
+          parentPhone: form.parentPhone?.trim() || undefined,
+          parentEmail: form.parentEmail?.trim() || undefined,
+          address: form.address?.trim() || undefined,
+          status: form.status || "active",
+        },
+        existing
+      ) as Student;
 
       if (editMode && form.id) {
         await db.students.update(form.id, {
+          accountId: payload.accountId,
+          schoolId: payload.schoolId,
+          branchId: payload.branchId,
+          cloudId: payload.cloudId,
+          createdAt: payload.createdAt,
           organizationId: payload.organizationId,
           currentClassId: payload.currentClassId,
           admissionNumber: payload.admissionNumber,
@@ -401,7 +503,7 @@ export default function StudentsPage() {
           deviceId: payload.deviceId,
           synced: payload.synced,
           isDeleted: false,
-        });
+        } as Partial<Student>);
       } else {
         await db.students.add(payload);
       }
@@ -426,14 +528,15 @@ export default function StudentsPage() {
         `This student has ${enrollmentCount} enrollment record(s). Delete anyway?`
       );
       if (!proceed) return;
-    } else {
-      if (!confirm("Delete this student?")) return;
+    } else if (!confirm("Delete this student?")) {
+      return;
     }
 
     await db.students.update(id, {
       isDeleted: true,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<Student>);
 
     await load();
   };
@@ -443,114 +546,54 @@ export default function StudentsPage() {
 
     await db.students.update(row.id, {
       status,
+      synced: SyncStatus.PENDING,
       updatedAt: Date.now(),
-    });
+    } as Partial<Student>);
 
     await load();
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const label: React.CSSProperties = {
-    display: "block",
-    marginBottom: 6,
-    fontSize: 12,
-    opacity: 0.72,
-    fontWeight: 800,
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  const statusTone = (status?: string): "green" | "red" | "blue" | "orange" | "gray" => {
-    if (!status || status === "active") return "green";
-    if (status === "graduated") return "blue";
-    if (status === "transferred") return "orange";
-    if (status === "withdrawn") return "red";
-    return "gray";
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading students...</div>;
+  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+    return (
+      <main className="stu-page" style={{ "--stu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="stu-state-card">
+          <div className="stu-spinner" />
+          <h2>Opening students...</h2>
+          <p>Checking account, branch, classes, organizations, enrollments, and student records.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Students belong to a branch. Select a school and branch from the sidebar before managing students.
-          </p>
-        </div>
-      </div>
+      <main className="stu-page" style={{ "--stu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="stu-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before managing students.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="stu-page" style={{ "--stu-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="stu-state-card">
+          <h2>Select a branch first</h2>
+          <p>Students belong to one active school branch.</p>
+          <button type="button" className="stu-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -559,81 +602,62 @@ export default function StudentsPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 16,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Students</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Managing students in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="stu-page" style={{ "--stu-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="stu-hero">
+        <div className="stu-hero-left">
+          <div className="stu-hero-icon">🎓</div>
+          <div className="stu-title-wrap">
+            <p>People Records</p>
+            <h2>Students</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <button onClick={openCreate} style={button}>
+        <button type="button" className="stu-primary-btn" onClick={openCreate}>
           + Add Student
         </button>
-      </div>
+      </section>
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Total Students</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{rows.length}</div>
+      <section className="stu-context-card">
+        <div>
+          <p>Student Scope</p>
+          <h3>{statusCounts.active} active student(s)</h3>
+          <span>{rows.length} total student record(s) in this branch</span>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Active</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{statusCounts.active}</div>
+        <div className="stu-pill-row">
+          <Chip tone="blue">Same Tenant</Chip>
+          <Chip tone="green">Branch Scoped</Chip>
+          <Chip tone="purple">{statusCounts.withClass} With Class</Chip>
         </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Graduated</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{statusCounts.graduated}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Withdrawn</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{statusCounts.withdrawn}</div>
-        </div>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 18,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="stu-summary-grid" aria-label="Student summary">
+        <SummaryCard label="Total Students" value={rows.length} icon="👥" />
+        <SummaryCard label="Active" value={statusCounts.active} icon="✅" />
+        <SummaryCard label="Graduated" value={statusCounts.graduated} icon="🎯" />
+        <SummaryCard label="Transferred" value={statusCounts.transferred} icon="🔁" />
+        <SummaryCard label="Withdrawn" value={statusCounts.withdrawn} icon="🚪" />
+        <SummaryCard label="With Class" value={statusCounts.withClass} icon="🏫" />
+      </section>
+
+      <section className="stu-filter-card">
         <input
           placeholder="Search name, admission number, parent, class..."
           value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={input}
+          onChange={(event) => setSearch(event.target.value)}
         />
 
         <select
           value={filterClassId || ""}
-          onChange={e => setFilterClassId(Number(e.target.value) || undefined)}
-          style={input}
+          onChange={(event) => setFilterClassId(Number(event.target.value) || undefined)}
         >
           <option value="">All Classes</option>
-          {classes.map(row => (
+          {classes.map((row) => (
             <option key={row.id} value={row.id}>
               {row.name}
             </option>
@@ -642,21 +666,19 @@ export default function StudentsPage() {
 
         <select
           value={filterOrganizationId || ""}
-          onChange={e => setFilterOrganizationId(Number(e.target.value) || undefined)}
-          style={input}
+          onChange={(event) => setFilterOrganizationId(Number(event.target.value) || undefined)}
         >
           <option value="">All Organizations</option>
-          {organizations.map(row => (
+          {organizations.map((row) => (
             <option key={row.id} value={row.id}>
-              {row.name} • {row.type}
+              {row.name} · {row.type}
             </option>
           ))}
         </select>
 
         <select
           value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value as any)}
-          style={input}
+          onChange={(event) => setFilterStatus(event.target.value as "all" | StudentStatus)}
         >
           <option value="all">All Status</option>
           <option value="active">Active</option>
@@ -665,371 +687,594 @@ export default function StudentsPage() {
           <option value="withdrawn">Withdrawn</option>
         </select>
 
-        <select
-          value={filterGender}
-          onChange={e => setFilterGender(e.target.value)}
-          style={input}
-        >
+        <select value={filterGender} onChange={(event) => setFilterGender(event.target.value)}>
           <option value="all">All Gender</option>
-          {genderOptions.map(gender => (
+          {genderOptions.map((gender) => (
             <option key={gender} value={gender}>
               {gender}
             </option>
           ))}
         </select>
-      </div>
+      </section>
 
-      {/* LIST */}
-      <div style={{ marginTop: 18, display: "grid", gap: 12 }}>
-        {filteredRows.map(item => {
+      <section className="stu-list">
+        {filteredRows.map((item) => {
           const row = item.row;
 
           return (
-            <div key={row.id} style={{ ...card, padding: 0, overflow: "hidden" }}>
+            <article key={row.id} className="stu-card">
               {row.coverPhoto && (
                 <div
+                  className="stu-cover"
                   style={{
-                    height: 88,
-                    backgroundImage: `linear-gradient(135deg, rgba(15,23,42,0.42), rgba(15,23,42,0.08)), url(${row.coverPhoto})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
+                    backgroundImage: `linear-gradient(135deg, rgba(15,23,42,.46), rgba(15,23,42,.08)), url(${row.coverPhoto})`,
                   }}
                 />
               )}
 
-              <div
-                style={{
-                  padding: 16,
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+              <div className="stu-card-inner">
+                <div className="stu-card-top">
                   <div
+                    className="stu-avatar"
                     style={{
-                      width: 58,
-                      height: 58,
-                      borderRadius: 18,
                       background: row.photo
                         ? `url(${row.photo}) center/cover`
-                        : `linear-gradient(135deg, ${primary}, rgba(255,255,255,0.2))`,
-                      color: "#fff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 950,
-                      flex: "0 0 58px",
+                        : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))`,
                     }}
                   >
                     {!row.photo && row.fullName.slice(0, 1).toUpperCase()}
                   </div>
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <div style={{ fontSize: 18, fontWeight: 900 }}>{row.fullName}</div>
-                      {row.admissionNumber && <span style={badge("gray")}>{row.admissionNumber}</span>}
-                      <span style={badge(statusTone(row.status))}>{row.status || "active"}</span>
-                      {row.gender && <span style={badge("blue")}>{row.gender}</span>}
-                    </div>
+                  <div className="stu-main-info">
+                    <h3>{row.fullName}</h3>
+                    <p>{item.className} · {item.organizationName}</p>
 
-                    <div style={{ marginTop: 6, opacity: 0.72, fontSize: 13, fontWeight: 650 }}>
-                      {item.className} • {item.organizationName}
-                    </div>
-
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span style={badge("blue")}>{item.enrollmentCount} enrollment(s)</span>
-                      {row.parentName && <span style={badge("gray")}>Parent: {row.parentName}</span>}
-                      {row.parentPhone && <span style={badge("gray")}>{row.parentPhone}</span>}
+                    <div className="stu-chip-row">
+                      {row.admissionNumber && <Chip tone="gray">{row.admissionNumber}</Chip>}
+                      <Chip tone={statusTone(row.status)}>{statusLabel(row.status)}</Chip>
+                      {row.gender && <Chip tone="blue">{row.gender}</Chip>}
+                      <Chip tone="purple">{item.enrollmentCount} enrollment(s)</Chip>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <div className="stu-info-grid">
+                  <MiniStat label="Parent" value={row.parentName || "No parent"} />
+                  <MiniStat label="Phone" value={row.parentPhone || "No phone"} />
+                  <MiniStat label="Email" value={row.parentEmail || "No email"} />
+                </div>
+
+                {row.address && <p className="stu-address">{row.address}</p>}
+
+                <div className="stu-action-row">
                   {row.status !== "active" && (
-                    <button style={ghostButton} onClick={() => setStatus(row, "active")}>
+                    <button type="button" onClick={() => setStatus(row, "active")}>
                       Activate
                     </button>
                   )}
+                  {row.status !== "graduated" && (
+                    <button type="button" onClick={() => setStatus(row, "graduated")}>
+                      Graduate
+                    </button>
+                  )}
+                  {row.status !== "transferred" && (
+                    <button type="button" onClick={() => setStatus(row, "transferred")}>
+                      Transfer
+                    </button>
+                  )}
                   {row.status !== "withdrawn" && (
-                    <button style={ghostButton} onClick={() => setStatus(row, "withdrawn")}>
+                    <button type="button" onClick={() => setStatus(row, "withdrawn")}>
                       Withdraw
                     </button>
                   )}
-                  <button style={ghostButton} onClick={() => openEdit(row)}>
+                  <button type="button" onClick={() => openEdit(row)}>
                     Edit
                   </button>
-                  <button style={{ ...ghostButton, color: "#dc2626" }} onClick={() => remove(row.id)}>
+                  <button type="button" className="danger" onClick={() => remove(row.id)}>
                     Delete
                   </button>
                 </div>
               </div>
-            </div>
+            </article>
           );
         })}
 
-        {!filteredRows.length && (
-          <div style={{ ...card, textAlign: "center", padding: 30 }}>
-            No students found in this branch.
-          </div>
-        )}
-      </div>
+        {!filteredRows.length && <EmptyCard text="No students found in this branch." />}
+      </section>
 
-      {/* DRAWER */}
       {drawerOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            display: "flex",
-            justifyContent: "flex-end",
-            background: "rgba(15,23,42,0.45)",
-            backdropFilter: "blur(4px)",
-          }}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            style={{
-              width: "min(620px, 100vw)",
-              height: "100vh",
-              background: "var(--surface)",
-              color: "var(--text)",
-              boxShadow: "-20px 0 50px rgba(0,0,0,0.25)",
-              padding: 22,
-              overflowY: "auto",
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: 18,
-              }}
-            >
-              <div>
-                <h3 style={{ margin: 0, fontSize: 22, fontWeight: 900 }}>
-                  {editMode ? "Edit Student" : "Add Student"}
-                </h3>
-                <div style={{ marginTop: 4, opacity: 0.66, fontSize: 13 }}>
-                  Student will be saved under {activeBranch?.name || "the selected branch"}.
-                </div>
-              </div>
+        <div className="stu-drawer-layer">
+          <button type="button" aria-label="Close drawer" className="stu-drawer-overlay" onClick={() => setDrawerOpen(false)} />
 
-              <button style={ghostButton} onClick={() => setDrawerOpen(false)}>
-                Close
-              </button>
+          <aside className="stu-drawer">
+            <div className="stu-drawer-head">
+              <div>
+                <p>Student Record</p>
+                <h2>{editMode ? "Edit Student" : "Add Student"}</h2>
+                <span>
+                  Student will be saved under {activeBranch?.name || "the selected branch"}
+                  {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+                </span>
+              </div>
+              <button type="button" onClick={() => setDrawerOpen(false)}>✕</button>
             </div>
 
-            <div style={{ display: "grid", gap: 14 }}>
-              <div>
-                <label style={label}>Full Name</label>
+            <div className="stu-form-grid">
+              <Field label="Full Name">
                 <input
                   value={form.fullName}
-                  onChange={e => updateForm({ fullName: e.target.value })}
+                  onChange={(event) => updateForm({ fullName: event.target.value })}
                   placeholder="Student full name"
-                  style={input}
                 />
-              </div>
+              </Field>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <label style={label}>Admission Number</label>
+              <div className="stu-form-two">
+                <Field label="Admission Number">
                   <input
                     value={form.admissionNumber || ""}
-                    onChange={e => updateForm({ admissionNumber: e.target.value })}
+                    onChange={(event) => updateForm({ admissionNumber: event.target.value })}
                     placeholder="Admission number"
-                    style={input}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label style={label}>Gender</label>
+                <Field label="Gender">
                   <select
                     value={form.gender || ""}
-                    onChange={e => updateForm({ gender: e.target.value || undefined })}
-                    style={input}
+                    onChange={(event) => updateForm({ gender: event.target.value || undefined })}
                   >
                     <option value="">Select gender</option>
                     <option value="Male">Male</option>
                     <option value="Female">Female</option>
                     <option value="Other">Other</option>
                   </select>
-                </div>
+                </Field>
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <label style={label}>Date of Birth</label>
+              <div className="stu-form-two">
+                <Field label="Date of Birth">
                   <input
                     type="date"
                     value={form.dateOfBirth || ""}
-                    onChange={e => updateForm({ dateOfBirth: e.target.value })}
-                    style={input}
+                    onChange={(event) => updateForm({ dateOfBirth: event.target.value })}
                   />
-                </div>
+                </Field>
 
-                <div>
-                  <label style={label}>Age</label>
+                <Field label="Age">
                   <input
                     type="number"
                     value={form.age ?? ""}
-                    onChange={e =>
-                      updateForm({ age: e.target.value === "" ? undefined : Number(e.target.value) })
-                    }
+                    onChange={(event) => updateForm({ age: event.target.value === "" ? undefined : Number(event.target.value) })}
                     placeholder="Age"
-                    style={input}
                   />
-                </div>
+                </Field>
               </div>
 
-              <div>
-                <label style={label}>Current Class</label>
+              <Field label="Current Class">
                 <select
                   value={form.currentClassId || ""}
-                  onChange={e => updateForm({ currentClassId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ currentClassId: Number(event.target.value) || undefined })}
                 >
                   <option value="">No class assigned</option>
-                  {classes.map(row => (
+                  {classes.map((row) => (
                     <option key={row.id} value={row.id}>
                       {row.name}
                     </option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Organization / House / Department</label>
+              <Field label="Organization / House / Department">
                 <select
                   value={form.organizationId || ""}
-                  onChange={e => updateForm({ organizationId: Number(e.target.value) || undefined })}
-                  style={input}
+                  onChange={(event) => updateForm({ organizationId: Number(event.target.value) || undefined })}
                 >
                   <option value="">No organization</option>
-                  {organizations.map(row => (
+                  {organizations.map((row) => (
                     <option key={row.id} value={row.id}>
-                      {row.name} • {row.type}
+                      {row.name} · {row.type}
                     </option>
                   ))}
                 </select>
-              </div>
+              </Field>
 
-              <div>
-                <label style={label}>Status</label>
+              <Field label="Status">
                 <select
                   value={form.status || "active"}
-                  onChange={e => updateForm({ status: e.target.value as StudentStatus })}
-                  style={input}
+                  onChange={(event) => updateForm({ status: event.target.value as StudentStatus })}
                 >
                   <option value="active">Active</option>
                   <option value="graduated">Graduated</option>
                   <option value="transferred">Transferred</option>
                   <option value="withdrawn">Withdrawn</option>
                 </select>
-              </div>
+              </Field>
 
-              <div style={{ ...card, boxShadow: "none", borderRadius: 16 }}>
-                <div style={{ fontWeight: 900, marginBottom: 10 }}>Parent / Guardian Information</div>
+              <section className="stu-sub-card">
+                <h3>Parent / Guardian Information</h3>
 
-                <div style={{ display: "grid", gap: 12 }}>
-                  <input
-                    value={form.parentName || ""}
-                    onChange={e => updateForm({ parentName: e.target.value })}
-                    placeholder="Parent / guardian name"
-                    style={input}
-                  />
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
-                      gap: 12,
-                    }}
-                  >
+                <div className="stu-form-grid compact">
+                  <Field label="Parent / Guardian Name">
                     <input
-                      value={form.parentPhone || ""}
-                      onChange={e => updateForm({ parentPhone: e.target.value })}
-                      placeholder="Parent phone"
-                      style={input}
+                      value={form.parentName || ""}
+                      onChange={(event) => updateForm({ parentName: event.target.value })}
+                      placeholder="Parent / guardian name"
                     />
-                    <input
-                      value={form.parentEmail || ""}
-                      onChange={e => updateForm({ parentEmail: e.target.value })}
-                      placeholder="Parent email"
-                      style={input}
-                    />
+                  </Field>
+
+                  <div className="stu-form-two">
+                    <Field label="Parent Phone">
+                      <input
+                        value={form.parentPhone || ""}
+                        onChange={(event) => updateForm({ parentPhone: event.target.value })}
+                        placeholder="Parent phone"
+                      />
+                    </Field>
+
+                    <Field label="Parent Email">
+                      <input
+                        value={form.parentEmail || ""}
+                        onChange={(event) => updateForm({ parentEmail: event.target.value })}
+                        placeholder="Parent email"
+                      />
+                    </Field>
                   </div>
                 </div>
-              </div>
+              </section>
 
-              <div>
-                <label style={label}>Address</label>
+              <Field label="Address">
                 <textarea
                   value={form.address || ""}
-                  onChange={e => updateForm({ address: e.target.value })}
+                  onChange={(event) => updateForm({ address: event.target.value })}
                   placeholder="Student address"
                   rows={3}
-                  style={{ ...input, resize: "vertical" }}
+                />
+              </Field>
+
+              <div className="stu-form-two">
+                <FileField
+                  label="Student Photo"
+                  value={form.photo}
+                  alt="Student"
+                  onChange={(file) => handleImageUpload("photo", file)}
+                />
+
+                <FileField
+                  label="Cover Photo"
+                  value={form.coverPhoto}
+                  alt="Student cover"
+                  wide
+                  onChange={(file) => handleImageUpload("coverPhoto", file)}
                 />
               </div>
 
-              <div>
-                <label style={label}>Student Photo</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => handleImageUpload("photo", e.target.files?.[0])}
-                  style={input}
-                />
-                {form.photo && (
-                  <img
-                    src={form.photo}
-                    alt="Student"
-                    style={{ height: 88, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
-                  />
-                )}
-              </div>
-
-              <div>
-                <label style={label}>Cover Photo</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => handleImageUpload("coverPhoto", e.target.files?.[0])}
-                  style={input}
-                />
-                {form.coverPhoto && (
-                  <img
-                    src={form.coverPhoto}
-                    alt="Student cover"
-                    style={{ width: "100%", height: 120, borderRadius: 14, marginTop: 8, objectFit: "cover" }}
-                  />
-                )}
-              </div>
-
-              <button onClick={save} disabled={saving} style={{ ...button, opacity: saving ? 0.6 : 1 }}>
+              <button type="button" onClick={save} disabled={saving} className="stu-save-btn">
                 {saving ? "Saving..." : editMode ? "Save Changes" : "Add Student"}
               </button>
             </div>
-          </div>
+          </aside>
         </div>
       )}
+    </main>
+  );
+}
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="stu-summary-card">
+      <div className="stu-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`stu-chip ${tone}`}>{children}</span>;
+}
+
+function MiniStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="stu-mini-stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
     </div>
   );
 }
+
+function EmptyCard({ text }: { text: string }) {
+  return (
+    <section className="stu-empty-card">
+      <div className="stu-empty-icon">🎓</div>
+      <h3>No students found</h3>
+      <p>{text}</p>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="stu-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function FileField({
+  label,
+  value,
+  alt,
+  wide,
+  onChange,
+}: {
+  label: string;
+  value?: string;
+  alt: string;
+  wide?: boolean;
+  onChange: (file?: File) => void;
+}) {
+  return (
+    <Field label={label}>
+      <input type="file" accept="image/*" onChange={(event) => onChange(event.target.files?.[0])} />
+      {value && (
+        <img
+          src={value}
+          alt={alt}
+          className={wide ? "stu-preview wide" : "stu-preview"}
+        />
+      )}
+    </Field>
+  );
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes stuSpin { to { transform: rotate(360deg); } }
+
+.stu-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+.stu-page *, .stu-page *::before, .stu-page *::after { box-sizing: border-box; }
+.stu-page button, .stu-page input, .stu-page select, .stu-page textarea { font: inherit; max-width: 100%; }
+.stu-page img { max-width: 100%; }
+.stu-page input,
+.stu-page select,
+.stu-page textarea {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+.stu-page textarea {
+  min-height: 92px;
+  padding: 12px;
+  resize: vertical;
+}
+.stu-page input[type="file"] {
+  padding: 10px;
+  font-size: 12px;
+}
+
+.stu-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(480px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+.stu-state-card h2 { margin: 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.04em; }
+.stu-state-card p { max-width: 34rem; margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+.stu-spinner { width: 38px; height: 38px; border-radius: 999px; border: 4px solid color-mix(in srgb, var(--stu-primary) 18%, transparent); border-top-color: var(--stu-primary); animation: stuSpin .8s linear infinite; }
+
+.stu-primary-btn,
+.stu-save-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--stu-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+.stu-save-btn { width: 100%; }
+.stu-primary-btn:disabled,
+.stu-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.stu-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--stu-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+.stu-hero-left { min-width: 0; display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.stu-hero-icon { width: 46px; height: 46px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 18px; background: var(--stu-primary); color: #fff; box-shadow: 0 12px 26px color-mix(in srgb, var(--stu-primary) 28%, transparent); font-size: 22px; }
+.stu-title-wrap { min-width: 0; }
+.stu-title-wrap p, .stu-title-wrap h2, .stu-title-wrap span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stu-title-wrap p { margin: 0 0 2px; color: var(--stu-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.stu-title-wrap h2 { margin: 0; font-size: clamp(19px, 5vw, 28px); font-weight: 1000; letter-spacing: -.06em; line-height: 1; }
+.stu-title-wrap span { margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+
+.stu-context-card,
+.stu-filter-card,
+.stu-card,
+.stu-empty-card {
+  min-width: 0;
+  margin-top: 10px;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .045);
+  overflow: hidden;
+}
+.stu-context-card {
+  padding: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--stu-primary) 10%, #fff), #fff 68%);
+}
+.stu-context-card p { margin: 0; color: var(--stu-primary); font-size: 10px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.stu-context-card h3 { margin: 4px 0 0; font-size: clamp(18px, 5vw, 24px); font-weight: 1000; letter-spacing: -.05em; }
+.stu-context-card span { display: block; margin-top: 3px; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; }
+.stu-pill-row { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.stu-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.stu-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+.stu-summary-icon { width: 36px; height: 36px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 15px; background: color-mix(in srgb, var(--stu-primary) 12%, #fff); }
+.stu-summary-card div:last-child { min-width: 0; }
+.stu-summary-card strong, .stu-summary-card span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stu-summary-card strong { font-size: 20px; font-weight: 1000; letter-spacing: -.05em; }
+.stu-summary-card span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 850; }
+
+.stu-filter-card {
+  padding: 13px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.stu-list { display: grid; gap: 10px; margin-top: 10px; }
+.stu-card { background: linear-gradient(135deg, #fff, #f8fafc); }
+.stu-cover { height: 90px; background-size: cover; background-position: center; }
+.stu-card-inner { padding: 13px; }
+.stu-card-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.stu-avatar { width: 56px; height: 56px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 19px; color: #fff; font-weight: 1000; box-shadow: 0 12px 24px rgba(15, 23, 42, .12); }
+.stu-main-info { min-width: 0; flex: 1; }
+.stu-main-info h3, .stu-main-info p { display: block; overflow: hidden; text-overflow: ellipsis; }
+.stu-main-info h3 { margin: 0; font-size: 17px; font-weight: 1000; letter-spacing: -.035em; }
+.stu-main-info p { margin: 4px 0 0; color: var(--muted, #64748b); font-size: 12px; font-weight: 750; line-height: 1.4; }
+.stu-chip-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-top: 10px; }
+.stu-chip { max-width: 100%; display: inline-flex; align-items: center; min-height: 25px; padding: 4px 9px; border-radius: 999px; font-size: 11px; font-weight: 950; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stu-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.stu-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.stu-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.stu-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.stu-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.stu-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+.stu-info-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.stu-mini-stat { min-width: 0; padding: 10px; border-radius: 17px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .12); }
+.stu-mini-stat strong, .stu-mini-stat span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stu-mini-stat strong { font-size: 13px; font-weight: 1000; }
+.stu-mini-stat span { margin-top: 2px; color: var(--muted, #64748b); font-size: 10px; font-weight: 850; }
+.stu-address { margin: 10px 0 0; padding: 10px; border-radius: 17px; background: rgba(148, 163, 184, .08); color: var(--muted, #64748b); font-size: 12px; line-height: 1.5; font-weight: 700; }
+.stu-action-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.stu-action-row button {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+.stu-action-row button.danger { color: #dc2626; background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.13); }
+.stu-empty-card { padding: 13px; display: grid; place-items: center; align-content: center; gap: 8px; min-height: 210px; text-align: center; border-style: dashed; }
+.stu-empty-icon { width: 56px; height: 56px; display: grid; place-items: center; border-radius: 22px; background: color-mix(in srgb, var(--stu-primary) 12%, #fff); font-size: 28px; }
+.stu-empty-card h3 { margin: 0; font-size: 18px; font-weight: 1000; }
+.stu-empty-card p { margin: 0; color: var(--muted, #64748b); font-size: 13px; line-height: 1.6; }
+
+.stu-drawer-layer { position: fixed; inset: 0; z-index: 80; }
+.stu-drawer-overlay { position: absolute; inset: 0; border: 0; background: rgba(15, 23, 42, .52); }
+.stu-drawer { position: absolute; right: 0; top: 0; bottom: 0; width: min(94vw, 620px); max-width: 100vw; overflow-y: auto; overflow-x: hidden; background: var(--surface, #fff); color: var(--text, #0f172a); padding: 14px; box-shadow: -24px 0 70px rgba(15, 23, 42, .22); }
+.stu-drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 0 12px; background: var(--surface, #fff); }
+.stu-drawer-head div { min-width: 0; }
+.stu-drawer-head p { margin: 0; color: var(--stu-primary); font-size: 11px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.stu-drawer-head h2, .stu-drawer-head span { display: block; overflow: hidden; text-overflow: ellipsis; }
+.stu-drawer-head h2 { margin: 2px 0 0; font-size: 24px; font-weight: 1000; letter-spacing: -.05em; }
+.stu-drawer-head span { margin-top: 5px; color: var(--muted, #64748b); font-size: 12px; line-height: 1.4; font-weight: 700; }
+.stu-drawer-head button { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 999px; border: 1px solid rgba(148, 163, 184, .24); background: var(--surface, #fff); color: var(--text, #0f172a); font-weight: 1000; cursor: pointer; }
+.stu-form-grid { display: grid; gap: 12px; }
+.stu-form-grid.compact { gap: 10px; }
+.stu-form-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.stu-field { display: grid; gap: 6px; min-width: 0; }
+.stu-field > span { color: var(--muted, #64748b); font-size: 11px; font-weight: 950; letter-spacing: .06em; text-transform: uppercase; }
+.stu-sub-card { padding: 12px; border-radius: 19px; background: rgba(148, 163, 184, .08); border: 1px solid rgba(148, 163, 184, .14); }
+.stu-sub-card h3 { margin: 0 0 10px; font-size: 15px; font-weight: 1000; }
+.stu-preview { width: 92px; height: 84px; border-radius: 16px; margin-top: 8px; object-fit: cover; display: block; border: 1px solid rgba(148, 163, 184, .24); }
+.stu-preview.wide { width: 100%; max-width: 260px; }
+
+@media (max-width: 390px) {
+  .stu-page { padding: 6px; }
+  .stu-hero { padding: 10px; border-radius: 24px; flex-wrap: wrap; }
+  .stu-hero-icon { width: 42px; height: 42px; border-radius: 16px; }
+  .stu-hero .stu-primary-btn { width: 100%; }
+  .stu-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .stu-card-top { flex-direction: column; }
+  .stu-action-row { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (min-width: 560px) {
+  .stu-page { padding: 14px; }
+  .stu-summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stu-filter-card { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stu-info-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stu-form-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stu-action-row { display: flex; flex-wrap: wrap; justify-content: flex-end; }
+  .stu-action-row button { padding: 0 14px; }
+}
+
+@media (min-width: 980px) {
+  .stu-page { padding: 18px; }
+  .stu-summary-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .stu-filter-card { grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(150px, 1fr)); }
+  .stu-card-inner { padding: 16px; }
+  .stu-card-top { align-items: center; }
+}
+`;

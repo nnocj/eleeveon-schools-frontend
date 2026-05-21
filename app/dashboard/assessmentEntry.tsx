@@ -3,23 +3,27 @@
 /**
  * AssessmentEntries.tsx
  * ---------------------------------------------------------
- * PROFESSIONAL CLASS-SUBJECT ASSESSMENT ENTRY ENGINE
+ * MOBILE-FIRST SECURE CLASS-SUBJECT ASSESSMENT ENTRY ENGINE
  * ---------------------------------------------------------
- *
- * DB-safe rewrite for current db.ts.
  *
  * Source of truth:
  * ClassSubject -> AssessmentApplicability -> AssessmentStructureItems -> AssessmentEntry
  *
- * Important DB notes:
- * - Uses active school/branch context.
+ * Production rules:
+ * - Signed-in account required.
+ * - Active school + branch required.
+ * - All reads/writes are scoped by accountId + schoolId + branchId.
  * - ClassSubject is the academic delivery context.
- * - AssessmentApplicability activates a structure/grading system for a ClassSubject.
- * - AssessmentEntry does NOT have assessmentApplicabilityId.
- * - StudentEnrollment requires academicStructureId + academicPeriodId + status.
+ * - AssessmentEntry is linked by classSubjectId / assessmentStructureId / gradingSystemId.
+ * - Mobile-first cards; score table scrolls internally only.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useAccount } from "../context/account-context";
+import { useSettings } from "../context/settings-context";
+import { useActiveBranch } from "../context/active-branch-context";
 
 import {
   db,
@@ -44,12 +48,17 @@ import {
 } from "../lib/db";
 
 import { prepareSyncData } from "../lib/sync/syncUtils";
-import { useSettings } from "../context/settings-context";
-import { useActiveBranch } from "../context/active-branch-context";
 
 // ======================================================
 // TYPES
 // ======================================================
+
+type TenantRow = {
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  isDeleted?: boolean;
+};
 
 type ScoreMap = Record<string, number | "">;
 
@@ -89,11 +98,6 @@ type StudentRow = {
 // HELPERS
 // ======================================================
 
-const toNumber = (value: unknown, fallback = 0) => {
-  const next = Number(value);
-  return Number.isFinite(next) ? next : fallback;
-};
-
 const scoreKey = (studentId?: number, itemId?: number) => `${studentId || 0}-${itemId || 0}`;
 
 // ======================================================
@@ -101,17 +105,27 @@ const scoreKey = (studentId?: number, itemId?: number) => `${studentId || 0}-${i
 // ======================================================
 
 export default function AssessmentEntriesPage() {
-  const { settings } = useSettings();
+  const router = useRouter();
+
+  const {
+    accountId,
+    loading: accountLoading,
+    authenticated,
+  } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
   const {
     activeSchool,
+    activeSchoolId,
     activeBranch,
     activeBranchId,
     loading: contextLoading,
   } = useActiveBranch();
 
-  const branchId = activeBranchId || settings?.branchId || 1;
-  const schoolId = settings?.schoolId || activeSchool?.id;
-  const primary = settings?.primaryColor || "var(--primary-color)";
+  const schoolId = activeSchoolId || activeSchool?.id || settings?.schoolId;
+  const branchId = activeBranchId || activeBranch?.id || settings?.branchId;
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   // ======================================================
   // STATE
@@ -146,10 +160,70 @@ export default function AssessmentEntriesPage() {
   const [scores, setScores] = useState<ScoreMap>({});
 
   // ======================================================
+  // AUTH PROTECTION
+  // ======================================================
+
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/account");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
+
+  // ======================================================
   // LOAD DATA
   // ======================================================
 
+  const clearData = () => {
+    setStudents([]);
+    setClasses([]);
+    setSubjects([]);
+    setTeachers([]);
+    setAcademicStructures([]);
+    setPeriods([]);
+    setOrganizations([]);
+    setCurriculums([]);
+    setPathways([]);
+    setCurriculumSubjects([]);
+    setClassSubjects([]);
+    setApplicabilities([]);
+    setStructures([]);
+    setItems([]);
+    setEntries([]);
+    setGradings([]);
+    setRules([]);
+    setEnrollments([]);
+    setScores({});
+    setSessionStarted(false);
+  };
+
+  const sameTenant = (row: TenantRow) =>
+    row.accountId === accountId &&
+    row.schoolId === schoolId &&
+    row.branchId === branchId &&
+    !row.isDeleted;
+
   const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -194,35 +268,31 @@ export default function AssessmentEntriesPage() {
       ]);
 
       setStudents(
-        studentRows.filter(row => row.branchId === branchId && !row.isDeleted && row.status !== "withdrawn")
+        studentRows
+          .filter(sameTenant)
+          .filter((row) => row.status !== "withdrawn")
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
       );
-      setClasses(classRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setSubjects(subjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setTeachers(teacherRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setAcademicStructures(academicStructureRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setPeriods(periodRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setOrganizations(organizationRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setCurriculums(curriculumRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setPathways(pathwayRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setCurriculumSubjects(curriculumSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setClassSubjects(
-        classSubjectRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
-      );
-      setApplicabilities(
-        applicabilityRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
-      );
-      setStructures(
-        structureRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
-      );
-      setItems(itemRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false));
-      setEntries(entryRows.filter(row => row.branchId === branchId && !row.isDeleted));
-      setGradings(
-        gradingRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false)
-      );
-      setRules(ruleRows.filter(row => row.branchId === branchId && !row.isDeleted && row.active !== false));
-      setEnrollments(enrollmentRows.filter(row => row.branchId === branchId && !row.isDeleted));
+      setClasses(classRows.filter(sameTenant));
+      setSubjects(subjectRows.filter(sameTenant));
+      setTeachers(teacherRows.filter(sameTenant));
+      setAcademicStructures(academicStructureRows.filter(sameTenant));
+      setPeriods(periodRows.filter(sameTenant));
+      setOrganizations(organizationRows.filter(sameTenant));
+      setCurriculums(curriculumRows.filter(sameTenant));
+      setPathways(pathwayRows.filter(sameTenant));
+      setCurriculumSubjects(curriculumSubjectRows.filter(sameTenant));
+      setClassSubjects(classSubjectRows.filter((row) => sameTenant(row) && row.active !== false));
+      setApplicabilities(applicabilityRows.filter((row) => sameTenant(row) && row.active !== false));
+      setStructures(structureRows.filter((row) => sameTenant(row) && row.active !== false));
+      setItems(itemRows.filter((row) => sameTenant(row) && row.active !== false));
+      setEntries(entryRows.filter(sameTenant));
+      setGradings(gradingRows.filter((row) => sameTenant(row) && row.active !== false));
+      setRules(ruleRows.filter((row) => sameTenant(row) && row.active !== false));
+      setEnrollments(enrollmentRows.filter(sameTenant));
     } catch (error) {
       console.error("Failed to load assessment entries:", error);
+      clearData();
       alert("Failed to load assessment entries");
     } finally {
       setLoading(false);
@@ -231,27 +301,22 @@ export default function AssessmentEntriesPage() {
 
   useEffect(() => {
     load();
-  }, [branchId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, accountId, schoolId, branchId]);
 
   // ======================================================
   // LOOKUPS
   // ======================================================
 
-  const classMap = useMemo(() => new Map(classes.map(row => [row.id, row])), [classes]);
-  const subjectMap = useMemo(() => new Map(subjects.map(row => [row.id, row])), [subjects]);
-  const teacherMap = useMemo(() => new Map(teachers.map(row => [row.id, row])), [teachers]);
-  const structureMap = useMemo(
-    () => new Map(academicStructures.map(row => [row.id, row])),
-    [academicStructures]
-  );
-  const periodMap = useMemo(() => new Map(periods.map(row => [row.id, row])), [periods]);
-  const orgMap = useMemo(() => new Map(organizations.map(row => [row.id, row])), [organizations]);
-  const curriculumSubjectMap = useMemo(
-    () => new Map(curriculumSubjects.map(row => [row.id, row])),
-    [curriculumSubjects]
-  );
-  const curriculumMap = useMemo(() => new Map(curriculums.map(row => [row.id, row])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map(row => [row.id, row])), [pathways]);
+  const classMap = useMemo(() => new Map(classes.map((row) => [row.id, row])), [classes]);
+  const subjectMap = useMemo(() => new Map(subjects.map((row) => [row.id, row])), [subjects]);
+  const teacherMap = useMemo(() => new Map(teachers.map((row) => [row.id, row])), [teachers]);
+  const structureMap = useMemo(() => new Map(academicStructures.map((row) => [row.id, row])), [academicStructures]);
+  const periodMap = useMemo(() => new Map(periods.map((row) => [row.id, row])), [periods]);
+  const orgMap = useMemo(() => new Map(organizations.map((row) => [row.id, row])), [organizations]);
+  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map((row) => [row.id, row])), [curriculumSubjects]);
+  const curriculumMap = useMemo(() => new Map(curriculums.map((row) => [row.id, row])), [curriculums]);
+  const pathwayMap = useMemo(() => new Map(pathways.map((row) => [row.id, row])), [pathways]);
 
   // ======================================================
   // CLASS SUBJECT OPTIONS
@@ -259,7 +324,7 @@ export default function AssessmentEntriesPage() {
 
   const classSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
     return classSubjects
-      .map(row => {
+      .map((row) => {
         const classRow = classMap.get(row.classId);
         const subject = subjectMap.get(row.subjectId);
         const teacher = row.teacherId ? teacherMap.get(row.teacherId) : undefined;
@@ -289,7 +354,7 @@ export default function AssessmentEntriesPage() {
           display: `${className} • ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} • ${academicPeriodName}`,
         };
       })
-      .filter(option => option.id > 0)
+      .filter((option) => option.id > 0)
       .sort((a, b) => a.display.localeCompare(b.display));
   }, [
     classSubjects,
@@ -304,7 +369,7 @@ export default function AssessmentEntriesPage() {
   ]);
 
   const selectedOption = useMemo(() => {
-    return classSubjectOptions.find(option => option.id === classSubjectId);
+    return classSubjectOptions.find((option) => option.id === classSubjectId);
   }, [classSubjectOptions, classSubjectId]);
 
   const currentClassSubject = selectedOption?.row;
@@ -315,33 +380,32 @@ export default function AssessmentEntriesPage() {
 
   const applicability = useMemo(() => {
     if (!classSubjectId) return undefined;
-
-    return applicabilities.find(row => row.classSubjectId === classSubjectId && row.active !== false);
+    return applicabilities.find((row) => row.classSubjectId === classSubjectId && row.active !== false);
   }, [applicabilities, classSubjectId]);
 
   const assessmentStructure = useMemo(() => {
     if (!applicability?.assessmentStructureId) return undefined;
-    return structures.find(row => row.id === applicability.assessmentStructureId);
+    return structures.find((row) => row.id === applicability.assessmentStructureId);
   }, [structures, applicability]);
 
   const structureItems = useMemo(() => {
     if (!applicability?.assessmentStructureId) return [];
 
     return items
-      .filter(row => row.assessmentStructureId === applicability.assessmentStructureId && row.active !== false)
+      .filter((row) => row.assessmentStructureId === applicability.assessmentStructureId && row.active !== false)
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
   }, [items, applicability]);
 
   const gradingSystem = useMemo(() => {
     if (!applicability?.gradingSystemId) return undefined;
-    return gradings.find(row => row.id === applicability.gradingSystemId);
+    return gradings.find((row) => row.id === applicability.gradingSystemId);
   }, [gradings, applicability]);
 
   const gradeRules = useMemo(() => {
     if (!gradingSystem?.id) return [];
 
     return rules
-      .filter(row => row.gradingSystemId === gradingSystem.id && row.active !== false)
+      .filter((row) => row.gradingSystemId === gradingSystem.id && row.active !== false)
       .sort((a, b) => Number(b.minScore || 0) - Number(a.minScore || 0));
   }, [rules, gradingSystem]);
 
@@ -360,8 +424,8 @@ export default function AssessmentEntriesPage() {
     const periodId = currentClassSubject.academicPeriodId;
 
     return students
-      .map(student => {
-        const enrollment = enrollments.find(row => {
+      .map((student) => {
+        const enrollment = enrollments.find((row) => {
           if (row.studentId !== student.id) return false;
           if (row.classId !== currentClassSubject.classId) return false;
           if (row.academicStructureId !== currentClassSubject.academicStructureId) return false;
@@ -397,7 +461,7 @@ export default function AssessmentEntriesPage() {
     const nextScores: ScoreMap = {};
 
     entries
-      .filter(entry => {
+      .filter((entry) => {
         if (entry.classSubjectId !== currentClassSubject.id) return false;
         if (entry.classId !== currentClassSubject.classId) return false;
         if (entry.subjectId !== currentClassSubject.subjectId) return false;
@@ -407,7 +471,7 @@ export default function AssessmentEntriesPage() {
         if (applicability.gradingSystemId && entry.gradingSystemId !== applicability.gradingSystemId) return false;
         return true;
       })
-      .forEach(entry => {
+      .forEach((entry) => {
         nextScores[scoreKey(entry.studentId, entry.assessmentStructureItemId)] = Number(entry.score);
       });
 
@@ -444,7 +508,7 @@ export default function AssessmentEntriesPage() {
         ? Number(((rawTotal / maxTotal) * 100).toFixed(2))
         : 0;
 
-      const matchedRule = gradeRules.find(rule => {
+      const matchedRule = gradeRules.find((rule) => {
         return percentage >= Number(rule.minScore) && percentage <= Number(rule.maxScore);
       });
 
@@ -463,7 +527,7 @@ export default function AssessmentEntriesPage() {
 
   const completionStats = useMemo(() => {
     const expected = filteredStudentRows.length * structureItems.length;
-    const entered = Object.values(scores).filter(value => value !== "" && value !== undefined).length;
+    const entered = Object.values(scores).filter((value) => value !== "" && value !== undefined).length;
     const completion = expected ? Math.round((entered / expected) * 100) : 0;
 
     return { expected, entered, completion };
@@ -475,7 +539,7 @@ export default function AssessmentEntriesPage() {
 
   const updateScore = (studentId: number, item: AssessmentStructureItem, value: string) => {
     if (value === "") {
-      setScores(prev => ({ ...prev, [scoreKey(studentId, item.id)]: "" }));
+      setScores((prev) => ({ ...prev, [scoreKey(studentId, item.id)]: "" }));
       return;
     }
 
@@ -483,13 +547,12 @@ export default function AssessmentEntriesPage() {
     if (Number.isNaN(num)) return;
 
     const sanitized = Math.max(0, Math.min(num, Number(item.maxScore || 100)));
-
-    setScores(prev => ({ ...prev, [scoreKey(studentId, item.id)]: sanitized }));
+    setScores((prev) => ({ ...prev, [scoreKey(studentId, item.id)]: sanitized }));
   };
 
   const startSession = () => {
-    if (!activeBranchId) {
-      alert("Select a branch first");
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a branch first");
       return;
     }
 
@@ -522,6 +585,11 @@ export default function AssessmentEntriesPage() {
       return;
     }
 
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      alert("Sign in and select a branch first");
+      return;
+    }
+
     if (!currentClassSubject || !applicability) {
       alert("Select a valid class subject with assessment applicability");
       return;
@@ -531,7 +599,6 @@ export default function AssessmentEntriesPage() {
       setSaving(true);
 
       const academicPeriodId = currentClassSubject.academicPeriodId || 0;
-
       const payload: AssessmentEntry[] = [];
 
       for (const { student } of filteredStudentRows) {
@@ -545,6 +612,7 @@ export default function AssessmentEntriesPage() {
 
           payload.push(
             prepareSyncData({
+              accountId,
               schoolId,
               branchId,
               classSubjectId: currentClassSubject.id,
@@ -568,7 +636,7 @@ export default function AssessmentEntriesPage() {
         }
       }
 
-      const existing = entries.filter(entry => {
+      const existing = entries.filter((entry) => {
         if (entry.classSubjectId !== currentClassSubject.id) return false;
         if (entry.classId !== currentClassSubject.classId) return false;
         if (entry.subjectId !== currentClassSubject.subjectId) return false;
@@ -599,89 +667,46 @@ export default function AssessmentEntriesPage() {
   };
 
   // ======================================================
-  // STYLES
+  // PROTECTED STATES
   // ======================================================
 
-  const card: React.CSSProperties = {
-    background: "var(--surface)",
-    color: "var(--text)",
-    border: "1px solid rgba(0,0,0,0.08)",
-    borderRadius: 22,
-    padding: 18,
-    boxShadow: "0 14px 34px rgba(0,0,0,0.05)",
-  };
-
-  const input: React.CSSProperties = {
-    width: "100%",
-    padding: "12px 13px",
-    borderRadius: 14,
-    border: "1px solid rgba(0,0,0,0.12)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-    fontWeight: 650,
-  };
-
-  const button: React.CSSProperties = {
-    padding: "12px 16px",
-    borderRadius: 14,
-    border: "none",
-    background: primary,
-    color: "#fff",
-    fontWeight: 850,
-    cursor: "pointer",
-  };
-
-  const ghostButton: React.CSSProperties = {
-    padding: "10px 13px",
-    borderRadius: 12,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    fontWeight: 750,
-    cursor: "pointer",
-  };
-
-  const badge = (tone: "green" | "red" | "blue" | "gray" | "orange" | "purple"): React.CSSProperties => {
-    const tones = {
-      green: { bg: "rgba(34,197,94,0.12)", color: "#16a34a" },
-      red: { bg: "rgba(239,68,68,0.12)", color: "#dc2626" },
-      blue: { bg: "rgba(59,130,246,0.12)", color: "#2563eb" },
-      gray: { bg: "rgba(107,114,128,0.12)", color: "#4b5563" },
-      orange: { bg: "rgba(245,158,11,0.14)", color: "#b45309" },
-      purple: { bg: "rgba(147,51,234,0.12)", color: "#7e22ce" },
-    }[tone];
-
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      padding: "5px 9px",
-      borderRadius: 999,
-      background: tones.bg,
-      color: tones.color,
-      fontSize: 11,
-      fontWeight: 850,
-    };
-  };
-
-  // ======================================================
-  // LOADING / NO BRANCH
-  // ======================================================
-
-  if (loading || contextLoading) {
-    return <div style={{ padding: 20 }}>Loading assessment engine...</div>;
+  if (accountLoading || contextLoading || settingsLoading || loading) {
+    return (
+      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="ae-state-card">
+          <div className="ae-spinner" />
+          <h2>Opening assessment engine...</h2>
+          <p>Checking account, branch, class subjects, applicability, and score records.</p>
+        </section>
+      </main>
+    );
   }
 
-  if (!activeBranchId) {
+  if (!authenticated || !accountId) {
     return (
-      <div style={{ padding: 20, color: "var(--text)" }}>
-        <div style={{ ...card, textAlign: "center", padding: 34 }}>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900 }}>Select a branch first</h2>
-          <p style={{ marginTop: 8, opacity: 0.7 }}>
-            Assessment entries belong to a branch. Select a school and branch first.
-          </p>
-        </div>
-      </div>
+      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="ae-state-card">
+          <h2>Redirecting to login...</h2>
+          <p>You must sign in before entering assessment scores.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!schoolId || !branchId) {
+    return (
+      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="ae-state-card">
+          <h2>Select a branch first</h2>
+          <p>Assessment entries belong to one active school branch.</p>
+          <button type="button" className="ae-primary-btn" onClick={() => router.push("/account")}>
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -690,275 +715,808 @@ export default function AssessmentEntriesPage() {
   // ======================================================
 
   return (
-    <div style={{ padding: 20, color: "var(--text)" }}>
-      {/* HEADER */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: 16,
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Assessment Entries</h2>
-          <div style={{ marginTop: 4, opacity: 0.68, fontSize: 13, fontWeight: 650 }}>
-            Entering assessment scores in <b>{activeBranch?.name || "selected branch"}</b>
-            {activeSchool?.name ? ` under ${activeSchool.name}` : ""}.
+    <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+      <style>{css}</style>
+
+      <section className="ae-hero">
+        <div className="ae-hero-left">
+          <div className="ae-hero-icon">📝</div>
+          <div className="ae-title-wrap">
+            <p>Score Entry</p>
+            <h2>Assessment Entries</h2>
+            <span>
+              {activeBranch?.name || "Selected branch"}
+              {activeSchool?.name ? ` · ${activeSchool.name}` : ""}
+            </span>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button style={ghostButton} onClick={load} type="button">
-            Refresh
-          </button>
-          <button style={button} onClick={startSession} type="button">
-            {sessionStarted ? "Session Active" : "Start Session"}
-          </button>
-          <button
-            style={{ ...button, opacity: !sessionStarted || saving ? 0.6 : 1 }}
-            onClick={saveEntries}
-            disabled={!sessionStarted || saving}
-            type="button"
-          >
-            {saving ? "Saving..." : "Save Scores"}
-          </button>
+        <div className="ae-hero-actions">
+          <button type="button" className="ae-ghost-btn" onClick={load}>Refresh</button>
+          <button type="button" className="ae-primary-btn" onClick={startSession}>{sessionStarted ? "Session Active" : "Start Session"}</button>
+          <button type="button" className="ae-primary-btn" onClick={saveEntries} disabled={!sessionStarted || saving}>{saving ? "Saving..." : "Save Scores"}</button>
         </div>
-      </div>
+      </section>
 
-      {/* FILTERS */}
-      <div
-        style={{
-          ...card,
-          marginTop: 20,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))",
-          gap: 12,
-        }}
-      >
+      <section className="ae-filter-card">
         <select
-          style={input}
           value={classSubjectId}
-          onChange={e => {
-            setClassSubjectId(Number(e.target.value));
+          onChange={(event) => {
+            setClassSubjectId(Number(event.target.value));
             setSessionStarted(false);
           }}
         >
           <option value={0}>Select Class Subject</option>
-          {classSubjectOptions.map(option => (
-            <option key={option.id} value={option.id}>
-              {option.display}
-            </option>
+          {classSubjectOptions.map((option) => (
+            <option key={option.id} value={option.id}>{option.display}</option>
           ))}
         </select>
 
         <input
-          style={input}
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search student or admission number..."
         />
-      </div>
+      </section>
 
-      {/* SELECTED CONTEXT */}
       {selectedOption && (
-        <div style={{ ...card, marginTop: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>{selectedOption.subjectName}</h3>
-              <div style={{ marginTop: 6, opacity: 0.68, fontSize: 13 }}>
-                {selectedOption.className} • {selectedOption.academicStructureName} • {selectedOption.academicPeriodName}
+        <section className="ae-context-card">
+          <div className="ae-card-top">
+            <div className="ae-context-main">
+              <div className="ae-context-icon">📖</div>
+              <div>
+                <h3>{selectedOption.subjectName}</h3>
+                <p>{selectedOption.className} · {selectedOption.academicStructureName} · {selectedOption.academicPeriodName}</p>
+                <span>{selectedOption.curriculumName} · {selectedOption.pathwayName} · {selectedOption.teacherName}</span>
               </div>
-              <div style={{ marginTop: 6, opacity: 0.68, fontSize: 13 }}>
-                {selectedOption.curriculumName} • {selectedOption.pathwayName} • {selectedOption.teacherName}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              {applicability ? <span style={badge("green")}>Applicability Ready</span> : <span style={badge("red")}>No Applicability</span>}
-              {assessmentStructure && <span style={badge("blue")}>{assessmentStructure.name}</span>}
-              {gradingSystem && <span style={badge("purple")}>{gradingSystem.name}</span>}
-              <span style={badge("gray")}>{organizationName}</span>
             </div>
           </div>
-        </div>
+
+          <div className="ae-chip-row">
+            {applicability ? <Chip tone="green">Applicability Ready</Chip> : <Chip tone="red">No Applicability</Chip>}
+            {assessmentStructure && <Chip tone="blue">{assessmentStructure.name}</Chip>}
+            {gradingSystem && <Chip tone="purple">{gradingSystem.name}</Chip>}
+            <Chip tone="gray">{organizationName}</Chip>
+          </div>
+        </section>
       )}
 
-      {/* WARNINGS */}
       {classSubjectId > 0 && !applicability && (
-        <div
-          style={{
-            ...card,
-            marginTop: 16,
-            border: "1px solid rgba(239,68,68,0.18)",
-            background: "rgba(239,68,68,0.06)",
-          }}
-        >
+        <section className="ae-warning-card red">
           No active assessment applicability is configured for this class subject. Go to Assessment Applicability first.
-        </div>
+        </section>
       )}
 
       {applicability && !structureItems.length && (
-        <div
-          style={{
-            ...card,
-            marginTop: 16,
-            border: "1px solid rgba(245,158,11,0.18)",
-            background: "rgba(245,158,11,0.07)",
-          }}
-        >
+        <section className="ae-warning-card orange">
           The selected assessment structure has no active assessment items.
-        </div>
+        </section>
       )}
 
-      {/* ANALYTICS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))",
-          gap: 14,
-          marginTop: 20,
-        }}
-      >
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Students</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{filteredStudentRows.length}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Assessment Items</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{structureItems.length}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Grade Rules</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{gradeRules.length}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Entered Scores</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{completionStats.entered}</div>
-        </div>
-        <div style={card}>
-          <div style={{ opacity: 0.72, fontSize: 12, fontWeight: 800 }}>Completion</div>
-          <div style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>{completionStats.completion}%</div>
-        </div>
-      </div>
+      <section className="ae-summary-grid" aria-label="Score entry summary">
+        <SummaryCard label="Students" value={filteredStudentRows.length} icon="🧑‍🎓" />
+        <SummaryCard label="Items" value={structureItems.length} icon="🧩" />
+        <SummaryCard label="Grade Rules" value={gradeRules.length} icon="🏅" />
+        <SummaryCard label="Entered" value={completionStats.entered} icon="✍️" />
+        <SummaryCard label="Completion" value={`${completionStats.completion}%`} icon="✅" />
+      </section>
 
-      {/* SCORE GRID */}
+      {!classSubjectOptions.length && (
+        <section className="ae-empty-card">
+          <div className="ae-empty-icon">📖</div>
+          <h3>No class subjects available</h3>
+          <p>Create Class Subjects and Assessment Applicability before entering scores.</p>
+        </section>
+      )}
+
+      {!sessionStarted && classSubjectOptions.length > 0 && (
+        <section className="ae-empty-card compact">
+          <div className="ae-empty-icon">▶️</div>
+          <h3>Start a score entry session</h3>
+          <p>Select a class subject, confirm applicability, then start the session to enter scores.</p>
+        </section>
+      )}
+
       {sessionStarted && (
-        <div style={{ ...card, marginTop: 20, overflowX: "auto" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 16,
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
+        <section className="ae-score-shell">
+          <div className="ae-score-head">
             <div>
-              <h3 style={{ margin: 0, fontSize: 20, fontWeight: 900 }}>Score Entry</h3>
-              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                Scores are saved against ClassSubject, AssessmentStructureItem, student, class, subject and academic period.
-              </div>
+              <h3>Score Entry</h3>
+              <p>Scores are saved against ClassSubject, AssessmentStructureItem, student, class, subject and academic period.</p>
             </div>
-
-            <span style={badge(completionStats.completion === 100 ? "green" : "orange")}>
-              {completionStats.completion}% complete
-            </span>
+            <Chip tone={completionStats.completion === 100 ? "green" : "orange"}>{completionStats.completion}% complete</Chip>
           </div>
 
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: "left", padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)" }}>
-                  Student
-                </th>
-                {structureItems.map(item => (
-                  <th key={item.id} style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "center" }}>
-                    {item.name}
-                    <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>
-                      Max {item.maxScore} • {item.weight}%
-                    </div>
-                  </th>
-                ))}
-                <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "center" }}>
-                  Raw Total
-                </th>
-                <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "center" }}>
-                  % / Weighted
-                </th>
-                <th style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.08)", textAlign: "center" }}>
-                  Grade
-                </th>
-              </tr>
-            </thead>
+          <div className="ae-table-scroll" aria-label="Scrollable score entry table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  {structureItems.map((item) => (
+                    <th key={item.id}>
+                      {item.name}
+                      <span>Max {item.maxScore} · {item.weight}%</span>
+                    </th>
+                  ))}
+                  <th>Raw Total</th>
+                  <th>% / Weighted</th>
+                  <th>Grade</th>
+                </tr>
+              </thead>
 
-            <tbody>
-              {filteredStudentRows.map(({ student }) => {
-                const result = computedResults[String(student.id)];
+              <tbody>
+                {filteredStudentRows.map(({ student }) => {
+                  const result = computedResults[String(student.id)];
 
-                return (
-                  <tr key={student.id}>
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.04)", minWidth: 220 }}>
-                      <div style={{ fontWeight: 850 }}>{student.fullName}</div>
-                      <div style={{ marginTop: 3, opacity: 0.62, fontSize: 12 }}>
-                        {student.admissionNumber || "No admission number"}
-                      </div>
-                    </td>
-
-                    {structureItems.map(item => (
-                      <td key={item.id} style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "center" }}>
-                        <input
-                          style={{
-                            width: 90,
-                            padding: 9,
-                            borderRadius: 12,
-                            border: "1px solid rgba(0,0,0,0.16)",
-                            outline: "none",
-                            background: "var(--surface)",
-                            color: "var(--text)",
-                            textAlign: "center",
-                            fontWeight: 800,
-                          }}
-                          type="number"
-                          min={0}
-                          max={item.maxScore}
-                          value={scores[scoreKey(student.id, item.id)] ?? ""}
-                          onChange={e => updateScore(Number(student.id), item, e.target.value)}
-                        />
+                  return (
+                    <tr key={student.id}>
+                      <td className="ae-student-cell">
+                        <strong>{student.fullName}</strong>
+                        <span>{student.admissionNumber || "No admission number"}</span>
                       </td>
-                    ))}
 
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "center", fontWeight: 850 }}>
-                      {result?.rawTotal ?? 0}
-                    </td>
+                      {structureItems.map((item) => (
+                        <td key={item.id}>
+                          <input
+                            className="ae-score-input"
+                            type="number"
+                            min={0}
+                            max={item.maxScore}
+                            value={scores[scoreKey(student.id, item.id)] ?? ""}
+                            onChange={(event) => updateScore(Number(student.id), item, event.target.value)}
+                          />
+                        </td>
+                      ))}
 
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "center", fontWeight: 850 }}>
-                      {result?.percentage ?? 0}%
-                    </td>
+                      <td className="ae-center strong">{result?.rawTotal ?? 0}</td>
+                      <td className="ae-center strong">{result?.percentage ?? 0}%</td>
+                      <td className="ae-center">
+                        <Chip tone={result?.grade ? "green" : "gray"}>{result?.grade || "-"}</Chip>
+                        {result?.remark && <span className="ae-remark">{result.remark}</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
 
-                    <td style={{ padding: 10, borderBottom: "1px solid rgba(0,0,0,0.04)", textAlign: "center", fontWeight: 850 }}>
-                      <span style={badge(result?.grade ? "green" : "gray")}>
-                        {result?.grade || "-"}
-                      </span>
-                      {result?.remark && (
-                        <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>{result.remark}</div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          {!filteredStudentRows.length && (
-            <div style={{ textAlign: "center", padding: 24, opacity: 0.72 }}>
-              No active students found for this class subject and period.
-            </div>
-          )}
-        </div>
+            {!filteredStudentRows.length && (
+              <div className="ae-empty-table">No active students found for this class subject and period.</div>
+            )}
+          </div>
+        </section>
       )}
-    </div>
+    </main>
   );
 }
+
+// ======================================================
+// SMALL COMPONENTS
+// ======================================================
+
+function SummaryCard({ label, value, icon }: { label: string; value: string | number; icon: string }) {
+  return (
+    <article className="ae-summary-card">
+      <div className="ae-summary-icon">{icon}</div>
+      <div>
+        <strong>{value}</strong>
+        <span>{label}</span>
+      </div>
+    </article>
+  );
+}
+
+function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+  return <span className={`ae-chip ${tone}`}>{children}</span>;
+}
+
+// ======================================================
+// CSS
+// ======================================================
+
+const css = `
+@keyframes aeSpin {
+  to { transform: rotate(360deg); }
+}
+
+.ae-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  background: var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  overflow-x: hidden;
+}
+
+.ae-page *,
+.ae-page *::before,
+.ae-page *::after {
+  box-sizing: border-box;
+}
+
+.ae-page button,
+.ae-page input,
+.ae-page select,
+.ae-page textarea {
+  font: inherit;
+  max-width: 100%;
+}
+
+.ae-page input,
+.ae-page select {
+  width: 100%;
+  min-height: 43px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 15px;
+  padding: 0 12px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font-weight: 750;
+}
+
+.ae-state-card {
+  min-height: min(420px, calc(100dvh - 32px));
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 22px;
+  border-radius: 28px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .08);
+  text-align: center;
+}
+
+.ae-state-card h2 {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.ae-state-card p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ae-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 4px solid color-mix(in srgb, var(--ae-primary) 18%, transparent);
+  border-top-color: var(--ae-primary);
+  animation: aeSpin .8s linear infinite;
+}
+
+.ae-primary-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 18px;
+  background: var(--ae-primary);
+  color: #fff;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.ae-primary-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.ae-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--ae-primary) 12%, #fff), #fff 64%);
+  border: 1px solid rgba(148, 163, 184, .22);
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+  overflow: hidden;
+}
+
+.ae-hero-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.ae-hero-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 18px;
+  background: var(--ae-primary);
+  color: #fff;
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--ae-primary) 28%, transparent);
+  font-size: 22px;
+}
+
+.ae-title-wrap {
+  min-width: 0;
+}
+
+.ae-title-wrap p,
+.ae-title-wrap h2,
+.ae-title-wrap span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-title-wrap p {
+  margin: 0 0 2px;
+  color: var(--ae-primary);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.ae-title-wrap h2 {
+  margin: 0;
+  font-size: clamp(19px, 5vw, 28px);
+  font-weight: 1000;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
+
+.ae-title-wrap span {
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ae-hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ae-ghost-btn {
+  min-height: 40px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.ae-filter-card,
+.ae-context-card,
+.ae-warning-card,
+.ae-score-shell,
+.ae-empty-card {
+  min-width: 0;
+  border-radius: 24px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .055);
+  overflow: hidden;
+}
+
+.ae-filter-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.ae-context-card,
+.ae-warning-card,
+.ae-score-shell {
+  margin-top: 10px;
+  padding: 13px;
+}
+
+.ae-warning-card {
+  color: #7f1d1d;
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.55;
+}
+
+.ae-warning-card.red {
+  border-color: rgba(239, 68, 68, .18);
+  background: rgba(239, 68, 68, .06);
+}
+
+.ae-warning-card.orange {
+  color: #92400e;
+  border-color: rgba(245, 158, 11, .18);
+  background: rgba(245, 158, 11, .07);
+}
+
+.ae-card-top,
+.ae-context-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ae-context-main {
+  flex: 1 1 auto;
+}
+
+.ae-context-main > div:last-child {
+  min-width: 0;
+}
+
+.ae-context-icon {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+  background: color-mix(in srgb, var(--ae-primary) 12%, #fff);
+}
+
+.ae-context-main h3,
+.ae-context-main p,
+.ae-context-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ae-context-main h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 1000;
+  letter-spacing: -.035em;
+}
+
+.ae-context-main p,
+.ae-context-main span {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.ae-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.ae-chip {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ae-chip.green { background: rgba(34,197,94,.12); color: #16a34a; }
+.ae-chip.red { background: rgba(239,68,68,.12); color: #dc2626; }
+.ae-chip.blue { background: rgba(59,130,246,.12); color: #2563eb; }
+.ae-chip.gray { background: rgba(107,114,128,.12); color: #4b5563; }
+.ae-chip.orange { background: rgba(245,158,11,.14); color: #b45309; }
+.ae-chip.purple { background: rgba(147,51,234,.12); color: #7e22ce; }
+
+.ae-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ae-summary-card {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148, 163, 184, .2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+  overflow: hidden;
+}
+
+.ae-summary-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--ae-primary) 12%, #fff);
+}
+
+.ae-summary-card div:last-child {
+  min-width: 0;
+}
+
+.ae-summary-card strong,
+.ae-summary-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ae-summary-card strong {
+  font-size: 22px;
+  font-weight: 1000;
+  letter-spacing: -.05em;
+}
+
+.ae-summary-card span {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.ae-empty-card {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 210px;
+  margin-top: 10px;
+  padding: 22px;
+  text-align: center;
+  border-style: dashed;
+}
+
+.ae-empty-card.compact {
+  min-height: 170px;
+}
+
+.ae-empty-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--ae-primary) 12%, #fff);
+  font-size: 28px;
+}
+
+.ae-empty-card h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 1000;
+}
+
+.ae-empty-card p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ae-score-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.ae-score-head div {
+  min-width: 0;
+}
+
+.ae-score-head h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 1000;
+  letter-spacing: -.04em;
+}
+
+.ae-score-head p {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ae-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, .18);
+}
+
+.ae-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+.ae-table-scroll th,
+.ae-table-scroll td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, .16);
+  vertical-align: middle;
+}
+
+.ae-table-scroll th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #334155;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.ae-table-scroll th:first-child,
+.ae-table-scroll td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+  text-align: left;
+  min-width: 220px;
+  max-width: 260px;
+}
+
+.ae-table-scroll th:first-child {
+  z-index: 3;
+  background: #f8fafc;
+}
+
+.ae-table-scroll th span,
+.ae-student-cell span,
+.ae-remark {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.ae-student-cell strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.ae-score-input {
+  width: 84px !important;
+  min-height: 38px !important;
+  border-radius: 12px !important;
+  padding: 0 8px !important;
+  text-align: center;
+  font-weight: 900 !important;
+}
+
+.ae-center {
+  text-align: center;
+}
+
+.ae-center.strong {
+  font-weight: 950;
+}
+
+.ae-empty-table {
+  padding: 22px;
+  text-align: center;
+  color: var(--muted, #64748b);
+  font-weight: 850;
+}
+
+@media (min-width: 680px) {
+  .ae-page {
+    padding: 12px;
+  }
+
+  .ae-filter-card {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, .7fr);
+  }
+
+  .ae-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .ae-page {
+    padding: 16px;
+  }
+
+  .ae-summary-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .ae-page {
+    padding: 6px;
+  }
+
+  .ae-hero {
+    flex-direction: column;
+    border-radius: 22px;
+    padding: 10px;
+  }
+
+  .ae-hero-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ae-ghost-btn,
+  .ae-primary-btn {
+    width: 100%;
+  }
+
+  .ae-summary-grid {
+    gap: 6px;
+  }
+
+  .ae-summary-card {
+    padding: 10px;
+    border-radius: 19px;
+  }
+
+  .ae-context-card,
+  .ae-warning-card,
+  .ae-score-shell,
+  .ae-empty-card {
+    border-radius: 20px;
+    padding: 11px;
+  }
+
+  .ae-score-head {
+    flex-direction: column;
+  }
+
+  .ae-table-scroll th:first-child,
+  .ae-table-scroll td:first-child {
+    min-width: 180px;
+    max-width: 200px;
+  }
+
+  .ae-score-input {
+    width: 74px !important;
+  }
+}
+`;

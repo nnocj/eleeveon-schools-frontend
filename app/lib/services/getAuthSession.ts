@@ -3,7 +3,9 @@
 // ======================================================
 
 import { NextRequest } from "next/server";
-import jwt from "jsonwebtoken";
+const jwt = require("jsonwebtoken") as {
+  verify(token: string, secretOrPublicKey: string): unknown;
+};
 
 export type AuthSession = {
   id: string;

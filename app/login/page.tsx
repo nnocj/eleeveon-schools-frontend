@@ -6,115 +6,424 @@
  * SECURE LOGIN PAGE
  * ---------------------------------------------------------
  *
- * Fixes:
- * - Saves auth token.
- * - Saves accountId for syncConfig.
- * - Notifies AccountProvider immediately after login.
- * - Calls /auth/me once after login to confirm session is restorable.
- * - Uses router.replace instead of push so Back does not return to login.
- * - Mobile-first responsive UI.
+ * Purpose:
+ * - Login using the platform API client.
+ * - Save auth token and accountId.
+ * - Clear stale active membership before every new login.
+ * - Normalize and save memberships.
+ * - Store the chosen active membership BEFORE opening a portal.
+ * - Support developer, owner, admin, branch_admin, accountant,
+ *   teacher, student, and parent routing.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { apiClient, setAuthToken } from "../lib/api/apiClient";
+import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
-import { AUTH_CHANGED_EVENT } from "../context/account-context";
+
+import {
+  clearStoredActiveMembership,
+  setStoredActiveMembership,
+} from "../lib/auth/activeMembership";
+
+import {
+  AppRole,
+  getPortalPathByRole,
+  getPortalPathForUser,
+  normalizeRole,
+  shouldChooseMembership,
+  UserMembership,
+} from "../lib/auth/roleRedirect";
 
 // ======================================================
 // TYPES
 // ======================================================
 
+type LoginUser = {
+  id: string;
+  accountId: string;
+  email: string;
+  role?: string | null;
+  fullName?: string;
+  name?: string;
+  memberships?: UserMembership[];
+  userMemberships?: UserMembership[];
+  accountMemberships?: UserMembership[];
+  schoolMemberships?: UserMembership[];
+  roleMemberships?: UserMembership[];
+  [key: string]: any;
+};
+
+type LoginAccount = {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  country?: string | null;
+  currency?: string | null;
+  status?: string;
+  role?: string | null;
+  memberships?: UserMembership[];
+  userMemberships?: UserMembership[];
+  accountMemberships?: UserMembership[];
+  schoolMemberships?: UserMembership[];
+  roleMemberships?: UserMembership[];
+  subscription?: any;
+  [key: string]: any;
+} | null;
+
 type LoginResponse = {
-  token: string;
-  user: {
-    id: string;
-    accountId: string;
-    email: string;
-    role: string;
-    fullName?: string;
-    name?: string;
-  };
-  account?: {
-    id: string;
-    name: string;
-    email?: string | null;
-  } | null;
+  token?: string;
+  accessToken?: string;
+  access_token?: string;
+  user: LoginUser;
+  memberships?: UserMembership[];
+  userMemberships?: UserMembership[];
+  accountMemberships?: UserMembership[];
+  schoolMemberships?: UserMembership[];
+  roleMemberships?: UserMembership[];
+  account?: LoginAccount;
 };
 
 // ======================================================
-// COMPONENT
+// STORAGE KEYS
+// ======================================================
+
+const AUTH_USER_KEY = "eleeveon_auth_user";
+const AUTH_ACCOUNT_KEY = "eleeveon_auth_account";
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+function asArray<T = any>(value: any): T[] {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  return [value];
+}
+
+function numberOrNull(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function membershipIsActive(value: any) {
+  if (!value) return false;
+  if (value.active === false) return false;
+  if (value.isActive === false) return false;
+  if (value.disabled === true) return false;
+  if (value.isDeleted === true) return false;
+
+  const status = String(value.status || "").trim().toLowerCase();
+
+  if (["inactive", "disabled", "deleted", "blocked", "suspended"].includes(status)) {
+    return false;
+  }
+
+  return true;
+}
+
+function normalizeMembershipForLogin(value: any): UserMembership | null {
+  if (!membershipIsActive(value)) return null;
+
+  const role = normalizeRole(
+    value.role ||
+      value.membershipRole ||
+      value.portalRole ||
+      value.userRole ||
+      value.type
+  );
+
+  if (!role) return null;
+
+  return {
+    ...value,
+    id: value.id,
+    role,
+    schoolId: numberOrNull(
+      value.schoolId ||
+        value.school?.id ||
+        value.activeSchoolId ||
+        value.contextSchoolId
+    ),
+    branchId: numberOrNull(
+      value.branchId ||
+        value.schoolBranchId ||
+        value.branch?.id ||
+        value.activeBranchId ||
+        value.contextBranchId
+    ),
+    teacherLocalId: numberOrNull(
+      value.teacherLocalId || value.teacherId || value.teacher?.id
+    ),
+    studentLocalId: numberOrNull(
+      value.studentLocalId || value.studentId || value.student?.id
+    ),
+    parentLocalId: numberOrNull(
+      value.parentLocalId || value.parentId || value.parent?.id
+    ),
+    active: true,
+  };
+}
+
+function collectMemberships(res: LoginResponse): UserMembership[] {
+  const raw = [
+    res.memberships,
+    res.userMemberships,
+    res.accountMemberships,
+    res.schoolMemberships,
+    res.roleMemberships,
+    res.user?.memberships,
+    res.user?.userMemberships,
+    res.user?.accountMemberships,
+    res.user?.schoolMemberships,
+    res.user?.roleMemberships,
+    res.account?.memberships,
+    res.account?.userMemberships,
+    res.account?.accountMemberships,
+    res.account?.schoolMemberships,
+    res.account?.roleMemberships,
+  ].flatMap((source) => asArray(source));
+
+  const normalized = raw
+    .map((membership) => normalizeMembershipForLogin(membership))
+    .filter(Boolean) as UserMembership[];
+
+  const unique = new Map<string, UserMembership>();
+
+  normalized.forEach((membership, index) => {
+    const key =
+      membership.id ||
+      `${membership.role}-${membership.schoolId || "school"}-${
+        membership.branchId || "branch"
+      }-${
+        membership.teacherLocalId ||
+        membership.studentLocalId ||
+        membership.parentLocalId ||
+        index
+      }`;
+
+    unique.set(String(key), membership);
+  });
+
+  return Array.from(unique.values());
+}
+
+function saveLoginContext(res: LoginResponse, memberships: UserMembership[]) {
+  if (typeof window === "undefined") return;
+
+  const normalizedRole = normalizeRole(res.user?.role) || res.user?.role || null;
+
+  const userToStore = {
+    ...res.user,
+    role: normalizedRole,
+    memberships,
+    userMemberships: memberships,
+  };
+
+  const accountToStore = res.account
+    ? {
+        ...res.account,
+        role: normalizeRole(res.account.role) || res.account.role || normalizedRole,
+        memberships,
+        userMemberships: memberships,
+      }
+    : null;
+
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userToStore));
+  localStorage.setItem(AUTH_ACCOUNT_KEY, JSON.stringify(accountToStore));
+
+  // Compatibility with older contexts/pages that may read these keys.
+  localStorage.setItem("user", JSON.stringify(userToStore));
+  localStorage.setItem("account", JSON.stringify(accountToStore));
+
+  if (normalizedRole) {
+    localStorage.setItem("activeRole", String(normalizedRole));
+  }
+}
+
+function chooseSingleMembershipForRole(
+  role: AppRole | undefined,
+  memberships: UserMembership[]
+) {
+  if (!memberships.length) return null;
+  if (!role) return memberships[0];
+
+  return memberships.find((membership) => membership.role === role) || memberships[0];
+}
+
+function createFallbackMembership(args: {
+  role?: AppRole;
+  user?: LoginUser;
+}): UserMembership | null {
+  if (!args.role) return null;
+
+  return {
+    id: `direct-${args.role}-${args.user?.id || Date.now()}`,
+    role: args.role,
+    schoolId: numberOrNull(args.user?.schoolId || args.user?.activeSchoolId),
+    branchId: numberOrNull(
+      args.user?.branchId ||
+        args.user?.schoolBranchId ||
+        args.user?.activeBranchId
+    ),
+    teacherLocalId: numberOrNull(args.user?.teacherLocalId || args.user?.teacherId),
+    studentLocalId: numberOrNull(args.user?.studentLocalId || args.user?.studentId),
+    parentLocalId: numberOrNull(args.user?.parentLocalId || args.user?.parentId),
+    active: true,
+  };
+}
+
+function openPath(router: ReturnType<typeof useRouter>, path: string) {
+  if (typeof window !== "undefined") {
+    window.location.replace(path);
+    return;
+  }
+
+  router.replace(path);
+}
+
+// ======================================================
+// PAGE
 // ======================================================
 
 export default function LoginPage() {
   const router = useRouter();
 
-  const [form, setForm] = useState({
-    email: "",
-    password: "",
-  });
-
+  const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
-  const canSubmit = useMemo(() => {
-    return !!form.email.trim() && !!form.password.trim() && !loading;
-  }, [form.email, form.password, loading]);
-
-  const updateForm = (patch: Partial<typeof form>) => {
+  const update = (patch: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...patch }));
-    setError("");
   };
 
-  const submit = async (event?: React.FormEvent) => {
-    event?.preventDefault();
-
-    if (!canSubmit) {
-      setError("Enter your email and password.");
-      return;
-    }
+  const submit = async () => {
+    if (loading) return;
+    if (!form.email.trim()) return alert("Enter your email address");
+    if (!form.password.trim()) return alert("Enter your password");
 
     try {
       setLoading(true);
-      setError("");
 
-      const res = await apiClient<LoginResponse>("/auth/login", {
+      // Prevent old teacher/student/parent context from leaking into the new login.
+      clearStoredActiveMembership();
+
+      const res = await apiRequest<LoginResponse>("/auth/login", {
         method: "POST",
-        body: {
-          email: form.email.trim(),
+        body: JSON.stringify({
+          email: form.email.trim().toLowerCase(),
           password: form.password,
-        },
+        }),
       });
 
-      if (!res?.token) {
+      const token = extractToken(res);
+
+      if (!token) {
+        console.error("Login response without token:", res);
         throw new Error("Login succeeded but no token was returned.");
       }
 
-      const accountId = res.user?.accountId || res.account?.id;
-
-      if (!accountId) {
-        throw new Error("Login succeeded but no accountId was returned.");
+      if (!res.user?.accountId) {
+        console.error("Login response without accountId:", res);
+        throw new Error("Login succeeded but no account ID was returned.");
       }
 
-      setAuthToken(res.token);
-      setAccountId(accountId);
+      const memberships = collectMemberships(res);
+      const role = normalizeRole(res.user.role);
 
-      // Tell AccountProvider to immediately restore /auth/me.
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+      saveAuthToken(token);
+      setAccountId(res.user.accountId);
+      saveLoginContext(res, memberships);
+
+      // Developer does not need school/branch membership.
+      if (role === "developer") {
+        setStoredActiveMembership(
+          createFallbackMembership({ role, user: res.user })
+        );
+        openPath(router, "/developer");
+        return;
       }
 
-      // Confirm the token works before moving away from login.
-      await apiClient("/auth/me");
+      // Platform-team members do not need school/branch membership.
+      if (role === "platform_team") {
+        setStoredActiveMembership(
+          createFallbackMembership({ role, user: res.user })
+        );
+        openPath(router, "/platform-team");
+        return;
+      }
+      
 
-      router.replace("/account");
+      // Owner may have no school/branch membership yet because owner creates schools.
+      if (role === "super_admin") {
+        const ownerMembership =
+          chooseSingleMembershipForRole(role, memberships) ||
+          createFallbackMembership({ role, user: res.user });
+
+        setStoredActiveMembership(ownerMembership);
+        openPath(router, "/owner");
+        return;
+      }
+
+      // Multiple memberships require the selection page.
+      // Important: we do NOT set one active membership here because the user must choose.
+      if (
+        memberships.length > 1 ||
+        shouldChooseMembership({
+          role,
+          memberships,
+        })
+      ) {
+        openPath(router, "/select-role");
+        return;
+      }
+
+      // Single membership users: set active membership BEFORE opening portal.
+      if (memberships.length === 1) {
+        const membership = memberships[0];
+
+        setStoredActiveMembership(membership);
+        openPath(router, getPortalPathByRole(membership.role));
+        return;
+      }
+
+      // Direct-role fallback for users whose backend login response has role
+      // but does not yet return a membership object.
+      if (role) {
+        const fallbackMembership = createFallbackMembership({
+          role,
+          user: res.user,
+        });
+
+        setStoredActiveMembership(fallbackMembership);
+
+        openPath(
+          router,
+          getPortalPathForUser({
+            role,
+            memberships,
+          })
+        );
+        return;
+      }
+
+      throw new Error(
+        "Login succeeded, but no active membership or role was found."
+      );
     } catch (error: any) {
-      console.error("Login failed:", error);
-      setError(error?.message || "Login failed. Check your email and password.");
-    } finally {
+      clearStoredActiveMembership();
+      alert(error?.message || "Login failed");
       setLoading(false);
     }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" && !loading) submit();
   };
 
   return (
@@ -122,77 +431,76 @@ export default function LoginPage() {
       <style>{css}</style>
 
       <section className="login-card">
-        <div className="login-brand">
-          <div className="login-logo">E</div>
-          <div>
-            <p>Welcome back</p>
-            <h1>Login</h1>
-          </div>
-        </div>
+        <div className="login-badge">🔐</div>
 
-        <p className="login-text">Access your Eleeveon workspace.</p>
+        <h1>Login</h1>
+        <p>Access your Eleeveon workspace.</p>
 
-        {error && <div className="login-error">{error}</div>}
+        <div className="login-grid">
+          <input
+            placeholder="Email"
+            value={form.email}
+            onChange={(event) => update({ email: event.target.value })}
+            onKeyDown={handleKeyDown}
+            autoComplete="email"
+            inputMode="email"
+            disabled={loading}
+          />
 
-        <form className="login-form" onSubmit={submit}>
-          <label>
-            <span>Email</span>
+          <div className="password-wrap">
             <input
-              type="email"
-              placeholder="you@example.com"
-              value={form.email}
-              autoComplete="email"
-              onChange={(event) => updateForm({ email: event.target.value })}
-            />
-          </label>
-
-          <label>
-            <span>Password</span>
-            <input
-              type="password"
-              placeholder="Your password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
               value={form.password}
+              onChange={(event) => update({ password: event.target.value })}
+              onKeyDown={handleKeyDown}
               autoComplete="current-password"
-              onChange={(event) => updateForm({ password: event.target.value })}
+              disabled={loading}
             />
-          </label>
 
-          <button type="submit" className="login-primary" disabled={!canSubmit}>
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowPassword((prev) => !prev)}
+              disabled={loading}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
+
+          <button type="button" onClick={submit} disabled={loading}>
             {loading ? "Logging in..." : "Login"}
           </button>
 
           <button
             type="button"
-            className="login-ghost"
+            className="ghost"
             onClick={() => router.push("/register")}
             disabled={loading}
           >
             Create new account
           </button>
-        </form>
+        </div>
       </section>
     </main>
   );
 }
-
-// ======================================================
-// CSS
-// ======================================================
 
 const css = `
 .login-page {
   min-height: 100dvh;
   width: 100%;
   max-width: 100vw;
+  overflow-x: hidden;
   display: grid;
   place-items: center;
   padding: 16px;
   background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--primary-color, #2563eb) 14%, transparent), transparent 34%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color, #2563eb) 18%, transparent), transparent 34%),
     var(--bg, #f8fafc);
   color: var(--text, #0f172a);
   font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-  overflow-x: hidden;
 }
 
 .login-page *,
@@ -204,130 +512,119 @@ const css = `
 .login-card {
   width: min(430px, 100%);
   border-radius: 28px;
-  padding: 22px;
-  background: var(--surface, #fff);
+  padding: 24px;
+  background: var(--surface, #ffffff);
   border: 1px solid rgba(148, 163, 184, .24);
   box-shadow: 0 24px 70px rgba(15, 23, 42, .12);
   overflow: hidden;
 }
 
-.login-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.login-logo {
-  width: 52px;
-  height: 52px;
-  flex: 0 0 auto;
+.login-badge {
+  width: 54px;
+  height: 54px;
   display: grid;
   place-items: center;
-  border-radius: 20px;
-  background: var(--primary-color, #2563eb);
-  color: #fff;
-  font-size: 24px;
-  font-weight: 1000;
-  box-shadow: 0 14px 30px color-mix(in srgb, var(--primary-color, #2563eb) 30%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 13%, #fff);
+  font-size: 26px;
 }
 
-.login-brand p {
-  margin: 0;
-  color: var(--primary-color, #2563eb);
-  font-size: 11px;
-  font-weight: 950;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.login-brand h1 {
-  margin: 1px 0 0;
-  font-size: clamp(28px, 8vw, 38px);
+.login-card h1 {
+  margin: 16px 0 4px;
+  font-size: clamp(28px, 9vw, 38px);
   font-weight: 1000;
   letter-spacing: -.06em;
   line-height: 1;
 }
 
-.login-text {
-  margin: 12px 0 0;
+.login-card p {
+  margin: 0;
   color: var(--muted, #64748b);
   font-size: 14px;
+  font-weight: 700;
   line-height: 1.55;
-  font-weight: 750;
 }
 
-.login-error {
-  margin-top: 14px;
-  padding: 12px;
-  border-radius: 17px;
-  background: rgba(239, 68, 68, .1);
-  color: #dc2626;
-  border: 1px solid rgba(239, 68, 68, .16);
-  font-size: 13px;
-  font-weight: 850;
-  line-height: 1.45;
-}
-
-.login-form {
+.login-grid {
   display: grid;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 20px;
 }
 
-.login-form label {
-  display: grid;
-  gap: 6px;
-}
-
-.login-form label span {
-  color: var(--muted, #64748b);
-  font-size: 11px;
-  font-weight: 950;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-
-.login-form input {
+.login-grid input,
+.password-wrap input {
   width: 100%;
-  min-height: 46px;
+  min-height: 48px;
   border: 1px solid rgba(148, 163, 184, .28);
   border-radius: 16px;
-  padding: 0 13px;
+  padding: 0 14px;
   background: var(--surface, #fff);
   color: var(--text, #0f172a);
   outline: none;
+  font: inherit;
   font-weight: 750;
 }
 
-.login-form input:focus {
-  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 55%, rgba(148, 163, 184, .28));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+.login-grid input:disabled,
+.password-wrap input:disabled {
+  opacity: .72;
+  cursor: not-allowed;
 }
 
-.login-primary,
-.login-ghost {
-  min-height: 46px;
+.password-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.password-wrap input {
+  padding-right: 52px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  min-height: 40px !important;
+  border: 0 !important;
+  border-radius: 14px !important;
+  padding: 0 !important;
+  background: rgba(148, 163, 184, .12) !important;
+  color: var(--text, #0f172a) !important;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.login-grid input:focus,
+.password-wrap input:focus {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 60%, rgba(148,163,184,.28));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color, #2563eb) 13%, transparent);
+}
+
+.login-grid button {
+  min-height: 48px;
+  border: 0;
   border-radius: 16px;
   padding: 0 16px;
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  font: inherit;
   font-weight: 950;
   cursor: pointer;
 }
 
-.login-primary {
-  border: 0;
-  background: var(--primary-color, #2563eb);
-  color: #fff;
-}
-
-.login-primary:disabled,
-.login-ghost:disabled {
-  opacity: .55;
+.login-grid button:disabled {
+  opacity: .58;
   cursor: not-allowed;
 }
 
-.login-ghost {
-  border: 1px solid rgba(148, 163, 184, .25);
+.login-grid button.ghost {
+  border: 1px solid rgba(148, 163, 184, .24);
   background: var(--surface, #fff);
   color: var(--text, #0f172a);
 }
@@ -338,14 +635,22 @@ const css = `
   }
 
   .login-card {
-    padding: 18px;
     border-radius: 24px;
+    padding: 18px;
   }
 
-  .login-logo {
-    width: 48px;
-    height: 48px;
-    border-radius: 18px;
+  .login-grid input,
+  .login-grid button,
+  .password-wrap input {
+    min-height: 46px;
+    border-radius: 15px;
+  }
+
+  .password-toggle {
+    width: 38px;
+    height: 38px;
+    min-height: 38px !important;
+    border-radius: 13px !important;
   }
 }
 `;

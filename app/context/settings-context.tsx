@@ -6,7 +6,7 @@
  * SCHOOL-BRANCH SETTINGS PROVIDER
  * ---------------------------------------------------------
  *
- * New architecture:
+ * Architecture:
  * School -> Branch -> SchoolBranchSettings
  *
  * There is no global settings row anymore.
@@ -40,6 +40,7 @@ import React, {
 
 import { db, SchoolBranchSetting } from "../lib/db";
 import { prepareSyncData } from "../lib/sync/syncUtils";
+import { SyncStatus } from "../lib/constants/syncStatus";
 
 // ======================================================
 // TYPES
@@ -75,7 +76,9 @@ const BRANCH_STORAGE_KEY = "activeBranchId";
 // CONTEXT
 // ======================================================
 
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+const SettingsContext = createContext<SettingsContextType | undefined>(
+  undefined
+);
 
 // ======================================================
 // DEFAULTS
@@ -123,8 +126,55 @@ const defaultSettings = (
 
 function numberOrNull(value: string | null | undefined) {
   if (!value) return null;
+
   const parsed = Number(value);
+
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function normalizeSyncStatus(value: unknown): SyncStatus | undefined {
+  if (!value) return undefined;
+
+  const raw = String(value);
+  const values = Object.values(SyncStatus) as string[];
+
+  return values.includes(raw) ? (raw as unknown as SyncStatus) : undefined;
+}
+
+function toSchoolBranchSetting(
+  value: Partial<SchoolBranchSetting> & Record<string, any>,
+  fallbackSchoolId?: number | null,
+  fallbackBranchId?: number | null
+): SettingsValue {
+  const normalized = normalizeSettings(
+    value,
+    fallbackSchoolId,
+    fallbackBranchId
+  );
+
+  return {
+    ...normalized,
+    synced:
+      normalizeSyncStatus(normalized.synced) ||
+      normalizeSyncStatus((value as any).synced) ||
+      SyncStatus.PENDING,
+  } as SettingsValue;
+}
+
+function prepareSettingsSyncData(
+  value: Partial<SchoolBranchSetting> & Record<string, any>,
+  fallbackSchoolId?: number | null,
+  fallbackBranchId?: number | null
+): SettingsValue {
+  const prepared = prepareSyncData(
+    value as unknown as Record<string, any>
+  ) as unknown as Partial<SchoolBranchSetting> & Record<string, any>;
+
+  return toSchoolBranchSetting(
+    prepared,
+    fallbackSchoolId,
+    fallbackBranchId
+  );
 }
 
 function normalizeSettings(
@@ -141,25 +191,38 @@ function normalizeSettings(
     schoolGalleryImages: Array.isArray(row.schoolGalleryImages)
       ? row.schoolGalleryImages
       : [],
+    synced:
+      normalizeSyncStatus(row.synced) ||
+      SyncStatus.PENDING,
   } as SettingsValue;
 
   return normalized;
 }
 
 async function resolveStoredOrFirstContext() {
-  const storedSchoolId = numberOrNull(localStorage.getItem(SCHOOL_STORAGE_KEY));
-  const storedBranchId = numberOrNull(localStorage.getItem(BRANCH_STORAGE_KEY));
+  const storedSchoolId = numberOrNull(
+    localStorage.getItem(SCHOOL_STORAGE_KEY)
+  );
+
+  const storedBranchId = numberOrNull(
+    localStorage.getItem(BRANCH_STORAGE_KEY)
+  );
 
   const [schoolRows, branchRows] = await Promise.all([
     db.schools.toArray(),
     db.branches.toArray(),
   ]);
 
-  const schools = schoolRows.filter(row => !row.isDeleted && (row as any).active !== false);
-  const branches = branchRows.filter(row => !row.isDeleted && row.active !== false);
+  const schools = schoolRows.filter(
+    (row) => !row.isDeleted && (row as any).active !== false
+  );
+
+  const branches = branchRows.filter(
+    (row) => !row.isDeleted && row.active !== false
+  );
 
   const storedSchoolExists = storedSchoolId
-    ? schools.some(row => row.id === storedSchoolId)
+    ? schools.some((row) => row.id === storedSchoolId)
     : false;
 
   const resolvedSchoolId = storedSchoolExists
@@ -167,11 +230,11 @@ async function resolveStoredOrFirstContext() {
     : schools[0]?.id || null;
 
   const branchesForSchool = resolvedSchoolId
-    ? branches.filter(row => row.schoolId === resolvedSchoolId)
+    ? branches.filter((row) => row.schoolId === resolvedSchoolId)
     : [];
 
   const storedBranchExists = storedBranchId
-    ? branchesForSchool.some(row => row.id === storedBranchId)
+    ? branchesForSchool.some((row) => row.id === storedBranchId)
     : false;
 
   const resolvedBranchId = storedBranchExists
@@ -201,26 +264,43 @@ async function getOrCreateSchoolBranchSettings(
   branchId: number | null
 ) {
   if (!schoolId || !branchId) {
-    return normalizeSettings(defaultSettings(schoolId, branchId), schoolId, branchId);
+    return normalizeSettings(
+      defaultSettings(schoolId, branchId),
+      schoolId,
+      branchId
+    );
   }
 
   const rows = await db.schoolBranchSettings.toArray();
 
   const existing = rows
     .filter(
-      row =>
+      (row) =>
         row.schoolId === schoolId &&
         row.branchId === branchId &&
         !row.isDeleted
     )
-    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+    .sort(
+      (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
+    )[0];
 
   if (existing) {
-    return normalizeSettings(existing as SettingsValue, schoolId, branchId);
+    return normalizeSettings(
+      existing as SettingsValue,
+      schoolId,
+      branchId
+    );
   }
 
-  const created = prepareSyncData(defaultSettings(schoolId, branchId)) as SettingsValue;
-  const id = await db.schoolBranchSettings.add(created as SchoolBranchSetting);
+  const created = prepareSettingsSyncData(
+    defaultSettings(schoolId, branchId),
+    schoolId,
+    branchId
+  );
+
+  const id = await db.schoolBranchSettings.add(
+    created as SchoolBranchSetting
+  );
 
   return normalizeSettings(
     {
@@ -236,7 +316,11 @@ async function getOrCreateSchoolBranchSettings(
 // PROVIDER
 // ======================================================
 
-export function SettingsProvider({ children }: { children: React.ReactNode }) {
+export function SettingsProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [settings, setSettings] = useState<SettingsValue | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSchoolId, setActiveSchoolId] = useState<number | null>(null);
@@ -263,6 +347,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSettings(current);
     } catch (error) {
       console.error("Failed to load school branch settings:", error);
+
       setSettings(normalizeSettings(defaultSettings(), null, null));
     } finally {
       setLoading(false);
@@ -303,7 +388,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
         setSettings(current);
       } catch (error) {
-        console.error("Failed to refresh school branch settings context:", error);
+        console.error(
+          "Failed to refresh school branch settings context:",
+          error
+        );
       } finally {
         setLoading(false);
       }
@@ -322,11 +410,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     };
 
     window.addEventListener("storage", onStorage);
-    window.addEventListener("school-branch-context-changed", onStorage as EventListener);
+    window.addEventListener(
+      "school-branch-context-changed",
+      onStorage as EventListener
+    );
 
     return () => {
       window.removeEventListener("storage", onStorage);
-      window.removeEventListener("school-branch-context-changed", onStorage as EventListener);
+      window.removeEventListener(
+        "school-branch-context-changed",
+        onStorage as EventListener
+      );
     };
   }, [refreshSettings]);
 
@@ -337,10 +431,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const updateSettings = useCallback(
     async (patch: SettingsPatch) => {
       const targetSchoolId =
-        Number(patch.schoolId || settings?.schoolId || activeSchoolId || 0) || null;
+        Number(patch.schoolId || settings?.schoolId || activeSchoolId || 0) ||
+        null;
 
       const targetBranchId =
-        Number(patch.branchId || settings?.branchId || activeBranchId || 0) || null;
+        Number(patch.branchId || settings?.branchId || activeBranchId || 0) ||
+        null;
 
       if (!targetSchoolId || !targetBranchId) {
         const fallback = normalizeSettings(
@@ -356,10 +452,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         return fallback;
       }
 
-      const existing = await getOrCreateSchoolBranchSettings(targetSchoolId, targetBranchId);
+      const existing = await getOrCreateSchoolBranchSettings(
+        targetSchoolId,
+        targetBranchId
+      );
 
-      const next = normalizeSettings(
-        prepareSyncData({
+      const next = prepareSettingsSyncData(
+        {
           ...existing,
           ...patch,
           id: existing.id,
@@ -371,7 +470,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             : Array.isArray(existing.schoolGalleryImages)
             ? existing.schoolGalleryImages
             : [],
-        }) as SettingsValue,
+        },
         targetSchoolId,
         targetBranchId
       );
@@ -406,14 +505,20 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
           schoolGalleryImages: next.schoolGalleryImages,
 
+          accountId: next.accountId,
+          cloudId: next.cloudId,
+          createdAt: next.createdAt,
           updatedAt: next.updatedAt,
           version: next.version,
           deviceId: next.deviceId,
           synced: next.synced,
           isDeleted: false,
-        } as any);
+        } as Partial<SchoolBranchSetting>);
       } else {
-        const id = await db.schoolBranchSettings.add(next as SchoolBranchSetting);
+        const id = await db.schoolBranchSettings.add(
+          next as SchoolBranchSetting
+        );
+
         next.id = Number(id);
       }
 
@@ -423,6 +528,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
       localStorage.setItem(SCHOOL_STORAGE_KEY, String(targetSchoolId));
       localStorage.setItem(BRANCH_STORAGE_KEY, String(targetBranchId));
+
       window.dispatchEvent(new Event("school-branch-settings-updated"));
 
       return next;
@@ -455,7 +561,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     ]
   );
 
-  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
+  return (
+    <SettingsContext.Provider value={value}>
+      {children}
+    </SettingsContext.Provider>
+  );
 }
 
 // ======================================================

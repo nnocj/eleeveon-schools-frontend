@@ -1,23 +1,27 @@
-// ======================================================
-// FILE 3: app/components/SyncStatusStrip.tsx
-// ======================================================
-
 "use client";
 
 /**
- * SyncStatusStrip.tsx
+ * app/components/SyncStatusStrip.tsx
  * ---------------------------------------------------------
- * OPTIONAL SMALL STATUS STRIP
+ * PLATFORM-READY SYNC STATUS STRIP
  * ---------------------------------------------------------
- *
- * Place inside account/page.tsx or dashboard/page.tsx if you want users
- * to see initial sync/autosync status.
+ * Backward compatible with sync-bootstrap-context, but enhanced for the
+ * upgraded sync engine by showing diagnostics when available.
  */
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useSyncBootstrap } from "../context/sync-bootstrap-context";
 
-function formatTime(value?: number) {
+type LocalDiagnostics = {
+  pending?: number;
+  errors?: number;
+  conflicts?: number;
+  lastSyncAt?: number | null;
+  lastSyncOkAt?: number | null;
+  lastSyncError?: string | null;
+};
+
+function formatTime(value?: number | null) {
   if (!value) return "Never";
 
   return new Date(value).toLocaleString("en-GH", {
@@ -26,6 +30,16 @@ function formatTime(value?: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+async function loadDiagnostics(): Promise<LocalDiagnostics | null> {
+  try {
+    const mod = await import("../lib/sync/syncDiagnostics");
+    if (typeof mod.getSyncDiagnostics !== "function") return null;
+    return await mod.getSyncDiagnostics();
+  } catch {
+    return null;
+  }
 }
 
 export default function SyncStatusStrip() {
@@ -39,10 +53,35 @@ export default function SyncStatusStrip() {
     setAutoSyncEnabled,
   } = useSyncBootstrap();
 
+  const [diagnostics, setDiagnostics] = useState<LocalDiagnostics | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refresh = async () => {
+      const data = await loadDiagnostics();
+      if (!cancelled) setDiagnostics(data);
+    };
+
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [status, pushed, pulled, lastSyncedAt]);
+
+  const conflictCount = diagnostics?.conflicts || 0;
+  const pendingCount = diagnostics?.pending || 0;
+  const syncErrorCount = diagnostics?.errors || 0;
+
   const tone =
-    status === "success"
+    conflictCount > 0
+      ? "purple"
+      : status === "success"
       ? "green"
-      : status === "failed"
+      : status === "failed" || syncErrorCount > 0
       ? "red"
       : status === "offline"
       ? "orange"
@@ -50,31 +89,36 @@ export default function SyncStatusStrip() {
       ? "blue"
       : "gray";
 
+  const title =
+    conflictCount > 0
+      ? "Sync conflicts need review"
+      : status === "syncing" || status === "checking"
+      ? "Syncing account data..."
+      : status === "success"
+      ? "Account data synced"
+      : status === "failed"
+      ? "Sync needs attention"
+      : status === "offline"
+      ? "Offline mode"
+      : "Sync ready";
+
+  const firstError = errors[0] || diagnostics?.lastSyncError || "";
+
   return (
-    <section className="sync-strip">
+    <section className="sync-strip" aria-live="polite">
       <style>{css}</style>
 
       <div className={`sync-dot ${tone}`} />
 
       <div className="sync-copy">
-        <strong>
-          {status === "syncing" || status === "checking"
-            ? "Syncing account data..."
-            : status === "success"
-            ? "Account data synced"
-            : status === "failed"
-            ? "Sync needs attention"
-            : status === "offline"
-            ? "Offline mode"
-            : "Sync ready"}
-        </strong>
+        <strong>{title}</strong>
         <span>
-          Pushed {pushed} · Pulled {pulled} · Last sync: {formatTime(lastSyncedAt)}
+          Pushed {pushed} · Pulled {pulled} · Pending {pendingCount} · Conflicts {conflictCount} · Last sync: {formatTime(lastSyncedAt || diagnostics?.lastSyncOkAt || diagnostics?.lastSyncAt)}
         </span>
-        {!!errors.length && <small>{errors[0]}</small>}
+        {!!firstError && <small>{firstError}</small>}
       </div>
 
-      <label className="sync-toggle">
+      <label className="sync-toggle" title="Enable or disable automatic background sync">
         <input
           type="checkbox"
           checked={autoSyncEnabled}
@@ -114,6 +158,7 @@ const css = `
 .sync-dot.orange { background: #f59e0b; }
 .sync-dot.blue { background: #2563eb; }
 .sync-dot.gray { background: #64748b; }
+.sync-dot.purple { background: #7c3aed; }
 
 .sync-copy {
   min-width: 0;
@@ -173,31 +218,3 @@ const css = `
   }
 }
 `;
-
-
-
-
-
-
-
-// ======================================================
-// FILE 7: OPTIONAL UPDATE syncBackup.tsx MANUAL/AUTO CONTROL
-// ======================================================
-
-/**
- * Since syncBackup.tsx was already built with manual Run Sync,
- * add this import:
- *
- * 
- *
- * Then inside component:
- *
- * 
- *
- * Then add this toggle near the Run Sync button:
- */
-
-/*
-
-*/
-

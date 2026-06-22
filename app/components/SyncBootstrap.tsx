@@ -3,13 +3,8 @@
 /**
  * app/components/SyncBootstrap.tsx
  * ---------------------------------------------------------
- * LOGIN / NEW DEVICE SYNC BOOTSTRAP
+ * LOGIN / NEW DEVICE SYNC BOOTSTRAP - PLATFORM READY
  * ---------------------------------------------------------
- *
- * IMPORTANT FIX:
- * - No early return before hooks.
- * - Every useEffect/useRef is always called in the same order.
- * - Conditions are handled inside effects only.
  */
 
 import { useEffect, useRef } from "react";
@@ -18,6 +13,63 @@ import { useAccount } from "../context/account-context";
 import { useActiveBranch } from "../context/active-branch-context";
 import { useSyncBootstrap } from "../context/sync-bootstrap-context";
 import { runSync, startAutoSync } from "../lib/sync/syncEngine";
+
+type OptionalSyncDevicesModule = {
+  upsertLocalSyncDevice?: (patch?: Record<string, any>) => Promise<any>;
+  registerSyncDevice?: (options?: {
+    silent?: boolean;
+    patch?: Record<string, any>;
+  }) => Promise<any>;
+
+  // Backward compatibility if older/generated sync file used this name.
+  registerOrTouchSyncDevice?: () => Promise<any>;
+};
+
+type OptionalPlatformCacheModule = {
+  refreshPlatformCache?: () => Promise<any>;
+};
+
+async function tryRegisterDevice() {
+  try {
+    const mod = (await import("../lib/sync/syncDevices")) as OptionalSyncDevicesModule;
+
+    if (typeof mod.registerSyncDevice === "function") {
+      await mod.registerSyncDevice({ silent: true });
+      return;
+    }
+
+    if (typeof mod.registerOrTouchSyncDevice === "function") {
+      await mod.registerOrTouchSyncDevice();
+      return;
+    }
+
+    if (typeof mod.upsertLocalSyncDevice === "function") {
+      await mod.upsertLocalSyncDevice();
+    }
+  } catch {
+    // Optional device registration must never block the dashboard.
+  }
+}
+
+async function tryRefreshPlatformCache() {
+  try {
+    const mod = (await import("../lib/sync/platformCache")) as OptionalPlatformCacheModule;
+    await mod.refreshPlatformCache?.();
+  } catch {
+    // Platform cache is helpful but should never block the dashboard.
+  }
+}
+
+function getReadableError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown sync error";
+  }
+}
 
 export default function SyncBootstrap() {
   const { authenticated, accountId, loading: accountLoading } = useAccount();
@@ -34,6 +86,7 @@ export default function SyncBootstrap() {
 
   const bootstrappedAccountRef = useRef<string | null>(null);
   const refreshInstitutionRef = useRef(refreshInstitution);
+
   const markersRef = useRef({
     markSyncStart,
     markSyncSuccess,
@@ -41,12 +94,10 @@ export default function SyncBootstrap() {
     markSyncOffline,
   });
 
-  // Keep latest refresh function without putting it into the main sync effect.
   useEffect(() => {
     refreshInstitutionRef.current = refreshInstitution;
   }, [refreshInstitution]);
 
-  // Keep latest marker functions without causing sync effect loops.
   useEffect(() => {
     markersRef.current = {
       markSyncStart,
@@ -56,7 +107,6 @@ export default function SyncBootstrap() {
     };
   }, [markSyncStart, markSyncSuccess, markSyncFailure, markSyncOffline]);
 
-  // First login / new device sync.
   useEffect(() => {
     let cancelled = false;
 
@@ -81,10 +131,13 @@ export default function SyncBootstrap() {
       markersRef.current.markSyncStart();
 
       try {
-        const result = await runSync();
+        await tryRegisterDevice();
+
+        const result = await runSync({ includePlatformCache: true } as any);
 
         if (cancelled) return;
 
+        await tryRefreshPlatformCache();
         await refreshInstitutionRef.current();
 
         if (result.ok) {
@@ -92,11 +145,11 @@ export default function SyncBootstrap() {
         } else {
           markersRef.current.markSyncFailure(result.errors);
         }
-      } catch (error: any) {
+      } catch (error) {
         if (cancelled) return;
 
         await refreshInstitutionRef.current();
-        markersRef.current.markSyncFailure([error?.message || String(error)]);
+        markersRef.current.markSyncFailure([getReadableError(error)]);
       }
     };
 
@@ -107,18 +160,18 @@ export default function SyncBootstrap() {
     };
   }, [accountLoading, authenticated, accountId, initialSyncDone]);
 
-  // Auto sync every 60 seconds when enabled.
   useEffect(() => {
     if (!authenticated || !accountId || !autoSyncEnabled) return;
 
-    const stopAutoSync = startAutoSync(60_000);
+    const stopAutoSync = startAutoSync(60_000, {
+      includePlatformCache: true,
+    } as any);
 
     return () => {
       stopAutoSync();
     };
   }, [authenticated, accountId, autoSyncEnabled]);
 
-  // Sync once when the device comes back online.
   useEffect(() => {
     if (!authenticated || !accountId) return;
 
@@ -131,7 +184,11 @@ export default function SyncBootstrap() {
       markersRef.current.markSyncStart();
 
       try {
-        const result = await runSync();
+        await tryRegisterDevice();
+
+        const result = await runSync({ includePlatformCache: true } as any);
+
+        await tryRefreshPlatformCache();
         await refreshInstitutionRef.current();
 
         if (result.ok) {
@@ -139,8 +196,8 @@ export default function SyncBootstrap() {
         } else {
           markersRef.current.markSyncFailure(result.errors);
         }
-      } catch (error: any) {
-        markersRef.current.markSyncFailure([error?.message || String(error)]);
+      } catch (error) {
+        markersRef.current.markSyncFailure([getReadableError(error)]);
       } finally {
         running = false;
       }

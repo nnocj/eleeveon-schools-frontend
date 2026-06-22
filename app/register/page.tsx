@@ -1,7 +1,15 @@
 "use client";
 
+/**
+ * app/register/page.tsx
+ * ---------------------------------------------------------
+ * SECURE REGISTER PAGE
+ * ---------------------------------------------------------
+ */
+
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
+
 import { apiClient, setAuthToken } from "../lib/api/apiClient";
 import { setAccountId } from "../lib/sync/syncConfig";
 
@@ -16,48 +24,130 @@ export default function RegisterPage() {
   });
 
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const update = (patch: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...patch }));
   };
 
   const submit = async () => {
+    if (!form.fullName.trim()) return alert("Enter your full name");
+    if (!form.accountName.trim()) return alert("Enter school or business account name");
+    if (!form.email.trim()) return alert("Enter your email address");
+    if (!form.password.trim()) return alert("Enter your password");
+    if (form.password.trim().length < 6) return alert("Password must be at least 6 characters");
+
     try {
       setLoading(true);
 
-      const res = await apiClient<any>("/auth/register", {
+      const res = await apiClient<{
+        token: string;
+        user: {
+          id: string;
+          accountId: string;
+          email: string;
+          role: string;
+          fullName?: string;
+          name?: string;
+        };
+        account?: {
+          id: string;
+          name: string;
+        } | null;
+      }>("/auth/register", {
         method: "POST",
-        body: form,
+        body: {
+          fullName: form.fullName.trim(),
+          email: form.email.trim().toLowerCase(),
+          password: form.password,
+          accountName: form.accountName.trim(),
+        },
       });
+
+      if (!res.token) throw new Error("Account created but no login token was returned.");
+      if (!res.user?.accountId) throw new Error("Account created but no account ID was returned.");
 
       setAuthToken(res.token);
       setAccountId(res.user.accountId);
 
-      router.push("/account");
+      router.replace("/account");
     } catch (error: any) {
-      alert(error.message || "Registration failed");
+      alert(error?.message || "Registration failed");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" && !loading) submit();
+  };
+
   return (
-    <main style={page}>
-      <section style={card}>
-        <h1 style={title}>Create Account</h1>
-        <p style={text}>Create your Eleeveon owner account.</p>
+    <main className="register-page">
+      <style>{css}</style>
 
-        <div style={grid}>
-          <input style={input} placeholder="Full name" value={form.fullName} onChange={(e) => update({ fullName: e.target.value })} />
-          <input style={input} placeholder="School / business account name" value={form.accountName} onChange={(e) => update({ accountName: e.target.value })} />
-          <input style={input} placeholder="Email" value={form.email} onChange={(e) => update({ email: e.target.value })} />
-          <input style={input} type="password" placeholder="Password" value={form.password} onChange={(e) => update({ password: e.target.value })} />
+      <section className="register-card">
+        <div className="register-badge">🏫</div>
 
-          <button style={button} onClick={submit} disabled={loading}>
+        <h1>Create Account</h1>
+        <p>Create your Eleeveon owner workspace.</p>
+
+        <div className="register-grid">
+          <input
+            placeholder="Full name"
+            value={form.fullName}
+            onChange={(event) => update({ fullName: event.target.value })}
+            onKeyDown={handleKeyDown}
+            autoComplete="name"
+          />
+
+          <input
+            placeholder="School / business account name"
+            value={form.accountName}
+            onChange={(event) => update({ accountName: event.target.value })}
+            onKeyDown={handleKeyDown}
+            autoComplete="organization"
+          />
+
+          <input
+            placeholder="Email"
+            value={form.email}
+            onChange={(event) => update({ email: event.target.value })}
+            onKeyDown={handleKeyDown}
+            autoComplete="email"
+          />
+
+          <div className="password-wrap">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={form.password}
+              onChange={(event) => update({ password: event.target.value })}
+              onKeyDown={handleKeyDown}
+              autoComplete="new-password"
+            />
+
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowPassword((prev) => !prev)}
+              disabled={loading}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
+
+          <button type="button" onClick={submit} disabled={loading}>
             {loading ? "Creating..." : "Create Account"}
           </button>
 
-          <button style={ghost} onClick={() => router.push("/login")}>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => router.push("/login")}
+            disabled={loading}
+          >
             Already have account? Login
           </button>
         </div>
@@ -66,67 +156,164 @@ export default function RegisterPage() {
   );
 }
 
-const page: React.CSSProperties = {
-  minHeight: "100vh",
-  display: "grid",
-  placeItems: "center",
-  padding: 16,
-  background: "var(--bg)",
-  color: "var(--text)",
-};
+const css = `
+.register-page {
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--primary-color, #2563eb) 18%, transparent), transparent 34%),
+    var(--bg, #f8fafc);
+  color: var(--text, #0f172a);
+  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+}
 
-const card: React.CSSProperties = {
-  width: "min(460px, 100%)",
-  background: "var(--surface)",
-  border: "1px solid rgba(0,0,0,0.08)",
-  borderRadius: 24,
-  padding: 24,
-  boxShadow: "0 18px 46px rgba(15,23,42,0.10)",
-};
+.register-page *,
+.register-page *::before,
+.register-page *::after {
+  box-sizing: border-box;
+}
 
-const title: React.CSSProperties = {
-  margin: 0,
-  fontSize: 30,
-  fontWeight: 950,
-};
+.register-card {
+  width: min(460px, 100%);
+  border-radius: 28px;
+  padding: 24px;
+  background: var(--surface, #ffffff);
+  border: 1px solid rgba(148, 163, 184, .24);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .12);
+  overflow: hidden;
+}
 
-const text: React.CSSProperties = {
-  opacity: 0.68,
-  fontWeight: 650,
-};
+.register-badge {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 13%, #fff);
+  font-size: 26px;
+}
 
-const grid: React.CSSProperties = {
-  display: "grid",
-  gap: 12,
-  marginTop: 18,
-};
+.register-card h1 {
+  margin: 16px 0 4px;
+  font-size: clamp(28px, 9vw, 38px);
+  font-weight: 1000;
+  letter-spacing: -.06em;
+  line-height: 1;
+}
 
-const input: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "13px 14px",
-  borderRadius: 14,
-  border: "1px solid rgba(0,0,0,0.12)",
-  background: "var(--surface)",
-  color: "var(--text)",
-};
+.register-card p {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.55;
+}
 
-const button: React.CSSProperties = {
-  border: "none",
-  borderRadius: 14,
-  padding: "13px 16px",
-  background: "var(--primary-color)",
-  color: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};
+.register-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
 
-const ghost: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,0.10)",
-  borderRadius: 14,
-  padding: "13px 16px",
-  background: "var(--surface)",
-  color: "var(--text)",
-  fontWeight: 850,
-  cursor: "pointer",
-};
+.register-grid input,
+.password-wrap input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 16px;
+  padding: 0 14px;
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  outline: none;
+  font: inherit;
+  font-weight: 750;
+}
+
+.password-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.password-wrap input {
+  padding-right: 52px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  min-height: 40px !important;
+  border: 0 !important;
+  border-radius: 14px !important;
+  padding: 0 !important;
+  background: rgba(148, 163, 184, .12) !important;
+  color: var(--text, #0f172a) !important;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.register-grid input:focus,
+.password-wrap input:focus {
+  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 60%, rgba(148,163,184,.28));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color, #2563eb) 13%, transparent);
+}
+
+.register-grid button {
+  min-height: 48px;
+  border: 0;
+  border-radius: 16px;
+  padding: 0 16px;
+  background: var(--primary-color, #2563eb);
+  color: #fff;
+  font: inherit;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.register-grid button:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
+.register-grid button.ghost {
+  border: 1px solid rgba(148, 163, 184, .24);
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+}
+
+@media (max-width: 420px) {
+  .register-page {
+    padding: 10px;
+  }
+
+  .register-card {
+    border-radius: 24px;
+    padding: 18px;
+  }
+
+  .register-grid input,
+  .register-grid button,
+  .password-wrap input {
+    min-height: 46px;
+    border-radius: 15px;
+  }
+
+  .password-toggle {
+    width: 38px;
+    height: 38px;
+    min-height: 38px !important;
+    border-radius: 13px !important;
+  }
+}
+`;

@@ -1,25 +1,29 @@
+// ======================================================
+// FILE 1: app/account/page.tsx
+// DROP-IN REPLACEMENT
+// ======================================================
+
 "use client";
 
 /**
  * app/account/page.tsx
  * ---------------------------------------------------------
- * SECURE ACCOUNT SETUP CENTER
+ * ACCOUNT CONTROL CENTER
  * ---------------------------------------------------------
  *
- * Rules:
- * - User must be signed in.
- * - accountId is required.
- * - School/branch are NOT required here yet.
- * - This page is for creating/managing schools, branches,
- *   account users, billing, profile, backup, and account settings.
- * - Uses a WhatsApp-like setup center instead of a dashboard sidebar.
- * - Mobile-first and safe for small screens.
- * - No horizontal page scrollbar: every tab is contained inside the shell.
+ * Purpose:
+ * - Owner-level setup and SaaS control center.
+ * - School/branch setup.
+ * - User, roles, permissions management.
+ * - Subscription, invoices and payment controls.
+ * - Sync, backup and settings.
+ * - Mobile-first and dashboard-shell safe.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { getAuthToken } from "../lib/api/apiClient";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useActiveBranch } from "../context/active-branch-context";
@@ -34,6 +38,12 @@ import OwnerProfilePage from "./ownerProfile";
 import SyncBackupPage from "./syncBackup";
 import AccountSettingsPage from "./accountSettings";
 
+import SubscriptionPage from "./subscription";
+import InvoicesPage from "./invoices";
+import PaymentsPage from "./payments";
+import RolesPage from "./roles";
+import PermissionsPage from "./permissions";
+
 // ======================================================
 // TYPES
 // ======================================================
@@ -42,28 +52,38 @@ type AccountTool =
   | "home"
   | "schools"
   | "branches"
-  | "billing"
   | "users"
+  | "roles"
+  | "permissions"
+  | "billing"
+  | "subscription"
+  | "invoices"
+  | "payments"
   | "profile"
   | "sync"
   | "settings";
+
+type ToolGroup = "Institution" | "Access Control" | "Billing" | "System";
+type ToolPriority = "required" | "important" | "optional" | "premium";
+
+type ToolConfig = {
+  key: Exclude<AccountTool, "home">;
+  title: string;
+  description: string;
+  icon: string;
+  group: ToolGroup;
+  priority: ToolPriority;
+};
 
 // ======================================================
 // SETUP TOOLS
 // ======================================================
 
-const SETUP_TOOLS: {
-  key: Exclude<AccountTool, "home">;
-  title: string;
-  description: string;
-  icon: string;
-  group: "Institution" | "Account" | "System";
-  priority: "required" | "important" | "optional";
-}[] = [
+const SETUP_TOOLS: ToolConfig[] = [
   {
     key: "schools",
     title: "Schools",
-    description: "Create and manage school profiles under this account.",
+    description: "Create and manage institution profiles under this account.",
     icon: "🏫",
     group: "Institution",
     priority: "required",
@@ -71,7 +91,7 @@ const SETUP_TOOLS: {
   {
     key: "branches",
     title: "Branches",
-    description: "Create campuses or branches after your school profile exists.",
+    description: "Create campuses, branches, or operational locations.",
     icon: "🏢",
     group: "Institution",
     priority: "required",
@@ -79,31 +99,71 @@ const SETUP_TOOLS: {
   {
     key: "users",
     title: "Account Users",
-    description: "Manage admins, staff, and users who can access this account.",
+    description: "Manage people who can sign in to this account.",
     icon: "👥",
-    group: "Account",
+    group: "Access Control",
     priority: "important",
   },
   {
-    key: "profile",
-    title: "Owner Profile",
-    description: "Update account owner details and contact information.",
-    icon: "👤",
-    group: "Account",
+    key: "roles",
+    title: "Roles",
+    description: "Define owner, admin, teacher, student, parent and accountant access.",
+    icon: "🛡️",
+    group: "Access Control",
+    priority: "important",
+  },
+  {
+    key: "permissions",
+    title: "Permissions",
+    description: "Review role-based access to modules and actions.",
+    icon: "🔐",
+    group: "Access Control",
     priority: "important",
   },
   {
     key: "billing",
-    title: "Billing",
-    description: "Manage subscription, invoices, and payment records.",
+    title: "Billing Overview",
+    description: "View billing summary, limits and account subscription status.",
     icon: "💳",
-    group: "Account",
+    group: "Billing",
+    priority: "important",
+  },
+  {
+    key: "subscription",
+    title: "Subscription",
+    description: "Choose plans, manage renewal and view package limits.",
+    icon: "📦",
+    group: "Billing",
+    priority: "premium",
+  },
+  {
+    key: "invoices",
+    title: "Invoices",
+    description: "Track issued invoices, due dates and payment status.",
+    icon: "🧾",
+    group: "Billing",
     priority: "optional",
+  },
+  {
+    key: "payments",
+    title: "Payments",
+    description: "Record and review subscription payments for this account.",
+    icon: "💰",
+    group: "Billing",
+    priority: "optional",
+  },
+  {
+    key: "profile",
+    title: "Owner Profile",
+    description: "Update account owner and business contact details.",
+    icon: "👤",
+    group: "System",
+    priority: "important",
   },
   {
     key: "sync",
     title: "Sync & Backup",
-    description: "Check offline sync, backup, and local device status.",
+    description: "Monitor offline sync, local records and cloud backup readiness.",
     icon: "☁️",
     group: "System",
     priority: "important",
@@ -111,7 +171,7 @@ const SETUP_TOOLS: {
   {
     key: "settings",
     title: "Account Settings",
-    description: "Control security, preferences, and account-level settings.",
+    description: "Control account preferences, theme and security settings.",
     icon: "⚙️",
     group: "System",
     priority: "optional",
@@ -119,23 +179,33 @@ const SETUP_TOOLS: {
 ];
 
 const TOOL_LABELS: Record<AccountTool, string> = {
-  home: "Account Setup",
+  home: "Account Control",
   schools: "Schools",
   branches: "Branches",
-  billing: "Billing",
   users: "Account Users",
+  roles: "Roles",
+  permissions: "Permissions",
+  billing: "Billing Overview",
+  subscription: "Subscription",
+  invoices: "Invoices",
+  payments: "Payments",
   profile: "Owner Profile",
   sync: "Sync & Backup",
   settings: "Account Settings",
 };
 
 const TOOL_GROUPS: Record<AccountTool, string> = {
-  home: "Setup Center",
+  home: "Control Center",
   schools: "Institution",
   branches: "Institution",
-  billing: "Account",
-  users: "Account",
-  profile: "Account",
+  users: "Access Control",
+  roles: "Access Control",
+  permissions: "Access Control",
+  billing: "Billing",
+  subscription: "Billing",
+  invoices: "Billing",
+  payments: "Billing",
+  profile: "System",
   sync: "System",
   settings: "System",
 };
@@ -143,8 +213,13 @@ const TOOL_GROUPS: Record<AccountTool, string> = {
 const TOOL_COMPONENTS: Record<Exclude<AccountTool, "home">, React.ComponentType<any>> = {
   schools: SchoolsPage,
   branches: BranchesPage,
-  billing: BillingPage,
   users: AccountUsersPage,
+  roles: RolesPage,
+  permissions: PermissionsPage,
+  billing: BillingPage,
+  subscription: SubscriptionPage,
+  invoices: InvoicesPage,
+  payments: PaymentsPage,
   profile: OwnerProfilePage,
   sync: SyncBackupPage,
   settings: AccountSettingsPage,
@@ -161,7 +236,9 @@ export default function AccountPage() {
     accountId,
     user,
     account,
+    subscription,
     logout,
+    refreshAccount,
     loading: accountLoading,
     authenticated,
   } = useAccount();
@@ -192,12 +269,19 @@ export default function AccountPage() {
   // ======================================================
 
   useEffect(() => {
+    const token = getAuthToken();
+
     if (accountLoading) return;
 
-    if (!authenticated || !accountId) {
+    if (token && (!authenticated || !accountId)) {
+      refreshAccount();
+      return;
+    }
+
+    if (!token && (!authenticated || !accountId)) {
       router.replace("/login");
     }
-  }, [accountLoading, authenticated, accountId, router]);
+  }, [accountLoading, authenticated, accountId, refreshAccount, router]);
 
   // ======================================================
   // BRANDING
@@ -243,8 +327,16 @@ export default function AccountPage() {
   const activeLabel = TOOL_LABELS[activeTool];
   const activeGroup = TOOL_GROUPS[activeTool];
 
-  const checking = accountLoading || settingsLoading || initialSyncing;
-  const canOpenDashboard = !initialSyncing && !!activeSchoolId && !!activeBranchId;
+  const tokenExists = typeof window !== "undefined" && !!getAuthToken();
+  const checking =
+    accountLoading ||
+    settingsLoading ||
+    initialSyncing ||
+    (tokenExists && (!authenticated || !accountId));
+
+  const canOpenOwnerPortal = !initialSyncing && !!activeSchoolId && !!activeBranchId;
+  const planName = subscription?.plan?.name || "No active plan";
+  const planStatus = subscription?.status || "not configured";
 
   const openTool = (tool: AccountTool) => {
     setActiveTool(tool);
@@ -260,22 +352,21 @@ export default function AccountPage() {
     openTool("home");
   };
 
-  //goDashboard does not open the context drawer while sync is still pulling data:
-  const goDashboard = () => {
-  if (initialSyncing) {
+  const goOwnerPortal = () => {
+    if (initialSyncing) {
+      setContextOpen(true);
+      setMoreOpen(false);
+      return;
+    }
+
+    if (canOpenOwnerPortal) {
+      router.push("/owner");
+      return;
+    }
+
     setContextOpen(true);
     setMoreOpen(false);
-    return;
-  }
-
-  if (canOpenDashboard) {
-    router.push("/dashboard");
-    return;
-  }
-
-  setContextOpen(true);
-  setMoreOpen(false);
-};
+  };
 
   // ======================================================
   // SAFE STATES
@@ -287,8 +378,8 @@ export default function AccountPage() {
         <style>{css}</style>
         <section style={safeStyles.loadingCard}>
           <div style={safeStyles.spinner} />
-          <h2 style={safeStyles.loadingTitle}>Opening account setup...</h2>
-          <p style={safeStyles.mutedText}>Checking your signed-in account.</p>
+          <h2 style={safeStyles.loadingTitle}>Opening account control...</h2>
+          <p style={safeStyles.mutedText}>Checking account, subscription and sync state.</p>
         </section>
       </main>
     );
@@ -361,15 +452,21 @@ export default function AccountPage() {
         </section>
 
         <section className="drawer-grid">
-          <div>
+          <button type="button" onClick={() => openTool("schools")}>
             <strong>{schools?.length || 0}</strong>
             <span>Schools</span>
-          </div>
+          </button>
 
-          <div>
+          <button type="button" onClick={() => openTool("branches")}>
             <strong>{allBranches?.length || 0}</strong>
             <span>Branches</span>
-          </div>
+          </button>
+        </section>
+
+        <section className="drawer-card">
+          <label>Subscription</label>
+          <strong>{planName}</strong>
+          <span>Status: {planStatus}</span>
         </section>
 
         <section className="drawer-card">
@@ -387,13 +484,13 @@ export default function AccountPage() {
         <button
           type="button"
           className="drawer-action"
-          onClick={goDashboard}
-          disabled={initialSyncing || !canOpenDashboard || branchContextLoading}
+          onClick={goOwnerPortal}
+          disabled={initialSyncing || !canOpenOwnerPortal || branchContextLoading}
         >
           {initialSyncing
             ? "Syncing account data..."
-            : canOpenDashboard
-            ? "Open Dashboard"
+            : canOpenOwnerPortal
+            ? "Open Owner Portal"
             : "Create/select branch first"}
         </button>
 
@@ -407,8 +504,8 @@ export default function AccountPage() {
           <button
             type="button"
             className="icon-btn primary"
-            onClick={activeTool === "home" ? goDashboard : goBackHome}
-            aria-label={activeTool === "home" ? "Open dashboard" : "Back to account setup"}
+            onClick={activeTool === "home" ? goOwnerPortal : goBackHome}
+            aria-label={activeTool === "home" ? "Open owner portal" : "Back to account control"}
           >
             {activeTool === "home" ? "☰" : "‹"}
           </button>
@@ -432,7 +529,7 @@ export default function AccountPage() {
               <div className="more-menu">
                 {activeTool !== "home" && (
                   <button type="button" onClick={goBackHome}>
-                    Setup center
+                    Control center
                   </button>
                 )}
 
@@ -446,12 +543,16 @@ export default function AccountPage() {
                   Account context
                 </button>
 
-                <button type="button" onClick={goDashboard}>
-                  Open dashboard
+                <button type="button" onClick={goOwnerPortal}>
+                  Open owner portal
                 </button>
 
-                <button type="button" onClick={() => openTool("settings")}>
-                  Account settings
+                <button type="button" onClick={() => openTool("subscription")}>
+                  Subscription
+                </button>
+
+                <button type="button" onClick={() => openTool("permissions")}>
+                  Permissions
                 </button>
 
                 <button type="button" className="danger" onClick={logout}>
@@ -472,8 +573,8 @@ export default function AccountPage() {
                   </div>
 
                   <div>
-                    <p>Signed in account</p>
-                    <h1>{account?.name || "Account Setup"}</h1>
+                    <p>Signed in owner account</p>
+                    <h1>{account?.name || "Account Control"}</h1>
                     <span>{user?.email}</span>
                   </div>
                 </div>
@@ -482,13 +583,16 @@ export default function AccountPage() {
                   <span className={isOnline ? "online" : "offline"}>
                     ● {isOnline ? "Online" : "Offline"}
                   </span>
-                  <span>🔐 Signed in</span>
+                  <span>📦 {planName}</span>
+                  <span>🔐 {planStatus}</span>
                 </div>
-                
               </section>
-              <section style={{ marginBottom: 10 }}>
-                <SyncStatusStrip />
-              </section>
+
+              {authenticated && accountId && initialSyncDone && (
+                <section className="sync-strip-wrap">
+                  <SyncStatusStrip />
+                </section>
+              )}
 
               <section className="setup-summary">
                 <button type="button" onClick={() => openTool("schools")}>
@@ -501,9 +605,14 @@ export default function AccountPage() {
                   <span>Branches</span>
                 </button>
 
-                <button type="button" onClick={goDashboard}>
-                  <strong>{canOpenDashboard ? "Ready" : "Setup"}</strong>
-                  <span>Dashboard</span>
+                <button type="button" onClick={() => openTool("subscription")}>
+                  <strong>{planName}</strong>
+                  <span>Subscription</span>
+                </button>
+
+                <button type="button" onClick={() => openTool("users")}>
+                  <strong>{user?.memberships?.length || 1}</strong>
+                  <span>Memberships</span>
                 </button>
               </section>
 
@@ -520,7 +629,7 @@ export default function AccountPage() {
               </section>
 
               <section className="tool-groups">
-                {(["Institution", "Account", "System"] as const).map((group) => {
+                {(["Institution", "Access Control", "Billing", "System"] as const).map((group) => {
                   const groupTools = SETUP_TOOLS.filter((tool) => tool.group === group);
 
                   return (
@@ -557,7 +666,7 @@ export default function AccountPage() {
             <section className="tool-panel">
               <div className="panel-head">
                 <button type="button" className="back-pill" onClick={goBackHome}>
-                  ← Setup Center
+                  ← Control Center
                 </button>
 
                 <div>
@@ -644,21 +753,9 @@ const safeStyles: Record<string, React.CSSProperties> = {
 };
 
 const css = `
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-html,
-body {
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+@keyframes spin { to { transform: rotate(360deg); } }
+html, body { max-width: 100%; overflow-x: hidden; }
+*, *::before, *::after { box-sizing: border-box; }
 
 .account-shell {
   min-height: 100dvh;
@@ -750,7 +847,7 @@ body {
   position: absolute;
   top: 42px;
   right: 0;
-  width: min(230px, calc(100vw - 18px));
+  width: min(245px, calc(100vw - 18px));
   border-radius: 18px;
   padding: 8px;
   background: #fff;
@@ -777,13 +874,8 @@ body {
   white-space: nowrap;
 }
 
-.more-menu button:hover {
-  background: #f1f5f9;
-}
-
-.more-menu .danger {
-  color: #dc2626;
-}
+.more-menu button:hover { background: #f1f5f9; }
+.more-menu .danger { color: #dc2626; }
 
 .account-main {
   min-width: 0;
@@ -797,7 +889,10 @@ body {
 
 .account-main *,
 .account-main *::before,
-.account-main *::after {
+.account-main *::after,
+.panel-body *,
+.panel-body *::before,
+.panel-body *::after {
   box-sizing: border-box;
   max-width: 100%;
 }
@@ -805,7 +900,11 @@ body {
 .account-main button,
 .account-main input,
 .account-main select,
-.account-main textarea {
+.account-main textarea,
+.panel-body button,
+.panel-body input,
+.panel-body select,
+.panel-body textarea {
   font: inherit;
   max-width: 100%;
 }
@@ -813,23 +912,24 @@ body {
 .account-main img,
 .account-main svg,
 .account-main canvas,
-.account-main video {
+.account-main video,
+.panel-body img,
+.panel-body svg,
+.panel-body canvas,
+.panel-body video {
   max-width: 100%;
   height: auto;
 }
 
-.account-main table {
-  max-width: 100%;
-}
+.account-main table,
+.panel-body table { max-width: 100%; }
 
 .account-hero {
   min-width: 0;
   max-width: 100%;
   border-radius: 24px;
   padding: 14px;
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--account-primary) 20%, transparent), transparent 36%),
-    #fff;
+  background: radial-gradient(circle at top right, color-mix(in srgb, var(--account-primary) 20%, transparent), transparent 36%), #fff;
   border: 1px solid rgba(148,163,184,.2);
   box-shadow: 0 12px 34px rgba(15,23,42,.07);
   display: grid;
@@ -856,9 +956,7 @@ body {
   flex: 0 0 auto;
 }
 
-.hero-left div:last-child {
-  min-width: 0;
-}
+.hero-left div:last-child { min-width: 0; }
 
 .account-hero p,
 .panel-head p,
@@ -908,22 +1006,17 @@ body {
   font-weight: 900;
 }
 
-.hero-status .online {
-  color: #16a34a;
-  background: rgba(34,197,94,.12);
-}
+.hero-status .online { color: #16a34a; background: rgba(34,197,94,.12); }
+.hero-status .offline { color: #dc2626; background: rgba(239,68,68,.1); }
 
-.hero-status .offline {
-  color: #dc2626;
-  background: rgba(239,68,68,.1);
-}
+.sync-strip-wrap { margin-top: 10px; }
 
 .setup-summary {
   min-width: 0;
   max-width: 100%;
   margin-top: 10px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   overflow: hidden;
 }
@@ -950,17 +1043,8 @@ body {
   text-overflow: ellipsis;
 }
 
-.setup-summary strong {
-  font-size: 18px;
-  font-weight: 950;
-}
-
-.setup-summary span {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #64748b;
-  font-weight: 850;
-}
+.setup-summary strong { font-size: 18px; font-weight: 950; }
+.setup-summary span { margin-top: 4px; font-size: 11px; color: #64748b; font-weight: 850; }
 
 .current-context-card {
   min-width: 0;
@@ -976,11 +1060,7 @@ body {
   overflow: hidden;
 }
 
-.current-context-card div {
-  min-width: 0;
-  flex: 1;
-}
-
+.current-context-card div { min-width: 0; flex: 1; }
 .current-context-card strong {
   display: block;
   margin-top: 3px;
@@ -991,7 +1071,8 @@ body {
   text-overflow: ellipsis;
 }
 
-.current-context-card button {
+.current-context-card button,
+.empty-button {
   flex: 0 0 auto;
   border: 0;
   border-radius: 999px;
@@ -1012,11 +1093,7 @@ body {
   overflow: hidden;
 }
 
-.tool-group {
-  min-width: 0;
-  max-width: 100%;
-}
-
+.tool-group { min-width: 0; max-width: 100%; }
 .tool-group h2 {
   margin: 0 0 8px;
   font-size: 13px;
@@ -1052,10 +1129,7 @@ body {
   overflow: hidden;
 }
 
-.tool-card:hover {
-  border-color: color-mix(in srgb, var(--account-primary) 45%, rgba(148,163,184,.2));
-}
-
+.tool-card:hover { border-color: color-mix(in srgb, var(--account-primary) 45%, rgba(148,163,184,.2)); }
 .tool-icon {
   width: 42px;
   height: 42px;
@@ -1067,24 +1141,14 @@ body {
   flex: 0 0 auto;
 }
 
-.tool-copy {
-  min-width: 0;
-}
-
+.tool-copy { min-width: 0; }
 .tool-copy strong,
 .tool-copy small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.tool-copy strong {
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 950;
-  white-space: nowrap;
-}
-
+.tool-copy strong { color: #0f172a; font-size: 14px; font-weight: 950; white-space: nowrap; }
 .tool-copy small {
   margin-top: 3px;
   color: #64748b;
@@ -1103,21 +1167,10 @@ body {
   text-transform: uppercase;
   white-space: nowrap;
 }
-
-.tool-badge.required {
-  background: rgba(239,68,68,.1);
-  color: #dc2626;
-}
-
-.tool-badge.important {
-  background: rgba(37,99,235,.1);
-  color: var(--account-primary);
-}
-
-.tool-badge.optional {
-  background: rgba(100,116,139,.12);
-  color: #475569;
-}
+.tool-badge.required { background: rgba(239,68,68,.1); color: #dc2626; }
+.tool-badge.important { background: rgba(37,99,235,.1); color: var(--account-primary); }
+.tool-badge.optional { background: rgba(100,116,139,.12); color: #475569; }
+.tool-badge.premium { background: rgba(245,158,11,.14); color: #b45309; }
 
 .tool-panel {
   min-width: 0;
@@ -1157,10 +1210,7 @@ body {
   white-space: nowrap;
 }
 
-.panel-head div {
-  min-width: 0;
-}
-
+.panel-head div { min-width: 0; }
 .panel-head h1 {
   margin: 2px 0 0;
   font-size: clamp(22px, 7vw, 34px);
@@ -1169,13 +1219,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-.panel-body {
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
-  overflow-x: hidden;
-}
-
+.panel-body,
 .panel-body-inner {
   min-width: 0;
   width: 100%;
@@ -1188,41 +1232,6 @@ body {
   width: 100% !important;
   max-width: 100% !important;
   overflow-x: hidden !important;
-}
-
-.panel-body *,
-.panel-body *::before,
-.panel-body *::after {
-  box-sizing: border-box;
-  max-width: 100%;
-}
-
-.panel-body button,
-.panel-body input,
-.panel-body select,
-.panel-body textarea {
-  font: inherit;
-  max-width: 100%;
-}
-
-.panel-body img,
-.panel-body svg,
-.panel-body canvas,
-.panel-body video {
-  max-width: 100%;
-  height: auto;
-}
-
-.panel-body table {
-  max-width: 100%;
-}
-
-.panel-body [style*="width"] {
-  max-width: 100%;
-}
-
-.panel-body [style*="min-width"] {
-  min-width: 0;
 }
 
 .account-context-drawer {
@@ -1245,9 +1254,7 @@ body {
   box-shadow: 0 24px 70px rgba(15,23,42,.22);
 }
 
-.account-context-drawer.open {
-  transform: translateX(0);
-}
+.account-context-drawer.open { transform: translateX(0); }
 
 .drawer-head {
   display: flex;
@@ -1258,11 +1265,7 @@ body {
   justify-content: space-between;
   margin-bottom: 16px;
 }
-
-.drawer-head div {
-  min-width: 0;
-}
-
+.drawer-head div { min-width: 0; }
 .drawer-head h2 {
   margin: 2px 0 0;
   font-size: 22px;
@@ -1273,7 +1276,7 @@ body {
 }
 
 .drawer-card,
-.drawer-grid div {
+.drawer-grid button {
   min-width: 0;
   max-width: 100%;
   border-radius: 22px;
@@ -1282,21 +1285,9 @@ body {
   border: 1px solid rgba(148,163,184,.2);
   overflow: hidden;
 }
-
-.drawer-card {
-  margin-bottom: 12px;
-}
-
-.drawer-card.big {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.drawer-card.big div:last-child {
-  min-width: 0;
-}
-
+.drawer-card { margin-bottom: 12px; }
+.drawer-card.big { display: flex; align-items: center; gap: 12px; }
+.drawer-card.big div:last-child { min-width: 0; }
 .drawer-card label {
   display: block;
   margin-bottom: 6px;
@@ -1304,7 +1295,6 @@ body {
   color: #64748b;
   font-weight: 900;
 }
-
 .drawer-card strong,
 .drawer-card span {
   display: block;
@@ -1312,17 +1302,8 @@ body {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-
-.drawer-card strong {
-  font-size: 15px;
-  font-weight: 950;
-}
-
-.drawer-card span {
-  margin-top: 4px;
-  color: #64748b;
-  font-size: 12px;
-}
+.drawer-card strong { font-size: 15px; font-weight: 950; }
+.drawer-card span { margin-top: 4px; color: #64748b; font-size: 12px; }
 
 .drawer-grid {
   display: grid;
@@ -1331,7 +1312,10 @@ body {
   margin-bottom: 12px;
   max-width: 100%;
 }
-
+.drawer-grid button {
+  text-align: left;
+  cursor: pointer;
+}
 .drawer-grid strong,
 .drawer-grid span {
   display: block;
@@ -1339,17 +1323,8 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.drawer-grid strong {
-  font-size: 22px;
-  font-weight: 950;
-}
-
-.drawer-grid span {
-  margin-top: 4px;
-  color: #64748b;
-  font-size: 12px;
-}
+.drawer-grid strong { font-size: 22px; font-weight: 950; }
+.drawer-grid span { margin-top: 4px; color: #64748b; font-size: 12px; }
 
 .drawer-action,
 .drawer-danger {
@@ -1361,35 +1336,15 @@ body {
   cursor: pointer;
   margin-top: 8px;
 }
-
-.drawer-action {
-  background: var(--account-primary);
-  color: #fff;
-}
-
-.drawer-action:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-}
-
-.drawer-danger {
-  background: rgba(239,68,68,.1);
-  color: #dc2626;
-}
+.drawer-action { background: var(--account-primary); color: #fff; }
+.drawer-action:disabled { opacity: .55; cursor: not-allowed; }
+.drawer-danger { background: rgba(239,68,68,.1); color: #dc2626; }
 
 @media (min-width: 760px) {
-  .account-main {
-    padding: 14px;
-  }
-
-  .account-hero {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
-
-  .tool-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .account-main { padding: 14px; }
+  .account-hero { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .setup-summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (min-width: 1120px) {
@@ -1399,65 +1354,25 @@ body {
     margin: 0 auto;
     padding: 18px;
   }
-
-  .tool-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+  .tool-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 420px) {
-  .account-header {
-    min-height: 46px;
-    padding: 5px 6px;
-  }
-
-  .icon-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 13px;
-    font-size: 18px;
-  }
-
-  .account-main {
-    padding: 6px;
-  }
-
+  .account-header { min-height: 46px; padding: 5px 6px; }
+  .icon-btn { width: 34px; height: 34px; border-radius: 13px; font-size: 18px; }
+  .account-main { padding: 6px; }
   .account-hero,
   .current-context-card,
   .tool-card,
-  .panel-head {
-    border-radius: 20px;
-  }
-
-  .setup-summary {
-    grid-template-columns: 1fr;
-  }
-
-  .current-context-card {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .current-context-card button {
-    width: 100%;
-  }
-
-  .tool-card {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .tool-badge {
-    grid-column: 2;
-    justify-self: start;
-  }
-
-  .account-context-drawer {
-    width: min(94vw, 380px);
-    padding: 12px;
-  }
-
-  .drawer-grid {
-    grid-template-columns: 1fr;
-  }
+  .panel-head { border-radius: 20px; }
+  .setup-summary { grid-template-columns: 1fr; }
+  .current-context-card { align-items: stretch; flex-direction: column; }
+  .current-context-card button { width: 100%; }
+  .tool-card { grid-template-columns: auto minmax(0, 1fr); }
+  .tool-badge { grid-column: 2; justify-self: start; }
+  .account-context-drawer { width: min(94vw, 380px); padding: 12px; }
+  .drawer-grid { grid-template-columns: 1fr; }
 }
 `;
+
+

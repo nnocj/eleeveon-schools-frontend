@@ -1,23 +1,27 @@
 "use client";
 
 /**
- * context/account-context.tsx
+ * app/context/account-context.tsx
  * ---------------------------------------------------------
- * ACCOUNT + AUTH SESSION PROVIDER
+ * ELEEVEON ACCOUNT CONTEXT
  * ---------------------------------------------------------
  *
- * FIXED VERSION
- * ---------------------------------------------------------
- * Solves:
- * - Login succeeds but /account or /dashboard sends user back to /login.
- * - Provider only restored session once on mount and did not react to token changes.
- * - authenticated depended on getAuthToken() inside useMemo without token state.
- * - Failed /auth/me clears token safely, but successful login can now be restored.
+ * Drop-in replacement.
  *
- * Assumptions:
- * - apiClient("/auth/me") points to app/api/auth/me/route.ts.
- * - Login page saves token using setAuthToken(res.token).
- * - Login page saves accountId using setAccountId(res.user.accountId).
+ * Why this version exists:
+ * - Login may receive the correct memberships, but after a full page reload
+ *   /auth/me can sometimes return a user payload without memberships.
+ * - If AccountProvider replaces the user with that thinner payload, the
+ *   select-role page sees no memberships and shows "No role membership found".
+ * - This context now keeps a small membership backup in localStorage/sessionStorage
+ *   and merges it back when /auth/me is missing memberships.
+ *
+ * Important behavior:
+ * - Token/account restoration stays backward-compatible.
+ * - Active membership is still cleared only on logout/auth failure.
+ * - Account id is still stored for sync.
+ * - Membership aliases are preserved exactly as provided so select-role and
+ *   RolePortalShell can normalize studentLocalId/teacherLocalId/parentLocalId.
  */
 
 import React, {
@@ -26,25 +30,23 @@ import React, {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
-
 import { useRouter } from "next/navigation";
-import {
-  apiClient,
-  clearAuthToken,
-  getAuthToken,
-} from "../lib/api/apiClient";
+
+import { apiClient, clearAuthToken, getAuthToken } from "../lib/api/apiClient";
 import {
   clearAccountId,
   getAccountId,
   setAccountId,
 } from "../lib/sync/syncConfig";
-
-// ======================================================
-// TYPES
-// ======================================================
+import { clearStoredActiveMembership } from "../lib/auth/activeMembership";
+import { AccountSubscriptionDTO } from "../lib/billing/subscriptionAccess";
+import {
+  collectUserMemberships,
+  normalizeMemberships,
+  type UserMembership,
+} from "../lib/auth/roleRedirect";
 
 export type AccountUser = {
   id: string;
@@ -53,107 +55,276 @@ export type AccountUser = {
   name?: string;
   email: string;
   role: string;
+
+  /**
+   * Normalized active memberships available to the UI.
+   * This may come from /auth/me directly or from the local fallback backup.
+   */
+  memberships?: UserMembership[];
+
+  /**
+   * Allow backend aliases without breaking older auth payloads.
+   */
+  userMemberships?: UserMembership[];
+  accountMemberships?: UserMembership[];
+  schoolMemberships?: UserMembership[];
+  roleMemberships?: UserMembership[];
+  membership?: UserMembership | UserMembership[];
+  [key: string]: any;
 };
 
 export type AccountInfo = {
   id: string;
   name: string;
   email?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
+  phone?: string | null;
+  country?: string | null;
+  currency?: string | null;
+  status?: string;
+  metadata?: any;
+  subscription?: AccountSubscriptionDTO | null;
+
+  /**
+   * Optional membership aliases from backend/account payloads.
+   */
+  memberships?: UserMembership[];
+  userMemberships?: UserMembership[];
+  accountMemberships?: UserMembership[];
+  schoolMemberships?: UserMembership[];
+  roleMemberships?: UserMembership[];
+  membership?: UserMembership | UserMembership[];
+  [key: string]: any;
 };
 
 type AccountContextType = {
   user: AccountUser | null;
   account: AccountInfo | null;
+  subscription: AccountSubscriptionDTO | null;
   accountId: string | null;
-  token: string | null;
   loading: boolean;
   authenticated: boolean;
-
   refreshAccount: () => Promise<void>;
   logout: () => void;
 };
 
-// ======================================================
-// CONTEXT
-// ======================================================
-
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
 
-// ======================================================
-// STORAGE EVENT HELPERS
-// ======================================================
+const STORED_USER_MEMBERSHIPS_KEY = "eleeveon_user_memberships";
+const STORED_ACCOUNT_USER_KEY = "eleeveon_account_user";
+const STORED_ACCOUNT_INFO_KEY = "eleeveon_account_info";
 
-export const AUTH_CHANGED_EVENT = "eleeveon-auth-changed";
+function safeGetStorage(key: string): string | null {
+  if (typeof window === "undefined") return null;
 
-function emitAuthChanged() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  try {
+    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
 }
 
-function clearInstitutionStorage() {
+function safeSetStorage(key: string, value: string) {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem("activeSchoolId");
-  window.localStorage.removeItem("activeBranchId");
+
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore localStorage failures.
+  }
+
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore sessionStorage failures.
+  }
 }
 
-// ======================================================
-// PROVIDER
-// ======================================================
+function safeRemoveStorage(key: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore localStorage failures.
+  }
+
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore sessionStorage failures.
+  }
+}
+
+function readJson<T>(key: string): T | null {
+  const raw = safeGetStorage(key);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  try {
+    safeSetStorage(key, JSON.stringify(value));
+  } catch {
+    // Ignore serialization/storage failures.
+  }
+}
+
+function clearStoredAccountSessionCache() {
+  safeRemoveStorage(STORED_USER_MEMBERSHIPS_KEY);
+  safeRemoveStorage(STORED_ACCOUNT_USER_KEY);
+  safeRemoveStorage(STORED_ACCOUNT_INFO_KEY);
+}
+
+function clearLocalInstitutionContext() {
+  clearStoredActiveMembership();
+  safeRemoveStorage("activeSchoolId");
+  safeRemoveStorage("activeBranchId");
+  safeRemoveStorage("activeRole");
+  safeRemoveStorage("activeTeacherId");
+  safeRemoveStorage("activeStudentId");
+  safeRemoveStorage("activeParentId");
+  safeRemoveStorage("activeMembershipId");
+}
+
+function normalizeAccountInfo(
+  value?: AccountInfo | null,
+  fallbackId?: string | null
+): AccountInfo | null {
+  if (value?.id) return value;
+  if (!fallbackId) return null;
+
+  return {
+    id: fallbackId,
+    name: "Eleeveon Account",
+    status: "active",
+  };
+}
+
+function membershipIdentity(membership: UserMembership) {
+  return String(
+    membership.id ??
+      `${membership.role}-${membership.schoolId ?? "account"}-${
+        membership.branchId ?? membership.schoolBranchId ?? "root"
+      }-${
+        membership.teacherLocalId ??
+        membership.studentLocalId ??
+        membership.parentLocalId ??
+        "profile"
+      }`
+  );
+}
+
+function uniqueMemberships(memberships: UserMembership[]) {
+  const unique = new Map<string, UserMembership>();
+
+  memberships.forEach((membership) => {
+    if (!membership) return;
+    if (membership.active === false) return;
+    if (membership.isActive === false) return;
+    if (membership.disabled === true) return;
+    if (membership.isDeleted === true) return;
+
+    unique.set(membershipIdentity(membership), membership);
+  });
+
+  return [...unique.values()];
+}
+
+function readStoredMemberships() {
+  return normalizeMemberships(readJson<UserMembership[]>(STORED_USER_MEMBERSHIPS_KEY) || []);
+}
+
+function saveMembershipBackup(user?: any, account?: any) {
+  const memberships = uniqueMemberships([
+    ...collectUserMemberships(user),
+    ...collectUserMemberships(account),
+  ]);
+
+  if (memberships.length) {
+    writeJson(STORED_USER_MEMBERSHIPS_KEY, memberships);
+  }
+
+  return memberships;
+}
+
+function mergeUserWithMembershipFallback(args: {
+  incomingUser: AccountUser;
+  incomingAccount?: AccountInfo | null;
+}) {
+  const incomingMemberships = uniqueMemberships([
+    ...collectUserMemberships(args.incomingUser),
+    ...collectUserMemberships(args.incomingAccount),
+  ]);
+
+  const fallbackMemberships = readStoredMemberships();
+
+  const memberships = incomingMemberships.length
+    ? incomingMemberships
+    : fallbackMemberships;
+
+  if (memberships.length) {
+    writeJson(STORED_USER_MEMBERSHIPS_KEY, memberships);
+  }
+
+  const nextUser: AccountUser = {
+    ...args.incomingUser,
+    memberships,
+  };
+
+  writeJson(STORED_ACCOUNT_USER_KEY, nextUser);
+
+  if (args.incomingAccount) {
+    writeJson(STORED_ACCOUNT_INFO_KEY, args.incomingAccount);
+  }
+
+  return nextUser;
+}
+
+function readStoredUserWithFallback(storedAccountId?: string | null) {
+  const storedUser = readJson<AccountUser>(STORED_ACCOUNT_USER_KEY);
+  const memberships = readStoredMemberships();
+
+  if (!storedUser && !memberships.length) return null;
+
+  return {
+    ...(storedUser || {
+      id: "",
+      accountId: storedAccountId || "",
+      email: "",
+      role: "",
+    }),
+    accountId: storedUser?.accountId || storedAccountId || "",
+    memberships,
+  } as AccountUser;
+}
 
 export function AccountProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
-  const mountedRef = useRef(true);
-  const refreshingRef = useRef(false);
-
   const [user, setUser] = useState<AccountUser | null>(null);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [fallbackAccountId, setFallbackAccountId] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    mountedRef.current = true;
-
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const clearSessionState = useCallback((clearToken = true) => {
-    if (clearToken) {
-      clearAuthToken();
-    }
-
-    clearAccountId();
-    clearInstitutionStorage();
-
-    setUser(null);
-    setAccount(null);
-    setFallbackAccountId(null);
-    setToken(null);
-  }, []);
-
   const refreshAccount = useCallback(async () => {
-    if (refreshingRef.current) return;
-
-    refreshingRef.current = true;
     setLoading(true);
 
     try {
-      const currentToken = getAuthToken();
+      const token = getAuthToken();
       const storedAccountId = getAccountId();
 
-      if (!mountedRef.current) return;
+      if (!token) {
+        const storedAccount = readJson<AccountInfo>(STORED_ACCOUNT_INFO_KEY);
+        const restoredUser = readStoredUserWithFallback(storedAccountId);
 
-      setToken(currentToken || null);
-
-      if (!currentToken) {
         setUser(null);
-        setAccount(null);
-        setFallbackAccountId(storedAccountId || null);
+        setAccount(normalizeAccountInfo(storedAccount || null, storedAccountId || null));
+        setFallbackAccountId(restoredUser?.accountId || storedAccountId || null);
         return;
       }
 
@@ -162,156 +333,87 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         account?: AccountInfo | null;
       }>("/auth/me");
 
-      if (!mountedRef.current) return;
-
       const resolvedAccountId =
         res.user?.accountId || res.account?.id || storedAccountId || null;
 
-      setUser(res.user || null);
-      setAccount(res.account || null);
-      setFallbackAccountId(resolvedAccountId);
+      const normalizedAccount = normalizeAccountInfo(
+        res.account || null,
+        resolvedAccountId
+      );
+
+      const nextUser = mergeUserWithMembershipFallback({
+        incomingUser: res.user,
+        incomingAccount: normalizedAccount,
+      });
+
+      setUser(nextUser);
+      setAccount(normalizedAccount);
 
       if (resolvedAccountId) {
         setAccountId(resolvedAccountId);
+        setFallbackAccountId(resolvedAccountId);
       }
+
+      saveMembershipBackup(nextUser, normalizedAccount);
     } catch (error) {
       console.error("Failed to restore account session:", error);
 
-      if (!mountedRef.current) return;
+      setUser(null);
+      setAccount(null);
+      setFallbackAccountId(null);
 
-      clearSessionState(true);
+      clearAuthToken();
+      clearAccountId();
+      clearStoredAccountSessionCache();
+      clearLocalInstitutionContext();
     } finally {
-      refreshingRef.current = false;
-      if (mountedRef.current) setLoading(false);
+      setLoading(false);
     }
-  }, [clearSessionState]);
-
-  // ======================================================
-  // INITIAL SESSION RESTORE
-  // ======================================================
+  }, []);
 
   useEffect(() => {
     refreshAccount();
   }, [refreshAccount]);
 
-  // ======================================================
-  // REACT TO LOGIN TOKEN CHANGES
-  // ======================================================
-  //
-  // IMPORTANT:
-  // After login, if AccountProvider is already mounted, it will not remount.
-  // This listener allows login code to call:
-  // window.dispatchEvent(new Event("eleeveon-auth-changed"));
-  // after setAuthToken(...) and setAccountId(...).
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const handleAuthChanged = () => {
-      refreshAccount();
-    };
-
-    const handleStorage = (event: StorageEvent) => {
-      if (!event.key) return;
-
-      const key = event.key.toLowerCase();
-
-      if (
-        key.includes("token") ||
-        key.includes("account") ||
-        key.includes("auth")
-      ) {
-        refreshAccount();
-      }
-    };
-
-    const handleFocus = () => {
-      const latestToken = getAuthToken() || null;
-      if (latestToken !== token) {
-        refreshAccount();
-      }
-    };
-
-    window.addEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      window.removeEventListener(AUTH_CHANGED_EVENT, handleAuthChanged);
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("focus", handleFocus);
-    };
-  }, [refreshAccount, token]);
-
-  // ======================================================
-  // LOGOUT
-  // ======================================================
-
   const logout = useCallback(() => {
-    clearSessionState(true);
-    emitAuthChanged();
-    router.replace("/login");
-  }, [clearSessionState, router]);
+    clearAuthToken();
+    clearAccountId();
+    clearStoredAccountSessionCache();
+    clearLocalInstitutionContext();
 
-  // ======================================================
-  // VALUE
-  // ======================================================
+    setUser(null);
+    setAccount(null);
+    setFallbackAccountId(null);
 
-  const resolvedAccountId = user?.accountId || account?.id || fallbackAccountId;
-  const authenticated = !!token && !!user && !!resolvedAccountId;
+    router.push("/login");
+  }, [router]);
 
   const value = useMemo<AccountContextType>(
     () => ({
       user,
       account,
-      accountId: resolvedAccountId || null,
-      token,
+      subscription: account?.subscription || null,
+      accountId: user?.accountId || account?.id || fallbackAccountId,
       loading,
-      authenticated,
+      authenticated: !!user && !!getAuthToken(),
       refreshAccount,
       logout,
     }),
-    [
-      user,
-      account,
-      resolvedAccountId,
-      token,
-      loading,
-      authenticated,
-      refreshAccount,
-      logout,
-    ]
+    [user, account, fallbackAccountId, loading, refreshAccount, logout]
   );
 
-  return <AccountContext.Provider value={value}>{children}</AccountContext.Provider>;
+  return (
+    <AccountContext.Provider value={value}>
+      {children}
+    </AccountContext.Provider>
+  );
 }
-
-// ======================================================
-// HOOK
-// ======================================================
 
 export function useAccount() {
   const context = useContext(AccountContext);
-
   if (!context) {
     throw new Error("useAccount must be used inside AccountProvider");
   }
 
   return context;
 }
-
-// ======================================================
-// LOGIN PAGE INTEGRATION NOTE
-// ======================================================
-
-/**
- * In your login page, after successful login, do this:
- *
- * setAuthToken(res.token);
- * setAccountId(res.user.accountId);
- * window.dispatchEvent(new Event("eleeveon-auth-changed"));
- * router.replace("/account");
- *
- * This tells AccountProvider to immediately restore /auth/me without waiting
- * for a full browser refresh.
- */

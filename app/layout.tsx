@@ -3,138 +3,67 @@
 /**
  * app/layout.tsx
  * ---------------------------------------------------------
- * ROOT PROVIDER + THEME ENGINE
+ * ROOT PROVIDER TREE
  * ---------------------------------------------------------
  *
  * Provider order matters:
- * SettingsProvider loads branding/theme/default academic settings.
- * ActiveBranchProvider then controls the active campus/branch.
+ * 1. AccountProvider gives authenticated account/user context.
+ * 2. SettingsProvider loads global/default branding settings.
+ * 3. ActiveBranchProvider controls active school/branch context.
+ * 4. ThemeProvider applies global + branch-specific theme settings.
+ * 5. ActiveMembershipProvider handles selected role membership context.
+ * 6. SyncBootstrapProvider handles first sync state.
+ *
+ * Theme logic is intentionally NOT kept here anymore.
+ * It now lives in:
+ * app/context/theme-context.tsx
+ *
+ * Dynamic browser branding:
+ * - Static <head> values remain safe defaults for first paint, PWA install,
+ *   crawlers and unauthenticated screens.
+ * - GlobalBrandingRuntime is mounted inside the provider tree and becomes the
+ *   runtime source of truth for document title, favicon, Apple icon and
+ *   theme-color after account/workspace/school context is available.
+ * - School-facing roles see their school name/logo in the browser.
+ * - Developer/platform roles keep the default Eleeveon title/logo.
+ * - Branchsettings does not apply favicon/title side effects.
  */
 
-import { useEffect } from "react";
+import React, { useEffect } from "react";
+
 import { AccountProvider } from "./context/account-context";
-import { SettingsProvider, useSettings } from "./context/settings-context";
-import { SyncBootstrapProvider } from "./context/sync-bootstrap-context";
-import SyncBootstrap from "./components/SyncBootstrap";
+import { SettingsProvider } from "./context/settings-context";
 import { ActiveBranchProvider } from "./context/active-branch-context";
+import { ThemeProvider } from "./context/theme-context";
+import { ActiveMembershipProvider } from "./context/active-membership-context";
+import { SyncBootstrapProvider } from "./context/sync-bootstrap-context";
+
+import SyncBootstrap from "./components/SyncBootstrap";
+import GlobalBrandingRuntime from "./components/GlobalBrandingRuntime";
+
 import { startAutoSync } from "./lib/sync/syncEngine";
 
 // ======================================================
-// COLOR UTILITY
+// APP RUNTIME
 // ======================================================
 
-function darken(hex: string, factor: number) {
-  let col = hex.replace("#", "");
-
-  if (col.length === 3) {
-    col = col
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-
-  const num = parseInt(col, 16);
-
-  let r = (num >> 16) & 255;
-  let g = (num >> 8) & 255;
-  let b = num & 255;
-
-  r = Math.floor(r * factor);
-  g = Math.floor(g * factor);
-  b = Math.floor(b * factor);
-
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-// ======================================================
-// THEME ENGINE
-// ======================================================
-
-function updateMetaThemeColor(color: string) {
-  //for my app header color on mobile browsers
-  let meta = document.querySelector("meta[name='theme-color']");
-
-  if (!meta) {
-    meta = document.createElement("meta");
-    meta.setAttribute("name", "theme-color");
-    document.head.appendChild(meta);
-  }
-
-  meta.setAttribute("content", color);
-}
-
-function applyTheme(settings: any) {
-  const root = document.documentElement;
-
-  const primary = settings?.primaryColor || "#2f6fed";
-  const isDark = settings?.theme === "dark";
-
-  root.style.setProperty("--primary-color", primary);
-
-  const darkBg = darken(primary, 0.25);
-  const darkerBg = darken(primary, 0.15);
-
-  updateMetaThemeColor(isDark ? darkBg : primary);
-
-  if (isDark) {
-    root.style.setProperty("--bg", darkBg);
-    root.style.setProperty("--surface", darkerBg);
-    root.style.setProperty("--text", "#ffffff");
-    root.style.setProperty("--border", "rgba(255,255,255,0.14)");
-    root.style.setProperty("--card-bg", darkerBg);
-  } else {
-    root.style.setProperty("--bg", "#f7f8fb");
-    root.style.setProperty("--surface", "#ffffff");
-    root.style.setProperty("--text", "#111111");
-    root.style.setProperty("--border", "rgba(0,0,0,0.10)");
-    root.style.setProperty("--card-bg", "#ffffff");
-  }
-
-  if (settings?.fontFamily) {
-    root.style.setProperty("--font-family", settings.fontFamily);
-  }
-
-  const fontSize =
-    typeof settings?.fontSize === "number"
-      ? `${settings.fontSize}px`
-      : settings?.fontSize === "large"
-      ? "18px"
-      : settings?.fontSize === "small"
-      ? "12px"
-      : "14px";
-
-  root.style.fontSize = fontSize;
-
-  if (settings?.schoolName) {
-    document.title = `${settings.schoolName} - Assessment System`;
-  }
-
-
-  
-}
-
-// ======================================================
-// WRAPPER
-// ======================================================
-
-function AppWrapper({ children }: { children: React.ReactNode }) {
-  const { settings } = useSettings();
-
-  useEffect(() => {
-    if (!settings) return;
-    applyTheme(settings);
-  }, [settings]);
-
+function AppRuntime({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const stopAutoSync = startAutoSync(60_000);
 
     return () => {
-      stopAutoSync();// this isto create a cs wj
+      stopAutoSync();
     };
   }, []);
 
-  return <>{children}</>;
+  return (
+    <>
+      <GlobalBrandingRuntime />
+      {children}
+    </>
+  );
 }
+
 // ======================================================
 // ROOT LAYOUT
 // ======================================================
@@ -143,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* Runtime title is handled by GlobalBrandingRuntime after context loads. */}
         <title>Eleeveon School Management</title>
 
         <meta
@@ -153,24 +83,36 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="theme-color" content="#2f6fed" />
         <meta name="background-color" content="#f7f8fb" />
 
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/manifest.json" />
       </head>
 
       <body
         style={{
           margin: 0,
-          background: "var(--bg)",
-          color: "var(--text)",
-          fontFamily: "var(--font-family, system-ui)",
+          background: "var(--bg, #f7f8fb)",
+          color: "var(--text, #111111)",
+          fontFamily:
+            "var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif)",
+          fontSize: "var(--font-size, 16px)",
           transition: "background 0.3s ease, color 0.3s ease",
         }}
-      ><AccountProvider>
+      >
+        <AccountProvider>
           <SettingsProvider>
             <ActiveBranchProvider>
-              <SyncBootstrapProvider>
-                <SyncBootstrap />
-                {children}
-              </SyncBootstrapProvider>
+              <ThemeProvider>
+                <ActiveMembershipProvider>
+                  <SyncBootstrapProvider>
+                    <AppRuntime>
+                      <SyncBootstrap />
+                      {children}
+                    </AppRuntime>
+                  </SyncBootstrapProvider>
+                </ActiveMembershipProvider>
+              </ThemeProvider>
             </ActiveBranchProvider>
           </SettingsProvider>
         </AccountProvider>

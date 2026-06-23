@@ -11,6 +11,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { apiClient, setAuthToken } from "../lib/api/apiClient";
+import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
 
 export default function RegisterPage() {
@@ -67,16 +68,28 @@ export default function RegisterPage() {
       if (!res.token) throw new Error("Account created but no login token was returned.");
       if (!res.user?.accountId) throw new Error("Account created but no account ID was returned.");
 
-      setAuthToken(res.token);
+      const token = extractToken(res);
+
+      if (!token) {
+        console.error("Register response without token:", res);
+        throw new Error("Account created but no login token was returned.");
+      }
+
+      saveAuthToken(token);
       setAccountId(res.user.accountId);
 
-      router.replace("/account");
-    } catch (error: any) {
-      alert(error?.message || "Registration failed");
-    } finally {
-      setLoading(false);
-    }
-  };
+      localStorage.setItem("eleeveon_auth_user", JSON.stringify(res.user));
+      localStorage.setItem("eleeveon_auth_account", JSON.stringify(res.account));
+      localStorage.setItem("user", JSON.stringify(res.user));
+      localStorage.setItem("account", JSON.stringify(res.account));
+
+      router.replace("/owner");
+          } catch (error: any) {
+            alert(error?.message || "Registration failed");
+          } finally {
+            setLoading(false);
+          }
+        };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter" && !loading) submit();

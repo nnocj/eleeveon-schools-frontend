@@ -10,7 +10,6 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { apiClient, setAuthToken } from "../lib/api/apiClient";
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
 
@@ -41,7 +40,7 @@ export default function RegisterPage() {
     try {
       setLoading(true);
 
-      const res = await apiClient<{
+      const res = await apiRequest<{
         token: string;
         user: {
           id: string;
@@ -57,15 +56,14 @@ export default function RegisterPage() {
         } | null;
       }>("/auth/register", {
         method: "POST",
-        body: {
-          fullName: form.fullName.trim(),
-          email: form.email.trim().toLowerCase(),
-          password: form.password,
-          accountName: form.accountName.trim(),
-        },
+        body: JSON.stringify({
+        fullName: form.fullName.trim(),
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+        accountName: form.accountName.trim(),
+      }),
       });
 
-      if (!res.token) throw new Error("Account created but no login token was returned.");
       if (!res.user?.accountId) throw new Error("Account created but no account ID was returned.");
 
       const token = extractToken(res);

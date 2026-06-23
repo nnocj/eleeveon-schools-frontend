@@ -367,11 +367,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "📚",
       },
       {
-        key: "courseOutline",
-        label: "Course Outline",
-        icon: "🗂️",
-      },
-      {
         key: "curriculumPathways",
         label: "Curriculum Pathways",
         icon: "🗺️",
@@ -425,6 +420,11 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "assessmentApplicability",
         label: "Assessment Applicability",
         icon: "✅",
+      }, 
+      {
+        key: "courseOutline",
+        label: "Course Outline",
+        icon: "🗂️",
       },
     ],
   },

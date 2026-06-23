@@ -388,6 +388,11 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "📖",
       },
       {
+        key: "classes",
+        label: "Classes",
+        icon: "🏫",
+      },
+      {
 
         key:"classSubjects",
         label:"ClassSubjects",

@@ -395,7 +395,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon:"📖",
       },
       {
-        key: "subjectPrerequisite",
+        key: "subjectPrerequisites",
         label: "Subject Prerequisites",
         icon: "🔗"
       },
@@ -462,11 +462,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "classSubjects",
         label: "Class Subjects",
         icon: "📘",
-      },
-      {
-        key: "subjectPrerequisites",
-        label: "Subject Prerequisites",
-        icon: "🔍",
       },
       {
         key: "studentEnrollments",

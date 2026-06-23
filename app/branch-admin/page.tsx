@@ -101,6 +101,7 @@ import Academicperiods from "./modules/Academicperiods";
 import Curriculumsetup from "./modules/Curriculumsetup";
 import CurriculumPathways from "./modules/CurriculumPathways";
 import CurriculumSubjects from "./modules/CurriculumSubjects";
+import SubjectPrerequisites from "./modules/SubjectPrerequisites";
 import CourseOutline from "./modules/CourseOutline";
 import Subjects from "./modules/Subjects";
 import ClassSubjects from "./modules/ClassSubjects";
@@ -459,6 +460,11 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "📘",
       },
       {
+        key: "subjectPrerequisites",
+        label: "Subject Prerequisites",
+        icon: "🔍",
+      },
+      {
         key: "studentEnrollments",
         label: "Enrollments",
         icon: "🧾",
@@ -663,6 +669,7 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   parents: Parents,
   classes: Classes,
   classSubjects: ClassSubjects,
+  subjectPrerequisites: SubjectPrerequisites,
   studentEnrollments: StudentEnrollments,
   resourceTimetable: ResourceTimetable,
 

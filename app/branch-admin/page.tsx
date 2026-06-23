@@ -341,6 +341,88 @@ export const NAV_SECTIONS: RoleNavSection[] = [
       },
     ],
   },
+   {
+    title: " Setup",
+    defaultOpen: false,
+    items: [
+      {
+
+        key:"organizations",
+        label: "Organizations",
+        icon: "🏢",
+      },
+      {
+        key: "academicStructures",
+        label: "Academic Structures",
+        icon: "🧱",
+      },
+      {
+        key: "academicPeriods",
+        label: "Academic Periods",
+        icon: "🗓",
+      },
+      {
+        key: "curriculumSetup",
+        label: "Curriculum",
+        icon: "📚",
+      },
+      {
+        key: "courseOutline",
+        label: "Course Outline",
+        icon: "🗂️",
+      },
+      {
+        key: "curriculumPathways",
+        label: "Curriculum Pathways",
+        icon: "🗺️",
+      },
+      {
+
+        key: "subjects",
+        label: "Subjects",
+        icon: "📖",
+      },
+      {
+        key: "curriculumSubjects",
+        label: "Curriculum Subjects",
+        icon: "📖",
+      },
+      {
+
+        key:"classSubjects",
+        label:"ClassSubjects",
+        icon:"📖",
+      },
+   
+      
+       {
+        key: "assessmentStructure",
+        label: "Assessment Structure",
+        icon: "🏗️",
+      },
+      {
+        key: "assessmentItems",
+        label: "Assessment Items",
+        icon: "📋",
+      },
+      
+       {
+        key: "gradingSystems",
+        label: "Grading Systems",
+        icon: "🎓",
+      },
+      {
+        key: "gradingRules",
+        label: "Grading Rules",
+        icon: "📏",
+      },
+      {
+        key: "assessmentApplicability",
+        label: "Assessment Applicability",
+        icon: "✅",
+      },
+    ],
+  },
 
   {
     title: "Administration",
@@ -452,86 +534,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
       }
     ],
   },
-  {
-    title: " Setup",
-    defaultOpen: false,
-    items: [
-      {
-
-        key:"organizations",
-        label: "Organizations",
-        icon: "🏢",
-      },
-      {
-        key: "curriculumSetup",
-        label: "Curriculum",
-        icon: "📚",
-      },
-      {
-        key: "courseOutline",
-        label: "Course Outline",
-        icon: "🗂️",
-      },
-      {
-        key: "curriculumPathways",
-        label: "Curriculum Pathways",
-        icon: "🗺️",
-      },
-      {
-
-        key: "subjects",
-        label: "Subjects",
-        icon: "📖",
-      },
-      {
-
-        key:"classSubjects",
-        label:"ClassSubjects",
-        icon:"📖",
-      },
-      {
-        key: "curriculumSubjects",
-        label: "Curriculum Subjects",
-        icon: "📖",
-      },
-      {
-        key: "academicStructures",
-        label: "Academic Structures",
-        icon: "🧱",
-      },
-      {
-        key: "academicPeriods",
-        label: "Academic Periods",
-        icon: "🗓",
-      },
-       {
-        key: "assessmentStructure",
-        label: "Assessment Structure",
-        icon: "🏗️",
-      },
-      {
-        key: "assessmentItems",
-        label: "Assessment Items",
-        icon: "📋",
-      },
-      {
-        key: "assessmentApplicability",
-        label: "Assessment Applicability",
-        icon: "✅",
-      },
-       {
-        key: "gradingSystems",
-        label: "Grading Systems",
-        icon: "🎓",
-      },
-      {
-        key: "gradingRules",
-        label: "Grading Rules",
-        icon: "📏",
-      },
-    ],
-  },
-
 
   {
     title: "Academic Records",

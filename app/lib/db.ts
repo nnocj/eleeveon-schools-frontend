@@ -1368,6 +1368,152 @@ export interface ReportCardItem extends BaseSync {
   position?: number;
 }
 
+// ======================================================
+// REPORT CARD TEMPLATE / VISIBILITY SETTINGS
+// ======================================================
+//
+// These tables make report cards enterprise-configurable without hard-coding
+// one permanent design. A school or branch can choose a template design,
+// then control which fields are actually printed. When a field is disabled,
+// report components should remove the field/column/box completely instead of
+// rendering an empty placeholder.
+
+export type ReportCardTemplateKey =
+  | "classic"
+  | "modern"
+  | "compact"
+  | "ghana_private_school"
+  | "british_style"
+  | "montessori"
+  | "kindergarten_narrative"
+  | string;
+
+export type ReportCardPageSize =
+  | "A4"
+  | "Letter"
+  | string;
+
+export type ReportCardOrientation =
+  | "portrait"
+  | "landscape";
+
+export interface ReportCardTemplate extends BaseSync {
+  schoolId: number;
+  branchId?: number | null;
+
+  name: string;
+  templateKey: ReportCardTemplateKey;
+  description?: string;
+
+  pageSize?: ReportCardPageSize;
+  orientation?: ReportCardOrientation;
+
+  previewImage?: string;
+  previewImageMediaId?: number;
+
+  isDefault?: boolean;
+  active?: boolean;
+  locked?: boolean;
+
+  metadata?: any;
+}
+
+export interface ReportCardTemplateSetting extends BaseSync {
+  schoolId: number;
+  branchId?: number | null;
+
+  templateId?: number | null;
+  templateKey?: ReportCardTemplateKey;
+
+  name?: string;
+
+  // =========================
+  // TOP / IDENTITY FIELDS
+  // =========================
+  showStudentPhoto?: boolean;
+  showAdmissionNumber?: boolean;
+  showGender?: boolean;
+  showClass?: boolean;
+  showAcademicStructure?: boolean;
+  showAcademicPeriod?: boolean;
+  showBranch?: boolean;
+  showNumberOnRoll?: boolean;
+
+  // =========================
+  // RESULT TABLE FIELDS
+  // =========================
+  showTeacherNames?: boolean;
+  showAssessmentBreakdown?: boolean;
+  showSubjectTotal?: boolean;
+  showSubjectAverage?: boolean;
+  showSubjectGrade?: boolean;
+  showSubjectRemark?: boolean;
+  showSubjectPosition?: boolean;
+
+  // =========================
+  // SUMMARY FIELDS
+  // =========================
+  showTotal?: boolean;
+  showAverage?: boolean;
+  showClassPosition?: boolean;
+  showGPA?: boolean;
+  showAttendance?: boolean;
+  showAttendancePercent?: boolean;
+  showPromotionStatus?: boolean;
+
+  // =========================
+  // REMARKS / SIGNATURES / NOTICE
+  // =========================
+  showClassTeacherRemark?: boolean;
+  showHeadTeacherRemark?: boolean;
+  showNextAcademicPeriod?: boolean;
+  showClassTeacherSignature?: boolean;
+  showHeadTeacherSignature?: boolean;
+  showParentSignature?: boolean;
+
+  // =========================
+  // BRANDING / VISUALS
+  // =========================
+  showLogo?: boolean;
+  showWatermark?: boolean;
+  showReportBackground?: boolean;
+  showOfficialSignatureImage?: boolean;
+
+  // =========================
+  // LABEL CUSTOMIZATION
+  // =========================
+  studentNameLabel?: string;
+  admissionNumberLabel?: string;
+  genderLabel?: string;
+  classLabel?: string;
+  academicStructureLabel?: string;
+  academicPeriodLabel?: string;
+  numberOnRollLabel?: string;
+
+  subjectLabel?: string;
+  totalLabel?: string;
+  averageLabel?: string;
+  gradeLabel?: string;
+  subjectPositionLabel?: string;
+  classPositionLabel?: string;
+  gpaLabel?: string;
+  attendanceLabel?: string;
+  attendancePercentLabel?: string;
+
+  classTeacherRemarkLabel?: string;
+  headTeacherRemarkLabel?: string;
+  nextAcademicPeriodLabel?: string;
+  classTeacherSignatureLabel?: string;
+  headTeacherSignatureLabel?: string;
+  parentSignatureLabel?: string;
+
+  footerText?: string;
+
+  active?: boolean;
+  metadata?: any;
+}
+
+
 export interface StudentReportSnapshot extends BaseSync {
   schoolId: number;
   branchId: number;
@@ -2483,6 +2629,8 @@ class AppDB extends Dexie {
 
   reportCards!: Table<ReportCard>;
   reportCardItems!: Table<ReportCardItem>;
+  reportCardTemplates!: Table<ReportCardTemplate, number>;
+  reportCardTemplateSettings!: Table<ReportCardTemplateSetting, number>;
 
   studentReportSnapshots!: Table<StudentReportSnapshot, number>;
   studentPromotions!: Table<StudentPromotion, number>;
@@ -2565,7 +2713,7 @@ class AppDB extends Dexie {
   constructor() {
     super("EleeveonDB");
 
-    this.version(35).stores({
+    this.version(36).stores({
       schools: "++id,cloudId,accountId, name,updatedAt",
 
       branches:
@@ -2666,6 +2814,12 @@ class AppDB extends Dexie {
 
       reportCardItems:
         "++id,cloudId,accountId, schoolId, branchId,reportCardId,subjectId,academicPeriodId",
+
+      reportCardTemplates:
+        "++id,cloudId,accountId,schoolId,branchId,templateKey,name,isDefault,active,updatedAt",
+
+      reportCardTemplateSettings:
+        "++id,cloudId,accountId,schoolId,branchId,templateId,templateKey,name,active,updatedAt",
 
       studentReportSnapshots:
         "++id,cloudId,accountId, schoolId, branchId, studentId, classId, academicStructureId, academicPeriodId, promotedToClassId, snapshotType, synced, isDeleted, updatedAt",

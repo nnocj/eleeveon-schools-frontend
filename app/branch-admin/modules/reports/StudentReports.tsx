@@ -30,6 +30,13 @@
  *   so the selected/generated student is always the one whose photo appears
  *
  * Golden cleanup: no visible readiness/scope cards; top row stays Search + Print + Filter + More only.
+ *
+ * Report template system update:
+ * - loads reportCardTemplates, reportCardTemplateSettings and reportCardTemplateAssignments
+ * - resolves the branch default template assignment from Branch Settings
+ * - injects the resolved template/settings into each report dataset
+ * - passes template/settings into the new StudentReportCard template router
+ * - keeps Classic Formal as a safe fallback while other templates are being implemented
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -86,6 +93,21 @@ import type {
   ReportFiltersState,
   ReportMode,
 } from "./engine/report-types";
+
+import type {
+  ReportCardTemplateAssignmentLike,
+  ReportCardTemplateLike,
+  ReportCardTemplateSettingsLike,
+  StudentReportTemplateSettings,
+} from "./shared/ReportTemplateTypes";
+
+import {
+  DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
+  mergeStudentReportTemplateSettings,
+  normalizeStudentReportTemplateDefinition,
+} from "./shared/ReportTemplateTypes";
+
+const TemplateAwareStudentReportCard = StudentReportCard as React.ComponentType<any>;
 
 type TenantRow = {
   accountId?: string;
@@ -340,6 +362,9 @@ export default function StudentReports() {
   const [computedResults, setComputedResults] = useState<ComputedResult[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
+  const [reportCardTemplates, setReportCardTemplates] = useState<ReportCardTemplateLike[]>([]);
+  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<ReportCardTemplateSettingsLike[]>([]);
+  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] = useState<ReportCardTemplateAssignmentLike[]>([]);
   const [reportMediaUrls, setReportMediaUrls] = useState<string[]>([]);
 
   useEffect(() => {
@@ -386,6 +411,9 @@ export default function StudentReports() {
     setComputedResults([]);
     setReportCards([]);
     setReportCardItems([]);
+    setReportCardTemplates([]);
+    setReportCardTemplateSettings([]);
+    setReportCardTemplateAssignments([]);
   };
 
   const resolveReportMediaUrl = async ({
@@ -478,6 +506,9 @@ export default function StudentReports() {
         computedRows,
         reportCardRows,
         reportCardItemRows,
+        reportCardTemplateRows,
+        reportCardTemplateSettingRows,
+        reportCardTemplateAssignmentRows,
       ] = await Promise.all([
         db.schools.toArray(),
         db.branches.toArray(),
@@ -503,6 +534,9 @@ export default function StudentReports() {
         db.computedResults.toArray(),
         db.reportCards.toArray(),
         db.reportCardItems.toArray(),
+        (db as any).reportCardTemplates?.toArray?.() || [],
+        (db as any).reportCardTemplateSettings?.toArray?.() || [],
+        (db as any).reportCardTemplateAssignments?.toArray?.() || [],
       ]);
 
       const sameSchool = (row: SchoolRow) =>
@@ -538,6 +572,39 @@ export default function StudentReports() {
       const scopedReportCards = reportCardRows.filter(sameTenant);
       const scopedSettings = schoolBranchSettingRows.filter(sameTenant);
       const currentSetting = scopedSettings[0];
+
+      const scopedReportCardTemplates = (reportCardTemplateRows as ReportCardTemplateLike[])
+        .filter((row: any) => {
+          if (row.isDeleted || row.active === false) return false;
+          if (row.accountId && row.accountId !== accountId) return false;
+          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+          if (row.branchId && Number(row.branchId) !== branchId) return false;
+          return true;
+        })
+        .sort((a: any, b: any) => {
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        });
+
+      const scopedReportCardTemplateSettings = (reportCardTemplateSettingRows as ReportCardTemplateSettingsLike[])
+        .filter((row: any) => {
+          if (row.isDeleted || row.active === false) return false;
+          if (row.accountId && row.accountId !== accountId) return false;
+          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+          if (row.branchId && Number(row.branchId) !== branchId) return false;
+          return true;
+        });
+
+      const scopedReportCardTemplateAssignments = (reportCardTemplateAssignmentRows as ReportCardTemplateAssignmentLike[])
+        .filter((row: any) => {
+          if (row.isDeleted || row.active === false) return false;
+          if (row.accountId && row.accountId !== accountId) return false;
+          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+          if (row.branchId && Number(row.branchId) !== branchId) return false;
+          return true;
+        });
+
       const nextMediaUrls: string[] = [];
 
       const currentSchoolWithMedia = currentSchool
@@ -667,6 +734,9 @@ export default function StudentReports() {
           return true;
         })
       );
+      setReportCardTemplates(scopedReportCardTemplates);
+      setReportCardTemplateSettings(scopedReportCardTemplateSettings);
+      setReportCardTemplateAssignments(scopedReportCardTemplateAssignments);
     } catch (error) {
       console.error("Failed to load report data:", error);
       clearState();
@@ -886,6 +956,58 @@ export default function StudentReports() {
   const warningCount = output.warnings.length;
   const canPrint = hasCoreSetup && (mode === "class-reports" ? output.classReports.length > 0 : Boolean(output.studentReport));
 
+  const activeReportTemplateAssignment = useMemo(() => {
+    return (
+      reportCardTemplateAssignments.find((row: any) =>
+        row.active !== false &&
+        row.isDefault === true &&
+        (!row.scopeType || row.scopeType === "branch") &&
+        (!row.scopeId || Number(row.scopeId) === branchId)
+      ) ||
+      reportCardTemplateAssignments.find((row: any) =>
+        row.active !== false &&
+        (!row.scopeType || row.scopeType === "branch")
+      ) ||
+      reportCardTemplateAssignments.find((row: any) => row.active !== false) ||
+      null
+    );
+  }, [reportCardTemplateAssignments, branchId]);
+
+  const activeReportTemplate = useMemo(() => {
+    const assignedTemplateId = idOf(activeReportTemplateAssignment?.templateId);
+
+    return (
+      reportCardTemplates.find((row: any) => assignedTemplateId && idOf(row.id) === assignedTemplateId) ||
+      reportCardTemplates.find((row: any) => row.isDefault) ||
+      reportCardTemplates.find((row: any) => String(row.code || "") === "classic_formal") ||
+      reportCardTemplates[0] ||
+      normalizeStudentReportTemplateDefinition(null)
+    );
+  }, [activeReportTemplateAssignment, reportCardTemplates]);
+
+  const activeReportTemplateSettingsRow = useMemo(() => {
+    const assignedSettingsId = idOf(activeReportTemplateAssignment?.templateSettingsId);
+    const activeTemplateId = idOf(activeReportTemplate?.id);
+
+    return (
+      reportCardTemplateSettings.find((row: any) => assignedSettingsId && idOf(row.id) === assignedSettingsId) ||
+      reportCardTemplateSettings.find((row: any) => activeTemplateId && idOf(row.templateId) === activeTemplateId) ||
+      reportCardTemplateSettings.find((row: any) => row.active !== false) ||
+      null
+    );
+  }, [activeReportTemplateAssignment, activeReportTemplate, reportCardTemplateSettings]);
+
+  const activeReportTemplateSettings = useMemo<StudentReportTemplateSettings>(() => {
+    return mergeStudentReportTemplateSettings(
+      {
+        ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
+        ...(activeReportTemplateSettingsRow || {}),
+      },
+      activeReportTemplate || null,
+      activeReportTemplateAssignment || null
+    );
+  }, [activeReportTemplate, activeReportTemplateAssignment, activeReportTemplateSettingsRow]);
+
   function studentForReport(reportDataset: Record<string, any> | undefined) {
     const reportStudentId = idOf(reportDataset?.report?.studentId || reportDataset?.studentId);
     if (!reportStudentId) return undefined;
@@ -932,12 +1054,22 @@ function withBranchContext<T extends Record<string, any>>(
     branchId: (branch as any)?.id || reportDataset.branchId,
     branchName,
     branchLabel: branchName,
+    template: activeReportTemplate,
+    templateSettings: activeReportTemplateSettings,
+    reportCardTemplate: activeReportTemplate,
+    reportCardTemplateSettings: activeReportTemplateSettings,
+    reportCardTemplateAssignment: activeReportTemplateAssignment,
     header: {
       ...(reportDataset as any).header,
       branch,
       branchId: (branch as any)?.id || (reportDataset as any).header?.branchId,
       branchName,
       branchLabel: branchName,
+      template: activeReportTemplate,
+      templateSettings: activeReportTemplateSettings,
+      reportCardTemplate: activeReportTemplate,
+      reportCardTemplateSettings: activeReportTemplateSettings,
+      reportCardTemplateAssignment: activeReportTemplateAssignment,
       branding: {
         ...((reportDataset as any).header?.branding || {}),
         primaryColor:
@@ -970,6 +1102,11 @@ function withBranchContext<T extends Record<string, any>>(
       branchId: (branch as any)?.id || (reportDataset as any).report?.branchId,
       branchName,
       branchLabel: branchName,
+      template: activeReportTemplate,
+      templateSettings: activeReportTemplateSettings,
+      reportCardTemplate: activeReportTemplate,
+      reportCardTemplateSettings: activeReportTemplateSettings,
+      reportCardTemplateAssignment: activeReportTemplateAssignment,
     },
   };
 }
@@ -991,19 +1128,32 @@ function withBranchContext<T extends Record<string, any>>(
     if (mode === "class-reports") {
       return output.classReports.length ? (
         output.classReports.map((reportDataset, index) => (
-          <StudentReportCard
+          <TemplateAwareStudentReportCard
             key={reportDataset.report?.studentId || index}
             dataset={withBranchContext(reportDataset as any, reportBranch) as any}
+            template={activeReportTemplate}
+            settings={activeReportTemplateSettings}
             compact
             pageBreakAfter={index < output.classReports.length - 1}
           />
         ))
       ) : (
-        <StudentReportCard dataset={undefined} />
+        <TemplateAwareStudentReportCard
+          dataset={undefined}
+          template={activeReportTemplate}
+          settings={activeReportTemplateSettings}
+        />
       );
     }
 
-    return <StudentReportCard dataset={withBranchContext(output.studentReport as any, reportBranch) as any} pageBreakAfter={false} />;
+    return (
+      <TemplateAwareStudentReportCard
+        dataset={withBranchContext(output.studentReport as any, reportBranch) as any}
+        template={activeReportTemplate}
+        settings={activeReportTemplateSettings}
+        pageBreakAfter={false}
+      />
+    );
   };
 
   if (accountLoading || contextLoading || settingsLoading || pageLoading) {

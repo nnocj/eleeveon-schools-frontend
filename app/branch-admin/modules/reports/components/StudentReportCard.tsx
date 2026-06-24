@@ -3,54 +3,84 @@
 /**
  * reports/components/StudentReportCard.tsx
  * ---------------------------------------------------------
- * PREMIUM PRINTABLE STUDENT REPORT CARD
+ * ELEEVEON SCHOOLS — STUDENT REPORT CARD TEMPLATE ROUTER
  * ---------------------------------------------------------
  *
- * This component renders ONE official student report card.
- * It does not compute results. It only renders data produced
- * by reports/engine/report-engine.ts.
+ * This component renders ONE official student report card by selecting
+ * the active visual template.
  *
- * Design target:
- * - Ghana/private-school ready
- * - A4 portrait
- * - professional institutional branding
- * - dynamic assessment item columns
- * - attendance, positions, remarks and signatures
+ * New template system:
+ * - The report engine still computes the dataset once.
+ * - Branch Settings controls selected template + display settings.
+ * - This component only resolves the selected template and routes rendering.
+ * - Actual visual designs live in reports/student-report-templates/*.
  *
- * Mobile update:
- * - Printable A4 design is preserved.
- * - Screen rendering is wrapped in a responsive preview shell.
- * - On mobile, the same report is scaled down beautifully.
- * - Users can expand the preview to inspect full details.
- * - Print layout remains original A4 and is not scaled.
- *
- * Media asset display update:
- * - prefers resolved media URLs supplied by StudentReports.tsx
- * - keeps old string image fields only as fallback display values
- * - no layout, print, table, grading, remark or mobile-preview behavior changed
+ * Important:
+ * - This file does not compute report results.
+ * - This file keeps backward compatibility with old datasets.
+ * - If no template/settings are supplied, it falls back to Classic Formal.
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 
-import ReportHeader from "./ReportHeader";
+import type { StudentReportCardDataset } from "../engine/report-types";
 
 import type {
-  ReportAssessmentColumn,
-  StudentReportCardDataset,
-} from "../engine/report-types";
+  ReportCardTemplateAssignmentLike,
+  ReportCardTemplateLike,
+  ReportCardTemplateSettingsLike,
+  StudentReportTemplateDefinition,
+  StudentReportTemplateSettings,
+} from "../shared/ReportTemplateTypes";
+
+import {
+  DEFAULT_STUDENT_REPORT_TEMPLATE_CODE,
+  mergeStudentReportTemplateSettings,
+  normalizeStudentReportTemplateDefinition,
+} from "../shared/ReportTemplateTypes";
+
+import {
+  getStudentReportTemplateComponent,
+  getStudentReportTemplateDefinition,
+} from "../student-report-templates";
+
+import { reportTemplateEmptyMessage } from "../shared/ReportTemplateUtils";
 
 // ======================================================
 // PROPS
 // ======================================================
 
-type Props = {
+export type StudentReportCardProps = {
   dataset?: StudentReportCardDataset;
+
+  /**
+   * Optional selected template row from Dexie/reportCardTemplates.
+   * StudentReports.tsx may pass this directly after resolving branch settings.
+   */
+  template?: ReportCardTemplateLike | StudentReportTemplateDefinition | null;
+
+  /**
+   * Optional selected template settings row from Dexie/reportCardTemplateSettings.
+   */
+  templateSettings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+
+  /**
+   * Optional assignment row from Dexie/reportCardTemplateAssignments.
+   */
+  templateAssignment?: ReportCardTemplateAssignmentLike | null;
+
+  /**
+   * Backward-compatible shortcut. If supplied, it overrides templateSettings.
+   */
+  settings?: Partial<StudentReportTemplateSettings> | null;
+
   compact?: boolean;
   showWatermark?: boolean;
   pageBreakAfter?: boolean;
+
   /**
-   * When true, shows the responsive preview controls.
-   * Print output is unchanged either way.
+   * When true, templates can show mobile preview controls.
+   * Print output remains A4 and unscaled.
    */
   mobilePreview?: boolean;
 };
@@ -59,28 +89,75 @@ type Props = {
 // HELPERS
 // ======================================================
 
-const formatNumber = (value?: number, decimals = 1) => {
-  if (value == null || Number.isNaN(value)) return "0";
-  return Number(value).toFixed(decimals);
-};
+function resolveDynamicTemplate(dataset?: StudentReportCardDataset) {
+  const dynamicDataset = dataset as any;
 
-const ordinal = (value?: number) => {
-  if (!value) return "-";
+  return (
+    dynamicDataset?.template ||
+    dynamicDataset?.reportTemplate ||
+    dynamicDataset?.reportCardTemplate ||
+    dynamicDataset?.selectedTemplate ||
+    dynamicDataset?.header?.template ||
+    dynamicDataset?.header?.reportTemplate ||
+    dynamicDataset?.header?.reportCardTemplate ||
+    null
+  ) as ReportCardTemplateLike | null;
+}
 
-  const suffixes = ["th", "st", "nd", "rd"];
-  const mod100 = value % 100;
+function resolveDynamicTemplateSettings(dataset?: StudentReportCardDataset) {
+  const dynamicDataset = dataset as any;
 
-  return `${value}${
-    suffixes[(mod100 - 20) % 10] || suffixes[mod100] || suffixes[0]
-  }`;
-};
+  return (
+    dynamicDataset?.templateSettings ||
+    dynamicDataset?.reportTemplateSettings ||
+    dynamicDataset?.reportCardTemplateSettings ||
+    dynamicDataset?.selectedTemplateSettings ||
+    dynamicDataset?.header?.templateSettings ||
+    dynamicDataset?.header?.reportTemplateSettings ||
+    dynamicDataset?.header?.reportCardTemplateSettings ||
+    null
+  ) as ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+}
 
-const firstText = (...values: unknown[]) => {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-};
+function resolveDynamicTemplateAssignment(dataset?: StudentReportCardDataset) {
+  const dynamicDataset = dataset as any;
+
+  return (
+    dynamicDataset?.templateAssignment ||
+    dynamicDataset?.reportTemplateAssignment ||
+    dynamicDataset?.reportCardTemplateAssignment ||
+    dynamicDataset?.selectedTemplateAssignment ||
+    dynamicDataset?.header?.templateAssignment ||
+    dynamicDataset?.header?.reportTemplateAssignment ||
+    dynamicDataset?.header?.reportCardTemplateAssignment ||
+    null
+  ) as ReportCardTemplateAssignmentLike | null;
+}
+
+function resolveTemplateCode(args: {
+  dataset?: StudentReportCardDataset;
+  template?: ReportCardTemplateLike | StudentReportTemplateDefinition | null;
+  settings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+}) {
+  const dynamicDataset = args.dataset as any;
+
+  return (
+    (args.settings as any)?.templateCode ||
+    (args.template as any)?.code ||
+    dynamicDataset?.templateCode ||
+    dynamicDataset?.template?.code ||
+    dynamicDataset?.reportTemplate?.code ||
+    dynamicDataset?.reportCardTemplate?.code ||
+    dynamicDataset?.templateSettings?.templateCode ||
+    dynamicDataset?.reportTemplateSettings?.templateCode ||
+    dynamicDataset?.reportCardTemplateSettings?.templateCode ||
+    dynamicDataset?.header?.templateCode ||
+    dynamicDataset?.header?.template?.code ||
+    dynamicDataset?.header?.reportTemplate?.code ||
+    dynamicDataset?.header?.reportCardTemplate?.code ||
+    DEFAULT_STUDENT_REPORT_TEMPLATE_CODE
+  );
+}
 
 // ======================================================
 // COMPONENT
@@ -88,481 +165,86 @@ const firstText = (...values: unknown[]) => {
 
 export default function StudentReportCard({
   dataset,
+  template,
+  templateSettings,
+  templateAssignment,
+  settings,
   compact = false,
   showWatermark = true,
   pageBreakAfter = true,
   mobilePreview = true,
-}: Props) {
-  const [expanded, setExpanded] = useState(false);
+}: StudentReportCardProps) {
+  const resolved = useMemo(() => {
+    const dynamicTemplate = resolveDynamicTemplate(dataset);
+    const dynamicSettings = resolveDynamicTemplateSettings(dataset);
+    const dynamicAssignment = resolveDynamicTemplateAssignment(dataset);
 
-  const report = dataset?.report;
-  const header = dataset?.header;
-  const student = dataset?.student;
+    const selectedTemplate =
+      (template as ReportCardTemplateLike | null) ||
+      dynamicTemplate ||
+      null;
 
-  const branding = header?.branding;
-  const primary = branding?.primaryColor || "var(--primary-color)";
+    const selectedSettings =
+      settings ||
+      templateSettings ||
+      dynamicSettings ||
+      null;
 
-  const dynamicData = dataset as any;
-  const dynamicReport = report as any;
-  const dynamicHeader = header as any;
-  const dynamicStudent = student as any;
+    const selectedAssignment =
+      templateAssignment ||
+      dynamicAssignment ||
+      null;
 
-  const reportBackgroundImage =
-    (branding as any)?.resolvedReportCardBackgroundImageUrl ||
-    branding?.reportCardBackgroundImage ||
-    "";
-
-  const reportLogo =
-    (branding as any)?.resolvedLogoUrl ||
-    branding?.logo ||
-    "";
-
-  const reportWatermark =
-    (branding as any)?.resolvedReportCardWatermarkUrl ||
-    branding?.reportCardWatermark ||
-    reportLogo ||
-    "";
-
-  const reportSignatureImage =
-    (branding as any)?.resolvedReportCardSignatureImageUrl ||
-    branding?.reportCardSignatureImage ||
-    "";
-
-  const studentPhoto =
-    dynamicReport?.resolvedStudentPhotoUrl ||
-    dynamicReport?.studentPhoto ||
-    dynamicStudent?.resolvedStudentPhotoUrl ||
-    dynamicStudent?.photo ||
-    "";
-
-  const classTeacherName = firstText(
-    dynamicReport?.classTeacherName,
-    dynamicReport?.classTeacher?.fullName,
-    dynamicReport?.classTeacher?.name,
-    dynamicData?.classTeacherName,
-    dynamicData?.classTeacher?.fullName,
-    dynamicData?.classTeacher?.name,
-    dynamicHeader?.classTeacherName,
-    dynamicHeader?.classTeacher?.fullName,
-    dynamicHeader?.classTeacher?.name
-  );
-
-  const headTeacherName = firstText(
-    dynamicReport?.headTeacherName,
-    dynamicReport?.principalName,
-    dynamicReport?.headTeacher?.fullName,
-    dynamicReport?.headTeacher?.name,
-    dynamicReport?.principal?.fullName,
-    dynamicReport?.principal?.name,
-    dynamicData?.headTeacherName,
-    dynamicData?.principalName,
-    dynamicData?.headTeacher?.fullName,
-    dynamicData?.headTeacher?.name,
-    dynamicData?.principal?.fullName,
-    dynamicData?.principal?.name,
-    dynamicHeader?.headTeacherName,
-    dynamicHeader?.principalName,
-    dynamicHeader?.headTeacher?.fullName,
-    dynamicHeader?.headTeacher?.name,
-    dynamicHeader?.principal?.fullName,
-    dynamicHeader?.principal?.name
-  );
-
-  const parentName = firstText(
-    dynamicReport?.parentName,
-    dynamicReport?.guardianName,
-    dynamicReport?.parent?.fullName,
-    dynamicReport?.parent?.name,
-    dynamicReport?.guardian?.fullName,
-    dynamicReport?.guardian?.name,
-    dynamicData?.parentName,
-    dynamicData?.guardianName,
-    dynamicData?.parent?.fullName,
-    dynamicData?.parent?.name,
-    dynamicData?.guardian?.fullName,
-    dynamicData?.guardian?.name,
-    dynamicStudent?.parentName,
-    dynamicStudent?.guardianName,
-    dynamicStudent?.parent?.fullName,
-    dynamicStudent?.parent?.name,
-    dynamicStudent?.guardian?.fullName,
-    dynamicStudent?.guardian?.name
-  );
-
-  const assessmentColumns = useMemo<ReportAssessmentColumn[]>(() => {
-    const map = new Map<number, ReportAssessmentColumn>();
-
-    report?.subjectResults.forEach((subject) => {
-      subject.breakdown.forEach((item) => {
-        if (!map.has(item.assessmentStructureItemId)) {
-          map.set(item.assessmentStructureItemId, {
-            assessmentStructureItemId: item.assessmentStructureItemId,
-            name: item.name,
-            maxScore: item.maxScore,
-            weight: item.weight,
-            order: item.order,
-          });
-        }
-      });
+    const templateCode = resolveTemplateCode({
+      dataset,
+      template: selectedTemplate,
+      settings: selectedSettings,
     });
 
-    return Array.from(map.values()).sort((a, b) => a.order - b.order);
-  }, [report]);
+    const definitionFromRegistry = getStudentReportTemplateDefinition(templateCode);
 
-  if (!dataset || !report || !header) {
+    const normalizedTemplate = selectedTemplate
+      ? normalizeStudentReportTemplateDefinition(selectedTemplate)
+      : definitionFromRegistry;
+
+    const resolvedSettings = mergeStudentReportTemplateSettings(
+      selectedSettings,
+      normalizedTemplate,
+      selectedAssignment
+    );
+
+    const TemplateComponent = getStudentReportTemplateComponent(
+      resolvedSettings.templateCode || normalizedTemplate.code || templateCode
+    );
+
+    return {
+      template: normalizedTemplate,
+      settings: resolvedSettings,
+      TemplateComponent,
+    };
+  }, [dataset, template, templateSettings, templateAssignment, settings]);
+
+  if (!dataset?.header || !dataset?.report) {
     return (
-      <div className="src-empty-card">
+      <div className="src-empty-card report-template-router-empty">
         <style>{css}</style>
-        Select a student, class and academic period to generate a report card.
+        {reportTemplateEmptyMessage(dataset)}
       </div>
     );
   }
 
-  const page: React.CSSProperties = {
-    width: "210mm",
-    minHeight: "297mm",
-    margin: "0 auto 20px",
-    padding: compact ? "9mm" : "11mm",
-    boxSizing: "border-box",
-    background: "#fff",
-    color: "#111",
-    fontFamily: branding?.fontFamily || "Arial, sans-serif",
-    border: "1px solid #e5e5e5",
-    position: "relative",
-    overflow: "hidden",
-    pageBreakAfter: pageBreakAfter ? "always" : "auto",
-  };
-
-  const table: React.CSSProperties = {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: compact ? 9.5 : 10.5,
-  };
-
-  const th: React.CSSProperties = {
-    border: "1px solid #222",
-    padding: compact ? 4 : 5,
-    background: primary,
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: 800,
-    lineHeight: 1.2,
-  };
-
-  const td: React.CSSProperties = {
-    border: "1px solid #222",
-    padding: compact ? 4 : 5,
-    verticalAlign: "middle",
-    lineHeight: 1.25,
-  };
-
-  const label: React.CSSProperties = {
-    fontSize: compact ? 8.5 : 9.5,
-    opacity: 0.72,
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-    fontWeight: 700,
-  };
-
-  const value: React.CSSProperties = {
-    marginTop: 2,
-    fontSize: compact ? 10.5 : 11.5,
-    fontWeight: 800,
-  };
-
-  const infoBox: React.CSSProperties = {
-    border: "1px solid #cfcfcf",
-    padding: compact ? 5 : 6,
-    minHeight: compact ? 38 : 42,
-    background: "rgba(255,255,255,0.92)",
-  };
-
-  const signatureNameStyle: React.CSSProperties = {
-    minHeight: 16,
-    marginBottom: 3,
-    fontSize: compact ? 9.5 : 10.5,
-    fontWeight: 800,
-    color: "#111",
-  };
-
-  const reportPage = (
-    <section
-      className="print-page report-page-break student-report-card-page src-a4-page"
-      style={page}
-    >
-      {reportBackgroundImage && (
-        <img
-          src={reportBackgroundImage}
-          alt="Report background"
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            opacity: 0.035,
-            zIndex: 0,
-          }}
-        />
-      )}
-
-      {showWatermark && reportWatermark && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: 0.045,
-            pointerEvents: "none",
-            zIndex: 0,
-          }}
-        >
-          <img
-            src={reportWatermark}
-            alt="Watermark"
-            style={{
-              width: "58%",
-              maxHeight: "58%",
-              objectFit: "contain",
-            }}
-          />
-        </div>
-      )}
-
-      <div style={{ position: "relative", zIndex: 1 }}>
-        <ReportHeader
-          header={header}
-          title="Terminal / Periodic Academic Report"
-          compact={compact}
-          orientation="portrait"
-        />
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 84px",
-            gap: 10,
-            marginTop: 8,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-              gap: 6,
-            }}
-          >
-            <div style={{ ...infoBox, gridColumn: "span 2" }}>
-              <div style={label}>Student Name</div>
-              <div style={value}>{report.studentName}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Admission No.</div>
-              <div style={value}>{report.admissionNumber || "-"}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Gender</div>
-              <div style={value}>{report.gender || student?.gender || "-"}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Class</div>
-              <div style={value}>{report.className}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Academic Period</div>
-              <div style={value}>{header.academicPeriod?.name || "-"}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Attendance</div>
-              <div style={value}>{report.attendance.presentDays}/{report.attendance.totalDays}</div>
-            </div>
-
-            <div style={infoBox}>
-              <div style={label}>Attendance %</div>
-              <div style={value}>{formatNumber(report.attendance.attendancePercent, 1)}%</div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              border: "1px solid #cfcfcf",
-              borderRadius: 8,
-              overflow: "hidden",
-              background: "#fafafa",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 84,
-            }}
-          >
-            {studentPhoto ? (
-              <img
-                src={studentPhoto}
-                alt="Student"
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            ) : (
-              <span style={{ fontSize: 10, fontWeight: 800, color: "#777" }}>PHOTO</span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10 }}>
-          <table style={table}>
-            <thead>
-              <tr>
-                <th style={{ ...th, textAlign: "left", minWidth: 95 }}>Subject</th>
-
-                {assessmentColumns.map((column) => (
-                  <th key={column.assessmentStructureItemId} style={th}>
-                    {column.name}
-                    <div style={{ fontSize: 8, marginTop: 2, opacity: 0.95 }}>
-                      W:{formatNumber(column.weight, 0)}
-                    </div>
-                  </th>
-                ))}
-
-                <th style={th}>Weighted</th>
-                <th style={th}>%</th>
-                <th style={th}>Grade</th>
-                <th style={th}>Pos.</th>
-                <th style={{ ...th, minWidth: 85 }}>Remark</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {report.subjectResults.map((subject) => (
-                <tr key={subject.classSubjectId}>
-                  <td style={{ ...td, fontWeight: 800 }}>
-                    {subject.subjectName}
-                    {subject.teacherName && (
-                      <div style={{ marginTop: 2, fontSize: 8, opacity: 0.72, fontWeight: 500 }}>
-                        {subject.teacherName}
-                      </div>
-                    )}
-                  </td>
-
-                  {assessmentColumns.map((column) => {
-                    const item = subject.breakdown.find(
-                      (row) => row.assessmentStructureItemId === column.assessmentStructureItemId
-                    );
-
-                    return (
-                      <td key={column.assessmentStructureItemId} style={{ ...td, textAlign: "center" }}>
-                        {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
-                      </td>
-                    );
-                  })}
-
-                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(subject.weightedTotal, 1)}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(subject.percentage, 1)}%</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>{subject.grade}</td>
-                  <td style={{ ...td, textAlign: "center" }}>{ordinal(subject.subjectPosition)}</td>
-                  <td style={td}>{subject.remark}</td>
-                </tr>
-              ))}
-
-              {!report.subjectResults.length && (
-                <tr>
-                  <td style={{ ...td, textAlign: "center", padding: 16 }} colSpan={assessmentColumns.length + 6}>
-                    No subject results available for this selected period.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 7 }}>
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
-            <div style={label}>Total</div>
-            <div style={{ ...value, fontSize: 16 }}>{formatNumber(report.total, 1)}</div>
-          </div>
-
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
-            <div style={label}>Average</div>
-            <div style={{ ...value, fontSize: 16 }}>{formatNumber(report.average, 1)}%</div>
-          </div>
-
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
-            <div style={label}>Class Position</div>
-            <div style={{ ...value, fontSize: 16 }}>{ordinal(report.overallPosition)}</div>
-          </div>
-
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
-            <div style={label}>GPA</div>
-            <div style={{ ...value, fontSize: 16 }}>{report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-"}</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div style={{ border: "1px solid #222", minHeight: 54, padding: 7 }}>
-            <div style={label}>Class Teacher's Remark</div>
-            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>{report.classTeacherRemark || ""}</div>
-          </div>
-
-          <div style={{ border: "1px solid #222", minHeight: 54, padding: 7 }}>
-            <div style={label}>Headteacher's Remark</div>
-            <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.35 }}>{report.headTeacherRemark || ""}</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 22, alignItems: "end" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={signatureNameStyle}>{classTeacherName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Class Teacher</div>
-          </div>
-
-          <div style={{ textAlign: "center" }}>
-            {reportSignatureImage && (
-              <img src={reportSignatureImage} alt="Official signature" style={{ height: 34, objectFit: "contain", marginBottom: 2 }} />
-            )}
-            <div style={signatureNameStyle}>{headTeacherName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Headteacher / Principal</div>
-          </div>
-
-          <div style={{ textAlign: "center" }}>
-            <div style={signatureNameStyle}>{parentName || ""}</div>
-            <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 10.5, fontWeight: 800 }}>Parent / Guardian</div>
-          </div>
-        </div>
-
-        <div style={{ marginTop: 10, borderTop: `2px solid ${primary}`, paddingTop: 5, display: "flex", justifyContent: "space-between", gap: 10, fontSize: 8.5, color: "#555" }}>
-          <span>Official academic report generated for {branding?.schoolName}</span>
-          <span>Powered by Eleeveon School Management System</span>
-        </div>
-      </div>
-    </section>
-  );
-
-  if (!mobilePreview) return reportPage;
+  const TemplateComponent = resolved.TemplateComponent;
 
   return (
-    <div className={`src-preview-shell ${expanded ? "expanded" : ""}`}>
-      <style>{css}</style>
-
-      <div className="src-mobile-toolbar report-no-print">
-        <div>
-          <strong>{report.studentName}</strong>
-          <span>{report.className} · {header.academicPeriod?.name || "Academic Period"}</span>
-        </div>
-
-        <button type="button" onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? "Fit Preview" : "Expand"}
-        </button>
-      </div>
-
-      <div className="src-preview-scroll report-screen-scroll">
-        <div className="src-preview-scale">{reportPage}</div>
-      </div>
-    </div>
+    <TemplateComponent
+      dataset={dataset}
+      template={resolved.template}
+      settings={resolved.settings}
+      compact={compact}
+      showWatermark={showWatermark}
+      pageBreakAfter={pageBreakAfter}
+      mobilePreview={mobilePreview}
+    />
   );
 }
 
@@ -578,144 +260,5 @@ const css = `
   background: var(--surface, #fff);
   color: var(--text, #0f172a);
   font-weight: 750;
-}
-
-.src-preview-shell {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  border-radius: 24px;
-}
-
-.src-mobile-toolbar {
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-  padding: 10px;
-  border-radius: 18px;
-  background: var(--surface, #fff);
-  border: 1px solid rgba(148,163,184,.22);
-  box-shadow: 0 10px 24px rgba(15,23,42,.06);
-}
-
-.src-mobile-toolbar div {
-  min-width: 0;
-}
-
-.src-mobile-toolbar strong,
-.src-mobile-toolbar span {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.src-mobile-toolbar strong {
-  font-size: 13px;
-  font-weight: 950;
-  color: var(--text, #0f172a);
-}
-
-.src-mobile-toolbar span {
-  margin-top: 2px;
-  color: var(--muted, #64748b);
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.src-mobile-toolbar button {
-  flex: 0 0 auto;
-  min-height: 34px;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: var(--primary-color, #2563eb);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 950;
-  cursor: pointer;
-}
-
-.src-preview-scroll {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  -webkit-overflow-scrolling: touch;
-  padding: 8px;
-  border-radius: 22px;
-  background: rgba(148,163,184,.08);
-  border: 1px solid rgba(148,163,184,.18);
-}
-
-.src-preview-scale {
-  width: max-content;
-  min-width: 100%;
-  transform-origin: top left;
-}
-
-@media screen and (max-width: 720px) {
-  .src-mobile-toolbar {
-    display: flex;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scroll {
-    overflow: hidden;
-    max-height: 76vh;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scale {
-    width: 210mm;
-    transform: scale(calc((100vw - 28px) / 793.7008));
-    transform-origin: top left;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scroll::after {
-    content: "";
-    display: block;
-    height: calc(1122.5197px * ((100vw - 28px) / 793.7008));
-    max-height: 76vh;
-  }
-
-  .src-preview-shell.expanded .src-preview-scroll {
-    overflow-x: auto;
-    max-height: none;
-  }
-
-  .src-preview-shell.expanded .src-preview-scale {
-    transform: none;
-  }
-}
-
-@media screen and (min-width: 721px) {
-  .src-preview-scroll {
-    overflow-x: auto;
-  }
-}
-
-@media print {
-  .src-preview-shell,
-  .src-preview-scroll,
-  .src-preview-scale {
-    display: contents !important;
-    transform: none !important;
-    overflow: visible !important;
-    padding: 0 !important;
-    border: 0 !important;
-    background: transparent !important;
-  }
-
-  .src-mobile-toolbar {
-    display: none !important;
-  }
-
-  .student-report-card-page {
-    transform: none !important;
-    margin: 0 auto !important;
-  }
 }
 `;

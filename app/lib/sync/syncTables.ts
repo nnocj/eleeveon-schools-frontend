@@ -24,6 +24,13 @@
  * Wallet/payout update:
  * - schoolPayoutSettings, paymentSettlements and withdrawalRequests are local-first
  *   so Branch Admin wallet/payout pages can save and push from the browser.
+ *
+ * Report-card template update:
+ * - reportCardTemplates stores reusable report layout choices.
+ * - reportCardTemplateSettings stores visibility/labels/statistic controls for
+ *   each school or branch report-card template.
+ * - reportCardTemplateAssignments stores the active/default template selection
+ *   per school, branch, academic structure, period, class or level.
  */
 
 // ======================================================
@@ -78,6 +85,13 @@ export const LOCAL_FIRST_SYNC_TABLES = [
   "reportCardItems",
   "studentReportSnapshots",
   "studentPromotions",
+
+  // Report-card templates, visibility settings and assignments.
+  // These are local-first because schools/branches must be able to configure
+  // report layouts offline and sync those choices later.
+  "reportCardTemplates",
+  "reportCardTemplateSettings",
+  "reportCardTemplateAssignments",
 
   // Finance - local school operations
   "feeStructures",

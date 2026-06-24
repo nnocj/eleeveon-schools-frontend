@@ -10,6 +10,12 @@
  * Core rule:
  * ClassSubject is the academic execution source of truth.
  *
+ * Next academic period update:
+ * - resolves the next active academic period from the selected/current period
+ * - exposes it through the report header and each student report dataset
+ * - enables report cards to print lines such as
+ *   "Next Academic Period Begins: Sep 10, 2026" without manual typing
+ *
  * Flow:
  * ClassSubject
  *   -> AssessmentApplicability
@@ -22,6 +28,7 @@
  */
 
 import type {
+  AcademicPeriod,
   AssessmentApplicability,
   AssessmentEntry,
   AssessmentStructureItem,
@@ -124,6 +131,208 @@ export function buildLookups(dataset: ReportEngineDataset) {
   };
 }
 
+
+// ======================================================
+// ACADEMIC PERIOD RESOLUTION
+// ======================================================
+
+export function toISODate(value?: string | number | Date | null): string {
+  if (!value) return "";
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  if (!Number.isFinite(time)) return "";
+
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+export function friendlyReportDate(value?: string | number | Date | null): string {
+  const iso = toISODate(value);
+  if (!iso) return "";
+
+  try {
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(`${iso}T00:00:00`));
+  } catch {
+    return iso;
+  }
+}
+
+export function resolveNextAcademicPeriod(
+  dataset: ReportEngineDataset,
+  filters: ReportFiltersState
+): AcademicPeriod | undefined {
+  const selectedPeriod = dataset.academicPeriods.find(
+    item => item.id === filters.academicPeriodId && !item.isDeleted
+  );
+
+  if (!selectedPeriod) return undefined;
+
+  const selectedStructureId =
+    filters.academicStructureId || selectedPeriod.academicStructureId;
+
+  const selectedStructure = dataset.academicStructures.find(
+    item => item.id === selectedStructureId && !item.isDeleted
+  );
+
+  const selectedOrder = safeNumber(selectedPeriod.order);
+  const selectedStartDate = toISODate(selectedPeriod.startDate);
+  const selectedEndDate = toISODate(selectedPeriod.endDate);
+
+  const sameTenant = (period: AcademicPeriod) => {
+    if (!isActive(period)) return false;
+    if (period.id === selectedPeriod.id) return false;
+    if (filters.branchId && period.branchId !== filters.branchId) return false;
+    if (selectedPeriod.schoolId && period.schoolId !== selectedPeriod.schoolId) return false;
+    return true;
+  };
+
+  const sortPeriods = (a: AcademicPeriod, b: AcademicPeriod) => {
+    const orderDiff = safeNumber(a.order) - safeNumber(b.order);
+    if (orderDiff !== 0) return orderDiff;
+
+    const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+    if (startDiff !== 0) return startDiff;
+
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  };
+
+  // 1) Normal case: Term 1 -> Term 2 -> Term 3 inside the same academic structure/year.
+  const sameStructureCandidates = dataset.academicPeriods
+    .filter(item => {
+      if (!sameTenant(item)) return false;
+      if (selectedStructureId && item.academicStructureId !== selectedStructureId) return false;
+
+      const itemOrder = safeNumber(item.order);
+      const itemStartDate = toISODate(item.startDate);
+
+      if (selectedOrder && itemOrder > selectedOrder) return true;
+      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate) return true;
+      if (selectedStartDate && itemStartDate && itemStartDate > selectedStartDate) return true;
+
+      return false;
+    })
+    .sort(sortPeriods);
+
+  if (sameStructureCandidates[0]) return sameStructureCandidates[0];
+
+  // 2) Year/structure transition case: 2026/2027 Term 3 -> 2028/2029 Term 1.
+  // AcademicStructure is treated as the school-year container, so when there is no
+  // later period in the current structure, move to the earliest active period in the
+  // next active structure for the same school/branch.
+  const selectedStructureEndDate = toISODate(selectedStructure?.endDate);
+  const selectedStructureStartDate = toISODate(selectedStructure?.startDate);
+
+  const nextStructures = dataset.academicStructures
+    .filter(structure => {
+      if (!isActive(structure)) return false;
+      if (structure.id === selectedStructureId) return false;
+      if (filters.branchId && structure.branchId !== filters.branchId) return false;
+      if (selectedPeriod.schoolId && structure.schoolId !== selectedPeriod.schoolId) return false;
+
+      const structureStartDate = toISODate(structure.startDate);
+      const structureEndDate = toISODate(structure.endDate);
+
+      if (selectedStructureEndDate && structureStartDate && structureStartDate > selectedStructureEndDate) {
+        return true;
+      }
+
+      if (selectedStructureStartDate && structureStartDate && structureStartDate > selectedStructureStartDate) {
+        return true;
+      }
+
+      if (selectedEndDate && structureStartDate && structureStartDate > selectedEndDate) {
+        return true;
+      }
+
+      if (selectedStartDate && structureStartDate && structureStartDate > selectedStartDate) {
+        return true;
+      }
+
+      if (selectedStructureEndDate && structureEndDate && structureEndDate > selectedStructureEndDate) {
+        return true;
+      }
+
+      return false;
+    })
+    .sort((a, b) => {
+      const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+      if (startDiff !== 0) return startDiff;
+
+      const endDiff = toISODate(a.endDate).localeCompare(toISODate(b.endDate));
+      if (endDiff !== 0) return endDiff;
+
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+
+  for (const structure of nextStructures) {
+    const firstPeriodInNextStructure = dataset.academicPeriods
+      .filter(item => sameTenant(item) && item.academicStructureId === structure.id)
+      .sort(sortPeriods)[0];
+
+    if (firstPeriodInNextStructure) return firstPeriodInNextStructure;
+  }
+
+  // 3) Last fallback: if structures are not well dated, pick the earliest future
+  // period in the same branch/school by startDate. This protects old/migrated data.
+  const futureByDateCandidates = dataset.academicPeriods
+    .filter(item => {
+      if (!sameTenant(item)) return false;
+
+      const itemStartDate = toISODate(item.startDate);
+      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate) return true;
+      if (selectedStartDate && itemStartDate && itemStartDate > selectedStartDate) return true;
+
+      return false;
+    })
+    .sort((a, b) => {
+      const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+      if (startDiff !== 0) return startDiff;
+
+      const structureA = dataset.academicStructures.find(item => item.id === a.academicStructureId);
+      const structureB = dataset.academicStructures.find(item => item.id === b.academicStructureId);
+
+      const structureStartDiff = toISODate(structureA?.startDate).localeCompare(toISODate(structureB?.startDate));
+      if (structureStartDiff !== 0) return structureStartDiff;
+
+      return sortPeriods(a, b);
+    });
+
+  return futureByDateCandidates[0];
+}
+
+export function buildNextAcademicPeriodSummary(
+  dataset: ReportEngineDataset,
+  filters: ReportFiltersState
+) {
+  const nextPeriod = resolveNextAcademicPeriod(dataset, filters);
+  if (!nextPeriod) return undefined;
+
+  const startDate = toISODate(nextPeriod.startDate);
+  const formattedStartDate = friendlyReportDate(startDate);
+
+  return {
+    id: nextPeriod.id || 0,
+    academicStructureId: nextPeriod.academicStructureId,
+    name: nextPeriod.name,
+    type: nextPeriod.type,
+    startDate,
+    endDate: toISODate(nextPeriod.endDate),
+    order: safeNumber(nextPeriod.order),
+    formattedStartDate,
+    label: formattedStartDate
+      ? `Next Academic Period Begins: ${formattedStartDate}`
+      : "Next Academic Period Begins: Not set",
+    period: nextPeriod,
+  };
+}
+
 // ======================================================
 // HEADER / BRANDING
 // ======================================================
@@ -154,6 +363,8 @@ export function buildReportHeader(
     item => item.id === filters.classId && !item.isDeleted
   );
 
+  const nextAcademicPeriod = buildNextAcademicPeriodSummary(dataset, filters);
+
   const branding = {
     schoolName:
        school?.name || branch?.name || "School Name",
@@ -179,6 +390,11 @@ export function buildReportHeader(
     academicPeriod,
     classData,
     schoolBranchSetting,
+    branchId: branch?.id || filters.branchId,
+    branchName: branch?.name,
+    branchAddress: branch?.address,
+    primaryColor: branding.primaryColor,
+    nextAcademicPeriod,
     branding,
   };
 }
@@ -497,6 +713,7 @@ export function buildStudentReport(
     className: lookups.classMap.get(filters.classId)?.name || "Class",
     academicStructureId: filters.academicStructureId,
     academicPeriodId: filters.academicPeriodId,
+    nextAcademicPeriod: buildNextAcademicPeriodSummary(dataset, filters),
 
     subjectResults,
 
@@ -904,6 +1121,7 @@ export function buildReportEngineOutput(
       principalName,
       parentName,
       guardianName: parentName,
+      nextAcademicPeriod: header.nextAcademicPeriod,
     };
   };
 

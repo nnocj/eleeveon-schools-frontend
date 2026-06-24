@@ -20,6 +20,12 @@
  * - display components should prefer resolved*Url fields, then fallback to legacy
  *   string fields only when no active media asset exists
  * - this keeps report components display-only while supporting the new media system
+ *
+ * Next academic period contract update:
+ * - the report engine can compute the next active academic period from academicPeriods
+ *   and pass it into the header/student report card dataset
+ * - printable components can display lines such as
+ *   "Next Academic Period Begins: Sep 10, 2026" without doing Dexie lookups
  */
 
 import type {
@@ -138,6 +144,7 @@ export interface ReportHeaderData {
   branch?: Branch;
   academicStructure?: AcademicStructure;
   academicPeriod?: AcademicPeriod;
+  nextAcademicPeriod?: NextAcademicPeriodInfo;
   classData?: Class;
   schoolBranchSetting?: SchoolBranchSetting;
 
@@ -232,6 +239,22 @@ export interface AttendanceSummary {
   attendancePercent: number;
 }
 
+/**
+ * Computed by the report engine from the selected/current academic period.
+ * This should normally be the next active period in the same academic structure.
+ */
+export interface NextAcademicPeriodInfo {
+  id?: number;
+  academicStructureId?: number;
+  name: string;
+  type?: string;
+  startDate: string;
+  endDate?: string;
+  order?: number;
+  label?: string;
+  formattedStartDate?: string;
+}
+
 // ======================================================
 // STUDENT SUBJECT RESULT
 // ======================================================
@@ -280,6 +303,7 @@ export interface ComputedStudentReport {
   className: string;
   academicStructureId?: number;
   academicPeriodId?: number;
+  nextAcademicPeriod?: NextAcademicPeriodInfo;
 
   subjectResults: StudentSubjectResult[];
 
@@ -311,6 +335,7 @@ export interface StudentReportCardDataset {
   header: ReportHeaderData;
   student?: Student;
   report?: ComputedStudentReport;
+  nextAcademicPeriod?: NextAcademicPeriodInfo;
 
   classTeacherName?: string;
   headTeacherName?: string;

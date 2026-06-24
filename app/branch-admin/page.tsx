@@ -435,6 +435,49 @@ export const NAV_SECTIONS: RoleNavSection[] = [
   },
 
   {
+    title: "Academic Records",
+    defaultOpen: false,
+    items: [
+      {
+        key: "studentReports",
+        label: "Student Reports",
+        icon: "📄",
+      },
+      {
+        key: "reportRemarks",
+        label: "Report Remarks",
+        icon: "📝",
+      },
+      {
+        key: "broadsheets",
+        label: "Broadsheets",
+        icon: "📊",
+      },
+      {
+        key: "promotion",
+        label: "Promotion",
+        icon: "🚀",
+      },
+      {
+        key: "cumulativeRecords",
+        label: "Cumulative Records",
+        icon: "📚",
+      },
+      {
+        key: "studentProgressTimeline",
+        label: "Student Progress Timeline",
+        icon: "⏳",
+
+      },
+      {
+        key: "academicProgress",
+        label: "Academic Progress",
+        icon: "📈",
+      }
+    ],
+  },
+
+  {
     title: "Administration",
     defaultOpen: true,
     items: [
@@ -545,49 +588,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
     ],
   },
 
-  {
-    title: "Academic Records",
-    defaultOpen: false,
-    items: [
-      {
-        key: "studentReports",
-        label: "Student Reports",
-        icon: "📄",
-      },
-      {
-        key: "reportRemarks",
-        label: "Report Remarks",
-        icon: "📝",
-      },
-      {
-        key: "broadsheets",
-        label: "Broadsheets",
-        icon: "📊",
-      },
-      {
-        key: "promotion",
-        label: "Promotion",
-        icon: "🚀",
-      },
-      {
-        key: "cumulativeRecords",
-        label: "Cumulative Records",
-        icon: "📚",
-      },
-      {
-        key: "studentProgressTimeline",
-        label: "Student Progress Timeline",
-        icon: "⏳",
-
-      },
-      {
-        key: "academicProgress",
-        label: "Academic Progress",
-        icon: "📈",
-      }
-    ],
-  },
-
+  
   {
     title: "Finance",
     defaultOpen: false,

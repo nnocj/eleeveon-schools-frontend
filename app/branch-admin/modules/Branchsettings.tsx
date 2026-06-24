@@ -19,6 +19,7 @@
  * - portal images
  * - report card branding
  * - gallery fallback images
+ * - report card templates and display controls
  *
  * Branch-admin difference:
  * - No school switching.
@@ -67,6 +68,15 @@
  * - Save All performs all writes first, then reloads once so removed images cannot rehydrate mid-save
  * - gallery removals persist after Save instead of reappearing after reload
  * - MediaSheet, SchoolSheet and BranchSheet receive clearImage as props so remove actions are in scope
+ *
+ * Report card template/settings upgrade:
+ * - keeps all existing branch settings exactly as they are
+ * - adds a dedicated Report Card Template & Display Controls section
+ * - reads/writes reportCardTemplates, reportCardTemplateSettings and
+ *   reportCardTemplateAssignments as local-first Dexie/sync records
+ * - supports show/hide controls without leaving blank table/report areas
+ * - stores template assignment separately from branding media so more templates
+ *   can be added later without rewriting schoolBranchSettings
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -100,6 +110,11 @@ import {
   softDeleteLocal,
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
+
+import {
+  STUDENT_REPORT_TEMPLATE_REGISTRY,
+  getStudentReportTemplateRegistryItem,
+} from "./reports/student-report-templates";
 
 // ======================================================
 // COLOR UTILITIES
@@ -158,7 +173,7 @@ const fontOptions = [
 ];
 
 type ToastTone = "success" | "error" | "info";
-type SettingsSection = "academic" | "school" | "branch" | "appearance" | "dashboardMedia" | "reportMedia" | "gallery";
+type SettingsSection = "academic" | "school" | "branch" | "appearance" | "dashboardMedia" | "reportMedia" | "reportTemplates" | "gallery";
 
 type ImageField =
   | "logo"
@@ -252,6 +267,91 @@ type BranchForm = {
 };
 
 
+type ReportTemplateForm = {
+  templateId?: number;
+  templateSettingsId?: number;
+  assignmentId?: number;
+
+  templateName: string;
+  templateCode: string;
+  layoutKey: string;
+  orientation: "portrait" | "landscape";
+  paperSize: "A4" | "Letter";
+  density: "compact" | "comfortable" | "spacious";
+
+  showSubjectPosition: boolean;
+  showClassPosition: boolean;
+  showNumberOnRoll: boolean;
+  showAttendance: boolean;
+  showAttendancePercent: boolean;
+  showStudentPhoto: boolean;
+  showTeacherNames: boolean;
+  showNextAcademicPeriod: boolean;
+  showPromotionStatus: boolean;
+  showGPA: boolean;
+  showAverage: boolean;
+  showTotal: boolean;
+  showGrade: boolean;
+  showSubjectRemarks: boolean;
+  showWatermark: boolean;
+  showParentSignature: boolean;
+
+  classTeacherLabel: string;
+  headTeacherLabel: string;
+  parentLabel: string;
+  principalLabel: string;
+  nextAcademicPeriodLabel: string;
+  numberOnRollLabel: string;
+  classPositionLabel: string;
+  subjectPositionLabel: string;
+
+  active: boolean;
+};
+
+type ReportTemplateRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  name?: string;
+  code?: string;
+  layoutKey?: string;
+  orientation?: string;
+  paperSize?: string;
+  density?: string;
+  description?: string | null;
+  active?: boolean;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+};
+
+type ReportTemplateSettingsRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  active?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
+};
+
+type ReportTemplateAssignmentRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  templateSettingsId?: number | string | null;
+  scopeType?: string | null;
+  scopeId?: number | string | null;
+  isDefault?: boolean;
+  active?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
+};
+
+
 type PendingMediaRemoval = {
   assetId?: number | null;
   ownerTable: string;
@@ -298,6 +398,90 @@ const defaultForm = (
   subjectPlaceholderImage: "",
   schoolGalleryImages: [],
 });
+
+
+function reportTemplateDefinitionOptions(): ReportTemplateRow[] {
+  return STUDENT_REPORT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
+    name: item.name,
+    code: item.code,
+    layoutKey: item.layoutKey,
+    orientation: item.orientation || "portrait",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: item.description || "",
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  }));
+}
+
+function defaultReportTemplateDefinition() {
+  return reportTemplateDefinitionOptions()[0];
+}
+
+function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> | null): ReportTemplateForm {
+  const fallback = defaultReportTemplateDefinition();
+  const selected = template || fallback;
+
+  return {
+    templateName: selected.name || fallback.name || "Classic Formal",
+    templateCode: selected.code || fallback.code || "classic_formal",
+    layoutKey: selected.layoutKey || fallback.layoutKey || "classic_formal",
+    orientation: ((selected.orientation || fallback.orientation || "portrait") as "portrait" | "landscape"),
+    paperSize: ((selected.paperSize || fallback.paperSize || "A4") as "A4" | "Letter"),
+    density: ((selected.density || fallback.density || "compact") as "compact" | "comfortable" | "spacious"),
+
+    showSubjectPosition: true,
+    showClassPosition: true,
+    showNumberOnRoll: false,
+    showAttendance: true,
+    showAttendancePercent: true,
+    showStudentPhoto: true,
+    showTeacherNames: true,
+    showNextAcademicPeriod: true,
+    showPromotionStatus: false,
+    showGPA: true,
+    showAverage: true,
+    showTotal: true,
+    showGrade: true,
+    showSubjectRemarks: true,
+    showWatermark: true,
+    showParentSignature: true,
+
+    classTeacherLabel: "Class Teacher",
+    headTeacherLabel: "Headteacher / Principal",
+    parentLabel: "Parent / Guardian",
+    principalLabel: "Principal",
+    nextAcademicPeriodLabel: "Next Academic Period Begins",
+    numberOnRollLabel: "Number On Roll",
+    classPositionLabel: "Class Position",
+    subjectPositionLabel: "Position",
+
+    active: true,
+  };
+}
+
+const defaultReportTemplateForm = (): ReportTemplateForm =>
+  reportTemplateFormFromDefinition(defaultReportTemplateDefinition());
+
+const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
+  "showSubjectPosition",
+  "showClassPosition",
+  "showNumberOnRoll",
+  "showAttendance",
+  "showAttendancePercent",
+  "showStudentPhoto",
+  "showTeacherNames",
+  "showNextAcademicPeriod",
+  "showPromotionStatus",
+  "showGPA",
+  "showAverage",
+  "showTotal",
+  "showGrade",
+  "showSubjectRemarks",
+  "showWatermark",
+  "showParentSignature",
+];
+
 
 // ======================================================
 // HELPERS
@@ -561,6 +745,129 @@ function makeSettingsPayload(
   } as unknown as SchoolBranchSetting;
 }
 
+
+function makeReportTemplatePayload(args: {
+  form: ReportTemplateForm;
+  accountId: string;
+  schoolId: number;
+  branchId: number;
+  existing?: any;
+}) {
+  const now = Date.now();
+  const existing = args.existing || {};
+
+  return {
+    ...existing,
+    accountId: args.accountId,
+    schoolId: args.schoolId,
+    branchId: args.branchId,
+    name: args.form.templateName?.trim() || defaultReportTemplateDefinition().name || "Classic Formal",
+    code: args.form.templateCode?.trim() || defaultReportTemplateDefinition().code || "classic_formal",
+    layoutKey: args.form.layoutKey || defaultReportTemplateDefinition().layoutKey || "classic_formal",
+    orientation: args.form.orientation || "portrait",
+    paperSize: args.form.paperSize || "A4",
+    density: args.form.density || "compact",
+    description: existing.description || "Default configurable student report card template.",
+    active: args.form.active !== false,
+    isDefault: true,
+    createdAt: existing.createdAt || now,
+    updatedAt: now,
+    version: Number(existing.version || 0) + 1,
+    synced: "pending",
+    isDeleted: false,
+  };
+}
+
+function makeReportTemplateSettingsPayload(args: {
+  form: ReportTemplateForm;
+  accountId: string;
+  schoolId: number;
+  branchId: number;
+  templateId: number;
+  existing?: any;
+}) {
+  const now = Date.now();
+  const existing = args.existing || {};
+
+  return {
+    ...existing,
+    accountId: args.accountId,
+    schoolId: args.schoolId,
+    branchId: args.branchId,
+    templateId: args.templateId,
+
+    orientation: args.form.orientation,
+    paperSize: args.form.paperSize,
+    density: args.form.density,
+
+    showSubjectPosition: !!args.form.showSubjectPosition,
+    showClassPosition: !!args.form.showClassPosition,
+    showNumberOnRoll: !!args.form.showNumberOnRoll,
+    showAttendance: !!args.form.showAttendance,
+    showAttendancePercent: !!args.form.showAttendancePercent,
+    showStudentPhoto: !!args.form.showStudentPhoto,
+    showTeacherNames: !!args.form.showTeacherNames,
+    showNextAcademicPeriod: !!args.form.showNextAcademicPeriod,
+    showPromotionStatus: !!args.form.showPromotionStatus,
+    showGPA: !!args.form.showGPA,
+    showAverage: !!args.form.showAverage,
+    showTotal: !!args.form.showTotal,
+    showGrade: !!args.form.showGrade,
+    showSubjectRemarks: !!args.form.showSubjectRemarks,
+    showWatermark: !!args.form.showWatermark,
+    showParentSignature: !!args.form.showParentSignature,
+
+    classTeacherLabel: args.form.classTeacherLabel?.trim() || "Class Teacher",
+    headTeacherLabel: args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
+    parentLabel: args.form.parentLabel?.trim() || "Parent / Guardian",
+    principalLabel: args.form.principalLabel?.trim() || "Principal",
+    nextAcademicPeriodLabel: args.form.nextAcademicPeriodLabel?.trim() || "Next Academic Period Begins",
+    numberOnRollLabel: args.form.numberOnRollLabel?.trim() || "Number On Roll",
+    classPositionLabel: args.form.classPositionLabel?.trim() || "Class Position",
+    subjectPositionLabel: args.form.subjectPositionLabel?.trim() || "Position",
+
+    active: args.form.active !== false,
+    createdAt: existing.createdAt || now,
+    updatedAt: now,
+    version: Number(existing.version || 0) + 1,
+    synced: "pending",
+    isDeleted: false,
+  };
+}
+
+function makeReportTemplateAssignmentPayload(args: {
+  form: ReportTemplateForm;
+  accountId: string;
+  schoolId: number;
+  branchId: number;
+  templateId: number;
+  templateSettingsId: number;
+  existing?: any;
+}) {
+  const now = Date.now();
+  const existing = args.existing || {};
+
+  return {
+    ...existing,
+    accountId: args.accountId,
+    schoolId: args.schoolId,
+    branchId: args.branchId,
+    templateId: args.templateId,
+    templateSettingsId: args.templateSettingsId,
+    templateCode: args.form.templateCode,
+    layoutKey: args.form.layoutKey,
+    scopeType: "branch",
+    scopeId: args.branchId,
+    isDefault: true,
+    active: args.form.active !== false,
+    createdAt: existing.createdAt || now,
+    updatedAt: now,
+    version: Number(existing.version || 0) + 1,
+    synced: "pending",
+    isDeleted: false,
+  };
+}
+
 function assetReady(value: unknown) {
   return !!String(value || "").trim();
 }
@@ -624,18 +931,23 @@ export default function Branchsettings() {
   const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [settingsRow, setSettingsRow] = useState<SchoolBranchSetting | null>(null);
+  const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>([]);
+  const [reportTemplateSettingsRow, setReportTemplateSettingsRow] = useState<ReportTemplateSettingsRow | null>(null);
+  const [reportTemplateAssignmentRow, setReportTemplateAssignmentRow] = useState<ReportTemplateAssignmentRow | null>(null);
 
   const [form, setForm] = useState<SettingsForm>(
     defaultForm(selectedSchoolId, selectedBranchId)
   );
   const [schoolForm, setSchoolForm] = useState<SchoolForm>({});
   const [branchForm, setBranchForm] = useState<BranchForm>({});
+  const [reportTemplateForm, setReportTemplateForm] = useState<ReportTemplateForm>(defaultReportTemplateForm());
 
   const [loading, setLoading] = useState(true);
   const [savingAll, setSavingAll] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingSchool, setSavingSchool] = useState(false);
   const [savingBranch, setSavingBranch] = useState(false);
+  const [savingReportTemplate, setSavingReportTemplate] = useState(false);
   const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
   const [pendingMediaRemovals, setPendingMediaRemovals] = useState<PendingMediaRemoval[]>([]);
   const settingsMediaSessionKeyRef = useRef(createSettingsMediaSessionKey());
@@ -663,10 +975,14 @@ export default function Branchsettings() {
     setSchool(null);
     setBranch(null);
     setSettingsRow(null);
+    setReportTemplates([]);
+    setReportTemplateSettingsRow(null);
+    setReportTemplateAssignmentRow(null);
     setAcademicStructures([]);
     setAcademicPeriods([]);
     setSchoolForm({});
     setBranchForm({});
+    setReportTemplateForm(defaultReportTemplateForm());
     setPendingMediaRemovals([]);
     setForm(defaultForm(selectedSchoolId, selectedBranchId));
   };
@@ -856,22 +1172,33 @@ export default function Branchsettings() {
     try {
       setLoading(true);
   
-      const [schoolRows, branchRows, settingRows, structureRows, periodRows] =
-        await Promise.all([
-          db.schools.toArray(),
-          db.branches.toArray(),
-          db.schoolBranchSettings.toArray(),
-          listActiveLocal("academicStructures", {
-            accountId: selectedAccountId,
-            schoolId: Number(selectedSchoolId),
-            branchId: Number(selectedBranchId),
-          } as any),
-          listActiveLocal("academicPeriods", {
-            accountId: selectedAccountId,
-            schoolId: Number(selectedSchoolId),
-            branchId: Number(selectedBranchId),
-          } as any),
-        ]);
+      const [
+        schoolRows,
+        branchRows,
+        settingRows,
+        structureRows,
+        periodRows,
+        reportTemplateRows,
+        reportTemplateSettingsRows,
+        reportTemplateAssignmentRows,
+      ] = await Promise.all([
+        db.schools.toArray(),
+        db.branches.toArray(),
+        db.schoolBranchSettings.toArray(),
+        listActiveLocal("academicStructures", {
+          accountId: selectedAccountId,
+          schoolId: Number(selectedSchoolId),
+          branchId: Number(selectedBranchId),
+        } as any),
+        listActiveLocal("academicPeriods", {
+          accountId: selectedAccountId,
+          schoolId: Number(selectedSchoolId),
+          branchId: Number(selectedBranchId),
+        } as any),
+        (db as any).reportCardTemplates?.toArray?.() || [],
+        (db as any).reportCardTemplateSettings?.toArray?.() || [],
+        (db as any).reportCardTemplateAssignments?.toArray?.() || [],
+      ]);
 
       const currentSchool =
         schoolRows.find(
@@ -902,6 +1229,89 @@ export default function Branchsettings() {
       const currentSetting =
         settingRows.find((row: any) => sameTenant(row)) || null;
 
+      const dbReportTemplates = (reportTemplateRows as ReportTemplateRow[])
+        .filter((row: any) => {
+          if (row.isDeleted || row.active === false) return false;
+          if (row.accountId && row.accountId !== selectedAccountId) return false;
+          if (row.schoolId && !sameId(row.schoolId, selectedSchoolId)) return false;
+          if (row.branchId && !sameId(row.branchId, selectedBranchId)) return false;
+          return true;
+        });
+
+      const templateMap = new Map<string, ReportTemplateRow>();
+
+      reportTemplateDefinitionOptions().forEach((template) => {
+        const key = String(template.code || template.layoutKey || template.name || "").trim();
+        if (key) templateMap.set(key, template);
+      });
+
+      dbReportTemplates.forEach((template) => {
+        const key = String(template.code || template.layoutKey || template.name || template.id || "").trim();
+        if (key) {
+          templateMap.set(key, {
+            ...(templateMap.get(key) || {}),
+            ...template,
+          });
+        }
+      });
+
+      const branchReportTemplates = Array.from(templateMap.values())
+        .filter((row: any) => row.active !== false && !row.isDeleted)
+        .sort((a: any, b: any) => {
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        });
+
+      const defaultReportTemplate =
+        branchReportTemplates.find((row: any) => row.isDefault) ||
+        branchReportTemplates.find((row: any) => String(row.code || "") === defaultReportTemplateDefinition().code) ||
+        branchReportTemplates[0] ||
+        defaultReportTemplateDefinition();
+
+      const currentReportAssignment =
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
+          sameTenant(row) &&
+          row.active !== false &&
+          row.isDefault === true &&
+          (!row.scopeType || row.scopeType === "branch")
+        ) ||
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
+          sameTenant(row) &&
+          row.active !== false
+        ) ||
+        null;
+
+      const assignedTemplateId = idOf(currentReportAssignment?.templateId) || idOf(defaultReportTemplate?.id);
+
+      const assignedTemplateCode = String((currentReportAssignment as any)?.templateCode || "").trim();
+
+      const currentReportTemplate =
+        branchReportTemplates.find((row: any) => assignedTemplateId > 0 && sameId(row.id, assignedTemplateId)) ||
+        branchReportTemplates.find((row: any) => assignedTemplateCode && sameId(row.code, assignedTemplateCode)) ||
+        defaultReportTemplate;
+
+      const assignedSettingsId = idOf(currentReportAssignment?.templateSettingsId);
+
+      const currentReportTemplateSettings =
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
+          sameTenant(row) &&
+          row.active !== false &&
+          assignedSettingsId > 0 &&
+          sameId(row.id, assignedSettingsId)
+        ) ||
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
+          sameTenant(row) &&
+          row.active !== false &&
+          currentReportTemplate?.id &&
+          sameId(row.templateId, currentReportTemplate.id)
+        ) ||
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
+          sameTenant(row) &&
+          row.active !== false
+        ) ||
+        null;
+
       const branchStructures = structureRows
         .filter((row: any) => sameTenant(row))
         .filter((row: any) => row.active !== false)
@@ -921,6 +1331,9 @@ export default function Branchsettings() {
       setSchool(currentSchool);
       setBranch(currentBranch);
       setSettingsRow(currentSetting);
+      setReportTemplates(branchReportTemplates);
+      setReportTemplateSettingsRow(currentReportTemplateSettings);
+      setReportTemplateAssignmentRow(currentReportAssignment);
       setAcademicStructures(branchStructures);
       setAcademicPeriods(branchPeriods);
 
@@ -1020,6 +1433,20 @@ export default function Branchsettings() {
         schoolGalleryMediaIds: Array.isArray((currentSetting as any)?.schoolGalleryMediaIds)
           ? (currentSetting as any).schoolGalleryMediaIds
           : [],
+      });
+
+      setReportTemplateForm({
+        ...defaultReportTemplateForm(),
+        ...(currentReportTemplateSettings || {}),
+        templateId: idOf(currentReportTemplate?.id) || undefined,
+        templateSettingsId: idOf(currentReportTemplateSettings?.id) || undefined,
+        assignmentId: idOf(currentReportAssignment?.id) || undefined,
+        templateName: currentReportTemplate?.name || currentReportTemplateSettings?.templateName || defaultReportTemplateDefinition().name || "Classic Formal",
+        templateCode: currentReportTemplate?.code || currentReportTemplateSettings?.templateCode || defaultReportTemplateDefinition().code || "classic_formal",
+        layoutKey: currentReportTemplate?.layoutKey || currentReportTemplateSettings?.layoutKey || defaultReportTemplateDefinition().layoutKey || "classic_formal",
+        orientation: (currentReportTemplateSettings?.orientation || currentReportTemplate?.orientation || "portrait") as "portrait" | "landscape",
+        paperSize: (currentReportTemplateSettings?.paperSize || currentReportTemplate?.paperSize || "A4") as "A4" | "Letter",
+        density: (currentReportTemplateSettings?.density || currentReportTemplate?.density || "compact") as "compact" | "comfortable" | "spacious",
       });
 
     } catch (error) {
@@ -1139,6 +1566,10 @@ export default function Branchsettings() {
 
   const updateBranchField = (key: keyof BranchForm, value: any) => {
     setBranchForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const updateReportTemplateField = (key: keyof ReportTemplateForm, value: any) => {
+    setReportTemplateForm((prev) => ({ ...prev, [key]: value }));
   };
 
   const queueMediaRemoval = (removal: PendingMediaRemoval) => {
@@ -1786,6 +2217,127 @@ export default function Branchsettings() {
     }
   };
 
+
+  const saveReportCardTemplateSettings = async (options: boolean | SaveOptions = false) => {
+    const silent = typeof options === "boolean" ? options : !!options.silent;
+    const reloadAfterSave = typeof options === "boolean" ? true : options.reloadAfterSave !== false;
+
+    if (!requireTenant()) return false;
+
+    if (!(db as any).reportCardTemplates || !(db as any).reportCardTemplateSettings || !(db as any).reportCardTemplateAssignments) {
+      showToast("error", "Report card template tables are missing. Update db.ts first.");
+      return false;
+    }
+
+    try {
+      setSavingReportTemplate(true);
+
+      const accountIdValue = String(selectedAccountId);
+      const schoolIdValue = Number(selectedSchoolId);
+      const branchIdValue = Number(selectedBranchId);
+
+      const existingTemplateId = idOf(reportTemplateForm.templateId);
+      const allExistingTemplates = await ((db as any).reportCardTemplates?.toArray?.() || []);
+      const existingTemplate =
+        existingTemplateId > 0
+          ? await (db as any).reportCardTemplates.get(existingTemplateId)
+          : (allExistingTemplates as any[]).find((row: any) =>
+              !row.isDeleted &&
+              row.active !== false &&
+              row.accountId === accountIdValue &&
+              sameId(row.schoolId, schoolIdValue) &&
+              sameId(row.branchId, branchIdValue) &&
+              sameId(row.code, reportTemplateForm.templateCode)
+            ) || null;
+
+      const templatePayload = makeReportTemplatePayload({
+        form: reportTemplateForm,
+        accountId: accountIdValue,
+        schoolId: schoolIdValue,
+        branchId: branchIdValue,
+        existing: existingTemplate || undefined,
+      });
+
+      let savedTemplateId = existingTemplateId || idOf(existingTemplate?.id);
+
+      if (savedTemplateId) {
+        await updateLocal("reportCardTemplates" as any, savedTemplateId, templatePayload as any);
+      } else {
+        const { id, ...withoutId } = templatePayload as any;
+        const created = await createLocal("reportCardTemplates" as any, withoutId as any);
+        savedTemplateId = Number(typeof created === "number" ? created : (created as any)?.id || 0);
+      }
+
+      if (!savedTemplateId) {
+        throw new Error("Could not save the report card template.");
+      }
+
+      const existingSettingsId = idOf(reportTemplateForm.templateSettingsId);
+      const existingTemplateSettings =
+        existingSettingsId > 0
+          ? await (db as any).reportCardTemplateSettings.get(existingSettingsId)
+          : null;
+
+      const settingsPayload = makeReportTemplateSettingsPayload({
+        form: reportTemplateForm,
+        accountId: accountIdValue,
+        schoolId: schoolIdValue,
+        branchId: branchIdValue,
+        templateId: savedTemplateId,
+        existing: existingTemplateSettings || undefined,
+      });
+
+      let savedSettingsId = existingSettingsId;
+
+      if (existingSettingsId) {
+        await updateLocal("reportCardTemplateSettings" as any, existingSettingsId, settingsPayload as any);
+      } else {
+        const { id, ...withoutId } = settingsPayload as any;
+        const created = await createLocal("reportCardTemplateSettings" as any, withoutId as any);
+        savedSettingsId = Number(typeof created === "number" ? created : (created as any)?.id || 0);
+      }
+
+      if (!savedSettingsId) {
+        throw new Error("Could not save the report card display settings.");
+      }
+
+      const existingAssignmentId = idOf(reportTemplateForm.assignmentId);
+      const existingAssignment =
+        existingAssignmentId > 0
+          ? await (db as any).reportCardTemplateAssignments.get(existingAssignmentId)
+          : null;
+
+      const assignmentPayload = makeReportTemplateAssignmentPayload({
+        form: reportTemplateForm,
+        accountId: accountIdValue,
+        schoolId: schoolIdValue,
+        branchId: branchIdValue,
+        templateId: savedTemplateId,
+        templateSettingsId: savedSettingsId,
+        existing: existingAssignment || undefined,
+      });
+
+      if (existingAssignmentId) {
+        await updateLocal("reportCardTemplateAssignments" as any, existingAssignmentId, assignmentPayload as any);
+      } else {
+        const { id, ...withoutId } = assignmentPayload as any;
+        await createLocal("reportCardTemplateAssignments" as any, withoutId as any);
+      }
+
+      if (reloadAfterSave) await load();
+      window.dispatchEvent(new Event("school-branch-settings-updated"));
+
+      if (!silent) showToast("success", "Report card template settings saved successfully.");
+      return true;
+    } catch (error: any) {
+      console.error("Failed to save report card template settings:", error);
+      showToast("error", error?.message || "Failed to save report card template settings.");
+      return false;
+    } finally {
+      setSavingReportTemplate(false);
+    }
+  };
+
   const saveAll = async () => {
     if (!requireTenant()) return;
 
@@ -1809,6 +2361,12 @@ export default function Branchsettings() {
       }
 
       await saveSchoolBranchSettings({
+        silent: true,
+        reloadAfterSave: false,
+        persistRemovals: false,
+      });
+
+      await saveReportCardTemplateSettings({
         silent: true,
         reloadAfterSave: false,
         persistRemovals: false,
@@ -1942,6 +2500,19 @@ export default function Branchsettings() {
         ].filter(Boolean).length} asset(s)`,
         detail: "Report background, watermark, signature and branch logo",
         tone: form.reportCardSignatureImage ? "green" : "gray",
+      },
+      {
+        key: "reportTemplates" as SettingsSection,
+        icon: "🧾",
+        title: "Report Card Template",
+        subtitle: `${reportTemplateForm.templateName || "Classic Ghana Report"} · ${reportTemplateForm.density}`,
+        detail: `${[
+          reportTemplateForm.showSubjectPosition ? "Subject pos." : "",
+          reportTemplateForm.showClassPosition ? "Class pos." : "",
+          reportTemplateForm.showNumberOnRoll ? "Roll" : "",
+          reportTemplateForm.showNextAcademicPeriod ? "Next period" : "",
+        ].filter(Boolean).join(" · ") || "Display controls ready"}`,
+        tone: reportTemplateForm.active ? "green" : "gray",
       },
       {
         key: "gallery" as SettingsSection,
@@ -2203,6 +2774,17 @@ export default function Branchsettings() {
         />
       )}
 
+      {sectionOpen === "reportTemplates" && (
+        <ReportTemplateSheet
+          form={reportTemplateForm}
+          templates={reportTemplates}
+          saving={savingReportTemplate}
+          updateField={updateReportTemplateField}
+          saveReportCardTemplateSettings={saveReportCardTemplateSettings}
+          onClose={() => setSectionOpen(null)}
+        />
+      )}
+
       {sectionOpen === "gallery" && (
         <GallerySheet
           images={form.schoolGalleryImages}
@@ -2452,6 +3034,7 @@ function MoreSheet({
     { key: "appearance", icon: "🎨", label: "Appearance", note: "Theme, primary color and font" },
     { key: "dashboardMedia", icon: "🖼️", label: "Dashboard Media", note: "Portal and dashboard images" },
     { key: "reportMedia", icon: "📄", label: "Report Branding", note: "Report images, watermark and signature" },
+    { key: "reportTemplates", icon: "🧾", label: "Report Card Template", note: "Template, visibility, labels and report fields" },
     { key: "gallery", icon: "🌄", label: "Gallery", note: "Branch experience images" },
   ];
 
@@ -2765,6 +3348,193 @@ function AppearanceSheet({
           <button type="button" onClick={onClose}>Cancel</button>
           <button type="button" className="primary" disabled={savingSettings} onClick={async () => { await saveSchoolBranchSettings(); onClose(); }}>
             {savingSettings ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+
+function ReportTemplateSheet({
+  form,
+  templates,
+  saving,
+  updateField,
+  saveReportCardTemplateSettings,
+  onClose,
+}: {
+  form: ReportTemplateForm;
+  templates: ReportTemplateRow[];
+  saving: boolean;
+  updateField: (key: keyof ReportTemplateForm, value: any) => void;
+  saveReportCardTemplateSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
+  onClose: () => void;
+}) {
+  const visibilityControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
+    { key: "showSubjectPosition", label: "Subject Positions", note: "Remove the subject position column entirely when off." },
+    { key: "showClassPosition", label: "Class Position", note: "Remove class position summary entirely when off." },
+    { key: "showNumberOnRoll", label: "Number On Roll", note: "Show class size/roll count only for schools that want it." },
+    { key: "showAttendance", label: "Attendance", note: "Show attendance count section." },
+    { key: "showAttendancePercent", label: "Attendance Percentage", note: "Show attendance percentage field." },
+    { key: "showStudentPhoto", label: "Student Photo", note: "Show or hide student photo box." },
+    { key: "showTeacherNames", label: "Subject Teacher Names", note: "Show teacher name under each subject." },
+    { key: "showNextAcademicPeriod", label: "Next Academic Period", note: "Show reopening/next period begins line." },
+    { key: "showPromotionStatus", label: "Promotion Status", note: "Show promote/repeat/graduate status when available." },
+    { key: "showGPA", label: "GPA", note: "Show GPA summary field." },
+    { key: "showAverage", label: "Average", note: "Show average summary field." },
+    { key: "showTotal", label: "Total", note: "Show total summary field." },
+    { key: "showGrade", label: "Grade", note: "Show grade column." },
+    { key: "showSubjectRemarks", label: "Subject Remarks", note: "Show subject remark column." },
+    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on report cards." },
+    { key: "showParentSignature", label: "Parent Signature", note: "Show parent/guardian signature area." },
+  ];
+
+  return (
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Report Card Template</h2>
+            <p>Choose the default report design and control which fields appear. Hidden fields are removed completely, not left blank.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close report card template settings">✕</button>
+        </div>
+
+        <div className="ba-form compact">
+          <Field label="Template">
+            <select
+              value={form.templateCode || ""}
+              onChange={(event) => {
+                const templateCode = event.target.value;
+                const selected =
+                  templates.find((item) => sameId(item.code, templateCode)) ||
+                  templates.find((item) => sameId(item.layoutKey, templateCode)) ||
+                  getStudentReportTemplateRegistryItem(templateCode);
+
+                updateField("templateId", idOf((selected as any)?.id) || undefined);
+                updateField("templateName", (selected as any)?.name || "Report Template");
+                updateField("templateCode", (selected as any)?.code || templateCode);
+                updateField("layoutKey", (selected as any)?.layoutKey || templateCode);
+                updateField("orientation", ((selected as any)?.orientation || "portrait") as "portrait" | "landscape");
+                updateField("paperSize", ((selected as any)?.paperSize || "A4") as "A4" | "Letter");
+                updateField("density", ((selected as any)?.density || "compact") as "compact" | "comfortable" | "spacious");
+              }}
+            >
+              {templates.map((template) => (
+                <option key={template.code || template.id || template.name} value={template.code || template.layoutKey || ""}>
+                  {template.name || template.code || "Report Template"}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Template Name">
+            <input value={form.templateName} readOnly />
+          </Field>
+
+          <Field label="Layout">
+            <input value={form.layoutKey} readOnly />
+          </Field>
+
+          <Field label="Paper">
+            <select value={form.paperSize} onChange={(event) => updateField("paperSize", event.target.value as "A4" | "Letter")}>
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+            </select>
+          </Field>
+
+          <Field label="Orientation">
+            <select value={form.orientation} onChange={(event) => updateField("orientation", event.target.value as "portrait" | "landscape")}>
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Landscape</option>
+            </select>
+          </Field>
+
+          <Field label="Density">
+            <select value={form.density} onChange={(event) => updateField("density", event.target.value as "compact" | "comfortable" | "spacious")}>
+              <option value="compact">Compact</option>
+              <option value="comfortable">Comfortable</option>
+              <option value="spacious">Spacious</option>
+            </select>
+          </Field>
+        </div>
+
+        <section className="branch-settings-subsection">
+          <h3>Display Controls</h3>
+          <p>Turn a field off to remove it from the report card layout completely.</p>
+
+          <div className="branch-report-toggle-grid">
+            {visibilityControls.map((control) => (
+              <label key={String(control.key)} className="branch-report-toggle">
+                <span>
+                  <strong>{control.label}</strong>
+                  <small>{control.note}</small>
+                </span>
+
+                <select
+                  value={form[control.key] ? "yes" : "no"}
+                  onChange={(event) => updateField(control.key, event.target.value === "yes")}
+                >
+                  <option value="yes">Show</option>
+                  <option value="no">Hide</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="branch-settings-subsection">
+          <h3>Report Labels</h3>
+          <p>Use each school's preferred wording without changing the report component code.</p>
+
+          <div className="ba-form compact">
+            <Field label="Class Teacher Label">
+              <input value={form.classTeacherLabel} onChange={(event) => updateField("classTeacherLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Headteacher Label">
+              <input value={form.headTeacherLabel} onChange={(event) => updateField("headTeacherLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Parent Label">
+              <input value={form.parentLabel} onChange={(event) => updateField("parentLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Principal Label">
+              <input value={form.principalLabel} onChange={(event) => updateField("principalLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Next Period Label">
+              <input value={form.nextAcademicPeriodLabel} onChange={(event) => updateField("nextAcademicPeriodLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Number On Roll Label">
+              <input value={form.numberOnRollLabel} onChange={(event) => updateField("numberOnRollLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Class Position Label">
+              <input value={form.classPositionLabel} onChange={(event) => updateField("classPositionLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Subject Position Label">
+              <input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} />
+            </Field>
+          </div>
+        </section>
+
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={async () => {
+              await saveReportCardTemplateSettings();
+              onClose();
+            }}
+          >
+            {saving ? "Saving..." : "Save Report Template"}
           </button>
         </div>
       </section>
@@ -4693,5 +5463,80 @@ const css = `
     grid-template-columns: minmax(0,1fr);
   }
 }
+
+
+.branch-settings-subsection {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid rgba(148,163,184,.22);
+  border-radius: 18px;
+  background: var(--card-bg, var(--surface, #ffffff));
+}
+
+.branch-settings-subsection h3 {
+  margin: 0;
+  color: var(--text, #0f172a);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.branch-settings-subsection p {
+  margin: 4px 0 12px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.branch-report-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.branch-report-toggle {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(148,163,184,.22);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card-bg, #fff) 92%, var(--ba-primary, #2563eb) 8%);
+}
+
+.branch-report-toggle strong,
+.branch-report-toggle small {
+  display: block;
+  min-width: 0;
+}
+
+.branch-report-toggle strong {
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.branch-report-toggle small {
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.branch-report-toggle select {
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+@media(max-width:720px) {
+  .branch-report-toggle-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 
 `;

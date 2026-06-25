@@ -627,8 +627,12 @@ export default function StudentsPage() {
         return {
           id,
           row,
-          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-          coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
+          // No-bleed rule: list/cards should display only media resolved by
+          // ownerTable + ownerLocalId + fieldKey. Do not fall back to raw
+          // row.photo/row.coverPhoto here because old preview strings can be
+          // stale or shared across records in the browser.
+          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || "",
+          coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || "",
           className: classData?.name || "No class assigned",
           organizationName: organization?.name || "No organization",
           enrollmentCount: studentEnrollments.length,
@@ -765,9 +769,12 @@ export default function StudentsPage() {
       gender: s.gender || "",
       age: s.age == null ? "" : String(s.age),
       dateOfBirth: s.dateOfBirth || "",
-      photo: mediaPreviewUrls[mediaKey(idOf(s.id), "photo")] || safeRecordMediaValue(s.photo) || "",
+      // No-bleed rule: edit preview should use the resolved owned media URL
+      // only. Old row.photo/row.coverPhoto values remain saved as legacy data
+      // but are not trusted for live preview display.
+      photo: mediaPreviewUrls[mediaKey(idOf(s.id), "photo")] || "",
       photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
-      coverPhoto: mediaPreviewUrls[mediaKey(idOf(s.id), "coverPhoto")] || safeRecordMediaValue(s.coverPhoto) || "",
+      coverPhoto: mediaPreviewUrls[mediaKey(idOf(s.id), "coverPhoto")] || "",
       coverPhotoMediaId: s.coverPhotoMediaId ? Number(s.coverPhotoMediaId) : undefined,
       parentName: s.parentName || "",
       parentPhone: s.parentPhone || "",
@@ -864,6 +871,34 @@ export default function StudentsPage() {
               })
             )
         );
+
+        // Match the working Teachers behavior: after the new media is attached,
+        // immediately refresh only this saved student's owned media keys. This
+        // prevents the freshly uploaded preview from sitting in form state while
+        // older list rows are still mounted.
+        const refreshedMedia: Record<string, string> = {};
+
+        const refreshedPhotoUrl = await resolveOwnerMediaUrl({
+          accountId: accountId || undefined,
+          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedStudentId,
+          fieldKey: MediaFieldKeys.PHOTO,
+          fallbackAssetId: form.photoMediaId,
+        });
+        if (refreshedPhotoUrl) refreshedMedia[mediaKey(savedStudentId, "photo")] = refreshedPhotoUrl;
+
+        const refreshedCoverUrl = await resolveOwnerMediaUrl({
+          accountId: accountId || undefined,
+          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedStudentId,
+          fieldKey: MediaFieldKeys.COVER_PHOTO,
+          fallbackAssetId: form.coverPhotoMediaId,
+        });
+        if (refreshedCoverUrl) refreshedMedia[mediaKey(savedStudentId, "coverPhoto")] = refreshedCoverUrl;
+
+        if (Object.keys(refreshedMedia).length) {
+          setMediaPreviewUrls((current) => ({ ...current, ...refreshedMedia }));
+        }
       }
 
       mediaSessionKeyRef.current = createStudentMediaSessionKey();
@@ -1155,7 +1190,7 @@ function StudentListItem({
 
   return (
     <button type="button" className="student-row" onClick={onOpen}>
-      <Avatar name={row.fullName} photo={item.photoUrl || safeRecordMediaValue(row.photo)} primary={primary} />
+      <Avatar name={row.fullName} photo={item.photoUrl} primary={primary} />
 
       <span className="student-main">
         <strong>{row.fullName || "Unnamed student"}</strong>

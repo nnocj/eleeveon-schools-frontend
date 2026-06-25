@@ -32,7 +32,8 @@ import {
 } from "../shared/ReportTemplateTypes";
 
 import ClassicFormalTemplate from "./ClassicFormalTemplate";
-
+import BorderedTraditionalTemplate from "./BorderedTraditionalTemplate";
+import CompactPrintTemplate from "./CompactPrintTemplate";
 // ======================================================
 // TEMPORARY FALLBACK COMPONENTS
 // ======================================================
@@ -42,8 +43,8 @@ import ClassicFormalTemplate from "./ClassicFormalTemplate";
 // break the report card.
 
 const ModernCleanTemplate = ClassicFormalTemplate;
-const CompactPrintTemplate = ClassicFormalTemplate;
-const BorderedTraditionalTemplate = ClassicFormalTemplate;
+//const CompactPrintTemplate = ClassicFormalTemplate;
+//const BorderedTraditionalTemplate = ClassicFormalTemplate;
 const LetterheadPremiumTemplate = ClassicFormalTemplate;
 const SideProfileTemplate = ClassicFormalTemplate;
 const CambridgeTemplate = ClassicFormalTemplate;

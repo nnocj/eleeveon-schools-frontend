@@ -1377,15 +1377,41 @@ export interface ReportCardItem extends BaseSync {
 // then control which fields are actually printed. When a field is disabled,
 // report components should remove the field/column/box completely instead of
 // rendering an empty placeholder.
+//
+// IMPORTANT:
+// - reportCardTemplates stores the available template designs.
+// - reportCardTemplateSettings stores visibility/label settings for a template.
+// - reportCardTemplateAssignments stores which template/settings apply to a branch,
+//   school, academic structure, academic period, class, level, or student.
 
-export type ReportCardTemplateKey =
-  | "classic"
-  | "modern"
-  | "compact"
-  | "ghana_private_school"
-  | "british_style"
+export type ReportCardTemplateCode =
+  | "classic_formal"
+  | "modern_clean"
+  | "compact_print"
+  | "bordered_traditional"
+  | "letterhead_premium"
+  | "side_profile"
+  | "cambridge"
+  | "ib"
+  | "kindergarten"
   | "montessori"
-  | "kindergarten_narrative"
+  | "university_transcript"
+  | string;
+
+export type ReportCardTemplateKey = ReportCardTemplateCode;
+
+export type ReportCardLayoutKey =
+  | "classic_formal"
+  | "modern_clean"
+  | "compact_print"
+  | "bordered_traditional"
+  | "letterhead_premium"
+  | "side_profile"
+  | "cambridge"
+  | "ib"
+  | "kindergarten"
+  | "montessori"
+  | "university_transcript"
   | string;
 
 export type ReportCardPageSize =
@@ -1397,16 +1423,42 @@ export type ReportCardOrientation =
   | "portrait"
   | "landscape";
 
+export type ReportCardDensity =
+  | "compact"
+  | "comfortable"
+  | "spacious"
+  | string;
+
+export type ReportCardTemplateScopeType =
+  | "account"
+  | "school"
+  | "branch"
+  | "academicStructure"
+  | "academicPeriod"
+  | "class"
+  | "level"
+  | "student"
+  | string;
+
 export interface ReportCardTemplate extends BaseSync {
   schoolId: number;
   branchId?: number | null;
 
   name: string;
-  templateKey: ReportCardTemplateKey;
+
+  /**
+   * `code` + `layoutKey` match reports/student-report-templates/index.ts.
+   * `templateKey` is kept for backward compatibility with earlier report code.
+   */
+  code: ReportCardTemplateCode;
+  layoutKey: ReportCardLayoutKey;
+  templateKey?: ReportCardTemplateKey;
+
   description?: string;
 
-  pageSize?: ReportCardPageSize;
+  paperSize?: ReportCardPageSize;
   orientation?: ReportCardOrientation;
+  density?: ReportCardDensity;
 
   previewImage?: string;
   previewImageMediaId?: number;
@@ -1423,9 +1475,20 @@ export interface ReportCardTemplateSetting extends BaseSync {
   branchId?: number | null;
 
   templateId?: number | null;
+
+  /**
+   * Stored redundantly for offline fallback and easier filtering.
+   */
+  templateCode?: ReportCardTemplateCode;
+  layoutKey?: ReportCardLayoutKey;
   templateKey?: ReportCardTemplateKey;
+  templateName?: string;
 
   name?: string;
+
+  paperSize?: ReportCardPageSize;
+  orientation?: ReportCardOrientation;
+  density?: ReportCardDensity;
 
   // =========================
   // TOP / IDENTITY FIELDS
@@ -1448,6 +1511,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showSubjectAverage?: boolean;
   showSubjectGrade?: boolean;
   showSubjectRemark?: boolean;
+  showSubjectRemarks?: boolean;
   showSubjectPosition?: boolean;
 
   // =========================
@@ -1457,6 +1521,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showAverage?: boolean;
   showClassPosition?: boolean;
   showGPA?: boolean;
+  showGrade?: boolean;
   showAttendance?: boolean;
   showAttendancePercent?: boolean;
   showPromotionStatus?: boolean;
@@ -1500,6 +1565,11 @@ export interface ReportCardTemplateSetting extends BaseSync {
   attendanceLabel?: string;
   attendancePercentLabel?: string;
 
+  classTeacherLabel?: string;
+  headTeacherLabel?: string;
+  parentLabel?: string;
+  principalLabel?: string;
+
   classTeacherRemarkLabel?: string;
   headTeacherRemarkLabel?: string;
   nextAcademicPeriodLabel?: string;
@@ -1510,6 +1580,36 @@ export interface ReportCardTemplateSetting extends BaseSync {
   footerText?: string;
 
   active?: boolean;
+  metadata?: any;
+}
+
+export interface ReportCardTemplateAssignment extends BaseSync {
+  schoolId: number;
+  branchId?: number | null;
+
+  templateId: number;
+  templateSettingsId?: number | null;
+
+  /**
+   * Stored redundantly so report rendering can still resolve a template even
+   * if the template row has not been pulled yet.
+   */
+  templateCode?: ReportCardTemplateCode;
+  layoutKey?: ReportCardLayoutKey;
+  templateKey?: ReportCardTemplateKey;
+
+  scopeType: ReportCardTemplateScopeType;
+  scopeId?: number | string | null;
+
+  academicStructureId?: number | null;
+  academicPeriodId?: number | null;
+  classId?: number | null;
+  level?: string | null;
+  studentId?: number | null;
+
+  isDefault?: boolean;
+  active?: boolean;
+
   metadata?: any;
 }
 
@@ -2631,6 +2731,7 @@ class AppDB extends Dexie {
   reportCardItems!: Table<ReportCardItem>;
   reportCardTemplates!: Table<ReportCardTemplate, number>;
   reportCardTemplateSettings!: Table<ReportCardTemplateSetting, number>;
+  reportCardTemplateAssignments!: Table<ReportCardTemplateAssignment, number>;
 
   studentReportSnapshots!: Table<StudentReportSnapshot, number>;
   studentPromotions!: Table<StudentPromotion, number>;
@@ -2713,7 +2814,7 @@ class AppDB extends Dexie {
   constructor() {
     super("EleeveonDB");
 
-    this.version(36).stores({
+    this.version(37).stores({
       schools: "++id,cloudId,accountId, name,updatedAt",
 
       branches:
@@ -2816,10 +2917,13 @@ class AppDB extends Dexie {
         "++id,cloudId,accountId, schoolId, branchId,reportCardId,subjectId,academicPeriodId",
 
       reportCardTemplates:
-        "++id,cloudId,accountId,schoolId,branchId,templateKey,name,isDefault,active,updatedAt",
+        "++id,cloudId,accountId,schoolId,branchId,code,layoutKey,templateKey,name,isDefault,active,updatedAt",
 
       reportCardTemplateSettings:
-        "++id,cloudId,accountId,schoolId,branchId,templateId,templateKey,name,active,updatedAt",
+        "++id,cloudId,accountId,schoolId,branchId,templateId,templateCode,layoutKey,templateKey,name,active,updatedAt",
+
+      reportCardTemplateAssignments:
+        "++id,cloudId,accountId,schoolId,branchId,templateId,templateSettingsId,templateCode,layoutKey,templateKey,scopeType,scopeId,academicStructureId,academicPeriodId,classId,level,studentId,isDefault,active,updatedAt",
 
       studentReportSnapshots:
         "++id,cloudId,accountId, schoolId, branchId, studentId, classId, academicStructureId, academicPeriodId, promotedToClassId, snapshotType, synced, isDeleted, updatedAt",

@@ -496,3 +496,21 @@ export interface ReportPrintButton {
   mode: ReportPrintMode;
   orientation: ReportOrientation;
 }
+
+
+// ======================================================
+// 1) reports/engine/report-types.ts
+// Add these fields inside ComputedStudentReport
+// ======================================================
+
+/*
+  numberOnRoll?: number;
+  classSize?: number;
+*/
+
+// Example placement:
+
+export interface ComputedStudentReport {
+  numberOnRoll?: number;
+  classSize?: number;
+}

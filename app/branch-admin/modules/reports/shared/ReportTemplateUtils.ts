@@ -590,13 +590,7 @@ export function resolveStudentInfo(
       student?.photo
     ),
     className: firstText(report?.className, dynamicData?.className, "Class"),
-    numberOnRoll: safeNumber(
-      report?.numberOnRoll ||
-        report?.classSize ||
-        dynamicData?.numberOnRoll ||
-        dynamicData?.classSize,
-      0
-    ) || undefined,
+    numberOnRoll: resolveNumberOnRollFromDataset(dataset),
     overallPosition: safeNumber(report?.overallPosition, 0) || undefined,
     promoted: typeof report?.promoted === "boolean" ? report.promoted : undefined,
   };
@@ -929,4 +923,38 @@ export function reportTemplateEmptyMessage(dataset?: StudentReportCardDataset) {
   if (!dataset.header) return "Report header data is missing.";
   if (!dataset.report) return "Student report data is missing.";
   return "Report data is not ready.";
+}
+
+
+// ======================================================
+// 3) reports/shared/ReportTemplateUtils.ts
+// Replace numberOnRoll inside resolveStudentInfo with this stronger fallback.
+// ======================================================
+
+export function resolveNumberOnRollFromDataset(dataset?: any) {
+  const report = dataset?.report || {};
+  const header = dataset?.header || {};
+
+  const candidates = [
+    report.numberOnRoll,
+    report.classSize,
+    report.totalStudentsInClass,
+    report.studentsInClass,
+    report.rollCount,
+    dataset?.numberOnRoll,
+    dataset?.classSize,
+    dataset?.totalStudentsInClass,
+    header?.numberOnRoll,
+    header?.classSize,
+    header?.classData?.numberOnRoll,
+    header?.classData?.classSize,
+    header?.classData?.capacity,
+  ];
+
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+
+  return undefined;
 }

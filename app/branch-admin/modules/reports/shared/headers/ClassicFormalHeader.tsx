@@ -13,6 +13,12 @@
  * - compact institutional metadata
  * - reusable across templates that need a classic official top section
  *
+ * Mobile / print upgrade:
+ * - keeps an A4/PDF-like look on small screens
+ * - uses strong borders and typography so black-and-white printing still works
+ * - avoids relying on color alone for structure
+ * - remains compact enough for report-card printing
+ *
  * This component does not compute report results.
  * It only renders already-resolved header/branding data.
  */
@@ -63,12 +69,6 @@ export default function ClassicFormalHeader({
     (dataset as any)?.report?.className
   );
 
-  const academicLine = [
-    academicStructureName,
-    academicPeriodName,
-    className,
-  ].filter(Boolean).join(" · ");
-
   const contactLine = [
     branding.address,
     branding.phone ? `Tel: ${branding.phone}` : "",
@@ -81,7 +81,22 @@ export default function ClassicFormalHeader({
     branding.branchAddress,
   ].filter(Boolean).join(" · ");
 
-  const logoSize = compact ? 52 : 64;
+  const logoSize = compact ? 50 : 62;
+
+  const metaItems = [
+    {
+      label: "Academic Structure",
+      value: academicStructureName || "-",
+    },
+    {
+      label: "Academic Period",
+      value: academicPeriodName || "-",
+    },
+    {
+      label: "Class",
+      value: className || "-",
+    },
+  ];
 
   return (
     <header
@@ -89,6 +104,9 @@ export default function ClassicFormalHeader({
       style={{
         fontFamily: fontFamily || branding.fontFamily || "Arial, sans-serif",
         color: "#111",
+        background: "#fff",
+        borderBottom: `2px solid ${primary}`,
+        paddingBottom: compact ? 5 : 7,
       }}
     >
       <div
@@ -96,22 +114,21 @@ export default function ClassicFormalHeader({
           display: "grid",
           gridTemplateColumns: `${logoSize}px 1fr ${logoSize}px`,
           alignItems: "center",
-          gap: compact ? 8 : 10,
-          paddingBottom: compact ? 6 : 8,
-          borderBottom: `3px solid ${primary}`,
+          gap: compact ? 7 : 9,
         }}
       >
         <div
           style={{
             width: logoSize,
             height: logoSize,
-            borderRadius: 10,
-            border: "1px solid #d4d4d4",
+            borderRadius: 9,
+            border: "1.4px solid #111",
             overflow: "hidden",
             background: "#fff",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            boxSizing: "border-box",
           }}
         >
           {branding.logo ? (
@@ -129,14 +146,15 @@ export default function ClassicFormalHeader({
           ) : (
             <span
               style={{
-                fontSize: compact ? 8 : 9,
-                fontWeight: 900,
-                color: "#777",
+                fontSize: compact ? 7.5 : 8.5,
+                fontWeight: 950,
+                color: "#555",
                 textAlign: "center",
-                lineHeight: 1.1,
+                lineHeight: 1.05,
+                textTransform: "uppercase",
               }}
             >
-              SCHOOL<br />LOGO
+              School<br />Logo
             </span>
           )}
         </div>
@@ -144,12 +162,13 @@ export default function ClassicFormalHeader({
         <div style={{ textAlign: "center", minWidth: 0 }}>
           <div
             style={{
-              fontSize: compact ? 19 : 23,
+              fontSize: compact ? 18 : 22,
               lineHeight: 1.05,
               fontWeight: 950,
               textTransform: "uppercase",
-              letterSpacing: 0.4,
+              letterSpacing: 0.42,
               color: primary,
+              overflowWrap: "anywhere",
             }}
           >
             {branding.schoolName}
@@ -158,11 +177,12 @@ export default function ClassicFormalHeader({
           {branding.motto && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9 : 10,
+                marginTop: 2,
+                fontSize: compact ? 8.6 : 9.6,
                 fontWeight: 800,
                 fontStyle: "italic",
-                color: "#444",
+                color: "#333",
+                lineHeight: 1.18,
               }}
             >
               {branding.motto}
@@ -172,11 +192,12 @@ export default function ClassicFormalHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 4,
-                fontSize: compact ? 8 : 8.8,
-                lineHeight: 1.25,
+                marginTop: 3,
+                fontSize: compact ? 7.5 : 8.4,
+                lineHeight: 1.22,
                 fontWeight: 700,
-                color: "#555",
+                color: "#444",
+                overflowWrap: "anywhere",
               }}
             >
               {contactLine}
@@ -186,11 +207,12 @@ export default function ClassicFormalHeader({
           {branchLine && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 8 : 8.8,
-                lineHeight: 1.25,
-                fontWeight: 800,
-                color: "#333",
+                marginTop: 2,
+                fontSize: compact ? 7.5 : 8.4,
+                lineHeight: 1.22,
+                fontWeight: 850,
+                color: "#111",
+                overflowWrap: "anywhere",
               }}
             >
               {branchLine}
@@ -199,11 +221,12 @@ export default function ClassicFormalHeader({
         </div>
 
         <div
+          data-report-color-block="true"
           style={{
             width: logoSize,
             height: logoSize,
-            borderRadius: 10,
-            border: `1px solid ${primary}`,
+            borderRadius: 9,
+            border: "1.4px solid #111",
             background: primary,
             color: contrast,
             display: "flex",
@@ -212,9 +235,9 @@ export default function ClassicFormalHeader({
             textAlign: "center",
             padding: 5,
             boxSizing: "border-box",
-            fontSize: compact ? 8 : 9,
+            fontSize: compact ? 7.6 : 8.8,
             fontWeight: 950,
-            lineHeight: 1.12,
+            lineHeight: 1.1,
             textTransform: "uppercase",
           }}
         >
@@ -224,32 +247,35 @@ export default function ClassicFormalHeader({
 
       <div
         style={{
-          marginTop: compact ? 6 : 8,
+          marginTop: compact ? 5 : 7,
           display: "grid",
           gridTemplateColumns: "1fr auto 1fr",
           alignItems: "center",
-          gap: 8,
+          gap: compact ? 5 : 7,
         }}
       >
         <div
           style={{
             height: 1,
-            background: "linear-gradient(90deg, transparent, #999)",
+            background: "#111",
+            opacity: 0.42,
           }}
         />
 
         <div
+          data-report-color-block="true"
           style={{
-            border: `1px solid ${primary}`,
+            border: "1.2px solid #111",
             background: primary,
             color: contrast,
             borderRadius: 999,
-            padding: compact ? "4px 14px" : "5px 18px",
-            fontSize: compact ? 9.5 : 10.5,
+            padding: compact ? "3.5px 12px" : "4.5px 16px",
+            fontSize: compact ? 8.8 : 10,
             fontWeight: 950,
             textTransform: "uppercase",
-            letterSpacing: 0.35,
+            letterSpacing: 0.3,
             whiteSpace: "nowrap",
+            textAlign: "center",
           }}
         >
           {title}
@@ -258,24 +284,55 @@ export default function ClassicFormalHeader({
         <div
           style={{
             height: 1,
-            background: "linear-gradient(90deg, #999, transparent)",
+            background: "#111",
+            opacity: 0.42,
           }}
         />
       </div>
 
-      {academicLine && (
-        <div
-          style={{
-            marginTop: compact ? 5 : 6,
-            textAlign: "center",
-            fontSize: compact ? 8.5 : 9.5,
-            fontWeight: 850,
-            color: "#333",
-          }}
-        >
-          {academicLine}
-        </div>
-      )}
+      <div
+        style={{
+          marginTop: compact ? 5 : 6,
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: 4,
+        }}
+      >
+        {metaItems.map((item) => (
+          <div
+            key={item.label}
+            style={{
+              border: "1px solid #cfcfcf",
+              borderRadius: 6,
+              background: "#fafafa",
+              padding: compact ? "3.5px 5px" : "4px 6px",
+              minWidth: 0,
+            }}
+          >
+            <span
+              style={{
+                fontSize: compact ? 6.9 : 7.5,
+                fontWeight: 900,
+                textTransform: "uppercase",
+                letterSpacing: 0.25,
+                color: "#555",
+              }}
+            >
+              {item.label}:{" "}
+            </span>
+            <span
+              style={{
+                fontSize: compact ? 7.9 : 8.7,
+                fontWeight: 850,
+                color: "#111",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {item.value}
+            </span>
+          </div>
+        ))}
+      </div>
     </header>
   );
 }

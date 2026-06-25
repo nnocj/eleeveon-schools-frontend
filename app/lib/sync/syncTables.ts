@@ -30,7 +30,7 @@
  * - reportCardTemplateSettings stores visibility/labels/statistic controls for
  *   each school or branch report-card template.
  * - reportCardTemplateAssignments stores the active/default template selection
- *   per school, branch, academic structure, period, class or level.
+ *   per school, branch, academic structure, period, class, level or student.
  */
 
 // ======================================================
@@ -83,8 +83,6 @@ export const LOCAL_FIRST_SYNC_TABLES = [
   // Reporting
   "reportCards",
   "reportCardItems",
-  "studentReportSnapshots",
-  "studentPromotions",
 
   // Report-card templates, visibility settings and assignments.
   // These are local-first because schools/branches must be able to configure
@@ -92,6 +90,9 @@ export const LOCAL_FIRST_SYNC_TABLES = [
   "reportCardTemplates",
   "reportCardTemplateSettings",
   "reportCardTemplateAssignments",
+
+  "studentReportSnapshots",
+  "studentPromotions",
 
   // Finance - local school operations
   "feeStructures",
@@ -110,9 +111,6 @@ export const LOCAL_FIRST_SYNC_TABLES = [
   "paymentRefunds",
 
   // Branch wallet / payout settings.
-  // These are local-first because Branch Admin can configure payout destination
-  // and request withdrawals while offline. Backend/provider verification can
-  // later update the same records through sync.
   "schoolPayoutSettings",
   "paymentSettlements",
   "withdrawalRequests",
@@ -150,9 +148,6 @@ export const LOCAL_FIRST_SYNC_TABLES = [
   "schoolBranchSettings",
 
   // Media metadata only.
-  // This table is safe to push because it should contain IDs, ownership,
-  // mime type, dimensions, sizes, preview thumbnail, remote URL/status, etc.
-  // It must NOT contain the full binary Blob/File payload.
   "mediaAssets",
 ] as const;
 
@@ -280,6 +275,7 @@ export function isLocalOnlyTable(tableName: string): tableName is LocalOnlyTable
 export const BACKEND_DRIVEN_TABLES = BACKEND_CACHE_TABLES;
 export type BackendDrivenTableName = BackendCacheTableName;
 export const BACKEND_DRIVEN_TABLE_SET = BACKEND_CACHE_TABLE_SET;
+
 export function isBackendDrivenTable(tableName: string): tableName is BackendDrivenTableName {
   return isBackendCacheTable(tableName);
 }

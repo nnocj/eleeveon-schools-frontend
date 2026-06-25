@@ -36,8 +36,6 @@ import type {
   ClassSubject,
   GradeRule,
   Student,
-  StudentParent,
- 
   StudentEnrollment,
 } from "../../../../lib/db";
 
@@ -131,6 +129,45 @@ export function buildLookups(dataset: ReportEngineDataset) {
   };
 }
 
+// ======================================================
+// 2) reports/engine/report-engine.ts
+// Inside the function that builds class reports, compute this once.
+// Usually this belongs inside buildClassReports(...) before mapping students.
+// ======================================================
+
+export function resolveNumberOnRollFromEnrollments(args: {
+  studentEnrollments: any[];
+  branchId?: number;
+  classId?: number;
+  academicStructureId?: number;
+  academicPeriodId?: number;
+}) {
+  const sameId = (a: unknown, b: unknown) => String(a ?? "") === String(b ?? "");
+
+  const studentIds = new Set<number>();
+
+  args.studentEnrollments
+    .filter((enrollment: any) => {
+      if (enrollment?.isDeleted) return false;
+      if (enrollment?.active === false) return false;
+
+      const status = String(enrollment?.status || "active").toLowerCase();
+      if (["withdrawn", "transferred"].includes(status)) return false;
+
+      if (args.branchId && !sameId(enrollment.branchId, args.branchId)) return false;
+      if (args.classId && !sameId(enrollment.classId, args.classId)) return false;
+      if (args.academicStructureId && !sameId(enrollment.academicStructureId, args.academicStructureId)) return false;
+      if (args.academicPeriodId && !sameId(enrollment.academicPeriodId, args.academicPeriodId)) return false;
+
+      return true;
+    })
+    .forEach((enrollment: any) => {
+      const studentId = Number(enrollment?.studentId || 0);
+      if (studentId > 0) studentIds.add(studentId);
+    });
+
+  return studentIds.size;
+}
 
 // ======================================================
 // ACADEMIC PERIOD RESOLUTION
@@ -702,6 +739,16 @@ export function buildStudentReport(
     .map(item => item.gpa)
     .filter((item): item is number => item != null);
 
+  const classId = filters.classId || student.currentClassId || 0;
+
+  const numberOnRoll = resolveNumberOnRollFromEnrollments({
+    studentEnrollments: dataset.studentEnrollments || [],
+    branchId: filters.branchId,
+    classId,
+    academicStructureId: filters.academicStructureId,
+    academicPeriodId: filters.academicPeriodId,
+  });
+
   return {
     studentId: student.id || 0,
     studentName: student.fullName,
@@ -709,11 +756,14 @@ export function buildStudentReport(
     gender: student.gender,
     studentPhoto: student.photo,
 
-    classId: filters.classId || student.currentClassId || 0,
-    className: lookups.classMap.get(filters.classId)?.name || "Class",
+    classId,
+    className: lookups.classMap.get(classId)?.name || "Class",
     academicStructureId: filters.academicStructureId,
     academicPeriodId: filters.academicPeriodId,
     nextAcademicPeriod: buildNextAcademicPeriodSummary(dataset, filters),
+
+    numberOnRoll,
+    classSize: numberOnRoll,
 
     subjectResults,
 

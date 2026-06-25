@@ -85,6 +85,7 @@ import {
 
 import ReportAnalytics from "./components/ReportAnalytics";
 import StudentReportCard from "./components/StudentReportCard";
+import { printReportTarget } from "./components/ReportExportTools";
 
 import { buildReportEngineOutput } from "./engine/report-engine";
 
@@ -135,6 +136,7 @@ function firstExistingId<T extends { id?: number }>(rows: T[]) {
 
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
+const STUDENT_REPORT_PRINT_ZONE_ID = "student-report-print-zone";
 
 const REPORT_MEDIA_OWNER_STUDENTS = String((MediaOwners as any).STUDENTS || "students");
 const REPORT_MEDIA_OWNER_SCHOOLS = String((MediaOwners as any).SCHOOLS || "schools");
@@ -956,6 +958,17 @@ export default function StudentReports() {
   const warningCount = output.warnings.length;
   const canPrint = hasCoreSetup && (mode === "class-reports" ? output.classReports.length > 0 : Boolean(output.studentReport));
 
+  const triggerReportPrint = () => {
+    if (!canPrint) return;
+
+    printReportTarget({
+      targetId: STUDENT_REPORT_PRINT_ZONE_ID,
+      mode: mode === "class-reports" ? "whole-class-reports" : "single-student",
+      orientation: "portrait",
+      pageSize: "A4",
+    });
+  };
+
   const activeReportTemplateAssignment = useMemo(() => {
     return (
       reportCardTemplateAssignments.find((row: any) =>
@@ -1203,11 +1216,10 @@ function withBranchContext<T extends Record<string, any>>(
         <button
           type="button"
           className="ba-add-inline"
-          onClick={() => {
-            if (canPrint) window.print();
-          }}
+          onClick={triggerReportPrint}
           aria-label="Print report"
           title="Print"
+          disabled={!canPrint}
         >
           ⎙
         </button>
@@ -1262,14 +1274,8 @@ function withBranchContext<T extends Record<string, any>>(
       )}
 
       <section className="ba-print-card">
-        <div className="ba-print-head report-no-print">
-          <div>
-            <strong>{mode === "class-reports" ? "Class Reports" : "Student Report"}</strong>
-            <p>{selectedStructureName} · {selectedPeriodName}</p>
-          </div>
-        </div>
 
-        <div id="student-report-print-zone" className="ba-print-zone">
+        <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
           {renderActiveReport()}
         </div>
       </section>
@@ -1297,7 +1303,7 @@ function withBranchContext<T extends Record<string, any>>(
           }}
           onPrint={() => {
             setMoreOpen(false);
-            window.print();
+            triggerReportPrint();
           }}
           onClose={() => setMoreOpen(false)}
         />
@@ -1742,6 +1748,12 @@ const css = `
   font-size: 25px;
   line-height: 1;
   box-shadow: 0 12px 28px color-mix(in srgb, var(--ba-primary) 22%, transparent);
+}
+
+.ba-add-inline:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .ba-search-card {

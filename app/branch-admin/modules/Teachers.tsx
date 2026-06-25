@@ -761,6 +761,21 @@ export default function TeachersPage() {
     }
   };
 
+  const handleSignaturePadSave = async (file: File) => {
+    if (!file) return;
+
+    const signatureFile =
+      file.type === "image/png" && file.name
+        ? file
+        : new File([file], `teacher-signature-${form.id || "new"}-${Date.now()}.png`, {
+            type: "image/png",
+            lastModified: Date.now(),
+          });
+
+    await handleImageUpload("signature", signatureFile);
+    setSignaturePadOpen(false);
+  };
+
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
       showToast("error", "Sign in and select a school branch first.");
@@ -983,7 +998,7 @@ export default function TeachersPage() {
         fileName={`teacher-signature-${form.id || "new"}-${Date.now()}.png`}
         defaultColor="#111827"
         onClose={() => setSignaturePadOpen(false)}
-        onSave={(file) => handleImageUpload("signature", file)}
+        onSave={handleSignaturePadSave}
       />
 
       {cameraOpen && (

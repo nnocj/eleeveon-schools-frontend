@@ -46,6 +46,7 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
+import SignaturePadModal from "../../components/media/SignaturePadModal";
 import {
   db,
   type Assignment,
@@ -400,6 +401,7 @@ export default function TeachersPage() {
   const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
+  const [signaturePadOpen, setSignaturePadOpen] = useState(false);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -437,6 +439,11 @@ export default function TeachersPage() {
 
     setCameraField(field);
     setCameraOpen(true);
+  };
+
+  const openSignaturePad = () => {
+    if (!requireTenant()) return;
+    setSignaturePadOpen(true);
   };
 
   const closeCamera = () => {
@@ -967,7 +974,17 @@ export default function TeachersPage() {
       {filterOpen && <FilterSheet organizations={organizations} genderOptions={genderOptions} filterOrganizationId={filterOrganizationId} filterRole={filterRole} filterStatus={filterStatus} filterGender={filterGender} setFilterOrganizationId={setFilterOrganizationId} setFilterRole={setFilterRole} setFilterStatus={setFilterStatus} setFilterGender={setFilterGender} clearFilters={clearFilters} onClose={() => setFilterOpen(false)} />}
       {moreOpen && <MoreSheet viewMode={viewMode} summary={summary} setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
       {selectedItem && <ActionSheet item={selectedItem} openEdit={openEdit} remove={remove} toggleActive={toggleActive} onClose={() => setSelectedItem(null)} />}
-      {modalOpen && <TeacherModal form={form} saving={saving} organizations={organizations} setModalOpen={setModalOpen} updateForm={updateForm} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} save={save} />}
+      {modalOpen && <TeacherModal form={form} saving={saving} organizations={organizations} setModalOpen={setModalOpen} updateForm={updateForm} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} openSignaturePad={openSignaturePad} save={save} />}
+
+      <SignaturePadModal
+        open={signaturePadOpen}
+        title="Draw Teacher Signature"
+        description="Sign inside the pad. The saved signature keeps a transparent background for reports and documents."
+        fileName={`teacher-signature-${form.id || "new"}-${Date.now()}.png`}
+        defaultColor="#111827"
+        onClose={() => setSignaturePadOpen(false)}
+        onSave={(file) => handleImageUpload("signature", file)}
+      />
 
       {cameraOpen && (
         <CameraCaptureModal
@@ -1074,7 +1091,7 @@ function TableView({ rows, openEdit, remove, toggleActive }: { rows: TeacherView
   );
 }
 
-function TeacherModal({ form, saving, organizations, setModalOpen, updateForm, handleImageUpload, openCameraForField, save }: { form: FormState; saving: boolean; organizations: Organization[]; setModalOpen: (open: boolean) => void; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>; openCameraForField: (field: CameraField) => void; save: (event?: React.FormEvent) => void }) {
+function TeacherModal({ form, saving, organizations, setModalOpen, updateForm, handleImageUpload, openCameraForField, openSignaturePad, save }: { form: FormState; saving: boolean; organizations: Organization[]; setModalOpen: (open: boolean) => void; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>; openCameraForField: (field: CameraField) => void; openSignaturePad: () => void; save: (event?: React.FormEvent) => void }) {
   return (
     <div className="ba-modal-backdrop"><form className="ba-modal" onSubmit={save}>
       <div className="ba-modal-head"><div><h2>{form.id ? "Edit Teacher" : "Add Teacher"}</h2><p>Teacher will be saved under the selected school branch.</p></div><button type="button" onClick={() => setModalOpen(false)} aria-label="Close teacher form">✕</button></div>
@@ -1132,11 +1149,11 @@ function TeacherModal({ form, saving, organizations, setModalOpen, updateForm, h
               Upload Signature
               <input type="file" accept="image/*" onChange={(e) => handleImageUpload("signature", e.target.files?.[0])} hidden />
             </label>
-            <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("signature")}>
-              Capture Signature
+            <button type="button" className="ba-media-button secondary" onClick={openSignaturePad}>
+              Draw Signature
             </button>
           </div>
-          <small className="ba-media-hint">Upload or capture a signature image. It is stored as a compact signature media asset.</small>
+          <small className="ba-media-hint">Upload or draw a signature image. It is stored as a compact signature media asset.</small>
           {form.signature && <img src={form.signature} alt="Teacher signature preview" className="ba-preview-signature" />}
         </label>
       </div></section>

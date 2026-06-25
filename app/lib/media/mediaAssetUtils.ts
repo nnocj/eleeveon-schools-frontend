@@ -386,7 +386,67 @@ function createObjectUrl(blob: Blob) {
   return URL.createObjectURL(blob);
 }
 
-const objectUrlCache = new Map<number, string>();
+type CachedObjectUrl = {
+  cacheKey: string;
+  url: string;
+};
+
+const objectUrlCache = new Map<number, CachedObjectUrl>();
+
+function mediaCacheKey(asset: any, blobRow?: any) {
+  return [
+    Number(asset?.id || 0),
+    Number(asset?.localBlobId || 0),
+    Number(blobRow?.id || 0),
+    Number(asset?.updatedAt || 0),
+    Number(blobRow?.updatedAt || 0),
+    Number(asset?.sizeBytes || 0),
+    Number(blobRow?.sizeBytes || 0),
+    String(asset?.mimeType || blobRow?.mimeType || ""),
+  ].join(":");
+}
+
+function revokeCachedMediaObjectUrl(assetId?: number | null) {
+  const id = cleanNumber(assetId);
+  if (!id) return;
+
+  const cached = objectUrlCache.get(id);
+  if (cached?.url?.startsWith("blob:")) {
+    URL.revokeObjectURL(cached.url);
+  }
+
+  objectUrlCache.delete(id);
+}
+
+function rememberMediaObjectUrl(assetId: number, cacheKey: string, url: string) {
+  const id = cleanNumber(assetId);
+  if (!id || !url) return url;
+
+  const existing = objectUrlCache.get(id);
+  if (existing && existing.cacheKey !== cacheKey && existing.url.startsWith("blob:")) {
+    URL.revokeObjectURL(existing.url);
+  }
+
+  objectUrlCache.set(id, { cacheKey, url });
+  return url;
+}
+
+function isInlinePreviewSafe(asset: any) {
+  const mimeType = String(asset?.mimeType || "").toLowerCase();
+  const kind = String(asset?.kind || asset?.assetKind || "").toLowerCase();
+  return kind === "image" || mimeType.startsWith("image/");
+}
+
+async function blobRowToDataUrl(blobRow: any, fallbackMimeType?: string) {
+  const blob =
+    blobRow?.blob ||
+    (blobRow?.arrayBuffer
+      ? new Blob([blobRow.arrayBuffer], { type: blobRow.mimeType || fallbackMimeType || "application/octet-stream" })
+      : undefined);
+
+  if (!blob) return "";
+  return fileToDataUrl(blob);
+}
 
 export function getMediaKind(fileOrMimeType: File | Blob | string): MediaKind {
   const mimeType = typeof fileOrMimeType === "string" ? fileOrMimeType : fileOrMimeType.type || "";
@@ -724,6 +784,7 @@ export async function saveImageAsset(file: File, options: SaveMediaAssetOptions)
     remoteUrl: undefined,
     publicUrl: undefined,
     thumbnailDataUrl: thumbnail.dataUrl,
+    previewDataUrl: await fileToDataUrl(compressed.blob),
     altText: options.altText,
     caption: options.caption,
     uploadStatus: "local" as MediaUploadStatus,
@@ -738,16 +799,19 @@ export async function saveImageAsset(file: File, options: SaveMediaAssetOptions)
   const assetId = Number((asset as any)?.id || 0);
 
   if (assetId && blobId) {
-    await tableSafe("mediaBlobs").update(Number(blobId), { assetId, updatedAt: Date.now() });
+    await tableSafe("mediaBlobs").update(Number(blobId), { assetLocalId: assetId, assetId, updatedAt: Date.now() });
   }
 
-  const previewUrl = URL.createObjectURL(compressed.blob);
+  // Use a stable data URL for image previews instead of a browser blob URL.
+  // Blob URLs are short-lived and can appear to “bleed” across React renders
+  // when they are revoked/recreated while list items are still mounted.
+  const previewUrl = await fileToDataUrl(compressed.blob);
 
   return {
     assetId,
     blobId: Number(blobId),
     asset,
-    blob: { ...blobPayload, id: Number(blobId), assetId },
+    blob: { ...blobPayload, id: Number(blobId), assetLocalId: assetId, assetId },
     previewUrl,
     thumbnailUrl: thumbnail.dataUrl,
     width: compressed.width,
@@ -826,15 +890,24 @@ export async function saveGenericFileAsset(file: File, options: SaveMediaAssetOp
   const assetId = Number((asset as any)?.id || 0);
 
   if (assetId && blobId) {
-    await tableSafe("mediaBlobs").update(Number(blobId), { assetId, updatedAt: Date.now() });
+    await tableSafe("mediaBlobs").update(Number(blobId), { assetLocalId: assetId, assetId, updatedAt: Date.now() });
+  }
+
+  const previewUrl = createObjectUrl(file);
+  if (assetId) {
+    const cacheKey = mediaCacheKey(
+      { ...(asset as any), id: assetId, localBlobId: Number(blobId), updatedAt: now, sizeBytes: file.size, mimeType: file.type || "application/octet-stream" },
+      { id: Number(blobId), assetLocalId: assetId, updatedAt: now, sizeBytes: file.size, mimeType: file.type || "application/octet-stream" }
+    );
+    rememberMediaObjectUrl(assetId, cacheKey, previewUrl);
   }
 
   return {
     assetId,
     blobId: Number(blobId),
     asset,
-    blob: { id: Number(blobId), assetId },
-    previewUrl: URL.createObjectURL(file),
+    blob: { id: Number(blobId), assetLocalId: assetId, assetId },
+    previewUrl,
     width: undefined,
     height: undefined,
     sizeBytes: file.size,
@@ -849,34 +922,84 @@ export async function getMediaAsset(assetId?: number | null) {
 }
 
 export async function getMediaBlob(assetOrBlobId?: number | null) {
-  if (!assetOrBlobId) return undefined;
-  const directBlob = await tableSafe("mediaBlobs")?.get?.(Number(assetOrBlobId));
-  if (directBlob) return directBlob;
+  const id = cleanNumber(assetOrBlobId);
+  if (!id) return undefined;
 
-  const asset = await getMediaAsset(Number(assetOrBlobId));
-  if (!asset?.localBlobId) return undefined;
-  return tableSafe("mediaBlobs")?.get?.(Number(asset.localBlobId));
+  const asset = await getMediaAsset(id);
+  if (asset?.localBlobId) {
+    const blobByAssetPointer = await tableSafe("mediaBlobs")?.get?.(Number(asset.localBlobId));
+    if (blobByAssetPointer) return blobByAssetPointer;
+  }
+
+  const rows = await tableSafe("mediaBlobs")?.toArray?.();
+  const blobByAssetLocalId = rows?.find?.(
+    (row: any) =>
+      !row?.isDeleted &&
+      row?.active !== false &&
+      (sameNumber(row.assetLocalId, id) || sameNumber(row.assetId, id))
+  );
+  if (blobByAssetLocalId) return blobByAssetLocalId;
+
+  return tableSafe("mediaBlobs")?.get?.(id);
 }
 
 export async function getMediaObjectUrl(assetId?: number | null) {
   const id = cleanNumber(assetId);
   if (!id) return "";
 
-  const cached = objectUrlCache.get(id);
-  if (cached) return cached;
-
   const asset = await getMediaAsset(id);
+  if (!asset || asset.isDeleted || asset.active === false) {
+    revokeCachedMediaObjectUrl(id);
+    return "";
+  }
 
   if (asset?.publicUrl) return asset.publicUrl;
   if (asset?.remoteUrl) return asset.remoteUrl;
 
-  const blobRow = asset?.localBlobId ? await tableSafe("mediaBlobs")?.get?.(Number(asset.localBlobId)) : undefined;
-  const blob = blobRow?.blob || (blobRow?.arrayBuffer ? new Blob([blobRow.arrayBuffer], { type: blobRow.mimeType || asset?.mimeType }) : undefined);
+  // Strong anti-bleed rule:
+  // For images, prefer stable inline data URLs over object URLs. This prevents
+  // browser blob URL revocation/reuse from making one newly uploaded image
+  // appear in other students/classes/teachers until cache is cleared.
+  if (isInlinePreviewSafe(asset)) {
+    if (asset.previewDataUrl) return asset.previewDataUrl;
+    if (asset.thumbnailDataUrl) return asset.thumbnailDataUrl;
+  }
+
+  const blobRow = await getMediaBlob(id);
+
+  if (isInlinePreviewSafe(asset)) {
+    const dataUrl = await blobRowToDataUrl(blobRow, asset?.mimeType);
+    if (dataUrl) {
+      // Persist the stable preview for future renders. This is best-effort;
+      // displaying the correct image must not depend on the update succeeding.
+      try {
+        await updateLocal("mediaAssets" as any, id, { previewDataUrl: dataUrl } as any);
+      } catch {
+        try {
+          await tableSafe("mediaAssets")?.update?.(id, { previewDataUrl: dataUrl, updatedAt: Date.now() });
+        } catch {
+          // ignore preview cache write failures
+        }
+      }
+      return dataUrl;
+    }
+  }
+
+  const cacheKey = mediaCacheKey(asset, blobRow);
+  const cached = objectUrlCache.get(id);
+  if (cached && cached.cacheKey === cacheKey) return cached.url;
+
+  if (cached?.url?.startsWith("blob:")) {
+    URL.revokeObjectURL(cached.url);
+    objectUrlCache.delete(id);
+  }
+
+  const blob =
+    blobRow?.blob ||
+    (blobRow?.arrayBuffer ? new Blob([blobRow.arrayBuffer], { type: blobRow.mimeType || asset?.mimeType }) : undefined);
 
   if (blob) {
-    const url = createObjectUrl(blob);
-    objectUrlCache.set(id, url);
-    return url;
+    return rememberMediaObjectUrl(id, cacheKey, createObjectUrl(blob));
   }
 
   return asset?.thumbnailDataUrl || "";
@@ -910,6 +1033,47 @@ export async function getOwnerFieldMediaAsset(params: {
     .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
 }
 
+
+export async function resolveOwnerMediaUrl(params: {
+  accountId?: string;
+  ownerTable: string;
+  ownerLocalId?: number | null;
+  ownerCloudId?: string | null;
+  ownerTempKey?: string | null;
+  fieldKey: string;
+  fallbackAssetId?: number | string | null;
+}) {
+  const ownedAsset = await getOwnerFieldMediaAsset({
+    accountId: params.accountId,
+    ownerTable: params.ownerTable,
+    ownerLocalId: params.ownerLocalId,
+    ownerCloudId: params.ownerCloudId,
+    ownerTempKey: params.ownerTempKey,
+    fieldKey: params.fieldKey,
+  });
+
+  if (ownedAsset?.id) {
+    const url = await getMediaObjectUrl(Number(ownedAsset.id));
+    if (url) return url;
+  }
+
+  const fallbackId = cleanNumber(params.fallbackAssetId);
+  const ownerLocalId = cleanNumber(params.ownerLocalId);
+  const ownerCloudId = cleanString(params.ownerCloudId);
+  const ownerTempKey = cleanString(params.ownerTempKey);
+
+  if (!fallbackId || !hasOwnerIdentity({ ownerLocalId, ownerCloudId, ownerTempKey })) return "";
+
+  const fallbackAsset = await getMediaAsset(fallbackId);
+  if (!fallbackAsset || fallbackAsset.isDeleted || fallbackAsset.active === false) return "";
+  if (params.accountId && fallbackAsset.accountId !== params.accountId) return "";
+  if (fallbackAsset.ownerTable !== cleanOwnerTable(params.ownerTable)) return "";
+  if (fallbackAsset.fieldKey !== cleanFieldKey(params.fieldKey)) return "";
+  if (!ownerIdentityMatches(fallbackAsset, { ownerLocalId, ownerCloudId, ownerTempKey })) return "";
+
+  return getMediaObjectUrl(fallbackId);
+}
+
 export async function softDeleteOwnerFieldAssets(params: {
   accountId?: string;
   ownerTable: string;
@@ -935,15 +1099,15 @@ export async function softDeleteOwnerFieldAssets(params: {
   });
 
   await Promise.all(
-    matches.map((row: any) =>
-      row.id
-        ? updateLocal("mediaAssets" as any, Number(row.id), {
-            active: false,
-            isDeleted: true,
-            uploadStatus: row.uploadStatus === "uploaded" ? row.uploadStatus : "local",
-          } as any)
-        : Promise.resolve()
-    )
+    matches.map((row: any) => {
+      if (!row.id) return Promise.resolve();
+      revokeCachedMediaObjectUrl(Number(row.id));
+      return updateLocal("mediaAssets" as any, Number(row.id), {
+        active: false,
+        isDeleted: true,
+        uploadStatus: row.uploadStatus === "uploaded" ? row.uploadStatus : "local",
+      } as any);
+    })
   );
 }
 
@@ -956,6 +1120,8 @@ export async function attachMediaAssetToOwner(params: {
 }) {
   const asset = await getMediaAsset(params.assetId);
   if (!asset?.id) return;
+
+  revokeCachedMediaObjectUrl(Number(asset.id));
 
   await updateLocal("mediaAssets" as any, Number(asset.id), {
     ownerTable: cleanOwnerTable(params.ownerTable),
@@ -973,15 +1139,15 @@ export function revokeMediaObjectUrl(url?: string) {
   if (!url) return;
   if (url.startsWith("blob:")) {
     URL.revokeObjectURL(url);
-    for (const [assetId, cachedUrl] of objectUrlCache.entries()) {
-      if (cachedUrl === url) objectUrlCache.delete(assetId);
+    for (const [assetId, cached] of objectUrlCache.entries()) {
+      if (cached.url === url) objectUrlCache.delete(assetId);
     }
   }
 }
 
 export function clearMediaObjectUrlCache() {
-  for (const url of objectUrlCache.values()) {
-    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  for (const cached of objectUrlCache.values()) {
+    if (cached.url.startsWith("blob:")) URL.revokeObjectURL(cached.url);
   }
   objectUrlCache.clear();
 }

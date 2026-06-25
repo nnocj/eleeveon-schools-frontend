@@ -60,13 +60,12 @@ import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../.
 import {
   MediaOwners,
   MediaFieldKeys,
-  getOwnerFieldMediaAsset,
   attachCameraStreamToVideo,
   attachMediaAssetToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
-  getMediaObjectUrl,
+  resolveOwnerMediaUrl,
   isCameraApiAvailable,
   openCameraStream,
   revokeMediaObjectUrl,
@@ -493,61 +492,52 @@ export default function TeachersPage() {
   const resolveTeacherMediaUrls = async (teacherRows: Teacher[]) => {
     const next: Record<string, string> = {};
 
-    const resolveOwnedMedia = async (teacherId: number, field: CameraField, fieldKey: string, fallbackAssetId?: number | null) => {
-      const ownedAsset = await getOwnerFieldMediaAsset({
-        accountId: accountId || undefined,
-        ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-        ownerLocalId: teacherId,
-        fieldKey,
-      });
-
-      if (ownedAsset?.id) {
-        const url = await getMediaObjectUrl(Number(ownedAsset.id));
-        if (url) {
-          next[mediaKey(teacherId, field)] = url;
-          return;
-        }
-      }
-
-      // Backward-compatible fallback for older records, but only after the
-      // owner-based lookup fails. This prevents student/parent media from
-      // being displayed as a teacher photo when local IDs collide after reload.
-      if (fallbackAssetId) {
-        const fallbackAsset = await getOwnerFieldMediaAsset({
-          accountId: accountId || undefined,
-          ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-          ownerLocalId: teacherId,
-          fieldKey,
-        });
-
-        if (fallbackAsset?.id && Number(fallbackAsset.id) === Number(fallbackAssetId)) {
-          const url = await getMediaObjectUrl(Number(fallbackAssetId));
-          if (url) next[mediaKey(teacherId, field)] = url;
-        }
-      }
-    };
-
     await Promise.all(
       teacherRows.map(async (teacher: any) => {
         const teacherId = idOf(teacher.id);
         if (!teacherId) return;
 
         try {
-          await resolveOwnedMedia(teacherId, "photo", MediaFieldKeys.PHOTO, teacher.photoMediaId);
-          await resolveOwnedMedia(teacherId, "coverPhoto", MediaFieldKeys.COVER_PHOTO, teacher.coverPhotoMediaId);
-          await resolveOwnedMedia(teacherId, "signature", MediaFieldKeys.SIGNATURE, teacher.signatureMediaId);
+          const photoUrl = await resolveOwnerMediaUrl({
+            accountId: accountId || undefined,
+            ownerTable: TEACHER_MEDIA_OWNER_TABLE,
+            ownerLocalId: teacherId,
+            ownerCloudId: teacher.cloudId || undefined,
+            fieldKey: MediaFieldKeys.PHOTO,
+            fallbackAssetId: teacher.photoMediaId,
+          });
+          if (photoUrl) next[mediaKey(teacherId, "photo")] = photoUrl;
+
+          const coverPhotoUrl = await resolveOwnerMediaUrl({
+            accountId: accountId || undefined,
+            ownerTable: TEACHER_MEDIA_OWNER_TABLE,
+            ownerLocalId: teacherId,
+            ownerCloudId: teacher.cloudId || undefined,
+            fieldKey: MediaFieldKeys.COVER_PHOTO,
+            fallbackAssetId: teacher.coverPhotoMediaId,
+          });
+          if (coverPhotoUrl) next[mediaKey(teacherId, "coverPhoto")] = coverPhotoUrl;
+
+          const signatureUrl = await resolveOwnerMediaUrl({
+            accountId: accountId || undefined,
+            ownerTable: TEACHER_MEDIA_OWNER_TABLE,
+            ownerLocalId: teacherId,
+            ownerCloudId: teacher.cloudId || undefined,
+            fieldKey: MediaFieldKeys.SIGNATURE,
+            fallbackAssetId: teacher.signatureMediaId,
+          });
+          if (signatureUrl) next[mediaKey(teacherId, "signature")] = signatureUrl;
         } catch (error) {
           console.error("Failed resolving teacher media:", teacherId, error);
         }
       })
     );
 
-    setMediaPreviewUrls((current) => {
-      Object.values(current).forEach((url) => {
-        if (!Object.values(next).includes(url)) revokeMediaObjectUrl(url);
-      });
-      return next;
-    });
+    // Do not revoke list preview URLs during a reload. The shared media utility
+    // now returns stable data URLs for local images, and replacing the map is
+    // enough. This prevents browser blob-url repaint bleed across teacher,
+    // student, class, parent and signature rows while React is still mounted.
+    setMediaPreviewUrls(next);
   };
 
   const load = async () => {

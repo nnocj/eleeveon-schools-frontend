@@ -61,8 +61,7 @@ import {
   captureImageFileFromVideo,
   createMediaSessionKey as createSharedMediaSessionKey,
   getCameraUnavailableMessage,
-  getMediaObjectUrl,
-  getOwnerFieldMediaAsset,
+  resolveOwnerMediaUrl,
   isCameraApiAvailable,
   openCameraStream,
   revokeMediaObjectUrl,
@@ -468,45 +467,25 @@ export default function StudentsPage() {
         const studentId = idOf(student.id);
         if (!studentId) return;
 
-        const resolveOwnedAssetUrl = async (fieldKey: string, fallbackMediaId?: number | string | null) => {
-          const ownedAsset = await getOwnerFieldMediaAsset({
+        try {
+          const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: STUDENT_MEDIA_OWNER_TABLE,
             ownerLocalId: studentId,
             ownerCloudId: student.cloudId || undefined,
-            fieldKey,
+            fieldKey: MediaFieldKeys.PHOTO,
+            fallbackAssetId: student.photoMediaId,
           });
-
-          if (ownedAsset?.id) {
-            const url = await getMediaObjectUrl(Number(ownedAsset.id));
-            if (url) return url;
-          }
-
-          // Backward-compatible fallback for older local records only.
-          // It is accepted only when the asset really belongs to this student.
-          const fallbackId = idOf(fallbackMediaId);
-          if (!fallbackId) return "";
-
-          const fallbackAsset = await tableSafe("mediaAssets")?.get?.(fallbackId);
-          const belongsToThisStudent =
-            fallbackAsset &&
-            !fallbackAsset.isDeleted &&
-            fallbackAsset.active !== false &&
-            fallbackAsset.accountId === accountId &&
-            fallbackAsset.ownerTable === STUDENT_MEDIA_OWNER_TABLE &&
-            fallbackAsset.fieldKey === fieldKey &&
-            sameId(fallbackAsset.ownerLocalId, studentId);
-
-          if (!belongsToThisStudent) return "";
-
-          return getMediaObjectUrl(fallbackId);
-        };
-
-        try {
-          const photoUrl = await resolveOwnedAssetUrl(MediaFieldKeys.PHOTO, student.photoMediaId);
           if (photoUrl) next[mediaKey(studentId, "photo")] = photoUrl;
 
-          const coverPhotoUrl = await resolveOwnedAssetUrl(MediaFieldKeys.COVER_PHOTO, student.coverPhotoMediaId);
+          const coverPhotoUrl = await resolveOwnerMediaUrl({
+            accountId: accountId || undefined,
+            ownerTable: STUDENT_MEDIA_OWNER_TABLE,
+            ownerLocalId: studentId,
+            ownerCloudId: student.cloudId || undefined,
+            fieldKey: MediaFieldKeys.COVER_PHOTO,
+            fallbackAssetId: student.coverPhotoMediaId,
+          });
           if (coverPhotoUrl) next[mediaKey(studentId, "coverPhoto")] = coverPhotoUrl;
         } catch (error) {
           console.error("Failed to resolve student media:", studentId, error);
@@ -514,12 +493,12 @@ export default function StudentsPage() {
       })
     );
 
-    setMediaPreviewUrls((current) => {
-      Object.values(current).forEach((url) => {
-        if (!Object.values(next).includes(url)) revokeMediaObjectUrl(url);
-      });
-      return next;
-    });
+    // Do not revoke list preview URLs during a reload. In practice, revoking
+    // blob URLs while React still has list rows mounted can make the browser
+    // temporarily paint the newly uploaded image in other rows. The shared
+    // media utility now returns stable data URLs for images, so replacing the
+    // map is enough. Cleanup still runs when the page unmounts.
+    setMediaPreviewUrls(next);
   };
 
   const load = async () => {

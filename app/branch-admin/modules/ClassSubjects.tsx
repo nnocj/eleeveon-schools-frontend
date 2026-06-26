@@ -18,7 +18,8 @@
  * - Rebuilt to follow the Students.tsx compact golden UI pattern.
  * - Removed the large hero/header, old toolbar, permanent filter grid, and summary strip.
  * - Main screen is now search + inline add + slider filter + more menu.
- * - Card view is a compact row/list, with desktop using compact multi-column rows to save space.
+ * - Card view is now class-first: the user selects a class before seeing its subjects.
+ * - Subject records remain normal atomic ClassSubject rows; only the default UI is scoped by class.
  * - Table and analytics live under More so the default screen stays clean.
  * - Uses createLocal/updateLocal/softDeleteLocal/listActiveLocal for sync-safe writes and reads.
  * - Uses mediaAssets/mediaBlobs via saveImageAsset(...) instead of storing Base64 images on records.
@@ -227,6 +228,21 @@ type ClassSubjectView = {
   locked: boolean;
 };
 
+type ClassSubjectClassView = {
+  id: number;
+  row: Class;
+  name: string;
+  code: string;
+  level: string;
+  subjectCount: number;
+  activeSubjectCount: number;
+  unassignedCount: number;
+  lockedCount: number;
+  rulesCount: number;
+  entriesCount: number;
+  updatedAt?: number | string | null;
+};
+
 const idOf = (value: any) => {
   if (value === undefined || value === null || value === "") return 0;
   const num = Number(value);
@@ -376,6 +392,7 @@ export default function ClassSubjectsPage() {
   const [filterTeacherId, setFilterTeacherId] = useState("all");
   const [filterType, setFilterType] = useState<SubjectTypeFilter>("all");
   const [filterStatus, setFilterStatus] = useState<StatusFilter>("all");
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -680,11 +697,41 @@ export default function ClassSubjectsPage() {
     [applicabilityCounts, classMap, curriculumMap, entryCounts, mediaPreviewUrls, periodMap, rows, structureMap, subjectMap, teacherMap]
   );
 
+  const classListRows = useMemo<ClassSubjectClassView[]>(() => {
+    return classes
+      .map((classRow: any) => {
+        const classId = idOf(classRow.id);
+        const subjectsForClass = viewRows.filter((item) => sameId((item.row as any).classId, classId));
+
+        return {
+          id: classId,
+          row: classRow,
+          name: classRow.name || "Unnamed class",
+          code: classRow.code || "",
+          level: classRow.level || "",
+          subjectCount: subjectsForClass.length,
+          activeSubjectCount: subjectsForClass.filter((item) => item.active).length,
+          unassignedCount: subjectsForClass.filter((item) => !(item.row as any).teacherId).length,
+          lockedCount: subjectsForClass.filter((item) => item.locked).length,
+          rulesCount: subjectsForClass.reduce((sum, item) => sum + item.applicabilityCount, 0),
+          entriesCount: subjectsForClass.reduce((sum, item) => sum + item.entryCount, 0),
+          updatedAt: classRow.updatedAt || classRow.createdAt,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [classes, viewRows]);
+
+  const selectedClass = useMemo(() => {
+    if (!selectedClassId) return null;
+    return classListRows.find((item) => sameId(item.id, selectedClassId)) || null;
+  }, [classListRows, selectedClassId]);
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     return viewRows
       .filter((item) => {
         const row: any = item.row;
+        if (selectedClassId && !sameId(row.classId, selectedClassId)) return false;
         if (filterClassId !== "all" && !sameId(row.classId, filterClassId)) return false;
         if (filterStructureId !== "all" && !sameId(row.academicStructureId, filterStructureId)) return false;
         if (filterPeriodId !== "all" && !sameId(row.academicPeriodId, filterPeriodId)) return false;
@@ -700,7 +747,7 @@ export default function ClassSubjectsPage() {
           .includes(query);
       })
       .sort((a, b) => a.className.localeCompare(b.className) || a.subjectName.localeCompare(b.subjectName));
-  }, [filterClassId, filterPeriodId, filterStatus, filterStructureId, filterTeacherId, filterType, search, viewRows]);
+  }, [filterClassId, filterPeriodId, filterStatus, filterStructureId, filterTeacherId, filterType, search, selectedClassId, viewRows]);
 
   const summary = useMemo(
     () => ({
@@ -720,6 +767,15 @@ export default function ClassSubjectsPage() {
   const activeFilterCount = useMemo(() => {
     return [filterClassId, filterStructureId, filterPeriodId, filterTeacherId, filterType, filterStatus].filter((value) => value !== "all").length;
   }, [filterClassId, filterPeriodId, filterStatus, filterStructureId, filterTeacherId, filterType]);
+
+  const filteredClassListRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query || selectedClassId) return classListRows;
+
+    return classListRows.filter((item) =>
+      `${item.name} ${item.code} ${item.level} ${item.subjectCount}`.toLowerCase().includes(query)
+    );
+  }, [classListRows, search, selectedClassId]);
 
   const countsByClass = useMemo(() => groupedCounts(viewRows, (item) => item.className), [viewRows]);
   const countsByType = useMemo(() => groupedCounts(viewRows, (item) => typeLabel((item.row as any).type)), [viewRows]);
@@ -846,7 +902,10 @@ export default function ClassSubjectsPage() {
     if (!requireTenant()) return;
     mediaSessionKeyRef.current = createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE);
     setSelectedItem(null);
-    setForm(makeEmptyForm(settings));
+    setForm({
+      ...makeEmptyForm(settings),
+      classId: selectedClassId || "",
+    });
     setModalOpen(true);
   };
 
@@ -1051,7 +1110,7 @@ export default function ClassSubjectsPage() {
         <label className="ba-search">
           <span>⌕</span>
           <input
-            placeholder="Search class subjects..."
+            placeholder={selectedClassId ? "Search subjects..." : "Search classes..."}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             aria-label="Search class subjects"
@@ -1105,20 +1164,56 @@ export default function ClassSubjectsPage() {
 
       {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} remove={remove} toggleActive={toggleActive} toggleLocked={toggleLocked} />}
 
-      {viewMode === "cards" && (
-        <section className="ba-list">
-          {filteredRows.map((item) => (
-            <ClassSubjectListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />
+      {viewMode === "cards" && !selectedClassId && (
+        <section className="ba-list class-picker-list">
+          {filteredClassListRows.map((item) => (
+            <ClassSubjectClassItem
+              key={String(item.id)}
+              item={item}
+              primary={primary}
+              onOpen={() => {
+                setSelectedClassId(String(item.id));
+                setFilterClassId("all");
+                setSearch("");
+              }}
+            />
           ))}
 
-          {!filteredRows.length && (
+          {!filteredClassListRows.length && (
             <Empty
-              icon="📖"
-              title="No class subjects found"
-              text="Create delivery contexts that connect classes, curriculum subjects, periods, teachers, reports, broadsheets, and assessment entries."
+              icon="🏫"
+              title="No classes found"
+              text="Create a class first, then assign curriculum subjects to it."
             />
           )}
         </section>
+      )}
+
+      {viewMode === "cards" && selectedClassId && (
+        <>
+          <ClassSubjectClassHeader
+            selectedClass={selectedClass}
+            subjectCount={filteredRows.length}
+            onBack={() => {
+              setSelectedClassId("");
+              setSearch("");
+            }}
+          />
+
+          <section className="ba-list">
+            {filteredRows.map((item) => (
+              <ClassSubjectListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />
+            ))}
+
+            {!filteredRows.length && (
+              <Empty
+                icon="📖"
+                title="No subjects for this class"
+                text="Use the plus button to add a class subject for the selected class."
+              />
+            )}
+          </section>
+        </>
       )}
 
       {filterOpen && (
@@ -1217,6 +1312,59 @@ function State({ primary, title, text }: { primary: string; title: string; text:
         <p>{text}</p>
       </section>
     </main>
+  );
+}
+
+function ClassSubjectClassItem({ item, primary, onOpen }: { item: ClassSubjectClassView; primary: string; onOpen: () => void }) {
+  return (
+    <button type="button" className="class-subject-row class-picker-row" onClick={onOpen}>
+      <Avatar name={item.name} photo={safeRecordMediaValue((item.row as any).photo)} primary={primary} />
+
+      <span className="class-subject-main">
+        <strong>{item.name}</strong>
+        <small>
+          {item.subjectCount} subject{item.subjectCount === 1 ? "" : "s"}
+          {item.code ? ` · ${item.code}` : ""}
+          {item.level ? ` · ${item.level}` : ""}
+        </small>
+        <em>
+          {item.unassignedCount ? `${item.unassignedCount} unassigned · ` : ""}
+          {item.lockedCount ? `${item.lockedCount} locked · ` : ""}
+          {item.rulesCount} rule link{item.rulesCount === 1 ? "" : "s"}
+        </em>
+      </span>
+
+      <span className="class-subject-side">
+        <span className={`status-dot-mini ${item.subjectCount ? "green" : "gray"}`} title={item.subjectCount ? "Has subjects" : "No subjects yet"} />
+        <i>›</i>
+      </span>
+    </button>
+  );
+}
+
+function ClassSubjectClassHeader({
+  selectedClass,
+  subjectCount,
+  onBack,
+}: {
+  selectedClass: ClassSubjectClassView | null;
+  subjectCount: number;
+  onBack: () => void;
+}) {
+  return (
+    <section className="class-subject-context-card">
+      <button type="button" className="class-subject-back" onClick={onBack}>
+        ← Classes
+      </button>
+      <div>
+        <strong>{selectedClass?.name || "Selected class"}</strong>
+        <small>
+          {subjectCount} subject{subjectCount === 1 ? "" : "s"}
+          {selectedClass?.code ? ` · ${selectedClass.code}` : ""}
+          {selectedClass?.level ? ` · ${selectedClass.level}` : ""}
+        </small>
+      </div>
+    </section>
   );
 }
 
@@ -2035,6 +2183,37 @@ const css = `
 .ba-camera-actions button { min-height: 42px; border-radius: 999px; padding: 0 14px; font-size: 12px; font-weight: 950; cursor: pointer; }
 .ba-camera-primary { border: 0; background: var(--ba-primary); color: #fff; }
 .ba-camera-secondary { border: 1px solid var(--border,rgba(0,0,0,.10)); background: var(--surface,#fff); color: var(--text,#111827); }
+
+.class-picker-list { margin-top: 10px; }
+.class-picker-row .class-subject-side i { font-size: 22px; line-height: 1; }
+.class-subject-context-card {
+  display: grid;
+  grid-template-columns: auto minmax(0,1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 22px;
+  background: var(--card-bg,var(--surface,#fff));
+  border: 1px solid var(--border,rgba(0,0,0,.10));
+  box-shadow: 0 12px 28px rgba(15,23,42,.045);
+}
+.class-subject-context-card strong,
+.class-subject-context-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.class-subject-context-card strong { color: var(--text,#111827); font-size: 14px; font-weight: 1000; letter-spacing: -.025em; }
+.class-subject-context-card small { margin-top: 2px; color: var(--muted,#64748b); font-size: 12px; font-weight: 850; }
+.class-subject-back {
+  width: auto;
+  min-height: 38px;
+  border: 1px solid var(--border,rgba(0,0,0,.10));
+  border-radius: 999px;
+  padding: 0 12px;
+  background: color-mix(in srgb,var(--ba-primary) 9%,var(--card-bg,#fff));
+  color: var(--ba-primary);
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
 
 @media (min-width: 680px) {
   .ba-page { padding: calc(12px * var(--local-density-scale,1)); }

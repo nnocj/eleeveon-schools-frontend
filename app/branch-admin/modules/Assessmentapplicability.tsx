@@ -26,6 +26,13 @@
  * - optionally attach a GradingSystem
  * - classSubjectId remains the ONLY source of truth for where assessment applies
  *
+ * Class-first workflow upgrade:
+ * - the main view first asks the branch admin to select a class
+ * - after a class is selected, cards/table/analytics only show applicability for that class
+ * - when creating a new applicability, the modal first selects a class, then intelligently
+ *   filters class subjects to only those that belong to the selected class
+ * - no database structure was changed; ClassSubject and AssessmentApplicability remain atomic
+ *
  * Golden close/action fix:
  * - card/sheet/modal close buttons now reuse the same theme-safe pattern as the More modal
  * - no input, modal layout, CRUD, sync or data behavior was changed
@@ -115,6 +122,17 @@ type ApplicabilityViewRow = {
   active: boolean;
   locked: boolean;
   entryCount: number;
+};
+
+type ClassApplicabilityView = {
+  id: number;
+  row: Class;
+  name: string;
+  code: string;
+  subjectCount: number;
+  applicabilityCount: number;
+  missingCount: number;
+  activeCount: number;
 };
 
 const emptyForm = (): ApplicabilityForm => ({
@@ -314,6 +332,8 @@ export default function Assessmentapplicability() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [structureFilter, setStructureFilter] = useState("all");
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
+  const [modalClassId, setModalClassId] = useState<string>("");
 
   const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
@@ -563,10 +583,51 @@ export default function Assessmentapplicability() {
     });
   }, [applicabilities, assessmentStructureMap, entryCountByClassSubject, gradeRuleCount, gradingSystemMap, optionMap, organizationMap]);
 
+  const selectedClass = useMemo(() => (selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null), [classMap, selectedClassId]);
+
+  const selectedClassSubjectOptions = useMemo(() => {
+    if (!selectedClassId) return [];
+    return classSubjectOptions.filter((option) => sameId((option.row as any).classId, selectedClassId));
+  }, [classSubjectOptions, selectedClassId]);
+
+  const classCards = useMemo<ClassApplicabilityView[]>(() => {
+    const term = search.trim().toLowerCase();
+
+    return classes
+      .filter(isActiveRow)
+      .map((classRow: any) => {
+        const id = idOf(classRow.id);
+        const options = classSubjectOptions.filter((option) => sameId((option.row as any).classId, id));
+        const optionIds = new Set(options.map((option) => option.id));
+        const applicabilityRows = viewRows.filter((row) => optionIds.has(row.classSubjectId));
+        const activeRows = applicabilityRows.filter((row) => row.active);
+
+        return {
+          id,
+          row: classRow,
+          name: classRow.name || `Class ${id}`,
+          code: classRow.code || "",
+          subjectCount: options.length,
+          applicabilityCount: applicabilityRows.length,
+          missingCount: Math.max(0, options.length - activeRows.length),
+          activeCount: activeRows.length,
+        };
+      })
+      .filter((item) => {
+        if (!term) return true;
+        return `${item.name} ${item.code} ${item.subjectCount} subjects`.toLowerCase().includes(term);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [classSubjectOptions, classes, search, viewRows]);
+
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return viewRows.filter((row) => {
+      if (!selectedClassId) return false;
+      const option = optionMap.get(row.classSubjectId);
+      if (!sameId((option?.row as any)?.classId, selectedClassId)) return false;
+
       const haystack = [
         row.className,
         row.subjectName,
@@ -589,14 +650,15 @@ export default function Assessmentapplicability() {
 
       return searchOk && statusOk && structureOk;
     });
-  }, [search, statusFilter, structureFilter, viewRows]);
+  }, [optionMap, search, selectedClassId, statusFilter, structureFilter, viewRows]);
 
-  const missingClassSubjects = classSubjectOptions.filter((option) => !activeApplicabilityClassSubjectIds.has(option.id));
+  const missingClassSubjects = selectedClassSubjectOptions.filter((option) => !activeApplicabilityClassSubjectIds.has(option.id));
 
-  const activeCount = viewRows.filter((row) => row.active).length;
-  const archivedCount = viewRows.length - activeCount;
-  const coverage = classSubjectOptions.length
-    ? Math.round(((classSubjectOptions.length - missingClassSubjects.length) / classSubjectOptions.length) * 100)
+  const scopedViewRows = selectedClassId ? viewRows.filter((row) => sameId((optionMap.get(row.classSubjectId)?.row as any)?.classId, selectedClassId)) : [];
+  const activeCount = scopedViewRows.filter((row) => row.active).length;
+  const archivedCount = scopedViewRows.length - activeCount;
+  const coverage = selectedClassSubjectOptions.length
+    ? Math.round(((selectedClassSubjectOptions.length - missingClassSubjects.length) / selectedClassSubjectOptions.length) * 100)
     : 0;
 
   const activeFilterCount = useMemo(
@@ -604,9 +666,9 @@ export default function Assessmentapplicability() {
     [structureFilter, statusFilter]
   );
 
-  const countsByAssessment = useMemo(() => groupedCounts(viewRows, (row) => row.assessmentName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")), [viewRows]);
-  const countsByAcademic = useMemo(() => groupedCounts(viewRows, (row) => row.academicStructureName), [viewRows]);
+  const countsByAssessment = useMemo(() => groupedCounts(scopedViewRows, (row) => row.assessmentName), [scopedViewRows]);
+  const countsByStatus = useMemo(() => groupedCounts(scopedViewRows, (row) => (row.active ? "Active" : "Inactive")), [scopedViewRows]);
+  const countsByAcademic = useMemo(() => groupedCounts(scopedViewRows, (row) => row.academicStructureName), [scopedViewRows]);
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -625,8 +687,13 @@ export default function Assessmentapplicability() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
+    if (!selectedClassId) {
+      showToast("info", "Select a class first, then add applicability for its class subjects.");
+      return;
+    }
 
     setSelectedItem(null);
+    setModalClassId(String(selectedClassId));
     setForm({
       ...emptyForm(),
       assessmentStructureId: structureFilter !== "all" ? structureFilter : "",
@@ -638,6 +705,7 @@ export default function Assessmentapplicability() {
     if (!requireTenant()) return;
 
     setSelectedItem(null);
+    setModalClassId(String((optionMap.get(classSubjectId)?.row as any)?.classId || selectedClassId || ""));
     setForm({
       ...emptyForm(),
       classSubjectId: String(classSubjectId),
@@ -651,6 +719,7 @@ export default function Assessmentapplicability() {
     const row: any = "row" in item ? item.row : item;
 
     setSelectedItem(null);
+    setModalClassId(String((optionMap.get(idOf(row.classSubjectId))?.row as any)?.classId || selectedClassId || ""));
     setForm({
       id: idOf(row.id),
       classSubjectId: String(row.classSubjectId || ""),
@@ -795,8 +864,8 @@ export default function Assessmentapplicability() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search applicability..."
-            aria-label="Search assessment applicability"
+            placeholder={selectedClassId ? "Search applicability..." : "Search classes..."}
+            aria-label={selectedClassId ? "Search assessment applicability" : "Search classes"}
           />
         </label>
 
@@ -828,6 +897,31 @@ export default function Assessmentapplicability() {
         <section className="ba-warning">No grading system found. Applicability can save without grading, but reports need grading rules.</section>
       )}
 
+      {!selectedClassId ? (
+        <section className="ba-list applicability-list">
+          {classCards.map((item) => (
+            <ClassPickerRow key={String(item.id)} item={item} onOpen={() => { setSelectedClassId(String(item.id)); setSearch(""); }} />
+          ))}
+
+          {!classCards.length && (
+            <Empty
+              icon="🏫"
+              title="No classes found"
+              text="Select or create a class first, then manage the assessment applicability for its class subjects."
+            />
+          )}
+        </section>
+      ) : (
+        <>
+          <section className="ba-filter-chips class-breadcrumb" aria-label="Selected class">
+            <button type="button" onClick={() => { setSelectedClassId(""); setSelectedItem(null); setSearch(""); }}>
+              ← Classes
+            </button>
+            <button type="button" onClick={() => setFilterOpen(true)}>
+              {(selectedClass as any)?.name || "Selected class"} · {selectedClassSubjectOptions.length} class subject(s)
+            </button>
+          </section>
+
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
           {structureFilter !== "all" && (
@@ -845,9 +939,9 @@ export default function Assessmentapplicability() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="By Assessment" rows={countsByAssessment} total={viewRows.length} />
-          <AnalysisCard title="By Academic Structure" rows={countsByAcademic} total={viewRows.length} />
-          <AnalysisCard title="By Status" rows={countsByStatus} total={viewRows.length} />
+          <AnalysisCard title="By Assessment" rows={countsByAssessment} total={scopedViewRows.length} />
+          <AnalysisCard title="By Academic Structure" rows={countsByAcademic} total={scopedViewRows.length} />
+          <AnalysisCard title="By Status" rows={countsByStatus} total={scopedViewRows.length} />
           <article className="ba-analysis ba-current-filter">
             <span>Coverage</span>
             <strong>{coverage}%</strong>
@@ -891,6 +985,10 @@ export default function Assessmentapplicability() {
         </section>
       )}
 
+
+        </>
+      )}
+
       {filterOpen && (
         <FilterSheet
           assessmentStructures={assessmentStructures}
@@ -932,6 +1030,9 @@ export default function Assessmentapplicability() {
           form={form}
           saving={saving}
           classSubjectOptions={classSubjectOptions}
+          classes={classes}
+          modalClassId={modalClassId}
+          setModalClassId={setModalClassId}
           assessmentStructures={assessmentStructures}
           gradingSystems={gradingSystems}
           organizations={organizations}
@@ -956,6 +1057,27 @@ function State({ primary, title, text }: { primary: string; title: string; text:
         <p>{text}</p>
       </section>
     </main>
+  );
+}
+
+function ClassPickerRow({ item, onOpen }: { item: ClassApplicabilityView; onOpen: () => void }) {
+  return (
+    <button type="button" className="student-row applicability-row" onClick={onOpen}>
+      <span className="app-icon">🏫</span>
+
+      <span className="student-main">
+        <strong>{item.name}</strong>
+        <small>
+          {item.subjectCount} class subject(s) · {item.activeCount} active setup(s)
+        </small>
+        <em>{item.missingCount ? `${item.missingCount} missing applicability` : "Applicability complete"}</em>
+      </span>
+
+      <span className="student-side">
+        <span className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`} />
+        <i>›</i>
+      </span>
+    </button>
   );
 }
 
@@ -1245,6 +1367,9 @@ function ApplicabilityModal({
   form,
   saving,
   classSubjectOptions,
+  classes,
+  modalClassId,
+  setModalClassId,
   assessmentStructures,
   gradingSystems,
   organizations,
@@ -1257,6 +1382,9 @@ function ApplicabilityModal({
   form: ApplicabilityForm;
   saving: boolean;
   classSubjectOptions: ClassSubjectOption[];
+  classes: Class[];
+  modalClassId: string;
+  setModalClassId: (value: string) => void;
   assessmentStructures: AssessmentStructure[];
   gradingSystems: GradingSystem[];
   organizations: Organization[];
@@ -1266,6 +1394,8 @@ function ApplicabilityModal({
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
 }) {
+  const visibleClassSubjectOptions = classSubjectOptions.filter((option) => !modalClassId || sameId((option.row as any).classId, modalClassId));
+
   return (
     <div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
@@ -1283,6 +1413,24 @@ function ApplicabilityModal({
           <h3>Applicability Details</h3>
           <div className="ba-form">
             <label className="wide">
+              <span>Class</span>
+              <select
+                value={modalClassId}
+                onChange={(event) => {
+                  setModalClassId(event.target.value);
+                  updateForm({ classSubjectId: "", organizationId: "" });
+                }}
+              >
+                <option value="">Select class first</option>
+                {classes.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="wide">
               <span>Class Subject</span>
               <select
                 value={form.classSubjectId}
@@ -1296,9 +1444,9 @@ function ApplicabilityModal({
                 }}
               >
                 <option value="">Select class subject</option>
-                {classSubjectOptions.map((option) => (
+                {visibleClassSubjectOptions.map((option) => (
                   <option key={option.id} value={option.id}>
-                    {option.display}
+                    {option.subjectName} · {option.teacherName} · {option.periodName}
                   </option>
                 ))}
               </select>
@@ -1465,6 +1613,8 @@ const css = `
 .ba-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none;-ms-overflow-style:none}
 .ba-filter-chips::-webkit-scrollbar{display:none}
 .ba-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ba-primary) 11%,transparent);color:var(--ba-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}
+.class-breadcrumb{padding-top:10px}
+.class-breadcrumb button:first-child{background:color-mix(in srgb,var(--muted,#64748b) 10%,transparent);color:var(--text,#111827)}
 .ba-warning{margin-top:8px;padding:11px 12px;border-radius:20px;color:#92400e;background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.22);font-size:12px;font-weight:850;line-height:1.5}
 
 .ba-list{display:grid;gap:7px;margin-top:10px}

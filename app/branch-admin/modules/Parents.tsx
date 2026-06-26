@@ -29,12 +29,15 @@
  * - listActiveLocal(...) for active student lookup.
  * - Reads/writes stay scoped by accountId + schoolId + branchId.
  *
- * Media behavior:
- * - saveImageAsset(...) stores parent photos in mediaAssets/mediaBlobs, not Base64 fields.
- * - photoMediaId / coverPhotoMediaId carry small local media references on parent records.
- * - old photo/coverPhoto strings remain backward-compatible fallbacks only.
- * - MediaOwners.PARENTS + createMediaSessionKey(...) prevent student/teacher/parent bleed.
- * - real camera capture uses getUserMedia helpers from mediaAssetUtils.
+ * Media behavior rebuilt to match the working Teachers.tsx pattern:
+ * - selected or camera-captured images are compressed and stored once in mediaAssets/mediaBlobs.
+ * - parent records save small media IDs instead of full Base64 image strings.
+ * - old photo/coverPhoto fields remain backward-compatible fallbacks only.
+ * - ownerTempKey isolates unsaved form uploads so one parent image cannot bleed into students/teachers/classes or another parent.
+ * - new uploads are attached to the parent after create/update so media can sync separately.
+ * - edit saves attach only media uploaded during the current edit session; old inherited media IDs are not reattached.
+ * - photo and cover fields support Upload and real Take Photo camera capture through the same saveImageAsset(...) pipeline.
+ * - media owner/session keys use shared mediaAssetUtils helpers so this page cannot save under student/teacher ownership.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -45,16 +48,25 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, type Parent, type Student, type StudentParent } from "../../lib/db";
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  db,
+  type Parent,
+  type Student,
+  type StudentParent,
+} from "../../lib/db";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 import {
   attachCameraStreamToVideo,
   attachMediaAssetToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
-  getMediaObjectUrl,
-  getOwnerFieldMediaAsset,
+  resolveOwnerMediaUrl,
   isCameraApiAvailable,
   MediaFieldKeys,
   MediaOwners,
@@ -70,6 +82,7 @@ type ToastTone = "success" | "error" | "info";
 type Relationship = "father" | "mother" | "guardian";
 type StudentParentRelationship = "father" | "mother" | "guardian" | "other";
 type CameraField = "photo" | "coverPhoto";
+type UploadedMediaIds = Partial<Record<CameraField, number>>;
 
 type TenantRow = {
   accountId?: string | null;
@@ -101,7 +114,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -143,7 +158,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -152,7 +171,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -164,7 +183,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -174,10 +197,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 type FormState = {
   id?: number;
@@ -243,19 +265,29 @@ const idOf = (value: any) => {
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
-const mediaKey = (parentId: number, field: CameraField) => `${PARENT_MEDIA_OWNER_TABLE}:${parentId}:${field}`;
+const mediaKey = (parentId: number, field: CameraField) =>
+  `${PARENT_MEDIA_OWNER_TABLE}:${parentId}:${field}`;
 
 const isActiveStudent = (row: any) =>
-  !row?.isDeleted && row?.active !== false && !["withdrawn", "deleted", "archived", "inactive"].includes(safeLower(row?.status));
+  !row?.isDeleted &&
+  row?.active !== false &&
+  !["withdrawn", "deleted", "archived", "inactive"].includes(
+    safeLower(row?.status),
+  );
 
 const relationshipLabel = (value?: string) => {
   if (!value) return "Guardian";
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-const relationshipTone = (value?: string): "green" | "blue" | "purple" | "orange" => {
+const relationshipTone = (
+  value?: string,
+): "green" | "blue" | "purple" | "orange" => {
   if (value === "father") return "blue";
   if (value === "mother") return "purple";
   if (value === "other") return "orange";
@@ -296,7 +328,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
@@ -306,12 +346,23 @@ function Avatar({ name, photo, primary }: { name: string; photo?: string; primar
           : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
       }}
     >
-      {!photo && String(name || "P").slice(0, 1).toUpperCase()}
+      {!photo &&
+        String(name || "P")
+          .slice(0, 1)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -326,8 +377,13 @@ export default function ParentsPage() {
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } =
-    useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -357,12 +413,18 @@ export default function ParentsPage() {
   const [rows, setRows] = useState<Parent[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
-  const [filterRelationship, setFilterRelationship] = useState<"all" | Relationship>("all");
-  const [filterLinked, setFilterLinked] = useState<"all" | "linked" | "unlinked" | "primary">("all");
+  const [filterRelationship, setFilterRelationship] = useState<
+    "all" | Relationship
+  >("all");
+  const [filterLinked, setFilterLinked] = useState<
+    "all" | "linked" | "unlinked" | "primary"
+  >("all");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -372,14 +434,21 @@ export default function ParentsPage() {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [linkForm, setLinkForm] = useState<LinkFormState>(emptyLinkForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(PARENT_MEDIA_OWNER_TABLE));
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(PARENT_MEDIA_OWNER_TABLE),
+  );
+  const uploadedMediaIdsRef = useRef<UploadedMediaIds>({});
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("photo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
 
@@ -394,7 +463,15 @@ export default function ParentsPage() {
     if (!schoolId || !branchId) {
       router.replace("/account");
     }
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -409,8 +486,10 @@ export default function ParentsPage() {
     }, 4200);
   };
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
-  const updateLinkForm = (patch: Partial<LinkFormState>) => setLinkForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
+  const updateLinkForm = (patch: Partial<LinkFormState>) =>
+    setLinkForm((current) => ({ ...current, ...patch }));
 
   const stopCurrentCamera = () => {
     stopCameraStream(cameraStreamRef.current);
@@ -464,41 +543,36 @@ export default function ParentsPage() {
         if (!parentId) return;
 
         try {
-          const photoAsset = await getOwnerFieldMediaAsset({
+          const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: PARENT_MEDIA_OWNER_TABLE,
             ownerLocalId: parentId,
+            ownerCloudId: parent.cloudId || undefined,
             fieldKey: MediaFieldKeys.PHOTO,
+            fallbackAssetId: parent.photoMediaId,
           });
+          if (photoUrl) next[mediaKey(parentId, "photo")] = photoUrl;
 
-          if (photoAsset?.id) {
-            const url = await getMediaObjectUrl(Number(photoAsset.id));
-            if (url) next[mediaKey(parentId, "photo")] = url;
-          }
-
-          const coverAsset = await getOwnerFieldMediaAsset({
+          const coverPhotoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: PARENT_MEDIA_OWNER_TABLE,
             ownerLocalId: parentId,
+            ownerCloudId: parent.cloudId || undefined,
             fieldKey: MediaFieldKeys.COVER_PHOTO,
+            fallbackAssetId: parent.coverPhotoMediaId,
           });
-
-          if (coverAsset?.id) {
-            const url = await getMediaObjectUrl(Number(coverAsset.id));
-            if (url) next[mediaKey(parentId, "coverPhoto")] = url;
-          }
+          if (coverPhotoUrl)
+            next[mediaKey(parentId, "coverPhoto")] = coverPhotoUrl;
         } catch (error) {
           console.error("Failed resolving parent media:", parentId, error);
         }
-      })
+      }),
     );
 
-    setMediaPreviewUrls((current) => {
-      Object.values(current).forEach((url) => {
-        if (!Object.values(next).includes(url)) revokeMediaObjectUrl(url);
-      });
-      return next;
-    });
+    // Match Teachers.tsx: do not revoke list preview URLs during a reload.
+    // Replacing the map is enough and avoids browser repaint bleed while
+    // parent rows and edit modals are still mounted.
+    setMediaPreviewUrls(next);
   };
 
   const load = async () => {
@@ -513,13 +587,19 @@ export default function ParentsPage() {
 
       const [parentRows, studentRows, relationRows] = await Promise.all([
         tableSafe("parents")?.toArray?.() || [],
-        listActiveLocal("students", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("students", {
+          accountId,
+          schoolId: Number(schoolId),
+          branchId: Number(branchId),
+        } as any),
         tableSafe("studentParents")?.toArray?.() || [],
       ]);
 
       const scopedParents = (parentRows as Parent[])
         .filter((row) => sameTenant(row as TenantRow))
-        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")));
+        .sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")),
+        );
 
       setRows(scopedParents);
       await resolveParentMediaUrls(scopedParents);
@@ -527,10 +607,16 @@ export default function ParentsPage() {
       setStudents(
         (studentRows as Student[])
           .filter((row: any) => isActiveStudent(row))
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")))
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
 
-      setStudentParents((relationRows as StudentParent[]).filter((row) => sameTenant(row as TenantRow)));
+      setStudentParents(
+        (relationRows as StudentParent[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load parents:", error);
       clearData();
@@ -544,7 +630,15 @@ export default function ParentsPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -614,17 +708,25 @@ export default function ParentsPage() {
         ownerTable: PARENT_MEDIA_OWNER_TABLE,
         ownerLocalId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
-        fieldKey: field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
+        fieldKey:
+          field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
       });
+
+      uploadedMediaIdsRef.current[field] = Number(result.assetId);
 
       updateForm({
         [field]: result.previewUrl,
         [`${field}MediaId`]: result.assetId,
       } as Partial<FormState>);
 
-      showToast("success", field === "photo" ? "Parent photo optimized." : "Cover photo optimized.");
+      showToast(
+        "success",
+        field === "photo"
+          ? "Parent photo optimized."
+          : "Cover photo optimized.",
+      );
     } catch (error: any) {
       console.error("Failed to process parent image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -702,12 +804,17 @@ export default function ParentsPage() {
       return {
         id,
         row,
-        photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-        coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
+        photoUrl:
+          mediaPreviewUrls[mediaKey(id, "photo")] ||
+          safeRecordMediaValue(row.photo),
+        coverPhotoUrl:
+          mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
+          safeRecordMediaValue(row.coverPhoto),
         linkedStudents,
         relations,
         linkCount: linkedStudents.length,
-        primaryChildren: relations.filter((relation: any) => relation.isPrimary).length,
+        primaryChildren: relations.filter((relation: any) => relation.isPrimary)
+          .length,
       };
     });
   }, [mediaPreviewUrls, relationByParent, rows, studentMap]);
@@ -719,10 +826,15 @@ export default function ParentsPage() {
       .filter((item) => {
         const row: any = item.row;
 
-        if (filterRelationship !== "all" && row.relationship !== filterRelationship) return false;
+        if (
+          filterRelationship !== "all" &&
+          row.relationship !== filterRelationship
+        )
+          return false;
         if (filterLinked === "linked" && item.linkCount === 0) return false;
         if (filterLinked === "unlinked" && item.linkCount > 0) return false;
-        if (filterLinked === "primary" && item.primaryChildren === 0) return false;
+        if (filterLinked === "primary" && item.primaryChildren === 0)
+          return false;
 
         if (!query) return true;
 
@@ -739,7 +851,11 @@ export default function ParentsPage() {
           .toLowerCase()
           .includes(query);
       })
-      .sort((a, b) => String((a.row as any).fullName || "").localeCompare(String((b.row as any).fullName || "")));
+      .sort((a, b) =>
+        String((a.row as any).fullName || "").localeCompare(
+          String((b.row as any).fullName || ""),
+        ),
+      );
   }, [filterLinked, filterRelationship, search, viewRows]);
 
   const summary = useMemo(
@@ -751,34 +867,56 @@ export default function ParentsPage() {
       primaryParents: studentParents.filter((row: any) => row.isPrimary).length,
       showing: filteredRows.length,
     }),
-    [filteredRows.length, relationByStudent.size, rows.length, studentParents, viewRows]
+    [
+      filteredRows.length,
+      relationByStudent.size,
+      rows.length,
+      studentParents,
+      viewRows,
+    ],
   );
 
   const activeFilterCount = useMemo(() => {
-    return [filterRelationship, filterLinked].filter((value) => value !== "all").length;
+    return [filterRelationship, filterLinked].filter((value) => value !== "all")
+      .length;
   }, [filterLinked, filterRelationship]);
 
   const countsByRelationship = useMemo(
-    () => groupedCounts(viewRows, (item) => relationshipLabel((item.row as any).relationship)),
-    [viewRows]
+    () =>
+      groupedCounts(viewRows, (item) =>
+        relationshipLabel((item.row as any).relationship),
+      ),
+    [viewRows],
   );
 
   const countsByLinkStatus = useMemo(
     () => [
-      { label: "Linked", value: viewRows.filter((item) => item.linkCount > 0).length },
-      { label: "Unlinked", value: viewRows.filter((item) => item.linkCount === 0).length },
-      { label: "Primary Guardian", value: viewRows.filter((item) => item.primaryChildren > 0).length },
+      {
+        label: "Linked",
+        value: viewRows.filter((item) => item.linkCount > 0).length,
+      },
+      {
+        label: "Unlinked",
+        value: viewRows.filter((item) => item.linkCount === 0).length,
+      },
+      {
+        label: "Primary Guardian",
+        value: viewRows.filter((item) => item.primaryChildren > 0).length,
+      },
     ],
-    [viewRows]
+    [viewRows],
   );
 
   const countsByChildren = useMemo(
     () =>
       viewRows
-        .map((item) => ({ label: (item.row as any).fullName || "Parent", value: item.linkCount }))
+        .map((item) => ({
+          label: (item.row as any).fullName || "Parent",
+          value: item.linkCount,
+        }))
         .filter((item) => item.value > 0)
         .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
-    [viewRows]
+    [viewRows],
   );
 
   const clearFilters = () => {
@@ -789,28 +927,45 @@ export default function ParentsPage() {
   const openCreate = () => {
     if (!requireTenant()) return;
 
-    mediaSessionKeyRef.current = createMediaSessionKey(PARENT_MEDIA_OWNER_TABLE);
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      PARENT_MEDIA_OWNER_TABLE,
+    );
+    uploadedMediaIdsRef.current = {};
     setSelectedItem(null);
     setForm({
       ...emptyForm,
-      relationship: filterRelationship !== "all" ? filterRelationship : "guardian",
+      relationship:
+        filterRelationship !== "all" ? filterRelationship : "guardian",
     });
     setModalOpen(true);
   };
 
   const openEdit = (row: Parent) => {
     const parent: any = row;
-    mediaSessionKeyRef.current = createMediaSessionKey(PARENT_MEDIA_OWNER_TABLE, idOf(parent.id) || "existing");
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      PARENT_MEDIA_OWNER_TABLE,
+    );
+    uploadedMediaIdsRef.current = {};
     setSelectedItem(null);
 
     setForm({
       id: idOf(parent.id),
       fullName: parent.fullName || "",
       phone: parent.phone || "",
-      photo: mediaPreviewUrls[mediaKey(idOf(parent.id), "photo")] || safeRecordMediaValue(parent.photo) || "",
-      photoMediaId: parent.photoMediaId ? Number(parent.photoMediaId) : undefined,
-      coverPhoto: mediaPreviewUrls[mediaKey(idOf(parent.id), "coverPhoto")] || safeRecordMediaValue(parent.coverPhoto) || "",
-      coverPhotoMediaId: parent.coverPhotoMediaId ? Number(parent.coverPhotoMediaId) : undefined,
+      photo:
+        mediaPreviewUrls[mediaKey(idOf(parent.id), "photo")] ||
+        safeRecordMediaValue(parent.photo) ||
+        "",
+      photoMediaId: parent.photoMediaId
+        ? Number(parent.photoMediaId)
+        : undefined,
+      coverPhoto:
+        mediaPreviewUrls[mediaKey(idOf(parent.id), "coverPhoto")] ||
+        safeRecordMediaValue(parent.coverPhoto) ||
+        "",
+      coverPhotoMediaId: parent.coverPhotoMediaId
+        ? Number(parent.coverPhotoMediaId)
+        : undefined,
       email: parent.email || "",
       address: parent.address || "",
       occupation: parent.occupation || "",
@@ -828,7 +983,8 @@ export default function ParentsPage() {
     setLinkForm({
       parentId: parent?.id ? String(parent.id) : "",
       studentId: student?.id ? String(student.id) : "",
-      relationship: ((parent as any)?.relationship || "guardian") as StudentParentRelationship,
+      relationship: ((parent as any)?.relationship ||
+        "guardian") as StudentParentRelationship,
       isPrimary: false,
     });
 
@@ -847,7 +1003,8 @@ export default function ParentsPage() {
       return safeLower(row.phone) === safeLower(form.phone) && !row.isDeleted;
     });
 
-    if (duplicate) return "A parent with this phone number already exists in this branch.";
+    if (duplicate)
+      return "A parent with this phone number already exists in this branch.";
     return "";
   };
 
@@ -865,7 +1022,9 @@ export default function ParentsPage() {
     try {
       setSaving(true);
 
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
 
       const payload: Partial<Parent> = {
         accountId,
@@ -891,32 +1050,42 @@ export default function ParentsPage() {
           ? await updateLocal("parents", Number(form.id), payload)
           : await createLocal("parents", payload as unknown as Parent);
 
-      const savedParentId = Number(typeof savedParent === "number" ? savedParent : (savedParent as any)?.id || form.id || 0);
+      const savedParentId = Number(
+        typeof savedParent === "number"
+          ? savedParent
+          : (savedParent as any)?.id || form.id || 0,
+      );
 
       if (savedParentId) {
+        const newlyUploadedAssetIds = Object.values(
+          uploadedMediaIdsRef.current,
+        ).filter(Boolean);
+
         await Promise.all(
-          [form.photoMediaId, form.coverPhotoMediaId]
-            .filter(Boolean)
-            .map((assetId) =>
-              attachMediaAssetToOwner({
-                assetId: Number(assetId),
-                ownerTable: PARENT_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedParentId,
-                ownerTempKey: mediaSessionKeyRef.current,
-              })
-            )
+          newlyUploadedAssetIds.map((assetId) =>
+            attachMediaAssetToOwner({
+              assetId: Number(assetId),
+              ownerTable: PARENT_MEDIA_OWNER_TABLE,
+              ownerLocalId: savedParentId,
+              ownerTempKey: mediaSessionKeyRef.current,
+            }),
+          ),
         );
       }
 
       const wasNew = !form.id;
       const parentToLink = savedParent as Parent | undefined;
 
-      mediaSessionKeyRef.current = createMediaSessionKey(PARENT_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        PARENT_MEDIA_OWNER_TABLE,
+      );
+      uploadedMediaIdsRef.current = {};
       setModalOpen(false);
       showToast("success", "Parent saved.");
       await load();
 
-      if (wasNew && (parentToLink as any)?.id) openLinkModal(parentToLink as Parent);
+      if (wasNew && (parentToLink as any)?.id)
+        openLinkModal(parentToLink as Parent);
     } catch (error) {
       console.error("Failed to save parent:", error);
       showToast("error", "Failed to save parent.");
@@ -944,7 +1113,11 @@ export default function ParentsPage() {
     }
 
     const duplicate = studentParents.find((row: any) => {
-      return sameId(row.parentId, linkForm.parentId) && sameId(row.studentId, linkForm.studentId) && !row.isDeleted;
+      return (
+        sameId(row.parentId, linkForm.parentId) &&
+        sameId(row.studentId, linkForm.studentId) &&
+        !row.isDeleted
+      );
     });
 
     if (duplicate) {
@@ -957,13 +1130,21 @@ export default function ParentsPage() {
 
       if (linkForm.isPrimary) {
         const existingPrimaryLinks = studentParents.filter((row: any) => {
-          return sameId(row.studentId, linkForm.studentId) && row.isPrimary && !row.isDeleted;
+          return (
+            sameId(row.studentId, linkForm.studentId) &&
+            row.isPrimary &&
+            !row.isDeleted
+          );
         });
 
         await Promise.all(
           existingPrimaryLinks.map((row: any) =>
-            row.id ? updateLocal("studentParents", Number(row.id), { isPrimary: false } as Partial<StudentParent>) : Promise.resolve()
-          )
+            row.id
+              ? updateLocal("studentParents", Number(row.id), {
+                  isPrimary: false,
+                } as Partial<StudentParent>)
+              : Promise.resolve(),
+          ),
         );
       }
 
@@ -1018,21 +1199,43 @@ export default function ParentsPage() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Parents..." text="Checking account, branch, parent records, students, family links, and media." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Parents..."
+        text="Checking account, branch, parent records, students, family links, and media."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing parents." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing parents."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Parents belong to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <p>
+            Parents belong to the selected branch-admin workspace. Use Select
+            Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -1041,19 +1244,29 @@ export default function ParentsPage() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Parent search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Parent search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -1064,7 +1277,12 @@ export default function ParentsPage() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add parent">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add parent"
+        >
           +
         </button>
 
@@ -1079,7 +1297,12 @@ export default function ParentsPage() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
@@ -1101,25 +1324,53 @@ export default function ParentsPage() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Parents by Relationship" rows={countsByRelationship} total={summary.total} />
-          <AnalysisCard title="Family Link Status" rows={countsByLinkStatus} total={summary.total} />
-          <AnalysisCard title="Most Linked Guardians" rows={countsByChildren} total={Math.max(1, countsByChildren.reduce((s, r) => s + r.value, 0))} />
+          <AnalysisCard
+            title="Parents by Relationship"
+            rows={countsByRelationship}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Family Link Status"
+            rows={countsByLinkStatus}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Most Linked Guardians"
+            rows={countsByChildren}
+            total={Math.max(
+              1,
+              countsByChildren.reduce((s, r) => s + r.value, 0),
+            )}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{summary.showing}</strong>
-            <p>Parent record(s) currently match your search and filter conditions.</p>
+            <p>
+              Parent record(s) currently match your search and filter
+              conditions.
+            </p>
           </article>
         </section>
       )}
 
       {viewMode === "table" && (
-        <TableView rows={filteredRows} openEdit={openEdit} openLinkModal={openLinkModal} remove={remove} />
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          openLinkModal={openLinkModal}
+          remove={remove}
+        />
       )}
 
       {viewMode === "cards" && (
         <section className="ba-list">
           {filteredRows.map((item) => (
-            <ParentListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />
+            <ParentListItem
+              key={String(item.id)}
+              item={item}
+              primary={primary}
+              onOpen={() => setSelectedItem(item)}
+            />
           ))}
 
           {!filteredRows.length && (
@@ -1215,9 +1466,20 @@ export default function ParentsPage() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1228,12 +1490,20 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function ParentListItem({ item, primary, onOpen }: { item: ParentView; primary: string; onOpen: () => void }) {
+function ParentListItem({
+  item,
+  primary,
+  onOpen,
+}: {
+  item: ParentView;
+  primary: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
 
   return (
     <button type="button" className="student-row" onClick={onOpen}>
-      <Avatar name={row.fullName} photo={item.photoUrl || safeRecordMediaValue(row.photo)} primary={primary} />
+      <Avatar name={row.fullName} photo={item.photoUrl} primary={primary} />
 
       <span className="student-main">
         <strong>{row.fullName || "Unnamed parent"}</strong>
@@ -1242,13 +1512,19 @@ function ParentListItem({ item, primary, onOpen }: { item: ParentView; primary: 
           {row.phone ? ` · ${row.phone}` : ""}
         </small>
         <em>
-          {item.linkCount ? `${item.linkCount} child link(s)` : "No child linked"}
+          {item.linkCount
+            ? `${item.linkCount} child link(s)`
+            : "No child linked"}
           {row.email ? ` · ${row.email}` : ""}
         </em>
       </span>
 
       <span className="student-side">
-        <span className={`status-dot-mini ${item.linkCount ? "green" : "orange"}`} title={item.linkCount ? "Linked" : "Unlinked"} aria-label={item.linkCount ? "Linked" : "Unlinked"} />
+        <span
+          className={`status-dot-mini ${item.linkCount ? "green" : "orange"}`}
+          title={item.linkCount ? "Linked" : "Unlinked"}
+          aria-label={item.linkCount ? "Linked" : "Unlinked"}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1289,7 +1565,9 @@ function FilterSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose only what you need. The parent list updates after applying.</p>
+            <p>
+              Choose only what you need. The parent list updates after applying.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1299,7 +1577,14 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Relationship</span>
-            <select value={filterRelationship} onChange={(event) => setFilterRelationship(event.target.value as "all" | Relationship)}>
+            <select
+              value={filterRelationship}
+              onChange={(event) =>
+                setFilterRelationship(
+                  event.target.value as "all" | Relationship,
+                )
+              }
+            >
               <option value="all">All relationships</option>
               <option value="father">Father</option>
               <option value="mother">Mother</option>
@@ -1309,7 +1594,10 @@ function FilterSheet({
 
           <label>
             <span>Link Status</span>
-            <select value={filterLinked} onChange={(event) => setFilterLinked(event.target.value as any)}>
+            <select
+              value={filterLinked}
+              onChange={(event) => setFilterLinked(event.target.value as any)}
+            >
               <option value="all">All link status</option>
               <option value="linked">Linked</option>
               <option value="unlinked">Unlinked</option>
@@ -1340,7 +1628,14 @@ function MoreSheet({
   onClose,
 }: {
   viewMode: ViewMode;
-  summary: { total: number; linked: number; unlinked: number; studentsWithParents: number; primaryParents: number; showing: number };
+  summary: {
+    total: number;
+    linked: number;
+    unlinked: number;
+    studentsWithParents: number;
+    primaryParents: number;
+    showing: number;
+  };
   setViewMode: (mode: ViewMode) => void;
   onLink: () => void;
   onRefresh: () => void | Promise<void>;
@@ -1352,7 +1647,9 @@ function MoreSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>More</h2>
-            <p>{summary.showing} of {summary.total} parent record(s) shown.</p>
+            <p>
+              {summary.showing} of {summary.total} parent record(s) shown.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close menu">
             ✕
@@ -1360,19 +1657,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Simple parent records</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Relationship and link summaries</small>
@@ -1419,10 +1728,15 @@ function ActionSheet({
           <div>
             <h2>{row.fullName || "Parent"}</h2>
             <p>
-              {relationshipLabel(row.relationship)} · {item.linkCount ? `${item.linkCount} child link(s)` : "Unlinked"}
+              {relationshipLabel(row.relationship)} ·{" "}
+              {item.linkCount ? `${item.linkCount} child link(s)` : "Unlinked"}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close parent actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close parent actions"
+          >
             ✕
           </button>
         </div>
@@ -1445,11 +1759,15 @@ function ActionSheet({
         {item.relations.length ? (
           <div className="link-list compact">
             {item.relations.map((relation: any) => {
-              const student: any = item.linkedStudents.find((child: any) => sameId(child.id, relation.studentId));
+              const student: any = item.linkedStudents.find((child: any) =>
+                sameId(child.id, relation.studentId),
+              );
               return (
                 <div key={String(relation.id)} className="link-row">
                   <div>
-                    <strong>{student?.fullName || `Student #${relation.studentId}`}</strong>
+                    <strong>
+                      {student?.fullName || `Student #${relation.studentId}`}
+                    </strong>
                     <span>
                       {relationshipLabel(relation.relationship)}
                       {relation.isPrimary ? " · Primary" : ""}
@@ -1531,7 +1849,9 @@ function TableView({
                   <td>{row.phone || "—"}</td>
                   <td>{row.email || "—"}</td>
                   <td>
-                    <Chip tone={relationshipTone(row.relationship)}>{relationshipLabel(row.relationship)}</Chip>
+                    <Chip tone={relationshipTone(row.relationship)}>
+                      {relationshipLabel(row.relationship)}
+                    </Chip>
                   </td>
                   <td>{row.occupation || "—"}</td>
                   <td>{row.emergencyContact || "—"}</td>
@@ -1540,13 +1860,20 @@ function TableView({
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
-                      <button type="button" onClick={() => openLinkModal(item.row)}>
+                      <button
+                        type="button"
+                        onClick={() => openLinkModal(item.row)}
+                      >
                         Link
                       </button>
                       <button type="button" onClick={() => openEdit(item.row)}>
                         Edit
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => remove(item)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(item)}
+                      >
                         Delete
                       </button>
                     </div>
@@ -1557,7 +1884,9 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No parent matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">No parent matches your filters.</div>
+        )}
       </div>
     </section>
   );
@@ -1588,7 +1917,11 @@ function ParentModal({
             <h2>{form.id ? "Edit Parent" : "Add Parent"}</h2>
             <p>Parent or guardian will be saved under the selected branch.</p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close parent form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close parent form"
+          >
             ✕
           </button>
         </div>
@@ -1600,24 +1933,41 @@ function ParentModal({
               <span>Full Name</span>
               <input
                 value={form.fullName}
-                onChange={(event) => updateForm({ fullName: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ fullName: event.target.value })
+                }
                 placeholder="Parent / guardian full name"
               />
             </label>
 
             <label>
               <span>Phone</span>
-              <input value={form.phone} onChange={(event) => updateForm({ phone: event.target.value })} placeholder="Phone number" />
+              <input
+                value={form.phone}
+                onChange={(event) => updateForm({ phone: event.target.value })}
+                placeholder="Phone number"
+              />
             </label>
 
             <label>
               <span>Email</span>
-              <input value={form.email} onChange={(event) => updateForm({ email: event.target.value })} placeholder="Email address" />
+              <input
+                value={form.email}
+                onChange={(event) => updateForm({ email: event.target.value })}
+                placeholder="Email address"
+              />
             </label>
 
             <label>
               <span>Relationship</span>
-              <select value={form.relationship} onChange={(event) => updateForm({ relationship: event.target.value as Relationship })}>
+              <select
+                value={form.relationship}
+                onChange={(event) =>
+                  updateForm({
+                    relationship: event.target.value as Relationship,
+                  })
+                }
+              >
                 <option value="father">Father</option>
                 <option value="mother">Mother</option>
                 <option value="guardian">Guardian</option>
@@ -1631,21 +1981,35 @@ function ParentModal({
           <div className="ba-form">
             <label>
               <span>Occupation</span>
-              <input value={form.occupation} onChange={(event) => updateForm({ occupation: event.target.value })} placeholder="Occupation" />
+              <input
+                value={form.occupation}
+                onChange={(event) =>
+                  updateForm({ occupation: event.target.value })
+                }
+                placeholder="Occupation"
+              />
             </label>
 
             <label>
               <span>Emergency Contact</span>
               <input
                 value={form.emergencyContact}
-                onChange={(event) => updateForm({ emergencyContact: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ emergencyContact: event.target.value })
+                }
                 placeholder="Emergency contact"
               />
             </label>
 
             <label className="wide">
               <span>Address</span>
-              <textarea value={form.address} onChange={(event) => updateForm({ address: event.target.value })} placeholder="Parent address" />
+              <textarea
+                value={form.address}
+                onChange={(event) =>
+                  updateForm({ address: event.target.value })
+                }
+                placeholder="Parent address"
+              />
             </label>
           </div>
         </section>
@@ -1658,15 +2022,35 @@ function ParentModal({
               <div className="ba-media-actions">
                 <label className="ba-media-button">
                   Upload Photo
-                  <input type="file" accept="image/*" onChange={(event) => handleImageUpload("photo", event.target.files?.[0])} hidden />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      handleImageUpload("photo", event.target.files?.[0])
+                    }
+                    hidden
+                  />
                 </label>
 
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("photo")}
+                >
                   Take Photo
                 </button>
               </div>
-              <small className="ba-media-hint">Upload from files or take a quick camera photo. The image is optimized and saved as a media asset.</small>
-              {form.photo && <img src={form.photo} alt="Parent preview" className="ba-preview-photo" />}
+              <small className="ba-media-hint">
+                Upload from files or take a quick camera photo. The image is
+                optimized and saved as a media asset.
+              </small>
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Parent preview"
+                  className="ba-preview-photo"
+                />
+              )}
             </label>
 
             <label>
@@ -1674,15 +2058,35 @@ function ParentModal({
               <div className="ba-media-actions">
                 <label className="ba-media-button">
                   Upload Cover
-                  <input type="file" accept="image/*" onChange={(event) => handleImageUpload("coverPhoto", event.target.files?.[0])} hidden />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      handleImageUpload("coverPhoto", event.target.files?.[0])
+                    }
+                    hidden
+                  />
                 </label>
 
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("coverPhoto")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("coverPhoto")}
+                >
                   Take Photo
                 </button>
               </div>
-              <small className="ba-media-hint">Upload from files or use the camera. The cover is compressed separately so sync records stay small.</small>
-              {form.coverPhoto && <img src={form.coverPhoto} alt="Parent cover preview" className="ba-preview-banner" />}
+              <small className="ba-media-hint">
+                Upload from files or use the camera. The cover is compressed
+                separately so sync records stay small.
+              </small>
+              {form.coverPhoto && (
+                <img
+                  src={form.coverPhoto}
+                  alt="Parent cover preview"
+                  className="ba-preview-banner"
+                />
+              )}
             </label>
           </div>
         </section>
@@ -1723,7 +2127,10 @@ function LinkModal({
         <div className="ba-modal-head">
           <div>
             <h2>Link Parent to Student</h2>
-            <p>Connect a parent or guardian to a student record and choose the relationship.</p>
+            <p>
+              Connect a parent or guardian to a student record and choose the
+              relationship.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close link form">
             ✕
@@ -1733,7 +2140,12 @@ function LinkModal({
         <div className="ba-form link-form">
           <label>
             <span>Parent</span>
-            <select value={linkForm.parentId} onChange={(event) => updateLinkForm({ parentId: event.target.value })}>
+            <select
+              value={linkForm.parentId}
+              onChange={(event) =>
+                updateLinkForm({ parentId: event.target.value })
+              }
+            >
               <option value="">Select parent</option>
               {parents.map((parent: any) => (
                 <option key={String(parent.id)} value={String(parent.id)}>
@@ -1745,12 +2157,19 @@ function LinkModal({
 
           <label>
             <span>Student</span>
-            <select value={linkForm.studentId} onChange={(event) => updateLinkForm({ studentId: event.target.value })}>
+            <select
+              value={linkForm.studentId}
+              onChange={(event) =>
+                updateLinkForm({ studentId: event.target.value })
+              }
+            >
               <option value="">Select student</option>
               {students.map((student: any) => (
                 <option key={String(student.id)} value={String(student.id)}>
                   {student.fullName}
-                  {student.admissionNumber ? ` · ${student.admissionNumber}` : ""}
+                  {student.admissionNumber
+                    ? ` · ${student.admissionNumber}`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -1760,7 +2179,11 @@ function LinkModal({
             <span>Relationship to Student</span>
             <select
               value={linkForm.relationship}
-              onChange={(event) => updateLinkForm({ relationship: event.target.value as StudentParentRelationship })}
+              onChange={(event) =>
+                updateLinkForm({
+                  relationship: event.target.value as StudentParentRelationship,
+                })
+              }
             >
               <option value="father">Father</option>
               <option value="mother">Mother</option>
@@ -1773,7 +2196,9 @@ function LinkModal({
             <input
               type="checkbox"
               checked={linkForm.isPrimary}
-              onChange={(event) => updateLinkForm({ isPrimary: event.target.checked })}
+              onChange={(event) =>
+                updateLinkForm({ isPrimary: event.target.checked })
+              }
             />
             <span>Mark as primary parent/guardian for this student</span>
           </label>
@@ -1813,15 +2238,25 @@ function CameraCaptureModal({
   close: () => void;
   entityLabel: string;
 }) {
-  const title = field === "photo" ? `Take ${entityLabel} Photo` : `Take ${entityLabel} Cover Photo`;
+  const title =
+    field === "photo"
+      ? `Take ${entityLabel} Photo`
+      : `Take ${entityLabel} Cover Photo`;
 
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
-            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+            <p>
+              Use the live camera preview, then capture. The image will still be
+              compressed and saved as a media asset.
+            </p>
           </div>
           <button type="button" onClick={close} aria-label="Close camera">
             ✕
@@ -1830,22 +2265,36 @@ function CameraCaptureModal({
 
         <div className="ba-camera-preview">
           <video ref={videoRef} autoPlay muted playsInline />
-          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
         </div>
 
         <div className="ba-camera-actions">
           <button
             type="button"
             className="ba-camera-secondary"
-            onClick={() => setFacing(facing === "environment" ? "user" : "environment")}
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
             disabled={starting || capturing}
           >
             Switch Camera
           </button>
-          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
             Cancel
           </button>
-          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
             {capturing ? "Capturing..." : "Capture Photo"}
           </button>
         </div>
@@ -1854,7 +2303,10 @@ function CameraCaptureModal({
   );
 }
 
-function groupedCounts(rows: ParentView[], keyFn: (item: ParentView) => string) {
+function groupedCounts(
+  rows: ParentView[],
+  keyFn: (item: ParentView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1866,7 +2318,15 @@ function groupedCounts(rows: ParentView[], keyFn: (item: ParentView) => string) 
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

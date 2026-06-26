@@ -21,6 +21,8 @@
  * - createLocal/updateLocal/softDeleteLocal/listActiveLocal preserved
  * - class photos/banners use mediaAssets instead of storing Base64 in class records
  * - reloads resolve images by ownerTable + ownerLocalId + fieldKey to prevent media bleed
+ * - edit saves attach only newly uploaded media so old/corrupted media IDs are not reattached
+ * - class teacher is saved through classTeachers, not directly on the Class row
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -35,9 +37,11 @@ import {
   db,
   type Class,
   type ClassSubject,
+  type ClassTeacher,
   type Organization,
   type Student,
   type StudentEnrollment,
+  type Teacher,
 } from "../../lib/db";
 
 import {
@@ -49,16 +53,23 @@ import {
 import {
   MediaOwners,
   MediaFieldKeys,
+  attachCameraStreamToVideo,
   attachMediaAssetToOwner,
-  createMediaSessionKey as createSharedMediaSessionKey,
-  getMediaObjectUrl,
-  getOwnerFieldMediaAsset,
+  captureImageFileFromVideo,
+  createMediaSessionKey,
+  getCameraUnavailableMessage,
+  resolveOwnerMediaUrl,
+  isCameraApiAvailable,
+  openCameraStream,
   revokeMediaObjectUrl,
   saveImageAsset,
+  stopCameraStream,
+  type CameraFacingMode,
 } from "../../lib/media/mediaAssetUtils";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
+type CameraField = "photo" | "bannerImage";
 
 type TenantRow = {
   accountId?: string | null;
@@ -171,13 +182,16 @@ function selectedWorkspaceBranchId(args: {
 type FormState = {
   id?: number;
   organizationId: string;
+  classTeacherId: string;
   name: string;
   code: string;
   level: string;
   photo: string;
   photoMediaId?: number;
+  newPhotoMediaId?: number;
   bannerImage: string;
   bannerImageMediaId?: number;
+  newBannerImageMediaId?: number;
   capacity: string;
   active: boolean;
 };
@@ -188,6 +202,9 @@ type ClassView = {
   photoUrl?: string;
   bannerImageUrl?: string;
   organizationName: string;
+  classTeacherId?: number;
+  classTeacherName: string;
+  classTeacherLink?: ClassTeacher;
   studentCount: number;
   subjectCount: number;
   capacity: number;
@@ -198,13 +215,16 @@ type ClassView = {
 
 const emptyForm: FormState = {
   organizationId: "",
+  classTeacherId: "",
   name: "",
   code: "",
   level: "",
   photo: "",
   photoMediaId: undefined,
+  newPhotoMediaId: undefined,
   bannerImage: "",
   bannerImageMediaId: undefined,
+  newBannerImageMediaId: undefined,
   capacity: "",
   active: true,
 };
@@ -258,8 +278,9 @@ const timeText = (value?: string | number | null) => {
 };
 
 const CLASS_MEDIA_OWNER_TABLE = MediaOwners.CLASSES;
+const CLASS_MEDIA_ENTITY_LABEL = "Class";
 const createClassMediaSessionKey = () =>
-  createSharedMediaSessionKey(CLASS_MEDIA_OWNER_TABLE);
+  createMediaSessionKey(CLASS_MEDIA_OWNER_TABLE);
 const mediaKey = (classId: number, field: "photo" | "bannerImage") =>
   `${CLASS_MEDIA_OWNER_TABLE}:${classId}:${field}`;
 
@@ -364,9 +385,11 @@ export default function ClassesPage() {
 
   const [rows, setRows] = useState<Class[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
+  const [classTeachers, setClassTeachers] = useState<ClassTeacher[]>([]);
   const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
     Record<string, string>
   >({});
@@ -385,6 +408,13 @@ export default function ClassesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const mediaSessionKeyRef = useRef(createClassMediaSessionKey());
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraField, setCameraField] = useState<CameraField>("photo");
+  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraStarting, setCameraStarting] = useState(false);
+  const [cameraCapturing, setCameraCapturing] = useState(false);
   const [toast, setToast] = useState<{
     tone: ToastTone;
     message: string;
@@ -424,13 +454,69 @@ export default function ClassesPage() {
     );
   };
 
+  const stopCurrentCamera = () => {
+    stopCameraStream(cameraStreamRef.current);
+    cameraStreamRef.current = null;
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+  };
+
+  const openCameraForField = (field: CameraField) => {
+    if (!requireTenant()) return;
+
+    if (!isCameraApiAvailable()) {
+      showToast("error", getCameraUnavailableMessage());
+      return;
+    }
+
+    setCameraField(field);
+    setCameraOpen(true);
+  };
+
+  const closeCamera = () => {
+    stopCurrentCamera();
+    setCameraOpen(false);
+    setCameraCapturing(false);
+    setCameraStarting(false);
+  };
+
+  const captureCameraPhoto = async () => {
+    if (!cameraVideoRef.current) {
+      showToast("error", "Camera preview is not ready yet.");
+      return;
+    }
+
+    try {
+      setCameraCapturing(true);
+      const file = await captureImageFileFromVideo(cameraVideoRef.current, {
+        fileName: `class-${cameraField}-${Date.now()}.jpg`,
+        mimeType: "image/jpeg",
+        quality: 0.88,
+        maxWidth: cameraField === "photo" ? 900 : 1440,
+        maxHeight: cameraField === "photo" ? 900 : 900,
+      });
+
+      await handleImageUpload(cameraField, file);
+      closeCamera();
+    } catch (error: any) {
+      console.error("Failed to capture class image:", error);
+      showToast("error", error?.message || "Failed to capture photo.");
+    } finally {
+      setCameraCapturing(false);
+    }
+  };
+
   const clearData = () => {
     Object.values(mediaPreviewUrls).forEach(revokeMediaObjectUrl);
     setRows([]);
     setOrganizations([]);
+    setTeachers([]);
     setStudents([]);
     setEnrollments([]);
     setClassSubjects([]);
+    setClassTeachers([]);
     setMediaPreviewUrls({});
   };
 
@@ -442,52 +528,25 @@ export default function ClassesPage() {
         const classId = idOf(classRow.id);
         if (!classId) return;
 
-        const resolveOwnedAssetUrl = async (
-          fieldKey: string,
-          fallbackMediaId?: number | string | null,
-        ) => {
-          const ownedAsset = await getOwnerFieldMediaAsset({
+        try {
+          const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: CLASS_MEDIA_OWNER_TABLE,
             ownerLocalId: classId,
             ownerCloudId: classRow.cloudId || undefined,
-            fieldKey,
+            fieldKey: MediaFieldKeys.PHOTO,
+            fallbackAssetId: classRow.photoMediaId,
           });
-
-          if (ownedAsset?.id) {
-            const url = await getMediaObjectUrl(Number(ownedAsset.id));
-            if (url) return url;
-          }
-
-          const fallbackId = idOf(fallbackMediaId);
-          if (!fallbackId) return "";
-
-          const fallbackAsset =
-            await tableSafe("mediaAssets")?.get?.(fallbackId);
-          const belongsToThisClass =
-            fallbackAsset &&
-            !fallbackAsset.isDeleted &&
-            fallbackAsset.active !== false &&
-            fallbackAsset.accountId === accountId &&
-            fallbackAsset.ownerTable === CLASS_MEDIA_OWNER_TABLE &&
-            fallbackAsset.fieldKey === fieldKey &&
-            sameId(fallbackAsset.ownerLocalId, classId);
-
-          if (!belongsToThisClass) return "";
-          return getMediaObjectUrl(fallbackId);
-        };
-
-        try {
-          const photoUrl = await resolveOwnedAssetUrl(
-            MediaFieldKeys.PHOTO,
-            classRow.photoMediaId,
-          );
           if (photoUrl) next[mediaKey(classId, "photo")] = photoUrl;
 
-          const bannerUrl = await resolveOwnedAssetUrl(
-            MediaFieldKeys.BANNER,
-            classRow.bannerImageMediaId,
-          );
+          const bannerUrl = await resolveOwnerMediaUrl({
+            accountId: accountId || undefined,
+            ownerTable: CLASS_MEDIA_OWNER_TABLE,
+            ownerLocalId: classId,
+            ownerCloudId: classRow.cloudId || undefined,
+            fieldKey: MediaFieldKeys.BANNER,
+            fallbackAssetId: classRow.bannerImageMediaId,
+          });
           if (bannerUrl) next[mediaKey(classId, "bannerImage")] = bannerUrl;
         } catch (error) {
           console.error("Failed to resolve class media:", classId, error);
@@ -495,12 +554,9 @@ export default function ClassesPage() {
       }),
     );
 
-    setMediaPreviewUrls((current) => {
-      Object.values(current).forEach((url) => {
-        if (!Object.values(next).includes(url)) revokeMediaObjectUrl(url);
-      });
-      return next;
-    });
+    // Match Teachers/Students fixed media behavior: do not revoke preview URLs
+    // during a reload while rows are still mounted. Replacing the map is enough.
+    setMediaPreviewUrls(next);
   };
 
   const load = async () => {
@@ -519,6 +575,8 @@ export default function ClassesPage() {
         studentRows,
         enrollmentRows,
         classSubjectRows,
+        teacherRows,
+        classTeacherRows,
       ] = await Promise.all([
         tableSafe("classes")?.toArray?.() || [],
         listActiveLocal("organizations", {
@@ -533,6 +591,8 @@ export default function ClassesPage() {
         } as any),
         tableSafe("studentEnrollments")?.toArray?.() || [],
         tableSafe("classSubjects")?.toArray?.() || [],
+        tableSafe("teachers")?.toArray?.() || [],
+        tableSafe("classTeachers")?.toArray?.() || [],
       ]);
 
       const scopedClasses = (classRows as Class[])
@@ -550,6 +610,12 @@ export default function ClassesPage() {
         ),
       );
 
+      setTeachers(
+        (teacherRows as Teacher[])
+          .filter((row: any) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))),
+      );
+
       setStudents(
         (studentRows as Student[]).filter(
           (row: any) =>
@@ -563,6 +629,11 @@ export default function ClassesPage() {
       );
       setClassSubjects(
         (classSubjectRows as ClassSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setClassTeachers(
+        (classTeacherRows as ClassTeacher[]).filter((row) =>
           sameTenant(row as TenantRow),
         ),
       );
@@ -592,14 +663,77 @@ export default function ClassesPage() {
   useEffect(() => {
     return () => {
       Object.values(mediaPreviewUrls).forEach(revokeMediaObjectUrl);
+      stopCurrentCamera();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaPreviewUrls]);
+
+  useEffect(() => {
+    if (!cameraOpen) return;
+
+    let cancelled = false;
+
+    const startCamera = async () => {
+      try {
+        setCameraStarting(true);
+        stopCurrentCamera();
+
+        const stream = await openCameraStream({
+          facingMode: cameraFacing,
+          width: 1280,
+          height: 720,
+        });
+
+        if (cancelled) {
+          stopCameraStream(stream);
+          return;
+        }
+
+        cameraStreamRef.current = stream;
+
+        if (cameraVideoRef.current) {
+          await attachCameraStreamToVideo(cameraVideoRef.current, stream);
+        }
+      } catch (error: any) {
+        console.error("Failed to open class camera:", error);
+        showToast("error", error?.message || getCameraUnavailableMessage());
+        setCameraOpen(false);
+      } finally {
+        if (!cancelled) setCameraStarting(false);
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      cancelled = true;
+      stopCurrentCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraOpen, cameraFacing]);
 
   const organizationMap = useMemo(() => {
     const map = new Map<number, Organization>();
     organizations.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [organizations]);
+
+  const teacherMap = useMemo(() => {
+    const map = new Map<number, Teacher>();
+    teachers.forEach((row: any) => map.set(idOf(row.id), row));
+    return map;
+  }, [teachers]);
+
+  const classTeacherMap = useMemo(() => {
+    const map = new Map<number, ClassTeacher>();
+    classTeachers.forEach((row: any) => {
+      if (!isActiveRow(row)) return;
+      const classId = idOf(row.classId);
+      if (!classId || map.has(classId)) return;
+      map.set(classId, row);
+    });
+    return map;
+  }, [classTeachers]);
 
   const activeEnrollmentCounts = useMemo(() => {
     const map = new Map<number, number>();
@@ -645,6 +779,8 @@ export default function ClassesPage() {
         0;
       const subjectCount = classSubjectCounts.get(id) || 0;
       const capacity = Number(row.capacity || 0);
+      const classTeacherLink = classTeacherMap.get(id);
+      const classTeacher = classTeacherLink ? (teacherMap.get(idOf((classTeacherLink as any).teacherId)) as any) : undefined;
       const capacityUsed = capacity
         ? Math.min(100, Math.round((studentCount / capacity) * 100))
         : 0;
@@ -659,6 +795,9 @@ export default function ClassesPage() {
           mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
           safeRecordMediaValue(row.bannerImage),
         organizationName: organization?.name || "No organization",
+        classTeacherId: classTeacher ? idOf(classTeacher.id) : undefined,
+        classTeacherName: classTeacher?.fullName || "No class teacher",
+        classTeacherLink,
         studentCount,
         subjectCount,
         capacity,
@@ -670,10 +809,12 @@ export default function ClassesPage() {
   }, [
     activeEnrollmentCounts,
     classSubjectCounts,
+    classTeacherMap,
     fallbackCurrentClassCounts,
     mediaPreviewUrls,
     organizationMap,
     rows,
+    teacherMap,
   ]);
 
   const filteredRows = useMemo(() => {
@@ -699,7 +840,7 @@ export default function ClassesPage() {
 
         if (!query) return true;
 
-        return `${row.name} ${row.code || ""} ${row.level || ""} ${item.organizationName} ${row.capacity || ""}`
+        return `${row.name} ${row.code || ""} ${row.level || ""} ${item.organizationName} ${item.classTeacherName} ${row.capacity || ""}`
           .toLowerCase()
           .includes(query);
       })
@@ -775,7 +916,7 @@ export default function ClassesPage() {
     setForm((current) => ({ ...current, ...patch }));
 
   const handleImageUpload = async (
-    field: "photo" | "bannerImage",
+    field: CameraField,
     file?: File,
   ) => {
     if (!file) return;
@@ -804,6 +945,7 @@ export default function ClassesPage() {
       updateForm({
         [field]: result.previewUrl,
         [isPhoto ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [isPhoto ? "newPhotoMediaId" : "newBannerImageMediaId"]: result.assetId,
       } as Partial<FormState>);
 
       showToast(
@@ -842,6 +984,7 @@ export default function ClassesPage() {
     setForm({
       id: idOf(item.id),
       organizationId: item.organizationId ? String(item.organizationId) : "",
+      classTeacherId: classTeacherMap.get(idOf(item.id))?.teacherId ? String((classTeacherMap.get(idOf(item.id)) as any).teacherId) : "",
       name: item.name || "",
       code: item.code || "",
       level: item.level || "",
@@ -850,6 +993,7 @@ export default function ClassesPage() {
         safeRecordMediaValue(item.photo) ||
         "",
       photoMediaId: item.photoMediaId ? Number(item.photoMediaId) : undefined,
+      newPhotoMediaId: undefined,
       bannerImage:
         mediaPreviewUrls[mediaKey(idOf(item.id), "bannerImage")] ||
         safeRecordMediaValue(item.bannerImage) ||
@@ -857,6 +1001,7 @@ export default function ClassesPage() {
       bannerImageMediaId: item.bannerImageMediaId
         ? Number(item.bannerImageMediaId)
         : undefined,
+      newBannerImageMediaId: undefined,
       capacity: item.capacity == null ? "" : String(item.capacity),
       active: isActiveRow(item),
     });
@@ -943,7 +1088,7 @@ export default function ClassesPage() {
 
       if (savedClassId) {
         await Promise.all(
-          [form.photoMediaId, form.bannerImageMediaId]
+          [form.newPhotoMediaId, form.newBannerImageMediaId]
             .filter(Boolean)
             .map((assetId) =>
               attachMediaAssetToOwner({
@@ -954,6 +1099,46 @@ export default function ClassesPage() {
               }),
             ),
         );
+      }
+
+      if (savedClassId) {
+        const selectedTeacherId = idOf(form.classTeacherId);
+        const existingLinks = classTeachers.filter(
+          (link: any) => sameId(link.classId, savedClassId) && !link.isDeleted,
+        );
+
+        await Promise.all(
+          existingLinks
+            .filter((link: any) => !sameId(link.teacherId, selectedTeacherId))
+            .map((link: any) =>
+              link.id ? softDeleteLocal("classTeachers", Number(link.id)) : Promise.resolve(),
+            ),
+        );
+
+        if (selectedTeacherId) {
+          const matchingLink = existingLinks.find((link: any) => sameId(link.teacherId, selectedTeacherId));
+          if (matchingLink?.id) {
+            await updateLocal("classTeachers", Number(matchingLink.id), {
+              accountId,
+              schoolId: Number(schoolId),
+              branchId: Number(branchId),
+              classId: savedClassId,
+              teacherId: selectedTeacherId,
+              active: true,
+              isDeleted: false,
+            } as Partial<ClassTeacher>);
+          } else {
+            await createLocal("classTeachers", {
+              accountId,
+              schoolId: Number(schoolId),
+              branchId: Number(branchId),
+              classId: savedClassId,
+              teacherId: selectedTeacherId,
+              active: true,
+              isDeleted: false,
+            } as unknown as ClassTeacher);
+          }
+        }
       }
 
       mediaSessionKeyRef.current = createClassMediaSessionKey();
@@ -1232,10 +1417,26 @@ export default function ClassesPage() {
           form={form}
           saving={saving}
           organizations={organizations}
+          teachers={teachers}
           setModalOpen={setModalOpen}
           updateForm={updateForm}
           handleImageUpload={handleImageUpload}
+          openCameraForField={openCameraForField}
           save={save}
+        />
+      )}
+
+      {cameraOpen && (
+        <CameraCaptureModal
+          field={cameraField}
+          videoRef={cameraVideoRef}
+          starting={cameraStarting}
+          capturing={cameraCapturing}
+          facing={cameraFacing}
+          setFacing={setCameraFacing}
+          capture={captureCameraPhoto}
+          close={closeCamera}
+          entityLabel={CLASS_MEDIA_ENTITY_LABEL}
         />
       )}
     </main>
@@ -1293,7 +1494,7 @@ function ClassListItem({
           {row.code ? ` · ${row.code}` : ""}
         </small>
         <em>
-          {item.studentCount} student{item.studentCount === 1 ? "" : "s"} ·{" "}
+          {item.classTeacherName} · {item.studentCount} student{item.studentCount === 1 ? "" : "s"} ·{" "}
           {item.subjectCount} subject
           {item.subjectCount === 1 ? "" : "s"}
           {item.capacity
@@ -1504,7 +1705,7 @@ function ActionSheet({
             <h2>{row.name || "Class"}</h2>
             <p>
               {item.organizationName} ·{" "}
-              {item.overCapacity ? "Over capacity" : statusLabel(item.active)}
+              {item.classTeacherName} · {item.overCapacity ? "Over capacity" : statusLabel(item.active)}
             </p>
           </div>
           <button
@@ -1517,6 +1718,10 @@ function ActionSheet({
         </div>
 
         <div className="student-detail-strip">
+          <span>
+            <b>Teacher</b>
+            {item.classTeacherName}
+          </span>
           <span>
             <b>Students</b>
             {item.studentCount}
@@ -1584,6 +1789,7 @@ function TableView({
               <th>Code</th>
               <th>Level</th>
               <th>Organization</th>
+              <th>Class Teacher</th>
               <th>Students</th>
               <th>Subjects</th>
               <th>Capacity</th>
@@ -1608,6 +1814,7 @@ function TableView({
                   <td>{row.code || "—"}</td>
                   <td>{row.level || "—"}</td>
                   <td>{item.organizationName}</td>
+                  <td>{item.classTeacherName}</td>
                   <td>{item.studentCount}</td>
                   <td>{item.subjectCount}</td>
                   <td>
@@ -1661,17 +1868,21 @@ function ClassModal({
   form,
   saving,
   organizations,
+  teachers,
   setModalOpen,
   updateForm,
   handleImageUpload,
+  openCameraForField,
   save,
 }: {
   form: FormState;
   saving: boolean;
   organizations: Organization[];
+  teachers: Teacher[];
   setModalOpen: (open: boolean) => void;
   updateForm: (patch: Partial<FormState>) => void;
-  handleImageUpload: (field: "photo" | "bannerImage", file?: File) => void;
+  handleImageUpload: (field: CameraField, file?: File) => void;
+  openCameraForField: (field: CameraField) => void;
   save: (event?: React.FormEvent) => void;
 }) {
   return (
@@ -1743,6 +1954,24 @@ function ClassModal({
             </label>
 
             <label>
+              <span>Class Teacher</span>
+              <select
+                value={form.classTeacherId}
+                onChange={(event) =>
+                  updateForm({ classTeacherId: event.target.value })
+                }
+              >
+                <option value="">No class teacher</option>
+                {teachers.map((teacher: any) => (
+                  <option key={String(teacher.id)} value={String(teacher.id)}>
+                    {teacher.fullName}
+                    {teacher.role ? ` · ${teacher.role}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
               <span>Capacity</span>
               <input
                 type="number"
@@ -1786,6 +2015,9 @@ function ClassModal({
                     hidden
                   />
                 </label>
+                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>
+                  Take Photo
+                </button>
               </div>
               <small className="ba-media-hint">
                 Upload a class image. It is optimized and saved as a media asset
@@ -1814,6 +2046,9 @@ function ClassModal({
                     hidden
                   />
                 </label>
+                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("bannerImage")}>
+                  Take Photo
+                </button>
               </div>
               <small className="ba-media-hint">
                 Upload a banner for this class. The banner is compressed
@@ -1839,6 +2074,68 @@ function ClassModal({
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function CameraCaptureModal({
+  field,
+  videoRef,
+  starting,
+  capturing,
+  facing,
+  setFacing,
+  capture,
+  close,
+  entityLabel,
+}: {
+  field: CameraField;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  starting: boolean;
+  capturing: boolean;
+  facing: CameraFacingMode;
+  setFacing: (value: CameraFacingMode) => void;
+  capture: () => void | Promise<void>;
+  close: () => void;
+  entityLabel: string;
+}) {
+  const title = field === "photo" ? `Take ${entityLabel} Photo` : `Take ${entityLabel} Banner Photo`;
+
+  return (
+    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-camera-modal">
+        <div className="ba-modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close camera">
+            ✕
+          </button>
+        </div>
+
+        <div className="ba-camera-preview">
+          <video ref={videoRef} autoPlay muted playsInline />
+          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+        </div>
+
+        <div className="ba-camera-actions">
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={() => setFacing(facing === "environment" ? "user" : "environment")}
+            disabled={starting || capturing}
+          >
+            Switch Camera
+          </button>
+          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>
+            Cancel
+          </button>
+          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>
+            {capturing ? "Capturing..." : "Capture Photo"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2678,6 +2975,11 @@ const css = `
   box-shadow: 0 10px 22px color-mix(in srgb, var(--ba-primary) 18%, transparent);
 }
 
+.ba-media-button.secondary {
+  background: color-mix(in srgb, var(--ba-primary) 10%, var(--card-bg,#fff));
+  color: var(--ba-primary) !important;
+}
+
 .ba-media-button input {
   display: none;
 }
@@ -2703,6 +3005,78 @@ const css = `
   object-fit: cover;
   border-radius: 22px;
   border: 1px solid var(--border,rgba(0,0,0,.10));
+}
+
+.ba-camera-modal {
+  width: min(720px, 100%);
+  max-height: min(92dvh, 820px);
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: 28px;
+  box-shadow: 0 30px 90px rgba(15,23,42,.35);
+}
+
+.ba-camera-preview {
+  position: relative;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #020617;
+  aspect-ratio: 16 / 10;
+  display: grid;
+  place-items: center;
+}
+
+.ba-camera-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ba-camera-loading {
+  position: absolute;
+  inset: auto 14px 14px;
+  border-radius: 999px;
+  padding: 8px 11px;
+  background: rgba(255,255,255,.92);
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ba-camera-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+}
+
+.ba-camera-secondary,
+.ba-camera-primary {
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.ba-camera-secondary {
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  background: var(--card-bg, #fff);
+  color: var(--text, #111827);
+}
+
+.ba-camera-primary {
+  border: 0;
+  background: var(--ba-primary);
+  color: #fff;
+}
+
+.ba-camera-secondary:disabled,
+.ba-camera-primary:disabled {
+  opacity: .55;
+  cursor: not-allowed;
 }
 
 .ba-modal {

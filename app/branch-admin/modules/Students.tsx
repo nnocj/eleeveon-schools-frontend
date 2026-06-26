@@ -24,9 +24,10 @@
  * Media behavior rebuilt from the working Teachers.tsx pattern:
  * - selected images are compressed and stored once in mediaAssets/mediaBlobs
  * - student records save small media IDs instead of full image strings
- * - old photo/coverPhoto fields remain as backward-compatible fallbacks only
+ * - old photo/coverPhoto fields remain as backward-compatible fallbacks for list display only
+ * - edit forms prefer resolved owned media and never reattach inherited/stale row media IDs
  * - ownerTempKey isolates unsaved form uploads so one student image cannot bleed into teachers/parents/classes or another student
- * - new uploads are attached to the student after create/update so media can sync separately
+ * - only newly uploaded media from the current create/edit session is attached after save
  * - photo and cover fields support Upload and real Take Photo camera capture
  * - media owner/session keys use shared mediaAssetUtils helpers so this page cannot save under teacher/parent ownership
  *
@@ -369,6 +370,7 @@ export default function StudentsPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
   const mediaSessionKey = useRef(makeMediaSessionKey());
+  const uploadedMediaAssetIds = useRef<Partial<Record<CameraField, number>>>({});
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -714,6 +716,11 @@ export default function StudentsPage() {
         replaceExisting: true,
       });
 
+      uploadedMediaAssetIds.current = {
+        ...uploadedMediaAssetIds.current,
+        [field]: result.assetId,
+      };
+
       updateForm({
         [field]: result.previewUrl,
         [`${field}MediaId`]: result.assetId,
@@ -738,6 +745,7 @@ export default function StudentsPage() {
     if (!requireTenant()) return;
 
     mediaSessionKey.current = makeMediaSessionKey();
+    uploadedMediaAssetIds.current = {};
 
     setForm({
       ...emptyForm,
@@ -750,10 +758,15 @@ export default function StudentsPage() {
 
   const openEdit = (row: Student) => {
     const s: any = row;
+    const studentId = idOf(s.id);
+    const resolvedPhoto = mediaPreviewUrls[mediaKey(studentId, "photo")] || "";
+    const resolvedCoverPhoto = mediaPreviewUrls[mediaKey(studentId, "coverPhoto")] || "";
+
     mediaSessionKey.current = makeMediaSessionKey();
+    uploadedMediaAssetIds.current = {};
     setSelectedItem(null);
     setForm({
-      id: idOf(s.id),
+      id: studentId,
       organizationId: s.organizationId ? String(s.organizationId) : "",
       currentClassId: s.currentClassId ? String(s.currentClassId) : "",
       admissionNumber: s.admissionNumber || "",
@@ -761,9 +774,13 @@ export default function StudentsPage() {
       gender: s.gender || "",
       age: s.age == null ? "" : String(s.age),
       dateOfBirth: s.dateOfBirth || "",
-      photo: mediaPreviewUrls[mediaKey(idOf(s.id), "photo")] || safeRecordMediaValue(s.photo) || "",
+      // Edit safety: do not hydrate the edit form from raw row.photo/row.coverPhoto.
+      // Those legacy fields may already be stale or wrong on corrupted student rows.
+      // The list can still display legacy fallback, but edit/save should only use
+      // media resolved by student owner + local id + field key or a new upload.
+      photo: resolvedPhoto,
       photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
-      coverPhoto: mediaPreviewUrls[mediaKey(idOf(s.id), "coverPhoto")] || safeRecordMediaValue(s.coverPhoto) || "",
+      coverPhoto: resolvedCoverPhoto,
       coverPhotoMediaId: s.coverPhotoMediaId ? Number(s.coverPhotoMediaId) : undefined,
       parentName: s.parentName || "",
       parentPhone: s.parentPhone || "",
@@ -847,21 +864,22 @@ export default function StudentsPage() {
       const savedStudentId = Number(
         typeof savedStudent === "number" ? savedStudent : (savedStudent as any)?.id || form.id || 0
       );
-      if (savedStudentId) {
+      const newlyUploadedAssetIds = Object.values(uploadedMediaAssetIds.current).filter(Boolean);
+
+      if (savedStudentId && newlyUploadedAssetIds.length) {
         await Promise.all(
-          [form.photoMediaId, form.coverPhotoMediaId]
-            .filter(Boolean)
-            .map((assetId) =>
-              attachMediaAssetToOwner({
-                assetId: Number(assetId),
-                ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedStudentId,
-                ownerTempKey: mediaSessionKey.current,
-              })
-            )
+          newlyUploadedAssetIds.map((assetId) =>
+            attachMediaAssetToOwner({
+              assetId: Number(assetId),
+              ownerTable: STUDENT_MEDIA_OWNER_TABLE,
+              ownerLocalId: savedStudentId,
+              ownerTempKey: mediaSessionKey.current,
+            })
+          )
         );
       }
 
+      uploadedMediaAssetIds.current = {};
       mediaSessionKey.current = makeMediaSessionKey();
       setModalOpen(false);
       showToast("success", "Student saved.");

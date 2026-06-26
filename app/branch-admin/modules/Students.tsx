@@ -19,18 +19,16 @@
  * - softDeleteLocal(...) for local soft delete
  * - listActiveLocal(...) for active lookup tables
  * - saveImageAsset(...) for photos so large Base64 files are not stored inside student records
- * - photoMediaId / coverPhotoMediaId remain as backward-compatible references, but reloads resolve media by ownerTable + ownerLocalId + fieldKey
+ * - photoMediaId / coverPhotoMediaId carry local media references for sync-safe records
  *
- * Media behavior:
- * - selected or camera-captured images are compressed and stored once in mediaAssets/mediaBlobs
+ * Media behavior rebuilt from the working Teachers.tsx pattern:
+ * - selected images are compressed and stored once in mediaAssets/mediaBlobs
  * - student records save small media IDs instead of full image strings
  * - old photo/coverPhoto fields remain as backward-compatible fallbacks only
- * - unsaved-form uploads use ownerTempKey so one student/teacher/parent upload cannot bleed into another record
+ * - ownerTempKey isolates unsaved form uploads so one student image cannot bleed into teachers/parents/classes or another student
  * - new uploads are attached to the student after create/update so media can sync separately
- * - synced students also attach ownerCloudId so media updates can resolve correctly on other devices
- * - photo fields offer both Upload and Take Photo actions while using the same saveImageAsset(...) pipeline
- * - media owner table comes from shared MediaOwners.STUDENTS so the camera/upload system stays reusable across Students, Teachers, Parents, Settings, and finance documents
- * - this file only supplies the student owner constant; the camera utility itself remains shared and module-agnostic
+ * - photo and cover fields support Upload and real Take Photo camera capture
+ * - media owner/session keys use shared mediaAssetUtils helpers so this page cannot save under teacher/parent ownership
  *
  * Compact mobile-first UI update:
  * - keeps the original page styling intact
@@ -60,7 +58,7 @@ import {
   attachCameraStreamToVideo,
   attachMediaAssetToOwner,
   captureImageFileFromVideo,
-  createMediaSessionKey as createSharedMediaSessionKey,
+  createMediaSessionKey,
   getCameraUnavailableMessage,
   resolveOwnerMediaUrl,
   isCameraApiAvailable,
@@ -283,8 +281,7 @@ const safeRecordMediaValue = (value?: string) => {
 const STUDENT_MEDIA_OWNER_TABLE = MediaOwners.STUDENTS;
 const STUDENT_MEDIA_ENTITY_LABEL = "Student";
 
-const createStudentMediaSessionKey = () =>
-  createSharedMediaSessionKey(STUDENT_MEDIA_OWNER_TABLE);
+const makeMediaSessionKey = () => createMediaSessionKey(STUDENT_MEDIA_OWNER_TABLE);
 
 function Chip({
   children,
@@ -371,7 +368,7 @@ export default function StudentsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
-  const mediaSessionKeyRef = useRef(createStudentMediaSessionKey());
+  const mediaSessionKey = useRef(makeMediaSessionKey());
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -434,7 +431,7 @@ export default function StudentsPage() {
     try {
       setCameraCapturing(true);
       const file = await captureImageFileFromVideo(cameraVideoRef.current, {
-        fileName: `${cameraField}-${Date.now()}.jpg`,
+        fileName: `student-${cameraField}-${Date.now()}.jpg`,
         mimeType: "image/jpeg",
         quality: 0.88,
         maxWidth: cameraField === "photo" ? 900 : 1440,
@@ -628,12 +625,8 @@ export default function StudentsPage() {
         return {
           id,
           row,
-          // No-bleed rule: list/cards should display only media resolved by
-          // ownerTable + ownerLocalId + fieldKey. Do not fall back to raw
-          // row.photo/row.coverPhoto here because old preview strings can be
-          // stale or shared across records in the browser.
-          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || "",
-          coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || "",
+          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
+          coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
           className: classData?.name || "No class assigned",
           organizationName: organization?.name || "No organization",
           enrollmentCount: studentEnrollments.length,
@@ -700,15 +693,6 @@ export default function StudentsPage() {
 
   const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
 
-  const getFormOwnerCloudId = () => {
-    if (!form.id) return undefined;
-
-    const existing = rows.find((row: any) => sameId(row.id, form.id)) as any;
-    const cloudId = String(existing?.cloudId || "").trim();
-
-    return cloudId || undefined;
-  };
-
   const handleImageUpload = async (field: "photo" | "coverPhoto", file?: File) => {
     if (!file) return;
 
@@ -718,16 +702,13 @@ export default function StudentsPage() {
     }
 
     try {
-      const ownerTempKey = form.id ? undefined : mediaSessionKeyRef.current;
-
       const result = await saveImageAsset(file, {
         accountId,
         schoolId: Number(schoolId),
         branchId: Number(branchId),
         ownerTable: STUDENT_MEDIA_OWNER_TABLE,
         ownerLocalId: form.id || undefined,
-        ownerCloudId: getFormOwnerCloudId(),
-        ownerTempKey,
+        ownerTempKey: form.id ? undefined : mediaSessionKey.current,
         fieldKey: field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
@@ -756,7 +737,7 @@ export default function StudentsPage() {
   const openCreate = () => {
     if (!requireTenant()) return;
 
-    mediaSessionKeyRef.current = createStudentMediaSessionKey();
+    mediaSessionKey.current = makeMediaSessionKey();
 
     setForm({
       ...emptyForm,
@@ -769,7 +750,7 @@ export default function StudentsPage() {
 
   const openEdit = (row: Student) => {
     const s: any = row;
-    mediaSessionKeyRef.current = createStudentMediaSessionKey();
+    mediaSessionKey.current = makeMediaSessionKey();
     setSelectedItem(null);
     setForm({
       id: idOf(s.id),
@@ -780,12 +761,9 @@ export default function StudentsPage() {
       gender: s.gender || "",
       age: s.age == null ? "" : String(s.age),
       dateOfBirth: s.dateOfBirth || "",
-      // No-bleed rule: edit preview should use the resolved owned media URL
-      // only. Old row.photo/row.coverPhoto values remain saved as legacy data
-      // but are not trusted for live preview display.
-      photo: mediaPreviewUrls[mediaKey(idOf(s.id), "photo")] || "",
+      photo: mediaPreviewUrls[mediaKey(idOf(s.id), "photo")] || safeRecordMediaValue(s.photo) || "",
       photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
-      coverPhoto: mediaPreviewUrls[mediaKey(idOf(s.id), "coverPhoto")] || "",
+      coverPhoto: mediaPreviewUrls[mediaKey(idOf(s.id), "coverPhoto")] || safeRecordMediaValue(s.coverPhoto) || "",
       coverPhotoMediaId: s.coverPhotoMediaId ? Number(s.coverPhotoMediaId) : undefined,
       parentName: s.parentName || "",
       parentPhone: s.parentPhone || "",
@@ -869,11 +847,6 @@ export default function StudentsPage() {
       const savedStudentId = Number(
         typeof savedStudent === "number" ? savedStudent : (savedStudent as any)?.id || form.id || 0
       );
-      const savedStudentCloudId =
-        typeof savedStudent === "number"
-          ? String((existing as any)?.cloudId || "").trim() || undefined
-          : String((savedStudent as any)?.cloudId || (existing as any)?.cloudId || "").trim() || undefined;
-
       if (savedStudentId) {
         await Promise.all(
           [form.photoMediaId, form.coverPhotoMediaId]
@@ -883,44 +856,13 @@ export default function StudentsPage() {
                 assetId: Number(assetId),
                 ownerTable: STUDENT_MEDIA_OWNER_TABLE,
                 ownerLocalId: savedStudentId,
-                ownerCloudId: savedStudentCloudId,
-                ownerTempKey: mediaSessionKeyRef.current,
+                ownerTempKey: mediaSessionKey.current,
               })
             )
         );
-
-        // Match the working Teachers behavior: after the new media is attached,
-        // immediately refresh only this saved student's owned media keys. This
-        // prevents the freshly uploaded preview from sitting in form state while
-        // older list rows are still mounted.
-        const refreshedMedia: Record<string, string> = {};
-
-        const refreshedPhotoUrl = await resolveOwnerMediaUrl({
-          accountId: accountId || undefined,
-          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedStudentId,
-          ownerCloudId: savedStudentCloudId,
-          fieldKey: MediaFieldKeys.PHOTO,
-          fallbackAssetId: form.photoMediaId,
-        });
-        if (refreshedPhotoUrl) refreshedMedia[mediaKey(savedStudentId, "photo")] = refreshedPhotoUrl;
-
-        const refreshedCoverUrl = await resolveOwnerMediaUrl({
-          accountId: accountId || undefined,
-          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedStudentId,
-          ownerCloudId: savedStudentCloudId,
-          fieldKey: MediaFieldKeys.COVER_PHOTO,
-          fallbackAssetId: form.coverPhotoMediaId,
-        });
-        if (refreshedCoverUrl) refreshedMedia[mediaKey(savedStudentId, "coverPhoto")] = refreshedCoverUrl;
-
-        if (Object.keys(refreshedMedia).length) {
-          setMediaPreviewUrls((current) => ({ ...current, ...refreshedMedia }));
-        }
       }
 
-      mediaSessionKeyRef.current = createStudentMediaSessionKey();
+      mediaSessionKey.current = makeMediaSessionKey();
       setModalOpen(false);
       showToast("success", "Student saved.");
       await load();

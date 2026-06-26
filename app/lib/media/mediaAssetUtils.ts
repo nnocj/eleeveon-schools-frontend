@@ -49,7 +49,7 @@ import { db } from "../db";
 import { createLocal, updateLocal } from "../sync/syncUtils";
 
 export type MediaKind = "image" | "document" | "video" | "audio" | "other";
-export type MediaUploadStatus = "local" | "uploading" | "uploaded" | "failed";
+export type MediaUploadStatus = "local" | "queued" | "uploading" | "uploaded" | "failed";
 export type MediaVariant = "avatar" | "cover" | "logo" | "signature" | "gallery" | "receipt" | "attachment";
 
 export type MediaOwnerTable =
@@ -431,6 +431,61 @@ function rememberMediaObjectUrl(assetId: number, cacheKey: string, url: string) 
   return url;
 }
 
+function mediaSortTime(row: any) {
+  const updatedAt = Number(row?.updatedAt || 0);
+  const createdAt = Number(row?.createdAt || 0);
+  const uploadedAt = row?.uploadedAt ? new Date(row.uploadedAt).getTime() : 0;
+  return Math.max(updatedAt, createdAt, Number.isFinite(uploadedAt) ? uploadedAt : 0);
+}
+
+function sortNewestMediaFirst(a: any, b: any) {
+  const versionDiff = Number(b?.version || 0) - Number(a?.version || 0);
+  if (versionDiff) return versionDiff;
+
+  const timeDiff = mediaSortTime(b) - mediaSortTime(a);
+  if (timeDiff) return timeDiff;
+
+  return Number(b?.id || 0) - Number(a?.id || 0);
+}
+
+async function rawUpdateMediaAssetLocalOnly(assetId: number, patch: Record<string, any>) {
+  const id = cleanNumber(assetId);
+  if (!id) return;
+
+  // Important: this is intentionally NOT updateLocal(...). Preview caching is
+  // a local display concern. It must not change updatedAt/version/synced,
+  // otherwise an old local image can look newer than the database source of truth
+  // and win on another sync round.
+  await tableSafe("mediaAssets")?.update?.(id, patch);
+}
+
+async function softDeleteMediaBlobForAsset(asset: any, now = Date.now()) {
+  const blobTable = tableSafe("mediaBlobs");
+  if (!blobTable || !asset?.id) return;
+
+  const directBlobId = cleanNumber(asset.localBlobId);
+  if (directBlobId) {
+    try {
+      await blobTable.update(directBlobId, { active: false, isDeleted: true, updatedAt: now });
+    } catch {
+      // ignore local-only blob cleanup errors
+    }
+  }
+
+  try {
+    const rows = await blobTable.toArray?.();
+    await Promise.all(
+      (rows || [])
+        .filter((row: any) => sameNumber(row.assetLocalId, asset.id) || sameNumber(row.assetId, asset.id))
+        .map((row: any) =>
+          row?.id ? blobTable.update(Number(row.id), { active: false, isDeleted: true, updatedAt: now }) : Promise.resolve()
+        )
+    );
+  } catch {
+    // ignore local-only blob cleanup errors
+  }
+}
+
 function isInlinePreviewSafe(asset: any) {
   const mimeType = String(asset?.mimeType || "").toLowerCase();
   const kind = String(asset?.kind || asset?.assetKind || "").toLowerCase();
@@ -771,6 +826,7 @@ export async function saveImageAsset(file: File, options: SaveMediaAssetOptions)
     ownerTempKey: cleanString(options.ownerTempKey),
     fieldKey: cleanFieldKey(options.fieldKey),
     kind: "image" as MediaKind,
+    assetKind: "image" as MediaKind,
     variant,
     fileName: file.name || `${options.fieldKey}-${now}`,
     originalFileName: file.name || undefined,
@@ -870,6 +926,7 @@ export async function saveGenericFileAsset(file: File, options: SaveMediaAssetOp
     ownerTempKey: cleanString(options.ownerTempKey),
     fieldKey: cleanFieldKey(options.fieldKey),
     kind: getMediaKind(file),
+    assetKind: getMediaKind(file),
     variant: options.variant || "attachment",
     fileName: file.name || `${options.fieldKey}-${now}`,
     originalFileName: file.name || undefined,
@@ -973,13 +1030,9 @@ export async function getMediaObjectUrl(assetId?: number | null) {
       // Persist the stable preview for future renders. This is best-effort;
       // displaying the correct image must not depend on the update succeeding.
       try {
-        await updateLocal("mediaAssets" as any, id, { previewDataUrl: dataUrl } as any);
+        await rawUpdateMediaAssetLocalOnly(id, { previewDataUrl: dataUrl });
       } catch {
-        try {
-          await tableSafe("mediaAssets")?.update?.(id, { previewDataUrl: dataUrl, updatedAt: Date.now() });
-        } catch {
-          // ignore preview cache write failures
-        }
+        // ignore preview cache write failures
       }
       return dataUrl;
     }
@@ -1030,7 +1083,7 @@ export async function getOwnerFieldMediaAsset(params: {
       if (row.fieldKey !== cleanFieldKey(params.fieldKey)) return false;
       return ownerIdentityMatches(row, params);
     })
-    .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+    .sort(sortNewestMediaFirst)[0];
 }
 
 
@@ -1081,6 +1134,7 @@ export async function softDeleteOwnerFieldAssets(params: {
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
   fieldKey?: string;
+  excludeAssetIds?: Array<number | string | null | undefined>;
 }) {
   const table = tableSafe("mediaAssets");
   if (!table) return;
@@ -1089,8 +1143,10 @@ export async function softDeleteOwnerFieldAssets(params: {
   // delete media from another open unsaved record.
   if (!hasOwnerIdentity(params)) return;
 
+  const excluded = new Set((params.excludeAssetIds || []).map((id) => Number(id || 0)).filter(Boolean));
   const rows = await table.toArray();
   const matches = rows.filter((row: any) => {
+    if (row?.id && excluded.has(Number(row.id))) return false;
     if (row.isDeleted) return false;
     if (params.accountId && row.accountId !== params.accountId) return false;
     if (row.ownerTable !== cleanOwnerTable(params.ownerTable)) return false;
@@ -1099,14 +1155,22 @@ export async function softDeleteOwnerFieldAssets(params: {
   });
 
   await Promise.all(
-    matches.map((row: any) => {
-      if (!row.id) return Promise.resolve();
+    matches.map(async (row: any) => {
+      if (!row.id) return;
       revokeCachedMediaObjectUrl(Number(row.id));
-      return updateLocal("mediaAssets" as any, Number(row.id), {
+
+      await updateLocal("mediaAssets" as any, Number(row.id), {
         active: false,
         isDeleted: true,
+        ownerTempKey: undefined,
+        // Keep uploaded assets marked uploaded so the backend can receive the
+        // deletion tombstone instead of the file being treated as a new local upload.
         uploadStatus: row.uploadStatus === "uploaded" ? row.uploadStatus : "local",
       } as any);
+
+      // mediaBlobs are local-only. Clean them locally so the old image stops
+      // occupying storage and cannot be resolved by stale blob pointers.
+      await softDeleteMediaBlobForAsset(row);
     })
   );
 }
@@ -1123,16 +1187,35 @@ export async function attachMediaAssetToOwner(params: {
 
   revokeCachedMediaObjectUrl(Number(asset.id));
 
+  const ownerTable = cleanOwnerTable(params.ownerTable);
+  const ownerLocalId = cleanNumber(params.ownerLocalId);
+  const ownerCloudId = cleanString(params.ownerCloudId);
+
   await updateLocal("mediaAssets" as any, Number(asset.id), {
-    ownerTable: cleanOwnerTable(params.ownerTable),
-    ownerLocalId: cleanNumber(params.ownerLocalId),
-    ownerCloudId: cleanString(params.ownerCloudId),
+    ownerTable,
+    ownerLocalId,
+    ownerCloudId,
     // Once attached to a real record, clear the temporary form/session key so
     // future lookups use the permanent owner identity.
     ownerTempKey: undefined,
     active: true,
     isDeleted: false,
   } as any);
+
+  // Replacement cleanup for unsaved-form uploads that become attached later:
+  // once this asset has a permanent owner, deactivate older active assets for
+  // the same owner + field. The current asset is excluded.
+  const fieldKey = cleanString(asset.fieldKey);
+  if (fieldKey && (ownerLocalId || ownerCloudId)) {
+    await softDeleteOwnerFieldAssets({
+      accountId: asset.accountId,
+      ownerTable,
+      ownerLocalId,
+      ownerCloudId,
+      fieldKey,
+      excludeAssetIds: [Number(asset.id)],
+    });
+  }
 }
 
 export function revokeMediaObjectUrl(url?: string) {

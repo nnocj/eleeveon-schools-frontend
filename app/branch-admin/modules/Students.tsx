@@ -27,6 +27,7 @@
  * - old photo/coverPhoto fields remain as backward-compatible fallbacks only
  * - unsaved-form uploads use ownerTempKey so one student/teacher/parent upload cannot bleed into another record
  * - new uploads are attached to the student after create/update so media can sync separately
+ * - synced students also attach ownerCloudId so media updates can resolve correctly on other devices
  * - photo fields offer both Upload and Take Photo actions while using the same saveImageAsset(...) pipeline
  * - media owner table comes from shared MediaOwners.STUDENTS so the camera/upload system stays reusable across Students, Teachers, Parents, Settings, and finance documents
  * - this file only supplies the student owner constant; the camera utility itself remains shared and module-agnostic
@@ -699,6 +700,15 @@ export default function StudentsPage() {
 
   const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
 
+  const getFormOwnerCloudId = () => {
+    if (!form.id) return undefined;
+
+    const existing = rows.find((row: any) => sameId(row.id, form.id)) as any;
+    const cloudId = String(existing?.cloudId || "").trim();
+
+    return cloudId || undefined;
+  };
+
   const handleImageUpload = async (field: "photo" | "coverPhoto", file?: File) => {
     if (!file) return;
 
@@ -716,6 +726,7 @@ export default function StudentsPage() {
         branchId: Number(branchId),
         ownerTable: STUDENT_MEDIA_OWNER_TABLE,
         ownerLocalId: form.id || undefined,
+        ownerCloudId: getFormOwnerCloudId(),
         ownerTempKey,
         fieldKey: field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
@@ -858,6 +869,11 @@ export default function StudentsPage() {
       const savedStudentId = Number(
         typeof savedStudent === "number" ? savedStudent : (savedStudent as any)?.id || form.id || 0
       );
+      const savedStudentCloudId =
+        typeof savedStudent === "number"
+          ? String((existing as any)?.cloudId || "").trim() || undefined
+          : String((savedStudent as any)?.cloudId || (existing as any)?.cloudId || "").trim() || undefined;
+
       if (savedStudentId) {
         await Promise.all(
           [form.photoMediaId, form.coverPhotoMediaId]
@@ -867,6 +883,7 @@ export default function StudentsPage() {
                 assetId: Number(assetId),
                 ownerTable: STUDENT_MEDIA_OWNER_TABLE,
                 ownerLocalId: savedStudentId,
+                ownerCloudId: savedStudentCloudId,
                 ownerTempKey: mediaSessionKeyRef.current,
               })
             )
@@ -882,6 +899,7 @@ export default function StudentsPage() {
           accountId: accountId || undefined,
           ownerTable: STUDENT_MEDIA_OWNER_TABLE,
           ownerLocalId: savedStudentId,
+          ownerCloudId: savedStudentCloudId,
           fieldKey: MediaFieldKeys.PHOTO,
           fallbackAssetId: form.photoMediaId,
         });
@@ -891,6 +909,7 @@ export default function StudentsPage() {
           accountId: accountId || undefined,
           ownerTable: STUDENT_MEDIA_OWNER_TABLE,
           ownerLocalId: savedStudentId,
+          ownerCloudId: savedStudentCloudId,
           fieldKey: MediaFieldKeys.COVER_PHOTO,
           fallbackAssetId: form.coverPhotoMediaId,
         });

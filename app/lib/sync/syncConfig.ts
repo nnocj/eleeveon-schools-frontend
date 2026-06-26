@@ -6,15 +6,20 @@ import { SyncStatus } from "../constants/syncStatus";
  * ELEEVEON OFFLINE-FIRST SYNC CONFIG
  * ---------------------------------------------------------
  * Backward-compatible with your existing app.
+ *
+ * Media source-of-truth note:
+ * - mediaAssets SHOULD sync across devices because it carries ownerTable,
+ *   ownerLocalId/ownerCloudId, fieldKey, active/isDeleted and previewDataUrl.
+ * - mediaBlobs should remain local-only because it stores real browser Blob
+ *   objects that are not safe or efficient to push through normal SyncRecord.
+ * - Cross-device image display should therefore use mediaAssets.previewDataUrl,
+ *   thumbnailDataUrl, remoteUrl or publicUrl.
  */
 
 export const SYNC_ENDPOINTS = {
   PUSH: "/sync/push",
   PULL: "/sync/pull",
   STATUS: "/sync/status",
-
-  // Optional upgraded endpoints. If the backend does not have these yet,
-  // the frontend helpers fail softly and the normal sync still works.
   BOOTSTRAP: "/sync/bootstrap",
   PLATFORM_CACHE: "/sync/platform-cache",
   DEVICE_REGISTER: "/sync/devices/register",
@@ -42,15 +47,47 @@ export const SYNC_STATUS_VALUE = {
 
 export type SyncStatusValue = SyncStatus;
 
+/**
+ * Central media sync policy.
+ *
+ * Import these helpers in the sync registry/engine so all media behavior stays
+ * consistent:
+ * - mediaAssets sync normally and are the cross-device source of truth.
+ * - mediaBlobs remain local-only and should never be pushed through SyncRecord.
+ */
+export const MEDIA_SYNC_TABLES = {
+  ASSETS: "mediaAssets",
+  BLOBS: "mediaBlobs",
+} as const;
+
+export const MEDIA_SYNC_POLICY = {
+  MEDIA_ASSETS_SHOULD_SYNC: true,
+  MEDIA_BLOBS_SHOULD_SYNC: false,
+  MEDIA_ASSETS_ARE_SOURCE_OF_TRUTH: true,
+  MEDIA_BLOBS_ARE_LOCAL_ONLY: true,
+} as const;
+
+export function isMediaAssetTable(tableName?: string | null) {
+  return String(tableName || "") === MEDIA_SYNC_TABLES.ASSETS;
+}
+
+export function isMediaBlobTable(tableName?: string | null) {
+  return String(tableName || "") === MEDIA_SYNC_TABLES.BLOBS;
+}
+
+export function shouldSyncMediaTable(tableName?: string | null) {
+  if (isMediaAssetTable(tableName)) return true;
+  if (isMediaBlobTable(tableName)) return false;
+  return true;
+}
+
+export function shouldKeepTableLocalOnly(tableName?: string | null) {
+  return isMediaBlobTable(tableName);
+}
+
 export function normalizeSyncStatus(value: unknown): SyncStatus {
-  if (value === SyncStatus.PENDING || value === "pending" || value === "PENDING") {
-    return SyncStatus.PENDING;
-  }
-
-  if (value === SyncStatus.SYNCED || value === "synced" || value === "SYNCED") {
-    return SyncStatus.SYNCED;
-  }
-
+  if (value === SyncStatus.PENDING || value === "pending" || value === "PENDING") return SyncStatus.PENDING;
+  if (value === SyncStatus.SYNCED || value === "synced" || value === "SYNCED") return SyncStatus.SYNCED;
   if (
     value === SyncStatus.FAILED ||
     value === "failed" ||
@@ -60,11 +97,7 @@ export function normalizeSyncStatus(value: unknown): SyncStatus {
   ) {
     return SyncStatus.FAILED;
   }
-
-  if (value === SyncStatus.CONFLICT || value === "conflict" || value === "CONFLICT") {
-    return SyncStatus.CONFLICT;
-  }
-
+  if (value === SyncStatus.CONFLICT || value === "conflict" || value === "CONFLICT") return SyncStatus.CONFLICT;
   return SyncStatus.PENDING;
 }
 
@@ -194,7 +227,6 @@ export function setAccountId(accountId: string) {
   setStorageItem(LOCAL_STORAGE_KEYS.ACCOUNT_ID, accountId);
 }
 
-
 export function clearAccountId() {
   removeStorageItem(LOCAL_STORAGE_KEYS.ACCOUNT_ID);
 }
@@ -233,10 +265,7 @@ export function getDeviceId() {
   let deviceId = getStorageItem(LOCAL_STORAGE_KEYS.DEVICE_ID);
 
   if (!deviceId) {
-    deviceId = typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : createFallbackUuid();
-
+    deviceId = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : createFallbackUuid();
     setStorageItem(LOCAL_STORAGE_KEYS.DEVICE_ID, deviceId);
   }
 
@@ -265,14 +294,6 @@ export function clearLastPlatformCacheAt() {
  * ---------------------------------------------------------
  * Use when local Dexie data becomes incomplete while backend
  * SyncRecord data is still correct.
- *
- * Example:
- * - Backend has 2 students
- * - Dexie has only 1 student
- * - Incremental pull will not recover the missing record
- *
- * Calling forceFullSyncNextRun() clears sync cursors so the
- * next pull behaves like a fresh account bootstrap.
  */
 export function forceFullSyncNextRun() {
   clearLastSyncAt();
@@ -282,23 +303,23 @@ export function forceFullSyncNextRun() {
     const accountId = getAccountId();
 
     if (accountId) {
-      removeStorageItem(
-        accountScopedStorageKey(
-          LOCAL_STORAGE_KEYS.LAST_SYNC_OK_AT,
-          accountId
-        )
-      );
-
-      removeStorageItem(
-        accountScopedStorageKey(
-          LOCAL_STORAGE_KEYS.LAST_SYNC_ERROR,
-          accountId
-        )
-      );
+      removeStorageItem(accountScopedStorageKey(LOCAL_STORAGE_KEYS.LAST_SYNC_OK_AT, accountId));
+      removeStorageItem(accountScopedStorageKey(LOCAL_STORAGE_KEYS.LAST_SYNC_ERROR, accountId));
     }
   } catch {
     // Ignore storage cleanup failures.
   }
+}
+
+/**
+ * Media-specific repair helper.
+ *
+ * Use this after deploying media source-of-truth changes so the next sync
+ * pulls fresh mediaAssets for the account. This intentionally does not clear
+ * mediaBlobs because those are local-only browser Blob records.
+ */
+export function forceMediaAssetsFullSyncNextRun() {
+  forceFullSyncNextRun();
 }
 
 export function getLastPlatformCacheAt() {
@@ -322,7 +343,6 @@ export function assertAccountId(): string {
   return accountId;
 }
 
-
 export function accountScopedStorageKey(baseKey: string, accountId?: string | null) {
   return accountId ? `${baseKey}:${accountId}` : baseKey;
 }
@@ -344,4 +364,3 @@ export function setLastSyncError(message: string | null, accountId?: string | nu
   if (!message) removeStorageItem(key);
   else setStorageItem(key, message);
 }
-

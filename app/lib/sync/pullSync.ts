@@ -5,13 +5,15 @@
  * Also understands optional backend cache records returned
  * by upgraded backend.
  *
- * Media safety upgrade:
- * - mediaAssets must not be matched by plain local numeric id first.
- *   Local Dexie ids can collide across browsers/devices, so mediaAssets
- *   are resolved by cloudId, ownerTempKey, ownerCloudId, or strict
- *   ownerTable + ownerLocalId + fieldKey identity before localId fallback.
- * - This prevents the latest teacher/student/parent image from replacing
- *   another record's image when pulled from sync.
+ * Media source-of-truth upgrade:
+ * - mediaAssets are synced metadata and are the cross-device image source.
+ * - mediaBlobs remain local-only and are never expected from normal pull sync.
+ * - mediaAssets are not matched by plain local numeric id first because local
+ *   Dexie ids can collide across browsers/devices.
+ * - incoming mediaAssets from cloud replace stale local metadata, including
+ *   previewDataUrl, thumbnailDataUrl, remoteUrl/publicUrl, active and isDeleted.
+ * - deleted/inactive mediaAssets are applied locally so replaced images stop
+ *   appearing on other devices.
  */
 
 import { db } from "../db";
@@ -40,6 +42,11 @@ import {
 
 import { applyPlatformCacheRecords } from "./platformCache";
 
+import {
+  clearMediaObjectUrlCache,
+  revokeMediaObjectUrl,
+} from "../media/mediaAssetUtils";
+
 export type PullSyncResult = {
   pulled: number;
   skipped: number;
@@ -67,6 +74,20 @@ function sameValue(a: any, b: any) {
   return String(a ?? "") === String(b ?? "");
 }
 
+function toNumber(value: any) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function isMediaAssetsTable(tableName?: string | null) {
+  return String(tableName || "") === "mediaAssets";
+}
+
+function isMediaBlobsTable(tableName?: string | null) {
+  return String(tableName || "") === "mediaBlobs";
+}
+
 async function findByCloudId(table: any, cloudId?: string | null) {
   if (!hasValue(cloudId)) return null;
 
@@ -92,19 +113,17 @@ async function findExistingMediaAsset(table: any, record: any) {
   if (byCloudId) return byCloudId;
 
   const rows = await table.toArray();
-  const activeRows = rows.filter((row: any) => !row.isDeleted);
 
   const accountId = payload.accountId || record.accountId;
   const ownerTable = payload.ownerTable;
   const fieldKey = payload.fieldKey;
   const ownerTempKey = payload.ownerTempKey;
   const ownerCloudId = payload.ownerCloudId;
-  const ownerLocalId = payload.ownerLocalId ?? record.localId;
+  const ownerLocalId = payload.ownerLocalId;
 
   // 2) Temporary form key is safe for unsaved forms on the same device/session.
-  // It prevents "latest upload wins" behavior before ownerLocalId exists.
   if (hasValue(ownerTempKey)) {
-    const byTempKey = activeRows.find((row: any) => {
+    const byTempKey = rows.find((row: any) => {
       if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
       if (hasValue(ownerTable) && !sameValue(row.ownerTable, ownerTable)) return false;
       if (hasValue(fieldKey) && !sameValue(row.fieldKey, fieldKey)) return false;
@@ -113,9 +132,9 @@ async function findExistingMediaAsset(table: any, record: any) {
     if (byTempKey) return byTempKey;
   }
 
-  // 3) Owner cloud id is also stable after the owner has synced.
+  // 3) Owner cloud id is stable after the owner has synced.
   if (hasValue(ownerCloudId)) {
-    const byOwnerCloud = activeRows.find((row: any) => {
+    const byOwnerCloud = rows.find((row: any) => {
       if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
       if (hasValue(ownerTable) && !sameValue(row.ownerTable, ownerTable)) return false;
       if (hasValue(fieldKey) && !sameValue(row.fieldKey, fieldKey)) return false;
@@ -125,9 +144,10 @@ async function findExistingMediaAsset(table: any, record: any) {
   }
 
   // 4) Strict ownerLocalId matching is allowed only with ownerTable + fieldKey.
-  // Never match mediaAssets by localId alone because local ids collide across devices.
+  // Never match mediaAssets by local numeric id alone because local ids collide
+  // across devices.
   if (hasValue(ownerLocalId) && hasValue(ownerTable) && hasValue(fieldKey)) {
-    const byStrictOwnerLocal = activeRows.find((row: any) => {
+    const byStrictOwnerLocal = rows.find((row: any) => {
       if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
       return (
         sameValue(row.ownerTable, ownerTable) &&
@@ -138,8 +158,7 @@ async function findExistingMediaAsset(table: any, record: any) {
     if (byStrictOwnerLocal) return byStrictOwnerLocal;
   }
 
-  // 5) Last fallback: payload.id only if it points to a media row with the same cloudId.
-  // This protects against local numeric id collisions.
+  // 5) Last fallback: payload.id only if it points to a row with the same cloudId.
   const payloadId = payload.id;
   if (hasValue(payloadId)) {
     const byPayloadId = await table.get(Number(payloadId)).catch(() => null);
@@ -150,7 +169,7 @@ async function findExistingMediaAsset(table: any, record: any) {
 }
 
 async function findExistingRecordForPull(tableName: string, table: any, record: any) {
-  if (tableName === "mediaAssets") {
+  if (isMediaAssetsTable(tableName)) {
     return findExistingMediaAsset(table, record);
   }
 
@@ -178,16 +197,117 @@ function normalizeIncomingMediaPayload(payload: Record<string, any>) {
   delete copy.dataUrl;
   delete copy.base64;
 
+  // Never trust local blob pointers from another browser/device.
+  delete copy.localBlobId;
+  delete copy.localObjectUrl;
+
   return copy;
 }
 
-export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncResult> {
+function normalizeIncomingPayloadForTable(tableName: string, payload: Record<string, any>) {
+  if (isMediaAssetsTable(tableName)) return normalizeIncomingMediaPayload(payload || {});
+  return payload || {};
+}
+
+function isIncomingMediaDeleted(incoming: any) {
+  return !!incoming?.isDeleted || incoming?.active === false;
+}
+
+function mediaCloudWins(existing: any, incoming: any) {
+  const existingUpdatedAt = Number(existing?.updatedAt || 0);
+  const incomingUpdatedAt = Number(incoming?.updatedAt || 0);
+
+  if (!existing) return incoming;
+
+  // Deleted/inactive cloud media must always be applied locally.
+  if (isIncomingMediaDeleted(incoming)) return incoming;
+
+  // If cloud is newer or equal, cloud metadata is source of truth.
+  if (incomingUpdatedAt >= existingUpdatedAt) return incoming;
+
+  // If local has pending unsynced changes that are newer, keep local.
+  if (existing?.synced && existing.synced !== SYNC_STATUS_VALUE.SYNCED) return existing;
+
+  return existing;
+}
+
+async function invalidateMediaPreview(existing: any, incoming: any) {
+  const ids = [
+    existing?.id,
+    incoming?.id,
+    existing?.localId,
+    incoming?.localId,
+  ]
+    .map(toNumber)
+    .filter((value): value is number => value !== undefined);
+
+  ids.forEach((id) => {
+    try {
+      revokeMediaObjectUrl(existing?.localObjectUrl);
+      revokeMediaObjectUrl(incoming?.localObjectUrl);
+    } catch {
+      // ignore
+    }
+  });
+
+  // The shared media utility keeps a small in-memory cache. Clearing it after a
+  // media pull is safer than letting list pages reuse a stale data/blob URL.
+  clearMediaObjectUrlCache();
+}
+
+function mergeIncomingMediaForUpdate(existing: any, incoming: any, existingId: number) {
+  const winner = mediaCloudWins(existing, incoming);
+
+  if (winner === existing) return existing;
+
+  return {
+    ...existing,
+    ...incoming,
+
+    // Preserve this browser's local blob pointer only if the cloud did not mark
+    // the media deleted. mediaBlobs are local-only and cannot be trusted from cloud.
+    localBlobId: isIncomingMediaDeleted(incoming) ? undefined : existing?.localBlobId,
+    localObjectUrl: undefined,
+
+    id: existingId,
+    synced: SYNC_STATUS_VALUE.SYNCED,
+    syncError: undefined,
+  };
+}
+
+function mergeIncomingRecordForUpdate(tableName: string, existing: any, incoming: any, existingId: number) {
+  if (isMediaAssetsTable(tableName)) {
+    return mergeIncomingMediaForUpdate(existing, incoming, existingId);
+  }
+
+  const winner = resolveConflict(existing, incoming) as any;
+  if (winner === existing) return existing;
+
+  return {
+    ...winner,
+    id: existingId,
+    synced: SYNC_STATUS_VALUE.SYNCED,
+  };
+}
+
+function prepareIncomingForInsert(tableName: string, incoming: any) {
+  const copy = { ...incoming };
+  delete copy.id;
+
+  if (isMediaAssetsTable(tableName)) {
+    // Do not keep foreign local blob pointers from another device.
+    copy.localBlobId = undefined;
+    copy.localObjectUrl = undefined;
+  }
+
+  return copy;
+}
+
+export async function pullSync(options?: { full?: boolean }): Promise<PullSyncResult> {
   const accountId = assertAccountId();
   const deviceId = getDeviceId();
 
-  const lastSyncAt = options?.full
-    ? 0
-    : getLastSyncAt();
+  const lastSyncAt = options?.full ? 0 : getLastSyncAt();
 
   const errors: string[] = [];
 
@@ -206,6 +326,13 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
     });
 
     for (const record of response.records || []) {
+      // mediaBlobs are local-only browser Blob records and must never be pulled
+      // through normal SyncRecord.
+      if (isMediaBlobsTable(record.tableName)) {
+        skipped++;
+        continue;
+      }
+
       if (!isPullSyncTable(record.tableName)) {
         skipped++;
         continue;
@@ -248,10 +375,7 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
         continue;
       }
 
-      const payload = record.tableName === "mediaAssets"
-        ? normalizeIncomingMediaPayload(record.payload || {})
-        : record.payload || {};
-
+      const payload = normalizeIncomingPayloadForTable(record.tableName, record.payload || {});
       const incomingUpdatedAt = Number(record.updatedAt || payload?.updatedAt || Date.now());
 
       const existing: any = await findExistingRecordForPull(record.tableName, table, {
@@ -275,7 +399,7 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
 
         updatedAt: incomingUpdatedAt,
 
-        isDeleted: !!record.isDeleted,
+        isDeleted: !!record.isDeleted || !!payload?.isDeleted,
 
         synced: SYNC_STATUS_VALUE.SYNCED,
 
@@ -287,18 +411,18 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
       // -------------------------------------------------
 
       if (existingId != null) {
-        const winner = resolveConflict(existing, incoming) as any;
+        if (isMediaAssetsTable(record.tableName)) {
+          await invalidateMediaPreview(existing, incoming);
+        }
 
-        if (winner === existing) {
+        const merged = mergeIncomingRecordForUpdate(record.tableName, existing, incoming, Number(existingId));
+
+        if (merged === existing) {
           skipped++;
           continue;
         }
 
-        await table.update(existingId, {
-          ...winner,
-          id: existingId,
-          synced: SYNC_STATUS_VALUE.SYNCED,
-        });
+        await table.update(existingId, merged);
 
         pulled++;
         continue;
@@ -308,9 +432,13 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
       // INSERT NEW
       // -------------------------------------------------
 
-      delete incoming.id;
+      const insert = prepareIncomingForInsert(record.tableName, incoming);
 
-      await table.add(incoming);
+      if (isMediaAssetsTable(record.tableName)) {
+        await invalidateMediaPreview(undefined, insert);
+      }
+
+      await table.add(insert);
 
       pulled++;
     }
@@ -332,11 +460,7 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
       errors.push(...cache.errors);
     }
 
-    if (response.serverTime && !options?.full) {
-      setLastSyncAt(Number(response.serverTime));
-    }
-
-    if (response.serverTime && options?.full) {
+    if (response.serverTime) {
       setLastSyncAt(Number(response.serverTime));
     }
   } catch (error: any) {
@@ -361,6 +485,7 @@ export async function pullSync(options?: {full?: boolean;}): Promise<PullSyncRes
  * - backend has records
  * - Dexie is missing records
  * - incremental pull cannot recover them
+ * - mediaAssets changed on another device but this browser has stale metadata
  */
 export async function repairSync(): Promise<PullSyncResult> {
   forceFullSyncNextRun();

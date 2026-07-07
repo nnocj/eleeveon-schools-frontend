@@ -120,6 +120,7 @@ import GradingRules from "./modules/GradingRules";
 // ======================================================
 
 import StudentReports from "./modules/reports/StudentReports";
+import AssessmentEntries from "./modules/AssessmentEntries";
 import ReportRemarks from "./modules/ReportRemarks";
 import Broadsheets from "./modules/reports/Broadsheets";
 import Promotion from "./modules/Promotion";
@@ -439,6 +440,12 @@ export const NAV_SECTIONS: RoleNavSection[] = [
     defaultOpen: false,
     items: [
       {
+        key: "assessmentEntries",
+        label: "Assessment Entries",
+        icon: "📝",
+
+      },
+      {
         key: "studentReports",
         label: "Student Reports",
         icon: "📄",
@@ -704,6 +711,7 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   courseOutline: CourseOutline,
 
   // Assessment / Grading
+  assessmentEntries: AssessmentEntries,
   assessmentStructure: Assessmentstructure,
   assessmentItems: AssessmentItems,
   assessmentApplicability: Assessmentapplicability,

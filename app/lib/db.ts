@@ -1536,6 +1536,10 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showHeadTeacherSignature?: boolean;
   showParentSignature?: boolean;
 
+  showCurrentAcademicPeriodEnd?: boolean;
+  showGeneratedDate?: boolean;
+
+
   // =========================
   // BRANDING / VISUALS
   // =========================
@@ -1576,6 +1580,9 @@ export interface ReportCardTemplateSetting extends BaseSync {
   classTeacherSignatureLabel?: string;
   headTeacherSignatureLabel?: string;
   parentSignatureLabel?: string;
+  currentAcademicPeriodEndLabel?: string;
+  generatedDateLabel?: string;
+
 
   footerText?: string;
 

@@ -40,6 +40,8 @@ export default function CompactPrintHeader({
   fontFamily,
   compact = true,
 }: ReportTemplateHeaderProps) {
+  void settings;
+
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
@@ -67,12 +69,13 @@ export default function CompactPrintHeader({
     branding.phone ? `Tel: ${branding.phone}` : "",
     branding.email,
     branding.website,
-  ].filter(Boolean).join("  |  ");
+  ]
+    .filter(Boolean)
+    .join("  |  ");
 
-  const branchLine = [
-    branding.branchName,
-    branding.branchAddress,
-  ].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
 
   const logoSize = compact ? 42 : 48;
 

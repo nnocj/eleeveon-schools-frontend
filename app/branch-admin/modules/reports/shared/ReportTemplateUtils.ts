@@ -38,6 +38,7 @@ import type {
   NormalizedStudentReportTemplateData,
   ReportTemplateBrandingData,
   ReportTemplateNextPeriodInfo,
+  ReportTemplateCurrentPeriodInfo,
   ReportTemplateSignatureInfo,
   ReportTemplateStudentInfo,
   ReportTemplateSummaryInfo,
@@ -161,6 +162,39 @@ export function friendlyReportDate(value?: string | number | Date | null): strin
   }
 }
 
+// ======================================================
+// REPORT GENERATED DATE
+// ======================================================
+
+export function generatedDateText(
+  generatedAt?: string | number | Date | null,
+  settings?: Partial<StudentReportTemplateSettings>
+) {
+  const resolvedSettings = {
+    ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
+    ...(settings || {}),
+  };
+
+  if (!resolvedSettings.showGeneratedDate) return "";
+
+  const date = friendlyReportDate(generatedAt);
+  if (!date) return "";
+
+  const label =
+    resolvedSettings.generatedDateLabel || "Report Generated";
+
+  return `${label}: ${date}`;
+}
+
+export function formatGeneratedDate(
+  dataset?: StudentReportCardDataset,
+  settings?: Partial<StudentReportTemplateSettings>
+) {
+  return generatedDateText(
+    (dataset as any)?.generatedAt,
+    settings
+  );
+}
 // ======================================================
 // TEMPLATE RESOLUTION HELPERS
 // ======================================================
@@ -473,6 +507,7 @@ export function visibleCount(settings: StudentReportTemplateSettings) {
     settings.showAttendancePercent,
     settings.showStudentPhoto,
     settings.showTeacherNames,
+    (settings as any).showCurrentAcademicPeriodEnd,
     settings.showNextAcademicPeriod,
     settings.showPromotionStatus,
     settings.showGPA,
@@ -605,6 +640,39 @@ export function resolveSummary(
     overallGPA: report?.overallGPA,
     overallPosition: report?.overallPosition,
     numberOnRoll: report?.numberOnRoll || report?.classSize,
+  };
+}
+
+export function resolveCurrentAcademicPeriodEnd(
+  dataset?: StudentReportCardDataset
+): ReportTemplateCurrentPeriodInfo | undefined {
+  const dynamicData = dataset as any;
+  const dynamicReport = dataset?.report as any;
+  const dynamicHeader = dataset?.header as any;
+
+  const current =
+    dynamicData?.currentAcademicPeriod ||
+    dynamicReport?.currentAcademicPeriod ||
+    dynamicHeader?.currentAcademicPeriod ||
+    dynamicHeader?.academicPeriod;
+
+  if (!current) return undefined;
+
+  const endDate = toISODate(current.endDate);
+  const formattedEndDate = current.formattedEndDate || friendlyReportDate(endDate);
+
+  return {
+    id: safeNumber(current.id, 0) || undefined,
+    academicStructureId: safeNumber(current.academicStructureId, 0) || undefined,
+    name: current.name,
+    type: current.type,
+    startDate: toISODate(current.startDate),
+    endDate,
+    order: safeNumber(current.order, 0) || undefined,
+    formattedEndDate,
+    label:
+      current.label ||
+      (formattedEndDate ? `This Academic Period Ends: ${formattedEndDate}` : ""),
   };
 }
 
@@ -758,6 +826,7 @@ export function normalizeStudentReportTemplateData(args: {
     subjectResults,
     attendance: report.attendance,
     summary: resolveSummary(report),
+    currentAcademicPeriod: resolveCurrentAcademicPeriodEnd(dataset),
     nextAcademicPeriod: resolveNextAcademicPeriod(dataset),
     signatures: resolveSignatures(dataset),
     settings,
@@ -818,6 +887,47 @@ export function subjectTeacherLine(
 ) {
   if (!settings.showTeacherNames) return "";
   return subject.teacherName || "";
+}
+
+// ======================================================
+// CURRENT PERIOD END DISPLAY
+// ======================================================
+
+export function currentAcademicPeriodEndText(
+  currentAcademicPeriod: ReportTemplateCurrentPeriodInfo | undefined,
+  settings: StudentReportTemplateSettings
+) {
+  if (!(settings as any).showCurrentAcademicPeriodEnd || !currentAcademicPeriod) return "";
+
+  const label =
+    (settings as any).currentAcademicPeriodEndLabel ||
+    "This Academic Period Ends";
+
+  const date =
+    currentAcademicPeriod.formattedEndDate ||
+    friendlyReportDate(currentAcademicPeriod.endDate);
+
+  if (!date) return "";
+
+  return `${label}: ${date}`;
+}
+
+export function formatCurrentAcademicPeriodEnd(
+  datasetOrCurrent?: StudentReportCardDataset | ReportTemplateCurrentPeriodInfo,
+  settings?: Partial<StudentReportTemplateSettings>
+) {
+  const current =
+    (datasetOrCurrent as StudentReportCardDataset)?.report ||
+    (datasetOrCurrent as StudentReportCardDataset)?.header
+      ? resolveCurrentAcademicPeriodEnd(datasetOrCurrent as StudentReportCardDataset)
+      : (datasetOrCurrent as ReportTemplateCurrentPeriodInfo | undefined);
+
+  const resolvedSettings = {
+    ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
+    ...(settings || {}),
+  } as StudentReportTemplateSettings;
+
+  return currentAcademicPeriodEndText(current, resolvedSettings);
 }
 
 // ======================================================

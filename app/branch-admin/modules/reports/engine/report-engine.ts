@@ -344,6 +344,39 @@ export function resolveNextAcademicPeriod(
   return futureByDateCandidates[0];
 }
 
+
+export function buildCurrentAcademicPeriodSummary(
+  dataset: ReportEngineDataset,
+  filters: ReportFiltersState
+) {
+  const currentPeriod = dataset.academicPeriods.find(
+    item => item.id === filters.academicPeriodId && !item.isDeleted
+  );
+
+  if (!currentPeriod) return undefined;
+
+  const startDate = toISODate(currentPeriod.startDate);
+  const endDate = toISODate(currentPeriod.endDate);
+  const formattedStartDate = friendlyReportDate(startDate);
+  const formattedEndDate = friendlyReportDate(endDate);
+
+  return {
+    id: currentPeriod.id || 0,
+    academicStructureId: currentPeriod.academicStructureId,
+    name: currentPeriod.name,
+    type: currentPeriod.type,
+    startDate,
+    endDate,
+    order: safeNumber(currentPeriod.order),
+    formattedStartDate,
+    formattedEndDate,
+    label: formattedEndDate
+      ? `This Academic Period Ends: ${formattedEndDate}`
+      : "This Academic Period Ends: Not set",
+    period: currentPeriod,
+  };
+}
+
 export function buildNextAcademicPeriodSummary(
   dataset: ReportEngineDataset,
   filters: ReportFiltersState
@@ -400,6 +433,7 @@ export function buildReportHeader(
     item => item.id === filters.classId && !item.isDeleted
   );
 
+  const currentAcademicPeriod = buildCurrentAcademicPeriodSummary(dataset, filters);
   const nextAcademicPeriod = buildNextAcademicPeriodSummary(dataset, filters);
 
   const branding = {
@@ -431,6 +465,7 @@ export function buildReportHeader(
     branchName: branch?.name,
     branchAddress: branch?.address,
     primaryColor: branding.primaryColor,
+    currentAcademicPeriod,
     nextAcademicPeriod,
     branding,
   };
@@ -760,6 +795,7 @@ export function buildStudentReport(
     className: lookups.classMap.get(classId)?.name || "Class",
     academicStructureId: filters.academicStructureId,
     academicPeriodId: filters.academicPeriodId,
+    currentAcademicPeriod: buildCurrentAcademicPeriodSummary(dataset, filters),
     nextAcademicPeriod: buildNextAcademicPeriodSummary(dataset, filters),
 
     numberOnRoll,
@@ -1035,6 +1071,7 @@ export function buildReportEngineOutput(
   filters: ReportFiltersState
 ): ReportEngineOutput {
   const header = buildReportHeader(dataset, filters);
+  const generatedAt = new Date().toISOString();
   const warnings: string[] = [];
 
   if (!filters.branchId) warnings.push("No branch selected.");
@@ -1166,11 +1203,14 @@ export function buildReportEngineOutput(
         guardianName: parentName,
       },
 
+      generatedAt,
+
       classTeacherName,
       headTeacherName,
       principalName,
       parentName,
       guardianName: parentName,
+      currentAcademicPeriod: header.currentAcademicPeriod,
       nextAcademicPeriod: header.nextAcademicPeriod,
     };
   };

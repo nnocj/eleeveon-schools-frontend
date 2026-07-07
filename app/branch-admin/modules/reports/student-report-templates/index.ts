@@ -34,6 +34,14 @@ import {
 import ClassicFormalTemplate from "./ClassicFormalTemplate";
 import BorderedTraditionalTemplate from "./BorderedTraditionalTemplate";
 import CompactPrintTemplate from "./CompactPrintTemplate";
+import ModernCleanTemplate from "./ModernCleanTemplate";
+import LetterHeadPremiumTemplate from "./LetterHeadPremiumTemplate";
+import SideProfileTemplate from "./SideProfileTemplate";
+import CambridgeTemplate from "./CambridgeTemplate";
+import IBTemplate from "./IBTemplate";
+import KindergartenTemplate from "./KindergartenTemplate";
+import MontessoriTemplate from "./MontessoriTemplate";
+import UniversityTranscriptTemplate from "./UniversityTranscriptTemplate";
 // ======================================================
 // TEMPORARY FALLBACK COMPONENTS
 // ======================================================
@@ -42,17 +50,16 @@ import CompactPrintTemplate from "./CompactPrintTemplate";
 // For now, they safely render Classic Formal so template switching does not
 // break the report card.
 
-const ModernCleanTemplate = ClassicFormalTemplate;
+//const ModernCleanTemplate = ClassicFormalTemplate;
 //const CompactPrintTemplate = ClassicFormalTemplate;
 //const BorderedTraditionalTemplate = ClassicFormalTemplate;
-const LetterheadPremiumTemplate = ClassicFormalTemplate;
-const SideProfileTemplate = ClassicFormalTemplate;
-const CambridgeTemplate = ClassicFormalTemplate;
-const IBTemplate = ClassicFormalTemplate;
-const KindergartenTemplate = ClassicFormalTemplate;
-const MontessoriTemplate = ClassicFormalTemplate;
-const UniversityTranscriptTemplate = ClassicFormalTemplate;
-
+//const LetterheadPremiumTemplate = ClassicFormalTemplate;
+//const SideProfileTemplate = ClassicFormalTemplate;
+//const CambridgeTemplate = ClassicFormalTemplate;
+//const IBTemplate = ClassicFormalTemplate;
+//const KindergartenTemplate = ClassicFormalTemplate;
+//const MontessoriTemplate = ClassicFormalTemplate;
+//const UniversityTranscriptTemplate = ClassicFormalTemplate;
 // ======================================================
 // REGISTRY TYPES
 // ======================================================
@@ -101,8 +108,8 @@ export const STUDENT_REPORT_TEMPLATE_REGISTRY: StudentReportTemplateRegistryItem
   },
   {
     ...getStudentReportTemplateDefinitionByCode("letterhead_premium"),
-    component: LetterheadPremiumTemplate,
-    fileName: "LetterheadPremiumTemplate.tsx",
+    component: LetterHeadPremiumTemplate,
+    fileName: "LetterHeadPremiumTemplate.tsx",
     aliases: ["letterhead", "premium", "letterhead_premium", "institutional"],
   },
   {
@@ -261,7 +268,7 @@ export {
   ModernCleanTemplate,
   CompactPrintTemplate,
   BorderedTraditionalTemplate,
-  LetterheadPremiumTemplate,
+  LetterHeadPremiumTemplate,
   SideProfileTemplate,
   CambridgeTemplate,
   IBTemplate,

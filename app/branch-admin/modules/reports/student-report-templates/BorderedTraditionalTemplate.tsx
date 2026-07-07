@@ -6,20 +6,21 @@
  * ELEEVEON SCHOOLS — BORDERED TRADITIONAL STUDENT REPORT TEMPLATE
  * ---------------------------------------------------------
  *
- * Template style:
- * - traditional printed school report layout
- * - strong outer borders and inner grid lines
- * - student details in boxed/table cells
- * - results shown in a heavy bordered table
- * - summary, remarks, next period and signatures in boxed sections
+ * Visual direction:
+ * - fixed A4/PDF sheet with a certificate-like ornamental border
+ * - centered BorderedTraditionalHeader with school crest, motto and title plate
+ * - formal student information register with square photo frame
+ * - examination-style result table with ruled borders and printable contrast
+ * - official summary ledger for total / average / position / GPA
+ * - traditional remark panels, academic calendar box and signature ledger
  *
- * Core rule:
- * - This template uses the exact same report dataset as every other template.
- * - Only the arrangement, borders, spacing and visual style change.
- * - Disabled fields are removed completely instead of leaving blank spaces.
+ * Data rule:
+ * - dataset stays exactly the same
+ * - this component does not compute results
+ * - it only renders data produced by reports/engine/report-engine.ts
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ReportAssessmentColumn,
@@ -36,13 +37,16 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import BorderedTraditionalHeader from "../shared/headers/BorderTraditionalHeader";
+import BorderedTraditionalHeader from "../shared/headers/BorderedTraditionalHeader";
 
 import {
   createReportPageStyle,
+  createReportTableStyles,
   firstText,
+  friendlyReportDate,
   formatNumber,
   formatPercent,
+  currentAcademicPeriodEndText,
   nextAcademicPeriodText,
   normalizeStudentReportTemplateData,
   ordinal,
@@ -55,6 +59,13 @@ import {
 
 type Props = StudentReportTemplateBaseProps & {
   dataset?: StudentReportCardDataset;
+};
+
+type InfoChip = {
+  key: string;
+  label: string;
+  value: React.ReactNode;
+  show: boolean;
 };
 
 // ======================================================
@@ -71,6 +82,104 @@ export default function BorderedTraditionalTemplate({
   mobilePreview = true,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const holdTimerRef = useRef<number | null>(null);
+  const holdIntervalRef = useRef<number | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
+
+  const previewScale = expanded ? zoomScale : fitScale;
+  const displayZoomPercent = Math.round(previewScale * 100);
+  const ZOOM_STEP = 1.01;
+
+  const applyZoomStep = useCallback((direction: "in" | "out") => {
+    setZoomScale((prev) => {
+      const baseScale = expanded ? prev : fitScale;
+      const nextScale = direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
+      return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
+    });
+
+    setExpanded(true);
+  }, [expanded, fitScale]);
+
+  const stopZoomHold = useCallback(() => {
+    if (holdTimerRef.current != null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
+    if (holdIntervalRef.current != null) {
+      window.clearInterval(holdIntervalRef.current);
+      holdIntervalRef.current = null;
+    }
+  }, []);
+
+  const startZoomHold = useCallback((direction: "in" | "out") => {
+    stopZoomHold();
+    applyZoomStep(direction);
+
+    holdTimerRef.current = window.setTimeout(() => {
+      holdIntervalRef.current = window.setInterval(() => {
+        applyZoomStep(direction);
+      }, 55);
+    }, 260);
+  }, [applyZoomStep, stopZoomHold]);
+
+  const zoomOut = () => applyZoomStep("out");
+  const zoomIn = () => applyZoomStep("in");
+
+  const fitToScreen = () => {
+    stopZoomHold();
+    setExpanded(false);
+    setZoomScale(1);
+    setZoomMenuOpen(false);
+  };
+
+  const selectZoomPercent = (percent: number) => {
+    stopZoomHold();
+    setExpanded(true);
+    setZoomScale(Number((percent / 100).toFixed(4)));
+    setZoomMenuOpen(false);
+  };
+
+  useEffect(() => {
+    if (!mobilePreview) return;
+
+    const A4_WIDTH_PX = 793.7008;
+    const A4_HEIGHT_PX = 1122.5197;
+    const SAFE_GAP = 8;
+
+    const updateScale = () => {
+      const frame = previewFrameRef.current;
+      if (!frame) return;
+
+      const rect = frame.getBoundingClientRect();
+      const availableWidth = Math.max(120, rect.width - SAFE_GAP);
+      const availableHeight = Math.max(180, window.innerHeight - rect.top - SAFE_GAP);
+      const widthScale = availableWidth / A4_WIDTH_PX;
+      const heightScale = availableHeight / A4_HEIGHT_PX;
+      const nextScale = Math.min(1, widthScale, heightScale);
+
+      setFitScale(Number(nextScale.toFixed(4)));
+    };
+
+    updateScale();
+
+    const observer = new ResizeObserver(updateScale);
+    if (previewFrameRef.current) observer.observe(previewFrameRef.current);
+
+    window.addEventListener("resize", updateScale);
+    window.addEventListener("orientationchange", updateScale);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateScale);
+      window.removeEventListener("orientationchange", updateScale);
+    };
+  }, [mobilePreview]);
+
+  useEffect(() => stopZoomHold, [stopZoomHold]);
 
   const resolvedSettings: StudentReportTemplateSettings =
     mergeStudentReportTemplateSettings(
@@ -80,7 +189,7 @@ export default function BorderedTraditionalTemplate({
         templateCode: "bordered_traditional",
         layoutKey: "bordered_traditional",
         templateName: "Bordered Traditional",
-        density: settings?.density || "compact",
+        density: settings?.density || (compact ? "compact" : "comfortable"),
       },
       template || null,
       null
@@ -128,24 +237,16 @@ export default function BorderedTraditionalTemplate({
   const {
     branding,
     studentInfo,
+    currentAcademicPeriod,
     nextAcademicPeriod,
     signatures,
   } = normalized;
 
   const primary = branding.primaryColor || "var(--primary-color)";
   const fontFamily = branding.fontFamily || "Arial, sans-serif";
-
   const reportBackgroundImage = branding.reportCardBackgroundImage || "";
-  const reportWatermark =
-    branding.reportCardWatermark ||
-    branding.logo ||
-    "";
-
-  const reportSignatureImage =
-    signatures.officialSignatureImage ||
-    branding.reportCardSignatureImage ||
-    "";
-
+  const reportWatermark = branding.reportCardWatermark || branding.logo || "";
+  const reportSignatureImage = signatures.officialSignatureImage || branding.reportCardSignatureImage || "";
   const studentPhoto = studentInfo.studentPhoto || "";
 
   const pageStyle = createReportPageStyle({
@@ -156,109 +257,81 @@ export default function BorderedTraditionalTemplate({
     pageBreakAfter,
   });
 
-  const borderedPageStyle: React.CSSProperties = {
+  const baseTraditionalTableStyles = createReportTableStyles({
+    settings: resolvedSettings,
+    primaryColor: primary,
+    compact,
+  });
+
+  const pagePadding = compact ? "8mm" : "9mm";
+
+  const upgradedPageStyle: React.CSSProperties = {
     ...pageStyle,
-    border: "3px double #111",
-    padding: compact ? "7mm" : "8mm",
-    background: "#fff",
+    width: "210mm",
+    minHeight: "297mm",
+    margin: "0 auto 18px",
+    padding: pagePadding,
+    background: "#fffdf7",
     color: "#111",
+    border: "2px double #111827",
+    borderRadius: 4,
+    boxShadow: "0 20px 54px rgba(15,23,42,.13)",
+    overflow: "hidden",
   };
 
-  const label: React.CSSProperties = {
-    fontSize: compact ? 7.5 : 8.2,
+  const tableStyles: ReturnType<typeof createReportTableStyles> = {
+    table: {
+      ...baseTraditionalTableStyles.table,
+      width: "100%",
+      borderCollapse: "collapse",
+      borderSpacing: 0,
+      overflow: "hidden",
+      borderRadius: 4,
+      border: "1.5px solid #111827",
+      fontSize: compact ? 8.5 : 9.2,
+    },
+    th: {
+      ...baseTraditionalTableStyles.th,
+      border: "1px solid #111827",
+      borderBottom: "2px double #111827",
+      background: "#f3efe4",
+      color: "#111827",
+      padding: compact ? "5px 5px" : "6px 6px",
+      fontWeight: 950,
+    },
+    td: {
+      ...baseTraditionalTableStyles.td,
+      border: "1px solid #111827",
+      borderBottom: "2px double #111827",
+      padding: compact ? "4px 5px" : "5px 6px",
+      color: "#111827",
+    },
+    label: baseTraditionalTableStyles.label,
+    value: baseTraditionalTableStyles.value,
+  };
+
+  const smallLabel: React.CSSProperties = {
+    fontSize: compact ? 6.9 : 7.6,
     fontWeight: 950,
-    textTransform: "uppercase",
     letterSpacing: 0.25,
-    color: "#333",
+    textTransform: "uppercase",
+    color: "#64748b",
     lineHeight: 1.15,
   };
 
-  const value: React.CSSProperties = {
-    marginTop: 2,
-    fontSize: compact ? 9.2 : 10,
-    fontWeight: 850,
-    color: "#111",
-    lineHeight: 1.2,
-  };
-
-  const boxCell: React.CSSProperties = {
-    border: "1px solid #111",
-    padding: compact ? 5 : 6,
-    background: "rgba(255,255,255,0.95)",
-    minHeight: compact ? 35 : 39,
-  };
-
-  const table: React.CSSProperties = {
-    width: "100%",
-    borderCollapse: "collapse",
-    tableLayout: "auto",
-    fontSize: compact ? 8.8 : 9.4,
-    background: "rgba(255,255,255,0.96)",
-  };
-
-  const th: React.CSSProperties = {
-    border: "1px solid #111",
-    padding: compact ? 4 : 5,
-    background: primary,
-    color: "#fff",
-    textAlign: "center",
+  const strongValue: React.CSSProperties = {
+    fontSize: compact ? 9.6 : 10.6,
     fontWeight: 950,
+    color: "#0f172a",
     lineHeight: 1.15,
-    textTransform: "uppercase",
-    fontSize: compact ? 7.8 : 8.5,
+    overflowWrap: "anywhere",
   };
 
-  const td: React.CSSProperties = {
-    border: "1px solid #111",
-    padding: compact ? 4 : 5,
-    verticalAlign: "middle",
-    lineHeight: 1.22,
-    color: "#111",
-  };
-
-  const sectionTitle: React.CSSProperties = {
-    border: "1px solid #111",
-    background: "#f3f3f3",
-    padding: compact ? "4px 6px" : "5px 7px",
-    fontSize: compact ? 8 : 8.7,
-    fontWeight: 950,
-    textTransform: "uppercase",
-    letterSpacing: 0.35,
-    color: "#111",
-  };
-
-  const visibleStudentInfoBoxes = [
-    {
-      key: "studentName",
-      label: "Student Name",
-      value: report.studentName,
-      span: 2,
-      show: true,
-    },
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
-      show: true,
-    },
-    {
-      key: "gender",
-      label: "Gender",
-      value: report.gender || student?.gender || "-",
-      show: true,
-    },
-    {
-      key: "class",
-      label: "Class",
-      value: report.className,
-      show: true,
-    },
-    {
-      key: "academicPeriod",
-      label: "Academic Period",
-      value: header.academicPeriod?.name || "-",
-      show: true,
-    },
+  const studentInfoChips: InfoChip[] = [
+    { key: "admissionNumber", label: "Admission No.", value: report.admissionNumber || "-", show: true },
+    { key: "gender", label: "Gender", value: report.gender || student?.gender || "-", show: true },
+    { key: "class", label: "Class", value: report.className || "-", show: true },
+    { key: "academicPeriod", label: "Period", value: header.academicPeriod?.name || "-", show: true },
     {
       key: "numberOnRoll",
       label: resolvedSettings.numberOnRollLabel || "Number On Roll",
@@ -286,18 +359,8 @@ export default function BorderedTraditionalTemplate({
   ].filter((item) => item.show);
 
   const summaryCards = [
-    {
-      key: "total",
-      label: "Total",
-      value: formatNumber(report.total, 1),
-      show: resolvedSettings.showTotal,
-    },
-    {
-      key: "average",
-      label: "Average",
-      value: `${formatNumber(report.average, 1)}%`,
-      show: resolvedSettings.showAverage,
-    },
+    { key: "total", label: "Total", value: formatNumber(report.total, 1), show: resolvedSettings.showTotal },
+    { key: "average", label: "Average", value: `${formatNumber(report.average, 1)}%`, show: resolvedSettings.showAverage },
     {
       key: "classPosition",
       label: resolvedSettings.classPositionLabel || "Class Position",
@@ -312,7 +375,9 @@ export default function BorderedTraditionalTemplate({
     },
   ].filter((item) => item.show);
 
+  const currentPeriodEndLine = currentAcademicPeriodEndText(currentAcademicPeriod, resolvedSettings);
   const nextPeriodLine = nextAcademicPeriodText(nextAcademicPeriod, resolvedSettings);
+  const generatedDateValue=(resolvedSettings as any).showGeneratedDate?friendlyReportDate((dataset as any)?.generatedAt):"";
 
   const subjectTableColumnCount =
     1 +
@@ -325,8 +390,14 @@ export default function BorderedTraditionalTemplate({
   const reportPage = (
     <section
       className="print-page report-page-break student-report-card-page src-a4-page bordered-traditional-template-page"
-      style={borderedPageStyle}
+      style={upgradedPageStyle}
     >
+      <div aria-hidden="true" style={{ position: "absolute", inset: 10, border: `1px solid ${primary}`, pointerEvents: "none", zIndex: 0 }} />
+      <div aria-hidden="true" style={{ position: "absolute", left: 16, top: 16, width: 32, height: 32, borderTop: `3px solid ${primary}`, borderLeft: `3px solid ${primary}`, zIndex: 0 }} />
+      <div aria-hidden="true" style={{ position: "absolute", right: 16, top: 16, width: 32, height: 32, borderTop: `3px solid ${primary}`, borderRight: `3px solid ${primary}`, zIndex: 0 }} />
+      <div aria-hidden="true" style={{ position: "absolute", left: 16, bottom: 16, width: 32, height: 32, borderBottom: `3px solid ${primary}`, borderLeft: `3px solid ${primary}`, zIndex: 0 }} />
+      <div aria-hidden="true" style={{ position: "absolute", right: 16, bottom: 16, width: 32, height: 32, borderBottom: `3px solid ${primary}`, borderRight: `3px solid ${primary}`, zIndex: 0 }} />
+
       {reportBackgroundImage && (
         <img
           src={reportBackgroundImage}
@@ -351,158 +422,176 @@ export default function BorderedTraditionalTemplate({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            opacity: 0.035,
+            opacity: 0.032,
             pointerEvents: "none",
             zIndex: 0,
           }}
         >
-          <img
-            src={reportWatermark}
-            alt="Watermark"
-            style={{
-              width: "56%",
-              maxHeight: "56%",
-              objectFit: "contain",
-            }}
-          />
+          <img src={reportWatermark} alt="Watermark" style={{ width: "52%", maxHeight: "52%", objectFit: "contain" }} />
         </div>
       )}
+
+      <div aria-hidden="true" className="traditional-frame-line traditional-frame-outer" style={{ borderColor: primary }} />
+      <div aria-hidden="true" className="traditional-frame-line traditional-frame-inner" />
+      <div aria-hidden="true" className="traditional-corner traditional-corner-tl" style={{ borderColor: primary }} />
+      <div aria-hidden="true" className="traditional-corner traditional-corner-tr" style={{ borderColor: primary }} />
+      <div aria-hidden="true" className="traditional-corner traditional-corner-bl" style={{ borderColor: primary }} />
+      <div aria-hidden="true" className="traditional-corner traditional-corner-br" style={{ borderColor: primary }} />
 
       <div style={{ position: "relative", zIndex: 1 }}>
         <BorderedTraditionalHeader
           header={header}
           dataset={dataset}
           settings={resolvedSettings}
-          title="Terminal / Periodic Academic Report"
+          title="Official Academic Report"
           compact={compact}
           primaryColor={primary}
           fontFamily={fontFamily}
         />
 
-        <div style={{ marginTop: 8 }}>
-          <div style={sectionTitle}>Student Information</div>
-
+        <section
+          style={{
+            marginTop: 8,
+            display: "grid",
+            gridTemplateColumns: resolvedSettings.showStudentPhoto ? "1fr 86px" : "1fr",
+            gap: 8,
+            alignItems: "stretch",
+          }}
+        >
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: resolvedSettings.showStudentPhoto ? "1fr 82px" : "1fr",
-              borderLeft: "1px solid #111",
-              borderRight: "1px solid #111",
-              borderBottom: "1px solid #111",
+              borderRadius: 4,
+              border: "1px solid #111827",
+              background: "#fffdf7",
+              overflow: "hidden",
             }}
           >
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gridTemplateColumns: "minmax(0, 1fr) auto",
+                alignItems: "center",
+                gap: 10,
+                padding: compact ? "7px 9px" : "8px 11px",
+                borderBottom: "1px solid #111827",
               }}
             >
-              {visibleStudentInfoBoxes.map((box, index) => (
+              <div style={{ minWidth: 0 }}>
+                <div style={smallLabel}>Student Identity</div>
                 <div
-                  key={box.key}
                   style={{
-                    ...boxCell,
-                    borderTop: 0,
-                    borderLeft: 0,
-                    borderRight:
-                      index === visibleStudentInfoBoxes.length - 1 &&
-                      !resolvedSettings.showStudentPhoto
-                        ? 0
-                        : "1px solid #111",
-                    borderBottom: 0,
-                    gridColumn: box.span ? `span ${box.span}` : undefined,
+                    marginTop: 1,
+                    fontSize: compact ? 15.5 : 17.5,
+                    lineHeight: 1.05,
+                    fontWeight: 950,
+                    color: "#0f172a",
+                    textTransform: "uppercase",
+                    overflowWrap: "anywhere",
                   }}
                 >
-                  <div style={label}>{box.label}</div>
-                  <div style={value}>{box.value}</div>
+                  {report.studentName}
+                </div>
+              </div>
+
+              <div
+                data-report-color-block="true"
+                style={{
+                  borderRadius: 999,
+                  padding: compact ? "5px 9px" : "6px 11px",
+                  background: primary,
+                  color: "#fff",
+                  fontSize: compact ? 8 : 8.8,
+                  fontWeight: 950,
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {report.className || "Class"}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gap: 0,
+              }}
+            >
+              {studentInfoChips.map((chip, index) => (
+                <div
+                  key={chip.key}
+                  style={{
+                    padding: compact ? "6px 8px" : "7px 9px",
+                    borderRight: (index + 1) % 4 === 0 ? "0" : "1px solid #e5e7eb",
+                    borderBottom: index < studentInfoChips.length - 4 ? "1px solid #e5e7eb" : "0",
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={smallLabel}>{chip.label}</div>
+                  <div style={{ ...strongValue, marginTop: 1 }}>{chip.value}</div>
                 </div>
               ))}
             </div>
-
-            {resolvedSettings.showStudentPhoto && (
-              <div
-                style={{
-                  borderLeft: "1px solid #111",
-                  background: "#fafafa",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: 82,
-                  padding: 4,
-                  boxSizing: "border-box",
-                }}
-              >
-                {studentPhoto ? (
-                  <img
-                    src={studentPhoto}
-                    alt="Student"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      border: "1px solid #111",
-                    }}
-                  />
-                ) : (
-                  <span style={{ fontSize: 9, fontWeight: 900, color: "#555" }}>PHOTO</span>
-                )}
-              </div>
-            )}
           </div>
-        </div>
+
+          {resolvedSettings.showStudentPhoto && (
+            <div
+              style={{
+                border: "1px solid #111827",
+                borderRadius: 4,
+                overflow: "hidden",
+                background: "#fffaf0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 92,
+              }}
+            >
+              {studentPhoto ? (
+                <img src={studentPhoto} alt="Student" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 9, fontWeight: 950, color: "#64748b" }}>PHOTO</span>
+              )}
+            </div>
+          )}
+        </section>
 
         <div style={{ marginTop: 8 }}>
-          <div style={sectionTitle}>Academic Performance</div>
-
-          <table style={table}>
+          <table style={tableStyles.table}>
             <thead>
               <tr>
-                <th style={{ ...th, textAlign: "left", minWidth: 95 }}>
-                  Subject
-                </th>
-
+                <th data-report-color-block="true" style={{ ...tableStyles.th, textAlign: "left", minWidth: 98 }}>Subject</th>
                 {assessmentColumns.map((column) => (
-                  <th key={column.assessmentStructureItemId} style={th}>
+                  <th data-report-color-block="true" key={column.assessmentStructureItemId} style={tableStyles.th}>
                     {column.name}
-                    <div style={{ fontSize: 7, marginTop: 2, opacity: 0.95 }}>
-                      W:{formatNumber(column.weight, 0)}
-                    </div>
+                    <div style={{ fontSize: 7.5, marginTop: 2, opacity: 0.88 }}>W:{formatNumber(column.weight, 0)}</div>
                   </th>
                 ))}
-
-                <th style={th}>Weighted</th>
-                <th style={th}>%</th>
-
-                {resolvedSettings.showGrade && (
-                  <th style={th}>Grade</th>
-                )}
-
+                <th data-report-color-block="true" style={tableStyles.th}>Weighted</th>
+                <th data-report-color-block="true" style={tableStyles.th}>%</th>
+                {resolvedSettings.showGrade && <th data-report-color-block="true" style={tableStyles.th}>Grade</th>}
                 {resolvedSettings.showSubjectPosition && (
-                  <th style={th}>
-                    {resolvedSettings.subjectPositionLabel || "Pos."}
-                  </th>
+                  <th data-report-color-block="true" style={tableStyles.th}>{resolvedSettings.subjectPositionLabel || "Pos."}</th>
                 )}
-
                 {resolvedSettings.showSubjectRemarks && (
-                  <th style={{ ...th, minWidth: 85 }}>Remark</th>
+                  <th data-report-color-block="true" style={{ ...tableStyles.th, minWidth: 86 }}>Remark</th>
                 )}
               </tr>
             </thead>
 
             <tbody>
-              {report.subjectResults.map((subject) => (
+              {report.subjectResults.map((subject, rowIndex) => (
                 <tr key={subject.classSubjectId}>
-                  <td style={{ ...td, fontWeight: 850 }}>
+                  <td
+                    style={{
+                      ...tableStyles.td,
+                      fontWeight: 950,
+                      background: rowIndex % 2 === 0 ? "#fffaf0" : "#fffdf7",
+                    }}
+                  >
                     {subject.subjectName}
                     {resolvedSettings.showTeacherNames && subject.teacherName && (
-                      <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 7.4,
-                          opacity: 0.72,
-                          fontWeight: 650,
-                        }}
-                      >
+                      <div style={{ marginTop: 2, fontSize: 7.8, opacity: 0.72, fontWeight: 700 }}>
                         {subject.teacherName}
                       </div>
                     )}
@@ -514,47 +603,33 @@ export default function BorderedTraditionalTemplate({
                     );
 
                     return (
-                      <td
-                        key={column.assessmentStructureItemId}
-                        style={{ ...td, textAlign: "center" }}
-                      >
+                      <td key={column.assessmentStructureItemId} style={{ ...tableStyles.td, textAlign: "center" }}>
                         {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
                       </td>
                     );
                   })}
 
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
+                  <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 950 }}>
                     {formatNumber(subject.weightedTotal, 1)}
                   </td>
-
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
+                  <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 950 }}>
                     {formatPercent(subject.percentage, 1, "-")}
                   </td>
-
                   {resolvedSettings.showGrade && (
-                    <td style={{ ...td, textAlign: "center", fontWeight: 950 }}>
-                      {subject.grade}
+                    <td style={{ ...tableStyles.td, textAlign: "center" }}>
+                      <span className="traditional-grade-seal" style={{ borderColor: primary, color: primary }}>{subject.grade}</span>
                     </td>
                   )}
-
                   {resolvedSettings.showSubjectPosition && (
-                    <td style={{ ...td, textAlign: "center" }}>
-                      {ordinal(subject.subjectPosition)}
-                    </td>
+                    <td style={{ ...tableStyles.td, textAlign: "center" }}>{ordinal(subject.subjectPosition)}</td>
                   )}
-
-                  {resolvedSettings.showSubjectRemarks && (
-                    <td style={td}>{subject.remark}</td>
-                  )}
+                  {resolvedSettings.showSubjectRemarks && <td style={tableStyles.td}>{subject.remark}</td>}
                 </tr>
               ))}
 
               {!report.subjectResults.length && (
                 <tr>
-                  <td
-                    style={{ ...td, textAlign: "center", padding: 16 }}
-                    colSpan={subjectTableColumnCount}
-                  >
+                  <td style={{ ...tableStyles.td, textAlign: "center", padding: 16 }} colSpan={subjectTableColumnCount}>
                     No subject results available for this selected period.
                   </td>
                 </tr>
@@ -564,161 +639,180 @@ export default function BorderedTraditionalTemplate({
         </div>
 
         {summaryCards.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={sectionTitle}>Summary</div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `repeat(${Math.min(summaryCards.length, 4)}, minmax(0, 1fr))`,
-                borderLeft: "1px solid #111",
-                borderBottom: "1px solid #111",
-              }}
-            >
-              {summaryCards.map((card) => (
-                <div
-                  key={card.key}
-                  style={{
-                    borderRight: "1px solid #111",
-                    padding: compact ? 6 : 7,
-                    textAlign: "center",
-                    background: "rgba(255,255,255,0.96)",
-                  }}
-                >
-                  <div style={label}>{card.label}</div>
-                  <div style={{ ...value, fontSize: compact ? 14 : 15.5, fontWeight: 950 }}>
-                    {card.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div style={{ marginTop: 8 }}>
-          <div style={sectionTitle}>Remarks</div>
-
-          <div
+          <section
             style={{
+              marginTop: 8,
+              borderRadius: 4,
+              border: "1px solid #111827",
+              overflow: "hidden",
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              borderLeft: "1px solid #111",
-              borderBottom: "1px solid #111",
+              gridTemplateColumns: `16px repeat(${summaryCards.length}, minmax(0, 1fr))`,
+              background: "#fffdf7",
             }}
           >
-            <div
-              style={{
-                borderRight: "1px solid #111",
-                padding: 7,
-                minHeight: 56,
-                background: "rgba(255,255,255,0.96)",
-              }}
-            >
-              <div style={label}>{resolvedSettings.classTeacherLabel}'s Remark</div>
-              <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.35 }}>
-                {report.classTeacherRemark || ""}
-              </div>
-            </div>
-
-            <div
-              style={{
-                borderRight: "1px solid #111",
-                padding: 7,
-                minHeight: 56,
-                background: "rgba(255,255,255,0.96)",
-              }}
-            >
-              <div style={label}>{resolvedSettings.headTeacherLabel}'s Remark</div>
-              <div style={{ marginTop: 6, fontSize: 10.5, lineHeight: 1.35 }}>
-                {report.headTeacherRemark || ""}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {nextPeriodLine && (
-          <div style={{ marginTop: 8 }}>
-            <div style={sectionTitle}>Next Academic Period</div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                borderLeft: "1px solid #111",
-                borderRight: "1px solid #111",
-                borderBottom: "1px solid #111",
-                background: "rgba(255,255,255,0.96)",
-              }}
-            >
-              <div style={{ padding: 7, borderRight: "1px solid #111" }}>
-                <div style={label}>Period</div>
-                <div style={value}>{nextAcademicPeriod?.name || "Next Period"}</div>
-              </div>
-
-              <div style={{ padding: 7, textAlign: "right" }}>
-                <div style={label}>Begins</div>
-                <div style={value}>
-                  {nextAcademicPeriod?.formattedStartDate ||
-                    nextPeriodLine.replace(/^.*?:\s*/i, "")}
+            <div data-report-color-block="true" style={{ background: primary }} />
+            {summaryCards.map((card, index) => (
+              <div
+                key={card.key}
+                style={{
+                  padding: compact ? "7px 8px" : "8px 10px",
+                  textAlign: "center",
+                  borderLeft: index === 0 ? "0" : "1px solid #111827",
+                  background: "#fffdf7",
+                }}
+              >
+                <div style={smallLabel}>{card.label}</div>
+                <div style={{ marginTop: 2, fontSize: compact ? 14 : 15.8, fontWeight: 950, color: "#0f172a" }}>
+                  {card.value}
                 </div>
               </div>
-            </div>
-          </div>
+            ))}
+          </section>
         )}
 
-        <div style={{ marginTop: 14 }}>
-          <div style={sectionTitle}>Signatures</div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: resolvedSettings.showParentSignature
-                ? "repeat(3, minmax(0, 1fr))"
-                : "repeat(2, minmax(0, 1fr))",
-              borderLeft: "1px solid #111",
-              borderBottom: "1px solid #111",
-              background: "rgba(255,255,255,0.96)",
-            }}
-          >
-            <SignatureBox
-              label={resolvedSettings.classTeacherLabel}
-              name={signatures.classTeacherName || ""}
-              compact={compact}
-            />
-
-            <SignatureBox
-              label={resolvedSettings.headTeacherLabel}
-              name={firstText(signatures.headTeacherName, signatures.principalName)}
-              image={reportSignatureImage}
-              compact={compact}
-            />
-
-            {resolvedSettings.showParentSignature && (
-              <SignatureBox
-                label={resolvedSettings.parentLabel}
-                name={firstText(signatures.parentName, signatures.guardianName)}
-                compact={compact}
-              />
-            )}
-          </div>
-        </div>
-
-        <div
+        <section
           style={{
             marginTop: 8,
-            border: "1px solid #111",
-            padding: "4px 6px",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 7,
+          }}
+        >
+          {[
+            { label: `${resolvedSettings.classTeacherLabel}'s Remark`, value: report.classTeacherRemark || "" },
+            { label: `${resolvedSettings.headTeacherLabel}'s Remark`, value: report.headTeacherRemark || "" },
+          ].map((remark) => (
+            <div
+              key={remark.label}
+              style={{
+                border: "1px solid #111827",
+                borderRadius: 4,
+                minHeight: 52,
+                padding: compact ? 8 : 9,
+                background: "#fffdf7",
+                position: "relative",
+                overflow: "hidden",
+              }}
+            >
+              <div aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: primary }} />
+              <div style={smallLabel}>{remark.label}</div>
+              <div style={{ marginTop: 5, paddingLeft: 2, fontSize: compact ? 9.6 : 10.5, lineHeight: 1.32, color: "#111827" }}>
+                {remark.value}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {(currentPeriodEndLine || nextPeriodLine || generatedDateValue) && (
+          <section
+            style={{
+              marginTop: 8,
+              border: "1px solid #111827",
+              borderRadius: 4,
+              padding: compact ? 7 : 8,
+              background: "#fffaf0",
+              display: "grid",
+              gridTemplateColumns:[currentPeriodEndLine,nextPeriodLine,generatedDateValue].filter(Boolean).length>=3?"1fr 28px 1fr 28px 1fr":currentPeriodEndLine&&nextPeriodLine?"1fr 28px 1fr":"1fr",
+              gap: 6,
+              alignItems: "center",
+            }}
+          >
+            {currentPeriodEndLine && (
+              <div>
+                <div style={smallLabel}>Current Academic Period</div>
+                <div style={strongValue}>{currentAcademicPeriod?.name || header.academicPeriod?.name || "Current Period"}</div>
+                <div style={{ marginTop: 2, fontSize: compact ? 8.8 : 9.7, fontWeight: 900, color: primary }}>
+                  Ends: {currentAcademicPeriod?.formattedEndDate || currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
+                </div>
+              </div>
+            )}
+
+            {currentPeriodEndLine && nextPeriodLine && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span className="traditional-timeline-seal" style={{ borderColor: primary }} />
+              </div>
+            )}
+
+            {nextPeriodLine && (
+              <div style={{ textAlign: currentPeriodEndLine ? "right" : "left" }}>
+                <div style={smallLabel}>Next Academic Period</div>
+                <div style={strongValue}>{nextAcademicPeriod?.name || "Next Period"}</div>
+                <div style={{ marginTop: 2, fontSize: compact ? 8.8 : 9.7, fontWeight: 900, color: primary }}>
+                  Begins: {nextAcademicPeriod?.formattedStartDate || nextPeriodLine.replace(/^.*?:\s*/i, "")}
+                </div>
+              </div>
+            )}
+
+            {generatedDateValue && currentPeriodEndLine && nextPeriodLine && (
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"center" }}>
+                <span className="traditional-timeline-seal" style={{ borderColor: primary }} />
+              </div>
+            )}
+
+            {generatedDateValue && (
+              <div style={{ textAlign:"right" }}>
+                <div style={smallLabel}>{(resolvedSettings as any).generatedDateLabel || "Generated"}</div>
+                <div style={strongValue}>Report Card</div>
+                <div style={{ marginTop:2,fontSize:compact?8.8:9.7,fontWeight:900,color:primary }}>
+                  {generatedDateValue}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section
+          style={{
+            marginTop: 15,
+            display: "grid",
+            gridTemplateColumns: resolvedSettings.showParentSignature ? "repeat(3, minmax(0, 1fr))" : "repeat(2, minmax(0, 1fr))",
+            gap: 20,
+            alignItems: "end",
+          }}
+        >
+          {[
+            { label: resolvedSettings.classTeacherLabel, name: signatures.classTeacherName || "", image: "", show: true },
+            {
+              label: resolvedSettings.headTeacherLabel,
+              name: firstText(signatures.headTeacherName, signatures.principalName),
+              image: reportSignatureImage,
+              show: true,
+            },
+            {
+              label: resolvedSettings.parentLabel,
+              name: firstText(signatures.parentName, signatures.guardianName),
+              image: "",
+              show: resolvedSettings.showParentSignature,
+            },
+          ].filter((item) => item.show).map((item) => (
+            <div key={item.label} style={{ textAlign: "center" }}>
+              {item.image && <img src={item.image} alt="Official signature" style={{ height: 30, objectFit: "contain", marginBottom: 2 }} />}
+              <div style={{ minHeight: 16, marginBottom: 3, fontSize: compact ? 9 : 10, fontWeight: 950, color: "#111827" }}>
+                {item.name}
+              </div>
+              <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: 9.8, fontWeight: 900 }}>
+                {item.label}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <footer
+          style={{
+            marginTop: 8,
+            borderTop: `2px solid ${primary}`,
+            paddingTop: 4,
             display: "flex",
             justifyContent: "space-between",
             gap: 10,
-            fontSize: 8,
-            color: "#333",
-            background: "#f7f7f7",
+            fontSize: 7.8,
+            color: "#475569",
+            fontWeight: 700,
           }}
         >
           <span>Official academic report generated for {branding.schoolName}</span>
           <span>Powered by Eleeveon School Management System</span>
-        </div>
+        </footer>
       </div>
     </section>
   );
@@ -732,85 +826,38 @@ export default function BorderedTraditionalTemplate({
       <div className="src-mobile-toolbar report-no-print">
         <div>
           <strong>{report.studentName}</strong>
-          <span>
-            {report.className} · {header.academicPeriod?.name || "Academic Period"}
-          </span>
+          <span>{report.className} · {header.academicPeriod?.name || "Academic Period"}</span>
         </div>
 
-        <button type="button" onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? "Fit Preview" : "Expand"}
-        </button>
+        <div className="src-zoom-controls" aria-label="Report zoom controls">
+          <button type="button" className="src-zoom-icon-button" onClick={zoomOut} onPointerDown={() => startZoomHold("out")} onPointerUp={stopZoomHold} onPointerCancel={stopZoomHold} onPointerLeave={stopZoomHold} aria-label="Zoom out" title="Click or hold to zoom out">−</button>
+          <button type="button" className="src-zoom-fit-button" onClick={fitToScreen} aria-label="Fit to screen" title="Fit to screen">Fit</button>
+
+          <div className="src-zoom-menu-wrap">
+            <button type="button" className="src-zoom-percent-button" onClick={() => setZoomMenuOpen((prev) => !prev)} aria-label="Choose zoom percentage" aria-expanded={zoomMenuOpen} title="Choose zoom percentage">
+              <span>{displayZoomPercent}%</span>
+              <span className="src-zoom-caret">▾</span>
+            </button>
+
+            {zoomMenuOpen && (
+              <div className="src-zoom-menu" role="menu">
+                {[30, 40, 50, 60, 70, 80, 90, 100].map((percent) => (
+                  <button key={percent} type="button" role="menuitem" onClick={() => selectZoomPercent(percent)} className={`src-zoom-menu-item ${Math.round(previewScale * 100) === percent ? "active" : ""}`}>
+                    {percent}%
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button type="button" className="src-zoom-icon-button" onClick={zoomIn} onPointerDown={() => startZoomHold("in")} onPointerUp={stopZoomHold} onPointerCancel={stopZoomHold} onPointerLeave={stopZoomHold} aria-label="Zoom in" title="Click or hold to zoom in">+</button>
+        </div>
       </div>
 
-      <div className="src-preview-scroll report-screen-scroll">
-        <div className="src-preview-scale">{reportPage}</div>
-      </div>
-    </div>
-  );
-}
-
-// ======================================================
-// SMALL COMPONENTS
-// ======================================================
-
-function SignatureBox({
-  label,
-  name,
-  image,
-  compact,
-}: {
-  label: string;
-  name?: string;
-  image?: string;
-  compact?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        borderRight: "1px solid #111",
-        padding: compact ? 7 : 8,
-        textAlign: "center",
-        minHeight: compact ? 64 : 72,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-end",
-      }}
-    >
-      {image && (
-        <img
-          src={image}
-          alt="Official signature"
-          style={{
-            height: compact ? 26 : 32,
-            objectFit: "contain",
-            marginBottom: 2,
-            alignSelf: "center",
-          }}
-        />
-      )}
-
-      <div
-        style={{
-          minHeight: 15,
-          marginBottom: 4,
-          fontSize: compact ? 9 : 10,
-          fontWeight: 850,
-          color: "#111",
-        }}
-      >
-        {name || ""}
-      </div>
-
-      <div
-        style={{
-          borderTop: "1px solid #111",
-          paddingTop: 4,
-          fontSize: compact ? 8.5 : 9.5,
-          fontWeight: 900,
-          color: "#111",
-        }}
-      >
-        {label}
+      <div ref={previewFrameRef} className="src-preview-scroll report-screen-scroll" style={{ "--report-preview-scale": previewScale } as React.CSSProperties}>
+        <div className="src-preview-center">
+          <div className="src-preview-scale">{reportPage}</div>
+        </div>
       </div>
     </div>
   );
@@ -831,6 +878,8 @@ const css = `
 }
 
 .src-preview-shell {
+  --a4-width-px: 793.7008;
+  --a4-height-px: 1122.5197;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -839,11 +888,13 @@ const css = `
 }
 
 .src-mobile-toolbar {
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
   padding: 10px;
   border-radius: 18px;
   background: var(--surface, #fff);
@@ -851,10 +902,7 @@ const css = `
   box-shadow: 0 10px 24px rgba(15,23,42,.06);
 }
 
-.src-mobile-toolbar div {
-  min-width: 0;
-}
-
+.src-mobile-toolbar div { min-width: 0; }
 .src-mobile-toolbar strong,
 .src-mobile-toolbar span {
   display: block;
@@ -862,110 +910,238 @@ const css = `
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.src-mobile-toolbar strong { font-size: 13px; font-weight: 950; color: var(--text, #0f172a); }
+.src-mobile-toolbar span { margin-top: 2px; color: var(--muted, #64748b); font-size: 11px; font-weight: 750; }
 
-.src-mobile-toolbar strong {
-  font-size: 13px;
-  font-weight: 950;
-  color: var(--text, #0f172a);
-}
-
-.src-mobile-toolbar span {
-  margin-top: 2px;
-  color: var(--muted, #64748b);
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.src-mobile-toolbar button {
+.src-zoom-controls {
   flex: 0 0 auto;
-  min-height: 34px;
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
   border-radius: 999px;
-  padding: 0 12px;
+  background: color-mix(in srgb, var(--muted, #64748b) 10%, transparent);
+  border: 1px solid rgba(148,163,184,.18);
+}
+.src-zoom-controls button { appearance: none; -webkit-appearance: none; border: 0; cursor: pointer; font-family: inherit; }
+.src-zoom-icon-button,
+.src-zoom-fit-button,
+.src-zoom-percent-button {
+  height: 32px;
+  min-height: 32px;
+  border-radius: 999px;
   background: var(--primary-color, #2563eb);
   color: #fff;
-  font-size: 12px;
   font-weight: 950;
-  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(15,23,42,.12);
 }
+.src-zoom-icon-button { width: 32px; min-width: 32px; padding: 0; font-size: 18px; }
+.src-zoom-fit-button { min-width: 42px; padding: 0 12px; font-size: 12px; }
+.src-zoom-percent-button { min-width: 68px; padding: 0 10px; font-size: 12px; gap: 5px; font-variant-numeric: tabular-nums; }
+.src-zoom-caret { font-size: 9px; line-height: 1; opacity: .9; transform: translateY(1px); }
+.src-zoom-menu-wrap { position: relative; display: inline-flex; flex: 0 0 auto; }
+.src-zoom-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  width: 114px;
+  max-height: 252px;
+  overflow-y: auto;
+  display: grid;
+  gap: 4px;
+  padding: 7px;
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  border: 1px solid rgba(148,163,184,.34);
+  box-shadow: 0 20px 46px rgba(15,23,42,.20);
+  box-sizing: border-box;
+}
+.src-zoom-menu-item {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 900;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.src-zoom-menu-item:hover { background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent); }
+.src-zoom-menu-item.active { background: var(--primary-color, #2563eb); color: #fff; }
 
 .src-preview-scroll {
+  --report-preview-scale: 1;
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 8px;
+  padding: 4px;
   border-radius: 22px;
-  background: rgba(148,163,184,.08);
+  background: rgba(148,163,184,.10);
   border: 1px solid rgba(148,163,184,.18);
+  box-sizing: border-box;
 }
-
+.src-preview-center {
+  width: 100%;
+  height: calc(297mm * var(--report-preview-scale));
+  min-height: calc(297mm * var(--report-preview-scale));
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  overflow: hidden;
+}
 .src-preview-scale {
-  width: max-content;
-  min-width: 100%;
-  transform-origin: top left;
+  width: 210mm;
+  height: 297mm;
+  min-width: 210mm;
+  min-height: 297mm;
+  transform: scale(var(--report-preview-scale));
+  transform-origin: top center;
+  flex: 0 0 auto;
+}
+.bordered-traditional-template-page,
+.student-report-card-page,
+.src-a4-page {
+  width: 210mm !important;
+  min-width: 210mm !important;
+  max-width: 210mm !important;
+  min-height: 297mm !important;
+  box-sizing: border-box !important;
+}
+.src-preview-shell:not(.expanded) .src-preview-scroll { overflow: hidden; }
+.src-preview-shell.expanded .src-preview-scroll { overflow: auto; max-height: none; }
+.src-preview-shell.expanded .src-preview-center {
+  width: max(100%, calc(210mm * var(--report-preview-scale)));
+  height: calc(297mm * var(--report-preview-scale));
+  min-height: calc(297mm * var(--report-preview-scale));
+  overflow: visible;
+  margin: 0 auto;
 }
 
-@media screen and (max-width: 720px) {
-  .src-mobile-toolbar {
-    display: flex;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scroll {
-    overflow: hidden;
-    max-height: 76vh;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scale {
-    width: 210mm;
-    transform: scale(calc((100vw - 28px) / 793.7008));
-    transform-origin: top left;
-  }
-
-  .src-preview-shell:not(.expanded) .src-preview-scroll::after {
-    content: "";
-    display: block;
-    height: calc(1122.5197px * ((100vw - 28px) / 793.7008));
-    max-height: 76vh;
-  }
-
-  .src-preview-shell.expanded .src-preview-scroll {
-    overflow-x: auto;
-    max-height: none;
-  }
-
-  .src-preview-shell.expanded .src-preview-scale {
-    transform: none;
-  }
+.traditional-frame-line {
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 18px;
 }
+.traditional-frame-outer { inset: 4.5mm; border: 1.5px solid; opacity: .65; }
+.traditional-frame-inner { inset: 6.5mm; border: 1px solid #e5e7eb; }
+.traditional-corner {
+  position: absolute;
+  z-index: 0;
+  width: 17mm;
+  height: 17mm;
+  pointer-events: none;
+  opacity: .85;
+}
+.traditional-corner-tl { left: 4.5mm; top: 4.5mm; border-left: 3px solid; border-top: 3px solid; border-top-left-radius: 18px; }
+.traditional-corner-tr { right: 4.5mm; top: 4.5mm; border-right: 3px solid; border-top: 3px solid; border-top-right-radius: 18px; }
+.traditional-corner-bl { left: 4.5mm; bottom: 4.5mm; border-left: 3px solid; border-bottom: 3px solid; border-bottom-left-radius: 18px; }
+.traditional-corner-br { right: 4.5mm; bottom: 4.5mm; border-right: 3px solid; border-bottom: 3px solid; border-bottom-right-radius: 18px; }
+.traditional-grade-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-weight: 950;
+  background: #fff;
+}
+.traditional-timeline-seal {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 3px solid;
+  display: inline-block;
+  position: relative;
+}
+.traditional-timeline-seal::before,
+.traditional-timeline-seal::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 1px;
+  background: #cbd5e1;
+}
+.traditional-timeline-seal::before { right: 100%; }
+.traditional-timeline-seal::after { left: 100%; }
 
-@media screen and (min-width: 721px) {
-  .src-preview-scroll {
-    overflow-x: auto;
-  }
+@media screen and (max-width: 380px) {
+  .src-mobile-toolbar { gap: 6px; padding: 8px; }
+  .src-mobile-toolbar strong { font-size: 12px; }
+  .src-mobile-toolbar span { font-size: 10px; }
+  .src-zoom-controls { gap: 3px; padding: 3px; }
+  .src-zoom-icon-button { width: 29px; min-width: 29px; height: 29px; min-height: 29px; font-size: 16px; }
+  .src-zoom-fit-button { min-width: 36px; height: 29px; min-height: 29px; padding: 0 8px; font-size: 10px; }
+  .src-zoom-percent-button { min-width: 62px; height: 29px; min-height: 29px; padding: 0 8px; font-size: 10px; gap: 4px; }
+  .src-zoom-menu { width: 106px; max-height: 210px; padding: 6px; }
+  .src-zoom-menu-item { height: 30px; min-height: 30px; font-size: 11px; }
 }
 
 @media print {
   .src-preview-shell,
   .src-preview-scroll,
+  .src-preview-center,
   .src-preview-scale {
     display: contents !important;
     transform: none !important;
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
     overflow: visible !important;
     padding: 0 !important;
+    margin: 0 !important;
     border: 0 !important;
     background: transparent !important;
+    box-shadow: none !important;
   }
 
-  .src-mobile-toolbar {
+  .src-mobile-toolbar,
+  .report-no-print {
     display: none !important;
+    visibility: hidden !important;
   }
 
-  .student-report-card-page {
+  .student-report-card-page,
+  .bordered-traditional-template-page,
+  .src-a4-page {
+    width: 210mm !important;
+    min-width: 210mm !important;
+    max-width: 210mm !important;
+    min-height: 297mm !important;
     transform: none !important;
     margin: 0 auto !important;
+    box-shadow: none !important;
+    border-color: #111 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .bordered-traditional-template-page [data-report-color-block="true"] {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  table,
+  tr,
+  td,
+  th {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 `;

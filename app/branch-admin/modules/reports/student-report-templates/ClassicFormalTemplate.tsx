@@ -47,7 +47,9 @@ import {
   firstText,
   formatNumber,
   formatPercent,
+  currentAcademicPeriodEndText,
   nextAcademicPeriodText,
+  friendlyReportDate,
   normalizeStudentReportTemplateData,
   ordinal,
   reportTemplateEmptyMessage,
@@ -264,6 +266,7 @@ export default function ClassicFormalTemplate({
   const {
     branding,
     studentInfo,
+    currentAcademicPeriod,
     nextAcademicPeriod,
     signatures,
   } = normalized;
@@ -423,7 +426,12 @@ export default function ClassicFormalTemplate({
     },
   ].filter((item) => item.show);
 
+  const currentPeriodEndLine = currentAcademicPeriodEndText(currentAcademicPeriod, resolvedSettings);
   const nextPeriodLine = nextAcademicPeriodText(nextAcademicPeriod, resolvedSettings);
+  const generatedDateValue =
+    (resolvedSettings as any).showGeneratedDate
+      ? friendlyReportDate((dataset as any)?.generatedAt)
+      : "";
 
   const subjectTableColumnCount =
     1 +
@@ -727,35 +735,113 @@ export default function ClassicFormalTemplate({
           </div>
         </div>
 
-        {nextPeriodLine && (
+        {(currentPeriodEndLine || nextPeriodLine || generatedDateValue) && (
           <div
             style={{
               marginTop: 8,
-              border: `1.5px solid #111`,
-              borderRadius: 8,
-              padding: "6px 9px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              background: "rgba(255,255,255,0.96)",
-              borderLeft: `6px solid ${primary}`,
+              display: "grid",
+              gridTemplateColumns:
+                [currentPeriodEndLine, nextPeriodLine, generatedDateValue].filter(Boolean).length >= 3
+                  ? "repeat(3, minmax(0, 1fr))"
+                  : [currentPeriodEndLine, nextPeriodLine, generatedDateValue].filter(Boolean).length === 2
+                    ? "repeat(2, minmax(0, 1fr))"
+                    : "1fr",
+              gap: 7,
             }}
           >
-            <div>
-              <div style={label}>Next Academic Period</div>
-              <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
-                {nextAcademicPeriod?.name || "Next Period"}
-              </div>
-            </div>
+            {currentPeriodEndLine && (
+              <div
+                style={{
+                  border: `1.5px solid #111`,
+                  borderRadius: 8,
+                  padding: "6px 9px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  background: "rgba(255,255,255,0.96)",
+                  borderLeft: `6px solid ${primary}`,
+                }}
+              >
+                <div>
+                  <div style={label}>Current Academic Period</div>
+                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                    {currentAcademicPeriod?.name || header.academicPeriod?.name || "Current Period"}
+                  </div>
+                </div>
 
-            <div style={{ textAlign: "right" }}>
-              <div style={label}>Begins</div>
-              <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
-                {nextAcademicPeriod?.formattedStartDate ||
-                  nextPeriodLine.replace(/^.*?:\s*/i, "")}
+                <div style={{ textAlign: "right" }}>
+                  <div style={label}>Ends</div>
+                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                    {currentAcademicPeriod?.formattedEndDate ||
+                      currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {nextPeriodLine && (
+              <div
+                style={{
+                  border: `1.5px solid #111`,
+                  borderRadius: 8,
+                  padding: "6px 9px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  background: "rgba(255,255,255,0.96)",
+                  borderLeft: `6px solid ${primary}`,
+                }}
+              >
+                <div>
+                  <div style={label}>Next Academic Period</div>
+                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                    {nextAcademicPeriod?.name || "Next Period"}
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <div style={label}>Begins</div>
+                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                    {nextAcademicPeriod?.formattedStartDate ||
+                      nextPeriodLine.replace(/^.*?:\s*/i, "")}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {generatedDateValue && (
+              <div
+                style={{
+                  border: `1.5px solid #111`,
+                  borderRadius: 8,
+                  padding: "6px 9px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  background: "rgba(255,255,255,0.96)",
+                  borderLeft: `6px solid ${primary}`,
+                }}
+              >
+                <div>
+                  <div style={label}>
+                    {(resolvedSettings as any).generatedDateLabel || "Generated"}
+                  </div>
+                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                    Report Card
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "right" }}>
+                  <div style={label}>Date</div>
+                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                    {generatedDateValue}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

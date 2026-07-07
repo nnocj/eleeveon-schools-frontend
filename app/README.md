@@ -25,3 +25,17 @@ Drop this `components` folder into `app/components`.
 ## Compatibility notes
 
 The role portal components were preserved to avoid breaking existing dashboard imports. This upgrade is designed to work with the upgraded Prisma, db.ts, sync folder, and backend source while keeping the current frontend stable.
+
+
+Compact Print — easiest next; same structure but tighter.
+Bordered Traditional — close to Classic Formal, just stronger borders/table styling.
+Modern Clean — cleaner cards, softer spacing.
+Letterhead Premium — branding-heavy header.
+Side Profile — student photo/profile emphasis.
+Cambridge — international academic style.
+IB — clean international layout.
+Kindergarten — softer early-years design.
+Montessori — calm spacious early-years design.
+University Transcript — transcript-style academic record.
+
+Best approach: build one template at a time from Classic Formal, changing layout/styling only, not logic.

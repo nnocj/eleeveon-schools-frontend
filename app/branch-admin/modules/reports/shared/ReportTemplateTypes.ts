@@ -149,6 +149,7 @@ export interface ReportCardTemplateSettingsLike {
   showStudentPhoto?: boolean;
   showTeacherNames?: boolean;
 
+  showCurrentAcademicPeriodEnd?: boolean;
   showNextAcademicPeriod?: boolean;
   showPromotionStatus?: boolean;
 
@@ -161,16 +162,19 @@ export interface ReportCardTemplateSettingsLike {
 
   showWatermark?: boolean;
   showParentSignature?: boolean;
+  showGeneratedDate?: boolean;
 
   classTeacherLabel?: string;
   headTeacherLabel?: string;
   parentLabel?: string;
   principalLabel?: string;
 
+  currentAcademicPeriodEndLabel?: string;
   nextAcademicPeriodLabel?: string;
   numberOnRollLabel?: string;
   classPositionLabel?: string;
   subjectPositionLabel?: string;
+  generatedDateLabel?: string;
 
   active?: boolean;
   isDeleted?: boolean;
@@ -234,6 +238,7 @@ export interface StudentReportVisibilitySettings {
   showStudentPhoto: boolean;
   showTeacherNames: boolean;
 
+  showCurrentAcademicPeriodEnd: boolean;
   showNextAcademicPeriod: boolean;
   showPromotionStatus: boolean;
 
@@ -246,6 +251,7 @@ export interface StudentReportVisibilitySettings {
 
   showWatermark: boolean;
   showParentSignature: boolean;
+  showGeneratedDate: boolean;
 }
 
 export interface StudentReportLabelSettings {
@@ -254,10 +260,12 @@ export interface StudentReportLabelSettings {
   parentLabel: string;
   principalLabel: string;
 
+  currentAcademicPeriodEndLabel: string;
   nextAcademicPeriodLabel: string;
   numberOnRollLabel: string;
   classPositionLabel: string;
   subjectPositionLabel: string;
+  generatedDateLabel: string;
 }
 
 export interface StudentReportTemplateSettings
@@ -377,6 +385,18 @@ export interface ReportTemplateNextPeriodInfo {
   label?: string;
 }
 
+export interface ReportTemplateCurrentPeriodInfo {
+  id?: number;
+  academicStructureId?: number;
+  name?: string;
+  type?: string;
+  startDate?: string;
+  endDate?: string;
+  order?: number;
+  formattedEndDate?: string;
+  label?: string;
+}
+
 export interface ReportTemplateSummaryInfo {
   total?: number;
   average?: number;
@@ -404,8 +424,10 @@ export interface NormalizedStudentReportTemplateData {
   subjectResults: StudentSubjectResult[];
   attendance?: AttendanceSummary;
   summary: ReportTemplateSummaryInfo;
+  currentAcademicPeriod?: ReportTemplateCurrentPeriodInfo;
   nextAcademicPeriod?: ReportTemplateNextPeriodInfo;
   signatures: ReportTemplateSignatureInfo;
+  generatedAt?: string | number | Date;
 
   settings: StudentReportTemplateSettings;
 }
@@ -436,6 +458,7 @@ export const DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS: StudentReportTemplateSett
   showStudentPhoto: true,
   showTeacherNames: true,
 
+  showCurrentAcademicPeriodEnd: true,
   showNextAcademicPeriod: true,
   showPromotionStatus: false,
 
@@ -448,16 +471,19 @@ export const DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS: StudentReportTemplateSett
 
   showWatermark: true,
   showParentSignature: true,
+  showGeneratedDate: false,
 
   classTeacherLabel: "Class Teacher",
   headTeacherLabel: "Headteacher / Principal",
   parentLabel: "Parent / Guardian",
   principalLabel: "Principal",
 
+  currentAcademicPeriodEndLabel: "This Academic Period Ends",
   nextAcademicPeriodLabel: "Next Academic Period Begins",
   numberOnRollLabel: "Number On Roll",
   classPositionLabel: "Class Position",
   subjectPositionLabel: "Position",
+  generatedDateLabel: "Generated On",
 
   active: true,
 };

@@ -116,6 +116,10 @@ import {
   getStudentReportTemplateRegistryItem,
 } from "./reports/student-report-templates";
 
+import StudentReportCard from "./reports/components/StudentReportCard";
+
+const TemplatePreviewStudentReportCard = StudentReportCard as React.ComponentType<any>;
+
 // ======================================================
 // COLOR UTILITIES
 // ======================================================
@@ -170,6 +174,15 @@ const fontOptions = [
   { label: "Courier New", value: "'Courier New', monospace" },
   { label: "Consolas", value: "Consolas, monospace" },
   { label: "Monaco", value: "Monaco, monospace" },
+];
+
+
+const generatedDateLabelOptions = [
+  "Generated",
+  "Report Generated",
+  "Date Generated",
+  "Printed On",
+  "Report Issued",
 ];
 
 type ToastTone = "success" | "error" | "info";
@@ -286,6 +299,7 @@ type ReportTemplateForm = {
   showAttendancePercent: boolean;
   showStudentPhoto: boolean;
   showTeacherNames: boolean;
+  showCurrentAcademicPeriodEnd: boolean;
   showNextAcademicPeriod: boolean;
   showPromotionStatus: boolean;
   showGPA: boolean;
@@ -295,15 +309,18 @@ type ReportTemplateForm = {
   showSubjectRemarks: boolean;
   showWatermark: boolean;
   showParentSignature: boolean;
+  showGeneratedDate: boolean;
 
   classTeacherLabel: string;
   headTeacherLabel: string;
   parentLabel: string;
   principalLabel: string;
+  currentAcademicPeriodEndLabel: string;
   nextAcademicPeriodLabel: string;
   numberOnRollLabel: string;
   classPositionLabel: string;
   subjectPositionLabel: string;
+  generatedDateLabel: string;
 
   active: boolean;
 };
@@ -437,6 +454,7 @@ function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> 
     showAttendancePercent: true,
     showStudentPhoto: true,
     showTeacherNames: true,
+    showCurrentAcademicPeriodEnd: true,
     showNextAcademicPeriod: true,
     showPromotionStatus: false,
     showGPA: true,
@@ -446,15 +464,18 @@ function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> 
     showSubjectRemarks: true,
     showWatermark: true,
     showParentSignature: true,
+    showGeneratedDate: false,
 
     classTeacherLabel: "Class Teacher",
     headTeacherLabel: "Headteacher / Principal",
     parentLabel: "Parent / Guardian",
     principalLabel: "Principal",
+    currentAcademicPeriodEndLabel: "This Academic Period Ends",
     nextAcademicPeriodLabel: "Next Academic Period Begins",
     numberOnRollLabel: "Number On Roll",
     classPositionLabel: "Class Position",
     subjectPositionLabel: "Position",
+    generatedDateLabel: "Generated",
 
     active: true,
   };
@@ -462,6 +483,194 @@ function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> 
 
 const defaultReportTemplateForm = (): ReportTemplateForm =>
   reportTemplateFormFromDefinition(defaultReportTemplateDefinition());
+
+function reportTemplatePreviewSettingsFromForm(
+  form: ReportTemplateForm,
+  template?: Partial<ReportTemplateRow> | null
+) {
+  const selected = template || null;
+
+  return {
+    ...form,
+    templateName: selected?.name || form.templateName,
+    templateCode: selected?.code || form.templateCode,
+    layoutKey: selected?.layoutKey || form.layoutKey,
+    orientation: (form.orientation || selected?.orientation || "portrait") as "portrait" | "landscape",
+    paperSize: (form.paperSize || selected?.paperSize || "A4") as "A4" | "Letter",
+    density: form.density || selected?.density || "compact",
+  };
+}
+
+function selectReportTemplateIntoForm(
+  template: Partial<ReportTemplateRow> | null | undefined,
+  updateField: (key: keyof ReportTemplateForm, value: any) => void
+) {
+  const selected = template || defaultReportTemplateDefinition();
+  const code = selected.code || selected.layoutKey || defaultReportTemplateDefinition().code || "classic_formal";
+
+  updateField("templateId", idOf((selected as any)?.id) || undefined);
+  updateField("templateName", selected.name || "Report Template");
+  updateField("templateCode", code);
+  updateField("layoutKey", selected.layoutKey || code);
+  updateField("orientation", ((selected as any)?.orientation || "portrait") as "portrait" | "landscape");
+  updateField("paperSize", ((selected as any)?.paperSize || "A4") as "A4" | "Letter");
+  updateField("density", ((selected as any)?.density || "compact") as "compact" | "comfortable" | "spacious");
+}
+
+function createDummyStudentReportPreviewDataset(args: {
+  schoolName?: string;
+  branchName?: string;
+  primaryColor?: string;
+  fontFamily?: string;
+  logo?: string;
+  reportCardBackgroundImage?: string;
+  reportCardWatermark?: string;
+  reportCardSignatureImage?: string;
+}) {
+  const schoolName = args.schoolName || "Eleeveon International Academy";
+  const branchName = args.branchName || "Main Campus";
+
+  const currentAcademicPeriod = {
+    id: 1,
+    name: "Term 2, 2026",
+    startDate: "2026-05-06",
+    endDate: "2026-07-31",
+    formattedStartDate: "May 06, 2026",
+    formattedEndDate: "Jul 31, 2026",
+  };
+
+  const nextAcademicPeriod = {
+    id: 2,
+    name: "Term 3, 2026",
+    startDate: "2026-09-10",
+    endDate: "2026-12-12",
+    formattedStartDate: "Sep 10, 2026",
+    formattedEndDate: "Dec 12, 2026",
+  };
+
+  const assessmentColumns = [
+    { assessmentStructureItemId: 1, name: "Class Score", maxScore: 50, weight: 50, order: 1 },
+    { assessmentStructureItemId: 2, name: "Exam", maxScore: 100, weight: 50, order: 2 },
+  ];
+
+  const subjects = [
+    ["English Language", "Ms. Abena Mensah", 42, 84, 88, "A", 2, "Excellent"],
+    ["Mathematics", "Mr. Kofi Addo", 45, 90, 92, "A+", 1, "Outstanding"],
+    ["Science", "Mrs. Ama Boateng", 39, 82, 84, "A", 3, "Very Good"],
+    ["Social Studies", "Mr. Kwame Owusu", 40, 78, 80, "B+", 4, "Good"],
+  ] as const;
+
+  return {
+    generatedAt: "2026-07-07T12:00:00.000Z",
+    header: {
+      schoolName,
+      branchName,
+      primaryColor: args.primaryColor || "#2f6fed",
+      fontFamily: args.fontFamily || "system-ui, -apple-system, sans-serif",
+      logo: args.logo || "",
+      reportCardBackgroundImage: args.reportCardBackgroundImage || "",
+      reportCardWatermark: args.reportCardWatermark || args.logo || "",
+      reportCardSignatureImage: args.reportCardSignatureImage || "",
+      school: {
+        name: schoolName,
+        motto: "Excellence, Character and Service",
+        address: "P.O. Box 100, Accra",
+        phone: "+233 24 000 0000",
+        email: "info@school.edu.gh",
+        website: "www.school.edu.gh",
+        logo: args.logo || "",
+      },
+      branch: {
+        name: branchName,
+        address: "Main Campus, Accra",
+        phone: "+233 24 000 0000",
+        email: "branch@school.edu.gh",
+        website: "www.school.edu.gh",
+        logo: args.logo || "",
+      },
+      academicStructure: { id: 1, name: "Basic School" },
+      academicStructureName: "Basic School",
+      academicPeriod: currentAcademicPeriod,
+      academicPeriodName: currentAcademicPeriod.name,
+      classData: { id: 1, name: "Grade 6" },
+      className: "Grade 6",
+    },
+    branding: {
+      schoolName,
+      branchName,
+      primaryColor: args.primaryColor || "#2f6fed",
+      fontFamily: args.fontFamily || "system-ui, -apple-system, sans-serif",
+      logo: args.logo || "",
+      reportCardBackgroundImage: args.reportCardBackgroundImage || "",
+      reportCardWatermark: args.reportCardWatermark || args.logo || "",
+      reportCardSignatureImage: args.reportCardSignatureImage || "",
+      address: "P.O. Box 100, Accra",
+      phone: "+233 24 000 0000",
+      email: "info@school.edu.gh",
+      website: "www.school.edu.gh",
+      motto: "Excellence, Character and Service",
+      branchAddress: "Main Campus, Accra",
+    },
+    currentAcademicPeriod,
+    nextAcademicPeriod,
+    student: {
+      id: 1,
+      name: "Jonathan Commey",
+      fullName: "Jonathan Commey",
+      admissionNumber: "STD-2026-014",
+      gender: "Male",
+      photo: "",
+    },
+    studentInfo: {
+      studentPhoto: "",
+      numberOnRoll: 38,
+    },
+    signatures: {
+      classTeacherName: "Ms. Abena Mensah",
+      headTeacherName: "Rev. Daniel Asare",
+      principalName: "Rev. Daniel Asare",
+      parentName: "Parent / Guardian",
+      guardianName: "Parent / Guardian",
+      officialSignatureImage: args.reportCardSignatureImage || "",
+    },
+    report: {
+      studentId: 1,
+      studentName: "Jonathan Commey",
+      admissionNumber: "STD-2026-014",
+      gender: "Male",
+      className: "Grade 6",
+      attendance: {
+        presentDays: 58,
+        totalDays: 62,
+        attendancePercent: 93.5,
+      },
+      total: 344,
+      average: 86,
+      overallPosition: 2,
+      overallGPA: 3.82,
+      classTeacherRemark: "Jonathan is attentive, respectful and participates actively in class.",
+      headTeacherRemark: "A strong performance. Keep building excellent learning habits.",
+      subjectResults: subjects.map((subject, index) => {
+        const [subjectName, teacherName, classScore, examScore, percentage, grade, position, remark] = subject;
+        return {
+          classSubjectId: index + 1,
+          subjectName,
+          teacherName,
+          breakdown: assessmentColumns.map((column) => ({
+            ...column,
+            score: column.assessmentStructureItemId === 1 ? classScore : examScore,
+          })),
+          weightedTotal: percentage,
+          percentage,
+          grade,
+          subjectPosition: position,
+          remark,
+        };
+      }),
+    },
+  };
+}
+
 
 const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showSubjectPosition",
@@ -471,6 +680,7 @@ const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showAttendancePercent",
   "showStudentPhoto",
   "showTeacherNames",
+  "showCurrentAcademicPeriodEnd",
   "showNextAcademicPeriod",
   "showPromotionStatus",
   "showGPA",
@@ -480,6 +690,7 @@ const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showSubjectRemarks",
   "showWatermark",
   "showParentSignature",
+  "showGeneratedDate",
 ];
 
 
@@ -807,6 +1018,7 @@ function makeReportTemplateSettingsPayload(args: {
     showAttendancePercent: !!args.form.showAttendancePercent,
     showStudentPhoto: !!args.form.showStudentPhoto,
     showTeacherNames: !!args.form.showTeacherNames,
+    showCurrentAcademicPeriodEnd: !!args.form.showCurrentAcademicPeriodEnd,
     showNextAcademicPeriod: !!args.form.showNextAcademicPeriod,
     showPromotionStatus: !!args.form.showPromotionStatus,
     showGPA: !!args.form.showGPA,
@@ -816,15 +1028,18 @@ function makeReportTemplateSettingsPayload(args: {
     showSubjectRemarks: !!args.form.showSubjectRemarks,
     showWatermark: !!args.form.showWatermark,
     showParentSignature: !!args.form.showParentSignature,
+    showGeneratedDate: !!args.form.showGeneratedDate,
 
     classTeacherLabel: args.form.classTeacherLabel?.trim() || "Class Teacher",
     headTeacherLabel: args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
     parentLabel: args.form.parentLabel?.trim() || "Parent / Guardian",
     principalLabel: args.form.principalLabel?.trim() || "Principal",
+    currentAcademicPeriodEndLabel: args.form.currentAcademicPeriodEndLabel?.trim() || "This Academic Period Ends",
     nextAcademicPeriodLabel: args.form.nextAcademicPeriodLabel?.trim() || "Next Academic Period Begins",
     numberOnRollLabel: args.form.numberOnRollLabel?.trim() || "Number On Roll",
     classPositionLabel: args.form.classPositionLabel?.trim() || "Class Position",
     subjectPositionLabel: args.form.subjectPositionLabel?.trim() || "Position",
+    generatedDateLabel: args.form.generatedDateLabel?.trim() || "Generated",
 
     active: args.form.active !== false,
     createdAt: existing.createdAt || now,
@@ -2510,7 +2725,9 @@ export default function Branchsettings() {
           reportTemplateForm.showSubjectPosition ? "Subject pos." : "",
           reportTemplateForm.showClassPosition ? "Class pos." : "",
           reportTemplateForm.showNumberOnRoll ? "Roll" : "",
+          reportTemplateForm.showCurrentAcademicPeriodEnd ? "Period end" : "",
           reportTemplateForm.showNextAcademicPeriod ? "Next period" : "",
+          reportTemplateForm.showGeneratedDate ? (reportTemplateForm.generatedDateLabel || "Generated") : "",
         ].filter(Boolean).join(" · ") || "Display controls ready"}`,
         tone: reportTemplateForm.active ? "green" : "gray",
       },
@@ -2778,6 +2995,9 @@ export default function Branchsettings() {
         <ReportTemplateSheet
           form={reportTemplateForm}
           templates={reportTemplates}
+          settingsForm={form}
+          schoolName={schoolForm.name || school?.name || activeSchool?.name || "Eleeveon International Academy"}
+          branchName={branchForm.name || branch?.name || activeBranch?.name || "Main Campus"}
           saving={savingReportTemplate}
           updateField={updateReportTemplateField}
           saveReportCardTemplateSettings={saveReportCardTemplateSettings}
@@ -3359,6 +3579,9 @@ function AppearanceSheet({
 function ReportTemplateSheet({
   form,
   templates,
+  settingsForm,
+  schoolName,
+  branchName,
   saving,
   updateField,
   saveReportCardTemplateSettings,
@@ -3366,6 +3589,9 @@ function ReportTemplateSheet({
 }: {
   form: ReportTemplateForm;
   templates: ReportTemplateRow[];
+  settingsForm: SettingsForm;
+  schoolName: string;
+  branchName: string;
   saving: boolean;
   updateField: (key: keyof ReportTemplateForm, value: any) => void;
   saveReportCardTemplateSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
@@ -3379,6 +3605,7 @@ function ReportTemplateSheet({
     { key: "showAttendancePercent", label: "Attendance Percentage", note: "Show attendance percentage field." },
     { key: "showStudentPhoto", label: "Student Photo", note: "Show or hide student photo box." },
     { key: "showTeacherNames", label: "Subject Teacher Names", note: "Show teacher name under each subject." },
+    { key: "showCurrentAcademicPeriodEnd", label: "Current Period End", note: "Show this academic period ends line before the next period line." },
     { key: "showNextAcademicPeriod", label: "Next Academic Period", note: "Show reopening/next period begins line." },
     { key: "showPromotionStatus", label: "Promotion Status", note: "Show promote/repeat/graduate status when available." },
     { key: "showGPA", label: "GPA", note: "Show GPA summary field." },
@@ -3388,7 +3615,45 @@ function ReportTemplateSheet({
     { key: "showSubjectRemarks", label: "Subject Remarks", note: "Show subject remark column." },
     { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on report cards." },
     { key: "showParentSignature", label: "Parent Signature", note: "Show parent/guardian signature area." },
+    { key: "showGeneratedDate", label: "Generated Date", note: "Show this as the third report-period card beside Current Period and Next Period." },
   ];
+
+  const galleryTemplates = templates.length ? templates : reportTemplateDefinitionOptions();
+
+  const previewDataset = useMemo(
+    () =>
+      createDummyStudentReportPreviewDataset({
+        schoolName,
+        branchName,
+        primaryColor: settingsForm.primaryColor,
+        fontFamily: settingsForm.fontFamily,
+        logo: settingsForm.logo,
+        reportCardBackgroundImage: settingsForm.reportCardBackgroundImage,
+        reportCardWatermark: settingsForm.reportCardWatermark,
+        reportCardSignatureImage: settingsForm.reportCardSignatureImage,
+      }),
+    [
+      schoolName,
+      branchName,
+      settingsForm.primaryColor,
+      settingsForm.fontFamily,
+      settingsForm.logo,
+      settingsForm.reportCardBackgroundImage,
+      settingsForm.reportCardWatermark,
+      settingsForm.reportCardSignatureImage,
+    ]
+  );
+
+  const selectedPreviewTemplate =
+    galleryTemplates.find((item) => sameId(item.code, form.templateCode)) ||
+    galleryTemplates.find((item) => sameId(item.layoutKey, form.layoutKey)) ||
+    getStudentReportTemplateRegistryItem(form.templateCode) ||
+    defaultReportTemplateDefinition();
+
+  const selectedPreviewSettings = reportTemplatePreviewSettingsFromForm(
+    form,
+    selectedPreviewTemplate as any
+  );
 
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
@@ -3412,13 +3677,7 @@ function ReportTemplateSheet({
                   templates.find((item) => sameId(item.layoutKey, templateCode)) ||
                   getStudentReportTemplateRegistryItem(templateCode);
 
-                updateField("templateId", idOf((selected as any)?.id) || undefined);
-                updateField("templateName", (selected as any)?.name || "Report Template");
-                updateField("templateCode", (selected as any)?.code || templateCode);
-                updateField("layoutKey", (selected as any)?.layoutKey || templateCode);
-                updateField("orientation", ((selected as any)?.orientation || "portrait") as "portrait" | "landscape");
-                updateField("paperSize", ((selected as any)?.paperSize || "A4") as "A4" | "Letter");
-                updateField("density", ((selected as any)?.density || "compact") as "compact" | "comfortable" | "spacious");
+                selectReportTemplateIntoForm(selected as any, updateField);
               }}
             >
               {templates.map((template) => (
@@ -3460,13 +3719,83 @@ function ReportTemplateSheet({
           </Field>
         </div>
 
+        <section className="branch-settings-subsection template-preview-studio">
+          <div className="template-preview-studio-head">
+            <div>
+              <h3>Template Preview Studio</h3>
+              <p>Preview every report design with the same dummy filled report-card dataset before saving. Select any card to make it the branch default.</p>
+            </div>
+            <span className="template-preview-badge">Preview only</span>
+          </div>
+
+          <div className="template-preview-gallery">
+            {galleryTemplates.map((template) => {
+              const templateCode = String(template.code || template.layoutKey || template.name || "");
+              const isSelected =
+                sameId(template.code, form.templateCode) ||
+                sameId(template.layoutKey, form.layoutKey) ||
+                sameId(template.name, form.templateName);
+
+              const templateSettings = reportTemplatePreviewSettingsFromForm(form, template);
+
+              return (
+                <button
+                  type="button"
+                  key={templateCode || template.id || template.name}
+                  className={`template-preview-card ${isSelected ? "selected" : ""}`}
+                  onClick={() => selectReportTemplateIntoForm(template, updateField)}
+                >
+                  <span className="template-preview-card-top">
+                    <strong>{template.name || template.code || "Report Template"}</strong>
+                    <em>{isSelected ? "Selected" : "Tap to select"}</em>
+                  </span>
+
+                  <span className="template-preview-mini" aria-hidden="true">
+                    <span className="template-preview-mini-scale">
+                      <TemplatePreviewStudentReportCard
+                        dataset={previewDataset}
+                        template={template}
+                        settings={templateSettings}
+                        compact
+                        showWatermark={form.showWatermark}
+                        pageBreakAfter={false}
+                        mobilePreview={false}
+                      />
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="template-preview-focus">
+            <div className="template-preview-focus-head">
+              <strong>{selectedPreviewTemplate?.name || form.templateName || "Selected Template"}</strong>
+              <span>Live fit-preview using the selected template and current display controls.</span>
+            </div>
+
+            <TemplatePreviewStudentReportCard
+              dataset={previewDataset}
+              template={selectedPreviewTemplate}
+              settings={selectedPreviewSettings}
+              compact
+              showWatermark={form.showWatermark}
+              pageBreakAfter={false}
+              mobilePreview
+            />
+          </div>
+        </section>
+
         <section className="branch-settings-subsection">
           <h3>Display Controls</h3>
           <p>Turn a field off to remove it from the report card layout completely.</p>
 
           <div className="branch-report-toggle-grid">
             {visibilityControls.map((control) => (
-              <label key={String(control.key)} className="branch-report-toggle">
+              <label
+                key={String(control.key)}
+                className={`branch-report-toggle ${form[control.key] ? "is-on" : "is-off"}`}
+              >
                 <span>
                   <strong>{control.label}</strong>
                   <small>{control.note}</small>
@@ -3486,7 +3815,7 @@ function ReportTemplateSheet({
 
         <section className="branch-settings-subsection">
           <h3>Report Labels</h3>
-          <p>Use each school's preferred wording without changing the report component code.</p>
+          <p>Use each school's preferred wording without changing the report component code. The generated-date label controls the third metadata card that will sit beside Current Period and Next Period.</p>
 
           <div className="ba-form compact">
             <Field label="Class Teacher Label">
@@ -3505,6 +3834,10 @@ function ReportTemplateSheet({
               <input value={form.principalLabel} onChange={(event) => updateField("principalLabel", event.target.value)} />
             </Field>
 
+            <Field label="Current Period End Label">
+              <input value={form.currentAcademicPeriodEndLabel} onChange={(event) => updateField("currentAcademicPeriodEndLabel", event.target.value)} />
+            </Field>
+
             <Field label="Next Period Label">
               <input value={form.nextAcademicPeriodLabel} onChange={(event) => updateField("nextAcademicPeriodLabel", event.target.value)} />
             </Field>
@@ -3519,6 +3852,35 @@ function ReportTemplateSheet({
 
             <Field label="Subject Position Label">
               <input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} />
+            </Field>
+
+            <Field label="Generated Date Label">
+              <select
+                value={
+                  generatedDateLabelOptions.includes(form.generatedDateLabel)
+                    ? form.generatedDateLabel
+                    : "__custom__"
+                }
+                onChange={(event) => {
+                  if (event.target.value === "__custom__") return;
+                  updateField("generatedDateLabel", event.target.value);
+                }}
+              >
+                {generatedDateLabelOptions.map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+                <option value="__custom__">Custom label...</option>
+              </select>
+            </Field>
+
+            <Field label="Custom Generated Date Label">
+              <input
+                value={form.generatedDateLabel}
+                onChange={(event) => updateField("generatedDateLabel", event.target.value)}
+                placeholder="Generated"
+              />
             </Field>
           </div>
         </section>
@@ -4155,6 +4517,163 @@ const css = `
 .ba-sheet.small {
   width: min(520px, 100%);
 }
+
+.template-preview-studio {
+  display: grid;
+  gap: 12px;
+}
+
+.template-preview-studio-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.template-preview-studio-head h3,
+.template-preview-focus-head strong {
+  margin: 0;
+}
+
+.template-preview-badge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ba-primary, var(--primary-color, #2563eb)) 12%, transparent);
+  color: var(--ba-primary, var(--primary-color, #2563eb));
+  font-size: 10px;
+  font-weight: 1000;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.template-preview-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(176px, 1fr));
+  gap: 10px;
+}
+
+.template-preview-card {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 18px;
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  background: var(--card-bg, var(--surface, #fff));
+  color: var(--text, #111827);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(15,23,42,.07);
+}
+
+.template-preview-card.selected {
+  border-color: var(--ba-primary, var(--primary-color, #2563eb));
+  box-shadow:
+    0 18px 40px rgba(15,23,42,.10),
+    0 0 0 3px color-mix(in srgb, var(--ba-primary, var(--primary-color, #2563eb)) 16%, transparent);
+}
+
+.template-preview-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.template-preview-card-top strong,
+.template-preview-card-top em {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.template-preview-card-top strong {
+  color: var(--text, #111827);
+  font-size: 12px;
+  font-weight: 1000;
+}
+
+.template-preview-card-top em {
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.template-preview-card.selected .template-preview-card-top em {
+  color: var(--ba-primary, var(--primary-color, #2563eb));
+}
+
+.template-preview-mini {
+  height: 230px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(148,163,184,.10), rgba(148,163,184,.05));
+  border: 1px solid rgba(148,163,184,.18);
+}
+
+.template-preview-mini-scale {
+  width: 210mm;
+  min-width: 210mm;
+  transform: scale(.235);
+  transform-origin: top center;
+  pointer-events: none;
+}
+
+.template-preview-mini .student-report-card-page,
+.template-preview-mini .src-a4-page {
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+.template-preview-focus {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  background: color-mix(in srgb, var(--muted, #64748b) 6%, transparent);
+}
+
+.template-preview-focus-head {
+  display: grid;
+  gap: 2px;
+}
+
+.template-preview-focus-head strong {
+  color: var(--text, #111827);
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.template-preview-focus-head span {
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+@media screen and (max-width: 520px) {
+  .template-preview-gallery {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .template-preview-mini {
+    height: 180px;
+  }
+
+  .template-preview-mini-scale {
+    transform: scale(.18);
+  }
+}
+
 
 @keyframes sheetIn {
   from { transform: translateY(16px); opacity: .7; }
@@ -5496,15 +6015,41 @@ const css = `
 .branch-report-toggle {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px;
+  grid-template-columns: minmax(0, 1fr) 92px;
   align-items: center;
   gap: 8px;
   padding: 10px;
-  border: 1px solid rgba(148,163,184,.22);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--card-bg, #fff) 92%, var(--ba-primary, #2563eb) 8%);
+  border: 1px solid var(--border, rgba(148,163,184,.24));
+  border-radius: 16px;
+  background: var(--card-bg, var(--surface, #ffffff));
+  color: var(--text, #0f172a);
+  box-shadow: 0 10px 24px rgba(15,23,42,.045);
+  transition:
+    border-color .18s var(--ease),
+    background .18s var(--ease),
+    box-shadow .18s var(--ease),
+    transform .18s var(--ease);
 }
 
+.branch-report-toggle.is-on {
+  border-color: color-mix(in srgb, var(--ba-primary, #2563eb) 34%, var(--border, rgba(148,163,184,.24)));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--ba-primary, #2563eb) 10%, transparent), transparent 62%),
+    var(--card-bg, var(--surface, #ffffff));
+}
+
+.branch-report-toggle.is-off {
+  background: color-mix(in srgb, var(--muted, #64748b) 7%, var(--card-bg, var(--surface, #ffffff)));
+  opacity: .92;
+}
+
+.branch-report-toggle:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--ba-primary, #2563eb) 42%, var(--border, rgba(148,163,184,.24)));
+  box-shadow: 0 14px 30px rgba(15,23,42,.075);
+}
+
+.branch-report-toggle span,
 .branch-report-toggle strong,
 .branch-report-toggle small {
   display: block;
@@ -5514,22 +6059,52 @@ const css = `
 .branch-report-toggle strong {
   color: var(--text, #0f172a);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 950;
+  line-height: 1.15;
+  letter-spacing: -.01em;
 }
 
 .branch-report-toggle small {
-  margin-top: 2px;
+  margin-top: 3px;
   color: var(--muted, #64748b);
   font-size: 10px;
-  font-weight: 700;
-  line-height: 1.25;
+  font-weight: 750;
+  line-height: 1.28;
+}
+
+.branch-report-toggle.is-off strong {
+  color: var(--muted, #64748b);
 }
 
 .branch-report-toggle select {
   min-height: 34px;
+  height: 34px;
   border-radius: 999px;
+  padding: 0 26px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--ba-primary, #2563eb) 30%, var(--border, rgba(148,163,184,.26)));
+  background: var(--input-bg, var(--surface, #ffffff));
+  color: var(--input-text, var(--text, #0f172a));
   font-size: 11px;
-  font-weight: 900;
+  font-weight: 950;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.branch-report-toggle.is-on select {
+  background: var(--ba-primary, #2563eb);
+  color: #ffffff;
+  border-color: var(--ba-primary, #2563eb);
+}
+
+.branch-report-toggle.is-off select {
+  background: var(--input-bg, var(--surface, #ffffff));
+  color: var(--muted, #64748b);
+  border-color: var(--border, rgba(148,163,184,.26));
+}
+
+.branch-report-toggle select option {
+  background: var(--input-bg, var(--surface, #ffffff));
+  color: var(--input-text, var(--text, #0f172a));
 }
 
 @media(max-width:720px) {

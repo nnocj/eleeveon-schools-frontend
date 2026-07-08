@@ -116,9 +116,18 @@ import {
   getStudentReportTemplateRegistryItem,
 } from "./reports/student-report-templates";
 
+import {
+  CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY,
+  getCumulativeTranscriptTemplateRegistryItem,
+} from "./reports/cumulative-transcript-templates";
+
 import StudentReportCard from "./reports/components/StudentReportCard";
+import CumulativeReportBook from "./reports/components/CumulativeReportBook";
+import CumulativeTranscriptCard from "./reports/components/CumulativeTranscriptCard";
 
 const TemplatePreviewStudentReportCard = StudentReportCard as React.ComponentType<any>;
+const TemplatePreviewCumulativeReportBook = CumulativeReportBook as React.ComponentType<any>;
+const TemplatePreviewCumulativeTranscriptCard = CumulativeTranscriptCard as React.ComponentType<any>;
 
 // ======================================================
 // COLOR UTILITIES
@@ -186,6 +195,7 @@ const generatedDateLabelOptions = [
 ];
 
 type ToastTone = "success" | "error" | "info";
+type ReportTemplateReportType = "student_report" | "cumulative_book" | "cumulative_transcript";
 type SettingsSection = "academic" | "school" | "branch" | "appearance" | "dashboardMedia" | "reportMedia" | "reportTemplates" | "gallery";
 
 type ImageField =
@@ -285,6 +295,8 @@ type ReportTemplateForm = {
   templateSettingsId?: number;
   assignmentId?: number;
 
+  reportType: ReportTemplateReportType;
+
   templateName: string;
   templateCode: string;
   layoutKey: string;
@@ -311,6 +323,19 @@ type ReportTemplateForm = {
   showParentSignature: boolean;
   showGeneratedDate: boolean;
 
+  showBookFrontCover: boolean;
+  showBookStudentProfilePage: boolean;
+  showBookAcademicJourneyPage: boolean;
+  showBookSummaryPage: boolean;
+  showBookBackCover: boolean;
+
+  showTranscriptTermBreakdown: boolean;
+  showTranscriptYearAverage: boolean;
+  showTranscriptCumulativeAverage: boolean;
+  showTranscriptCumulativePosition: boolean;
+  showTranscriptGPAProgression: boolean;
+  showTranscriptFinalRecommendation: boolean;
+
   classTeacherLabel: string;
   headTeacherLabel: string;
   parentLabel: string;
@@ -321,6 +346,20 @@ type ReportTemplateForm = {
   classPositionLabel: string;
   subjectPositionLabel: string;
   generatedDateLabel: string;
+  bookTitleLabel: string;
+  bookSubtitleLabel: string;
+  studentNameLabel: string;
+  admissionNumberLabel: string;
+  genderLabel: string;
+  classLabel: string;
+  academicStructureLabel: string;
+  academicPeriodLabel: string;
+  subjectLabel: string;
+  totalLabel: string;
+  averageLabel: string;
+  gradeLabel: string;
+  gpaLabel: string;
+  footerText: string;
 
   active: boolean;
 };
@@ -333,6 +372,7 @@ type ReportTemplateRow = {
   name?: string;
   code?: string;
   layoutKey?: string;
+  reportType?: ReportTemplateReportType | string;
   orientation?: string;
   paperSize?: string;
   density?: string;
@@ -348,6 +388,7 @@ type ReportTemplateSettingsRow = {
   schoolId?: number | string | null;
   branchId?: number | string | null;
   templateId?: number | string | null;
+  reportType?: ReportTemplateReportType | string;
   active?: boolean;
   isDeleted?: boolean;
   [key: string]: any;
@@ -360,6 +401,7 @@ type ReportTemplateAssignmentRow = {
   branchId?: number | string | null;
   templateId?: number | string | null;
   templateSettingsId?: number | string | null;
+  reportType?: ReportTemplateReportType | string;
   scopeType?: string | null;
   scopeId?: number | string | null;
   isDefault?: boolean;
@@ -417,29 +459,75 @@ const defaultForm = (
 });
 
 
-function reportTemplateDefinitionOptions(): ReportTemplateRow[] {
+function studentReportTemplateDefinitionOptions(): ReportTemplateRow[] {
   return STUDENT_REPORT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
     name: item.name,
     code: item.code,
     layoutKey: item.layoutKey,
+    reportType: "student_report",
     orientation: item.orientation || "portrait",
     paperSize: item.paperSize || "A4",
     density: item.density || "compact",
-    description: item.description || "",
+    description: item.description || "Student report card template.",
     active: item.active !== false,
     isDefault: item.isDefault === true || index === 0,
   }));
 }
 
-function defaultReportTemplateDefinition() {
-  return reportTemplateDefinitionOptions()[0];
+function cumulativeBookTemplateDefinitionOptions(): ReportTemplateRow[] {
+  return STUDENT_REPORT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
+    name: `${item.name} Book`,
+    code: item.code,
+    layoutKey: item.layoutKey,
+    reportType: "cumulative_book",
+    orientation: item.orientation || "portrait",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: `Cumulative report book using ${item.name} for every period snapshot.`,
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  }));
 }
 
-function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> | null): ReportTemplateForm {
-  const fallback = defaultReportTemplateDefinition();
+function cumulativeTranscriptTemplateDefinitionOptions(): ReportTemplateRow[] {
+  return CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
+    name: item.name,
+    code: item.code,
+    layoutKey: item.layoutKey,
+    reportType: "cumulative_transcript",
+    orientation: item.orientation || "portrait",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: item.description || "Cumulative transcript template.",
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  }));
+}
+
+function reportTemplateDefinitionOptions(reportType?: ReportTemplateReportType): ReportTemplateRow[] {
+  const all = [
+    ...studentReportTemplateDefinitionOptions(),
+    ...cumulativeBookTemplateDefinitionOptions(),
+    ...cumulativeTranscriptTemplateDefinitionOptions(),
+  ];
+
+  return reportType ? all.filter((item: any) => item.reportType === reportType) : all;
+}
+
+function defaultReportTemplateDefinition(reportType: ReportTemplateReportType = "student_report") {
+  return reportTemplateDefinitionOptions(reportType)[0] || reportTemplateDefinitionOptions("student_report")[0];
+}
+
+function reportTemplateFormFromDefinition(
+  template?: Partial<ReportTemplateRow> | null,
+  reportType: ReportTemplateReportType = "student_report"
+): ReportTemplateForm {
+  const fallback = defaultReportTemplateDefinition(reportType);
   const selected = template || fallback;
+  const selectedReportType = ((selected as any).reportType || reportType || "student_report") as ReportTemplateReportType;
 
   return {
+    reportType: selectedReportType,
     templateName: selected.name || fallback.name || "Classic Formal",
     templateCode: selected.code || fallback.code || "classic_formal",
     layoutKey: selected.layoutKey || fallback.layoutKey || "classic_formal",
@@ -464,7 +552,20 @@ function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> 
     showSubjectRemarks: true,
     showWatermark: true,
     showParentSignature: true,
-    showGeneratedDate: false,
+    showGeneratedDate: selectedReportType !== "student_report",
+
+    showBookFrontCover: true,
+    showBookStudentProfilePage: true,
+    showBookAcademicJourneyPage: true,
+    showBookSummaryPage: true,
+    showBookBackCover: true,
+
+    showTranscriptTermBreakdown: true,
+    showTranscriptYearAverage: true,
+    showTranscriptCumulativeAverage: true,
+    showTranscriptCumulativePosition: true,
+    showTranscriptGPAProgression: true,
+    showTranscriptFinalRecommendation: true,
 
     classTeacherLabel: "Class Teacher",
     headTeacherLabel: "Headteacher / Principal",
@@ -474,15 +575,29 @@ function reportTemplateFormFromDefinition(template?: Partial<ReportTemplateRow> 
     nextAcademicPeriodLabel: "Next Academic Period Begins",
     numberOnRollLabel: "Number On Roll",
     classPositionLabel: "Class Position",
-    subjectPositionLabel: "Position",
+    subjectPositionLabel: selectedReportType === "cumulative_transcript" ? "Rank" : "Position",
     generatedDateLabel: "Generated",
+    bookTitleLabel: "Cumulative Academic Report Book",
+    bookSubtitleLabel: "Student Academic Journey",
+    studentNameLabel: "Student",
+    admissionNumberLabel: "Student ID",
+    genderLabel: "Gender",
+    classLabel: selectedReportType === "cumulative_transcript" ? "Programme / Class" : "Class",
+    academicStructureLabel: "Academic Structure",
+    academicPeriodLabel: selectedReportType === "cumulative_transcript" ? "Academic Period" : "Academic Period",
+    subjectLabel: selectedReportType === "cumulative_transcript" ? "Course / Subject" : "Subject",
+    totalLabel: "Total",
+    averageLabel: "Average",
+    gradeLabel: "Grade",
+    gpaLabel: "GPA",
+    footerText: "Official academic document generated by Eleeveon Schools.",
 
     active: true,
   };
 }
 
 const defaultReportTemplateForm = (): ReportTemplateForm =>
-  reportTemplateFormFromDefinition(defaultReportTemplateDefinition());
+  reportTemplateFormFromDefinition(defaultReportTemplateDefinition("student_report"), "student_report");
 
 function reportTemplatePreviewSettingsFromForm(
   form: ReportTemplateForm,
@@ -492,6 +607,7 @@ function reportTemplatePreviewSettingsFromForm(
 
   return {
     ...form,
+    reportType: (selected as any)?.reportType || form.reportType || "student_report",
     templateName: selected?.name || form.templateName,
     templateCode: selected?.code || form.templateCode,
     layoutKey: selected?.layoutKey || form.layoutKey,
@@ -503,11 +619,14 @@ function reportTemplatePreviewSettingsFromForm(
 
 function selectReportTemplateIntoForm(
   template: Partial<ReportTemplateRow> | null | undefined,
-  updateField: (key: keyof ReportTemplateForm, value: any) => void
+  updateField: (key: keyof ReportTemplateForm, value: any) => void,
+  reportType?: ReportTemplateReportType
 ) {
-  const selected = template || defaultReportTemplateDefinition();
-  const code = selected.code || selected.layoutKey || defaultReportTemplateDefinition().code || "classic_formal";
+  const resolvedReportType = ((template as any)?.reportType || reportType || "student_report") as ReportTemplateReportType;
+  const selected = template || defaultReportTemplateDefinition(resolvedReportType);
+  const code = selected.code || selected.layoutKey || defaultReportTemplateDefinition(resolvedReportType).code || "classic_formal";
 
+  updateField("reportType", resolvedReportType);
   updateField("templateId", idOf((selected as any)?.id) || undefined);
   updateField("templateName", selected.name || "Report Template");
   updateField("templateCode", code);
@@ -672,6 +791,174 @@ function createDummyStudentReportPreviewDataset(args: {
 }
 
 
+
+function createDummyCumulativeReportBookPreviewDataset(args: {
+  schoolName?: string;
+  branchName?: string;
+  primaryColor?: string;
+  fontFamily?: string;
+  logo?: string;
+  reportCardBackgroundImage?: string;
+  reportCardWatermark?: string;
+  reportCardSignatureImage?: string;
+}) {
+  const term1 = createDummyStudentReportPreviewDataset(args);
+  const term2 = createDummyStudentReportPreviewDataset(args) as any;
+  const term3 = createDummyStudentReportPreviewDataset(args) as any;
+
+  term1.header.academicPeriod = { ...term1.header.academicPeriod, name: "Term 1, 2026", formattedEndDate: "Apr 04, 2026" };
+  term1.header.academicPeriodName = "Term 1, 2026";
+  term1.report.average = 82.4;
+  term1.report.total = 329.6;
+  term1.report.overallPosition = 4;
+
+  term2.header.academicPeriod = { ...term2.header.academicPeriod, name: "Term 2, 2026", formattedEndDate: "Jul 31, 2026" };
+  term2.header.academicPeriodName = "Term 2, 2026";
+
+  term3.header.academicPeriod = { ...term3.header.academicPeriod, name: "Term 3, 2026", formattedEndDate: "Dec 12, 2026" };
+  term3.header.academicPeriodName = "Term 3, 2026";
+  term3.report.average = 89.2;
+  term3.report.total = 356.8;
+  term3.report.overallPosition = 1;
+
+  return {
+    generatedAt: "2026-07-07T12:00:00.000Z",
+    title: "Cumulative Academic Report Book",
+    subtitle: "Student Academic Journey",
+    header: term2.header,
+    branding: term2.branding,
+    student: {
+      id: 1,
+      fullName: "Jonathan Commey",
+      admissionNumber: "STD-2026-014",
+      gender: "Male",
+      currentClassName: "Grade 6",
+      parentName: "Parent / Guardian",
+      parentPhone: "+233 24 000 0000",
+      address: "Accra, Ghana",
+      studentPhoto: "",
+    },
+    periods: [
+      { id: 1, academicPeriodName: "Term 1, 2026", academicYear: "2026", dataset: term1, average: 82.4, position: 4, gpa: 3.54, recommendation: "promote" },
+      { id: 2, academicPeriodName: "Term 2, 2026", academicYear: "2026", dataset: term2, average: 86, position: 2, gpa: 3.82, recommendation: "promote" },
+      { id: 3, academicPeriodName: "Term 3, 2026", academicYear: "2026", dataset: term3, average: 89.2, position: 1, gpa: 3.9, recommendation: "promote" },
+    ],
+    notes: [
+      "This is a preview-only academic booklet using dummy records.",
+      "Actual cumulative books will use the student's saved report snapshots.",
+    ],
+  };
+}
+
+function createDummyCumulativeTranscriptPreviewDataset(args: {
+  schoolName?: string;
+  branchName?: string;
+  primaryColor?: string;
+  fontFamily?: string;
+  logo?: string;
+  reportCardWatermark?: string;
+}) {
+  const schoolName = args.schoolName || "Eleeveon International Academy";
+  const branchName = args.branchName || "Main Campus";
+  const primaryColor = args.primaryColor || "#111827";
+
+  return {
+    generatedAt: "2026-07-07T12:00:00.000Z",
+    header: {
+      branding: {
+        schoolName,
+        branchName,
+        primaryColor,
+        fontFamily: args.fontFamily || "Arial, sans-serif",
+        logo: args.logo || "",
+        reportCardWatermark: args.reportCardWatermark || args.logo || "",
+        address: "P.O. Box 100, Accra",
+        phone: "+233 24 000 0000",
+        email: "records@school.edu.gh",
+        website: "www.school.edu.gh",
+        motto: "Excellence, Character and Service",
+      },
+      academicStructure: { id: 1, name: "Basic School" },
+      academicPeriod: { id: 3, name: "Term 3, 2026" },
+      classData: { id: 1, name: "Grade 6" },
+    },
+    transcript: {
+      studentId: 1,
+      studentName: "Jonathan Commey",
+      admissionNumber: "STD-2026-014",
+      gender: "Male",
+      studentPhoto: "",
+      currentClassName: "Grade 6",
+      parentName: "Parent / Guardian",
+      guardianName: "Parent / Guardian",
+      periods: [
+        {
+          academicPeriodId: 1,
+          academicPeriodName: "Term 1, 2026",
+          academicYear: "2026",
+          className: "Grade 6",
+          total: 329.6,
+          average: 82.4,
+          gpa: 3.54,
+          position: 4,
+          recommendation: "promote",
+          subjectResults: [
+            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 82, grade: "A", remark: "Very Good", position: 3 },
+            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 86, grade: "A", remark: "Excellent", position: 2 },
+            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 80, grade: "B+", remark: "Good", position: 5 },
+          ],
+        },
+        {
+          academicPeriodId: 2,
+          academicPeriodName: "Term 2, 2026",
+          academicYear: "2026",
+          className: "Grade 6",
+          total: 344,
+          average: 86,
+          gpa: 3.82,
+          position: 2,
+          recommendation: "promote",
+          subjectResults: [
+            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 88, grade: "A", remark: "Excellent", position: 2 },
+            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 92, grade: "A+", remark: "Outstanding", position: 1 },
+            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 84, grade: "A", remark: "Very Good", position: 3 },
+          ],
+        },
+        {
+          academicPeriodId: 3,
+          academicPeriodName: "Term 3, 2026",
+          academicYear: "2026",
+          className: "Grade 6",
+          total: 356.8,
+          average: 89.2,
+          gpa: 3.9,
+          position: 1,
+          recommendation: "promote",
+          subjectResults: [
+            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 90, grade: "A+", remark: "Outstanding", position: 1 },
+            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 94, grade: "A+", remark: "Outstanding", position: 1 },
+            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 88, grade: "A", remark: "Excellent", position: 2 },
+          ],
+        },
+      ],
+      academicYears: [],
+      subjectHistories: [],
+      progression: [],
+      totalPeriods: 3,
+      totalSubjects: 3,
+      cumulativeTotal: 1030.4,
+      cumulativeAverage: 85.9,
+      cumulativeGPA: 3.75,
+      highestAverage: 89.2,
+      lowestAverage: 82.4,
+      latestAverage: 89.2,
+      latestPosition: 1,
+      latestDecision: "promote",
+      overallTrend: "up",
+    },
+  };
+}
+
 const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showSubjectPosition",
   "showClassPosition",
@@ -691,6 +978,17 @@ const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showWatermark",
   "showParentSignature",
   "showGeneratedDate",
+  "showBookFrontCover",
+  "showBookStudentProfilePage",
+  "showBookAcademicJourneyPage",
+  "showBookSummaryPage",
+  "showBookBackCover",
+  "showTranscriptTermBreakdown",
+  "showTranscriptYearAverage",
+  "showTranscriptCumulativeAverage",
+  "showTranscriptCumulativePosition",
+  "showTranscriptGPAProgression",
+  "showTranscriptFinalRecommendation",
 ];
 
 
@@ -978,7 +1276,15 @@ function makeReportTemplatePayload(args: {
     orientation: args.form.orientation || "portrait",
     paperSize: args.form.paperSize || "A4",
     density: args.form.density || "compact",
-    description: existing.description || "Default configurable student report card template.",
+    templateKey: args.form.templateCode?.trim() || args.form.layoutKey,
+    reportType: args.form.reportType || "student_report",
+    description: existing.description || (
+      args.form.reportType === "cumulative_book"
+        ? "Default configurable cumulative report book template."
+        : args.form.reportType === "cumulative_transcript"
+          ? "Default configurable cumulative transcript template."
+          : "Default configurable student report card template."
+    ),
     active: args.form.active !== false,
     isDefault: true,
     createdAt: existing.createdAt || now,
@@ -1006,6 +1312,11 @@ function makeReportTemplateSettingsPayload(args: {
     schoolId: args.schoolId,
     branchId: args.branchId,
     templateId: args.templateId,
+    templateCode: args.form.templateCode,
+    layoutKey: args.form.layoutKey,
+    templateKey: args.form.templateCode,
+    templateName: args.form.templateName,
+    reportType: args.form.reportType || "student_report",
 
     orientation: args.form.orientation,
     paperSize: args.form.paperSize,
@@ -1030,6 +1341,19 @@ function makeReportTemplateSettingsPayload(args: {
     showParentSignature: !!args.form.showParentSignature,
     showGeneratedDate: !!args.form.showGeneratedDate,
 
+    showBookFrontCover: !!args.form.showBookFrontCover,
+    showBookStudentProfilePage: !!args.form.showBookStudentProfilePage,
+    showBookAcademicJourneyPage: !!args.form.showBookAcademicJourneyPage,
+    showBookSummaryPage: !!args.form.showBookSummaryPage,
+    showBookBackCover: !!args.form.showBookBackCover,
+
+    showTranscriptTermBreakdown: !!args.form.showTranscriptTermBreakdown,
+    showTranscriptYearAverage: !!args.form.showTranscriptYearAverage,
+    showTranscriptCumulativeAverage: !!args.form.showTranscriptCumulativeAverage,
+    showTranscriptCumulativePosition: !!args.form.showTranscriptCumulativePosition,
+    showTranscriptGPAProgression: !!args.form.showTranscriptGPAProgression,
+    showTranscriptFinalRecommendation: !!args.form.showTranscriptFinalRecommendation,
+
     classTeacherLabel: args.form.classTeacherLabel?.trim() || "Class Teacher",
     headTeacherLabel: args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
     parentLabel: args.form.parentLabel?.trim() || "Parent / Guardian",
@@ -1040,6 +1364,20 @@ function makeReportTemplateSettingsPayload(args: {
     classPositionLabel: args.form.classPositionLabel?.trim() || "Class Position",
     subjectPositionLabel: args.form.subjectPositionLabel?.trim() || "Position",
     generatedDateLabel: args.form.generatedDateLabel?.trim() || "Generated",
+    bookTitleLabel: args.form.bookTitleLabel?.trim() || "Cumulative Academic Report Book",
+    bookSubtitleLabel: args.form.bookSubtitleLabel?.trim() || "Student Academic Journey",
+    studentNameLabel: args.form.studentNameLabel?.trim() || "Student",
+    admissionNumberLabel: args.form.admissionNumberLabel?.trim() || "Student ID",
+    genderLabel: args.form.genderLabel?.trim() || "Gender",
+    classLabel: args.form.classLabel?.trim() || "Class",
+    academicStructureLabel: args.form.academicStructureLabel?.trim() || "Academic Structure",
+    academicPeriodLabel: args.form.academicPeriodLabel?.trim() || "Academic Period",
+    subjectLabel: args.form.subjectLabel?.trim() || "Subject",
+    totalLabel: args.form.totalLabel?.trim() || "Total",
+    averageLabel: args.form.averageLabel?.trim() || "Average",
+    gradeLabel: args.form.gradeLabel?.trim() || "Grade",
+    gpaLabel: args.form.gpaLabel?.trim() || "GPA",
+    footerText: args.form.footerText?.trim() || "Official academic document generated by Eleeveon Schools.",
 
     active: args.form.active !== false,
     createdAt: existing.createdAt || now,
@@ -1071,6 +1409,8 @@ function makeReportTemplateAssignmentPayload(args: {
     templateSettingsId: args.templateSettingsId,
     templateCode: args.form.templateCode,
     layoutKey: args.form.layoutKey,
+    templateKey: args.form.templateCode,
+    reportType: args.form.reportType || "student_report",
     scopeType: "branch",
     scopeId: args.branchId,
     isDefault: true,
@@ -1456,16 +1796,21 @@ export default function Branchsettings() {
       const templateMap = new Map<string, ReportTemplateRow>();
 
       reportTemplateDefinitionOptions().forEach((template) => {
-        const key = String(template.code || template.layoutKey || template.name || "").trim();
+        const baseKey = String(template.code || template.layoutKey || template.name || "").trim();
+        const reportTypeKey = String(template.reportType || "student_report");
+        const key = baseKey ? `${reportTypeKey}:${baseKey}` : "";
         if (key) templateMap.set(key, template);
       });
 
       dbReportTemplates.forEach((template) => {
-        const key = String(template.code || template.layoutKey || template.name || template.id || "").trim();
+        const baseKey = String(template.code || template.layoutKey || template.name || template.id || "").trim();
+        const reportTypeKey = String(template.reportType || "student_report");
+        const key = baseKey ? `${reportTypeKey}:${baseKey}` : "";
         if (key) {
           templateMap.set(key, {
             ...(templateMap.get(key) || {}),
             ...template,
+            reportType: (template as any).reportType || (templateMap.get(key) as any)?.reportType || "student_report",
           });
         }
       });
@@ -1488,12 +1833,14 @@ export default function Branchsettings() {
         (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
           sameTenant(row) &&
           row.active !== false &&
+          (row.reportType === "student_report" || !row.reportType) &&
           row.isDefault === true &&
           (!row.scopeType || row.scopeType === "branch")
         ) ||
         (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
           sameTenant(row) &&
-          row.active !== false
+          row.active !== false &&
+          (row.reportType === "student_report" || !row.reportType)
         ) ||
         null;
 
@@ -1512,18 +1859,21 @@ export default function Branchsettings() {
         (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
           sameTenant(row) &&
           row.active !== false &&
+          (row.reportType === "student_report" || !row.reportType) &&
           assignedSettingsId > 0 &&
           sameId(row.id, assignedSettingsId)
         ) ||
         (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
           sameTenant(row) &&
           row.active !== false &&
+          (row.reportType === "student_report" || !row.reportType) &&
           currentReportTemplate?.id &&
           sameId(row.templateId, currentReportTemplate.id)
         ) ||
         (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
           sameTenant(row) &&
-          row.active !== false
+          row.active !== false &&
+          (row.reportType === "student_report" || !row.reportType)
         ) ||
         null;
 
@@ -1656,6 +2006,7 @@ export default function Branchsettings() {
         templateId: idOf(currentReportTemplate?.id) || undefined,
         templateSettingsId: idOf(currentReportTemplateSettings?.id) || undefined,
         assignmentId: idOf(currentReportAssignment?.id) || undefined,
+        reportType: "student_report",
         templateName: currentReportTemplate?.name || currentReportTemplateSettings?.templateName || defaultReportTemplateDefinition().name || "Classic Formal",
         templateCode: currentReportTemplate?.code || currentReportTemplateSettings?.templateCode || defaultReportTemplateDefinition().code || "classic_formal",
         layoutKey: currentReportTemplate?.layoutKey || currentReportTemplateSettings?.layoutKey || defaultReportTemplateDefinition().layoutKey || "classic_formal",
@@ -2451,6 +2802,7 @@ export default function Branchsettings() {
       const schoolIdValue = Number(selectedSchoolId);
       const branchIdValue = Number(selectedBranchId);
 
+      const activeReportType = (reportTemplateForm.reportType || "student_report") as ReportTemplateReportType;
       const existingTemplateId = idOf(reportTemplateForm.templateId);
       const allExistingTemplates = await ((db as any).reportCardTemplates?.toArray?.() || []);
       const existingTemplate =
@@ -2462,6 +2814,7 @@ export default function Branchsettings() {
               row.accountId === accountIdValue &&
               sameId(row.schoolId, schoolIdValue) &&
               sameId(row.branchId, branchIdValue) &&
+              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
               sameId(row.code, reportTemplateForm.templateCode)
             ) || null;
 
@@ -2488,10 +2841,21 @@ export default function Branchsettings() {
       }
 
       const existingSettingsId = idOf(reportTemplateForm.templateSettingsId);
+      const existingTemplateSettingsById = existingSettingsId > 0
+        ? await (db as any).reportCardTemplateSettings.get(existingSettingsId)
+        : null;
       const existingTemplateSettings =
-        existingSettingsId > 0
-          ? await (db as any).reportCardTemplateSettings.get(existingSettingsId)
-          : null;
+        existingTemplateSettingsById && (existingTemplateSettingsById.reportType === activeReportType || (!existingTemplateSettingsById.reportType && activeReportType === "student_report"))
+          ? existingTemplateSettingsById
+          : (await ((db as any).reportCardTemplateSettings?.toArray?.() || [])).find((row: any) =>
+              !row.isDeleted &&
+              row.active !== false &&
+              row.accountId === accountIdValue &&
+              sameId(row.schoolId, schoolIdValue) &&
+              sameId(row.branchId, branchIdValue) &&
+              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
+              (sameId(row.templateCode, reportTemplateForm.templateCode) || sameId(row.templateId, savedTemplateId))
+            ) || null;
 
       const settingsPayload = makeReportTemplateSettingsPayload({
         form: reportTemplateForm,
@@ -2502,10 +2866,10 @@ export default function Branchsettings() {
         existing: existingTemplateSettings || undefined,
       });
 
-      let savedSettingsId = existingSettingsId;
+      let savedSettingsId = idOf(existingTemplateSettings?.id);
 
-      if (existingSettingsId) {
-        await updateLocal("reportCardTemplateSettings" as any, existingSettingsId, settingsPayload as any);
+      if (savedSettingsId) {
+        await updateLocal("reportCardTemplateSettings" as any, savedSettingsId, settingsPayload as any);
       } else {
         const { id, ...withoutId } = settingsPayload as any;
         const created = await createLocal("reportCardTemplateSettings" as any, withoutId as any);
@@ -2517,10 +2881,22 @@ export default function Branchsettings() {
       }
 
       const existingAssignmentId = idOf(reportTemplateForm.assignmentId);
+      const existingAssignmentById = existingAssignmentId > 0
+        ? await (db as any).reportCardTemplateAssignments.get(existingAssignmentId)
+        : null;
       const existingAssignment =
-        existingAssignmentId > 0
-          ? await (db as any).reportCardTemplateAssignments.get(existingAssignmentId)
-          : null;
+        existingAssignmentById && (existingAssignmentById.reportType === activeReportType || (!existingAssignmentById.reportType && activeReportType === "student_report"))
+          ? existingAssignmentById
+          : (await ((db as any).reportCardTemplateAssignments?.toArray?.() || [])).find((row: any) =>
+              !row.isDeleted &&
+              row.active !== false &&
+              row.accountId === accountIdValue &&
+              sameId(row.schoolId, schoolIdValue) &&
+              sameId(row.branchId, branchIdValue) &&
+              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
+              (!row.scopeType || row.scopeType === "branch") &&
+              sameId(row.scopeId, branchIdValue)
+            ) || null;
 
       const assignmentPayload = makeReportTemplateAssignmentPayload({
         form: reportTemplateForm,
@@ -2532,8 +2908,9 @@ export default function Branchsettings() {
         existing: existingAssignment || undefined,
       });
 
-      if (existingAssignmentId) {
-        await updateLocal("reportCardTemplateAssignments" as any, existingAssignmentId, assignmentPayload as any);
+      const saveAssignmentId = idOf(existingAssignment?.id);
+      if (saveAssignmentId) {
+        await updateLocal("reportCardTemplateAssignments" as any, saveAssignmentId, assignmentPayload as any);
       } else {
         const { id, ...withoutId } = assignmentPayload as any;
         await createLocal("reportCardTemplateAssignments" as any, withoutId as any);
@@ -2542,7 +2919,10 @@ export default function Branchsettings() {
       if (reloadAfterSave) await load();
       window.dispatchEvent(new Event("school-branch-settings-updated"));
 
-      if (!silent) showToast("success", "Report card template settings saved successfully.");
+      if (!silent) {
+        const savedLabel = activeReportType === "cumulative_book" ? "Cumulative report book" : activeReportType === "cumulative_transcript" ? "Cumulative transcript" : "Student report card";
+        showToast("success", `${savedLabel} template settings saved successfully.`);
+      }
       return true;
     } catch (error: any) {
       console.error("Failed to save report card template settings:", error);
@@ -3597,28 +3977,44 @@ function ReportTemplateSheet({
   saveReportCardTemplateSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
   onClose: () => void;
 }) {
-  const visibilityControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
-    { key: "showSubjectPosition", label: "Subject Positions", note: "Remove the subject position column entirely when off." },
-    { key: "showClassPosition", label: "Class Position", note: "Remove class position summary entirely when off." },
-    { key: "showNumberOnRoll", label: "Number On Roll", note: "Show class size/roll count only for schools that want it." },
-    { key: "showAttendance", label: "Attendance", note: "Show attendance count section." },
-    { key: "showAttendancePercent", label: "Attendance Percentage", note: "Show attendance percentage field." },
-    { key: "showStudentPhoto", label: "Student Photo", note: "Show or hide student photo box." },
-    { key: "showTeacherNames", label: "Subject Teacher Names", note: "Show teacher name under each subject." },
-    { key: "showCurrentAcademicPeriodEnd", label: "Current Period End", note: "Show this academic period ends line before the next period line." },
-    { key: "showNextAcademicPeriod", label: "Next Academic Period", note: "Show reopening/next period begins line." },
-    { key: "showPromotionStatus", label: "Promotion Status", note: "Show promote/repeat/graduate status when available." },
-    { key: "showGPA", label: "GPA", note: "Show GPA summary field." },
-    { key: "showAverage", label: "Average", note: "Show average summary field." },
-    { key: "showTotal", label: "Total", note: "Show total summary field." },
-    { key: "showGrade", label: "Grade", note: "Show grade column." },
-    { key: "showSubjectRemarks", label: "Subject Remarks", note: "Show subject remark column." },
-    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on report cards." },
-    { key: "showParentSignature", label: "Parent Signature", note: "Show parent/guardian signature area." },
-    { key: "showGeneratedDate", label: "Generated Date", note: "Show this as the third report-period card beside Current Period and Next Period." },
+  const reportTabs: { key: ReportTemplateReportType; label: string; note: string }[] = [
+    { key: "student_report", label: "Student Report Cards", note: "Existing template gallery and display controls." },
+    { key: "cumulative_book", label: "Cumulative Report Book", note: "Student report templates assembled as printable booklets." },
+    { key: "cumulative_transcript", label: "Cumulative Transcript", note: "Official transcript-style academic history." },
   ];
 
-  const galleryTemplates = templates.length ? templates : reportTemplateDefinitionOptions();
+  const activeReportType = (form.reportType || "student_report") as ReportTemplateReportType;
+
+  const studentTemplates = reportTemplateDefinitionOptions("student_report").map((definition) => {
+    const existing = templates.find((row: any) =>
+      (row.reportType === "student_report" || !row.reportType) &&
+      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
+    );
+    return { ...definition, ...(existing || {}) };
+  });
+
+  const bookTemplates = reportTemplateDefinitionOptions("cumulative_book").map((definition) => {
+    const existing = templates.find((row: any) =>
+      row.reportType === "cumulative_book" &&
+      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
+    );
+    return { ...definition, ...(existing || {}) };
+  });
+
+  const transcriptTemplates = reportTemplateDefinitionOptions("cumulative_transcript").map((definition) => {
+    const existing = templates.find((row: any) =>
+      row.reportType === "cumulative_transcript" &&
+      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
+    );
+    return { ...definition, ...(existing || {}) };
+  });
+
+  const galleryTemplates =
+    activeReportType === "cumulative_book"
+      ? bookTemplates
+      : activeReportType === "cumulative_transcript"
+        ? transcriptTemplates
+        : studentTemplates;
 
   const previewDataset = useMemo(
     () =>
@@ -3644,44 +4040,225 @@ function ReportTemplateSheet({
     ]
   );
 
+  const bookPreviewDataset = useMemo(
+    () =>
+      createDummyCumulativeReportBookPreviewDataset({
+        schoolName,
+        branchName,
+        primaryColor: settingsForm.primaryColor,
+        fontFamily: settingsForm.fontFamily,
+        logo: settingsForm.logo,
+        reportCardBackgroundImage: settingsForm.reportCardBackgroundImage,
+        reportCardWatermark: settingsForm.reportCardWatermark,
+        reportCardSignatureImage: settingsForm.reportCardSignatureImage,
+      }),
+    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardBackgroundImage, settingsForm.reportCardWatermark, settingsForm.reportCardSignatureImage]
+  );
+
+  const transcriptPreviewDataset = useMemo(
+    () =>
+      createDummyCumulativeTranscriptPreviewDataset({
+        schoolName,
+        branchName,
+        primaryColor: settingsForm.primaryColor,
+        fontFamily: settingsForm.fontFamily,
+        logo: settingsForm.logo,
+        reportCardWatermark: settingsForm.reportCardWatermark,
+      }),
+    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardWatermark]
+  );
+
   const selectedPreviewTemplate =
     galleryTemplates.find((item) => sameId(item.code, form.templateCode)) ||
     galleryTemplates.find((item) => sameId(item.layoutKey, form.layoutKey)) ||
-    getStudentReportTemplateRegistryItem(form.templateCode) ||
-    defaultReportTemplateDefinition();
+    (activeReportType === "cumulative_transcript"
+      ? getCumulativeTranscriptTemplateRegistryItem(form.templateCode)
+      : getStudentReportTemplateRegistryItem(form.templateCode)) ||
+    defaultReportTemplateDefinition(activeReportType);
 
   const selectedPreviewSettings = reportTemplatePreviewSettingsFromForm(
     form,
     selectedPreviewTemplate as any
   );
 
+  const studentVisibilityControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
+    { key: "showSubjectPosition", label: "Subject Positions", note: "Remove the subject position column entirely when off." },
+    { key: "showClassPosition", label: "Class Position", note: "Remove class position summary entirely when off." },
+    { key: "showNumberOnRoll", label: "Number On Roll", note: "Show class size/roll count only for schools that want it." },
+    { key: "showAttendance", label: "Attendance", note: "Show attendance count section." },
+    { key: "showAttendancePercent", label: "Attendance Percentage", note: "Show attendance percentage field." },
+    { key: "showStudentPhoto", label: "Student Photo", note: "Show or hide student photo box." },
+    { key: "showTeacherNames", label: "Subject Teacher Names", note: "Show teacher name under each subject." },
+    { key: "showCurrentAcademicPeriodEnd", label: "Current Period End", note: "Show this academic period ends line before the next period line." },
+    { key: "showNextAcademicPeriod", label: "Next Academic Period", note: "Show reopening/next period begins line." },
+    { key: "showPromotionStatus", label: "Promotion Status", note: "Show promote/repeat/graduate status when available." },
+    { key: "showGPA", label: "GPA", note: "Show GPA summary field." },
+    { key: "showAverage", label: "Average", note: "Show average summary field." },
+    { key: "showTotal", label: "Total", note: "Show total summary field." },
+    { key: "showGrade", label: "Grade", note: "Show grade column." },
+    { key: "showSubjectRemarks", label: "Subject Remarks", note: "Show subject remark column." },
+    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on report cards." },
+    { key: "showParentSignature", label: "Parent Signature", note: "Show parent/guardian signature area." },
+    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date using the selected label." },
+  ];
+
+  const bookControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
+    { key: "showBookFrontCover", label: "Front Cover", note: "Start the cumulative book with a designed cover page." },
+    { key: "showBookStudentProfilePage", label: "Student Profile Page", note: "Show student identity, parent and branch profile details." },
+    { key: "showBookAcademicJourneyPage", label: "Academic Journey Page", note: "Show the student's period-by-period progress timeline." },
+    { key: "showBookSummaryPage", label: "Summary Page", note: "Show cumulative average, GPA, trend and final recommendation." },
+    { key: "showBookBackCover", label: "Back Cover", note: "End the printable booklet with an official closing cover." },
+    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date on cover and info pages." },
+    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on book pages." },
+  ];
+
+  const transcriptControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
+    { key: "showTranscriptTermBreakdown", label: "Term / Period Breakdown", note: "Show subject rows grouped under each academic period." },
+    { key: "showTranscriptYearAverage", label: "Year Average", note: "Show academic-year average/statistics where available." },
+    { key: "showTranscriptCumulativeAverage", label: "Cumulative Average", note: "Show overall cumulative average in the transcript summary." },
+    { key: "showTranscriptCumulativePosition", label: "Cumulative Position", note: "Show latest/cumulative rank or position where available." },
+    { key: "showTranscriptGPAProgression", label: "GPA Progression", note: "Show term GPA and cumulative GPA values." },
+    { key: "showTranscriptFinalRecommendation", label: "Final Recommendation", note: "Show promote/repeat/graduate recommendation." },
+    { key: "showStudentPhoto", label: "Student Photo", note: "Show student photo if the template supports it." },
+    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date in transcript footer or metadata." },
+    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on transcripts." },
+  ];
+
+  const activeControls = activeReportType === "cumulative_book" ? bookControls : activeReportType === "cumulative_transcript" ? transcriptControls : studentVisibilityControls;
+
+  const switchReportType = (reportType: ReportTemplateReportType) => {
+    const defaultTemplate = defaultReportTemplateDefinition(reportType);
+    updateField("reportType", reportType);
+    selectReportTemplateIntoForm(defaultTemplate, updateField, reportType);
+  };
+
+  const renderPreviewCard = (template: ReportTemplateRow, templateSettings: any) => {
+    if (activeReportType === "cumulative_book") {
+      return (
+        <TemplatePreviewCumulativeReportBook
+          dataset={bookPreviewDataset}
+          template={template}
+          settings={templateSettings}
+          compact
+          showWatermark={form.showWatermark}
+          pageBreakAfter={false}
+          mobilePreview={false}
+        />
+      );
+    }
+
+    if (activeReportType === "cumulative_transcript") {
+      return (
+        <TemplatePreviewCumulativeTranscriptCard
+          dataset={transcriptPreviewDataset}
+          template={template}
+          settings={templateSettings}
+          compact
+          showWatermark={form.showWatermark}
+          pageBreakAfter={false}
+          mobilePreview={false}
+        />
+      );
+    }
+
+    return (
+      <TemplatePreviewStudentReportCard
+        dataset={previewDataset}
+        template={template}
+        settings={templateSettings}
+        compact
+        showWatermark={form.showWatermark}
+        pageBreakAfter={false}
+        mobilePreview={false}
+      />
+    );
+  };
+
+  const renderFocusedPreview = () => {
+    if (activeReportType === "cumulative_book") {
+      return (
+        <TemplatePreviewCumulativeReportBook
+          dataset={bookPreviewDataset}
+          template={selectedPreviewTemplate}
+          settings={selectedPreviewSettings}
+          compact
+          showWatermark={form.showWatermark}
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
+    }
+
+    if (activeReportType === "cumulative_transcript") {
+      return (
+        <TemplatePreviewCumulativeTranscriptCard
+          dataset={transcriptPreviewDataset}
+          template={selectedPreviewTemplate}
+          settings={selectedPreviewSettings}
+          compact
+          showWatermark={form.showWatermark}
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
+    }
+
+    return (
+      <TemplatePreviewStudentReportCard
+        dataset={previewDataset}
+        template={selectedPreviewTemplate}
+        settings={selectedPreviewSettings}
+        compact
+        showWatermark={form.showWatermark}
+        pageBreakAfter={false}
+        mobilePreview
+      />
+    );
+  };
+
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet">
+      <section className="ba-sheet report-template-suite-sheet">
         <div className="ba-sheet-head">
           <div>
-            <h2>Report Card Template</h2>
-            <p>Choose the default report design and control which fields appear. Hidden fields are removed completely, not left blank.</p>
+            <h2>Report Template & Document Controls</h2>
+            <p>Configure student report cards, cumulative report books and cumulative transcripts. Each tab saves to reportCardTemplates, reportCardTemplateSettings and reportCardTemplateAssignments with its own reportType.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close report card template settings">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close report template settings">✕</button>
+        </div>
+
+        <div className="report-template-tabs" role="tablist" aria-label="Report template setting tabs">
+          {reportTabs.map((tab) => (
+            <button
+              type="button"
+              key={tab.key}
+              className={activeReportType === tab.key ? "active" : ""}
+              onClick={() => switchReportType(tab.key)}
+            >
+              <strong>{tab.label}</strong>
+              <span>{tab.note}</span>
+            </button>
+          ))}
         </div>
 
         <div className="ba-form compact">
-          <Field label="Template">
+          <Field label={activeReportType === "cumulative_book" ? "Book Style" : activeReportType === "cumulative_transcript" ? "Transcript Template" : "Template"}>
             <select
               value={form.templateCode || ""}
               onChange={(event) => {
                 const templateCode = event.target.value;
                 const selected =
-                  templates.find((item) => sameId(item.code, templateCode)) ||
-                  templates.find((item) => sameId(item.layoutKey, templateCode)) ||
-                  getStudentReportTemplateRegistryItem(templateCode);
+                  galleryTemplates.find((item) => sameId(item.code, templateCode)) ||
+                  galleryTemplates.find((item) => sameId(item.layoutKey, templateCode)) ||
+                  (activeReportType === "cumulative_transcript"
+                    ? getCumulativeTranscriptTemplateRegistryItem(templateCode)
+                    : getStudentReportTemplateRegistryItem(templateCode));
 
-                selectReportTemplateIntoForm(selected as any, updateField);
+                selectReportTemplateIntoForm(selected as any, updateField, activeReportType);
               }}
             >
-              {templates.map((template) => (
-                <option key={template.code || template.id || template.name} value={template.code || template.layoutKey || ""}>
+              {galleryTemplates.map((template) => (
+                <option key={`${activeReportType}-${template.code || template.id || template.name}`} value={template.code || template.layoutKey || ""}>
                   {template.name || template.code || "Report Template"}
                 </option>
               ))}
@@ -3722,8 +4299,8 @@ function ReportTemplateSheet({
         <section className="branch-settings-subsection template-preview-studio">
           <div className="template-preview-studio-head">
             <div>
-              <h3>Template Preview Studio</h3>
-              <p>Preview every report design with the same dummy filled report-card dataset before saving. Select any card to make it the branch default.</p>
+              <h3>{activeReportType === "cumulative_book" ? "Cumulative Book Preview Studio" : activeReportType === "cumulative_transcript" ? "Transcript Preview Studio" : "Student Report Preview Studio"}</h3>
+              <p>{activeReportType === "cumulative_book" ? "Preview each student-report style as a printable report book with covers and journey pages." : activeReportType === "cumulative_transcript" ? "Preview each transcript design using a dummy academic-history dataset." : "Preview every student report-card design with the same dummy filled dataset before saving."}</p>
             </div>
             <span className="template-preview-badge">Preview only</span>
           </div>
@@ -3741,9 +4318,9 @@ function ReportTemplateSheet({
               return (
                 <button
                   type="button"
-                  key={templateCode || template.id || template.name}
+                  key={`${activeReportType}-${templateCode || template.id || template.name}`}
                   className={`template-preview-card ${isSelected ? "selected" : ""}`}
-                  onClick={() => selectReportTemplateIntoForm(template, updateField)}
+                  onClick={() => selectReportTemplateIntoForm(template, updateField, activeReportType)}
                 >
                   <span className="template-preview-card-top">
                     <strong>{template.name || template.code || "Report Template"}</strong>
@@ -3752,15 +4329,7 @@ function ReportTemplateSheet({
 
                   <span className="template-preview-mini" aria-hidden="true">
                     <span className="template-preview-mini-scale">
-                      <TemplatePreviewStudentReportCard
-                        dataset={previewDataset}
-                        template={template}
-                        settings={templateSettings}
-                        compact
-                        showWatermark={form.showWatermark}
-                        pageBreakAfter={false}
-                        mobilePreview={false}
-                      />
+                      {renderPreviewCard(template, templateSettings)}
                     </span>
                   </span>
                 </button>
@@ -3773,29 +4342,17 @@ function ReportTemplateSheet({
               <strong>{selectedPreviewTemplate?.name || form.templateName || "Selected Template"}</strong>
               <span>Live fit-preview using the selected template and current display controls.</span>
             </div>
-
-            <TemplatePreviewStudentReportCard
-              dataset={previewDataset}
-              template={selectedPreviewTemplate}
-              settings={selectedPreviewSettings}
-              compact
-              showWatermark={form.showWatermark}
-              pageBreakAfter={false}
-              mobilePreview
-            />
+            {renderFocusedPreview()}
           </div>
         </section>
 
         <section className="branch-settings-subsection">
-          <h3>Display Controls</h3>
-          <p>Turn a field off to remove it from the report card layout completely.</p>
+          <h3>{activeReportType === "cumulative_book" ? "Book Pages" : activeReportType === "cumulative_transcript" ? "Transcript Display Controls" : "Student Report Display Controls"}</h3>
+          <p>Turn a field off to remove it from the printed output completely.</p>
 
           <div className="branch-report-toggle-grid">
-            {visibilityControls.map((control) => (
-              <label
-                key={String(control.key)}
-                className={`branch-report-toggle ${form[control.key] ? "is-on" : "is-off"}`}
-              >
+            {activeControls.map((control) => (
+              <label key={String(control.key)} className={`branch-report-toggle ${form[control.key] ? "is-on" : "is-off"}`}>
                 <span>
                   <strong>{control.label}</strong>
                   <small>{control.note}</small>
@@ -3814,73 +4371,70 @@ function ReportTemplateSheet({
         </section>
 
         <section className="branch-settings-subsection">
-          <h3>Report Labels</h3>
-          <p>Use each school's preferred wording without changing the report component code. The generated-date label controls the third metadata card that will sit beside Current Period and Next Period.</p>
+          <h3>{activeReportType === "cumulative_book" ? "Book Labels" : activeReportType === "cumulative_transcript" ? "Transcript Labels" : "Report Labels"}</h3>
+          <p>Use each school's preferred wording without changing component code.</p>
 
           <div className="ba-form compact">
-            <Field label="Class Teacher Label">
-              <input value={form.classTeacherLabel} onChange={(event) => updateField("classTeacherLabel", event.target.value)} />
-            </Field>
+            {activeReportType === "student_report" && (
+              <>
+                <Field label="Class Teacher Label"><input value={form.classTeacherLabel} onChange={(event) => updateField("classTeacherLabel", event.target.value)} /></Field>
+                <Field label="Headteacher Label"><input value={form.headTeacherLabel} onChange={(event) => updateField("headTeacherLabel", event.target.value)} /></Field>
+                <Field label="Parent Label"><input value={form.parentLabel} onChange={(event) => updateField("parentLabel", event.target.value)} /></Field>
+                <Field label="Principal Label"><input value={form.principalLabel} onChange={(event) => updateField("principalLabel", event.target.value)} /></Field>
+                <Field label="Current Period End Label"><input value={form.currentAcademicPeriodEndLabel} onChange={(event) => updateField("currentAcademicPeriodEndLabel", event.target.value)} /></Field>
+                <Field label="Next Period Label"><input value={form.nextAcademicPeriodLabel} onChange={(event) => updateField("nextAcademicPeriodLabel", event.target.value)} /></Field>
+                <Field label="Number On Roll Label"><input value={form.numberOnRollLabel} onChange={(event) => updateField("numberOnRollLabel", event.target.value)} /></Field>
+                <Field label="Class Position Label"><input value={form.classPositionLabel} onChange={(event) => updateField("classPositionLabel", event.target.value)} /></Field>
+                <Field label="Subject Position Label"><input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} /></Field>
+              </>
+            )}
 
-            <Field label="Headteacher Label">
-              <input value={form.headTeacherLabel} onChange={(event) => updateField("headTeacherLabel", event.target.value)} />
-            </Field>
+            {activeReportType === "cumulative_book" && (
+              <>
+                <Field label="Book Title"><input value={form.bookTitleLabel} onChange={(event) => updateField("bookTitleLabel", event.target.value)} /></Field>
+                <Field label="Book Subtitle"><input value={form.bookSubtitleLabel} onChange={(event) => updateField("bookSubtitleLabel", event.target.value)} /></Field>
+                <Field label="Student Label"><input value={form.studentNameLabel} onChange={(event) => updateField("studentNameLabel", event.target.value)} /></Field>
+                <Field label="Admission / Student ID Label"><input value={form.admissionNumberLabel} onChange={(event) => updateField("admissionNumberLabel", event.target.value)} /></Field>
+                <Field label="Academic Period Label"><input value={form.academicPeriodLabel} onChange={(event) => updateField("academicPeriodLabel", event.target.value)} /></Field>
+                <Field label="Average Label"><input value={form.averageLabel} onChange={(event) => updateField("averageLabel", event.target.value)} /></Field>
+                <Field label="GPA Label"><input value={form.gpaLabel} onChange={(event) => updateField("gpaLabel", event.target.value)} /></Field>
+              </>
+            )}
 
-            <Field label="Parent Label">
-              <input value={form.parentLabel} onChange={(event) => updateField("parentLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Principal Label">
-              <input value={form.principalLabel} onChange={(event) => updateField("principalLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Current Period End Label">
-              <input value={form.currentAcademicPeriodEndLabel} onChange={(event) => updateField("currentAcademicPeriodEndLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Next Period Label">
-              <input value={form.nextAcademicPeriodLabel} onChange={(event) => updateField("nextAcademicPeriodLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Number On Roll Label">
-              <input value={form.numberOnRollLabel} onChange={(event) => updateField("numberOnRollLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Class Position Label">
-              <input value={form.classPositionLabel} onChange={(event) => updateField("classPositionLabel", event.target.value)} />
-            </Field>
-
-            <Field label="Subject Position Label">
-              <input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} />
-            </Field>
+            {activeReportType === "cumulative_transcript" && (
+              <>
+                <Field label="Student Label"><input value={form.studentNameLabel} onChange={(event) => updateField("studentNameLabel", event.target.value)} /></Field>
+                <Field label="Student ID Label"><input value={form.admissionNumberLabel} onChange={(event) => updateField("admissionNumberLabel", event.target.value)} /></Field>
+                <Field label="Programme / Class Label"><input value={form.classLabel} onChange={(event) => updateField("classLabel", event.target.value)} /></Field>
+                <Field label="Academic Period Label"><input value={form.academicPeriodLabel} onChange={(event) => updateField("academicPeriodLabel", event.target.value)} /></Field>
+                <Field label="Course / Subject Label"><input value={form.subjectLabel} onChange={(event) => updateField("subjectLabel", event.target.value)} /></Field>
+                <Field label="Score / Total Label"><input value={form.totalLabel} onChange={(event) => updateField("totalLabel", event.target.value)} /></Field>
+                <Field label="Average Label"><input value={form.averageLabel} onChange={(event) => updateField("averageLabel", event.target.value)} /></Field>
+                <Field label="Grade Label"><input value={form.gradeLabel} onChange={(event) => updateField("gradeLabel", event.target.value)} /></Field>
+                <Field label="GPA Label"><input value={form.gpaLabel} onChange={(event) => updateField("gpaLabel", event.target.value)} /></Field>
+                <Field label="Position / Rank Label"><input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} /></Field>
+              </>
+            )}
 
             <Field label="Generated Date Label">
               <select
-                value={
-                  generatedDateLabelOptions.includes(form.generatedDateLabel)
-                    ? form.generatedDateLabel
-                    : "__custom__"
-                }
+                value={generatedDateLabelOptions.includes(form.generatedDateLabel) ? form.generatedDateLabel : "__custom__"}
                 onChange={(event) => {
                   if (event.target.value === "__custom__") return;
                   updateField("generatedDateLabel", event.target.value);
                 }}
               >
-                {generatedDateLabelOptions.map((label) => (
-                  <option key={label} value={label}>
-                    {label}
-                  </option>
-                ))}
+                {generatedDateLabelOptions.map((label) => <option key={label} value={label}>{label}</option>)}
                 <option value="__custom__">Custom label...</option>
               </select>
             </Field>
 
             <Field label="Custom Generated Date Label">
-              <input
-                value={form.generatedDateLabel}
-                onChange={(event) => updateField("generatedDateLabel", event.target.value)}
-                placeholder="Generated"
-              />
+              <input value={form.generatedDateLabel} onChange={(event) => updateField("generatedDateLabel", event.target.value)} placeholder="Generated" />
+            </Field>
+
+            <Field label="Footer Text">
+              <input value={form.footerText} onChange={(event) => updateField("footerText", event.target.value)} placeholder="Official academic document generated by Eleeveon Schools." />
             </Field>
           </div>
         </section>
@@ -3896,13 +4450,14 @@ function ReportTemplateSheet({
               onClose();
             }}
           >
-            {saving ? "Saving..." : "Save Report Template"}
+            {saving ? "Saving..." : activeReportType === "cumulative_book" ? "Save Cumulative Book" : activeReportType === "cumulative_transcript" ? "Save Cumulative Transcript" : "Save Student Report"}
           </button>
         </div>
       </section>
     </div>
   );
 }
+
 
 function MediaSheet({
   title,
@@ -4674,6 +5229,74 @@ const css = `
   }
 }
 
+
+
+.report-template-suite-sheet {
+  width: min(980px, 100%);
+}
+
+.report-template-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+
+.report-template-tabs button {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border, rgba(148,163,184,.26));
+  border-radius: 16px;
+  background: var(--card-bg, var(--surface, #fff));
+  color: var(--text, #0f172a);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(15,23,42,.045);
+}
+
+.report-template-tabs button.active {
+  border-color: var(--ba-primary, var(--primary-color, #2563eb));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--ba-primary, #2563eb) 14%, transparent), transparent 64%),
+    var(--card-bg, var(--surface, #fff));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ba-primary, #2563eb) 13%, transparent);
+}
+
+.report-template-tabs strong,
+.report-template-tabs span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.report-template-tabs strong {
+  font-size: 12px;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.report-template-tabs span {
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.template-preview-mini .cumulative-book-page,
+.template-preview-mini .cumulative-transcript-page {
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+@media(max-width:720px) {
+  .report-template-tabs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 
 @keyframes sheetIn {
   from { transform: translateY(16px); opacity: .7; }

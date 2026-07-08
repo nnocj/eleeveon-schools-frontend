@@ -14,7 +14,7 @@
  *   -> normalized historical reports
  *   -> student transcript
  *   -> multi-period report
- *   -> annual broadsheet
+ *   -> annual broadsheet 
  *   -> subject history
  *   -> promotion summary
  *   -> progression timeline
@@ -1666,6 +1666,93 @@ export function buildCumulativeWarnings(
   return warnings;
 }
 
+
+// ======================================================
+// CUMULATIVE TRANSCRIPT TEMPLATE DATASET
+// ======================================================
+//
+// This adapter is the bridge between the cumulative computation engine and
+// reports/cumulative-transcript-templates/*.tsx. It keeps templates away from
+// raw Dexie rows and gives them a stable, safe shape that matches the existing
+// StudentReportSnapshot + StudentPromotion source of truth.
+
+export type CumulativeTranscriptTemplateDataset = {
+  header: ReportHeaderData;
+  transcript?: StudentCumulativeTranscript;
+  generatedAt: string;
+  student?: {
+    studentId: number;
+    studentName: string;
+    admissionNumber?: string;
+    gender?: string;
+    currentClassName?: string;
+    studentPhoto?: string;
+    parentName?: string;
+    guardianName?: string;
+  };
+  summary?: {
+    totalPeriods: number;
+    totalSubjects: number;
+    cumulativeTotal: number;
+    cumulativeAverage: number;
+    cumulativeGPA?: number;
+    cumulativePosition?: number;
+    highestAverage: number;
+    lowestAverage: number;
+    latestAverage?: number;
+    latestPosition?: number;
+    latestDecision?: CumulativeDecision;
+    overallTrend: CumulativeTrendDirection;
+  };
+};
+
+export function buildCumulativeTranscriptTemplateDataset(args: {
+  header: ReportHeaderData;
+  transcript?: StudentCumulativeTranscript;
+  generatedAt?: string | number | Date;
+}): CumulativeTranscriptTemplateDataset {
+  const generatedDate = args.generatedAt ? new Date(args.generatedAt) : new Date();
+  const generatedAt = Number.isNaN(generatedDate.getTime())
+    ? new Date().toISOString()
+    : generatedDate.toISOString();
+
+  const transcript = args.transcript;
+
+  return {
+    header: args.header,
+    transcript,
+    generatedAt,
+    student: transcript
+      ? {
+          studentId: transcript.studentId,
+          studentName: transcript.studentName,
+          admissionNumber: transcript.admissionNumber,
+          gender: transcript.gender,
+          currentClassName: transcript.currentClassName,
+          studentPhoto: transcript.studentPhoto,
+          parentName: transcript.parentName,
+          guardianName: transcript.guardianName,
+        }
+      : undefined,
+    summary: transcript
+      ? {
+          totalPeriods: transcript.totalPeriods,
+          totalSubjects: transcript.totalSubjects,
+          cumulativeTotal: transcript.cumulativeTotal,
+          cumulativeAverage: transcript.cumulativeAverage,
+          cumulativeGPA: transcript.cumulativeGPA,
+          cumulativePosition: transcript.latestPosition,
+          highestAverage: transcript.highestAverage,
+          lowestAverage: transcript.lowestAverage,
+          latestAverage: transcript.latestAverage,
+          latestPosition: transcript.latestPosition,
+          latestDecision: transcript.latestDecision,
+          overallTrend: transcript.overallTrend,
+        }
+      : undefined,
+  };
+}
+
 // ======================================================
 // MAIN ENGINE OUTPUT
 // ======================================================
@@ -1725,10 +1812,16 @@ export function buildCumulativeReportEngineOutput(
 
   const warnings = buildCumulativeWarnings(dataset, filters, normalizedSnapshots);
 
+  const cumulativeTranscriptDataset = buildCumulativeTranscriptTemplateDataset({
+    header,
+    transcript: studentTranscript,
+  });
+
   return {
     header,
 
     studentTranscript,
+    cumulativeTranscriptDataset,
     multiPeriodReport,
     annualBroadsheet,
     subjectHistory,
@@ -1737,5 +1830,7 @@ export function buildCumulativeReportEngineOutput(
 
     analytics,
     warnings,
+  } as CumulativeReportEngineOutput & {
+    cumulativeTranscriptDataset: CumulativeTranscriptTemplateDataset;
   };
 }

@@ -36,6 +36,15 @@
  * - prefers active owner-bound media over legacy string image fields
  * - prevents removed/deleted branch-setting logos from reappearing on cumulative outputs
  * - passes resolved logo URLs into the shared ReportHeader contract
+ *
+ * Phase 6 template integration:
+ * - reads the same reportCardTemplates, reportCardTemplateSettings and
+ *   reportCardTemplateAssignments records saved from Branch Settings
+ * - resolves reportType="cumulative_book" to the selected student-report
+ *   template style, then renders a full report book from saved snapshots
+ * - resolves reportType="cumulative_transcript" to transcript-only templates
+ * - falls back to built-in template registries when the branch has not saved
+ *   database rows yet, so preview/rendering still works immediately
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -71,13 +80,19 @@ import {
   revokeMediaObjectUrl,
 } from "../../lib/media/mediaAssetUtils";
 
-import StudentCumulativeTranscript from "./reports/components/StudentCumulativeTranscript";
+import CumulativeReportBook from "./reports/components/CumulativeReportBook";
+import CumulativeTranscriptCard from "./reports/components/CumulativeTranscriptCard";
+import { STUDENT_REPORT_TEMPLATE_REGISTRY } from "./reports/student-report-templates";
+import { CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY } from "./reports/cumulative-transcript-templates";
 import AnnualBroadsheet from "./reports/components/AnnualBroadsheet";
 import PromotionSummary from "./reports/components/PromotionSummary";
 import StudentProgressionTimeline from "./reports/components/StudentProgressionTimeline";
 import ReportHeader from "./reports/components/ReportHeader";
 
-import { buildCumulativeReportEngineOutput } from "./reports/engine/cumulative-report-engine";
+import {
+  buildCumulativeReportEngineOutput,
+  buildStudentTranscript,
+} from "./reports/engine/cumulative-report-engine";
 
 import type {
   CumulativeReportEngineDataset,
@@ -110,17 +125,125 @@ type BranchRow = {
 
 type PrintOrientation = "portrait" | "landscape";
 
+type ReportTemplateRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  name?: string;
+  code?: string;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  reportType?: string | null;
+  orientation?: string;
+  paperSize?: string;
+  density?: string;
+  active?: boolean;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
+};
+
+type ReportTemplateSettingsRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  templateName?: string;
+  reportType?: string | null;
+  active?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
+};
+
+type ReportTemplateAssignmentRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  templateSettingsId?: number | string | null;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  reportType?: string | null;
+  scopeType?: string | null;
+  scopeId?: number | string | null;
+  active?: boolean;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
+};
+
+function normalizeTemplateRegistryRow(
+  item: any,
+  index: number,
+  reportType: "student_report" | "cumulative_transcript",
+): ReportTemplateRow {
+  const code = String(item.code || item.templateCode || item.layoutKey || item.key || "").trim();
+
+  return {
+    name:
+      item.name ||
+      item.templateName ||
+      (reportType === "cumulative_transcript"
+        ? "Cumulative Transcript Classic"
+        : "Classic Formal"),
+    code: code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    templateCode: code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    layoutKey: item.layoutKey || code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    templateKey: item.templateKey || item.layoutKey || code,
+    reportType,
+    orientation: item.orientation || "portrait",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: item.description || "Built-in report template.",
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  };
+}
+
+function builtInReportTemplateRows(): ReportTemplateRow[] {
+  return [
+    ...(STUDENT_REPORT_TEMPLATE_REGISTRY as any[]).map((item, index) =>
+      normalizeTemplateRegistryRow(item, index, "student_report"),
+    ),
+    ...(CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY as any[]).map((item, index) =>
+      normalizeTemplateRegistryRow(item, index, "cumulative_transcript"),
+    ),
+  ];
+}
+
+function reportTemplateMapKey(row: Partial<ReportTemplateRow>) {
+  const reportType = String(row.reportType || "student_report").trim();
+  const code = String(row.code || row.templateCode || row.layoutKey || row.templateKey || row.name || row.id || "").trim();
+  return `${reportType}:${code}`;
+}
+
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
-const CUMULATIVE_MEDIA_OWNER_SCHOOLS = String((MediaOwners as any).SCHOOLS || "schools");
-const CUMULATIVE_MEDIA_OWNER_BRANCHES = String((MediaOwners as any).BRANCHES || "branches");
+const CUMULATIVE_MEDIA_OWNER_SCHOOLS = String(
+  (MediaOwners as any).SCHOOLS || "schools",
+);
+const CUMULATIVE_MEDIA_OWNER_BRANCHES = String(
+  (MediaOwners as any).BRANCHES || "branches",
+);
 const CUMULATIVE_MEDIA_OWNER_SETTINGS = String(
   (MediaOwners as any).SCHOOL_BRANCH_SETTINGS ||
     (MediaOwners as any).SCHOOL_BRANCHES_SETTINGS ||
-    "schoolBranchSettings"
+    "schoolBranchSettings",
+);
+const CUMULATIVE_MEDIA_OWNER_STUDENTS = String(
+  (MediaOwners as any).STUDENTS || "students",
 );
 
 const CUMULATIVE_FIELD_LOGO = String((MediaFieldKeys as any).LOGO || "logo");
+const CUMULATIVE_FIELD_PHOTO = String((MediaFieldKeys as any).PHOTO || "photo");
 
 function hasOwn(row: any, key: string) {
   return !!row && Object.prototype.hasOwnProperty.call(row, key);
@@ -134,12 +257,25 @@ function safeRecordMediaValue(value?: string | null) {
   return media;
 }
 
-function fallbackMediaValue(row: any, stringField: string, mediaIdField?: string) {
+function fallbackMediaValue(
+  row: any,
+  stringField: string,
+  mediaIdField?: string,
+) {
   if (!row) return "";
 
-  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField])) return "";
+  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField]))
+    return "";
 
   return safeRecordMediaValue(row[stringField]);
+}
+
+function firstMediaText(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 type OpenWorkspaceSession = {
@@ -161,7 +297,10 @@ type OpenWorkspaceSession = {
 // PRINT TOOL
 // ======================================================
 
-function applyCumulativePrintStyles(targetId: string, orientation: PrintOrientation) {
+function applyCumulativePrintStyles(
+  targetId: string,
+  orientation: PrintOrientation,
+) {
   const existing = document.getElementById("cumulative-report-print-style");
 
   if (existing) existing.remove();
@@ -241,8 +380,9 @@ const trendLabel = (trend?: string) => {
   return "-";
 };
 
-const modeLabels: Record<CumulativeReportFiltersState["mode"], string> = {
-  "student-transcript": "Student Transcript",
+const modeLabels: Record<string, string> = {
+  "student-transcript": "Cumulative Transcript",
+  "cumulative-book": "Cumulative Report Book",
   "multi-period-report": "Multi-Period Report",
   "annual-broadsheet": "Annual Broadsheet",
   "subject-history": "Subject History",
@@ -250,10 +390,19 @@ const modeLabels: Record<CumulativeReportFiltersState["mode"], string> = {
   "progression-timeline": "Progression Timeline",
 };
 
-const printOrientationForMode = (mode: CumulativeReportFiltersState["mode"]): PrintOrientation =>
-  mode === "annual-broadsheet" || mode === "subject-history" || mode === "promotion-summary" ? "landscape" : "portrait";
+const printOrientationForMode = (
+  mode: CumulativeReportFiltersState["mode"] | string,
+): PrintOrientation =>
+  mode === "annual-broadsheet" ||
+  mode === "subject-history" ||
+  mode === "promotion-summary"
+    ? "landscape"
+    : "portrait";
 
-function labelOf<T extends { id?: number; name?: string; fullName?: string }>(rows: T[], id?: number) {
+function labelOf<T extends { id?: number; name?: string; fullName?: string }>(
+  rows: T[],
+  id?: number,
+) {
   if (!id) return "Not selected";
   const found = rows.find((row) => row.id === id);
   return found?.name || found?.fullName || "Not found";
@@ -303,12 +452,14 @@ function withCumulativeBranchContext<T extends Record<string, any>>(
         branchAddress: headerBranding.branchAddress || branchAddress,
         resolvedLogoUrl:
           headerBranding.resolvedLogoUrl ||
+          headerBranding.logo ||
           header.schoolBranchSetting?.logo ||
           header.branch?.logo ||
           header.school?.logo ||
           "",
         logo:
           headerBranding.logo ||
+          headerBranding.resolvedLogoUrl ||
           header.schoolBranchSetting?.logo ||
           header.branch?.logo ||
           header.school?.logo ||
@@ -320,7 +471,6 @@ function withCumulativeBranchContext<T extends Record<string, any>>(
     },
   };
 }
-
 
 function idOf(value: unknown) {
   if (value === null || value === undefined || value === "") return 0;
@@ -338,7 +488,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -380,7 +532,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -389,7 +545,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -401,7 +557,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -411,7 +571,7 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
@@ -421,10 +581,387 @@ function accountMatches(rowAccountId: unknown, accountId?: string | null) {
   return rowAccountId === accountId;
 }
 
-function rowIsActive(row: { isDeleted?: boolean; active?: boolean; status?: string }) {
+function rowIsActive(row: {
+  isDeleted?: boolean;
+  active?: boolean;
+  status?: string;
+}) {
   return !row.isDeleted && row.active !== false && row.status !== "withdrawn";
 }
 
+function templateCodeOf(
+  row?: Partial<
+    ReportTemplateRow | ReportTemplateSettingsRow | ReportTemplateAssignmentRow
+  > | null,
+) {
+  return String(
+    row?.code || row?.templateCode || row?.layoutKey || row?.templateKey || "",
+  ).trim();
+}
+
+function rowReportType(row?: { reportType?: string | null } | null) {
+  return String(row?.reportType || "student_report").trim();
+}
+
+function isUsableTemplateRow(row: { isDeleted?: boolean; active?: boolean }) {
+  return !row.isDeleted && row.active !== false;
+}
+
+function templateTenantMatches(
+  row: TenantRow,
+  accountId?: string | null,
+  schoolId?: number,
+  branchId?: number,
+) {
+  return (
+    accountMatches(row.accountId, accountId) &&
+    (!row.schoolId || sameId(row.schoolId, schoolId)) &&
+    (!row.branchId || sameId(row.branchId, branchId)) &&
+    !row.isDeleted
+  );
+}
+
+function firstTemplateByReportType(
+  templates: ReportTemplateRow[],
+  reportType: "student_report" | "cumulative_book" | "cumulative_transcript",
+) {
+  const scoped = templates.filter(
+    (row) => isUsableTemplateRow(row) && rowReportType(row) === reportType,
+  );
+  return scoped.find((row) => row.isDefault) || scoped[0];
+}
+
+function assignmentForReportType(
+  assignments: ReportTemplateAssignmentRow[],
+  reportType: "student_report" | "cumulative_book" | "cumulative_transcript",
+  branchId?: number,
+) {
+  const scoped = assignments.filter((row) => {
+    if (!isUsableTemplateRow(row)) return false;
+    if (rowReportType(row) !== reportType) return false;
+    if (row.scopeType && row.scopeType !== "branch") return false;
+    if (row.scopeId && branchId && !sameId(row.scopeId, branchId)) return false;
+    return true;
+  });
+
+  return scoped.find((row) => row.isDefault) || scoped[0];
+}
+
+function templateFromAssignment(
+  templates: ReportTemplateRow[],
+  assignment?: ReportTemplateAssignmentRow,
+) {
+  if (!assignment) return undefined;
+
+  const templateId = idOf(assignment.templateId);
+  const code = templateCodeOf(assignment);
+
+  return (
+    templates.find(
+      (row) =>
+        templateId && idOf(row.id) === templateId && isUsableTemplateRow(row),
+    ) ||
+    templates.find(
+      (row) => code && templateCodeOf(row) === code && isUsableTemplateRow(row),
+    )
+  );
+}
+
+function settingsFromAssignment(
+  settingsRows: ReportTemplateSettingsRow[],
+  assignment?: ReportTemplateAssignmentRow,
+  template?: ReportTemplateRow,
+  reportType?: string,
+) {
+  const settingsId = idOf(assignment?.templateSettingsId);
+  const templateId = idOf(template?.id || assignment?.templateId);
+  const code = templateCodeOf(template) || templateCodeOf(assignment);
+
+  return (
+    settingsRows.find(
+      (row) =>
+        settingsId && idOf(row.id) === settingsId && isUsableTemplateRow(row),
+    ) ||
+    settingsRows.find(
+      (row) =>
+        templateId &&
+        idOf(row.templateId) === templateId &&
+        isUsableTemplateRow(row),
+    ) ||
+    settingsRows.find(
+      (row) =>
+        code &&
+        templateCodeOf(row) === code &&
+        (!reportType || rowReportType(row) === reportType) &&
+        isUsableTemplateRow(row),
+    )
+  );
+}
+
+function fallbackStudentTemplate(): ReportTemplateRow {
+  return {
+    name: "Classic Formal",
+    code: "classic_formal",
+    layoutKey: "classic_formal",
+    templateKey: "classic_formal",
+    reportType: "student_report",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    active: true,
+    isDefault: true,
+  };
+}
+
+function fallbackCumulativeTranscriptTemplate(): ReportTemplateRow {
+  return {
+    name: "Cumulative Transcript Classic",
+    code: "cumulative_transcript_classic",
+    layoutKey: "cumulative_transcript_classic",
+    templateKey: "cumulative_transcript_classic",
+    reportType: "cumulative_transcript",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    active: true,
+    isDefault: true,
+  };
+}
+
+function fallbackCumulativeTranscriptSettings(): ReportTemplateSettingsRow {
+  return {
+    templateCode: "cumulative_transcript_classic",
+    layoutKey: "cumulative_transcript_classic",
+    templateKey: "cumulative_transcript_classic",
+    templateName: "Cumulative Transcript Classic",
+    reportType: "cumulative_transcript",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    showAdmissionNumber: true,
+    showGender: true,
+    showClass: true,
+    showAcademicStructure: true,
+    showAcademicPeriod: true,
+    showBranch: true,
+    showTranscriptTermBreakdown: true,
+    showTranscriptYearAverage: true,
+    showTranscriptCumulativeAverage: true,
+    showTranscriptCumulativePosition: true,
+    showTranscriptGPAProgression: true,
+    showTranscriptFinalRecommendation: true,
+    showGeneratedDate: true,
+    studentNameLabel: "Student",
+    admissionNumberLabel: "Student ID",
+    classLabel: "Programme / Class",
+    academicPeriodLabel: "Academic Period",
+    subjectLabel: "Course / Subject",
+    averageLabel: "Average",
+    gradeLabel: "Grade",
+    gpaLabel: "GPA",
+    generatedDateLabel: "Date Generated",
+    footerText:
+      "Official cumulative academic transcript generated by Eleeveon Schools.",
+  };
+}
+
+function fallbackCumulativeBookSettings(
+  templateSettings?: ReportTemplateSettingsRow,
+): ReportTemplateSettingsRow {
+  return {
+    ...(templateSettings || {}),
+    reportType: "cumulative_book",
+    showBookFrontCover: templateSettings?.showBookFrontCover ?? true,
+    showBookStudentProfilePage:
+      templateSettings?.showBookStudentProfilePage ?? true,
+    showBookAcademicJourneyPage:
+      templateSettings?.showBookAcademicJourneyPage ?? true,
+    showBookSummaryPage: templateSettings?.showBookSummaryPage ?? true,
+    showBookBackCover: templateSettings?.showBookBackCover ?? true,
+    bookTitleLabel:
+      templateSettings?.bookTitleLabel || "Cumulative Academic Report Book",
+    bookSubtitleLabel:
+      templateSettings?.bookSubtitleLabel || "Complete Academic Journey",
+    showGeneratedDate: templateSettings?.showGeneratedDate ?? true,
+    generatedDateLabel: templateSettings?.generatedDateLabel || "Generated",
+  };
+}
+
+function snapshotMatchesBookFilters(
+  snapshot: StudentReportSnapshot,
+  filters: CumulativeReportFiltersState,
+  schoolId?: number,
+  branchId?: number,
+) {
+  if (!filters.includeDeletedSnapshots && snapshot.isDeleted) return false;
+  if (schoolId && !sameId(snapshot.schoolId, schoolId)) return false;
+  if (branchId && !sameId(snapshot.branchId, branchId)) return false;
+  if (
+    filters.academicStructureId &&
+    !sameId(snapshot.academicStructureId, filters.academicStructureId)
+  )
+    return false;
+  if (
+    filters.academicPeriodId &&
+    !sameId(snapshot.academicPeriodId, filters.academicPeriodId)
+  )
+    return false;
+  if (filters.classId && !sameId(snapshot.classId, filters.classId))
+    return false;
+  if (filters.studentId && !sameId(snapshot.studentId, filters.studentId))
+    return false;
+  if (
+    filters.snapshotType !== "all" &&
+    snapshot.snapshotType !== filters.snapshotType
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "manual" &&
+    filters.includeManualSnapshots === false
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "terminal" &&
+    filters.includeTerminalSnapshots === false
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "promotion" &&
+    filters.includePromotionRecords === false
+  )
+    return false;
+  return true;
+}
+
+function studentReportDatasetFromSnapshot(
+  snapshot: StudentReportSnapshot,
+  header: any,
+  studentRow?: Student,
+) {
+  const raw = (snapshot as any).reportData || {};
+  const dataset =
+    raw.dataset || raw.reportCardDataset || raw.studentReportDataset || raw;
+
+  const report = dataset?.report || dataset || {};
+  const datasetHeader = dataset?.header || {};
+  const currentHeader = header || {};
+  const datasetBranding = datasetHeader?.branding || {};
+  const currentBranding = currentHeader?.branding || {};
+
+  const logo = firstMediaText(
+    currentBranding.logo,
+    currentBranding.resolvedLogoUrl,
+    currentHeader.schoolBranchSetting?.logo,
+    currentHeader.branch?.logo,
+    currentHeader.school?.logo,
+    datasetBranding.logo,
+    datasetBranding.resolvedLogoUrl,
+    datasetHeader.schoolBranchSetting?.logo,
+    datasetHeader.branch?.logo,
+    datasetHeader.school?.logo,
+  );
+
+  const reportCardBackgroundImage = firstMediaText(
+    currentBranding.reportCardBackgroundImage,
+    currentHeader.schoolBranchSetting?.reportCardBackgroundImage,
+    datasetBranding.reportCardBackgroundImage,
+    datasetHeader.schoolBranchSetting?.reportCardBackgroundImage,
+  );
+
+  const reportCardWatermark = firstMediaText(
+    currentBranding.reportCardWatermark,
+    currentHeader.schoolBranchSetting?.reportCardWatermark,
+    datasetBranding.reportCardWatermark,
+    datasetHeader.schoolBranchSetting?.reportCardWatermark,
+    logo,
+  );
+
+  const reportCardSignatureImage = firstMediaText(
+    currentBranding.reportCardSignatureImage,
+    currentHeader.schoolBranchSetting?.reportCardSignatureImage,
+    datasetBranding.reportCardSignatureImage,
+    datasetHeader.schoolBranchSetting?.reportCardSignatureImage,
+  );
+
+  const studentPhoto = firstMediaText(
+    (studentRow as any)?.resolvedStudentPhotoUrl,
+    (studentRow as any)?.photo,
+    (studentRow as any)?.studentPhoto,
+    dataset?.studentInfo?.studentPhoto,
+    dataset?.studentInfo?.photo,
+    dataset?.student?.resolvedStudentPhotoUrl,
+    dataset?.student?.studentPhoto,
+    dataset?.student?.photo,
+    report?.resolvedStudentPhotoUrl,
+    report?.studentPhoto,
+  );
+
+  return {
+    ...dataset,
+    generatedAt: dataset?.generatedAt || snapshot.createdAt || new Date().toISOString(),
+    header: {
+      ...currentHeader,
+      ...datasetHeader,
+      school: currentHeader.school || datasetHeader.school,
+      branch: currentHeader.branch || datasetHeader.branch,
+      schoolBranchSetting:
+        currentHeader.schoolBranchSetting || datasetHeader.schoolBranchSetting,
+      branding: {
+        ...datasetBranding,
+        ...currentBranding,
+        logo,
+        resolvedLogoUrl: logo,
+        reportCardBackgroundImage,
+        reportCardWatermark,
+        reportCardSignatureImage,
+      },
+    },
+    branding: {
+      ...(dataset?.branding || {}),
+      ...currentBranding,
+      logo,
+      resolvedLogoUrl: logo,
+      reportCardBackgroundImage,
+      reportCardWatermark,
+      reportCardSignatureImage,
+    },
+    report: {
+      ...report,
+      studentId: report?.studentId || snapshot.studentId,
+      studentPhoto,
+      resolvedStudentPhotoUrl: studentPhoto,
+    },
+    student: {
+      ...(studentRow || {}),
+      ...(dataset?.student || {}),
+      id: dataset?.student?.id || (studentRow as any)?.id || snapshot.studentId,
+      name:
+        dataset?.student?.name ||
+        dataset?.student?.fullName ||
+        (studentRow as any)?.fullName ||
+        report?.studentName,
+      fullName:
+        dataset?.student?.fullName ||
+        dataset?.student?.name ||
+        (studentRow as any)?.fullName ||
+        report?.studentName,
+      admissionNumber:
+        dataset?.student?.admissionNumber ||
+        (studentRow as any)?.admissionNumber ||
+        report?.admissionNumber,
+      gender:
+        dataset?.student?.gender || (studentRow as any)?.gender || report?.gender,
+      photo: studentPhoto,
+      studentPhoto,
+      resolvedStudentPhotoUrl: studentPhoto,
+    },
+    studentInfo: {
+      ...(dataset?.studentInfo || {}),
+      studentPhoto,
+      photo: studentPhoto,
+    },
+  };
+}
 
 // ======================================================
 // COMPONENT
@@ -433,11 +970,7 @@ function rowIsActive(row: { isDeleted?: boolean; active?: boolean; status?: stri
 export default function CumulativeRecordsPage() {
   const router = useRouter();
 
-  const {
-    accountId,
-    authenticated,
-    loading: accountLoading,
-  } = useAccount();
+  const { accountId, authenticated, loading: accountLoading } = useAccount();
 
   const { settings, loading: settingsLoading } = useSettings();
 
@@ -506,8 +1039,12 @@ export default function CumulativeRecordsPage() {
 
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [schoolBranchSettings, setSchoolBranchSettings] = useState<SchoolBranchSetting[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [schoolBranchSettings, setSchoolBranchSettings] = useState<
+    SchoolBranchSetting[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [parents, setParents] = useState<Parent[]>([]);
@@ -515,8 +1052,21 @@ export default function CumulativeRecordsPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [studentReportSnapshots, setStudentReportSnapshots] = useState<StudentReportSnapshot[]>([]);
-  const [studentPromotions, setStudentPromotions] = useState<StudentPromotion[]>([]);
+  const [studentReportSnapshots, setStudentReportSnapshots] = useState<
+    StudentReportSnapshot[]
+  >([]);
+  const [studentPromotions, setStudentPromotions] = useState<
+    StudentPromotion[]
+  >([]);
+  const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
+    [],
+  );
+  const [reportTemplateSettingsRows, setReportTemplateSettingsRows] = useState<
+    ReportTemplateSettingsRow[]
+  >([]);
+  const [reportTemplateAssignments, setReportTemplateAssignments] = useState<
+    ReportTemplateAssignmentRow[]
+  >([]);
   const [cumulativeMediaUrls, setCumulativeMediaUrls] = useState<string[]>([]);
 
   // ======================================================
@@ -544,7 +1094,6 @@ export default function CumulativeRecordsPage() {
     router,
   ]);
 
-
   useEffect(() => {
     return () => {
       cumulativeMediaUrls.forEach(revokeMediaObjectUrl);
@@ -563,7 +1112,8 @@ export default function CumulativeRecordsPage() {
 
   const sameSchool = (row: TenantRow | SchoolRow) =>
     accountMatches(row.accountId, accountId) &&
-    (sameId((row as any).schoolId, schoolId) || sameId((row as any).id, schoolId)) &&
+    (sameId((row as any).schoolId, schoolId) ||
+      sameId((row as any).id, schoolId)) &&
     !row.isDeleted;
 
   const sameBranch = (row: BranchRow) =>
@@ -594,6 +1144,9 @@ export default function CumulativeRecordsPage() {
     setSubjects([]);
     setStudentReportSnapshots([]);
     setStudentPromotions([]);
+    setReportTemplates([]);
+    setReportTemplateSettingsRows([]);
+    setReportTemplateAssignments([]);
   };
 
   const resolveCumulativeMediaUrl = async ({
@@ -622,7 +1175,11 @@ export default function CumulativeRecordsPage() {
         fieldKey,
       });
 
-      if (ownedAsset?.id && !(ownedAsset as any).isDeleted && (ownedAsset as any).active !== false) {
+      if (
+        ownedAsset?.id &&
+        !(ownedAsset as any).isDeleted &&
+        (ownedAsset as any).active !== false
+      ) {
         const url = await getMediaObjectUrl(Number(ownedAsset.id));
         if (url) {
           nextUrls.push(url);
@@ -642,7 +1199,8 @@ export default function CumulativeRecordsPage() {
       (!accountId || fallbackAsset.accountId === accountId) &&
       fallbackAsset.ownerTable === ownerTable &&
       fallbackAsset.fieldKey === fieldKey &&
-      (!localId || String(fallbackAsset.ownerLocalId || "") === String(localId));
+      (!localId ||
+        String(fallbackAsset.ownerLocalId || "") === String(localId));
 
     if (!belongsToOwner) return "";
 
@@ -675,6 +1233,9 @@ export default function CumulativeRecordsPage() {
         subjectRows,
         snapshotRows,
         promotionRows,
+        reportTemplateRows,
+        reportTemplateSettingsRowsData,
+        reportTemplateAssignmentRows,
       ] = await Promise.all([
         db.schools.toArray(),
         db.branches.toArray(),
@@ -689,11 +1250,18 @@ export default function CumulativeRecordsPage() {
         db.subjects.toArray(),
         db.studentReportSnapshots.toArray(),
         db.studentPromotions.toArray(),
+        (db as any).reportCardTemplates?.toArray?.() || Promise.resolve([]),
+        (db as any).reportCardTemplateSettings?.toArray?.() ||
+          Promise.resolve([]),
+        (db as any).reportCardTemplateAssignments?.toArray?.() ||
+          Promise.resolve([]),
       ]);
 
       const scopedSchools = schoolRows.filter(sameSchool);
       const scopedBranches = branchRows.filter(sameBranch);
-      const scopedSettings = schoolBranchSettingRows.filter((row) => sameTenant(row) || looseBranchTenant(row));
+      const scopedSettings = schoolBranchSettingRows.filter(
+        (row) => sameTenant(row) || looseBranchTenant(row),
+      );
       const nextMediaUrls: string[] = [];
 
       const schoolsWithMedia = await Promise.all(
@@ -708,7 +1276,7 @@ export default function CumulativeRecordsPage() {
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
             })) || fallbackMediaValue(row, "logo", "logoMediaId"),
-        }))
+        })),
       );
 
       const branchesWithMedia = await Promise.all(
@@ -723,7 +1291,7 @@ export default function CumulativeRecordsPage() {
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
             })) || fallbackMediaValue(row, "logo", "logoMediaId"),
-        }))
+        })),
       );
 
       const settingsWithMedia = await Promise.all(
@@ -738,7 +1306,7 @@ export default function CumulativeRecordsPage() {
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
             })) || fallbackMediaValue(row, "logo", "logoMediaId"),
-        }))
+        })),
       );
 
       cumulativeMediaUrls.forEach((url) => {
@@ -746,36 +1314,64 @@ export default function CumulativeRecordsPage() {
       });
       setCumulativeMediaUrls(nextMediaUrls);
 
+      const studentsWithMedia = await Promise.all(
+        studentRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+          .map(async (row: any) => {
+            const photo =
+              (await resolveCumulativeMediaUrl({
+                ownerTable: CUMULATIVE_MEDIA_OWNER_STUDENTS,
+                ownerLocalId: row.id,
+                ownerCloudId: row.cloudId,
+                fieldKey: CUMULATIVE_FIELD_PHOTO,
+                fallbackMediaId: row.photoMediaId,
+                nextUrls: nextMediaUrls,
+              })) || fallbackMediaValue(row, "photo", "photoMediaId");
+
+            return {
+              ...row,
+              photo,
+              studentPhoto: photo,
+              resolvedStudentPhotoUrl: photo,
+            };
+          }),
+      );
+
       setSchools(schoolsWithMedia as School[]);
       setBranches(branchesWithMedia as Branch[]);
       setSchoolBranchSettings(settingsWithMedia as SchoolBranchSetting[]);
       setAcademicStructures(
         academicStructureRows
           .filter((row) => looseBranchTenant(row) && rowIsActive(row))
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
       setAcademicPeriods(
         academicPeriodRows
           .filter((row) => looseBranchTenant(row) && rowIsActive(row))
-          .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+          .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
       );
-      setStudents(
-        studentRows
-          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
-          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+      setStudents(studentsWithMedia as Student[]);
+      setParents(
+        parentRows.filter((row) => sameTenant(row) || looseBranchTenant(row)),
       );
-      setParents(parentRows.filter((row) => sameTenant(row) || looseBranchTenant(row)));
-      setStudentParents(studentParentRows.filter((row) => sameTenant(row) || looseBranchTenant(row)));
-      setTeachers(teacherRows.filter((row) => sameTenant(row) || looseBranchTenant(row)));
+      setStudentParents(
+        studentParentRows.filter(
+          (row) => sameTenant(row) || looseBranchTenant(row),
+        ),
+      );
+      setTeachers(
+        teacherRows.filter((row) => sameTenant(row) || looseBranchTenant(row)),
+      );
       setClasses(
         classRows
           .filter((row) => looseBranchTenant(row) && rowIsActive(row))
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
       setSubjects(
         subjectRows
           .filter((row) => looseBranchTenant(row) && rowIsActive(row))
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
       setStudentReportSnapshots(
         snapshotRows.filter((row) => {
@@ -784,16 +1380,74 @@ export default function CumulativeRecordsPage() {
           if (!sameId(row.schoolId, schoolId)) return false;
           if (!sameId(row.branchId, branchId)) return false;
           return true;
-        })
+        }),
       );
       setStudentPromotions(
         promotionRows.filter((row) => {
           if (row.isDeleted) return false;
           if (!accountMatches(row.accountId, accountId)) return false;
-          if ((row as any).schoolId && !sameId((row as any).schoolId, schoolId)) return false;
-          if ((row as any).branchId && !sameId((row as any).branchId, branchId)) return false;
+          if ((row as any).schoolId && !sameId((row as any).schoolId, schoolId))
+            return false;
+          if ((row as any).branchId && !sameId((row as any).branchId, branchId))
+            return false;
           return true;
-        })
+        }),
+      );
+
+      const templateMap = new Map<string, ReportTemplateRow>();
+
+      builtInReportTemplateRows().forEach((template) => {
+        const key = reportTemplateMapKey(template);
+        if (key) templateMap.set(key, template);
+      });
+
+      (reportTemplateRows as ReportTemplateRow[])
+        .filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        )
+        .forEach((template) => {
+          const normalized: ReportTemplateRow = {
+            ...template,
+            reportType: template.reportType || "student_report",
+            templateCode: template.templateCode || template.code || template.layoutKey,
+            templateKey: template.templateKey || template.layoutKey || template.code,
+          };
+          const key = reportTemplateMapKey(normalized);
+          if (key) {
+            templateMap.set(key, {
+              ...(templateMap.get(key) || {}),
+              ...normalized,
+            });
+          }
+        });
+
+      setReportTemplates(
+        Array.from(templateMap.values()).sort((a, b) => {
+          if (a.reportType !== b.reportType) {
+            return String(a.reportType || "").localeCompare(String(b.reportType || ""));
+          }
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        }),
+      );
+
+      setReportTemplateSettingsRows(
+        (reportTemplateSettingsRowsData as ReportTemplateSettingsRow[]).filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        ),
+      );
+
+      setReportTemplateAssignments(
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        ),
       );
     } catch (error) {
       console.error("Failed to load cumulative records:", error);
@@ -833,7 +1487,10 @@ export default function CumulativeRecordsPage() {
 
   useEffect(() => {
     if (!filters.academicStructureId && academicStructures[0]?.id) {
-      setFilters((prev) => ({ ...prev, academicStructureId: academicStructures[0].id }));
+      setFilters((prev) => ({
+        ...prev,
+        academicStructureId: academicStructures[0].id,
+      }));
     }
   }, [filters.academicStructureId, academicStructures]);
 
@@ -842,7 +1499,9 @@ export default function CumulativeRecordsPage() {
   // ======================================================
 
   const lockedBranches = useMemo(() => {
-    const resolvedBranch = branches.find((branch: any) => sameId(branch.id, branchId));
+    const resolvedBranch = branches.find((branch: any) =>
+      sameId(branch.id, branchId),
+    );
     if (resolvedBranch) return [resolvedBranch];
     return activeBranch ? [activeBranch] : branches;
   }, [activeBranch, branches, branchId]);
@@ -855,7 +1514,13 @@ export default function CumulativeRecordsPage() {
       if (accountId && snapshot.accountId !== accountId) return false;
       return true;
     });
-  }, [studentReportSnapshots, branchId, schoolId, accountId, filters.includeDeletedSnapshots]);
+  }, [
+    studentReportSnapshots,
+    branchId,
+    schoolId,
+    accountId,
+    filters.includeDeletedSnapshots,
+  ]);
 
   // ======================================================
   // DATASET
@@ -892,7 +1557,7 @@ export default function CumulativeRecordsPage() {
       subjects,
       studentReportSnapshots,
       studentPromotions,
-    ]
+    ],
   );
 
   const rawOutput = useMemo(() => {
@@ -902,17 +1567,30 @@ export default function CumulativeRecordsPage() {
   const reportBranch = useMemo(() => {
     return (
       branches.find((branch: any) => idOf(branch.id) === idOf(branchId)) ||
-      lockedBranches.find((branch: any) => idOf(branch.id) === idOf(branchId)) ||
-      (activeBranch && idOf((activeBranch as any).id) === idOf(branchId) ? activeBranch : undefined) ||
+      lockedBranches.find(
+        (branch: any) => idOf(branch.id) === idOf(branchId),
+      ) ||
+      (activeBranch && idOf((activeBranch as any).id) === idOf(branchId)
+        ? activeBranch
+        : undefined) ||
       activeBranch ||
       branches[0] ||
       lockedBranches[0] ||
       rawOutput.header.branch
     );
-  }, [activeBranch, branchId, branches, lockedBranches, rawOutput.header.branch]);
+  }, [
+    activeBranch,
+    branchId,
+    branches,
+    lockedBranches,
+    rawOutput.header.branch,
+  ]);
 
   const output = useMemo(() => {
-    return withCumulativeBranchContext(rawOutput as any, reportBranch) as typeof rawOutput;
+    return withCumulativeBranchContext(
+      rawOutput as any,
+      reportBranch,
+    ) as typeof rawOutput;
   }, [rawOutput, reportBranch]);
 
   const selectedStudent = useMemo(() => {
@@ -953,6 +1631,268 @@ export default function CumulativeRecordsPage() {
   };
 
   // ======================================================
+  // TEMPLATE RESOLUTION FOR CUMULATIVE BOOK + TRANSCRIPT
+  // ======================================================
+
+  const selectedStudentReportTemplateForBook = useMemo(() => {
+    const bookAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_book",
+      branchId,
+    );
+    const studentAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "student_report",
+      branchId,
+    );
+
+    return (
+      templateFromAssignment(reportTemplates, bookAssignment) ||
+      templateFromAssignment(reportTemplates, studentAssignment) ||
+      firstTemplateByReportType(reportTemplates, "student_report") ||
+      fallbackStudentTemplate()
+    );
+  }, [reportTemplateAssignments, reportTemplates, branchId]);
+
+  const selectedStudentReportSettingsForBook = useMemo(() => {
+    const bookAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_book",
+      branchId,
+    );
+    const studentAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "student_report",
+      branchId,
+    );
+
+    const directBookSettings = settingsFromAssignment(
+      reportTemplateSettingsRows,
+      bookAssignment,
+      selectedStudentReportTemplateForBook,
+      "cumulative_book",
+    );
+
+    const studentSettings = settingsFromAssignment(
+      reportTemplateSettingsRows,
+      studentAssignment,
+      selectedStudentReportTemplateForBook,
+      "student_report",
+    );
+
+    return fallbackCumulativeBookSettings(
+      directBookSettings || studentSettings,
+    );
+  }, [
+    reportTemplateAssignments,
+    reportTemplateSettingsRows,
+    selectedStudentReportTemplateForBook,
+    branchId,
+  ]);
+
+  const selectedCumulativeTranscriptTemplate = useMemo(() => {
+    const assignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_transcript",
+      branchId,
+    );
+    return (
+      templateFromAssignment(reportTemplates, assignment) ||
+      firstTemplateByReportType(reportTemplates, "cumulative_transcript") ||
+      fallbackCumulativeTranscriptTemplate()
+    );
+  }, [reportTemplateAssignments, reportTemplates, branchId]);
+
+  const selectedCumulativeTranscriptSettings = useMemo(() => {
+    const assignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_transcript",
+      branchId,
+    );
+    return (
+      settingsFromAssignment(
+        reportTemplateSettingsRows,
+        assignment,
+        selectedCumulativeTranscriptTemplate,
+        "cumulative_transcript",
+      ) || fallbackCumulativeTranscriptSettings()
+    );
+  }, [
+    reportTemplateAssignments,
+    reportTemplateSettingsRows,
+    selectedCumulativeTranscriptTemplate,
+    branchId,
+  ]);
+
+  const transcriptForTemplates = useMemo(() => {
+    if (output.studentTranscript) return output.studentTranscript;
+    if (!filters.studentId) return undefined;
+
+    return buildStudentTranscript(
+      dataset,
+      {
+        ...filters,
+        mode: "student-transcript",
+      } as CumulativeReportFiltersState,
+      filters.studentId,
+    );
+  }, [dataset, filters, output.studentTranscript]);
+
+  const cumulativeTranscriptDataset = useMemo(() => {
+    const existing = (output as any).cumulativeTranscriptDataset;
+    if (existing?.transcript && existing?.student) return existing;
+
+    return {
+      ...(existing || {}),
+      header: output.header,
+      transcript: transcriptForTemplates,
+      generatedAt: existing?.generatedAt || new Date().toISOString(),
+      student: transcriptForTemplates
+        ? {
+            studentId: transcriptForTemplates.studentId,
+            studentName: transcriptForTemplates.studentName,
+            admissionNumber: transcriptForTemplates.admissionNumber,
+            gender: transcriptForTemplates.gender,
+            currentClassName: transcriptForTemplates.currentClassName,
+            studentPhoto: transcriptForTemplates.studentPhoto,
+            parentName: transcriptForTemplates.parentName,
+            guardianName: transcriptForTemplates.guardianName,
+          }
+        : undefined,
+      summary: transcriptForTemplates
+        ? {
+            totalPeriods: transcriptForTemplates.totalPeriods,
+            totalSubjects: transcriptForTemplates.totalSubjects,
+            cumulativeTotal: transcriptForTemplates.cumulativeTotal,
+            cumulativeAverage: transcriptForTemplates.cumulativeAverage,
+            cumulativeGPA: transcriptForTemplates.cumulativeGPA,
+            cumulativePosition: transcriptForTemplates.latestPosition,
+            highestAverage: transcriptForTemplates.highestAverage,
+            lowestAverage: transcriptForTemplates.lowestAverage,
+            latestAverage: transcriptForTemplates.latestAverage,
+            latestPosition: transcriptForTemplates.latestPosition,
+            latestDecision: transcriptForTemplates.latestDecision,
+            overallTrend: transcriptForTemplates.overallTrend,
+          }
+        : undefined,
+    };
+  }, [output, transcriptForTemplates]);
+
+  const cumulativeReportBookDataset = useMemo(() => {
+    const student = transcriptForTemplates;
+    const scopedSnapshots = studentReportSnapshots
+      .filter((snapshot) =>
+        snapshotMatchesBookFilters(snapshot, filters, schoolId, branchId),
+      )
+      .sort((a, b) => {
+        const yearCompare = String(a.academicYear || "").localeCompare(
+          String(b.academicYear || ""),
+        );
+        if (yearCompare !== 0) return yearCompare;
+        return (
+          Number(a.academicPeriodId || 0) - Number(b.academicPeriodId || 0)
+        );
+      });
+
+    const periods = scopedSnapshots.map((snapshot) => {
+      const period = academicPeriods.find((row) =>
+        sameId(row.id, snapshot.academicPeriodId),
+      );
+      const snapshotStudent = students.find((row) =>
+        sameId(row.id, snapshot.studentId),
+      );
+      const reportDataset = studentReportDatasetFromSnapshot(
+        snapshot,
+        output.header,
+        snapshotStudent,
+      );
+      const report = reportDataset?.report || {};
+
+      return {
+        id: snapshot.id,
+        academicPeriodId: snapshot.academicPeriodId,
+        academicPeriodName:
+          period?.name ||
+          snapshot.term ||
+          reportDataset?.header?.academicPeriod?.name ||
+          "Academic Period",
+        academicYear: snapshot.academicYear,
+        term: snapshot.term,
+        startDate: period?.startDate,
+        endDate: period?.endDate,
+        dataset: reportDataset,
+        total: snapshot.total ?? report.total,
+        average: snapshot.average ?? report.average,
+        position:
+          snapshot.position ?? report.overallPosition ?? report.position,
+        gpa: report.overallGPA ?? report.gpa,
+        recommendation: snapshot.recommendation,
+      };
+    });
+
+    return {
+      generatedAt: new Date().toISOString(),
+      title:
+        selectedStudentReportSettingsForBook.bookTitleLabel ||
+        "Cumulative Academic Report Book",
+      subtitle:
+        selectedStudentReportSettingsForBook.bookSubtitleLabel ||
+        "Complete Academic Journey",
+      header: output.header,
+      branding: output.header.branding,
+      student: {
+        id: student?.studentId || selectedStudent?.id,
+        fullName: student?.studentName || selectedStudent?.fullName,
+        name: student?.studentName || selectedStudent?.fullName,
+        admissionNumber:
+          student?.admissionNumber || selectedStudent?.admissionNumber,
+        gender: student?.gender || selectedStudent?.gender,
+        className: student?.currentClassName,
+        currentClassName: student?.currentClassName,
+        photo:
+          student?.studentPhoto ||
+          (selectedStudent as any)?.resolvedStudentPhotoUrl ||
+          selectedStudent?.photo ||
+          (periods[0]?.dataset as any)?.studentInfo?.studentPhoto ||
+          (periods[0]?.dataset as any)?.report?.studentPhoto,
+        studentPhoto:
+          student?.studentPhoto ||
+          (selectedStudent as any)?.resolvedStudentPhotoUrl ||
+          selectedStudent?.photo ||
+          (periods[0]?.dataset as any)?.studentInfo?.studentPhoto ||
+          (periods[0]?.dataset as any)?.report?.studentPhoto,
+        parentName: student?.parentName || selectedStudent?.parentName,
+        address: selectedStudent?.address,
+        parentPhone: selectedStudent?.parentPhone,
+        parentEmail: selectedStudent?.parentEmail,
+      },
+      periods,
+      summary: {
+        totalPeriods: student?.totalPeriods || periods.length,
+        cumulativeAverage: student?.cumulativeAverage,
+        cumulativeGPA: student?.cumulativeGPA,
+        bestAverage: student?.highestAverage,
+        latestAverage: student?.latestAverage,
+        latestPosition: student?.latestPosition,
+        finalRecommendation: student?.latestDecision,
+        trend: student?.overallTrend,
+      },
+      notes: output.warnings,
+    };
+  }, [
+    academicPeriods,
+    branchId,
+    filters,
+    output.header,
+    output.warnings,
+    schoolId,
+    selectedStudent,
+    selectedStudentReportSettingsForBook,
+    studentReportSnapshots,
+    transcriptForTemplates,
+  ]);
+
+  // ======================================================
   // EXTRA MODE RENDERERS
   // ======================================================
 
@@ -977,26 +1917,46 @@ export default function CumulativeRecordsPage() {
         <ReportHeader
           header={output.header}
           title="Multi-Period Academic Report"
-          subtitle={report ? `${report.studentName} • ${report.periods.length} Periods` : undefined}
+          subtitle={
+            report
+              ? `${report.studentName} • ${report.periods.length} Periods`
+              : undefined
+          }
           orientation="portrait"
         />
 
         {!report ? (
-          <div className="cr-print-empty">Select a student with multiple historical snapshots to generate a multi-period report.</div>
+          <div className="cr-print-empty">
+            Select a student with multiple historical snapshots to generate a
+            multi-period report.
+          </div>
         ) : (
           <>
             <div className="cr-print-summary-grid">
-              <div><strong>Student:</strong> {report.studentName}</div>
-              <div><strong>Class:</strong> {report.className || "-"}</div>
-              <div><strong>Average:</strong> {formatNumber(report.average, 1)}%</div>
-              <div><strong>GPA:</strong> {report.gpa != null ? formatNumber(report.gpa, 2) : "-"}</div>
+              <div>
+                <strong>Student:</strong> {report.studentName}
+              </div>
+              <div>
+                <strong>Class:</strong> {report.className || "-"}
+              </div>
+              <div>
+                <strong>Average:</strong> {formatNumber(report.average, 1)}%
+              </div>
+              <div>
+                <strong>GPA:</strong>{" "}
+                {report.gpa != null ? formatNumber(report.gpa, 2) : "-"}
+              </div>
             </div>
 
             <table style={table}>
               <thead>
                 <tr>
                   <th style={{ ...th, textAlign: "left" }}>Subject</th>
-                  {report.periods.map((period) => <th key={period.academicPeriodId} style={th}>{period.academicPeriodName}</th>)}
+                  {report.periods.map((period) => (
+                    <th key={period.academicPeriodId} style={th}>
+                      {period.academicPeriodName}
+                    </th>
+                  ))}
                   <th style={th}>Average</th>
                   <th style={th}>Best</th>
                   <th style={th}>Latest</th>
@@ -1009,30 +1969,72 @@ export default function CumulativeRecordsPage() {
                   <tr key={subject.subjectId || subject.subjectName}>
                     <td style={{ ...td, fontWeight: 800 }}>
                       {subject.subjectName}
-                      {subject.subjectCode && <div style={{ fontSize: 8, opacity: 0.7 }}>{subject.subjectCode}</div>}
+                      {subject.subjectCode && (
+                        <div style={{ fontSize: 8, opacity: 0.7 }}>
+                          {subject.subjectCode}
+                        </div>
+                      )}
                     </td>
                     {report.periods.map((period) => {
-                      const score = subject.periodScores.find((item) => item.academicPeriodId === period.academicPeriodId);
+                      const score = subject.periodScores.find(
+                        (item) =>
+                          item.academicPeriodId === period.academicPeriodId,
+                      );
                       return (
-                        <td key={`${subject.subjectName}-${period.academicPeriodId}`} style={{ ...td, textAlign: "center" }}>
-                          {score ? <><strong>{formatNumber(score.percentage, 1)}%</strong><div style={{ fontSize: 8, opacity: 0.7 }}>{score.grade || "-"}</div></> : "-"}
+                        <td
+                          key={`${subject.subjectName}-${period.academicPeriodId}`}
+                          style={{ ...td, textAlign: "center" }}
+                        >
+                          {score ? (
+                            <>
+                              <strong>
+                                {formatNumber(score.percentage, 1)}%
+                              </strong>
+                              <div style={{ fontSize: 8, opacity: 0.7 }}>
+                                {score.grade || "-"}
+                              </div>
+                            </>
+                          ) : (
+                            "-"
+                          )}
                         </td>
                       );
                     })}
-                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(subject.average, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{formatNumber(subject.bestScore, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{formatNumber(subject.latestScore, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{trendLabel(subject.trend)}</td>
-                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{subject.finalGrade || "-"}</td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {formatNumber(subject.average, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(subject.bestScore, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(subject.latestScore, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {trendLabel(subject.trend)}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {subject.finalGrade || "-"}
+                    </td>
                   </tr>
                 ))}
                 {!report.subjects.length && (
-                  <tr><td style={{ ...td, textAlign: "center", padding: 16 }} colSpan={report.periods.length + 6}>No multi-period subject records found.</td></tr>
+                  <tr>
+                    <td
+                      style={{ ...td, textAlign: "center", padding: 16 }}
+                      colSpan={report.periods.length + 6}
+                    >
+                      No multi-period subject records found.
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
 
-            <PrintFooter primary={primary} schoolName={output.header.branding.schoolName} label="Official multi-period academic report" />
+            <PrintFooter
+              primary={primary}
+              schoolName={output.header.branding.schoolName}
+              label="Official multi-period academic report"
+            />
           </>
         )}
       </section>
@@ -1043,32 +2045,56 @@ export default function CumulativeRecordsPage() {
     const history = output.subjectHistory;
 
     return (
-      <section className="print-page report-page-break cumulative-subject-history-page" style={printablePage}>
+      <section
+        className="print-page report-page-break cumulative-subject-history-page"
+        style={printablePage}
+      >
         <ReportHeader
           header={output.header}
           title="Subject Longitudinal Analytics"
-          subtitle={history ? `${history.subjectName} • ${history.totalStudents} Students • ${history.totalPeriods} Periods` : undefined}
+          subtitle={
+            history
+              ? `${history.subjectName} • ${history.totalStudents} Students • ${history.totalPeriods} Periods`
+              : undefined
+          }
           orientation="landscape"
         />
 
         {!history ? (
-          <div className="cr-print-empty">Select a subject to generate longitudinal subject analytics.</div>
+          <div className="cr-print-empty">
+            Select a subject to generate longitudinal subject analytics.
+          </div>
         ) : (
           <>
             <div className="cr-print-summary-grid six">
-              <div><strong>Subject:</strong> {history.subjectName}</div>
-              <div><strong>Students:</strong> {history.totalStudents}</div>
-              <div><strong>Periods:</strong> {history.totalPeriods}</div>
-              <div><strong>Average:</strong> {formatNumber(history.subjectAverage, 1)}%</div>
-              <div><strong>Improving:</strong> {history.improvingCount}</div>
-              <div><strong>Declining:</strong> {history.decliningCount}</div>
+              <div>
+                <strong>Subject:</strong> {history.subjectName}
+              </div>
+              <div>
+                <strong>Students:</strong> {history.totalStudents}
+              </div>
+              <div>
+                <strong>Periods:</strong> {history.totalPeriods}
+              </div>
+              <div>
+                <strong>Average:</strong>{" "}
+                {formatNumber(history.subjectAverage, 1)}%
+              </div>
+              <div>
+                <strong>Improving:</strong> {history.improvingCount}
+              </div>
+              <div>
+                <strong>Declining:</strong> {history.decliningCount}
+              </div>
             </div>
 
             <table style={table}>
               <thead>
                 <tr>
                   <th style={th}>#</th>
-                  <th style={{ ...th, textAlign: "left", minWidth: 180 }}>Student</th>
+                  <th style={{ ...th, textAlign: "left", minWidth: 180 }}>
+                    Student
+                  </th>
                   <th style={th}>Class</th>
                   <th style={th}>Periods</th>
                   <th style={th}>Average</th>
@@ -1082,21 +2108,57 @@ export default function CumulativeRecordsPage() {
                 {history.students.map((student, index) => (
                   <tr key={student.studentId}>
                     <td style={{ ...td, textAlign: "center" }}>{index + 1}</td>
-                    <td style={{ ...td, fontWeight: 800 }}>{student.studentName}{student.admissionNumber && <div style={{ fontSize: 8, opacity: 0.7 }}>{student.admissionNumber}</div>}</td>
-                    <td style={{ ...td, textAlign: "center" }}>{student.className || "-"}</td>
-                    <td style={{ ...td, textAlign: "center" }}>{student.periods.length}</td>
-                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{formatNumber(student.average, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{formatNumber(student.highest, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{formatNumber(student.lowest, 1)}%</td>
-                    <td style={{ ...td, textAlign: "center" }}>{student.latest != null ? `${formatNumber(student.latest, 1)}%` : "-"}</td>
-                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>{trendLabel(student.trend)}</td>
+                    <td style={{ ...td, fontWeight: 800 }}>
+                      {student.studentName}
+                      {student.admissionNumber && (
+                        <div style={{ fontSize: 8, opacity: 0.7 }}>
+                          {student.admissionNumber}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.className || "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.periods.length}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {formatNumber(student.average, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(student.highest, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(student.lowest, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.latest != null
+                        ? `${formatNumber(student.latest, 1)}%`
+                        : "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {trendLabel(student.trend)}
+                    </td>
                   </tr>
                 ))}
-                {!history.students.length && <tr><td style={{ ...td, textAlign: "center", padding: 16 }} colSpan={9}>No subject history records found.</td></tr>}
+                {!history.students.length && (
+                  <tr>
+                    <td
+                      style={{ ...td, textAlign: "center", padding: 16 }}
+                      colSpan={9}
+                    >
+                      No subject history records found.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
 
-            <PrintFooter primary={primary} schoolName={output.header.branding.schoolName} label="Official subject history" />
+            <PrintFooter
+              primary={primary}
+              schoolName={output.header.branding.schoolName}
+              label="Official subject history"
+            />
           </>
         )}
       </section>
@@ -1104,36 +2166,79 @@ export default function CumulativeRecordsPage() {
   };
 
   const renderActiveView = () => {
-    if (filters.mode === "student-transcript") {
-      return <StudentCumulativeTranscript header={output.header} transcript={output.studentTranscript} pageBreakAfter={false} />;
+    if (String(filters.mode) === "cumulative-book") {
+      return (
+        <CumulativeReportBook
+          dataset={cumulativeReportBookDataset as any}
+          template={selectedStudentReportTemplateForBook as any}
+          settings={selectedStudentReportSettingsForBook as any}
+          compact
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
     }
 
-    if (filters.mode === "multi-period-report") return renderMultiPeriodReport();
+    if (filters.mode === "student-transcript") {
+      return (
+        <CumulativeTranscriptCard
+          dataset={cumulativeTranscriptDataset as any}
+          template={selectedCumulativeTranscriptTemplate as any}
+          settings={selectedCumulativeTranscriptSettings as any}
+          compact
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
+    }
+
+    if (filters.mode === "multi-period-report")
+      return renderMultiPeriodReport();
 
     if (filters.mode === "annual-broadsheet") {
-      return <AnnualBroadsheet header={output.header} broadsheet={output.annualBroadsheet} pageBreakAfter={false} />;
+      return (
+        <AnnualBroadsheet
+          header={output.header}
+          broadsheet={output.annualBroadsheet}
+          pageBreakAfter={false}
+        />
+      );
     }
 
     if (filters.mode === "subject-history") return renderSubjectHistory();
 
     if (filters.mode === "promotion-summary") {
-      return <PromotionSummary header={output.header} summary={output.promotionSummary} pageBreakAfter={false} />;
+      return (
+        <PromotionSummary
+          header={output.header}
+          summary={output.promotionSummary}
+          pageBreakAfter={false}
+        />
+      );
     }
 
     return (
       <StudentProgressionTimeline
         header={output.header}
         steps={output.progressionTimeline}
-        studentName={selectedStudent?.fullName || output.studentTranscript?.studentName}
+        studentName={
+          selectedStudent?.fullName || output.studentTranscript?.studentName
+        }
         pageBreakAfter={false}
       />
     );
   };
 
-  const setBranchLockedFilters: React.Dispatch<React.SetStateAction<CumulativeReportFiltersState>> = (next) => {
+  const setBranchLockedFilters: React.Dispatch<
+    React.SetStateAction<CumulativeReportFiltersState>
+  > = (next) => {
     if (typeof next === "function") {
       setFilters((prev) => ({
-        ...(next as (value: CumulativeReportFiltersState) => CumulativeReportFiltersState)(prev),
+        ...(
+          next as (
+            value: CumulativeReportFiltersState,
+          ) => CumulativeReportFiltersState
+        )(prev),
         branchId: branchId || 0,
       }));
       return;
@@ -1144,7 +2249,6 @@ export default function CumulativeRecordsPage() {
       branchId: branchId || 0,
     });
   };
-
 
   // ======================================================
   // GOLDEN COMPACT UI
@@ -1161,10 +2265,14 @@ export default function CumulativeRecordsPage() {
       filters.subjectId,
       filters.snapshotType !== "all" ? filters.snapshotType : undefined,
       filters.decision !== "all" ? filters.decision : undefined,
-      filters.mode !== "student-transcript" ? filters.mode : undefined,
+      String(filters.mode) !== "student-transcript" ? filters.mode : undefined,
       filters.sortMode !== "position" ? filters.sortMode : undefined,
-      filters.groupingMode !== "academic-structure" ? filters.groupingMode : undefined,
-      filters.subjectAggregationMode !== "average" ? filters.subjectAggregationMode : undefined,
+      filters.groupingMode !== "academic-structure"
+        ? filters.groupingMode
+        : undefined,
+      filters.subjectAggregationMode !== "average"
+        ? filters.subjectAggregationMode
+        : undefined,
       !filters.includePromotionRecords ? "promotion-off" : undefined,
       !filters.includeManualSnapshots ? "manual-off" : undefined,
       !filters.includeTerminalSnapshots ? "terminal-off" : undefined,
@@ -1177,105 +2285,190 @@ export default function CumulativeRecordsPage() {
     if (!searchTerm) return students;
 
     return students.filter((student) =>
-      `${student.fullName || ""} ${student.admissionNumber || ""}`.toLowerCase().includes(searchTerm)
+      `${student.fullName || ""} ${student.admissionNumber || ""}`
+        .toLowerCase()
+        .includes(searchTerm),
     );
   }, [students, searchTerm]);
 
   const optionAcademicStructures = useMemo(() => {
-    const idsFromSnapshots = new Set(studentReportSnapshots.map((row) => idOf(row.academicStructureId)).filter(Boolean));
-    const rows = academicStructures.filter((row) => !row.isDeleted && (row.active !== false || idsFromSnapshots.has(idOf(row.id))));
+    const idsFromSnapshots = new Set(
+      studentReportSnapshots
+        .map((row) => idOf(row.academicStructureId))
+        .filter(Boolean),
+    );
+    const rows = academicStructures.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.active !== false || idsFromSnapshots.has(idOf(row.id))),
+    );
     if (rows.length) return rows;
 
-    return Array.from(idsFromSnapshots).map((id) => ({
-      id,
-      name: `Academic Structure ${id}`,
-      schoolId,
-      branchId,
-      accountId: accountId || undefined,
-      active: true,
-    } as AcademicStructure));
-  }, [academicStructures, studentReportSnapshots, schoolId, branchId, accountId]);
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          name: `Academic Structure ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          active: true,
+        }) as AcademicStructure,
+    );
+  }, [
+    academicStructures,
+    studentReportSnapshots,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
 
   const optionAcademicPeriods = useMemo(() => {
     const idsFromSnapshots = new Set(
       studentReportSnapshots
-        .filter((row) => !filters.academicStructureId || sameId(row.academicStructureId, filters.academicStructureId))
+        .filter(
+          (row) =>
+            !filters.academicStructureId ||
+            sameId(row.academicStructureId, filters.academicStructureId),
+        )
         .map((row) => idOf(row.academicPeriodId))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const rows = academicPeriods
       .filter((row) => {
         if (row.isDeleted) return false;
-        if (filters.academicStructureId && !sameId(row.academicStructureId, filters.academicStructureId)) return false;
+        if (
+          filters.academicStructureId &&
+          !sameId(row.academicStructureId, filters.academicStructureId)
+        )
+          return false;
         return row.active !== false || idsFromSnapshots.has(idOf(row.id));
       })
       .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
 
     if (rows.length) return rows;
 
-    return Array.from(idsFromSnapshots).map((id, index) => ({
-      id,
-      name: `Academic Period ${id}`,
-      schoolId,
-      branchId,
-      accountId: accountId || undefined,
-      academicStructureId: filters.academicStructureId || 0,
-      order: index + 1,
-      active: true,
-    } as AcademicPeriod));
-  }, [academicPeriods, studentReportSnapshots, filters.academicStructureId, schoolId, branchId, accountId]);
+    return Array.from(idsFromSnapshots).map(
+      (id, index) =>
+        ({
+          id,
+          name: `Academic Period ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          academicStructureId: filters.academicStructureId || 0,
+          order: index + 1,
+          active: true,
+        }) as AcademicPeriod,
+    );
+  }, [
+    academicPeriods,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
 
   const optionClasses = useMemo(() => {
     const idsFromSnapshots = new Set(
       studentReportSnapshots
         .filter((row) => {
-          if (filters.academicStructureId && !sameId(row.academicStructureId, filters.academicStructureId)) return false;
-          if (filters.academicPeriodId && !sameId(row.academicPeriodId, filters.academicPeriodId)) return false;
+          if (
+            filters.academicStructureId &&
+            !sameId(row.academicStructureId, filters.academicStructureId)
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            !sameId(row.academicPeriodId, filters.academicPeriodId)
+          )
+            return false;
           return true;
         })
         .map((row) => idOf(row.classId))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
-    const rows = classes.filter((row) => !row.isDeleted && (row.active !== false || idsFromSnapshots.has(idOf(row.id))));
+    const rows = classes.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.active !== false || idsFromSnapshots.has(idOf(row.id))),
+    );
     if (rows.length) return rows;
 
-    return Array.from(idsFromSnapshots).map((id) => ({
-      id,
-      name: `Class ${id}`,
-      schoolId,
-      branchId,
-      accountId: accountId || undefined,
-      active: true,
-    } as Class));
-  }, [classes, studentReportSnapshots, filters.academicStructureId, filters.academicPeriodId, schoolId, branchId, accountId]);
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          name: `Class ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          active: true,
+        }) as Class,
+    );
+  }, [
+    classes,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
 
   const optionStudents = useMemo(() => {
     const idsFromSnapshots = new Set(
       studentReportSnapshots
         .filter((row) => {
-          if (filters.academicStructureId && !sameId(row.academicStructureId, filters.academicStructureId)) return false;
-          if (filters.academicPeriodId && !sameId(row.academicPeriodId, filters.academicPeriodId)) return false;
-          if (filters.classId && !sameId(row.classId, filters.classId)) return false;
+          if (
+            filters.academicStructureId &&
+            !sameId(row.academicStructureId, filters.academicStructureId)
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            !sameId(row.academicPeriodId, filters.academicPeriodId)
+          )
+            return false;
+          if (filters.classId && !sameId(row.classId, filters.classId))
+            return false;
           return true;
         })
         .map((row) => idOf(row.studentId))
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
-    const rows = quickStudents.filter((row) => !row.isDeleted && (row.status !== "withdrawn" || idsFromSnapshots.has(idOf(row.id))));
+    const rows = quickStudents.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.status !== "withdrawn" || idsFromSnapshots.has(idOf(row.id))),
+    );
     if (rows.length) return rows;
 
-    return Array.from(idsFromSnapshots).map((id) => ({
-      id,
-      fullName: `Student ${id}`,
-      schoolId,
-      branchId,
-      accountId: accountId || undefined,
-      status: "active",
-    } as Student));
-  }, [quickStudents, studentReportSnapshots, filters.academicStructureId, filters.academicPeriodId, filters.classId, schoolId, branchId, accountId]);
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          fullName: `Student ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          status: "active",
+        }) as Student,
+    );
+  }, [
+    quickStudents,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    filters.classId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
 
   const optionSubjects = useMemo(() => {
     if (subjects.length) return subjects;
@@ -1323,19 +2516,30 @@ export default function CumulativeRecordsPage() {
       });
     });
 
-    return Array.from(subjectMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(subjectMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }, [subjects, studentReportSnapshots, schoolId, branchId, accountId]);
 
-  const selectedStructureName = labelOf(optionAcademicStructures, filters.academicStructureId);
-  const selectedPeriodName = labelOf(optionAcademicPeriods, filters.academicPeriodId);
+  const selectedStructureName = labelOf(
+    optionAcademicStructures,
+    filters.academicStructureId,
+  );
+  const selectedPeriodName = labelOf(
+    optionAcademicPeriods,
+    filters.academicPeriodId,
+  );
   const selectedStudentName = labelOf(optionStudents, filters.studentId);
   const selectedClassName = labelOf(optionClasses, filters.classId);
   const selectedSubjectName = labelOf(optionSubjects, filters.subjectId);
-  const modeLabel = modeLabels[filters.mode] || filters.mode.replaceAll("-", " ");
-
+  const modeLabel =
+    modeLabels[filters.mode] || filters.mode.replaceAll("-", " ");
 
   const printCurrent = () => {
-    applyCumulativePrintStyles("cumulative-report-print-zone", printOrientationForMode(filters.mode));
+    applyCumulativePrintStyles(
+      "cumulative-report-print-zone",
+      printOrientationForMode(filters.mode),
+    );
     setTimeout(() => window.print(), 120);
   };
 
@@ -1350,17 +2554,32 @@ export default function CumulativeRecordsPage() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before viewing cumulative records." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing cumulative records."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page cumulative-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page cumulative-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
-          <p>Cumulative records are generated inside one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/owner")}>
+          <p>
+            Cumulative records are generated inside one active school branch.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/owner")}
+          >
             Go to Owner Setup
           </button>
         </section>
@@ -1369,10 +2588,16 @@ export default function CumulativeRecordsPage() {
   }
 
   return (
-    <main className="ba-page cumulative-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page cumulative-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card report-no-print" aria-label="Cumulative records search and actions">
+      <section
+        className="ba-search-card report-no-print"
+        aria-label="Cumulative records search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -1383,7 +2608,13 @@ export default function CumulativeRecordsPage() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={printCurrent} aria-label="Print cumulative record" title="Print">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={printCurrent}
+          aria-label="Print cumulative record"
+          title="Print"
+        >
           ⎙
         </button>
 
@@ -1398,40 +2629,97 @@ export default function CumulativeRecordsPage() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips report-no-print" aria-label="Active cumulative filters">
-          {filters.mode !== "student-transcript" && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, mode: "student-transcript" }))}>
+        <section
+          className="ba-filter-chips report-no-print"
+          aria-label="Active cumulative filters"
+        >
+          {String(filters.mode) !== "student-transcript" && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  mode: "student-transcript",
+                }))
+              }
+            >
               Mode: {modeLabel} ×
             </button>
           )}
           {filters.academicStructureId && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, academicStructureId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicStructureId: undefined,
+                }))
+              }
+            >
               Structure: {selectedStructureName} ×
             </button>
           )}
           {filters.academicPeriodId && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, academicPeriodId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicPeriodId: undefined,
+                }))
+              }
+            >
               Period: {selectedPeriodName} ×
             </button>
           )}
           {filters.classId && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, classId: undefined, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  classId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
               Class: {selectedClassName} ×
             </button>
           )}
           {filters.studentId && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  studentId: undefined,
+                }))
+              }
+            >
               Student: {selectedStudentName} ×
             </button>
           )}
           {filters.subjectId && (
-            <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, subjectId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  subjectId: undefined,
+                }))
+              }
+            >
               Subject: {selectedSubjectName} ×
             </button>
           )}
@@ -1449,6 +2737,39 @@ export default function CumulativeRecordsPage() {
           </div>
 
           <div className="ba-report-toolbar">
+            <div
+              className="ba-output-switch"
+              role="group"
+              aria-label="Choose cumulative record output"
+            >
+              <button
+                type="button"
+                className={filters.mode === "student-transcript" ? "active" : ""}
+                onClick={() =>
+                  setBranchLockedFilters((prev) => ({
+                    ...prev,
+                    mode: "student-transcript",
+                  }))
+                }
+                title="View cumulative transcript"
+              >
+                Transcript
+              </button>
+              <button
+                type="button"
+                className={String(filters.mode) === "cumulative-book" ? "active" : ""}
+                onClick={() =>
+                  setBranchLockedFilters((prev) => ({
+                    ...prev,
+                    mode: "cumulative-book" as any,
+                  }))
+                }
+                title="View cumulative report book"
+              >
+                Book
+              </button>
+            </div>
+
             <button type="button" className="primary" onClick={printCurrent}>
               Print
             </button>
@@ -1477,7 +2798,10 @@ export default function CumulativeRecordsPage() {
         <MoreSheet
           mode={filters.mode}
           setMode={(mode) => {
-            setBranchLockedFilters((prev) => ({ ...prev, mode }));
+            setBranchLockedFilters((prev) => ({
+              ...prev,
+              mode: mode as any,
+            }));
             setMoreOpen(false);
           }}
           onRefresh={async () => {
@@ -1499,9 +2823,20 @@ export default function CumulativeRecordsPage() {
 // GOLDEN SMALL COMPONENTS
 // ======================================================
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page cumulative-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page cumulative-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1536,7 +2871,9 @@ function FilterSheet({
   onClose,
 }: {
   filters: CumulativeReportFiltersState;
-  setBranchLockedFilters: React.Dispatch<React.SetStateAction<CumulativeReportFiltersState>>;
+  setBranchLockedFilters: React.Dispatch<
+    React.SetStateAction<CumulativeReportFiltersState>
+  >;
   academicStructures: AcademicStructure[];
   academicPeriods: AcademicPeriod[];
   classes: Class[];
@@ -1555,12 +2892,18 @@ function FilterSheet({
   });
 
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose the cumulative record scope. School and branch stay locked.</p>
+            <p>
+              Choose the cumulative record scope. School and branch stay locked.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1587,7 +2930,9 @@ function FilterSheet({
             >
               <option value="">All structures</option>
               {academicStructures.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1607,7 +2952,9 @@ function FilterSheet({
             >
               <option value="">All periods</option>
               {periodOptions.map((period) => (
-                <option key={period.id} value={period.id}>{period.name}</option>
+                <option key={period.id} value={period.id}>
+                  {period.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1625,7 +2972,9 @@ function FilterSheet({
             >
               <option value="">No start period</option>
               {periodOptions.map((period) => (
-                <option key={period.id} value={period.id}>{period.name}</option>
+                <option key={period.id} value={period.id}>
+                  {period.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1643,7 +2992,9 @@ function FilterSheet({
             >
               <option value="">No end period</option>
               {periodOptions.map((period) => (
-                <option key={period.id} value={period.id}>{period.name}</option>
+                <option key={period.id} value={period.id}>
+                  {period.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1662,7 +3013,9 @@ function FilterSheet({
             >
               <option value="">All classes</option>
               {classes.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1681,7 +3034,10 @@ function FilterSheet({
               <option value="">Select student</option>
               {studentOptions.map((student) => (
                 <option key={student.id} value={student.id}>
-                  {student.fullName}{student.admissionNumber ? ` (${student.admissionNumber})` : ""}
+                  {student.fullName}
+                  {student.admissionNumber
+                    ? ` (${student.admissionNumber})`
+                    : ""}
                 </option>
               ))}
             </select>
@@ -1701,7 +3057,8 @@ function FilterSheet({
               <option value="">Select subject</option>
               {subjects.map((subject) => (
                 <option key={subject.id} value={subject.id}>
-                  {subject.name}{subject.code ? ` (${subject.code})` : ""}
+                  {subject.name}
+                  {subject.code ? ` (${subject.code})` : ""}
                 </option>
               ))}
             </select>
@@ -1714,7 +3071,8 @@ function FilterSheet({
               onChange={(event) =>
                 setBranchLockedFilters((prev) => ({
                   ...prev,
-                  snapshotType: event.target.value as CumulativeReportFiltersState["snapshotType"],
+                  snapshotType: event.target
+                    .value as CumulativeReportFiltersState["snapshotType"],
                 }))
               }
             >
@@ -1732,7 +3090,8 @@ function FilterSheet({
               onChange={(event) =>
                 setBranchLockedFilters((prev) => ({
                   ...prev,
-                  decision: event.target.value as CumulativeReportFiltersState["decision"],
+                  decision: event.target
+                    .value as CumulativeReportFiltersState["decision"],
                 }))
               }
             >
@@ -1750,7 +3109,8 @@ function FilterSheet({
               onChange={(event) =>
                 setBranchLockedFilters((prev) => ({
                   ...prev,
-                  sortMode: event.target.value as CumulativeReportFiltersState["sortMode"],
+                  sortMode: event.target
+                    .value as CumulativeReportFiltersState["sortMode"],
                 }))
               }
             >
@@ -1768,7 +3128,8 @@ function FilterSheet({
               onChange={(event) =>
                 setBranchLockedFilters((prev) => ({
                   ...prev,
-                  groupingMode: event.target.value as CumulativeReportFiltersState["groupingMode"],
+                  groupingMode: event.target
+                    .value as CumulativeReportFiltersState["groupingMode"],
                 }))
               }
             >
@@ -1785,7 +3146,8 @@ function FilterSheet({
               onChange={(event) =>
                 setBranchLockedFilters((prev) => ({
                   ...prev,
-                  subjectAggregationMode: event.target.value as CumulativeReportFiltersState["subjectAggregationMode"],
+                  subjectAggregationMode: event.target
+                    .value as CumulativeReportFiltersState["subjectAggregationMode"],
                 }))
               }
             >
@@ -1798,22 +3160,81 @@ function FilterSheet({
         </div>
 
         <div className="cumulative-toggle-grid">
-          <button type="button" className={filters.includeTerminalSnapshots ? "active" : ""} onClick={() => setBranchLockedFilters((prev) => ({ ...prev, includeTerminalSnapshots: !prev.includeTerminalSnapshots }))}>
+          <button
+            type="button"
+            className={filters.includeTerminalSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeTerminalSnapshots: !prev.includeTerminalSnapshots,
+              }))
+            }
+          >
             Terminal: {filters.includeTerminalSnapshots ? "On" : "Off"}
           </button>
-          <button type="button" className={filters.includePromotionRecords ? "active" : ""} onClick={() => setBranchLockedFilters((prev) => ({ ...prev, includePromotionRecords: !prev.includePromotionRecords }))}>
+          <button
+            type="button"
+            className={filters.includePromotionRecords ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includePromotionRecords: !prev.includePromotionRecords,
+              }))
+            }
+          >
             Promotions: {filters.includePromotionRecords ? "On" : "Off"}
           </button>
-          <button type="button" className={filters.includeManualSnapshots ? "active" : ""} onClick={() => setBranchLockedFilters((prev) => ({ ...prev, includeManualSnapshots: !prev.includeManualSnapshots }))}>
+          <button
+            type="button"
+            className={filters.includeManualSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeManualSnapshots: !prev.includeManualSnapshots,
+              }))
+            }
+          >
             Manual: {filters.includeManualSnapshots ? "On" : "Off"}
           </button>
-          <button type="button" className={filters.includeDeletedSnapshots ? "active" : ""} onClick={() => setBranchLockedFilters((prev) => ({ ...prev, includeDeletedSnapshots: !prev.includeDeletedSnapshots }))}>
+          <button
+            type="button"
+            className={filters.includeDeletedSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeDeletedSnapshots: !prev.includeDeletedSnapshots,
+              }))
+            }
+          >
             Deleted: {filters.includeDeletedSnapshots ? "On" : "Off"}
           </button>
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={() => setBranchLockedFilters((prev) => ({ ...prev, academicStructureId: undefined, academicPeriodId: undefined, fromAcademicPeriodId: undefined, toAcademicPeriodId: undefined, classId: undefined, studentId: undefined, subjectId: undefined, snapshotType: "all", decision: "all", sortMode: "position", groupingMode: "academic-structure", subjectAggregationMode: "average", includePromotionRecords: true, includeManualSnapshots: true, includeTerminalSnapshots: true, includeDeletedSnapshots: false }))}>
+          <button
+            type="button"
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                academicStructureId: undefined,
+                academicPeriodId: undefined,
+                fromAcademicPeriodId: undefined,
+                toAcademicPeriodId: undefined,
+                classId: undefined,
+                studentId: undefined,
+                subjectId: undefined,
+                snapshotType: "all",
+                decision: "all",
+                sortMode: "position",
+                groupingMode: "academic-structure",
+                subjectAggregationMode: "average",
+                includePromotionRecords: true,
+                includeManualSnapshots: true,
+                includeTerminalSnapshots: true,
+                includeDeletedSnapshots: false,
+              }))
+            }
+          >
             Clear
           </button>
           <button type="button" className="primary" onClick={onClose}>
@@ -1832,23 +3253,68 @@ function MoreSheet({
   onPrint,
   onClose,
 }: {
-  mode: CumulativeReportFiltersState["mode"];
-  setMode: (mode: CumulativeReportFiltersState["mode"]) => void;
+  mode: CumulativeReportFiltersState["mode"] | string;
+  setMode: (mode: CumulativeReportFiltersState["mode"] | string) => void;
   onRefresh: () => void | Promise<void>;
   onPrint: () => void;
   onClose: () => void;
 }) {
-  const options: { mode: CumulativeReportFiltersState["mode"]; icon: string; label: string; note: string }[] = [
-    { mode: "student-transcript", icon: "📄", label: "Student Transcript", note: "Individual cumulative transcript" },
-    { mode: "multi-period-report", icon: "📚", label: "Multi-Period Report", note: "Student performance across periods" },
-    { mode: "annual-broadsheet", icon: "☷", label: "Annual Broadsheet", note: "Class or school annual broadsheet" },
-    { mode: "subject-history", icon: "📈", label: "Subject History", note: "Longitudinal subject analytics" },
-    { mode: "promotion-summary", icon: "🎓", label: "Promotion Summary", note: "Promotion decision summary" },
-    { mode: "progression-timeline", icon: "⏱", label: "Progression Timeline", note: "Student academic timeline" },
+  const options: {
+    mode: CumulativeReportFiltersState["mode"] | string;
+    icon: string;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      mode: "student-transcript",
+      icon: "📄",
+      label: "Cumulative Transcript",
+      note: "Template-based academic transcript",
+    },
+    {
+      mode: "cumulative-book",
+      icon: "📘",
+      label: "Cumulative Report Book",
+      note: "Covers plus period report cards",
+    },
+    {
+      mode: "multi-period-report",
+      icon: "📚",
+      label: "Multi-Period Report",
+      note: "Student performance across periods",
+    },
+    {
+      mode: "annual-broadsheet",
+      icon: "☷",
+      label: "Annual Broadsheet",
+      note: "Class or school annual broadsheet",
+    },
+    {
+      mode: "subject-history",
+      icon: "📈",
+      label: "Subject History",
+      note: "Longitudinal subject analytics",
+    },
+    {
+      mode: "promotion-summary",
+      icon: "🎓",
+      label: "Promotion Summary",
+      note: "Promotion decision summary",
+    },
+    {
+      mode: "progression-timeline",
+      icon: "⏱",
+      label: "Progression Timeline",
+      note: "Student academic timeline",
+    },
   ];
 
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
@@ -1862,7 +3328,12 @@ function MoreSheet({
 
         <div className="ba-menu-list">
           {options.map((option) => (
-            <button key={option.mode} type="button" className={mode === option.mode ? "active" : ""} onClick={() => setMode(option.mode)}>
+            <button
+              key={option.mode}
+              type="button"
+              className={mode === option.mode ? "active" : ""}
+              onClick={() => setMode(option.mode)}
+            >
               <span>{option.icon}</span>
               <b>{option.label}</b>
               <small>{option.note}</small>
@@ -1886,10 +3357,30 @@ function MoreSheet({
   );
 }
 
-function PrintFooter({ primary, schoolName, label }: { primary: string; schoolName: string; label: string }) {
+function PrintFooter({
+  primary,
+  schoolName,
+  label,
+}: {
+  primary: string;
+  schoolName: string;
+  label: string;
+}) {
   return (
-    <div style={{ marginTop: 10, borderTop: `2px solid ${primary}`, paddingTop: 5, display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#555" }}>
-      <span>{label} generated for {schoolName}</span>
+    <div
+      style={{
+        marginTop: 10,
+        borderTop: `2px solid ${primary}`,
+        paddingTop: 5,
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: 8.5,
+        color: "#555",
+      }}
+    >
+      <span>
+        {label} generated for {schoolName}
+      </span>
       <span>Powered by Eleeveon School Management System</span>
     </div>
   );
@@ -3321,6 +4812,39 @@ const css = `
   color: #fff;
 }
 
+.ba-output-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--card-bg, #fff);
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 32%, rgba(148, 163, 184, .28));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px rgba(15,23,42,.06);
+}
+
+.ba-output-switch button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ba-primary) 9%, var(--card-bg, #fff));
+  color: var(--ba-primary);
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 22%, transparent);
+  box-shadow: none;
+  opacity: 1;
+}
+
+.ba-output-switch button:not(.active):hover {
+  background: color-mix(in srgb, var(--ba-primary) 14%, var(--card-bg, #fff));
+}
+
+.ba-output-switch button.active {
+  background: var(--ba-primary);
+  color: #fff;
+  border-color: var(--ba-primary);
+  box-shadow: 0 6px 14px rgba(15,23,42,.14);
+}
+
 .report-analytics-card {
   grid-column: 1 / -1;
 }
@@ -3488,7 +5012,7 @@ const css = `
 .cr-print-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px;font-size:10px}
 .cr-print-summary-grid.six{grid-template-columns:repeat(6,minmax(0,1fr))}
 .cr-print-summary-grid div{border:1px solid #ccc;padding:7px}
-@media(max-width:520px){.cumulative-toggle-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:520px){.cumulative-toggle-grid{grid-template-columns:minmax(0,1fr)}.ba-output-switch{width:100%;justify-content:center}.ba-output-switch button{flex:1}.cumulative-page .ba-report-toolbar{width:100%;justify-content:stretch}}
 @media print{.report-no-print,.ba-search-card,.ba-filter-chips,.ba-sheet-backdrop,.ba-modal-backdrop,.ba-print-head,.ba-report-toolbar{display:none!important}.ba-page,.ba-print-card,.ba-print-zone,.report-screen-scroll,#cumulative-report-print-zone{padding:0!important;margin:0!important;background:#fff!important;box-shadow:none!important;border:0!important;border-radius:0!important;overflow:visible!important}}
 
 `;

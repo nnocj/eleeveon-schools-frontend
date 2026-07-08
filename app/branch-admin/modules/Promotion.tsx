@@ -102,6 +102,7 @@ type PromotionRow = {
   student: Student;
   enrollment?: StudentEnrollment;
   engineReport?: ComputedStudentReport;
+  engineReportItem?: any;
   storedReportCard?: ReportCard;
 
   fromClassId: number;
@@ -766,6 +767,26 @@ export default function PromotionPage() {
     return map;
   }, [reportEngineOutput]);
 
+  /*
+   * Keep the full report-engine item too.
+   * The promotion snapshot must now be a reusable StudentReportCardDataset,
+   * not only a small promotion summary. Cumulative Report Book later reads
+   * StudentReportSnapshot.reportData and re-renders the original report card
+   * through the selected student report template.
+   */
+  const engineReportItemMap = useMemo(() => {
+    const map = new Map<number, any>();
+
+    (reportEngineOutput?.classReports || []).forEach((item: any) => {
+      const report = item?.report as ComputedStudentReport | undefined;
+      if (report?.studentId) {
+        map.set(report.studentId, item);
+      }
+    });
+
+    return map;
+  }, [reportEngineOutput]);
+
   const engineWarnings = reportEngineOutput?.warnings || [];
 
   // ======================================================
@@ -835,6 +856,7 @@ export default function PromotionPage() {
         if (!student?.id) return undefined;
 
         const engineReport = engineReportMap.get(student.id);
+        const engineReportItem = engineReportItemMap.get(student.id);
 
         const storedReportCard = branchReportCards.find((row) => {
           if (row.studentId !== student.id) return false;
@@ -881,6 +903,7 @@ export default function PromotionPage() {
           student,
           enrollment,
           engineReport,
+          engineReportItem,
           storedReportCard,
           fromClassId: enrollment.classId,
           fromAcademicStructureId: enrollment.academicStructureId || fromAcademicStructureId,
@@ -904,6 +927,7 @@ export default function PromotionPage() {
     sourceEnrollments,
     studentMap,
     engineReportMap,
+    engineReportItemMap,
     branchReportCards,
     branchPromotions,
     rowOverrides,
@@ -1038,25 +1062,313 @@ export default function PromotionPage() {
   // PROMOTION SAVE
   // ======================================================
 
-  const buildSnapshotData = (row: PromotionRow) => ({
-    school: schools.find((item) => idOf(item.id) === idOf(schoolId)) || activeSchool,
-    branch: branches.find((item) => idOf(item.id) === idOf(branchId)) || activeBranch,
-    student: row.student,
-    class: classMap.get(row.fromClassId),
-    academicPeriod: row.fromAcademicPeriodId ? periodMap.get(row.fromAcademicPeriodId) : undefined,
-    academicStructure: row.fromAcademicStructureId ? structureMap.get(row.fromAcademicStructureId) : undefined,
-    reportCard: row.storedReportCard,
-    engineReport: row.engineReport,
-    subjectResults: row.engineReport?.subjectResults || [],
-    total: row.total,
-    average: row.average,
-    position: row.position,
-    recommendation: row.recommendation,
-    finalDecision: row.finalDecision,
-    promotedToClassId: row.finalClassId,
-    branchName: (branches.find((item) => idOf(item.id) === idOf(branchId)) || activeBranch)?.name,
-    generatedAt: new Date().toISOString(),
-  });
+  const formatSnapshotDate = (value?: string | null) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    return parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
+  };
+
+  const countStudentsInClassPeriod = (classId?: number, academicStructureId?: number, academicPeriodId?: number) => {
+    const strictCount = branchStudentEnrollments.filter((enrollment) => {
+      if (enrollment.isDeleted) return false;
+      if (enrollment.status !== "active") return false;
+      if (classId && idOf(enrollment.classId) !== idOf(classId)) return false;
+      if (academicStructureId && idOf(enrollment.academicStructureId) !== idOf(academicStructureId)) return false;
+      if (academicPeriodId && idOf(enrollment.academicPeriodId) !== idOf(academicPeriodId)) return false;
+      return true;
+    }).length;
+
+    if (strictCount) return strictCount;
+
+    return branchStudents.filter((student) => {
+      if (!isActiveStudent(student)) return false;
+      if (classId && idOf(student.currentClassId) !== idOf(classId)) return false;
+      return true;
+    }).length;
+  };
+
+  const buildSnapshotData = (row: PromotionRow) => {
+    const generatedAt = new Date().toISOString();
+
+    const schoolRecord =
+      schools.find((item) => idOf(item.id) === idOf(schoolId)) || activeSchool;
+
+    const branchRecord =
+      branches.find((item) => idOf(item.id) === idOf(branchId)) || activeBranch;
+
+    const fromClass = classMap.get(row.fromClassId);
+    const toClass = row.finalClassId ? classMap.get(row.finalClassId) : undefined;
+
+    const fromAcademicPeriod = row.fromAcademicPeriodId
+      ? periodMap.get(row.fromAcademicPeriodId)
+      : undefined;
+
+    const toAcademicPeriod = toAcademicPeriodId
+      ? periodMap.get(toAcademicPeriodId)
+      : undefined;
+
+    const fromAcademicStructure = row.fromAcademicStructureId
+      ? structureMap.get(row.fromAcademicStructureId)
+      : undefined;
+
+    const toAcademicStructure = toAcademicStructureId
+      ? structureMap.get(toAcademicStructureId)
+      : undefined;
+
+    const engineItem = row.engineReportItem || {};
+    const engineHeader = engineItem.header || reportEngineOutput?.header || {};
+    const engineStudent = engineItem.student || row.student;
+    const report = row.engineReport || engineItem.report || {};
+
+    const branding = {
+      ...(engineHeader as any)?.branding,
+      schoolName:
+        (engineHeader as any)?.branding?.schoolName ||
+        (schoolRecord as any)?.name ||
+        "School Name",
+      branchName:
+        (engineHeader as any)?.branding?.branchName ||
+        (branchRecord as any)?.name ||
+        "",
+      logo:
+        (engineHeader as any)?.branding?.logo ||
+        (currentSetting as any)?.logo ||
+        (branchRecord as any)?.logo ||
+        (schoolRecord as any)?.logo ||
+        "",
+      address:
+        (engineHeader as any)?.branding?.address ||
+        (branchRecord as any)?.address ||
+        (schoolRecord as any)?.address ||
+        "",
+      phone:
+        (engineHeader as any)?.branding?.phone ||
+        (branchRecord as any)?.phone ||
+        (schoolRecord as any)?.phone ||
+        "",
+      email:
+        (engineHeader as any)?.branding?.email ||
+        (branchRecord as any)?.email ||
+        (schoolRecord as any)?.email ||
+        "",
+      website:
+        (engineHeader as any)?.branding?.website ||
+        (schoolRecord as any)?.website ||
+        "",
+      motto:
+        (engineHeader as any)?.branding?.motto ||
+        (schoolRecord as any)?.motto ||
+        "",
+      branchAddress:
+        (engineHeader as any)?.branding?.branchAddress ||
+        (branchRecord as any)?.address ||
+        "",
+      primaryColor:
+        (engineHeader as any)?.branding?.primaryColor ||
+        (currentSetting as any)?.primaryColor ||
+        primary,
+      fontFamily:
+        (engineHeader as any)?.branding?.fontFamily ||
+        (currentSetting as any)?.fontFamily ||
+        "Arial, sans-serif",
+      reportCardBackgroundImage:
+        (engineHeader as any)?.branding?.reportCardBackgroundImage ||
+        (currentSetting as any)?.reportCardBackgroundImage ||
+        "",
+      reportCardWatermark:
+        (engineHeader as any)?.branding?.reportCardWatermark ||
+        (currentSetting as any)?.reportCardWatermark ||
+        (currentSetting as any)?.logo ||
+        "",
+      reportCardSignatureImage:
+        (engineHeader as any)?.branding?.reportCardSignatureImage ||
+        (currentSetting as any)?.reportCardSignatureImage ||
+        "",
+    };
+
+    const currentAcademicPeriod = {
+      ...(fromAcademicPeriod || {}),
+      id: row.fromAcademicPeriodId || fromAcademicPeriod?.id,
+      name:
+        fromAcademicPeriod?.name ||
+        (engineHeader as any)?.academicPeriod?.name ||
+        currentSetting?.currentTerm ||
+        "Academic Period",
+      startDate: fromAcademicPeriod?.startDate,
+      endDate: fromAcademicPeriod?.endDate,
+      formattedStartDate: formatSnapshotDate(fromAcademicPeriod?.startDate),
+      formattedEndDate: formatSnapshotDate(fromAcademicPeriod?.endDate),
+    };
+
+    const nextAcademicPeriod = toAcademicPeriod
+      ? {
+          ...toAcademicPeriod,
+          id: toAcademicPeriod.id,
+          name: toAcademicPeriod.name,
+          startDate: toAcademicPeriod.startDate,
+          endDate: toAcademicPeriod.endDate,
+          formattedStartDate: formatSnapshotDate(toAcademicPeriod.startDate),
+          formattedEndDate: formatSnapshotDate(toAcademicPeriod.endDate),
+        }
+      : undefined;
+
+    const classTeacher = classTeachers.find((item) => {
+      return !item.isDeleted && idOf(item.classId) === idOf(row.fromClassId);
+    });
+
+    const classTeacherRecord = classTeacher?.teacherId
+      ? teachers.find((teacher) => idOf(teacher.id) === idOf(classTeacher.teacherId))
+      : undefined;
+
+    const headTeacherRecord =
+      teachers.find((teacher) => teacher.role === "head_teacher" && !teacher.isDeleted) ||
+      teachers.find((teacher) => teacher.role === "principal" && !teacher.isDeleted);
+
+    const studentParentLink =
+      studentParents.find((link) => {
+        return !link.isDeleted && idOf(link.studentId) === idOf(row.student.id) && link.isPrimary === true;
+      }) ||
+      studentParents.find((link) => {
+        return !link.isDeleted && idOf(link.studentId) === idOf(row.student.id);
+      });
+
+    const parentRecord = studentParentLink
+      ? parents.find((parent) => idOf(parent.id) === idOf(studentParentLink.parentId) && !parent.isDeleted)
+      : undefined;
+
+    /*
+     * Store a complete StudentReportCardDataset-compatible object.
+     * Cumulative Report Book can later read snapshot.reportData directly and
+     * render it with any selected student-report template.
+     */
+    return {
+      generatedAt,
+
+      header: {
+        ...engineHeader,
+        school: schoolRecord,
+        branch: branchRecord,
+        academicStructure: fromAcademicStructure,
+        academicStructureName:
+          fromAcademicStructure?.name || (engineHeader as any)?.academicStructureName,
+        academicPeriod: currentAcademicPeriod,
+        academicPeriodName: currentAcademicPeriod.name,
+        classData: fromClass,
+        className: fromClass?.name || (report as any)?.className || "",
+        branding,
+      },
+
+      branding,
+
+      currentAcademicPeriod,
+      nextAcademicPeriod,
+
+      student: {
+        ...engineStudent,
+        ...row.student,
+        id: row.student.id,
+        name: row.student.fullName,
+        fullName: row.student.fullName,
+        admissionNumber: row.student.admissionNumber,
+        gender: row.student.gender,
+        photo: row.student.photo,
+      },
+
+      studentInfo: {
+        studentPhoto: row.student.photo || "",
+        numberOnRoll: countStudentsInClassPeriod(
+          row.fromClassId,
+          row.fromAcademicStructureId,
+          row.fromAcademicPeriodId,
+        ),
+        parentName: parentRecord?.fullName || row.student.parentName || "",
+        parentPhone: parentRecord?.phone || row.student.parentPhone || "",
+        parentEmail: parentRecord?.email || row.student.parentEmail || "",
+      },
+
+      signatures: {
+        classTeacherName:
+          classTeacherRecord?.fullName ||
+          (report as any)?.classTeacherName ||
+          "",
+        headTeacherName:
+          headTeacherRecord?.fullName ||
+          (report as any)?.headTeacherName ||
+          "",
+        principalName:
+          headTeacherRecord?.fullName ||
+          (report as any)?.principalName ||
+          "",
+        parentName:
+          parentRecord?.fullName ||
+          row.student.parentName ||
+          "Parent / Guardian",
+        guardianName:
+          parentRecord?.fullName ||
+          row.student.parentName ||
+          "Parent / Guardian",
+        officialSignatureImage:
+          (headTeacherRecord as any)?.signature ||
+          (currentSetting as any)?.reportCardSignatureImage ||
+          "",
+      },
+
+      report: {
+        ...report,
+        studentId: row.student.id,
+        studentName: (report as any)?.studentName || row.student.fullName,
+        admissionNumber:
+          (report as any)?.admissionNumber || row.student.admissionNumber,
+        gender: (report as any)?.gender || row.student.gender,
+        className: (report as any)?.className || fromClass?.name || "",
+        total: row.total,
+        average: row.average,
+        overallPosition:
+          row.position ||
+          (report as any)?.overallPosition ||
+          (report as any)?.position,
+        subjectResults: Array.isArray((report as any)?.subjectResults)
+          ? (report as any).subjectResults
+          : [],
+      },
+
+      promotion: {
+        recommendation: row.recommendation,
+        finalDecision: row.finalDecision,
+        fromClassId: row.fromClassId,
+        fromClassName: fromClass?.name,
+        toClassId: row.finalDecision === "graduate" ? undefined : row.finalClassId,
+        toClassName: row.finalDecision === "graduate" ? undefined : toClass?.name,
+        fromAcademicStructureId: row.fromAcademicStructureId,
+        fromAcademicStructureName: fromAcademicStructure?.name,
+        toAcademicStructureId:
+          row.finalDecision === "graduate" ? undefined : toAcademicStructureId,
+        toAcademicStructureName:
+          row.finalDecision === "graduate" ? undefined : toAcademicStructure?.name,
+        fromAcademicPeriodId: row.fromAcademicPeriodId,
+        fromAcademicPeriodName: fromAcademicPeriod?.name,
+        toAcademicPeriodId:
+          row.finalDecision === "graduate" ? undefined : toAcademicPeriodId,
+        toAcademicPeriodName:
+          row.finalDecision === "graduate" ? undefined : toAcademicPeriod?.name,
+        note: row.note.trim() || undefined,
+      },
+
+      snapshotMeta: {
+        source: "promotion",
+        snapshotType: "promotion",
+        academicYear: currentSetting?.academicYear || undefined,
+        term: currentSetting?.currentTerm || fromAcademicPeriod?.name,
+        reportEngineVersion: "student-report-engine",
+        savedAt: generatedAt,
+      },
+    };
+  };
 
   const promoteSelected = async () => {
     if (!authenticated || !accountId) return alert("Sign in first");

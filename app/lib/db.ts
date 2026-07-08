@@ -1455,6 +1455,7 @@ export interface ReportCardTemplate extends BaseSync {
   templateKey?: ReportCardTemplateKey;
 
   description?: string;
+  reportType?: "student_report" | "cumulative_book" | "cumulative_transcript" | string;
 
   paperSize?: ReportCardPageSize;
   orientation?: ReportCardOrientation;
@@ -1485,6 +1486,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   templateName?: string;
 
   name?: string;
+  reportType?: "student_report" | "cumulative_book" | "cumulative_transcript" | string;
 
   paperSize?: ReportCardPageSize;
   orientation?: ReportCardOrientation;
@@ -1549,6 +1551,24 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showOfficialSignatureImage?: boolean;
 
   // =========================
+  // CUMMULATIVE BOOK / TRANSCRIPT PAGES
+  // =========================
+  showBookFrontCover?: boolean;
+  showBookStudentProfilePage?: boolean;
+  showBookAcademicJourneyPage?: boolean;
+  showBookSummaryPage?: boolean;
+  showBookBackCover?: boolean;
+  bookTitleLabel?: string;
+  bookSubtitleLabel?: string;
+
+  showTranscriptTermBreakdown?: boolean;
+  showTranscriptYearAverage?: boolean;
+  showTranscriptCumulativeAverage?: boolean;
+  showTranscriptCumulativePosition?: boolean;
+  showTranscriptGPAProgression?: boolean;
+  showTranscriptFinalRecommendation?: boolean;
+
+  // =========================
   // LABEL CUSTOMIZATION
   // =========================
   studentNameLabel?: string;
@@ -1596,6 +1616,8 @@ export interface ReportCardTemplateAssignment extends BaseSync {
 
   templateId: number;
   templateSettingsId?: number | null;
+
+  reportType?: "student_report" | "cumulative_book" | "cumulative_transcript" | string;
 
   /**
    * Stored redundantly so report rendering can still resolve a template even

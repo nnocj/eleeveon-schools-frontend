@@ -36,7 +36,7 @@ import BorderedTraditionalTemplate from "./BorderedTraditionalTemplate";
 import CompactPrintTemplate from "./CompactPrintTemplate";
 import ModernCleanTemplate from "./ModernCleanTemplate";
 import SideProfileTemplate from "./SideProfileTemplate";
-import LetterHeadPremiumTemplate from "./LetterHeadPremiumTemplate";
+import LetterHeadPremiumTemplate from "./LetterheadPremiumTemplate";
 import CambridgeTemplate from "./CambridgeTemplate";
 import IBTemplate from "./IBTemplate";
 import KindergartenTemplate from "./KindergartenTemplate";

@@ -371,6 +371,14 @@ export default function HomePage() {
             >
               <button
                 type="button"
+                style={button}
+                onClick={() => router.push("/login")}
+              >
+                Open Account Workspace
+              </button>
+
+              <button
+                type="button"
                 style={{
                   ...ghostButton,
                   opacity: contextReady ? 1 : 0.65,

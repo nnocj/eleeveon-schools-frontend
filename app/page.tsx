@@ -371,20 +371,12 @@ export default function HomePage() {
             >
               <button
                 type="button"
-                style={button}
-                onClick={() => router.push("/account")}
-              >
-                Open Account Workspace
-              </button>
-
-              <button
-                type="button"
                 style={{
                   ...ghostButton,
                   opacity: contextReady ? 1 : 0.65,
                 }}
                 disabled={!contextReady}
-                onClick={() => router.push("/dashboard")}
+                onClick={() => router.push("/select-role")}
               >
                 Enter Dashboard
               </button>

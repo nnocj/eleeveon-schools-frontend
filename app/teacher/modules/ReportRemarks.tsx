@@ -42,7 +42,7 @@ import type {
   ReportCard,
   Student,
   StudentEnrollment,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import {
   createLocal,

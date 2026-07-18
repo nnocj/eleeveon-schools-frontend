@@ -10,3 +10,4 @@ export * from "./syncDevices";
 export * from "./syncEngine";
 export * from "./syncStatus";
 export * from "./useSyncStatus";
+export * from "./syncIntegrity";

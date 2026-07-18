@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import LetterHeadPremiumHeader from "../shared/headers/LetterheadPremiumHeader";
+import LetterHeadPremiumHeader from "../shared/headers/student-reports/LetterheadPremiumHeader";
 
 import {
   createReportPageStyle,

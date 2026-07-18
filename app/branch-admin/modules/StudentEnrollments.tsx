@@ -53,10 +53,12 @@ import {
   type Class,
   type Student,
   type StudentEnrollment,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type EnrollmentStatus = "active" | "completed" | "promoted" | "withdrawn";
@@ -279,6 +281,8 @@ function Avatar({ name, photo, primary }: { name: string; photo?: string; primar
 }
 
 export default function StudentEnrollments() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -306,7 +310,7 @@ export default function StudentEnrollments() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [rows, setRows] = useState<StudentEnrollment[]>([]);
@@ -407,7 +411,9 @@ export default function StudentEnrollments() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const studentMap = useMemo(() => new Map(students.map((row: any) => [idOf(row.id), row])), [students]);
   const classMap = useMemo(() => new Map(classes.map((row: any) => [idOf(row.id), row])), [classes]);

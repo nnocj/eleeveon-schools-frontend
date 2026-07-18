@@ -72,7 +72,7 @@ import {
   StudentReportSnapshot,
   Subject,
   Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { prepareSyncData } from "../../lib/sync/syncUtils";
 
@@ -83,6 +83,8 @@ import type {
   ReportFiltersState,
 } from "./reports/engine/report-types";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 // ======================================================
 // TYPES
 // ======================================================
@@ -300,6 +302,8 @@ function isActiveStudent(student: Student) {
 // ======================================================
 
 export default function PromotionPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const {
@@ -343,7 +347,7 @@ export default function PromotionPage() {
   // STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [promoting, setPromoting] = useState(false);
 
   const [schools, setSchools] = useState<School[]>([]);
@@ -549,7 +553,9 @@ export default function PromotionPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     const refresh = () => load();
@@ -574,6 +580,16 @@ export default function PromotionPage() {
     );
   }, [schoolBranchSettings, schoolId, branchId, settings]);
 
+  /**
+   * `currentSetting` may resolve to full branch settings or appearance-only
+   * settings. Normalize academic IDs before placing them in number state.
+   */
+  const currentAcademicStructureId: number | undefined =
+    idOf(currentSetting?.currentAcademicStructureId) || undefined;
+
+  const currentAcademicPeriodId: number | undefined =
+    idOf(currentSetting?.currentAcademicPeriodId) || undefined;
+
   const branchAcademicStructures = useMemo(() => sortNamed(academicStructures), [academicStructures]);
   const branchAcademicPeriods = useMemo(() => sortNamed(academicPeriods), [academicPeriods]);
   const branchClasses = useMemo(() => sortNamed(classes), [classes]);
@@ -588,7 +604,7 @@ export default function PromotionPage() {
 
   useEffect(() => {
     if (!fromAcademicStructureId) {
-      const next = currentSetting?.currentAcademicStructureId || branchAcademicStructures[0]?.id;
+      const next = currentAcademicStructureId || branchAcademicStructures[0]?.id;
       if (next) {
         setFromAcademicStructureId(next);
         setToAcademicStructureId((prev) => prev || next);
@@ -596,12 +612,12 @@ export default function PromotionPage() {
     }
 
     if (!fromAcademicPeriodId) {
-      const next = currentSetting?.currentAcademicPeriodId || branchAcademicPeriods[0]?.id;
+      const next = currentAcademicPeriodId || branchAcademicPeriods[0]?.id;
       if (next) setFromAcademicPeriodId(next);
     }
   }, [
-    currentSetting?.currentAcademicStructureId,
-    currentSetting?.currentAcademicPeriodId,
+    currentAcademicStructureId,
+    currentAcademicPeriodId,
     branchAcademicStructures,
     branchAcademicPeriods,
     fromAcademicStructureId,
@@ -658,10 +674,10 @@ export default function PromotionPage() {
   useEffect(() => {
     if (!toAcademicStructureId) {
       setToAcademicStructureId(
-        fromAcademicStructureId || currentSetting?.currentAcademicStructureId || branchAcademicStructures[0]?.id
+        fromAcademicStructureId || currentAcademicStructureId || branchAcademicStructures[0]?.id
       );
     }
-  }, [toAcademicStructureId, fromAcademicStructureId, currentSetting?.currentAcademicStructureId, branchAcademicStructures]);
+  }, [toAcademicStructureId, fromAcademicStructureId, currentAcademicStructureId, branchAcademicStructures]);
 
   useEffect(() => {
     if (!toAcademicPeriodId) {
@@ -817,8 +833,8 @@ export default function PromotionPage() {
             branchId: Number(branchId || student.branchId),
             studentId: Number(student.id),
             classId: fromClassId,
-            academicStructureId: Number(fromAcademicStructureId || currentSetting?.currentAcademicStructureId || 0),
-            academicPeriodId: Number(fromAcademicPeriodId || currentSetting?.currentAcademicPeriodId || 0),
+            academicStructureId: Number(fromAcademicStructureId || currentAcademicStructureId || 0),
+            academicPeriodId: Number(fromAcademicPeriodId || currentAcademicPeriodId || 0),
             startDate: todayISO(),
             status: "active",
           }) as StudentEnrollment
@@ -829,8 +845,8 @@ export default function PromotionPage() {
     fromClassId,
     fromAcademicStructureId,
     fromAcademicPeriodId,
-    currentSetting?.currentAcademicStructureId,
-    currentSetting?.currentAcademicPeriodId,
+    currentAcademicStructureId,
+    currentAcademicPeriodId,
     accountId,
     schoolId,
     branchId,
@@ -1399,8 +1415,8 @@ export default function PromotionPage() {
         const studentId = row.student.id;
         if (!studentId || row.alreadyProcessed) continue;
 
-        const fromStructureId = row.fromAcademicStructureId || fromAcademicStructureId || currentSetting?.currentAcademicStructureId;
-        const fromPeriodId = row.fromAcademicPeriodId || fromAcademicPeriodId || currentSetting?.currentAcademicPeriodId;
+        const fromStructureId = row.fromAcademicStructureId || fromAcademicStructureId || currentAcademicStructureId;
+        const fromPeriodId = row.fromAcademicPeriodId || fromAcademicPeriodId || currentAcademicPeriodId;
 
         if (!fromStructureId || !fromPeriodId) continue;
 

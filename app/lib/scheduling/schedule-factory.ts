@@ -16,7 +16,7 @@ import type {
   ScheduleSessionType,
   ScheduleTimetable,
   ScheduleTimetableType,
-} from "../db";
+} from "../db/db";
 import { SYNC_STATUS_VALUE } from "../sync/syncConfig";
 
 import { getSchedulingDeviceId } from "../calendar/calendar-factory";

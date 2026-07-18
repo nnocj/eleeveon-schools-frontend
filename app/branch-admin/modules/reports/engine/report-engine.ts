@@ -37,7 +37,7 @@ import type {
   GradeRule,
   Student,
   StudentEnrollment,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 import type {
   AttendanceSummary,

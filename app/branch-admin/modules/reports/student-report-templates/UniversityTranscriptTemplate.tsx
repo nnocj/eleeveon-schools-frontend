@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import UniversityTranscriptHeader from "../shared/headers/UniversityTranscriptHeader";
+import UniversityTranscriptHeader from "../shared/headers/student-reports/UniversityTranscriptHeader";
 
 import {
   createReportPageStyle,

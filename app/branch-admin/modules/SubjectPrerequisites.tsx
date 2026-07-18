@@ -41,10 +41,12 @@ import {
   type CurriculumSubject,
   type Subject,
   type SubjectPrerequisite,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type RuleType = "prerequisite" | "corequisite" | "recommended";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
@@ -290,6 +292,8 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function SubjectPrerequisites() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
@@ -316,7 +320,7 @@ export default function SubjectPrerequisites() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
@@ -407,7 +411,9 @@ export default function SubjectPrerequisites() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const curriculumMap = useMemo(() => new Map(curriculums.map((row: any) => [idOf(row.id), row])), [curriculums]);
   const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);

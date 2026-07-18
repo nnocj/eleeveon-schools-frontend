@@ -33,7 +33,7 @@ import {
 import { apiClient } from "../../lib/api/apiClient";
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 
 type Props = { navigate?: (key: string) => void };
 type ViewMode = "cards" | "table" | "analytics";

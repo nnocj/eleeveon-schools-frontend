@@ -39,7 +39,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 import { useSettings } from "../../context/settings-context";
 import { useAccount } from "../../context/account-context";
 

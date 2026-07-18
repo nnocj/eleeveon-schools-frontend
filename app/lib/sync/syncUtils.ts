@@ -18,9 +18,11 @@
  *   CloudId is the only safe cross-device identity for normal synced rows.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import { assertAccountId, getAccountId, getDeviceId, normalizeSyncStatus, SYNC_STATUS_VALUE } from "./syncConfig";
 import { isSyncTable, SyncTableName } from "./syncTables";
+import { scheduleLocalWriteSync } from "./syncScheduler";
+import { publishLocalWrite } from "./syncEvents";
 
 export type SyncableRecord = Record<string, any> & {
   id?: number;
@@ -317,6 +319,16 @@ export async function createLocal<T extends SyncableRecord>(tableName: SyncTable
   const prepared = prepareSyncData(data);
   delete (prepared as any).id;
   const id = await table.add(prepared);
+
+  publishLocalWrite({
+    accountId: prepared.accountId,
+    changedTables: [String(tableName)],
+  });
+
+  scheduleLocalWriteSync(
+    String(tableName),
+  );
+
   return table.get(id);
 }
 
@@ -328,6 +340,16 @@ export async function updateLocal<T extends SyncableRecord>(tableName: SyncTable
 
   const prepared = prepareSyncData({ ...existing, ...patch } as T, existing);
   await table.update(id, prepared);
+
+  publishLocalWrite({
+    accountId: prepared.accountId,
+    changedTables: [String(tableName)],
+  });
+
+  scheduleLocalWriteSync(
+    String(tableName),
+  );
+
   return table.get(id);
 }
 
@@ -339,6 +361,16 @@ export async function softDeleteLocal(tableName: SyncTableName | string, id: num
 
   const prepared = prepareSoftDelete(existing);
   await table.update(id, prepared);
+
+  publishLocalWrite({
+    accountId: prepared.accountId,
+    changedTables: [String(tableName)],
+  });
+
+  scheduleLocalWriteSync(
+    String(tableName),
+  );
+
   return table.get(id);
 }
 

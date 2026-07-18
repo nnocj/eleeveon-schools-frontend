@@ -1,25 +1,50 @@
 "use client";
 
 /**
- * app/branch-admin/modules/CurriculumSubjects.tsx
- * Eleeveon Curriculum Subjects V2.
- * Branch-scoped, offline-first, mobile-first, syncUtils powered.
+ * app/branch-admin/modules/CumulativeRecords.tsx
+ * ---------------------------------------------------------
+ * BRANCH ADMIN — CUMULATIVE RECORDS ENGINE
+ * ---------------------------------------------------------
  *
- * Workspace-session aligned:
- * - reads the selected workspace session written by /select-role first
- * - falls back to ActiveMembershipProvider, then ActiveBranchContext/settings
- * - prevents this branch-admin academic module from accidentally using stale
- *   school/branch context left behind by another role or portal
- * - all reads and writes now use the resolved workspace schoolId and branchId
+ * Historical reporting engine for:
+ * - student cumulative transcripts
+ * - multi-period reports
+ * - annual cumulative broadsheets
+ * - subject longitudinal history
+ * - promotion summaries
+ * - student progression timelines
  *
- * Upgraded to the Students.tsx golden standard:
- * - no duplicate module hero/header block
- * - compact search + inline add + slider filter + more menu
- * - filters and advanced views moved into sheets
- * - compact list/card-row view instead of oversized cards
- * - table shows count in the first header only
- * - createLocal/updateLocal/softDeleteLocal/listActiveLocal used where appropriate
- * - theme variables preserved for dark mode and branch branding
+ * Source of truth:
+ * StudentReportSnapshot + StudentPromotion
+ *
+ * Production rules:
+ * - Signed-in account required.
+ * - Active assigned school + branch required.
+ * - All reads are locked to the selected workspace school + branch.
+ * - Print zone can remain A4-sized, but screen view is wrapped safely.
+ * - Dashboard-shell safe: no horizontal page overflow.
+ *
+ * Workspace-source fix:
+ * - mirrors reports/StudentReports.tsx workspace resolution
+ * - reads eleeveon_open_workspace first, then active membership, then active branch/settings
+ * - uses tolerant local-id matching so numeric IDs stored as strings still match
+ * - filter options are loaded from live setup rows plus historical snapshots/promotions
+ * - prevents empty filter selectors caused by strict account/school/branch matching
+ *
+ * Media asset header update:
+ * - resolves cumulative report header logos from mediaAssets/mediaBlobs
+ * - prefers active owner-bound media over legacy string image fields
+ * - prevents removed/deleted branch-setting logos from reappearing on cumulative outputs
+ * - passes resolved logo URLs into the shared ReportHeader contract
+ *
+ * Phase 6 template integration:
+ * - reads the same reportCardTemplates, reportCardTemplateSettings and
+ *   reportCardTemplateAssignments records saved from Branch Settings
+ * - resolves reportType="cumulative_book" to the selected student-report
+ *   template style, then renders a full report book from saved snapshots
+ * - resolves reportType="cumulative_transcript" to transcript-only templates
+ * - falls back to built-in template registries when the branch has not saved
+ *   database rows yet, so preview/rendering still works immediately
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -32,79 +57,228 @@ import { useActiveMembership } from "../../context/active-membership-context";
 
 import {
   db,
-  type ClassSubject,
-  type Curriculum,
-  type CurriculumPathway,
-  type CurriculumSubject,
-  type CurriculumSubjectType,
-  type Organization,
-  type Subject,
-  type SubjectPrerequisite,
-} from "../../lib/db";
+  AcademicPeriod,
+  AcademicStructure,
+  Branch,
+  Class,
+  Parent,
+  School,
+  SchoolBranchSetting,
+  Student,
+  StudentParent,
+  StudentPromotion,
+  StudentReportSnapshot,
+  Subject,
+  Teacher,
+} from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  MediaOwners,
+  MediaFieldKeys,
+  getMediaObjectUrl,
+  getOwnerFieldMediaAsset,
+  revokeMediaObjectUrl,
+} from "../../lib/media/mediaAssetUtils";
 
-type ViewMode = "cards" | "table" | "summary";
-type ToastTone = "success" | "error" | "info";
+import CumulativeReportBook from "./reports/components/CumulativeReportBook";
+import CumulativeTranscriptCard from "./reports/components/CumulativeTranscriptCard";
+import { STUDENT_REPORT_TEMPLATE_REGISTRY } from "./reports/student-report-templates";
+import { CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY } from "./reports/cumulative-transcript-templates";
+import AnnualBroadsheet from "./reports/components/AnnualBroadsheet";
+import PromotionSummary from "./reports/components/PromotionSummary";
+import StudentProgressionTimeline from "./reports/components/StudentProgressionTimeline";
+import ReportHeader from "./reports/components/ReportHeader";
+
+import {
+  buildCumulativeReportEngineOutput,
+  buildStudentTranscript,
+} from "./reports/engine/cumulative-report-engine";
+
+import type {
+  CumulativeReportEngineDataset,
+  CumulativeReportFiltersState,
+} from "./reports/engine/cumulative-report-types";
+
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+// ======================================================
+// TYPES
+// ======================================================
 
 type TenantRow = {
-  id?: number;
   accountId?: string | null;
   schoolId?: number | string | null;
   branchId?: number | string | null;
   isDeleted?: boolean;
-  active?: boolean;
-  status?: string;
 };
 
-type FormState = {
+type SchoolRow = {
+  accountId?: string | null;
+  id?: number | string | null;
+  isDeleted?: boolean;
+};
+
+type BranchRow = {
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  id?: number | string | null;
+  isDeleted?: boolean;
+};
+
+type PrintOrientation = "portrait" | "landscape";
+
+type ReportTemplateRow = {
   id?: number;
-  curriculumId: string;
-  subjectId: string;
-  pathwayId: string;
-  organizationId: string;
-  type: CurriculumSubjectType;
-  credits: string;
-  contactHours: string;
-  minimumPassScore: string;
-  orderIndex: string;
-  active: boolean;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  name?: string;
+  code?: string;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  reportType?: string | null;
+  orientation?: string;
+  paperSize?: string;
+  density?: string;
+  active?: boolean;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
 };
 
-type CurriculumSubjectView = {
-  id: number;
-  row: CurriculumSubject;
-  curriculumName: string;
-  subjectName: string;
-  subjectCode: string;
-  pathwayName: string;
-  organizationName: string;
-  classSubjectCount: number;
-  prerequisiteCount: number;
-  totalUsage: number;
-  active: boolean;
+type ReportTemplateSettingsRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  templateName?: string;
+  reportType?: string | null;
+  active?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
 };
 
-const emptyForm: FormState = {
-  curriculumId: "",
-  subjectId: "",
-  pathwayId: "",
-  organizationId: "",
-  type: "core",
-  credits: "",
-  contactHours: "",
-  minimumPassScore: "",
-  orderIndex: "",
-  active: true,
+type ReportTemplateAssignmentRow = {
+  id?: number;
+  accountId?: string | null;
+  schoolId?: number | string | null;
+  branchId?: number | string | null;
+  templateId?: number | string | null;
+  templateSettingsId?: number | string | null;
+  templateCode?: string;
+  layoutKey?: string;
+  templateKey?: string;
+  reportType?: string | null;
+  scopeType?: string | null;
+  scopeId?: number | string | null;
+  active?: boolean;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+  [key: string]: any;
 };
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
+function normalizeTemplateRegistryRow(
+  item: any,
+  index: number,
+  reportType: "student_report" | "cumulative_transcript",
+): ReportTemplateRow {
+  const code = String(item.code || item.templateCode || item.layoutKey || item.key || "").trim();
+
+  return {
+    name:
+      item.name ||
+      item.templateName ||
+      (reportType === "cumulative_transcript"
+        ? "Cumulative Transcript Classic"
+        : "Classic Formal"),
+    code: code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    templateCode: code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    layoutKey: item.layoutKey || code || (reportType === "cumulative_transcript" ? "cumulative_transcript_classic" : "classic_formal"),
+    templateKey: item.templateKey || item.layoutKey || code,
+    reportType,
+    orientation: item.orientation || "portrait",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: item.description || "Built-in report template.",
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  };
+}
+
+function builtInReportTemplateRows(): ReportTemplateRow[] {
+  return [
+    ...(STUDENT_REPORT_TEMPLATE_REGISTRY as any[]).map((item, index) =>
+      normalizeTemplateRegistryRow(item, index, "student_report"),
+    ),
+    ...(CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY as any[]).map((item, index) =>
+      normalizeTemplateRegistryRow(item, index, "cumulative_transcript"),
+    ),
+  ];
+}
+
+function reportTemplateMapKey(row: Partial<ReportTemplateRow>) {
+  const reportType = String(row.reportType || "student_report").trim();
+  const code = String(row.code || row.templateCode || row.layoutKey || row.templateKey || row.name || row.id || "").trim();
+  return `${reportType}:${code}`;
+}
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
+
+const CUMULATIVE_MEDIA_OWNER_SCHOOLS = String(
+  (MediaOwners as any).SCHOOLS || "schools",
+);
+const CUMULATIVE_MEDIA_OWNER_BRANCHES = String(
+  (MediaOwners as any).BRANCHES || "branches",
+);
+const CUMULATIVE_MEDIA_OWNER_SETTINGS = String(
+  (MediaOwners as any).SCHOOL_BRANCH_SETTINGS ||
+    (MediaOwners as any).SCHOOL_BRANCHES_SETTINGS ||
+    "schoolBranchSettings",
+);
+const CUMULATIVE_MEDIA_OWNER_STUDENTS = String(
+  (MediaOwners as any).STUDENTS || "students",
+);
+
+const CUMULATIVE_FIELD_LOGO = String((MediaFieldKeys as any).LOGO || "logo");
+const CUMULATIVE_FIELD_PHOTO = String((MediaFieldKeys as any).PHOTO || "photo");
+
+function hasOwn(row: any, key: string) {
+  return !!row && Object.prototype.hasOwnProperty.call(row, key);
+}
+
+function safeRecordMediaValue(value?: string | null) {
+  const media = String(value || "");
+  if (!media) return "";
+  if (media.startsWith("blob:")) return "";
+  if (media.startsWith("data:image/")) return "";
+  return media;
+}
+
+function fallbackMediaValue(
+  row: any,
+  stringField: string,
+  mediaIdField?: string,
+) {
+  if (!row) return "";
+
+  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField]))
+    return "";
+
+  return safeRecordMediaValue(row[stringField]);
+}
+
+function firstMediaText(...values: unknown[]) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
 
 type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
@@ -121,11 +295,204 @@ type OpenWorkspaceSession = {
   openedAt?: number;
 };
 
+// ======================================================
+// PRINT TOOL
+// ======================================================
+
+function applyCumulativePrintStyles(
+  targetId: string,
+  orientation: PrintOrientation,
+) {
+  const existing = document.getElementById("cumulative-report-print-style");
+
+  if (existing) existing.remove();
+
+  const style = document.createElement("style");
+  style.id = "cumulative-report-print-style";
+
+  style.innerHTML = `
+    @page {
+      size: A4 ${orientation};
+      margin: 10mm;
+    }
+
+    @media print {
+      body {
+        background: #ffffff !important;
+      }
+
+      body * {
+        visibility: hidden !important;
+      }
+
+      #${targetId},
+      #${targetId} * {
+        visibility: visible !important;
+      }
+
+      #${targetId} {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        background: #fff;
+        overflow: visible !important;
+      }
+
+      .report-no-print {
+        display: none !important;
+      }
+
+      .report-screen-scroll {
+        overflow: visible !important;
+      }
+
+      .report-page-break {
+        page-break-after: always;
+      }
+
+      .report-page-break:last-child {
+        page-break-after: auto;
+      }
+
+      tr,
+      td,
+      th {
+        page-break-inside: avoid !important;
+      }
+    }
+  `;
+
+  document.head.appendChild(style);
+}
+
+// ======================================================
+// SMALL HELPERS
+// ======================================================
+
+const formatNumber = (value?: number, decimals = 1) => {
+  if (value == null || Number.isNaN(value)) return "0";
+  return Number(value).toFixed(decimals);
+};
+
+const trendLabel = (trend?: string) => {
+  if (trend === "up") return "Improving";
+  if (trend === "down") return "Declining";
+  if (trend === "stable") return "Stable";
+  return "-";
+};
+
+const modeLabels: Record<string, string> = {
+  "student-transcript": "Cumulative Transcript",
+  "cumulative-book": "Cumulative Report Book",
+  "multi-period-report": "Multi-Period Report",
+  "annual-broadsheet": "Annual Broadsheet",
+  "subject-history": "Subject History",
+  "promotion-summary": "Promotion Summary",
+  "progression-timeline": "Progression Timeline",
+};
+
+const printOrientationForMode = (
+  mode: CumulativeReportFiltersState["mode"] | string,
+): PrintOrientation =>
+  mode === "annual-broadsheet" ||
+  mode === "subject-history" ||
+  mode === "promotion-summary"
+    ? "landscape"
+    : "portrait";
+
+function labelOf<T extends { id?: number; name?: string; fullName?: string }>(
+  rows: T[],
+  id?: number,
+) {
+  if (!id) return "Not selected";
+  const found = rows.find((row) => row.id === id);
+  return found?.name || found?.fullName || "Not found";
+}
+
+function withCumulativeBranchContext<T extends Record<string, any>>(
+  output: T,
+  branch?: Branch,
+): T {
+  if (!output) return output;
+
+  const header = (output as any).header || {};
+  const headerBranding = header.branding || {};
+
+  const branchName =
+    (branch as any)?.name ||
+    (branch as any)?.branchName ||
+    (branch as any)?.campusName ||
+    header.branchName ||
+    header.branchLabel ||
+    header.branch?.name ||
+    headerBranding.branchName ||
+    "";
+
+  const branchAddress =
+    (branch as any)?.address ||
+    (branch as any)?.branchAddress ||
+    header.branchAddress ||
+    headerBranding.branchAddress ||
+    "";
+
+  return {
+    ...output,
+    header: {
+      ...header,
+      branch: branch || header.branch,
+      branchId: (branch as any)?.id || header.branchId,
+      branchName,
+      branchLabel: branchName,
+      campusName: branchName,
+      branchAddress,
+      branding: {
+        ...headerBranding,
+        branchName: headerBranding.branchName || branchName,
+        branchLabel: headerBranding.branchLabel || branchName,
+        campusName: headerBranding.campusName || branchName,
+        branchAddress: headerBranding.branchAddress || branchAddress,
+        resolvedLogoUrl:
+          headerBranding.resolvedLogoUrl ||
+          headerBranding.logo ||
+          header.schoolBranchSetting?.logo ||
+          header.branch?.logo ||
+          header.school?.logo ||
+          "",
+        logo:
+          headerBranding.logo ||
+          headerBranding.resolvedLogoUrl ||
+          header.schoolBranchSetting?.logo ||
+          header.branch?.logo ||
+          header.school?.logo ||
+          "",
+        primaryColor:
+          headerBranding.primaryColor ||
+          "var(--ba-primary, var(--primary-color, #2563eb))",
+      },
+    },
+  };
+}
+
+function idOf(value: unknown) {
+  if (value === null || value === undefined || value === "") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function sameId(a: unknown, b: unknown) {
+  const left = idOf(a);
+  const right = idOf(b);
+  return left > 0 && right > 0 && left === right;
+}
+
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -167,7 +534,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -176,7 +547,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -188,7 +559,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -198,85 +573,431 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
-const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (v: any) => String(v || "").toLowerCase().trim();
-const tableSafe = (name: string) => (db as any)[name];
-
-const isActiveRow = (row: any) =>
-  !row?.isDeleted && row?.active !== false && !["inactive", "deleted", "archived", "suspended"].includes(safeLower(row?.status));
-
-const timeText = (v?: string | number | null) => {
-  if (!v) return "Not set";
-  const t = typeof v === "number" ? v : new Date(v).getTime();
-  if (!Number.isFinite(t)) return "Not set";
-  try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(t));
-  } catch {
-    return "Not set";
-  }
-};
-
-const toOptionalNumber = (value: string) => {
-  if (value === "" || value === undefined || value === null) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
-
-const typeLabel = (type?: CurriculumSubjectType) =>
-  String(type || "core").charAt(0).toUpperCase() + String(type || "core").slice(1);
-
-function typeTone(type?: CurriculumSubjectType): "green" | "orange" | "purple" {
-  if (type === "elective") return "orange";
-  if (type === "optional") return "purple";
-  return "green";
+function accountMatches(rowAccountId: unknown, accountId?: string | null) {
+  if (!accountId) return true;
+  if (!rowAccountId) return true;
+  return rowAccountId === accountId;
 }
 
-function Chip({
-  children,
-  tone = "gray",
-}: {
-  children: React.ReactNode;
-  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+function rowIsActive(row: {
+  isDeleted?: boolean;
+  active?: boolean;
+  status?: string;
 }) {
-  return <span className={`ba-chip ${tone}`}>{children}</span>;
+  return !row.isDeleted && row.active !== false && row.status !== "withdrawn";
 }
 
-function Avatar({ name, primary }: { name: string; primary: string }) {
+function templateCodeOf(
+  row?: Partial<
+    ReportTemplateRow | ReportTemplateSettingsRow | ReportTemplateAssignmentRow
+  > | null,
+) {
+  return String(
+    row?.code || row?.templateCode || row?.layoutKey || row?.templateKey || "",
+  ).trim();
+}
+
+function rowReportType(row?: { reportType?: string | null } | null) {
+  return String(row?.reportType || "student_report").trim();
+}
+
+function isUsableTemplateRow(row: { isDeleted?: boolean; active?: boolean }) {
+  return !row.isDeleted && row.active !== false;
+}
+
+function templateTenantMatches(
+  row: TenantRow,
+  accountId?: string | null,
+  schoolId?: number,
+  branchId?: number,
+) {
   return (
-    <div
-      className="ba-avatar"
-      style={{
-        background: `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
-      }}
-    >
-      {String(name || "CS").slice(0, 2).toUpperCase()}
-    </div>
+    accountMatches(row.accountId, accountId) &&
+    (!row.schoolId || sameId(row.schoolId, schoolId)) &&
+    (!row.branchId || sameId(row.branchId, branchId)) &&
+    !row.isDeleted
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function firstTemplateByReportType(
+  templates: ReportTemplateRow[],
+  reportType: "student_report" | "cumulative_book" | "cumulative_transcript",
+) {
+  const scoped = templates.filter(
+    (row) => isUsableTemplateRow(row) && rowReportType(row) === reportType,
+  );
+  return scoped.find((row) => row.isDefault) || scoped[0];
+}
+
+function assignmentForReportType(
+  assignments: ReportTemplateAssignmentRow[],
+  reportType: "student_report" | "cumulative_book" | "cumulative_transcript",
+  branchId?: number,
+) {
+  const scoped = assignments.filter((row) => {
+    if (!isUsableTemplateRow(row)) return false;
+    if (rowReportType(row) !== reportType) return false;
+    if (row.scopeType && row.scopeType !== "branch") return false;
+    if (row.scopeId && branchId && !sameId(row.scopeId, branchId)) return false;
+    return true;
+  });
+
+  return scoped.find((row) => row.isDefault) || scoped[0];
+}
+
+function templateFromAssignment(
+  templates: ReportTemplateRow[],
+  assignment?: ReportTemplateAssignmentRow,
+) {
+  if (!assignment) return undefined;
+
+  const templateId = idOf(assignment.templateId);
+  const code = templateCodeOf(assignment);
+
   return (
-    <section className="ba-empty">
-      <div className="ba-empty-icon">{icon}</div>
-      <h3>{title}</h3>
-      <p>{text}</p>
-    </section>
+    templates.find(
+      (row) =>
+        templateId && idOf(row.id) === templateId && isUsableTemplateRow(row),
+    ) ||
+    templates.find(
+      (row) => code && templateCodeOf(row) === code && isUsableTemplateRow(row),
+    )
   );
 }
 
-export default function CurriculumSubjects() {
+function settingsFromAssignment(
+  settingsRows: ReportTemplateSettingsRow[],
+  assignment?: ReportTemplateAssignmentRow,
+  template?: ReportTemplateRow,
+  reportType?: string,
+) {
+  const settingsId = idOf(assignment?.templateSettingsId);
+  const templateId = idOf(template?.id || assignment?.templateId);
+  const code = templateCodeOf(template) || templateCodeOf(assignment);
+
+  return (
+    settingsRows.find(
+      (row) =>
+        settingsId && idOf(row.id) === settingsId && isUsableTemplateRow(row),
+    ) ||
+    settingsRows.find(
+      (row) =>
+        templateId &&
+        idOf(row.templateId) === templateId &&
+        isUsableTemplateRow(row),
+    ) ||
+    settingsRows.find(
+      (row) =>
+        code &&
+        templateCodeOf(row) === code &&
+        (!reportType || rowReportType(row) === reportType) &&
+        isUsableTemplateRow(row),
+    )
+  );
+}
+
+function fallbackStudentTemplate(): ReportTemplateRow {
+  return {
+    name: "Classic Formal",
+    code: "classic_formal",
+    layoutKey: "classic_formal",
+    templateKey: "classic_formal",
+    reportType: "student_report",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    active: true,
+    isDefault: true,
+  };
+}
+
+function fallbackCumulativeTranscriptTemplate(): ReportTemplateRow {
+  return {
+    name: "Cumulative Transcript Classic",
+    code: "cumulative_transcript_classic",
+    layoutKey: "cumulative_transcript_classic",
+    templateKey: "cumulative_transcript_classic",
+    reportType: "cumulative_transcript",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    active: true,
+    isDefault: true,
+  };
+}
+
+function fallbackCumulativeTranscriptSettings(): ReportTemplateSettingsRow {
+  return {
+    templateCode: "cumulative_transcript_classic",
+    layoutKey: "cumulative_transcript_classic",
+    templateKey: "cumulative_transcript_classic",
+    templateName: "Cumulative Transcript Classic",
+    reportType: "cumulative_transcript",
+    paperSize: "A4",
+    orientation: "portrait",
+    density: "compact",
+    showAdmissionNumber: true,
+    showGender: true,
+    showClass: true,
+    showAcademicStructure: true,
+    showAcademicPeriod: true,
+    showBranch: true,
+    showTranscriptTermBreakdown: true,
+    showTranscriptYearAverage: true,
+    showTranscriptCumulativeAverage: true,
+    showTranscriptCumulativePosition: true,
+    showTranscriptGPAProgression: true,
+    showTranscriptFinalRecommendation: true,
+    showGeneratedDate: true,
+    studentNameLabel: "Student",
+    admissionNumberLabel: "Student ID",
+    classLabel: "Programme / Class",
+    academicPeriodLabel: "Academic Period",
+    subjectLabel: "Course / Subject",
+    averageLabel: "Average",
+    gradeLabel: "Grade",
+    gpaLabel: "GPA",
+    generatedDateLabel: "Date Generated",
+    footerText:
+      "Official cumulative academic transcript generated by Eleeveon Schools.",
+  };
+}
+
+function fallbackCumulativeBookSettings(
+  templateSettings?: ReportTemplateSettingsRow,
+): ReportTemplateSettingsRow {
+  return {
+    ...(templateSettings || {}),
+    reportType: "cumulative_book",
+    showBookFrontCover: templateSettings?.showBookFrontCover ?? true,
+    showBookStudentProfilePage:
+      templateSettings?.showBookStudentProfilePage ?? true,
+    showBookAcademicJourneyPage:
+      templateSettings?.showBookAcademicJourneyPage ?? true,
+    showBookSummaryPage: templateSettings?.showBookSummaryPage ?? true,
+    showBookBackCover: templateSettings?.showBookBackCover ?? true,
+    bookTitleLabel:
+      templateSettings?.bookTitleLabel || "Cumulative Academic Report Book",
+    bookSubtitleLabel:
+      templateSettings?.bookSubtitleLabel || "Complete Academic Journey",
+    showGeneratedDate: templateSettings?.showGeneratedDate ?? true,
+    generatedDateLabel: templateSettings?.generatedDateLabel || "Generated",
+  };
+}
+
+function snapshotMatchesBookFilters(
+  snapshot: StudentReportSnapshot,
+  filters: CumulativeReportFiltersState,
+  schoolId?: number,
+  branchId?: number,
+) {
+  if (!filters.includeDeletedSnapshots && snapshot.isDeleted) return false;
+  if (schoolId && !sameId(snapshot.schoolId, schoolId)) return false;
+  if (branchId && !sameId(snapshot.branchId, branchId)) return false;
+  if (
+    filters.academicStructureId &&
+    !sameId(snapshot.academicStructureId, filters.academicStructureId)
+  )
+    return false;
+  if (
+    filters.academicPeriodId &&
+    !sameId(snapshot.academicPeriodId, filters.academicPeriodId)
+  )
+    return false;
+  if (filters.classId && !sameId(snapshot.classId, filters.classId))
+    return false;
+  if (filters.studentId && !sameId(snapshot.studentId, filters.studentId))
+    return false;
+  if (
+    filters.snapshotType !== "all" &&
+    snapshot.snapshotType !== filters.snapshotType
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "manual" &&
+    filters.includeManualSnapshots === false
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "terminal" &&
+    filters.includeTerminalSnapshots === false
+  )
+    return false;
+  if (
+    snapshot.snapshotType === "promotion" &&
+    filters.includePromotionRecords === false
+  )
+    return false;
+  return true;
+}
+
+function studentReportDatasetFromSnapshot(
+  snapshot: StudentReportSnapshot,
+  header: any,
+  studentRow?: Student,
+) {
+  const raw = (snapshot as any).reportData || {};
+  const dataset =
+    raw.dataset || raw.reportCardDataset || raw.studentReportDataset || raw;
+
+  const report = dataset?.report || dataset || {};
+  const datasetHeader = dataset?.header || {};
+  const currentHeader = header || {};
+  const datasetBranding = datasetHeader?.branding || {};
+  const currentBranding = currentHeader?.branding || {};
+
+  const logo = firstMediaText(
+    currentBranding.logo,
+    currentBranding.resolvedLogoUrl,
+    currentHeader.schoolBranchSetting?.logo,
+    currentHeader.branch?.logo,
+    currentHeader.school?.logo,
+    datasetBranding.logo,
+    datasetBranding.resolvedLogoUrl,
+    datasetHeader.schoolBranchSetting?.logo,
+    datasetHeader.branch?.logo,
+    datasetHeader.school?.logo,
+  );
+
+  const reportCardBackgroundImage = firstMediaText(
+    currentBranding.reportCardBackgroundImage,
+    currentHeader.schoolBranchSetting?.reportCardBackgroundImage,
+    datasetBranding.reportCardBackgroundImage,
+    datasetHeader.schoolBranchSetting?.reportCardBackgroundImage,
+  );
+
+  const reportCardWatermark = firstMediaText(
+    currentBranding.reportCardWatermark,
+    currentHeader.schoolBranchSetting?.reportCardWatermark,
+    datasetBranding.reportCardWatermark,
+    datasetHeader.schoolBranchSetting?.reportCardWatermark,
+    logo,
+  );
+
+  const reportCardSignatureImage = firstMediaText(
+    currentBranding.reportCardSignatureImage,
+    currentHeader.schoolBranchSetting?.reportCardSignatureImage,
+    datasetBranding.reportCardSignatureImage,
+    datasetHeader.schoolBranchSetting?.reportCardSignatureImage,
+  );
+
+  const studentPhoto = firstMediaText(
+    (studentRow as any)?.resolvedStudentPhotoUrl,
+    (studentRow as any)?.photo,
+    (studentRow as any)?.studentPhoto,
+    dataset?.studentInfo?.studentPhoto,
+    dataset?.studentInfo?.photo,
+    dataset?.student?.resolvedStudentPhotoUrl,
+    dataset?.student?.studentPhoto,
+    dataset?.student?.photo,
+    report?.resolvedStudentPhotoUrl,
+    report?.studentPhoto,
+  );
+
+  return {
+    ...dataset,
+    generatedAt: dataset?.generatedAt || snapshot.createdAt || new Date().toISOString(),
+    header: {
+      ...currentHeader,
+      ...datasetHeader,
+      school: currentHeader.school || datasetHeader.school,
+      branch: currentHeader.branch || datasetHeader.branch,
+      schoolBranchSetting:
+        currentHeader.schoolBranchSetting || datasetHeader.schoolBranchSetting,
+      branding: {
+        ...datasetBranding,
+        ...currentBranding,
+        logo,
+        resolvedLogoUrl: logo,
+        reportCardBackgroundImage,
+        reportCardWatermark,
+        reportCardSignatureImage,
+      },
+    },
+    branding: {
+      ...(dataset?.branding || {}),
+      ...currentBranding,
+      logo,
+      resolvedLogoUrl: logo,
+      reportCardBackgroundImage,
+      reportCardWatermark,
+      reportCardSignatureImage,
+    },
+    report: {
+      ...report,
+      studentId: report?.studentId || snapshot.studentId,
+      studentPhoto,
+      resolvedStudentPhotoUrl: studentPhoto,
+    },
+    student: {
+      ...(studentRow || {}),
+      ...(dataset?.student || {}),
+      id: dataset?.student?.id || (studentRow as any)?.id || snapshot.studentId,
+      name:
+        dataset?.student?.name ||
+        dataset?.student?.fullName ||
+        (studentRow as any)?.fullName ||
+        report?.studentName,
+      fullName:
+        dataset?.student?.fullName ||
+        dataset?.student?.name ||
+        (studentRow as any)?.fullName ||
+        report?.studentName,
+      admissionNumber:
+        dataset?.student?.admissionNumber ||
+        (studentRow as any)?.admissionNumber ||
+        report?.admissionNumber,
+      gender:
+        dataset?.student?.gender || (studentRow as any)?.gender || report?.gender,
+      photo: studentPhoto,
+      studentPhoto,
+      resolvedStudentPhotoUrl: studentPhoto,
+    },
+    studentInfo: {
+      ...(dataset?.studentInfo || {}),
+      studentPhoto,
+      photo: studentPhoto,
+    },
+  };
+}
+
+// ======================================================
+// COMPONENT
+// ======================================================
+
+export default function CumulativeRecordsPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
-  const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
 
+  const { accountId, authenticated, loading: accountLoading } = useAccount();
+
+  const { settings, loading: settingsLoading } = useSettings();
+
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
+
+  const { activeMembership } = useActiveMembership();
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
+
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
+
+  /**
+   * The settings context can also return scoped appearance settings, so
+   * currentAcademicStructureId is not guaranteed to already be a number.
+   * Normalize it once before using it in the cumulative-report filters.
+   */
+  const currentAcademicStructureId =
+    idOf(settings?.currentAcademicStructureId) || undefined;
 
   const schoolId = selectedWorkspaceSchoolId({
     openWorkspace,
@@ -294,60 +1015,210 @@ export default function CurriculumSubjects() {
     settings: settings as any,
   });
 
-  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
+  // ======================================================
+  // SESSION STATE
+  // ======================================================
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  const [rows, setRows] = useState<CurriculumSubject[]>([]);
-  const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [prerequisites, setPrerequisites] = useState<SubjectPrerequisite[]>([]);
-
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const { loading, setLoading } = useBackgroundLoader();
   const [search, setSearch] = useState("");
-  const [filterCurriculumId, setFilterCurriculumId] = useState("all");
-  const [filterPathwayId, setFilterPathwayId] = useState("all");
-  const [filterOrganizationId, setFilterOrganizationId] = useState("all");
-  const [filterType, setFilterType] = useState<"all" | CurriculumSubjectType>("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive">("active");
-
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<CurriculumSubjectView | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [filters, setFilters] = useState<CumulativeReportFiltersState>({
+    branchId: branchId || 0,
+    academicStructureId: currentAcademicStructureId,
+    academicPeriodId: undefined,
+    fromAcademicPeriodId: undefined,
+    toAcademicPeriodId: undefined,
+    classId: undefined,
+    studentId: undefined,
+    subjectId: undefined,
+    snapshotType: "all",
+    decision: "all",
+    mode: "student-transcript",
+    sortMode: "position",
+    groupingMode: "academic-structure",
+    subjectAggregationMode: "average",
+    includePromotionRecords: true,
+    includeManualSnapshots: true,
+    includeTerminalSnapshots: true,
+    includeDeletedSnapshots: false,
+  });
+
+  // ======================================================
+  // DB STATE
+  // ======================================================
+
+  const [schools, setSchools] = useState<School[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [schoolBranchSettings, setSchoolBranchSettings] = useState<
+    SchoolBranchSetting[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
+  const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [parents, setParents] = useState<Parent[]>([]);
+  const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [studentReportSnapshots, setStudentReportSnapshots] = useState<
+    StudentReportSnapshot[]
+  >([]);
+  const [studentPromotions, setStudentPromotions] = useState<
+    StudentPromotion[]
+  >([]);
+  const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
+    [],
+  );
+  const [reportTemplateSettingsRows, setReportTemplateSettingsRows] = useState<
+    ReportTemplateSettingsRow[]
+  >([]);
+  const [reportTemplateAssignments, setReportTemplateAssignments] = useState<
+    ReportTemplateAssignmentRow[]
+  >([]);
+  const [cumulativeMediaUrls, setCumulativeMediaUrls] = useState<string[]>([]);
+
+  // ======================================================
+  // AUTH PROTECTION
+  // ======================================================
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
-    if (!authenticated || !accountId) router.replace("/login");
-    // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+
+    if (!authenticated || !accountId) {
+      router.replace("/login");
+      return;
+    }
+
+    if (!activeSchoolId || !activeBranchId) {
+      router.replace("/owner");
+    }
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+    router,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      cumulativeMediaUrls.forEach(revokeMediaObjectUrl);
+    };
+  }, [cumulativeMediaUrls]);
+
+  // ======================================================
+  // LOAD DATA
+  // ======================================================
 
   const sameTenant = (row: TenantRow) =>
-    (!row.accountId || row.accountId === accountId) &&
+    accountMatches(row.accountId, accountId) &&
+    sameId(row.schoolId, schoolId) &&
+    sameId(row.branchId, branchId) &&
+    !row.isDeleted;
+
+  const sameSchool = (row: TenantRow | SchoolRow) =>
+    accountMatches(row.accountId, accountId) &&
+    (sameId((row as any).schoolId, schoolId) ||
+      sameId((row as any).id, schoolId)) &&
+    !row.isDeleted;
+
+  const sameBranch = (row: BranchRow) =>
+    accountMatches(row.accountId, accountId) &&
+    sameId(row.schoolId, schoolId) &&
+    sameId(row.id, branchId) &&
+    !row.isDeleted;
+
+  const looseBranchTenant = (row: TenantRow) =>
+    accountMatches(row.accountId, accountId) &&
     (!row.schoolId || sameId(row.schoolId, schoolId)) &&
     (!row.branchId || sameId(row.branchId, branchId)) &&
     !row.isDeleted;
 
-  const showToast = (tone: ToastTone, message: string) => {
-    setToast({ tone, message });
-    window.setTimeout(() => setToast((c) => (c?.message === message ? null : c)), 4200);
+  const clearData = () => {
+    cumulativeMediaUrls.forEach(revokeMediaObjectUrl);
+    setCumulativeMediaUrls([]);
+    setSchools([]);
+    setBranches([]);
+    setSchoolBranchSettings([]);
+    setAcademicStructures([]);
+    setAcademicPeriods([]);
+    setStudents([]);
+    setParents([]);
+    setStudentParents([]);
+    setTeachers([]);
+    setClasses([]);
+    setSubjects([]);
+    setStudentReportSnapshots([]);
+    setStudentPromotions([]);
+    setReportTemplates([]);
+    setReportTemplateSettingsRows([]);
+    setReportTemplateAssignments([]);
   };
 
-  const clearData = () => {
-    setRows([]);
-    setCurriculums([]);
-    setSubjects([]);
-    setPathways([]);
-    setOrganizations([]);
-    setClassSubjects([]);
-    setPrerequisites([]);
+  const resolveCumulativeMediaUrl = async ({
+    ownerTable,
+    ownerLocalId,
+    ownerCloudId,
+    fieldKey,
+    fallbackMediaId,
+    nextUrls,
+  }: {
+    ownerTable: string;
+    ownerLocalId?: number | string | null;
+    ownerCloudId?: string | null;
+    fieldKey: string;
+    fallbackMediaId?: number | string | null;
+    nextUrls: string[];
+  }) => {
+    const localId = idOf(ownerLocalId);
+
+    if (localId) {
+      const ownedAsset = await getOwnerFieldMediaAsset({
+        accountId: accountId || undefined,
+        ownerTable,
+        ownerLocalId: localId,
+        ownerCloudId: ownerCloudId || undefined,
+        fieldKey,
+      });
+
+      if (
+        ownedAsset?.id &&
+        !(ownedAsset as any).isDeleted &&
+        (ownedAsset as any).active !== false
+      ) {
+        const url = await getMediaObjectUrl(Number(ownedAsset.id));
+        if (url) {
+          nextUrls.push(url);
+          return url;
+        }
+      }
+    }
+
+    const mediaId = idOf(fallbackMediaId);
+    if (!mediaId) return "";
+
+    const fallbackAsset = await (db as any).mediaAssets?.get?.(mediaId);
+    const belongsToOwner =
+      fallbackAsset &&
+      !fallbackAsset.isDeleted &&
+      fallbackAsset.active !== false &&
+      (!accountId || fallbackAsset.accountId === accountId) &&
+      fallbackAsset.ownerTable === ownerTable &&
+      fallbackAsset.fieldKey === fieldKey &&
+      (!localId ||
+        String(fallbackAsset.ownerLocalId || "") === String(localId));
+
+    if (!belongsToOwner) return "";
+
+    const url = await getMediaObjectUrl(mediaId);
+    if (url) nextUrls.push(url);
+    return url || "";
   };
 
   const load = async () => {
@@ -361,358 +1232,1369 @@ export default function CurriculumSubjects() {
       setLoading(true);
 
       const [
-        curriculumSubjectRows,
-        curriculumRows,
+        schoolRows,
+        branchRows,
+        schoolBranchSettingRows,
+        academicStructureRows,
+        academicPeriodRows,
+        studentRows,
+        parentRows,
+        studentParentRows,
+        teacherRows,
+        classRows,
         subjectRows,
-        pathwayRows,
-        organizationRows,
-        classSubjectRows,
-        prerequisiteRows,
+        snapshotRows,
+        promotionRows,
+        reportTemplateRows,
+        reportTemplateSettingsRowsData,
+        reportTemplateAssignmentRows,
       ] = await Promise.all([
-        tableSafe("curriculumSubjects")?.toArray?.() || [],
-        listActiveLocal("curriculums", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("subjects", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("curriculumPathways", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        tableSafe("classSubjects")?.toArray?.() || [],
-        tableSafe("subjectPrerequisites")?.toArray?.() || [],
+        db.schools.toArray(),
+        db.branches.toArray(),
+        db.schoolBranchSettings.toArray(),
+        db.academicStructures.toArray(),
+        db.academicPeriods.toArray(),
+        db.students.toArray(),
+        db.parents.toArray(),
+        db.studentParents.toArray(),
+        db.teachers.toArray(),
+        db.classes.toArray(),
+        db.subjects.toArray(),
+        db.studentReportSnapshots.toArray(),
+        db.studentPromotions.toArray(),
+        (db as any).reportCardTemplates?.toArray?.() || Promise.resolve([]),
+        (db as any).reportCardTemplateSettings?.toArray?.() ||
+          Promise.resolve([]),
+        (db as any).reportCardTemplateAssignments?.toArray?.() ||
+          Promise.resolve([]),
       ]);
 
-      setRows(
-        (curriculumSubjectRows as CurriculumSubject[])
-          .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => Number(a.orderIndex || 9999) - Number(b.orderIndex || 9999))
+      const scopedSchools = schoolRows.filter(sameSchool);
+      const scopedBranches = branchRows.filter(sameBranch);
+      const scopedSettings = schoolBranchSettingRows.filter(
+        (row) => sameTenant(row) || looseBranchTenant(row),
+      );
+      const nextMediaUrls: string[] = [];
+
+      const schoolsWithMedia = await Promise.all(
+        scopedSchools.map(async (row: any) => ({
+          ...row,
+          logo:
+            (await resolveCumulativeMediaUrl({
+              ownerTable: CUMULATIVE_MEDIA_OWNER_SCHOOLS,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: CUMULATIVE_FIELD_LOGO,
+              fallbackMediaId: row.logoMediaId,
+              nextUrls: nextMediaUrls,
+            })) || fallbackMediaValue(row, "logo", "logoMediaId"),
+        })),
       );
 
-      setCurriculums(
-        (curriculumRows as Curriculum[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+      const branchesWithMedia = await Promise.all(
+        scopedBranches.map(async (row: any) => ({
+          ...row,
+          logo:
+            (await resolveCumulativeMediaUrl({
+              ownerTable: CUMULATIVE_MEDIA_OWNER_BRANCHES,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: CUMULATIVE_FIELD_LOGO,
+              fallbackMediaId: row.logoMediaId,
+              nextUrls: nextMediaUrls,
+            })) || fallbackMediaValue(row, "logo", "logoMediaId"),
+        })),
+      );
+
+      const settingsWithMedia = await Promise.all(
+        scopedSettings.map(async (row: any) => ({
+          ...row,
+          logo:
+            (await resolveCumulativeMediaUrl({
+              ownerTable: CUMULATIVE_MEDIA_OWNER_SETTINGS,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: CUMULATIVE_FIELD_LOGO,
+              fallbackMediaId: row.logoMediaId,
+              nextUrls: nextMediaUrls,
+            })) || fallbackMediaValue(row, "logo", "logoMediaId"),
+        })),
+      );
+
+      cumulativeMediaUrls.forEach((url) => {
+        if (!nextMediaUrls.includes(url)) revokeMediaObjectUrl(url);
+      });
+      setCumulativeMediaUrls(nextMediaUrls);
+
+      const studentsWithMedia = await Promise.all(
+        studentRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => a.fullName.localeCompare(b.fullName))
+          .map(async (row: any) => {
+            const photo =
+              (await resolveCumulativeMediaUrl({
+                ownerTable: CUMULATIVE_MEDIA_OWNER_STUDENTS,
+                ownerLocalId: row.id,
+                ownerCloudId: row.cloudId,
+                fieldKey: CUMULATIVE_FIELD_PHOTO,
+                fallbackMediaId: row.photoMediaId,
+                nextUrls: nextMediaUrls,
+              })) || fallbackMediaValue(row, "photo", "photoMediaId");
+
+            return {
+              ...row,
+              photo,
+              studentPhoto: photo,
+              resolvedStudentPhotoUrl: photo,
+            };
+          }),
+      );
+
+      setSchools(schoolsWithMedia as School[]);
+      setBranches(branchesWithMedia as Branch[]);
+      setSchoolBranchSettings(settingsWithMedia as SchoolBranchSetting[]);
+      setAcademicStructures(
+        academicStructureRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+      setAcademicPeriods(
+        academicPeriodRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => Number(a.order || 0) - Number(b.order || 0)),
+      );
+      setStudents(studentsWithMedia as Student[]);
+      setParents(
+        parentRows.filter((row) => sameTenant(row) || looseBranchTenant(row)),
+      );
+      setStudentParents(
+        studentParentRows.filter(
+          (row) => sameTenant(row) || looseBranchTenant(row),
+        ),
+      );
+      setTeachers(
+        teacherRows.filter((row) => sameTenant(row) || looseBranchTenant(row)),
+      );
+      setClasses(
+        classRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
       setSubjects(
-        (subjectRows as Subject[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+        subjectRows
+          .filter((row) => looseBranchTenant(row) && rowIsActive(row))
+          .sort((a, b) => a.name.localeCompare(b.name)),
       );
-      setPathways(
-        (pathwayRows as CurriculumPathway[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+      setStudentReportSnapshots(
+        snapshotRows.filter((row) => {
+          if (!filters.includeDeletedSnapshots && row.isDeleted) return false;
+          if (!accountMatches(row.accountId, accountId)) return false;
+          if (!sameId(row.schoolId, schoolId)) return false;
+          if (!sameId(row.branchId, branchId)) return false;
+          return true;
+        }),
       );
-      setOrganizations(
-        (organizationRows as Organization[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+      setStudentPromotions(
+        promotionRows.filter((row) => {
+          if (row.isDeleted) return false;
+          if (!accountMatches(row.accountId, accountId)) return false;
+          if ((row as any).schoolId && !sameId((row as any).schoolId, schoolId))
+            return false;
+          if ((row as any).branchId && !sameId((row as any).branchId, branchId))
+            return false;
+          return true;
+        }),
       );
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setPrerequisites((prerequisiteRows as SubjectPrerequisite[]).filter((row) => sameTenant(row as TenantRow)));
+
+      const templateMap = new Map<string, ReportTemplateRow>();
+
+      builtInReportTemplateRows().forEach((template) => {
+        const key = reportTemplateMapKey(template);
+        if (key) templateMap.set(key, template);
+      });
+
+      (reportTemplateRows as ReportTemplateRow[])
+        .filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        )
+        .forEach((template) => {
+          const normalized: ReportTemplateRow = {
+            ...template,
+            reportType: template.reportType || "student_report",
+            templateCode: template.templateCode || template.code || template.layoutKey,
+            templateKey: template.templateKey || template.layoutKey || template.code,
+          };
+          const key = reportTemplateMapKey(normalized);
+          if (key) {
+            templateMap.set(key, {
+              ...(templateMap.get(key) || {}),
+              ...normalized,
+            });
+          }
+        });
+
+      setReportTemplates(
+        Array.from(templateMap.values()).sort((a, b) => {
+          if (a.reportType !== b.reportType) {
+            return String(a.reportType || "").localeCompare(String(b.reportType || ""));
+          }
+          if (a.isDefault && !b.isDefault) return -1;
+          if (!a.isDefault && b.isDefault) return 1;
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        }),
+      );
+
+      setReportTemplateSettingsRows(
+        (reportTemplateSettingsRowsData as ReportTemplateSettingsRow[]).filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        ),
+      );
+
+      setReportTemplateAssignments(
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).filter(
+          (row) =>
+            templateTenantMatches(row, accountId, schoolId, branchId) &&
+            isUsableTemplateRow(row),
+        ),
+      );
     } catch (error) {
-      console.error(error);
+      console.error("Failed to load cumulative records:", error);
       clearData();
-      showToast("error", "Failed to load curriculum subjects.");
+      alert("Failed to load cumulative records");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
-  const curriculumMap = useMemo(() => new Map(curriculums.map((row: any) => [idOf(row.id), row])), [curriculums]);
-  const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((row: any) => [idOf(row.id), row])), [pathways]);
-  const organizationMap = useMemo(() => new Map(organizations.map((row: any) => [idOf(row.id), row])), [organizations]);
+  // ======================================================
+  // KEEP FILTERS LOCKED TO ACTIVE BRANCH
+  // ======================================================
 
-  const usageMaps = useMemo(() => {
-    const classSubjectMap = new Map<number, number>();
-    const prerequisiteMap = new Map<number, number>();
-
-    classSubjects.forEach((row: any) => {
-      const id = idOf(row.curriculumSubjectId);
-      if (id) classSubjectMap.set(id, (classSubjectMap.get(id) || 0) + 1);
-    });
-
-    prerequisites.forEach((row: any) => {
-      const id = idOf(row.curriculumSubjectId);
-      if (id) prerequisiteMap.set(id, (prerequisiteMap.get(id) || 0) + 1);
-    });
-
-    return { classSubjectMap, prerequisiteMap };
-  }, [classSubjects, prerequisites]);
-
-  const filteredPathwaysForForm = useMemo(() => {
-    if (!form.curriculumId) return pathways;
-    return pathways.filter((row: any) => sameId(row.curriculumId, form.curriculumId));
-  }, [pathways, form.curriculumId]);
-
-  const viewRows = useMemo<CurriculumSubjectView[]>(() => {
-    return rows.map((row: any) => {
-      const id = idOf(row.id);
-      const curriculum: any = curriculumMap.get(idOf(row.curriculumId));
-      const subject: any = subjectMap.get(idOf(row.subjectId));
-      const pathway: any = row.pathwayId ? pathwayMap.get(idOf(row.pathwayId)) : undefined;
-      const organization: any = row.organizationId ? organizationMap.get(idOf(row.organizationId)) : undefined;
-      const classSubjectCount = usageMaps.classSubjectMap.get(id) || 0;
-      const prerequisiteCount = usageMaps.prerequisiteMap.get(id) || 0;
+  useEffect(() => {
+    setFilters((prev) => {
+      const branchChanged = prev.branchId !== (branchId || 0);
 
       return {
-        id,
-        row,
-        curriculumName: curriculum?.name || curriculum?.title || "Unknown curriculum",
-        subjectName: subject?.name || subject?.title || "Unknown subject",
-        subjectCode: subject?.code || subject?.shortCode || "",
-        pathwayName: pathway?.name || "No pathway",
-        organizationName: organization?.name || "No organization",
-        classSubjectCount,
-        prerequisiteCount,
-        totalUsage: classSubjectCount + prerequisiteCount,
-        active: isActiveRow(row),
+        ...prev,
+        branchId: branchId || 0,
+        academicStructureId: branchChanged
+          ? currentAcademicStructureId
+          : prev.academicStructureId || currentAcademicStructureId,
+        academicPeriodId: branchChanged ? undefined : prev.academicPeriodId,
+        classId: branchChanged ? undefined : prev.classId,
+        studentId: branchChanged ? undefined : prev.studentId,
+        subjectId: branchChanged ? undefined : prev.subjectId,
       };
     });
-  }, [curriculumMap, organizationMap, pathwayMap, rows, subjectMap, usageMaps]);
+  }, [branchId, currentAcademicStructureId]);
 
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  useEffect(() => {
+    if (!filters.academicStructureId && academicStructures[0]?.id) {
+      setFilters((prev) => ({
+        ...prev,
+        academicStructureId: academicStructures[0].id,
+      }));
+    }
+  }, [filters.academicStructureId, academicStructures]);
 
-    return viewRows
-      .filter((item) => {
-        const row: any = item.row;
+  // ======================================================
+  // LOCKED BRANCH DATA
+  // ======================================================
 
-        if (filterCurriculumId !== "all" && !sameId(row.curriculumId, filterCurriculumId)) return false;
-        if (filterPathwayId !== "all" && !sameId(row.pathwayId, filterPathwayId)) return false;
-        if (filterOrganizationId !== "all" && !sameId(row.organizationId, filterOrganizationId)) return false;
-        if (filterType !== "all" && row.type !== filterType) return false;
-        if (filterStatus === "active" && !item.active) return false;
-        if (filterStatus === "inactive" && item.active) return false;
+  const lockedBranches = useMemo(() => {
+    const resolvedBranch = branches.find((branch: any) =>
+      sameId(branch.id, branchId),
+    );
+    if (resolvedBranch) return [resolvedBranch];
+    return activeBranch ? [activeBranch] : branches;
+  }, [activeBranch, branches, branchId]);
 
-        if (!query) return true;
+  const filteredSnapshotsForControls = useMemo(() => {
+    return studentReportSnapshots.filter((snapshot) => {
+      if (!filters.includeDeletedSnapshots && snapshot.isDeleted) return false;
+      if (branchId && snapshot.branchId !== branchId) return false;
+      if (schoolId && snapshot.schoolId !== schoolId) return false;
+      if (accountId && snapshot.accountId !== accountId) return false;
+      return true;
+    });
+  }, [
+    studentReportSnapshots,
+    branchId,
+    schoolId,
+    accountId,
+    filters.includeDeletedSnapshots,
+  ]);
 
-        return `${item.curriculumName} ${item.subjectName} ${item.subjectCode} ${item.pathwayName} ${item.organizationName} ${
-          row.type || ""
-        } ${row.credits || ""} ${row.contactHours || ""} ${row.minimumPassScore || ""} ${row.orderIndex || ""}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) => {
-        const byCurriculum = a.curriculumName.localeCompare(b.curriculumName);
-        if (byCurriculum) return byCurriculum;
-        const byOrder = Number((a.row as any).orderIndex || 9999) - Number((b.row as any).orderIndex || 9999);
-        if (byOrder) return byOrder;
-        return a.subjectName.localeCompare(b.subjectName);
-      });
-  }, [filterCurriculumId, filterOrganizationId, filterPathwayId, filterStatus, filterType, search, viewRows]);
+  // ======================================================
+  // DATASET
+  // ======================================================
 
-  const summary = useMemo(
+  const dataset: CumulativeReportEngineDataset = useMemo(
     () => ({
-      total: rows.length,
-      active: viewRows.filter((row) => row.active).length,
-      inactive: viewRows.filter((row) => !row.active).length,
-      core: viewRows.filter((row) => (row.row as any).type === "core").length,
-      elective: viewRows.filter((row) => (row.row as any).type === "elective").length,
-      optional: viewRows.filter((row) => (row.row as any).type === "optional").length,
-      classLinks: classSubjects.length,
-      prerequisiteLinks: prerequisites.length,
-      showing: filteredRows.length,
+      schools: schools.length ? schools : activeSchool ? [activeSchool] : [],
+      branches: lockedBranches,
+      schoolBranchSettings,
+      academicStructures,
+      academicPeriods,
+      students,
+      parents,
+      studentParents,
+      teachers,
+      classes,
+      subjects,
+      studentReportSnapshots,
+      studentPromotions,
     }),
-    [classSubjects.length, filteredRows.length, prerequisites.length, rows.length, viewRows]
+    [
+      schools,
+      activeSchool,
+      lockedBranches,
+      schoolBranchSettings,
+      academicStructures,
+      academicPeriods,
+      students,
+      parents,
+      studentParents,
+      teachers,
+      classes,
+      subjects,
+      studentReportSnapshots,
+      studentPromotions,
+    ],
   );
 
-  const activeFilterCount = useMemo(() => {
-    return [filterCurriculumId, filterPathwayId, filterOrganizationId, filterType, filterStatus].filter((v) => v !== "all").length;
-  }, [filterCurriculumId, filterOrganizationId, filterPathwayId, filterStatus, filterType]);
+  const rawOutput = useMemo(() => {
+    return buildCumulativeReportEngineOutput(dataset, filters);
+  }, [dataset, filters]);
 
-  const countsByCurriculum = useMemo(() => groupedCounts(viewRows, (item) => item.curriculumName), [viewRows]);
-  const countsByType = useMemo(() => groupedCounts(viewRows, (item) => typeLabel((item.row as any).type)), [viewRows]);
-  const countsByPathway = useMemo(() => groupedCounts(viewRows, (item) => item.pathwayName), [viewRows]);
-  const countsByOrganization = useMemo(() => groupedCounts(viewRows, (item) => item.organizationName), [viewRows]);
+  const reportBranch = useMemo(() => {
+    return (
+      branches.find((branch: any) => idOf(branch.id) === idOf(branchId)) ||
+      lockedBranches.find(
+        (branch: any) => idOf(branch.id) === idOf(branchId),
+      ) ||
+      (activeBranch && idOf((activeBranch as any).id) === idOf(branchId)
+        ? activeBranch
+        : undefined) ||
+      activeBranch ||
+      branches[0] ||
+      lockedBranches[0] ||
+      rawOutput.header.branch
+    );
+  }, [
+    activeBranch,
+    branchId,
+    branches,
+    lockedBranches,
+    rawOutput.header.branch,
+  ]);
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const output = useMemo(() => {
+    return withCumulativeBranchContext(
+      rawOutput as any,
+      reportBranch,
+    ) as typeof rawOutput;
+  }, [rawOutput, reportBranch]);
 
-  const requireTenant = () => {
-    if (!authenticated || !accountId || !schoolId || !branchId) {
-      showToast("error", "Sign in and select a school branch first.");
-      return false;
+  const selectedStudent = useMemo(() => {
+    return students.find((student) => student.id === filters.studentId);
+  }, [students, filters.studentId]);
+
+  const printablePage: React.CSSProperties = {
+    width: "297mm",
+    minHeight: "210mm",
+    margin: "0 auto 20px",
+    padding: "10mm",
+    boxSizing: "border-box",
+    background: "#fff",
+    color: "#111",
+    fontFamily: output.header.branding.fontFamily || "Arial, sans-serif",
+    border: "1px solid #e5e5e5",
+  };
+
+  const table: React.CSSProperties = {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontSize: 9,
+  };
+
+  const th: React.CSSProperties = {
+    border: "1px solid #222",
+    padding: 5,
+    background: primary,
+    color: "#fff",
+    textAlign: "center",
+    fontWeight: 800,
+  };
+
+  const td: React.CSSProperties = {
+    border: "1px solid #222",
+    padding: 5,
+    verticalAlign: "middle",
+  };
+
+  // ======================================================
+  // TEMPLATE RESOLUTION FOR CUMULATIVE BOOK + TRANSCRIPT
+  // ======================================================
+
+  const selectedStudentReportTemplateForBook = useMemo(() => {
+    const bookAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_book",
+      branchId,
+    );
+    const studentAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "student_report",
+      branchId,
+    );
+
+    return (
+      templateFromAssignment(reportTemplates, bookAssignment) ||
+      templateFromAssignment(reportTemplates, studentAssignment) ||
+      firstTemplateByReportType(reportTemplates, "student_report") ||
+      fallbackStudentTemplate()
+    );
+  }, [reportTemplateAssignments, reportTemplates, branchId]);
+
+  const selectedStudentReportSettingsForBook = useMemo(() => {
+    const bookAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_book",
+      branchId,
+    );
+    const studentAssignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "student_report",
+      branchId,
+    );
+
+    const directBookSettings = settingsFromAssignment(
+      reportTemplateSettingsRows,
+      bookAssignment,
+      selectedStudentReportTemplateForBook,
+      "cumulative_book",
+    );
+
+    const studentSettings = settingsFromAssignment(
+      reportTemplateSettingsRows,
+      studentAssignment,
+      selectedStudentReportTemplateForBook,
+      "student_report",
+    );
+
+    return fallbackCumulativeBookSettings(
+      directBookSettings || studentSettings,
+    );
+  }, [
+    reportTemplateAssignments,
+    reportTemplateSettingsRows,
+    selectedStudentReportTemplateForBook,
+    branchId,
+  ]);
+
+  const selectedCumulativeTranscriptTemplate = useMemo(() => {
+    const assignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_transcript",
+      branchId,
+    );
+    return (
+      templateFromAssignment(reportTemplates, assignment) ||
+      firstTemplateByReportType(reportTemplates, "cumulative_transcript") ||
+      fallbackCumulativeTranscriptTemplate()
+    );
+  }, [reportTemplateAssignments, reportTemplates, branchId]);
+
+  const selectedCumulativeTranscriptSettings = useMemo(() => {
+    const assignment = assignmentForReportType(
+      reportTemplateAssignments,
+      "cumulative_transcript",
+      branchId,
+    );
+    return (
+      settingsFromAssignment(
+        reportTemplateSettingsRows,
+        assignment,
+        selectedCumulativeTranscriptTemplate,
+        "cumulative_transcript",
+      ) || fallbackCumulativeTranscriptSettings()
+    );
+  }, [
+    reportTemplateAssignments,
+    reportTemplateSettingsRows,
+    selectedCumulativeTranscriptTemplate,
+    branchId,
+  ]);
+
+  const transcriptForTemplates = useMemo(() => {
+    if (output.studentTranscript) return output.studentTranscript;
+    if (!filters.studentId) return undefined;
+
+    return buildStudentTranscript(
+      dataset,
+      {
+        ...filters,
+        mode: "student-transcript",
+      } as CumulativeReportFiltersState,
+      filters.studentId,
+    );
+  }, [dataset, filters, output.studentTranscript]);
+
+  const cumulativeTranscriptDataset = useMemo(() => {
+    const existing = (output as any).cumulativeTranscriptDataset;
+    if (existing?.transcript && existing?.student) return existing;
+
+    return {
+      ...(existing || {}),
+      header: output.header,
+      transcript: transcriptForTemplates,
+      generatedAt: existing?.generatedAt || new Date().toISOString(),
+      student: transcriptForTemplates
+        ? {
+            studentId: transcriptForTemplates.studentId,
+            studentName: transcriptForTemplates.studentName,
+            admissionNumber: transcriptForTemplates.admissionNumber,
+            gender: transcriptForTemplates.gender,
+            currentClassName: transcriptForTemplates.currentClassName,
+            studentPhoto: transcriptForTemplates.studentPhoto,
+            parentName: transcriptForTemplates.parentName,
+            guardianName: transcriptForTemplates.guardianName,
+          }
+        : undefined,
+      summary: transcriptForTemplates
+        ? {
+            totalPeriods: transcriptForTemplates.totalPeriods,
+            totalSubjects: transcriptForTemplates.totalSubjects,
+            cumulativeTotal: transcriptForTemplates.cumulativeTotal,
+            cumulativeAverage: transcriptForTemplates.cumulativeAverage,
+            cumulativeGPA: transcriptForTemplates.cumulativeGPA,
+            cumulativePosition: transcriptForTemplates.latestPosition,
+            highestAverage: transcriptForTemplates.highestAverage,
+            lowestAverage: transcriptForTemplates.lowestAverage,
+            latestAverage: transcriptForTemplates.latestAverage,
+            latestPosition: transcriptForTemplates.latestPosition,
+            latestDecision: transcriptForTemplates.latestDecision,
+            overallTrend: transcriptForTemplates.overallTrend,
+          }
+        : undefined,
+    };
+  }, [output, transcriptForTemplates]);
+
+  const cumulativeReportBookDataset = useMemo(() => {
+    const student = transcriptForTemplates;
+    const scopedSnapshots = studentReportSnapshots
+      .filter((snapshot) =>
+        snapshotMatchesBookFilters(snapshot, filters, schoolId, branchId),
+      )
+      .sort((a, b) => {
+        const yearCompare = String(a.academicYear || "").localeCompare(
+          String(b.academicYear || ""),
+        );
+        if (yearCompare !== 0) return yearCompare;
+        return (
+          Number(a.academicPeriodId || 0) - Number(b.academicPeriodId || 0)
+        );
+      });
+
+    const periods = scopedSnapshots.map((snapshot) => {
+      const period = academicPeriods.find((row) =>
+        sameId(row.id, snapshot.academicPeriodId),
+      );
+      const snapshotStudent = students.find((row) =>
+        sameId(row.id, snapshot.studentId),
+      );
+      const reportDataset = studentReportDatasetFromSnapshot(
+        snapshot,
+        output.header,
+        snapshotStudent,
+      );
+      const report = reportDataset?.report || {};
+
+      return {
+        id: snapshot.id,
+        academicPeriodId: snapshot.academicPeriodId,
+        academicPeriodName:
+          period?.name ||
+          snapshot.term ||
+          reportDataset?.header?.academicPeriod?.name ||
+          "Academic Period",
+        academicYear: snapshot.academicYear,
+        term: snapshot.term,
+        startDate: period?.startDate,
+        endDate: period?.endDate,
+        dataset: reportDataset,
+        total: snapshot.total ?? report.total,
+        average: snapshot.average ?? report.average,
+        position:
+          snapshot.position ?? report.overallPosition ?? report.position,
+        gpa: report.overallGPA ?? report.gpa,
+        recommendation: snapshot.recommendation,
+      };
+    });
+
+    return {
+      generatedAt: new Date().toISOString(),
+      title:
+        selectedStudentReportSettingsForBook.bookTitleLabel ||
+        "Cumulative Academic Report Book",
+      subtitle:
+        selectedStudentReportSettingsForBook.bookSubtitleLabel ||
+        "Complete Academic Journey",
+      header: output.header,
+      branding: output.header.branding,
+      student: {
+        id: student?.studentId || selectedStudent?.id,
+        fullName: student?.studentName || selectedStudent?.fullName,
+        name: student?.studentName || selectedStudent?.fullName,
+        admissionNumber:
+          student?.admissionNumber || selectedStudent?.admissionNumber,
+        gender: student?.gender || selectedStudent?.gender,
+        className: student?.currentClassName,
+        currentClassName: student?.currentClassName,
+        photo:
+          student?.studentPhoto ||
+          (selectedStudent as any)?.resolvedStudentPhotoUrl ||
+          selectedStudent?.photo ||
+          (periods[0]?.dataset as any)?.studentInfo?.studentPhoto ||
+          (periods[0]?.dataset as any)?.report?.studentPhoto,
+        studentPhoto:
+          student?.studentPhoto ||
+          (selectedStudent as any)?.resolvedStudentPhotoUrl ||
+          selectedStudent?.photo ||
+          (periods[0]?.dataset as any)?.studentInfo?.studentPhoto ||
+          (periods[0]?.dataset as any)?.report?.studentPhoto,
+        parentName: student?.parentName || selectedStudent?.parentName,
+        address: selectedStudent?.address,
+        parentPhone: selectedStudent?.parentPhone,
+        parentEmail: selectedStudent?.parentEmail,
+      },
+      periods,
+      summary: {
+        totalPeriods: student?.totalPeriods || periods.length,
+        cumulativeAverage: student?.cumulativeAverage,
+        cumulativeGPA: student?.cumulativeGPA,
+        bestAverage: student?.highestAverage,
+        latestAverage: student?.latestAverage,
+        latestPosition: student?.latestPosition,
+        finalRecommendation: student?.latestDecision,
+        trend: student?.overallTrend,
+      },
+      notes: output.warnings,
+    };
+  }, [
+    academicPeriods,
+    branchId,
+    filters,
+    output.header,
+    output.warnings,
+    schoolId,
+    selectedStudent,
+    selectedStudentReportSettingsForBook,
+    studentReportSnapshots,
+    transcriptForTemplates,
+  ]);
+
+  // ======================================================
+  // EXTRA MODE RENDERERS
+  // ======================================================
+
+  const renderMultiPeriodReport = () => {
+    const report = output.multiPeriodReport;
+
+    return (
+      <section
+        className="print-page report-page-break cumulative-multi-period-page"
+        style={{
+          width: "210mm",
+          minHeight: "297mm",
+          margin: "0 auto 20px",
+          padding: "11mm",
+          boxSizing: "border-box",
+          background: "#fff",
+          color: "#111",
+          fontFamily: output.header.branding.fontFamily || "Arial, sans-serif",
+          border: "1px solid #e5e5e5",
+        }}
+      >
+        <ReportHeader
+          header={output.header}
+          title="Multi-Period Academic Report"
+          subtitle={
+            report
+              ? `${report.studentName} • ${report.periods.length} Periods`
+              : undefined
+          }
+          orientation="portrait"
+        />
+
+        {!report ? (
+          <div className="cr-print-empty">
+            Select a student with multiple historical snapshots to generate a
+            multi-period report.
+          </div>
+        ) : (
+          <>
+            <div className="cr-print-summary-grid">
+              <div>
+                <strong>Student:</strong> {report.studentName}
+              </div>
+              <div>
+                <strong>Class:</strong> {report.className || "-"}
+              </div>
+              <div>
+                <strong>Average:</strong> {formatNumber(report.average, 1)}%
+              </div>
+              <div>
+                <strong>GPA:</strong>{" "}
+                {report.gpa != null ? formatNumber(report.gpa, 2) : "-"}
+              </div>
+            </div>
+
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={{ ...th, textAlign: "left" }}>Subject</th>
+                  {report.periods.map((period) => (
+                    <th key={period.academicPeriodId} style={th}>
+                      {period.academicPeriodName}
+                    </th>
+                  ))}
+                  <th style={th}>Average</th>
+                  <th style={th}>Best</th>
+                  <th style={th}>Latest</th>
+                  <th style={th}>Trend</th>
+                  <th style={th}>Final Grade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.subjects.map((subject) => (
+                  <tr key={subject.subjectId || subject.subjectName}>
+                    <td style={{ ...td, fontWeight: 800 }}>
+                      {subject.subjectName}
+                      {subject.subjectCode && (
+                        <div style={{ fontSize: 8, opacity: 0.7 }}>
+                          {subject.subjectCode}
+                        </div>
+                      )}
+                    </td>
+                    {report.periods.map((period) => {
+                      const score = subject.periodScores.find(
+                        (item) =>
+                          item.academicPeriodId === period.academicPeriodId,
+                      );
+                      return (
+                        <td
+                          key={`${subject.subjectName}-${period.academicPeriodId}`}
+                          style={{ ...td, textAlign: "center" }}
+                        >
+                          {score ? (
+                            <>
+                              <strong>
+                                {formatNumber(score.percentage, 1)}%
+                              </strong>
+                              <div style={{ fontSize: 8, opacity: 0.7 }}>
+                                {score.grade || "-"}
+                              </div>
+                            </>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {formatNumber(subject.average, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(subject.bestScore, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(subject.latestScore, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {trendLabel(subject.trend)}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {subject.finalGrade || "-"}
+                    </td>
+                  </tr>
+                ))}
+                {!report.subjects.length && (
+                  <tr>
+                    <td
+                      style={{ ...td, textAlign: "center", padding: 16 }}
+                      colSpan={report.periods.length + 6}
+                    >
+                      No multi-period subject records found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            <PrintFooter
+              primary={primary}
+              schoolName={output.header.branding.schoolName}
+              label="Official multi-period academic report"
+            />
+          </>
+        )}
+      </section>
+    );
+  };
+
+  const renderSubjectHistory = () => {
+    const history = output.subjectHistory;
+
+    return (
+      <section
+        className="print-page report-page-break cumulative-subject-history-page"
+        style={printablePage}
+      >
+        <ReportHeader
+          header={output.header}
+          title="Subject Longitudinal Analytics"
+          subtitle={
+            history
+              ? `${history.subjectName} • ${history.totalStudents} Students • ${history.totalPeriods} Periods`
+              : undefined
+          }
+          orientation="landscape"
+        />
+
+        {!history ? (
+          <div className="cr-print-empty">
+            Select a subject to generate longitudinal subject analytics.
+          </div>
+        ) : (
+          <>
+            <div className="cr-print-summary-grid six">
+              <div>
+                <strong>Subject:</strong> {history.subjectName}
+              </div>
+              <div>
+                <strong>Students:</strong> {history.totalStudents}
+              </div>
+              <div>
+                <strong>Periods:</strong> {history.totalPeriods}
+              </div>
+              <div>
+                <strong>Average:</strong>{" "}
+                {formatNumber(history.subjectAverage, 1)}%
+              </div>
+              <div>
+                <strong>Improving:</strong> {history.improvingCount}
+              </div>
+              <div>
+                <strong>Declining:</strong> {history.decliningCount}
+              </div>
+            </div>
+
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>#</th>
+                  <th style={{ ...th, textAlign: "left", minWidth: 180 }}>
+                    Student
+                  </th>
+                  <th style={th}>Class</th>
+                  <th style={th}>Periods</th>
+                  <th style={th}>Average</th>
+                  <th style={th}>Highest</th>
+                  <th style={th}>Lowest</th>
+                  <th style={th}>Latest</th>
+                  <th style={th}>Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.students.map((student, index) => (
+                  <tr key={student.studentId}>
+                    <td style={{ ...td, textAlign: "center" }}>{index + 1}</td>
+                    <td style={{ ...td, fontWeight: 800 }}>
+                      {student.studentName}
+                      {student.admissionNumber && (
+                        <div style={{ fontSize: 8, opacity: 0.7 }}>
+                          {student.admissionNumber}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.className || "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.periods.length}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {formatNumber(student.average, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(student.highest, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {formatNumber(student.lowest, 1)}%
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {student.latest != null
+                        ? `${formatNumber(student.latest, 1)}%`
+                        : "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
+                      {trendLabel(student.trend)}
+                    </td>
+                  </tr>
+                ))}
+                {!history.students.length && (
+                  <tr>
+                    <td
+                      style={{ ...td, textAlign: "center", padding: 16 }}
+                      colSpan={9}
+                    >
+                      No subject history records found.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+
+            <PrintFooter
+              primary={primary}
+              schoolName={output.header.branding.schoolName}
+              label="Official subject history"
+            />
+          </>
+        )}
+      </section>
+    );
+  };
+
+  const renderActiveView = () => {
+    if (String(filters.mode) === "cumulative-book") {
+      return (
+        <CumulativeReportBook
+          dataset={cumulativeReportBookDataset as any}
+          template={selectedStudentReportTemplateForBook as any}
+          settings={selectedStudentReportSettingsForBook as any}
+          compact
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
     }
-    return true;
-  };
 
-  const openCreate = () => {
-    if (!requireTenant()) return;
-
-    setForm({
-      ...emptyForm,
-      curriculumId: filterCurriculumId !== "all" ? String(filterCurriculumId) : "",
-      pathwayId: filterPathwayId !== "all" ? String(filterPathwayId) : "",
-      organizationId: filterOrganizationId !== "all" ? String(filterOrganizationId) : "",
-      type: filterType === "all" ? "core" : filterType,
-      active: filterStatus === "inactive" ? false : true,
-    });
-    setModalOpen(true);
-  };
-
-  const openEdit = (item: CurriculumSubjectView) => {
-    const row: any = item.row;
-    setSelectedItem(null);
-
-    setForm({
-      id: idOf(row.id),
-      curriculumId: row.curriculumId ? String(row.curriculumId) : "",
-      subjectId: row.subjectId ? String(row.subjectId) : "",
-      pathwayId: row.pathwayId ? String(row.pathwayId) : "",
-      organizationId: row.organizationId ? String(row.organizationId) : "",
-      type: row.type || "core",
-      credits: row.credits == null ? "" : String(row.credits),
-      contactHours: row.contactHours == null ? "" : String(row.contactHours),
-      minimumPassScore: row.minimumPassScore == null ? "" : String(row.minimumPassScore),
-      orderIndex: row.orderIndex == null ? "" : String(row.orderIndex),
-      active: item.active,
-    });
-
-    setModalOpen(true);
-  };
-
-  const clearFilters = () => {
-    setFilterCurriculumId("all");
-    setFilterPathwayId("all");
-    setFilterOrganizationId("all");
-    setFilterType("all");
-    setFilterStatus("all");
-  };
-
-  const validate = () => {
-    if (!authenticated || !accountId) return "Sign in first.";
-    if (!schoolId || !branchId) return "Select a school branch first.";
-    if (!form.curriculumId) return "Select a curriculum.";
-    if (!form.subjectId) return "Select a subject.";
-
-    const numericFields: [keyof FormState, string][] = [
-      ["credits", "Credits"],
-      ["contactHours", "Contact hours"],
-      ["minimumPassScore", "Minimum pass score"],
-      ["orderIndex", "Order index"],
-    ];
-
-    for (const [key, label] of numericFields) {
-      const value = form[key] as string;
-      if (value !== "" && Number(value) < 0) return `${label} cannot be negative.`;
+    if (filters.mode === "student-transcript") {
+      return (
+        <CumulativeTranscriptCard
+          dataset={cumulativeTranscriptDataset as any}
+          template={selectedCumulativeTranscriptTemplate as any}
+          settings={selectedCumulativeTranscriptSettings as any}
+          compact
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
     }
 
-    const duplicate = rows.find((row: any) => {
-      if (form.id && sameId(row.id, form.id)) return false;
-      if (row.isDeleted) return false;
+    if (filters.mode === "multi-period-report")
+      return renderMultiPeriodReport();
 
-      const sameCurriculum = sameId(row.curriculumId, form.curriculumId);
-      const sameSubject = sameId(row.subjectId, form.subjectId);
-      const samePathway = sameId(row.pathwayId || 0, form.pathwayId || 0);
+    if (filters.mode === "annual-broadsheet") {
+      return (
+        <AnnualBroadsheet
+          header={output.header}
+          broadsheet={output.annualBroadsheet}
+          pageBreakAfter={false}
+        />
+      );
+    }
 
-      return sameCurriculum && sameSubject && samePathway;
-    });
+    if (filters.mode === "subject-history") return renderSubjectHistory();
 
-    if (duplicate) return "This subject is already attached to this curriculum/pathway.";
+    if (filters.mode === "promotion-summary") {
+      return (
+        <PromotionSummary
+          header={output.header}
+          summary={output.promotionSummary}
+          pageBreakAfter={false}
+        />
+      );
+    }
 
-    return "";
+    return (
+      <StudentProgressionTimeline
+        header={output.header}
+        steps={output.progressionTimeline}
+        studentName={
+          selectedStudent?.fullName || output.studentTranscript?.studentName
+        }
+        pageBreakAfter={false}
+      />
+    );
   };
 
-  const save = async (event?: React.FormEvent) => {
-    event?.preventDefault();
-
-    const error = validate();
-    if (error) {
-      showToast("error", error);
+  const setBranchLockedFilters: React.Dispatch<
+    React.SetStateAction<CumulativeReportFiltersState>
+  > = (next) => {
+    if (typeof next === "function") {
+      setFilters((prev) => ({
+        ...(
+          next as (
+            value: CumulativeReportFiltersState,
+          ) => CumulativeReportFiltersState
+        )(prev),
+        branchId: branchId || 0,
+      }));
       return;
     }
 
-    if (!authenticated || !accountId || !schoolId || !branchId) return;
-
-    try {
-      setSaving(true);
-
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
-
-      const payload: Partial<CurriculumSubject> = {
-        accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        curriculumId: idOf(form.curriculumId),
-        subjectId: idOf(form.subjectId),
-        pathwayId: form.pathwayId ? idOf(form.pathwayId) : undefined,
-        organizationId: form.organizationId ? idOf(form.organizationId) : undefined,
-        type: form.type || "core",
-        credits: toOptionalNumber(form.credits),
-        contactHours: toOptionalNumber(form.contactHours),
-        minimumPassScore: toOptionalNumber(form.minimumPassScore),
-        orderIndex: toOptionalNumber(form.orderIndex),
-        active: form.active,
-        status: form.active ? "active" : "inactive",
-        isDeleted: false,
-      } as any;
-
-      if (form.id && existing) {
-        await updateLocal("curriculumSubjects", Number(form.id), payload);
-      } else {
-        await createLocal("curriculumSubjects", payload as CurriculumSubject);
-      }
-
-      setModalOpen(false);
-      showToast("success", "Curriculum subject rule saved.");
-      await load();
-    } catch (error) {
-      console.error(error);
-      showToast("error", "Could not save curriculum subject rule.");
-    } finally {
-      setSaving(false);
-    }
+    setFilters({
+      ...next,
+      branchId: branchId || 0,
+    });
   };
 
-  const toggleActive = async (item: CurriculumSubjectView) => {
-    const id = idOf((item.row as any).id);
-    if (!id) return;
+  // ======================================================
+  // GOLDEN COMPACT UI
+  // ======================================================
 
-    await updateLocal("curriculumSubjects", id, {
-      active: !item.active,
-      status: !item.active ? "active" : "inactive",
-      isDeleted: false,
-    } as unknown as Partial<CurriculumSubject>);
+  const activeFilterCount = useMemo(() => {
+    return [
+      filters.academicStructureId,
+      filters.academicPeriodId,
+      filters.fromAcademicPeriodId,
+      filters.toAcademicPeriodId,
+      filters.classId,
+      filters.studentId,
+      filters.subjectId,
+      filters.snapshotType !== "all" ? filters.snapshotType : undefined,
+      filters.decision !== "all" ? filters.decision : undefined,
+      String(filters.mode) !== "student-transcript" ? filters.mode : undefined,
+      filters.sortMode !== "position" ? filters.sortMode : undefined,
+      filters.groupingMode !== "academic-structure"
+        ? filters.groupingMode
+        : undefined,
+      filters.subjectAggregationMode !== "average"
+        ? filters.subjectAggregationMode
+        : undefined,
+      !filters.includePromotionRecords ? "promotion-off" : undefined,
+      !filters.includeManualSnapshots ? "manual-off" : undefined,
+      !filters.includeTerminalSnapshots ? "terminal-off" : undefined,
+      filters.includeDeletedSnapshots ? "deleted-on" : undefined,
+    ].filter(Boolean).length;
+  }, [filters]);
 
-    setSelectedItem(null);
-    showToast("success", item.active ? "Subject rule deactivated." : "Subject rule activated.");
-    await load();
+  const searchTerm = search.trim().toLowerCase();
+  const quickStudents = useMemo(() => {
+    if (!searchTerm) return students;
+
+    return students.filter((student) =>
+      `${student.fullName || ""} ${student.admissionNumber || ""}`
+        .toLowerCase()
+        .includes(searchTerm),
+    );
+  }, [students, searchTerm]);
+
+  const optionAcademicStructures = useMemo(() => {
+    const idsFromSnapshots = new Set(
+      studentReportSnapshots
+        .map((row) => idOf(row.academicStructureId))
+        .filter(Boolean),
+    );
+    const rows = academicStructures.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.active !== false || idsFromSnapshots.has(idOf(row.id))),
+    );
+    if (rows.length) return rows;
+
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          name: `Academic Structure ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          active: true,
+        }) as AcademicStructure,
+    );
+  }, [
+    academicStructures,
+    studentReportSnapshots,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
+
+  const optionAcademicPeriods = useMemo(() => {
+    const idsFromSnapshots = new Set(
+      studentReportSnapshots
+        .filter(
+          (row) =>
+            !filters.academicStructureId ||
+            sameId(row.academicStructureId, filters.academicStructureId),
+        )
+        .map((row) => idOf(row.academicPeriodId))
+        .filter(Boolean),
+    );
+
+    const rows = academicPeriods
+      .filter((row) => {
+        if (row.isDeleted) return false;
+        if (
+          filters.academicStructureId &&
+          !sameId(row.academicStructureId, filters.academicStructureId)
+        )
+          return false;
+        return row.active !== false || idsFromSnapshots.has(idOf(row.id));
+      })
+      .sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+
+    if (rows.length) return rows;
+
+    return Array.from(idsFromSnapshots).map(
+      (id, index) =>
+        ({
+          id,
+          name: `Academic Period ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          academicStructureId: filters.academicStructureId || 0,
+          order: index + 1,
+          active: true,
+        }) as AcademicPeriod,
+    );
+  }, [
+    academicPeriods,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
+
+  const optionClasses = useMemo(() => {
+    const idsFromSnapshots = new Set(
+      studentReportSnapshots
+        .filter((row) => {
+          if (
+            filters.academicStructureId &&
+            !sameId(row.academicStructureId, filters.academicStructureId)
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            !sameId(row.academicPeriodId, filters.academicPeriodId)
+          )
+            return false;
+          return true;
+        })
+        .map((row) => idOf(row.classId))
+        .filter(Boolean),
+    );
+
+    const rows = classes.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.active !== false || idsFromSnapshots.has(idOf(row.id))),
+    );
+    if (rows.length) return rows;
+
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          name: `Class ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          active: true,
+        }) as Class,
+    );
+  }, [
+    classes,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
+
+  const optionStudents = useMemo(() => {
+    const idsFromSnapshots = new Set(
+      studentReportSnapshots
+        .filter((row) => {
+          if (
+            filters.academicStructureId &&
+            !sameId(row.academicStructureId, filters.academicStructureId)
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            !sameId(row.academicPeriodId, filters.academicPeriodId)
+          )
+            return false;
+          if (filters.classId && !sameId(row.classId, filters.classId))
+            return false;
+          return true;
+        })
+        .map((row) => idOf(row.studentId))
+        .filter(Boolean),
+    );
+
+    const rows = quickStudents.filter(
+      (row) =>
+        !row.isDeleted &&
+        (row.status !== "withdrawn" || idsFromSnapshots.has(idOf(row.id))),
+    );
+    if (rows.length) return rows;
+
+    return Array.from(idsFromSnapshots).map(
+      (id) =>
+        ({
+          id,
+          fullName: `Student ${id}`,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          status: "active",
+        }) as Student,
+    );
+  }, [
+    quickStudents,
+    studentReportSnapshots,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    filters.classId,
+    schoolId,
+    branchId,
+    accountId,
+  ]);
+
+  const optionSubjects = useMemo(() => {
+    if (subjects.length) return subjects;
+
+    const subjectMap = new Map<number, Subject>();
+
+    studentReportSnapshots.forEach((snapshot) => {
+      const reportData: any = snapshot.reportData || {};
+      const report =
+        reportData.report ||
+        reportData.studentReport ||
+        reportData.computedReport ||
+        reportData.computedStudentReport ||
+        reportData;
+
+      const possibleSubjects =
+        report.subjectResults ||
+        report.subjects ||
+        report.reportItems ||
+        reportData.subjectResults ||
+        reportData.subjects ||
+        reportData.reportItems ||
+        [];
+
+      if (!Array.isArray(possibleSubjects)) return;
+
+      possibleSubjects.forEach((subject: any) => {
+        const id = idOf(subject.subjectId || subject.id);
+        if (!id || subjectMap.has(id)) return;
+
+        subjectMap.set(id, {
+          id,
+          name:
+            subject.subjectName ||
+            subject.name ||
+            subject.title ||
+            subject.shortName ||
+            `Subject ${id}`,
+          code: subject.subjectCode || subject.code,
+          schoolId,
+          branchId,
+          accountId: accountId || undefined,
+          active: true,
+        } as Subject);
+      });
+    });
+
+    return Array.from(subjectMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [subjects, studentReportSnapshots, schoolId, branchId, accountId]);
+
+  const selectedStructureName = labelOf(
+    optionAcademicStructures,
+    filters.academicStructureId,
+  );
+  const selectedPeriodName = labelOf(
+    optionAcademicPeriods,
+    filters.academicPeriodId,
+  );
+  const selectedStudentName = labelOf(optionStudents, filters.studentId);
+  const selectedClassName = labelOf(optionClasses, filters.classId);
+  const selectedSubjectName = labelOf(optionSubjects, filters.subjectId);
+  const modeLabel =
+    modeLabels[filters.mode] || filters.mode.replaceAll("-", " ");
+
+  const printCurrent = () => {
+    applyCumulativePrintStyles(
+      "cumulative-report-print-zone",
+      printOrientationForMode(filters.mode),
+    );
+    setTimeout(() => window.print(), 120);
   };
 
-  const remove = async (item: CurriculumSubjectView) => {
-    const id = idOf((item.row as any).id);
-    if (!id) return;
-
-    const warning = item.totalUsage
-      ? `"${item.subjectName}" is used by ${item.classSubjectCount} class subject(s) and ${item.prerequisiteCount} prerequisite rule(s). Delete anyway?`
-      : `Delete "${item.subjectName}" from ${item.curriculumName}?`;
-
-    if (!window.confirm(warning)) return;
-
-    await softDeleteLocal("curriculumSubjects", Number(id));
-    setSelectedItem(null);
-    showToast("success", "Curriculum subject rule deleted.");
-    await load();
-  };
-
-  if (loading || accountLoading || settingsLoading || contextLoading) {
+  if (accountLoading || contextLoading || settingsLoading || loading) {
     return (
       <State
         primary={primary}
-        title="Opening Curriculum Subjects..."
-        text="Checking curriculum rules, curriculums, pathways, subjects, organizations, class links, and prerequisites."
+        title="Opening Cumulative Records..."
+        text="Checking account, branch, snapshots, promotions and historical academic records."
       />
     );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing curriculum subject rules." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing cumulative records."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page cumulative-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
-          <p>Curriculum subject rules belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
-            Go to Account Setup
+          <p>
+            Cumulative records are generated inside one active school branch.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/owner")}
+          >
+            Go to Owner Setup
           </button>
         </section>
       </main>
@@ -720,183 +2602,255 @@ export default function CurriculumSubjects() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page cumulative-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {toast && (
-        <section className={`ba-toast ${toast.tone}`}>
-          {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
-            ✕
-          </button>
-        </section>
-      )}
-
-      <section className="ba-search-card" aria-label="Curriculum subject search and actions">
+      <section
+        className="ba-search-card report-no-print"
+        aria-label="Cumulative records search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search curriculum subjects..."
-            aria-label="Search curriculum subjects"
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search cumulative records..."
+            aria-label="Search cumulative records"
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add curriculum subject rule">
-          +
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={printCurrent}
+          aria-label="Print cumulative record"
+          title="Print"
+        >
+          ⎙
         </button>
 
         <button
           type="button"
           className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
           onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
+          aria-label="Open cumulative filters"
           title="Filters"
         >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {filterCurriculumId !== "all" && (
-            <button type="button" onClick={() => setFilterCurriculumId("all")}>
-              Curriculum: {(curriculumMap.get(idOf(filterCurriculumId)) as any)?.name || filterCurriculumId} ×
+        <section
+          className="ba-filter-chips report-no-print"
+          aria-label="Active cumulative filters"
+        >
+          {String(filters.mode) !== "student-transcript" && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  mode: "student-transcript",
+                }))
+              }
+            >
+              Mode: {modeLabel} ×
             </button>
           )}
-          {filterPathwayId !== "all" && (
-            <button type="button" onClick={() => setFilterPathwayId("all")}>
-              Pathway: {(pathwayMap.get(idOf(filterPathwayId)) as any)?.name || filterPathwayId} ×
+          {filters.academicStructureId && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicStructureId: undefined,
+                }))
+              }
+            >
+              Structure: {selectedStructureName} ×
             </button>
           )}
-          {filterOrganizationId !== "all" && (
-            <button type="button" onClick={() => setFilterOrganizationId("all")}>
-              Organization: {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name || filterOrganizationId} ×
+          {filters.academicPeriodId && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicPeriodId: undefined,
+                }))
+              }
+            >
+              Period: {selectedPeriodName} ×
             </button>
           )}
-          {filterType !== "all" && (
-            <button type="button" onClick={() => setFilterType("all")}>
-              Type: {typeLabel(filterType)} ×
+          {filters.classId && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  classId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
+              Class: {selectedClassName} ×
             </button>
           )}
-          {filterStatus !== "all" && (
-            <button type="button" onClick={() => setFilterStatus("all")}>
-              Status: {filterStatus} ×
+          {filters.studentId && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  studentId: undefined,
+                }))
+              }
+            >
+              Student: {selectedStudentName} ×
+            </button>
+          )}
+          {filters.subjectId && (
+            <button
+              type="button"
+              onClick={() =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  subjectId: undefined,
+                }))
+              }
+            >
+              Subject: {selectedSubjectName} ×
             </button>
           )}
         </section>
       )}
 
-      {viewMode === "summary" && (
-        <section className="ba-analysis-grid">
-          <AnalysisCard title="Rules by Curriculum" rows={countsByCurriculum} total={summary.total} />
-          <AnalysisCard title="Rules by Type" rows={countsByType} total={summary.total} />
-          <AnalysisCard title="Rules by Pathway" rows={countsByPathway} total={summary.total} />
-          <AnalysisCard title="Rules by Organization" rows={countsByOrganization} total={summary.total} />
-          <article className="ba-analysis ba-current-filter">
-            <span>Current Filter</span>
-            <strong>{summary.showing}</strong>
-            <p>Curriculum subject rule(s) currently match your search and filter conditions.</p>
-          </article>
-        </section>
-      )}
+      <section className="ba-print-card">
+        <div className="ba-print-head report-no-print">
+          <div>
+            <strong>{modeLabel}</strong>
+            <p>
+              {selectedStructureName} · {selectedPeriodName}
+              {filters.studentId ? ` · ${selectedStudentName}` : ""}
+            </p>
+          </div>
 
-      {viewMode === "table" && (
-        <TableView rows={filteredRows} openEdit={openEdit} toggleActive={toggleActive} remove={remove} />
-      )}
+          <div className="ba-report-toolbar">
+            <div
+              className="ba-output-switch"
+              role="group"
+              aria-label="Choose cumulative record output"
+            >
+              <button
+                type="button"
+                className={filters.mode === "student-transcript" ? "active" : ""}
+                onClick={() =>
+                  setBranchLockedFilters((prev) => ({
+                    ...prev,
+                    mode: "student-transcript",
+                  }))
+                }
+                title="View cumulative transcript"
+              >
+                Transcript
+              </button>
+              <button
+                type="button"
+                className={String(filters.mode) === "cumulative-book" ? "active" : ""}
+                onClick={() =>
+                  setBranchLockedFilters((prev) => ({
+                    ...prev,
+                    mode: "cumulative-book" as any,
+                  }))
+                }
+                title="View cumulative report book"
+              >
+                Book
+              </button>
+            </div>
 
-      {viewMode === "cards" && (
-        <section className="ba-list">
-          {filteredRows.map((item) => (
-            <CurriculumSubjectListItem
-              key={String(item.id)}
-              item={item}
-              primary={primary}
-              onOpen={() => setSelectedItem(item)}
-            />
-          ))}
+            <button type="button" className="primary" onClick={printCurrent}>
+              Print
+            </button>
+          </div>
+        </div>
 
-          {!filteredRows.length && (
-            <Empty
-              icon="📖"
-              title="No curriculum subject rules found"
-              text="Attach subjects to curriculums and pathways before assigning them to real class delivery."
-            />
-          )}
-        </section>
-      )}
+        <div className="report-screen-scroll ba-print-zone">
+          <div id="cumulative-report-print-zone">{renderActiveView()}</div>
+        </div>
+      </section>
 
       {filterOpen && (
         <FilterSheet
-          curriculums={curriculums}
-          pathways={pathways}
-          organizations={organizations}
-          filterCurriculumId={filterCurriculumId}
-          filterPathwayId={filterPathwayId}
-          filterOrganizationId={filterOrganizationId}
-          filterType={filterType}
-          filterStatus={filterStatus}
-          setFilterCurriculumId={setFilterCurriculumId}
-          setFilterPathwayId={setFilterPathwayId}
-          setFilterOrganizationId={setFilterOrganizationId}
-          setFilterType={setFilterType}
-          setFilterStatus={setFilterStatus}
-          clearFilters={clearFilters}
+          filters={filters}
+          setBranchLockedFilters={setBranchLockedFilters}
+          academicStructures={optionAcademicStructures}
+          academicPeriods={optionAcademicPeriods}
+          classes={optionClasses}
+          students={optionStudents}
+          subjects={optionSubjects}
           onClose={() => setFilterOpen(false)}
         />
       )}
 
       {moreOpen && (
         <MoreSheet
-          viewMode={viewMode}
-          setViewMode={(mode) => {
-            setViewMode(mode);
+          mode={filters.mode}
+          setMode={(mode) => {
+            setBranchLockedFilters((prev) => ({
+              ...prev,
+              mode: mode as any,
+            }));
             setMoreOpen(false);
           }}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
           }}
+          onPrint={() => {
+            setMoreOpen(false);
+            printCurrent();
+          }}
           onClose={() => setMoreOpen(false)}
-        />
-      )}
-
-      {selectedItem && (
-        <ActionSheet
-          item={selectedItem}
-          openEdit={openEdit}
-          toggleActive={toggleActive}
-          remove={remove}
-          onClose={() => setSelectedItem(null)}
-        />
-      )}
-
-      {modalOpen && (
-        <CurriculumSubjectModal
-          form={form}
-          saving={saving}
-          curriculums={curriculums}
-          subjects={subjects}
-          pathways={filteredPathwaysForForm}
-          organizations={organizations}
-          updateForm={updateForm}
-          setModalOpen={setModalOpen}
-          save={save}
         />
       )}
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+// ======================================================
+// GOLDEN SMALL COMPONENTS
+// ======================================================
+
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page cumulative-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -904,40 +2858,6 @@ function State({ primary, title, text }: { primary: string; title: string; text:
         <p>{text}</p>
       </section>
     </main>
-  );
-}
-
-function CurriculumSubjectListItem({
-  item,
-  primary,
-  onOpen,
-}: {
-  item: CurriculumSubjectView;
-  primary: string;
-  onOpen: () => void;
-}) {
-  const row: any = item.row;
-
-  return (
-    <button type="button" className="student-row curriculum-row" onClick={onOpen}>
-      <Avatar name={item.subjectName} primary={primary} />
-
-      <span className="curriculum-main">
-        <strong>{item.subjectName}</strong>
-        <small>
-          {item.curriculumName}
-          {item.subjectCode ? ` · ${item.subjectCode}` : ""}
-        </small>
-        <em>
-          {typeLabel(row.type)} · {item.pathwayName} · {item.totalUsage} linked
-        </em>
-      </span>
-
-      <span className="curriculum-side">
-        <span className={`status-dot-mini ${item.active ? "green" : "gray"}`} title={item.active ? "Active" : "Inactive"} />
-        <i>⋯</i>
-      </span>
-    </button>
   );
 }
 
@@ -955,45 +2875,49 @@ function SliderIcon() {
 }
 
 function FilterSheet({
-  curriculums,
-  pathways,
-  organizations,
-  filterCurriculumId,
-  filterPathwayId,
-  filterOrganizationId,
-  filterType,
-  filterStatus,
-  setFilterCurriculumId,
-  setFilterPathwayId,
-  setFilterOrganizationId,
-  setFilterType,
-  setFilterStatus,
-  clearFilters,
+  filters,
+  setBranchLockedFilters,
+  academicStructures,
+  academicPeriods,
+  classes,
+  students,
+  subjects,
   onClose,
 }: {
-  curriculums: Curriculum[];
-  pathways: CurriculumPathway[];
-  organizations: Organization[];
-  filterCurriculumId: string;
-  filterPathwayId: string;
-  filterOrganizationId: string;
-  filterType: "all" | CurriculumSubjectType;
-  filterStatus: "all" | "active" | "inactive";
-  setFilterCurriculumId: (value: string) => void;
-  setFilterPathwayId: (value: string) => void;
-  setFilterOrganizationId: (value: string) => void;
-  setFilterType: (value: "all" | CurriculumSubjectType) => void;
-  setFilterStatus: (value: "all" | "active" | "inactive") => void;
-  clearFilters: () => void;
+  filters: CumulativeReportFiltersState;
+  setBranchLockedFilters: React.Dispatch<
+    React.SetStateAction<CumulativeReportFiltersState>
+  >;
+  academicStructures: AcademicStructure[];
+  academicPeriods: AcademicPeriod[];
+  classes: Class[];
+  students: Student[];
+  subjects: Subject[];
   onClose: () => void;
 }) {
+  const periodOptions = academicPeriods.filter((period) => {
+    if (!filters.academicStructureId) return true;
+    return period.academicStructureId === filters.academicStructureId;
+  });
+
+  const studentOptions = students.filter((student) => {
+    if (!filters.classId) return true;
+    return student.currentClassId === filters.classId;
+  });
+
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose only what you need. The list updates after applying.</p>
+            <p>
+              Choose the cumulative record scope. School and branch stay locked.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1002,63 +2926,329 @@ function FilterSheet({
 
         <div className="ba-form compact">
           <label>
-            <span>Curriculum</span>
-            <select value={filterCurriculumId} onChange={(e) => setFilterCurriculumId(e.target.value)}>
-              <option value="all">All curriculums</option>
-              {curriculums.map((r: any) => (
-                <option key={String(r.id)} value={String(r.id)}>
-                  {r.name || r.title || `Curriculum ${r.id}`}
+            <span>Academic Structure</span>
+            <select
+              value={filters.academicStructureId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicStructureId: Number(event.target.value) || undefined,
+                  academicPeriodId: undefined,
+                  fromAcademicPeriodId: undefined,
+                  toAcademicPeriodId: undefined,
+                  classId: undefined,
+                  studentId: undefined,
+                  subjectId: undefined,
+                }))
+              }
+            >
+              <option value="">All structures</option>
+              {academicStructures.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            <span>Pathway</span>
-            <select value={filterPathwayId} onChange={(e) => setFilterPathwayId(e.target.value)}>
-              <option value="all">All pathways</option>
-              {pathways.map((r: any) => (
-                <option key={String(r.id)} value={String(r.id)}>
-                  {r.name || `Pathway ${r.id}`}
+            <span>Academic Period</span>
+            <select
+              value={filters.academicPeriodId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  academicPeriodId: Number(event.target.value) || undefined,
+                  classId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
+              <option value="">All periods</option>
+              {periodOptions.map((period) => (
+                <option key={period.id} value={period.id}>
+                  {period.name}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            <span>Organization</span>
-            <select value={filterOrganizationId} onChange={(e) => setFilterOrganizationId(e.target.value)}>
-              <option value="all">All organizations</option>
-              {organizations.map((r: any) => (
-                <option key={String(r.id)} value={String(r.id)}>
-                  {r.name || `Organization ${r.id}`}
+            <span>From Period</span>
+            <select
+              value={filters.fromAcademicPeriodId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  fromAcademicPeriodId: Number(event.target.value) || undefined,
+                }))
+              }
+            >
+              <option value="">No start period</option>
+              {periodOptions.map((period) => (
+                <option key={period.id} value={period.id}>
+                  {period.name}
                 </option>
               ))}
             </select>
           </label>
 
           <label>
-            <span>Type</span>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value as "all" | CurriculumSubjectType)}>
-              <option value="all">All types</option>
-              <option value="core">Core</option>
-              <option value="elective">Elective</option>
-              <option value="optional">Optional</option>
+            <span>To Period</span>
+            <select
+              value={filters.toAcademicPeriodId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  toAcademicPeriodId: Number(event.target.value) || undefined,
+                }))
+              }
+            >
+              <option value="">No end period</option>
+              {periodOptions.map((period) => (
+                <option key={period.id} value={period.id}>
+                  {period.name}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
-            <span>Status</span>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as "all" | "active" | "inactive")}>
-              <option value="all">All status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive/Archived</option>
+            <span>Class</span>
+            <select
+              value={filters.classId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  classId: Number(event.target.value) || undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
+              <option value="">All classes</option>
+              {classes.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Student</span>
+            <select
+              value={filters.studentId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  studentId: Number(event.target.value) || undefined,
+                }))
+              }
+            >
+              <option value="">Select student</option>
+              {studentOptions.map((student) => (
+                <option key={student.id} value={student.id}>
+                  {student.fullName}
+                  {student.admissionNumber
+                    ? ` (${student.admissionNumber})`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Subject</span>
+            <select
+              value={filters.subjectId || ""}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  subjectId: Number(event.target.value) || undefined,
+                }))
+              }
+            >
+              <option value="">Select subject</option>
+              {subjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>
+                  {subject.name}
+                  {subject.code ? ` (${subject.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Snapshot Type</span>
+            <select
+              value={filters.snapshotType}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  snapshotType: event.target
+                    .value as CumulativeReportFiltersState["snapshotType"],
+                }))
+              }
+            >
+              <option value="all">All snapshots</option>
+              <option value="terminal">Terminal snapshots</option>
+              <option value="promotion">Promotion snapshots</option>
+              <option value="manual">Manual snapshots</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Decision</span>
+            <select
+              value={filters.decision || "all"}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  decision: event.target
+                    .value as CumulativeReportFiltersState["decision"],
+                }))
+              }
+            >
+              <option value="all">All decisions</option>
+              <option value="promote">Promote</option>
+              <option value="repeat">Repeat</option>
+              <option value="graduate">Graduate</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Sort Mode</span>
+            <select
+              value={filters.sortMode}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  sortMode: event.target
+                    .value as CumulativeReportFiltersState["sortMode"],
+                }))
+              }
+            >
+              <option value="position">Sort by position</option>
+              <option value="alphabetical">Sort alphabetically</option>
+              <option value="average">Sort by average</option>
+              <option value="admission-number">Sort by admission no.</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Grouping</span>
+            <select
+              value={filters.groupingMode}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  groupingMode: event.target
+                    .value as CumulativeReportFiltersState["groupingMode"],
+                }))
+              }
+            >
+              <option value="academic-structure">Academic structure</option>
+              <option value="class">Class</option>
+              <option value="period">Period</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Subject Aggregation</span>
+            <select
+              value={filters.subjectAggregationMode}
+              onChange={(event) =>
+                setBranchLockedFilters((prev) => ({
+                  ...prev,
+                  subjectAggregationMode: event.target
+                    .value as CumulativeReportFiltersState["subjectAggregationMode"],
+                }))
+              }
+            >
+              <option value="average">Average</option>
+              <option value="latest">Latest score</option>
+              <option value="best">Best score</option>
+              <option value="weighted-average">Weighted average</option>
             </select>
           </label>
         </div>
 
+        <div className="cumulative-toggle-grid">
+          <button
+            type="button"
+            className={filters.includeTerminalSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeTerminalSnapshots: !prev.includeTerminalSnapshots,
+              }))
+            }
+          >
+            Terminal: {filters.includeTerminalSnapshots ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            className={filters.includePromotionRecords ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includePromotionRecords: !prev.includePromotionRecords,
+              }))
+            }
+          >
+            Promotions: {filters.includePromotionRecords ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            className={filters.includeManualSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeManualSnapshots: !prev.includeManualSnapshots,
+              }))
+            }
+          >
+            Manual: {filters.includeManualSnapshots ? "On" : "Off"}
+          </button>
+          <button
+            type="button"
+            className={filters.includeDeletedSnapshots ? "active" : ""}
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                includeDeletedSnapshots: !prev.includeDeletedSnapshots,
+              }))
+            }
+          >
+            Deleted: {filters.includeDeletedSnapshots ? "On" : "Off"}
+          </button>
+        </div>
+
         <div className="ba-sheet-actions">
-          <button type="button" onClick={clearFilters}>
+          <button
+            type="button"
+            onClick={() =>
+              setBranchLockedFilters((prev) => ({
+                ...prev,
+                academicStructureId: undefined,
+                academicPeriodId: undefined,
+                fromAcademicPeriodId: undefined,
+                toAcademicPeriodId: undefined,
+                classId: undefined,
+                studentId: undefined,
+                subjectId: undefined,
+                snapshotType: "all",
+                decision: "all",
+                sortMode: "position",
+                groupingMode: "academic-structure",
+                subjectAggregationMode: "average",
+                includePromotionRecords: true,
+                includeManualSnapshots: true,
+                includeTerminalSnapshots: true,
+                includeDeletedSnapshots: false,
+              }))
+            }
+          >
             Clear
           </button>
           <button type="button" className="primary" onClick={onClose}>
@@ -1071,23 +3261,79 @@ function FilterSheet({
 }
 
 function MoreSheet({
-  viewMode,
-  setViewMode,
+  mode,
+  setMode,
   onRefresh,
+  onPrint,
   onClose,
 }: {
-  viewMode: ViewMode;
-  setViewMode: (mode: ViewMode) => void;
+  mode: CumulativeReportFiltersState["mode"] | string;
+  setMode: (mode: CumulativeReportFiltersState["mode"] | string) => void;
   onRefresh: () => void | Promise<void>;
+  onPrint: () => void;
   onClose: () => void;
 }) {
+  const options: {
+    mode: CumulativeReportFiltersState["mode"] | string;
+    icon: string;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      mode: "student-transcript",
+      icon: "📄",
+      label: "Cumulative Transcript",
+      note: "Template-based academic transcript",
+    },
+    {
+      mode: "cumulative-book",
+      icon: "📘",
+      label: "Cumulative Report Book",
+      note: "Covers plus period report cards",
+    },
+    {
+      mode: "multi-period-report",
+      icon: "📚",
+      label: "Multi-Period Report",
+      note: "Student performance across periods",
+    },
+    {
+      mode: "annual-broadsheet",
+      icon: "☷",
+      label: "Annual Broadsheet",
+      note: "Class or school annual broadsheet",
+    },
+    {
+      mode: "subject-history",
+      icon: "📈",
+      label: "Subject History",
+      note: "Longitudinal subject analytics",
+    },
+    {
+      mode: "promotion-summary",
+      icon: "🎓",
+      label: "Promotion Summary",
+      note: "Promotion decision summary",
+    },
+    {
+      mode: "progression-timeline",
+      icon: "⏱",
+      label: "Progression Timeline",
+      note: "Student academic timeline",
+    },
+  ];
+
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
             <h2>More</h2>
-            <p>Advanced views are here so the main page stays simple.</p>
+            <p>Choose output mode or run quick actions.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close menu">
             ✕
@@ -1095,28 +3341,29 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
-            <span>☰</span>
-            <b>List view</b>
-            <small>Compact curriculum subject rules</small>
-          </button>
+          {options.map((option) => (
+            <button
+              key={option.mode}
+              type="button"
+              className={mode === option.mode ? "active" : ""}
+              onClick={() => setMode(option.mode)}
+            >
+              <span>{option.icon}</span>
+              <b>{option.label}</b>
+              <small>{option.note}</small>
+            </button>
+          ))}
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
-            <span>☷</span>
-            <b>Table view</b>
-            <small>Dense records for laptop work</small>
-          </button>
-
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
-            <span>◔</span>
-            <b>Analytics</b>
-            <small>Curriculum, pathway, type and organization summaries</small>
+          <button type="button" onClick={onPrint}>
+            <span>⎙</span>
+            <b>Print current view</b>
+            <small>Print the selected cumulative output</small>
           </button>
 
           <button type="button" onClick={onRefresh}>
             <span>↻</span>
             <b>Refresh</b>
-            <small>Reload local branch records</small>
+            <small>Reload branch cumulative records</small>
           </button>
         </div>
       </section>
@@ -1124,352 +3371,38 @@ function MoreSheet({
   );
 }
 
-function ActionSheet({
-  item,
-  openEdit,
-  toggleActive,
-  remove,
-  onClose,
+function PrintFooter({
+  primary,
+  schoolName,
+  label,
 }: {
-  item: CurriculumSubjectView;
-  openEdit: (item: CurriculumSubjectView) => void;
-  toggleActive: (item: CurriculumSubjectView) => void;
-  remove: (item: CurriculumSubjectView) => void;
-  onClose: () => void;
+  primary: string;
+  schoolName: string;
+  label: string;
 }) {
-  const row: any = item.row;
-
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
-        <div className="ba-sheet-profile">
-          <div>
-            <h2>{item.subjectName}</h2>
-            <p>
-              {item.curriculumName} · {typeLabel(row.type)}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close curriculum subject actions">
-            ✕
-          </button>
-        </div>
-
-        <div className="student-detail-strip">
-          <span>
-            <b>Pathway</b>
-            {item.pathwayName}
-          </span>
-          <span>
-            <b>Class Links</b>
-            {item.classSubjectCount}
-          </span>
-          <span>
-            <b>Prereq</b>
-            {item.prerequisiteCount}
-          </span>
-        </div>
-
-        <div className="ba-menu-list">
-          <button type="button" onClick={() => openEdit(item)}>
-            <span>✎</span>
-            <b>Edit rule</b>
-            <small>Update curriculum, subject, credits, hours and order</small>
-          </button>
-
-          <button type="button" onClick={() => toggleActive(item)}>
-            <span>{item.active ? "⏸" : "✓"}</span>
-            <b>{item.active ? "Deactivate" : "Activate"}</b>
-            <small>{item.active ? "Pause this curriculum subject rule" : "Mark this rule as active"}</small>
-          </button>
-
-          <button type="button" className="danger" onClick={() => remove(item)}>
-            <span>⌫</span>
-            <b>Delete</b>
-            <small>Soft delete this curriculum subject rule locally</small>
-          </button>
-        </div>
-      </section>
+    <div
+      style={{
+        marginTop: 10,
+        borderTop: `2px solid ${primary}`,
+        paddingTop: 5,
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: 8.5,
+        color: "#555",
+      }}
+    >
+      <span>
+        {label} generated for {schoolName}
+      </span>
+      <span>Powered by Eleeveon School Management System</span>
     </div>
   );
 }
 
-function TableView({
-  rows,
-  openEdit,
-  toggleActive,
-  remove,
-}: {
-  rows: CurriculumSubjectView[];
-  openEdit: (item: CurriculumSubjectView) => void;
-  toggleActive: (item: CurriculumSubjectView) => void;
-  remove: (item: CurriculumSubjectView) => void;
-}) {
-  return (
-    <section className="ba-table-card">
-      <div className="ba-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Rules ({rows.length})</th>
-              <th>Curriculum</th>
-              <th>Pathway</th>
-              <th>Organization</th>
-              <th>Type</th>
-              <th>Credits</th>
-              <th>Hours</th>
-              <th>Pass</th>
-              <th>Usage</th>
-              <th>Status</th>
-              <th>Updated</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((item) => {
-              const row: any = item.row;
-
-              return (
-                <tr key={String(item.id)}>
-                  <td>
-                    <strong>{item.subjectName}</strong>
-                    <span>{item.subjectCode || "No code"}</span>
-                  </td>
-                  <td>{item.curriculumName}</td>
-                  <td>{item.pathwayName}</td>
-                  <td>{item.organizationName}</td>
-                  <td>
-                    <Chip tone={typeTone(row.type)}>{typeLabel(row.type)}</Chip>
-                  </td>
-                  <td>{row.credits ?? "—"}</td>
-                  <td>{row.contactHours ?? "—"}</td>
-                  <td>{row.minimumPassScore ?? "—"}</td>
-                  <td>
-                    {item.classSubjectCount} class · {item.prerequisiteCount} prereq
-                  </td>
-                  <td>
-                    <Chip tone={item.active ? "green" : "gray"}>{item.active ? "Active" : "Inactive"}</Chip>
-                  </td>
-                  <td>{timeText(row.updatedAt || row.createdAt)}</td>
-                  <td>
-                    <div className="ba-table-actions">
-                      <button type="button" onClick={() => openEdit(item)}>
-                        Edit
-                      </button>
-                      <button type="button" onClick={() => toggleActive(item)}>
-                        {item.active ? "Deactivate" : "Activate"}
-                      </button>
-                      <button type="button" className="ba-delete" onClick={() => remove(item)}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {!rows.length && <div className="ba-empty-table">No curriculum subject rule matches your filters.</div>}
-      </div>
-    </section>
-  );
-}
-
-function CurriculumSubjectModal({
-  form,
-  saving,
-  curriculums,
-  subjects,
-  pathways,
-  organizations,
-  updateForm,
-  setModalOpen,
-  save,
-}: {
-  form: FormState;
-  saving: boolean;
-  curriculums: Curriculum[];
-  subjects: Subject[];
-  pathways: CurriculumPathway[];
-  organizations: Organization[];
-  updateForm: (patch: Partial<FormState>) => void;
-  setModalOpen: (open: boolean) => void;
-  save: (event?: React.FormEvent) => void;
-}) {
-  return (
-    <div className="ba-modal-backdrop">
-      <form className="ba-modal" onSubmit={save}>
-        <div className="ba-modal-head">
-          <div>
-            <h2>{form.id ? "Edit Subject Rule" : "New Subject Rule"}</h2>
-            <p>Define the curriculum rule before delivering the subject inside a real class.</p>
-          </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close subject rule form">
-            ✕
-          </button>
-        </div>
-
-        <section className="ba-form-section">
-          <h3>Rule Identity</h3>
-          <div className="ba-form">
-            <label>
-              <span>Curriculum</span>
-              <select value={form.curriculumId} onChange={(e) => updateForm({ curriculumId: e.target.value, pathwayId: "" })}>
-                <option value="">Select curriculum</option>
-                {curriculums.map((r: any) => (
-                  <option key={String(r.id)} value={String(r.id)}>
-                    {r.name || r.title || `Curriculum ${r.id}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Subject</span>
-              <select value={form.subjectId} onChange={(e) => updateForm({ subjectId: e.target.value })}>
-                <option value="">Select subject</option>
-                {subjects.map((r: any) => (
-                  <option key={String(r.id)} value={String(r.id)}>
-                    {r.name || r.title || `Subject ${r.id}`}
-                    {r.code ? ` · ${r.code}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Pathway</span>
-              <select value={form.pathwayId} onChange={(e) => updateForm({ pathwayId: e.target.value })}>
-                <option value="">No pathway</option>
-                {pathways.map((r: any) => (
-                  <option key={String(r.id)} value={String(r.id)}>
-                    {r.name || `Pathway ${r.id}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Organization / Department</span>
-              <select value={form.organizationId} onChange={(e) => updateForm({ organizationId: e.target.value })}>
-                <option value="">No organization</option>
-                {organizations.map((r: any) => (
-                  <option key={String(r.id)} value={String(r.id)}>
-                    {r.name || `Organization ${r.id}`}
-                    {r.type ? ` · ${r.type}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              <span>Subject Type</span>
-              <select value={form.type} onChange={(e) => updateForm({ type: e.target.value as CurriculumSubjectType })}>
-                <option value="core">Core</option>
-                <option value="elective">Elective</option>
-                <option value="optional">Optional</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </label>
-          </div>
-        </section>
-
-        <section className="ba-form-section">
-          <h3>Academic Rules</h3>
-          <div className="ba-form">
-            <label>
-              <span>Credits</span>
-              <input type="number" value={form.credits} onChange={(e) => updateForm({ credits: e.target.value })} placeholder="Optional" />
-            </label>
-
-            <label>
-              <span>Contact Hours</span>
-              <input
-                type="number"
-                value={form.contactHours}
-                onChange={(e) => updateForm({ contactHours: e.target.value })}
-                placeholder="Optional"
-              />
-            </label>
-
-            <label>
-              <span>Minimum Pass Score</span>
-              <input
-                type="number"
-                value={form.minimumPassScore}
-                onChange={(e) => updateForm({ minimumPassScore: e.target.value })}
-                placeholder="Optional"
-              />
-            </label>
-
-            <label>
-              <span>Order Index</span>
-              <input type="number" value={form.orderIndex} onChange={(e) => updateForm({ orderIndex: e.target.value })} placeholder="Optional" />
-            </label>
-          </div>
-        </section>
-
-        <div className="ba-modal-actions">
-          <button type="button" onClick={() => setModalOpen(false)}>
-            Cancel
-          </button>
-          <button type="submit" disabled={saving}>
-            {saving ? "Saving..." : form.id ? "Save Changes" : "Create Subject Rule"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function groupedCounts(rows: CurriculumSubjectView[], keyFn: (item: CurriculumSubjectView) => string) {
-  const m = new Map<string, number>();
-  rows.forEach((r) => {
-    const k = keyFn(r) || "Unknown";
-    m.set(k, (m.get(k) || 0) + 1);
-  });
-
-  return Array.from(m.entries())
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
-}
-
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
-  return (
-    <article className="ba-analysis">
-      <span>{title}</span>
-      <strong>{rows.reduce((s, r) => s + r.value, 0)}</strong>
-
-      <div className="ba-analysis-list">
-        {rows.slice(0, 8).map((row) => {
-          const share = total ? Math.round((row.value / total) * 100) : 0;
-          return (
-            <section key={row.label}>
-              <div>
-                <b>{row.label}</b>
-                <small>
-                  {row.value} · {share}%
-                </small>
-              </div>
-              <div className="ba-progress">
-                <i style={{ width: `${Math.max(4, share)}%` }} />
-              </div>
-            </section>
-          );
-        })}
-
-        {!rows.length && <p>No data available.</p>}
-      </div>
-    </article>
-  );
-}
+// ======================================================
+// CSS
+// ======================================================
 
 const css = `
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1659,7 +3592,7 @@ const css = `
 
 .ba-search-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 42px);
   gap: 8px;
   align-items: center;
   margin-top: 2px;
@@ -2527,7 +4460,7 @@ const css = `
   }
 
   .ba-search-card {
-    grid-template-columns: minmax(0,1fr) 48px 48px 48px;
+    grid-template-columns: minmax(0,1fr) repeat(3, 42px);
   }
 
   .ba-list {
@@ -2794,158 +4727,306 @@ const css = `
   }
 }
 
-.curriculum-row .ba-avatar { width: 44px; height: 44px; border-radius: 16px; }
-.curriculum-main { display: grid; gap: 2px; min-width: 0; }
-.curriculum-main strong,
-.curriculum-main small,
-.curriculum-main em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.curriculum-main strong { color: var(--text,#111827); font-size: 14px; font-weight: 1000; letter-spacing: -.02em; }
-.curriculum-main small { color: var(--muted,#64748b); font-size: 12px; font-weight: 850; font-style: normal; }
-.curriculum-main em { color: var(--muted,#64748b); font-size: 11px; font-weight: 750; font-style: normal; }
-.curriculum-side { display: inline-flex; align-items: center; gap: 8px; color: var(--muted,#64748b); }
-.curriculum-side i { font-style: normal; font-weight: 1000; }
-.ba-current-filter { min-height: 154px; }
+/* Student Reports golden additions */
+
+/* Extra compact report-only layout */
+.student-reports-page .ba-print-card{margin-top:8px;border-radius:22px}
+.student-reports-page .ba-print-head{padding:8px 10px}
+.student-reports-page .ba-print-head strong{font-size:14px}
+.student-reports-page .ba-print-head p{font-size:11px;margin-top:2px}
+.student-reports-page .ba-print-zone{padding:8px}
 
 
-
-/* ======================================================
-   GOLDEN THEME MODAL VISIBILITY FIX
-   ------------------------------------------------------
-   Keeps the More/List/Table/Summary modal readable in
-   dark mode, light mode, and custom branch themes.
-====================================================== */
-
-.ba-sheet,
-.ba-modal,
-.ba-drawer,
-.ba-panel {
-  color: var(--text, #111827);
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--primary-color, #2563eb) 8%, transparent), transparent 20rem),
-    var(--card-bg, var(--surface, #ffffff));
-  border-color: var(--border, rgba(0,0,0,.12));
+.student-reports-page .ba-list {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.ba-sheet-head,
-.ba-modal-head,
-.ba-drawer-head,
-.ba-panel-head {
-  color: var(--text, #111827);
+.ba-report-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ba-primary) 11%, transparent);
+  font-size: 18px;
+  color: var(--ba-primary);
 }
 
-.ba-sheet-head h2,
-.ba-modal-head h2,
-.ba-drawer-head h2,
-.ba-panel-head h2 {
-  color: var(--text, #111827);
+.ba-print-card {
+  margin-top: 10px;
+  background: var(--card-bg, var(--surface,#fff));
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  border-radius: 24px;
+  box-shadow: 0 12px 28px rgba(15,23,42,.045);
+  overflow: hidden;
 }
 
-.ba-sheet-head p,
-.ba-modal-head p,
-.ba-drawer-head p,
-.ba-panel-head p {
-  color: var(--muted, #64748b);
+.ba-print-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border, rgba(0,0,0,.08));
+  background: color-mix(in srgb, var(--muted,#64748b) 6%, transparent);
 }
 
-.ba-sheet-head button,
-.ba-modal-head button,
-.ba-drawer-head button,
-.ba-panel-head button,
-.ba-close,
-.ba-close-button {
-  color: var(--text, #111827) !important;
-  background: color-mix(in srgb, var(--card-bg, var(--surface, #ffffff)) 92%, var(--primary-color, #2563eb) 8%) !important;
-  border: 1px solid var(--border, rgba(0,0,0,.14)) !important;
-  box-shadow: 0 10px 24px rgba(15,23,42,.08);
+.ba-print-head span {
+  color: var(--muted,#64748b);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .08em;
 }
 
-.ba-sheet-head button:hover,
-.ba-modal-head button:hover,
-.ba-drawer-head button:hover,
-.ba-panel-head button:hover,
-.ba-close:hover,
-.ba-close-button:hover {
-  color: #ffffff !important;
-  background: var(--primary-color, #2563eb) !important;
-  border-color: var(--primary-color, #2563eb) !important;
+.ba-print-head strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text,#111827);
+  font-size: 15px;
+  font-weight: 1000;
+  letter-spacing: -.03em;
 }
 
-.ba-menu-list,
-.ba-view-list,
-.ba-more-list {
-  color: var(--text, #111827);
+.ba-print-head p {
+  margin: 3px 0 0;
+  color: var(--muted,#64748b);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
-.ba-menu-list button,
-.ba-view-list button,
-.ba-more-list button {
-  color: var(--text, #111827) !important;
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--card-bg, var(--surface, #ffffff)) 96%, var(--primary-color, #2563eb) 4%),
-      var(--card-bg, var(--surface, #ffffff))
-    ) !important;
-  border: 1px solid var(--border, rgba(0,0,0,.12)) !important;
-  box-shadow: 0 10px 24px rgba(15,23,42,.05);
+.ba-print-zone {
+  padding: 10px;
+  background: var(--card-bg, var(--surface,#fff));
 }
 
-.ba-menu-list button:hover,
-.ba-view-list button:hover,
-.ba-more-list button:hover {
-  background: color-mix(in srgb, var(--primary-color, #2563eb) 9%, var(--card-bg, var(--surface, #ffffff))) !important;
-  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 32%, var(--border, rgba(0,0,0,.12))) !important;
+.ba-report-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
 }
 
-.ba-menu-list button.active,
-.ba-view-list button.active,
-.ba-more-list button.active,
-.ba-menu-list button[aria-pressed="true"],
-.ba-view-list button[aria-pressed="true"],
-.ba-more-list button[aria-pressed="true"] {
-  color: var(--text, #111827) !important;
-  background: color-mix(in srgb, var(--primary-color, #2563eb) 13%, var(--card-bg, var(--surface, #ffffff))) !important;
-  border-color: color-mix(in srgb, var(--primary-color, #2563eb) 42%, var(--border, rgba(0,0,0,.12))) !important;
+.ba-report-toolbar button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--ba-primary) 10%, var(--card-bg,#fff));
+  color: var(--ba-primary);
+  font-size: 11px;
+  font-weight: 950;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.ba-menu-list button span,
-.ba-view-list button span,
-.ba-more-list button span {
-  color: var(--primary-color, #2563eb) !important;
-  background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent) !important;
+.ba-report-toolbar button.primary {
+  background: var(--ba-primary);
+  color: #fff;
 }
 
-.ba-menu-list button b,
-.ba-view-list button b,
-.ba-more-list button b,
-.ba-menu-list button strong,
-.ba-view-list button strong,
-.ba-more-list button strong {
-  color: var(--text, #111827) !important;
+.ba-output-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--card-bg, #fff);
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 32%, rgba(148, 163, 184, .28));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 16px rgba(15,23,42,.06);
 }
 
-.ba-menu-list button small,
-.ba-view-list button small,
-.ba-more-list button small,
-.ba-menu-list button em,
-.ba-view-list button em,
-.ba-more-list button em {
-  color: var(--muted, #64748b) !important;
+.ba-output-switch button {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ba-primary) 9%, var(--card-bg, #fff));
+  color: var(--ba-primary);
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 22%, transparent);
+  box-shadow: none;
+  opacity: 1;
 }
 
-.ba-sheet-actions button,
-.ba-modal-actions button,
-.ba-drawer-actions button {
-  color: var(--text, #111827);
-  background: color-mix(in srgb, var(--muted, #64748b) 8%, var(--card-bg, var(--surface, #ffffff)));
-  border-color: var(--border, rgba(0,0,0,.12));
+.ba-output-switch button:not(.active):hover {
+  background: color-mix(in srgb, var(--ba-primary) 14%, var(--card-bg, #fff));
 }
 
-.ba-sheet-actions button.primary,
-.ba-modal-actions button.primary,
-.ba-drawer-actions button.primary {
-  color: #ffffff;
-  background: var(--primary-color, #2563eb);
-  border-color: var(--primary-color, #2563eb);
+.ba-output-switch button.active {
+  background: var(--ba-primary);
+  color: #fff;
+  border-color: var(--ba-primary);
+  box-shadow: 0 6px 14px rgba(15,23,42,.14);
 }
+
+.report-analytics-card {
+  grid-column: 1 / -1;
+}
+
+.report-analytics-card > div {
+  margin-top: 10px;
+}
+
+@media (min-width: 680px) {
+  .student-reports-page .ba-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) {
+  .student-reports-page .ba-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1320px) {
+  .student-reports-page .ba-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media print {
+  .report-no-print,
+  .ba-search-card,
+  .ba-filter-chips,
+  .ba-sheet-backdrop,
+  .ba-modal-backdrop,
+  .ba-toast,
+  .ba-print-head,
+  .ba-report-toolbar {
+    display: none !important;
+  }
+
+  .ba-page,
+  .ba-print-card,
+  .ba-print-zone {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+}
+
+
+/* StudentReports final golden fixes: one-row action strip, theme-safe buttons/tables, clean preview */
+.student-reports-page .ba-search-card {
+  grid-template-columns: minmax(0, 1fr) repeat(4, 42px) !important;
+  gap: 7px;
+  align-items: center;
+  overflow: hidden;
+}
+
+.student-reports-page .ba-search {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.student-reports-page .ba-icon-button,
+.student-reports-page .ba-filter-button,
+.student-reports-page .ba-view-button,
+.student-reports-page .ba-add-inline {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  flex: 0 0 42px;
+  border-color: var(--border, rgba(0,0,0,.10));
+  background: var(--card-bg, var(--surface,#fff));
+  color: var(--text,#111827);
+}
+
+.student-reports-page .ba-add-inline {
+  border-color: var(--ba-primary);
+  background: var(--ba-primary);
+  color: #fff;
+}
+
+.student-reports-page .ba-filter-button {
+  background: color-mix(in srgb, var(--ba-primary) 8%, var(--card-bg,#fff));
+  color: var(--ba-primary);
+}
+
+.student-reports-page .ba-filter-button.active {
+  border-color: var(--ba-primary);
+  background: var(--ba-primary);
+  color: #fff;
+}
+
+.student-reports-page .ba-view-button {
+  background: color-mix(in srgb, var(--muted,#64748b) 8%, var(--card-bg,#fff));
+  color: var(--text,#111827);
+}
+
+.student-reports-page .ba-icon-button:hover,
+.student-reports-page .ba-view-button:hover {
+  border-color: color-mix(in srgb, var(--ba-primary) 28%, var(--border,rgba(0,0,0,.10)));
+  color: var(--ba-primary);
+}
+
+.student-reports-page .ba-table-scroll th {
+  background: var(--table-header-bg, color-mix(in srgb, var(--ba-primary) 6%, var(--card-bg, var(--surface,#fff))));
+  color: var(--table-header-text, var(--muted, var(--text,#111827)));
+}
+
+.student-reports-page .ba-table-scroll table,
+.student-reports-page .ba-table-scroll td {
+  background: var(--card-bg, var(--surface,#fff));
+  color: var(--text,#111827);
+}
+
+.student-reports-page .ba-print-head {
+  align-items: center;
+}
+
+@media (max-width: 520px) {
+  .student-reports-page .ba-search-card {
+    grid-template-columns: minmax(0, 1fr) repeat(4, 38px) !important;
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .student-reports-page .ba-icon-button,
+  .student-reports-page .ba-filter-button,
+  .student-reports-page .ba-view-button,
+  .student-reports-page .ba-add-inline {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    flex-basis: 38px;
+  }
+
+  .student-reports-page .ba-search {
+    min-height: 38px;
+    padding: 0 8px;
+  }
+
+  .student-reports-page .ba-search input {
+    min-height: 38px;
+    font-size: 13px;
+  }
+}
+
+
+
+/* Cumulative Records golden compact additions */
+.cumulative-page .ba-print-card{margin-top:8px;border-radius:22px}
+.cumulative-page .ba-print-head{padding:8px 10px}
+.cumulative-page .ba-print-head strong{font-size:14px}
+.cumulative-page .ba-print-head p{font-size:11px;margin-top:2px}
+.cumulative-page .ba-print-zone{padding:8px;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+#cumulative-report-print-zone{width:max-content;min-width:100%}
+.cumulative-toggle-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.cumulative-toggle-grid button{min-height:36px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));color:var(--text,#111827);font-size:11px;font-weight:950;cursor:pointer}
+.cumulative-toggle-grid button.active{background:color-mix(in srgb,var(--ba-primary) 10%,var(--card-bg,#fff));border-color:color-mix(in srgb,var(--ba-primary) 34%,var(--border,rgba(0,0,0,.10)));color:var(--ba-primary)}
+.cr-print-empty{padding:20px;border:1px dashed #bbb;border-radius:12px;text-align:center;font-weight:700}
+.cr-print-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px;font-size:10px}
+.cr-print-summary-grid.six{grid-template-columns:repeat(6,minmax(0,1fr))}
+.cr-print-summary-grid div{border:1px solid #ccc;padding:7px}
+@media(max-width:520px){.cumulative-toggle-grid{grid-template-columns:minmax(0,1fr)}.ba-output-switch{width:100%;justify-content:center}.ba-output-switch button{flex:1}.cumulative-page .ba-report-toolbar{width:100%;justify-content:stretch}}
+@media print{.report-no-print,.ba-search-card,.ba-filter-chips,.ba-sheet-backdrop,.ba-modal-backdrop,.ba-print-head,.ba-report-toolbar{display:none!important}.ba-page,.ba-print-card,.ba-print-zone,.report-screen-scroll,#cumulative-report-print-zone{padding:0!important;margin:0!important;background:#fff!important;box-shadow:none!important;border:0!important;border-radius:0!important;overflow:visible!important}}
 
 `;

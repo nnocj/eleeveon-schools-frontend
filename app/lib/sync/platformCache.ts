@@ -8,7 +8,7 @@
  * They do not push secrets or backend-only records from the browser.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import {
   assertAccountId,
   CachePullRecord,

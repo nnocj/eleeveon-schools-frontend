@@ -59,8 +59,10 @@ import type {
   StudentCurriculum,
   StudentEnrollment,
   AssessmentEntry,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 // ======================================================
 // TYPES
 // ======================================================
@@ -187,6 +189,8 @@ function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: numbe
 // ======================================================
 
 export default function AcademicProgress() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, loading: accountLoading, authenticated } = useAccount();
@@ -264,7 +268,7 @@ export default function AcademicProgress() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [pageLoading, setPageLoading] = useState(true);
+  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
@@ -405,6 +409,7 @@ export default function AcademicProgress() {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   // ======================================================

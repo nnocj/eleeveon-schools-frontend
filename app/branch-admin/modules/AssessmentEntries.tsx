@@ -43,10 +43,12 @@ import {
   type StudentEnrollment,
   type Subject,
   type Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type ReadinessFilter = "all" | "ready" | "missing";
@@ -238,6 +240,8 @@ function SliderIcon() {
 }
 
 export default function AssessmentEntriesPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -262,7 +266,7 @@ export default function AssessmentEntriesPage() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
@@ -425,7 +429,9 @@ export default function AssessmentEntriesPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const classMap = useMemo(() => new Map(classes.map((r: any) => [idOf(r.id), r])), [classes]);
   const subjectMap = useMemo(() => new Map(subjects.map((r: any) => [idOf(r.id), r])), [subjects]);

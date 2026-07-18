@@ -78,6 +78,8 @@ import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 
 type OpenWorkspaceSession = {
@@ -340,6 +342,8 @@ function Empty({ title, text: body }: { title: string; text: string }) {
 // FEES_WORKFLOW_FIX_VERSION: auto-invoice-on-fee-save-v5
 // Confirm this marker exists after replacement.
 export default function FeesPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId: rawAccountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -408,7 +412,7 @@ export default function FeesPage() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<ViewMode>("cards");
   const [activeSection, setActiveSection] = useState<ActiveSection>("fees");
@@ -498,7 +502,9 @@ export default function FeesPage() {
     if (accountLoading || settingsLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading,
+    dataRevision,
+  ]);
 
   const currency = useMemo(() => {
     const preferred = currencySettings.find((row) => row.defaultForFees || row.active !== false) || currencySettings[0];

@@ -30,7 +30,7 @@ import type {
   Student,
   StudentEnrollment,
   Subject,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 import type {
   ReportFiltersState,

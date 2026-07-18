@@ -1,19 +1,12 @@
-// ======================================================
-// FILE 1: app/context/sync-bootstrap-context.tsx
-// ======================================================
-
 "use client";
 
 /**
- * sync-bootstrap-context.tsx
- * ---------------------------------------------------------
- * GLOBAL SYNC BOOTSTRAP STATE
- * ---------------------------------------------------------
+ * app/context/sync-bootstrap-context.tsx
+ * --------------------------------------------------------------------------
+ * Global synchronization state.
  *
- * FIXED VERSION:
- * - All action functions are useCallback-stable.
- * - This prevents Maximum update depth loops when SyncBootstrap
- *   uses these actions inside effects.
+ * `initialSyncing` describes network synchronization for diagnostics.
+ * `applyingChanges` is the only state intended for a visible portal indicator.
  */
 
 import React, {
@@ -36,6 +29,7 @@ export type SyncBootstrapStatus =
 type SyncBootstrapContextValue = {
   initialSyncDone: boolean;
   initialSyncing: boolean;
+  applyingChanges: boolean;
   status: SyncBootstrapStatus;
   pushed: number;
   pulled: number;
@@ -47,27 +41,41 @@ type SyncBootstrapContextValue = {
   autoSyncEnabled: boolean;
   setAutoSyncEnabled: (value: boolean) => void;
   markSyncStart: () => void;
-  markSyncSuccess: (pushed: number, pulled: number, conflicts?: number) => void;
+  markSyncSuccess: (
+    pushed: number,
+    pulled: number,
+    conflicts?: number,
+  ) => void;
   markSyncFailure: (errors: string[]) => void;
   markSyncOffline: () => void;
   markSyncSkipped: () => void;
+  markApplyingChanges: (value: boolean) => void;
   markDeviceRegistered: () => void;
   markPlatformCacheRefreshed: () => void;
   markConflictsDetected: (count: number) => void;
 };
 
-const SyncBootstrapContext = createContext<SyncBootstrapContextValue | null>(null);
+const SyncBootstrapContext =
+  createContext<SyncBootstrapContextValue | null>(null);
 
-export function SyncBootstrapProvider({ children }: { children: React.ReactNode }) {
+export function SyncBootstrapProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [initialSyncDone, setInitialSyncDone] = useState(false);
-  const [status, setStatus] = useState<SyncBootstrapStatus>("idle");
+  const [status, setStatus] =
+    useState<SyncBootstrapStatus>("idle");
+  const [applyingChanges, setApplyingChanges] = useState(false);
   const [pushed, setPushed] = useState(0);
   const [pulled, setPulled] = useState(0);
   const [conflicts, setConflicts] = useState(0);
   const [deviceRegistered, setDeviceRegistered] = useState(false);
-  const [platformCacheRefreshed, setPlatformCacheRefreshed] = useState(false);
+  const [platformCacheRefreshed, setPlatformCacheRefreshed] =
+    useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | undefined>();
+  const [lastSyncedAt, setLastSyncedAt] =
+    useState<number | undefined>();
 
   const [autoSyncEnabled, setAutoSyncEnabledState] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -78,7 +86,10 @@ export function SyncBootstrapProvider({ children }: { children: React.ReactNode 
     setAutoSyncEnabledState(value);
 
     if (typeof window !== "undefined") {
-      window.localStorage.setItem("eleeveon-auto-sync", String(value));
+      window.localStorage.setItem(
+        "eleeveon-auto-sync",
+        String(value),
+      );
     }
   }, []);
 
@@ -87,31 +98,45 @@ export function SyncBootstrapProvider({ children }: { children: React.ReactNode 
     setErrors([]);
   }, []);
 
-  const markSyncSuccess = useCallback((nextPushed: number, nextPulled: number, nextConflicts = 0) => {
-    setPushed(nextPushed);
-    setPulled(nextPulled);
-    setConflicts(nextConflicts);
-    setErrors([]);
-    setStatus("success");
-    setInitialSyncDone(true);
-    setLastSyncedAt(Date.now());
-  }, []);
+  const markSyncSuccess = useCallback(
+    (
+      nextPushed: number,
+      nextPulled: number,
+      nextConflicts = 0,
+    ) => {
+      setPushed(nextPushed);
+      setPulled(nextPulled);
+      setConflicts(nextConflicts);
+      setErrors([]);
+      setStatus("success");
+      setInitialSyncDone(true);
+      setLastSyncedAt(Date.now());
+    },
+    [],
+  );
 
   const markSyncFailure = useCallback((nextErrors: string[]) => {
     setErrors(nextErrors);
     setStatus("failed");
     setInitialSyncDone(true);
+    setApplyingChanges(false);
     setLastSyncedAt(Date.now());
   }, []);
 
   const markSyncOffline = useCallback(() => {
     setStatus("offline");
     setInitialSyncDone(true);
+    setApplyingChanges(false);
   }, []);
 
   const markSyncSkipped = useCallback(() => {
     setStatus("skipped");
     setInitialSyncDone(true);
+    setApplyingChanges(false);
+  }, []);
+
+  const markApplyingChanges = useCallback((value: boolean) => {
+    setApplyingChanges(Boolean(value));
   }, []);
 
   const markDeviceRegistered = useCallback(() => {
@@ -126,10 +151,12 @@ export function SyncBootstrapProvider({ children }: { children: React.ReactNode 
     setConflicts(Math.max(0, Number(count) || 0));
   }, []);
 
-  const value = useMemo<SyncBootstrapContextValue>(() => {
-    return {
+  const value = useMemo<SyncBootstrapContextValue>(
+    () => ({
       initialSyncDone,
-      initialSyncing: status === "checking" || status === "syncing",
+      initialSyncing:
+        status === "checking" || status === "syncing",
+      applyingChanges,
       status,
       pushed,
       pulled,
@@ -145,31 +172,35 @@ export function SyncBootstrapProvider({ children }: { children: React.ReactNode 
       markSyncFailure,
       markSyncOffline,
       markSyncSkipped,
+      markApplyingChanges,
       markDeviceRegistered,
       markPlatformCacheRefreshed,
       markConflictsDetected,
-    };
-  }, [
-    initialSyncDone,
-    status,
-    pushed,
-    pulled,
-    conflicts,
-    deviceRegistered,
-    platformCacheRefreshed,
-    errors,
-    lastSyncedAt,
-    autoSyncEnabled,
-    setAutoSyncEnabled,
-    markSyncStart,
-    markSyncSuccess,
-    markSyncFailure,
-    markSyncOffline,
-    markSyncSkipped,
-    markDeviceRegistered,
-    markPlatformCacheRefreshed,
-    markConflictsDetected,
-  ]);
+    }),
+    [
+      initialSyncDone,
+      status,
+      applyingChanges,
+      pushed,
+      pulled,
+      conflicts,
+      deviceRegistered,
+      platformCacheRefreshed,
+      errors,
+      lastSyncedAt,
+      autoSyncEnabled,
+      setAutoSyncEnabled,
+      markSyncStart,
+      markSyncSuccess,
+      markSyncFailure,
+      markSyncOffline,
+      markSyncSkipped,
+      markApplyingChanges,
+      markDeviceRegistered,
+      markPlatformCacheRefreshed,
+      markConflictsDetected,
+    ],
+  );
 
   return (
     <SyncBootstrapContext.Provider value={value}>
@@ -179,13 +210,13 @@ export function SyncBootstrapProvider({ children }: { children: React.ReactNode 
 }
 
 export function useSyncBootstrap() {
-  const ctx = useContext(SyncBootstrapContext);
+  const context = useContext(SyncBootstrapContext);
 
-  if (!ctx) {
-    throw new Error("useSyncBootstrap must be used inside SyncBootstrapProvider");
+  if (!context) {
+    throw new Error(
+      "useSyncBootstrap must be used inside SyncBootstrapProvider",
+    );
   }
 
-  return ctx;
+  return context;
 }
-
-

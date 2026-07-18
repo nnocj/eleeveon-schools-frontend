@@ -35,9 +35,11 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 import type { RoleNavSection } from "../../components/role-portals/RolePortalShell";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type AreaFilter =
@@ -534,6 +536,8 @@ function metricFor(routeKey: string, rows: Record<string, AnyRow[]>, summary: An
 }
 
 export default function BranchAdminDashboard({ navigate, navSections }: RouteProps) {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -559,7 +563,7 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     settings: settings as AnyRow,
   });
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("cards");
   const [query, setQuery] = useState("");
   const [area, setArea] = useState<AreaFilter>("all");
@@ -601,7 +605,9 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     if (accountLoading || settingsLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading,
+    dataRevision,
+  ]);
 
   const rows = rowsByTable;
 

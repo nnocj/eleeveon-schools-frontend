@@ -54,7 +54,7 @@ import {
   StudentEnrollment,
   StudentParent,
   Subject,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 // ======================================================
 // TYPES

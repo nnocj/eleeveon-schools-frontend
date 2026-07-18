@@ -37,7 +37,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import BorderedTraditionalHeader from "../shared/headers/BorderedTraditionalHeader";
+import BorderedTraditionalHeader from "../shared/headers/student-reports/BorderedTraditionalHeader";
 
 import {
   createReportPageStyle,

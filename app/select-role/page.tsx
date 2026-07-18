@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -35,10 +34,19 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+
+import WorkspaceBootstrapScreen from "../components/WorkspaceBootstrapScreen";
+import {
+  bootstrapSelectedWorkspace,
+  type WorkspaceBootstrapProgress,
+} from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../context/account-context";
 import { useActiveMembership } from "../context/active-membership-context";
+import { useSettings } from "../context/settings-context";
+import { useTheme } from "../context/theme-context";
+import { appearanceIdentityFor, appearanceIdentityMatches, appearanceScopeForRole } from "../lib/theme/appearanceScope";
 import {
   collectUserMemberships,
   getPortalPathByRole,
@@ -314,9 +322,31 @@ function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: R
 
 export default function SelectRolePage() {
   const router = useRouter();
-  const { user, account, logout, loading, authenticated } = useAccount() as any;
-  const { setActiveMembership } = useActiveMembership();
+  const {
+    user,
+    account,
+    logout,
+    loading,
+    restoring,
+    verifying,
+    sessionVerified,
+    authenticated,
+  } = useAccount() as any;
+  const {
+    setActiveMembership,
+    beginMembershipTransition,
+    completeMembershipTransition,
+    failMembershipTransition,
+  } = useActiveMembership();
+  const { hydrateSettingsForMembership } = useSettings();
+  const { applyForMembership } = useTheme();
   const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [bootstrapProgress, setBootstrapProgress] =
+    useState<WorkspaceBootstrapProgress | null>(null);
+  const [bootstrapError, setBootstrapError] =
+    useState<string | null>(null);
+  const [pendingMembership, setPendingMembership] =
+    useState<UserMembership | null>(null);
 
   const memberships = useMemo(() => {
     const merged = [
@@ -356,9 +386,11 @@ export default function SelectRolePage() {
   );
 
   useEffect(() => {
-    if (loading) return;
-    if (!authenticated || !user) router.replace("/login");
-  }, [loading, authenticated, user, router]);
+    if (restoring || loading || verifying) return;
+    if (sessionVerified && (!authenticated || !user)) {
+      router.replace("/login");
+    }
+  }, [restoring, loading, verifying, sessionVerified, authenticated, user, router]);
 
   const choose = async (membership: UserMembership) => {
     const normalized = normalizeSelectedMembership(membership);
@@ -373,30 +405,130 @@ export default function SelectRolePage() {
       setSelectingId(id);
 
       const openedMembership = writeOpenedWorkspaceSession(normalized);
+      beginMembershipTransition(openedMembership);
       await setActiveMembership(openedMembership);
 
       const targetPath = getPortalPathByRole(openedMembership.role);
+      const scope = appearanceScopeForRole(openedMembership.role);
 
-      // A real page navigation is intentional here. It guarantees the portal
-      // starts from the already-written workspace session instead of a stale
-      // in-memory React context from the selector page.
-      window.location.assign(targetPath);
-    } catch (error) {
+      setPendingMembership(openedMembership);
+      setBootstrapError(null);
+      setBootstrapProgress({
+        stage: "checking-cache",
+        title: "Preparing workspace…",
+        detail: "Loading data and applying the correct role appearance.",
+        percent: 2,
+      });
+
+      let bootstrapResult: Awaited<ReturnType<typeof bootstrapSelectedWorkspace>> | null = null;
+
+      // Platform and account roles must not bootstrap or inherit branch settings.
+      if (scope === "school" || scope === "branch") {
+        bootstrapResult = await bootstrapSelectedWorkspace(openedMembership, {
+          allowCached: true,
+          onProgress: setBootstrapProgress,
+        });
+      }
+
+      await hydrateSettingsForMembership(
+        openedMembership,
+        bootstrapResult?.settings || bootstrapResult?.workspace?.settings || null,
+      );
+
+      const applied = await applyForMembership(openedMembership);
+      const expected = appearanceIdentityFor({
+        role: openedMembership.role,
+        accountId: openedMembership.accountId,
+        schoolId: openedMembership.schoolId,
+        branchId: openedMembership.branchId,
+      });
+
+      if (!applied || !appearanceIdentityMatches(applied, expected)) {
+        throw new Error("The selected role appearance was not applied correctly.");
+      }
+
+      completeMembershipTransition();
+      window.location.replace(targetPath);
+    } catch (error: any) {
       console.error("Failed to open selected workspace:", error);
-      alert("Failed to open selected workspace. Please try again.");
+      failMembershipTransition(error?.message);
+      setBootstrapError(
+        error?.message ||
+          "Failed to prepare the selected workspace.",
+      );
       setSelectingId(null);
     }
   };
 
-  if (loading) {
-    return <State title="Opening roles..." text="Checking your account memberships and available workspaces." />;
+  const retryWorkspaceBootstrap =
+    async () => {
+      if (!pendingMembership) return;
+
+      const id =
+        membershipKey(
+          pendingMembership,
+        );
+
+      setSelectingId(id);
+      setBootstrapError(null);
+      setBootstrapProgress({
+        stage: "checking-cache",
+        title: "Rebuilding workspace…",
+        detail: "Requesting every permitted table again.",
+        percent: 2,
+      });
+
+      try {
+        beginMembershipTransition(pendingMembership);
+        const scope = appearanceScopeForRole(pendingMembership.role);
+        let bootstrapResult: Awaited<ReturnType<typeof bootstrapSelectedWorkspace>> | null = null;
+
+        if (scope === "school" || scope === "branch") {
+          bootstrapResult = await bootstrapSelectedWorkspace(pendingMembership, {
+            force: true,
+            allowCached: true,
+            onProgress: setBootstrapProgress,
+          });
+        }
+
+        await hydrateSettingsForMembership(
+          pendingMembership,
+          bootstrapResult?.settings || bootstrapResult?.workspace?.settings || null,
+        );
+        const applied = await applyForMembership(pendingMembership);
+        const expected = appearanceIdentityFor({
+          role: pendingMembership.role,
+          accountId: pendingMembership.accountId,
+          schoolId: pendingMembership.schoolId,
+          branchId: pendingMembership.branchId,
+        });
+        if (!applied || !appearanceIdentityMatches(applied, expected)) {
+          throw new Error("The selected role appearance was not applied correctly.");
+        }
+
+        completeMembershipTransition();
+        window.location.replace(getPortalPathByRole(pendingMembership.role));
+      } catch (error: any) {
+        failMembershipTransition(error?.message);
+        setBootstrapError(
+          error?.message ||
+            "Failed to prepare the selected workspace.",
+        );
+        setSelectingId(null);
+      }
+    };
+
+  const hasUsableCachedSession = Boolean(user && memberships.length);
+
+  if ((restoring || loading) && !hasUsableCachedSession) {
+    return <State title="Opening roles..." text="Restoring your saved account memberships and workspaces." />;
   }
 
   if (!authenticated || !user) {
     return <State title="Redirecting to login..." text="You must sign in before choosing a workspace." />;
   }
 
-  if (!memberships.length) {
+  if (!memberships.length && sessionVerified && !verifying) {
     return (
       <main className="ba-page select-role-page">
         <style>{css}</style>
@@ -413,6 +545,20 @@ export default function SelectRolePage() {
   return (
     <main className="ba-page select-role-page">
       <style>{css}</style>
+
+      {(bootstrapProgress || bootstrapError) && (
+        <WorkspaceBootstrapScreen
+          progress={bootstrapProgress}
+          error={bootstrapError}
+          onRetry={retryWorkspaceBootstrap}
+          onCancel={() => {
+            setBootstrapProgress(null);
+            setBootstrapError(null);
+            setPendingMembership(null);
+            setSelectingId(null);
+          }}
+        />
+      )}
 
       <section className="sr-shell" aria-label="Choose workspace role">
         <section className="sr-compact-head">
@@ -459,7 +605,9 @@ export default function SelectRolePage() {
         </section>
 
         <section className="sr-footer-actions">
-          <Chip tone="gray">Signed in</Chip>
+          <Chip tone={verifying ? "orange" : "gray"}>
+            {verifying ? "Updating access…" : "Signed in"}
+          </Chip>
           <button type="button" onClick={logout}>Logout</button>
         </section>
       </section>

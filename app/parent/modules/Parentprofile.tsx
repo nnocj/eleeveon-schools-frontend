@@ -33,7 +33,7 @@ import {
   Parent,
   Student,
   StudentParent,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 // ======================================================
 // TYPES

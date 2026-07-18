@@ -5,17 +5,35 @@
  * ---------------------------------------------------------
  * ELEEVEON SCHOOL MANAGEMENT HOME PAGE
  * ---------------------------------------------------------
+ *
+ * Updated for the centralized startup and reactive-data system:
+ * - uses the single database instance exported by app/lib/db;
+ * - waits on DatabaseBootstrap state;
+ * - uses Dexie live queries for visible counts;
+ * - automatically reflects local writes and background pull updates;
+ * - does not start a separate synchronization loop.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { useRouter } from "next/navigation";
 
 import { db } from "./lib/db";
 import { useSettings } from "./context/settings-context";
+import { useAccount } from "./context/account-context";
+import { useDatabase } from "./context/database-context";
 import { useActiveBranch } from "./context/active-branch-context";
 
 export default function HomePage() {
   const router = useRouter();
+  const database = useDatabase();
+
+  const {
+    authenticated,
+    accountId,
+    loading: accountLoading,
+  } = useAccount();
+
   const { settings } = useSettings();
 
   const {
@@ -31,13 +49,64 @@ export default function HomePage() {
   const [isOnline, setIsOnline] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
-  const [counts, setCounts] = useState({
-    schools: 0,
-    branches: 0,
-    students: 0,
-    teachers: 0,
-    classes: 0,
-  });
+  const counts =
+    useLiveQuery(
+      async () => {
+        if (!database.ready) {
+          return {
+            schools: 0,
+            branches: 0,
+            students: 0,
+            teachers: 0,
+            classes: 0,
+          };
+        }
+
+        const [schools, branches, students, teachers, classes] =
+          await Promise.all([
+            db.schools.toArray(),
+            db.branches.toArray(),
+            db.students.toArray(),
+            db.teachers.toArray(),
+            db.classes.toArray(),
+          ]);
+
+        const belongsToActiveAccount = (row: any) =>
+          !accountId || row.accountId === accountId;
+
+        return {
+          schools: schools.filter(
+            (row) => belongsToActiveAccount(row) && !row.isDeleted,
+          ).length,
+          branches: branches.filter(
+            (row) => belongsToActiveAccount(row) && !row.isDeleted,
+          ).length,
+          students: students.filter(
+            (row) => belongsToActiveAccount(row) && !row.isDeleted,
+          ).length,
+          teachers: teachers.filter(
+            (row) => belongsToActiveAccount(row) && !row.isDeleted,
+          ).length,
+          classes: classes.filter(
+            (row) => belongsToActiveAccount(row) && !row.isDeleted,
+          ).length,
+        };
+      },
+      [database.ready, accountId],
+      {
+        schools: 0,
+        branches: 0,
+        students: 0,
+        teachers: 0,
+        classes: 0,
+      },
+    ) || {
+      schools: 0,
+      branches: 0,
+      students: 0,
+      teachers: 0,
+      classes: 0,
+    };
 
   useEffect(() => {
     const update = () => setIsOnline(navigator.onLine);
@@ -61,33 +130,6 @@ export default function HomePage() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [schools, branches, students, teachers, classes] =
-          await Promise.all([
-            db.schools.toArray(),
-            db.branches.toArray(),
-            db.students.toArray(),
-            db.teachers.toArray(),
-            db.classes.toArray(),
-          ]);
-
-        setCounts({
-          schools: schools.filter((row) => !row.isDeleted).length,
-          branches: branches.filter((row) => !row.isDeleted).length,
-          students: students.filter((row) => !row.isDeleted).length,
-          teachers: teachers.filter((row) => !row.isDeleted).length,
-          classes: classes.filter((row) => !row.isDeleted).length,
-        });
-      } catch (error) {
-        console.error("Failed to load home counts:", error);
-      }
-    };
-
-    load();
-  }, []);
-
   const schoolName =
     activeSchool?.name ||
     settings?.schoolName ||
@@ -109,6 +151,8 @@ export default function HomePage() {
     "";
 
   const contextReady = !!activeSchoolId && !!activeBranchId;
+  const appReady = database.ready && !accountLoading;
+  const canEnterWorkspace = authenticated && contextReady;
 
   const quickStats = useMemo(
     () => [
@@ -372,18 +416,20 @@ export default function HomePage() {
               <button
                 type="button"
                 style={button}
-                onClick={() => router.push("/login")}
+                onClick={() =>
+                  router.push(authenticated ? "/select-role" : "/login")
+                }
               >
-                Open Account Workspace
+                {authenticated ? "Open Account Workspace" : "Sign In"}
               </button>
 
               <button
                 type="button"
                 style={{
                   ...ghostButton,
-                  opacity: contextReady ? 1 : 0.65,
+                  opacity: canEnterWorkspace ? 1 : 0.65,
                 }}
-                disabled={!contextReady}
+                disabled={!canEnterWorkspace}
                 onClick={() => router.push("/select-role")}
               >
                 Enter Dashboard
@@ -399,7 +445,15 @@ export default function HomePage() {
                   : "Create/select school and branch"}
               </span>
 
-              <span style={badge("gray")}>Local database enabled</span>
+              <span style={badge(appReady ? "gray" : "orange")}>
+                {database.upgrading
+                  ? "Upgrading local database..."
+                  : database.opening
+                    ? "Opening local database..."
+                    : database.ready
+                      ? "Local database ready"
+                      : "Preparing local database..."}
+              </span>
             </div>
           </div>
 

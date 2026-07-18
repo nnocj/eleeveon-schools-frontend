@@ -28,11 +28,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-
 import {
   db,
   type Class,
@@ -42,7 +38,7 @@ import {
   type Student,
   type StudentEnrollment,
   type Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import {
   createLocal,
@@ -51,10 +47,11 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 import {
+  softDeleteOwnerFieldAssets,
   MediaOwners,
   MediaFieldKeys,
   attachCameraStreamToVideo,
-  attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
@@ -65,8 +62,15 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
+
+
+
 } from "../../lib/media/mediaAssetUtils";
 
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type CameraField = "photo" | "bannerImage";
@@ -347,43 +351,37 @@ function Empty({
 }
 
 export default function ClassesPage() {
+  const dataRevision = useBranchTableRevision(["classes", "organizations", "teachers", "students", "studentEnrollments", "classSubjects", "classTeachers", "mediaAssets", "mediaBlobs"]);
   const router = useRouter();
-
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
+  const workspace = useBranchWorkspaceScope();
   const {
-    activeSchool,
-    activeSchoolId,
-    activeBranch,
-    activeBranchId,
-    loading: contextLoading,
-  } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [rows, setRows] = useState<Class[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "classes",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -544,7 +542,7 @@ export default function ClassesPage() {
             ownerTable: CLASS_MEDIA_OWNER_TABLE,
             ownerLocalId: classId,
             ownerCloudId: classRow.cloudId || undefined,
-            fieldKey: MediaFieldKeys.BANNER,
+            fieldKey: "bannerImage",
             fallbackAssetId: classRow.bannerImageMediaId,
           });
           if (bannerUrl) next[mediaKey(classId, "bannerImage")] = bannerUrl;
@@ -658,6 +656,7 @@ export default function ClassesPage() {
     accountLoading,
     settingsLoading,
     contextLoading,
+    dataRevision,
   ]);
 
   useEffect(() => {
@@ -789,10 +788,10 @@ export default function ClassesPage() {
         id,
         row,
         photoUrl:
-          mediaPreviewUrls[mediaKey(id, "photo")] ||
+          resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] ||
           safeRecordMediaValue(row.photo),
         bannerImageUrl:
-          mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
+          resolvedMediaById[id]?.bannerImage || mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
           safeRecordMediaValue(row.bannerImage),
         organizationName: organization?.name || "No organization",
         classTeacherId: classTeacher ? idOf(classTeacher.id) : undefined,
@@ -937,7 +936,7 @@ export default function ClassesPage() {
         ownerTable: CLASS_MEDIA_OWNER_TABLE,
         ownerLocalId: form.id || undefined,
         ownerTempKey,
-        fieldKey: isPhoto ? MediaFieldKeys.PHOTO : MediaFieldKeys.BANNER,
+        fieldKey: isPhoto ? MediaFieldKeys.PHOTO : "bannerImage",
         variant: isPhoto ? "avatar" : "cover",
         replaceExisting: true,
       });
@@ -1087,18 +1086,17 @@ export default function ClassesPage() {
       );
 
       if (savedClassId) {
-        await Promise.all(
-          [form.newPhotoMediaId, form.newBannerImageMediaId]
-            .filter(Boolean)
-            .map((assetId) =>
-              attachMediaAssetToOwner({
-                assetId: Number(assetId),
-                ownerTable: CLASS_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedClassId,
-                ownerTempKey: mediaSessionKeyRef.current,
-              }),
-            ),
-        );
+        await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable: CLASS_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedClassId,
+          ownerCloudId: (savedClass as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: form.newPhotoMediaId, fieldKey: MediaFieldKeys.PHOTO },
+            { assetId: form.newBannerImageMediaId, fieldKey: "bannerImage" },
+          ],
+        });
       }
 
       if (savedClassId) {
@@ -1164,6 +1162,37 @@ export default function ClassesPage() {
         : `Delete "${row.name}"?`;
 
     if (!window.confirm(warning)) return;
+
+
+    await Promise.all(
+
+
+      ["photo", "bannerImage"].map((fieldKey) =>
+
+
+        softDeleteOwnerFieldAssets({
+
+
+          accountId: String(accountId),
+
+
+          ownerTable: "classes",
+
+
+          ownerLocalId: Number(id),
+
+
+          fieldKey,
+
+
+        }),
+
+
+      ),
+
+
+    );
+
 
     await softDeleteLocal("classes", Number(id));
     setSelectedItem(null);

@@ -38,7 +38,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { apiRequest } from "../lib/platformApi";
-import { db } from "../lib/db";
+import { db } from "../lib/db/db";
 
 type ViewMode = "cards" | "table" | "analytics";
 type StatusFilter =

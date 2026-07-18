@@ -1,32 +1,13 @@
 "use client";
 
 /**
- * context/settings-context.tsx
- * ---------------------------------------------------------
- * SCHOOL-BRANCH SETTINGS PROVIDER
- * ---------------------------------------------------------
+ * app/context/settings-context.tsx
+ * --------------------------------------------------------------------------
+ * Role-aware settings resolver.
  *
- * Architecture:
- * School -> Branch -> SchoolBranchSettings
- *
- * There is no global settings row anymore.
- * Every setting belongs to a specific school + branch.
- *
- * This file keeps the old API names for compatibility:
- * - SettingsProvider
- * - useSettings()
- * - settings
- * - updateSettings()
- * - refreshSettings()
- *
- * Existing pages can continue using useSettings(), but the returned
- * settings object is now the active school-branch settings row.
- *
- * IMPORTANT:
- * This provider intentionally does NOT use useActiveBranch(), because
- * active-branch-context may use useSettings(). To avoid circular provider
- * dependency, this provider resolves the active IDs from localStorage first,
- * then falls back to the first active school/branch in IndexedDB.
+ * Branch settings remain cached and editable, but they become effective only
+ * for branch-scoped memberships. Owner, Developer, Platform Team, and school
+ * roles never inherit a previously active branch row.
  */
 
 import React, {
@@ -35,549 +16,452 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
-import { db, SchoolBranchSetting } from "../lib/db";
+import { db, type SchoolBranchSetting } from "../lib/db";
+import type { UserMembership } from "../lib/auth/roleRedirect";
+import { getStoredActiveMembership } from "../lib/auth/activeMembership";
 import { prepareSyncData } from "../lib/sync/syncUtils";
 import { SyncStatus } from "../lib/constants/syncStatus";
+import {
+  appearanceIdentityFor,
+  appearanceScopeForRole,
+  normalizeAppearanceRole,
+  type AppearanceScope,
+} from "../lib/theme/appearanceScope";
+import {
+  PLATFORM_APPEARANCE_DEFAULTS,
+  type ScopedAppearanceSettings,
+} from "../lib/theme/applyScopedAppearance";
 
-// ======================================================
-// TYPES
-// ======================================================
+export type SettingsPatch = Partial<SchoolBranchSetting> & Record<string, any>;
+export type SettingsValue = SchoolBranchSetting & Record<string, any>;
+export type SettingsLoadedFor = {
+  role: string;
+  accountId?: string;
+  schoolId?: number;
+  branchId?: number;
+  key: string;
+};
 
-type SettingsPatch = Partial<SchoolBranchSetting> & Record<string, any>;
+export type SettingsContextValue = {
+  /** Backward-compatible alias for effectiveSettings. */
+  settings: SettingsValue | ScopedAppearanceSettings | null;
+  effectiveSettings: SettingsValue | ScopedAppearanceSettings | null;
+  effectiveScope: AppearanceScope;
 
-type SettingsValue = SchoolBranchSetting & Record<string, any>;
+  platformSettings: ScopedAppearanceSettings | null;
+  accountSettings: ScopedAppearanceSettings | null;
+  schoolSettings: ScopedAppearanceSettings | null;
+  branchSettings: SettingsValue | null;
 
-type SettingsContextType = {
-  settings: SettingsValue | null;
+  ready: boolean;
   loading: boolean;
+  loadedFor: SettingsLoadedFor | null;
 
   activeSchoolId: number | null;
   activeBranchId: number | null;
 
-  updateSettings: (patch: SettingsPatch) => Promise<SettingsValue>;
   refreshSettings: () => Promise<void>;
   refreshSettingsForContext: (
     schoolId?: number | null,
-    branchId?: number | null
+    branchId?: number | null,
   ) => Promise<void>;
+  hydrateSettingsForMembership: (
+    membership: UserMembership,
+    preferredSettings?: Record<string, any> | null,
+  ) => Promise<SettingsValue | ScopedAppearanceSettings | null>;
+  updateSettings: (patch: SettingsPatch) => Promise<SettingsValue>;
 };
 
-// ======================================================
-// STORAGE KEYS
-// ======================================================
+const SettingsContext = createContext<SettingsContextValue | undefined>(undefined);
 
-const SCHOOL_STORAGE_KEY = "activeSchoolId";
-const BRANCH_STORAGE_KEY = "activeBranchId";
+const CURRENT_SETTINGS_POINTER = "eleeveon_current_workspace_settings";
+const SCOPED_SETTINGS_PREFIX = "eleeveon_cached_settings";
 
-// ======================================================
-// CONTEXT
-// ======================================================
+const platformSettings: ScopedAppearanceSettings = {
+  ...PLATFORM_APPEARANCE_DEFAULTS,
+};
 
-const SettingsContext = createContext<SettingsContextType | undefined>(
-  undefined
-);
-
-// ======================================================
-// DEFAULTS
-// ======================================================
-
-const defaultSettings = (
-  schoolId?: number | null,
-  branchId?: number | null
-): Partial<SchoolBranchSetting> & Record<string, any> => ({
-  schoolId: schoolId || undefined,
-  branchId: branchId || undefined,
-
-  // Branch behavior
-  mode: "manual",
-  theme: "light",
-  primaryColor: "#2f6fed",
-  fontFamily: "system-ui, -apple-system, sans-serif",
-  fontSize: 16,
-
-  // Academic branch defaults
-  academicYear: "",
-  currentTerm: "Term 1",
-  currentAcademicStructureId: undefined,
-  currentAcademicPeriodId: undefined,
-
-  // Branch-specific branding / visual assets
-  logo: "",
-  reportCardBackgroundImage: "",
-  reportCardWatermark: "",
-  reportCardSignatureImage: "",
-
-  dashboardHeroImage: "",
-  dashboardBannerImage: "",
-  studentPortalImage: "",
-  teacherPortalImage: "",
-  classroomPlaceholderImage: "",
-  subjectPlaceholderImage: "",
-
-  schoolGalleryImages: [],
-});
-
-// ======================================================
-// HELPERS
-// ======================================================
-
-function numberOrNull(value: string | null | undefined) {
-  if (!value) return null;
-
+function positiveNumber(value: unknown) {
   const parsed = Number(value);
-
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function cleanString(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
 function normalizeSyncStatus(value: unknown): SyncStatus | undefined {
-  if (!value) return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
 
-  const raw = String(value);
-  const values = Object.values(SyncStatus) as string[];
-
-  return values.includes(raw) ? (raw as unknown as SyncStatus) : undefined;
+  switch (parsed) {
+    case SyncStatus.PENDING:
+    case SyncStatus.SYNCED:
+    case SyncStatus.FAILED:
+    case SyncStatus.CONFLICT:
+      return parsed;
+    default:
+      return undefined;
+  }
 }
 
-function toSchoolBranchSetting(
-  value: Partial<SchoolBranchSetting> & Record<string, any>,
-  fallbackSchoolId?: number | null,
-  fallbackBranchId?: number | null
+function defaultBranchSettings(
+  accountId: string,
+  schoolId: number,
+  branchId: number,
 ): SettingsValue {
-  const normalized = normalizeSettings(
-    value,
-    fallbackSchoolId,
-    fallbackBranchId
-  );
-
   return {
-    ...normalized,
-    synced:
-      normalizeSyncStatus(normalized.synced) ||
-      normalizeSyncStatus((value as any).synced) ||
-      SyncStatus.PENDING,
-  } as SettingsValue;
+    accountId,
+    schoolId,
+    branchId,
+    mode: "manual",
+    theme: "light",
+    primaryColor: PLATFORM_APPEARANCE_DEFAULTS.primaryColor,
+    fontFamily: PLATFORM_APPEARANCE_DEFAULTS.fontFamily,
+    fontSize: 16,
+    academicYear: "",
+    currentTerm: "Term 1",
+    logo: "",
+    schoolGalleryImages: [],
+    synced: SyncStatus.PENDING,
+
+    // Required local-first sync metadata. These defaults keep the temporary
+    // first-entry settings structurally valid until the exact branch row loads.
+    updatedAt: Date.now(),
+    version: 1,
+    deviceId: "",
+  };
 }
 
-function prepareSettingsSyncData(
-  value: Partial<SchoolBranchSetting> & Record<string, any>,
-  fallbackSchoolId?: number | null,
-  fallbackBranchId?: number | null
+function normalizeBranchSettings(
+  row: Record<string, any>,
+  accountId: string,
+  schoolId: number,
+  branchId: number,
 ): SettingsValue {
-  const prepared = prepareSyncData(
-    value as unknown as Record<string, any>
-  ) as unknown as Partial<SchoolBranchSetting> & Record<string, any>;
-
-  return toSchoolBranchSetting(
-    prepared,
-    fallbackSchoolId,
-    fallbackBranchId
-  );
-}
-
-function normalizeSettings(
-  row: Partial<SchoolBranchSetting> & Record<string, any>,
-  fallbackSchoolId?: number | null,
-  fallbackBranchId?: number | null
-): SettingsValue {
-  const normalized = {
-    ...defaultSettings(fallbackSchoolId, fallbackBranchId),
+  const base = defaultBranchSettings(accountId, schoolId, branchId);
+  return {
+    ...base,
     ...row,
-    schoolId: Number(row.schoolId || fallbackSchoolId || 0) || undefined,
-    branchId: Number(row.branchId || fallbackBranchId || 0) || undefined,
+    accountId: cleanString(row.accountId) ?? accountId,
+    schoolId: positiveNumber(row.schoolId) ?? schoolId,
+    branchId: positiveNumber(row.branchId) ?? branchId,
     fontSize: Number(row.fontSize || 16),
     schoolGalleryImages: Array.isArray(row.schoolGalleryImages)
       ? row.schoolGalleryImages
       : [],
-    synced:
-      normalizeSyncStatus(row.synced) ||
-      SyncStatus.PENDING,
+    synced: normalizeSyncStatus(row.synced) || SyncStatus.PENDING,
   } as SettingsValue;
-
-  return normalized;
 }
 
-async function resolveStoredOrFirstContext() {
-  const storedSchoolId = numberOrNull(
-    localStorage.getItem(SCHOOL_STORAGE_KEY)
-  );
-
-  const storedBranchId = numberOrNull(
-    localStorage.getItem(BRANCH_STORAGE_KEY)
-  );
-
-  const [schoolRows, branchRows] = await Promise.all([
-    db.schools.toArray(),
-    db.branches.toArray(),
-  ]);
-
-  const schools = schoolRows.filter(
-    (row) => !row.isDeleted && (row as any).active !== false
-  );
-
-  const branches = branchRows.filter(
-    (row) => !row.isDeleted && row.active !== false
-  );
-
-  const storedSchoolExists = storedSchoolId
-    ? schools.some((row) => row.id === storedSchoolId)
-    : false;
-
-  const resolvedSchoolId = storedSchoolExists
-    ? storedSchoolId
-    : schools[0]?.id || null;
-
-  const branchesForSchool = resolvedSchoolId
-    ? branches.filter((row) => row.schoolId === resolvedSchoolId)
-    : [];
-
-  const storedBranchExists = storedBranchId
-    ? branchesForSchool.some((row) => row.id === storedBranchId)
-    : false;
-
-  const resolvedBranchId = storedBranchExists
-    ? storedBranchId
-    : branchesForSchool[0]?.id || null;
-
-  if (resolvedSchoolId) {
-    localStorage.setItem(SCHOOL_STORAGE_KEY, String(resolvedSchoolId));
-  } else {
-    localStorage.removeItem(SCHOOL_STORAGE_KEY);
-  }
-
-  if (resolvedBranchId) {
-    localStorage.setItem(BRANCH_STORAGE_KEY, String(resolvedBranchId));
-  } else {
-    localStorage.removeItem(BRANCH_STORAGE_KEY);
-  }
-
-  return {
-    schoolId: resolvedSchoolId,
-    branchId: resolvedBranchId,
-  };
+function scopedCacheKey(accountId: string, schoolId: number, branchId: number) {
+  return [SCOPED_SETTINGS_PREFIX, accountId, schoolId, branchId].join(":");
 }
 
-async function getOrCreateSchoolBranchSettings(
-  schoolId: number | null,
-  branchId: number | null
-) {
-  if (!schoolId || !branchId) {
-    return normalizeSettings(
-      defaultSettings(schoolId, branchId),
-      schoolId,
-      branchId
-    );
+function readJson<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  const raw = JSON.stringify(value);
+  try { window.localStorage.setItem(key, raw); } catch {}
+  try { window.sessionStorage.setItem(key, raw); } catch {}
+}
+
+async function findExactBranchSettings(input: {
+  accountId: string;
+  schoolId: number;
+  branchId: number;
+  preferred?: Record<string, any> | null;
+}) {
+  const preferred = input.preferred;
+  if (
+    preferred &&
+    String(preferred.accountId || input.accountId) === input.accountId &&
+    Number(preferred.schoolId || 0) === input.schoolId &&
+    Number(preferred.branchId || 0) === input.branchId &&
+    !preferred.isDeleted
+  ) {
+    return normalizeBranchSettings(preferred, input.accountId, input.schoolId, input.branchId);
   }
 
   const rows = await db.schoolBranchSettings.toArray();
-
-  const existing = rows
-    .filter(
-      (row) =>
-        row.schoolId === schoolId &&
-        row.branchId === branchId &&
-        !row.isDeleted
+  const exact = rows
+    .filter((row: any) =>
+      !row.isDeleted &&
+      String(row.accountId || "") === input.accountId &&
+      Number(row.schoolId || 0) === input.schoolId &&
+      Number(row.branchId || 0) === input.branchId,
     )
-    .sort(
-      (a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0)
-    )[0];
+    .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
 
-  if (existing) {
-    return normalizeSettings(
-      existing as SettingsValue,
-      schoolId,
-      branchId
-    );
+  if (exact) {
+    return normalizeBranchSettings(exact as any, input.accountId, input.schoolId, input.branchId);
   }
 
-  const created = prepareSettingsSyncData(
-    defaultSettings(schoolId, branchId),
-    schoolId,
-    branchId
-  );
+  const cached = readJson<any>(scopedCacheKey(input.accountId, input.schoolId, input.branchId));
+  const cachedSettings = cached?.settings || cached;
+  if (
+    cachedSettings &&
+    String(cachedSettings.accountId || input.accountId) === input.accountId &&
+    Number(cachedSettings.schoolId || 0) === input.schoolId &&
+    Number(cachedSettings.branchId || 0) === input.branchId
+  ) {
+    return normalizeBranchSettings(cachedSettings, input.accountId, input.schoolId, input.branchId);
+  }
 
-  const id = await db.schoolBranchSettings.add(
-    created as SchoolBranchSetting
-  );
-
-  return normalizeSettings(
-    {
-      ...created,
-      id: Number(id),
-    },
-    schoolId,
-    branchId
-  );
+  return null;
 }
 
-// ======================================================
-// PROVIDER
-// ======================================================
+function baseSettingsForScope(scope: AppearanceScope): ScopedAppearanceSettings {
+  if (scope === "platform") return { ...platformSettings };
+  if (scope === "account") return { ...platformSettings };
+  if (scope === "school") return { ...platformSettings };
+  return { ...platformSettings };
+}
 
-export function SettingsProvider({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const [settings, setSettings] = useState<SettingsValue | null>(null);
+export function SettingsProvider({ children }: { children: React.ReactNode }) {
+  const [effectiveSettings, setEffectiveSettings] =
+    useState<SettingsValue | ScopedAppearanceSettings | null>(null);
+  const [effectiveScope, setEffectiveScope] = useState<AppearanceScope>("platform");
+  const [accountSettings, setAccountSettings] = useState<ScopedAppearanceSettings | null>(null);
+  const [schoolSettings, setSchoolSettings] = useState<ScopedAppearanceSettings | null>(null);
+  const [branchSettings, setBranchSettings] = useState<SettingsValue | null>(null);
+  const [loadedFor, setLoadedFor] = useState<SettingsLoadedFor | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeSchoolId, setActiveSchoolId] = useState<number | null>(null);
-  const [activeBranchId, setActiveBranchId] = useState<number | null>(null);
+  const requestRef = useRef(0);
 
-  // ======================================================
-  // REFRESH SETTINGS FOR CURRENT/STORED CONTEXT
-  // ======================================================
+  const hydrateSettingsForMembership = useCallback(async (
+    membership: UserMembership,
+    preferredSettings?: Record<string, any> | null,
+  ) => {
+    const request = ++requestRef.current;
+    const identity = appearanceIdentityFor({
+      role: membership.role,
+      accountId: membership.accountId,
+      schoolId: membership.schoolId,
+      branchId: membership.branchId,
+    });
 
-  const refreshSettings = useCallback(async () => {
     setLoading(true);
+    setEffectiveScope(identity.scope);
 
     try {
-      const context = await resolveStoredOrFirstContext();
+      let resolved: SettingsValue | ScopedAppearanceSettings | null = null;
 
-      setActiveSchoolId(context.schoolId);
-      setActiveBranchId(context.branchId);
+      if (identity.scope === "branch") {
+        if (!identity.accountId || !identity.schoolId || !identity.branchId) {
+          throw new Error("Branch appearance requires account, school, and branch context.");
+        }
+        const branchResolved: SettingsValue =
+          (await findExactBranchSettings({
+            accountId: identity.accountId,
+            schoolId: identity.schoolId,
+            branchId: identity.branchId,
+            preferred: preferredSettings,
+          })) ??
+          defaultBranchSettings(
+            identity.accountId,
+            identity.schoolId,
+            identity.branchId,
+          );
 
-      const current = await getOrCreateSchoolBranchSettings(
-        context.schoolId,
-        context.branchId
-      );
+        // Membership restoration can finish before workspace bootstrap has
+        // populated Dexie. The valid defaults above keep the portal usable;
+        // a later settings refresh replaces them with the exact branch row.
+        resolved = branchResolved;
 
-      setSettings(current);
-    } catch (error) {
-      console.error("Failed to load school branch settings:", error);
+        if (request === requestRef.current) {
+          setBranchSettings(branchResolved);
+        }
+      } else if (identity.scope === "school") {
+        resolved = baseSettingsForScope("school");
+        if (request === requestRef.current) setSchoolSettings(resolved);
+      } else if (identity.scope === "account") {
+        resolved = baseSettingsForScope("account");
+        if (request === requestRef.current) setAccountSettings(resolved);
+      } else {
+        resolved = baseSettingsForScope("platform");
+      }
 
-      setSettings(normalizeSettings(defaultSettings(), null, null));
+      if (request !== requestRef.current) return resolved;
+
+      setEffectiveSettings(resolved);
+      setLoadedFor({
+        role: normalizeAppearanceRole(membership.role),
+        accountId: identity.accountId || undefined,
+        schoolId: identity.schoolId || undefined,
+        branchId: identity.branchId || undefined,
+        key: identity.key,
+      });
+
+      if (identity.scope === "branch" && resolved) {
+        const envelope = {
+          accountId: identity.accountId,
+          schoolId: identity.schoolId,
+          branchId: identity.branchId,
+          role: identity.role,
+          appearanceScope: identity.scope,
+          settings: resolved,
+          cachedAt: Date.now(),
+        };
+        writeJson(scopedCacheKey(identity.accountId!, identity.schoolId!, identity.branchId!), envelope);
+        writeJson(CURRENT_SETTINGS_POINTER, envelope);
+      } else {
+        writeJson(CURRENT_SETTINGS_POINTER, {
+          accountId: identity.accountId,
+          role: identity.role,
+          appearanceScope: identity.scope,
+          settings: resolved,
+          cachedAt: Date.now(),
+        });
+      }
+
+      return resolved;
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, []);
 
-  // ======================================================
-  // REFRESH FOR EXPLICIT SCHOOL/BRANCH CONTEXT
-  // ======================================================
+  const refreshSettings = useCallback(async () => {
+    const membership = getStoredActiveMembership();
+    if (!membership) {
+      setEffectiveScope("platform");
+      setEffectiveSettings(platformSettings);
+      setLoadedFor(null);
+      setLoading(false);
+      return;
+    }
+    await hydrateSettingsForMembership(membership);
+  }, [hydrateSettingsForMembership]);
 
-  const refreshSettingsForContext = useCallback(
-    async (schoolId?: number | null, branchId?: number | null) => {
-      setLoading(true);
+  const refreshSettingsForContext = useCallback(async (
+    schoolId?: number | null,
+    branchId?: number | null,
+  ) => {
+    const stored = getStoredActiveMembership();
+    if (!stored) return refreshSettings();
+    await hydrateSettingsForMembership({
+      ...stored,
+      schoolId: schoolId ?? stored.schoolId,
+      branchId: branchId ?? stored.branchId,
+    });
+  }, [hydrateSettingsForMembership, refreshSettings]);
 
-      try {
-        const nextSchoolId = schoolId || null;
-        const nextBranchId = branchId || null;
+  const updateSettings = useCallback(async (patch: SettingsPatch) => {
+    const membership = getStoredActiveMembership();
+    const role = normalizeAppearanceRole(membership?.role);
+    const scope = appearanceScopeForRole(role);
+    if (scope !== "branch") {
+      throw new Error("Branch Settings can only update a branch-scoped membership.");
+    }
 
-        setActiveSchoolId(nextSchoolId);
-        setActiveBranchId(nextBranchId);
+    const accountId = cleanString(patch.accountId || membership?.accountId);
+    const schoolId = positiveNumber(patch.schoolId || membership?.schoolId);
+    const branchId = positiveNumber(patch.branchId || membership?.branchId);
+    if (!accountId || !schoolId || !branchId) {
+      throw new Error("Account, school, and branch are required to save Branch Settings.");
+    }
 
-        if (nextSchoolId) {
-          localStorage.setItem(SCHOOL_STORAGE_KEY, String(nextSchoolId));
-        } else {
-          localStorage.removeItem(SCHOOL_STORAGE_KEY);
-        }
+    const existing = await findExactBranchSettings({ accountId, schoolId, branchId });
+    const prepared = prepareSyncData({
+      ...(existing || defaultBranchSettings(accountId, schoolId, branchId)),
+      ...patch,
+      accountId,
+      schoolId,
+      branchId,
+      isDeleted: false,
+    } as any) as any;
+    const next = normalizeBranchSettings(prepared, accountId, schoolId, branchId);
 
-        if (nextBranchId) {
-          localStorage.setItem(BRANCH_STORAGE_KEY, String(nextBranchId));
-        } else {
-          localStorage.removeItem(BRANCH_STORAGE_KEY);
-        }
+    if (existing?.id) {
+      await db.schoolBranchSettings.update(existing.id, next as any);
+      next.id = existing.id;
+    } else {
+      next.id = Number(await db.schoolBranchSettings.add(next as any));
+    }
 
-        const current = await getOrCreateSchoolBranchSettings(
-          nextSchoolId,
-          nextBranchId
-        );
+    setBranchSettings(next);
+    setEffectiveScope("branch");
+    setEffectiveSettings(next);
+    const identity = appearanceIdentityFor({ role, accountId, schoolId, branchId });
+    setLoadedFor({ role, accountId, schoolId, branchId, key: identity.key });
 
-        setSettings(current);
-      } catch (error) {
-        console.error(
-          "Failed to refresh school branch settings context:",
-          error
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
+    const envelope = {
+      accountId, schoolId, branchId, role,
+      appearanceScope: "branch",
+      settings: next,
+      cachedAt: Date.now(),
+    };
+    writeJson(scopedCacheKey(accountId, schoolId, branchId), envelope);
+    writeJson(CURRENT_SETTINGS_POINTER, envelope);
+    window.dispatchEvent(new CustomEvent("school-branch-settings-updated", {
+      detail: { accountId, schoolId, branchId, settings: next },
+    }));
+    return next;
+  }, []);
 
   useEffect(() => {
-    refreshSettings();
+    void refreshSettings().catch((error) => {
+      console.error("Failed to restore role-aware settings:", error);
+      setEffectiveSettings(platformSettings);
+      setEffectiveScope("platform");
+      setLoading(false);
+    });
   }, [refreshSettings]);
 
-  // Keep settings in sync when another context file changes localStorage.
   useEffect(() => {
-    const onStorage = () => {
-      refreshSettings();
-    };
-
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(
-      "school-branch-context-changed",
-      onStorage as EventListener
-    );
-
+    const handle = () => { void refreshSettings(); };
+    window.addEventListener("active-membership-changed", handle);
+    window.addEventListener("storage", handle);
+    window.addEventListener("school-branch-settings-updated", handle);
     return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(
-        "school-branch-context-changed",
-        onStorage as EventListener
-      );
+      window.removeEventListener("active-membership-changed", handle);
+      window.removeEventListener("storage", handle);
+      window.removeEventListener("school-branch-settings-updated", handle);
     };
   }, [refreshSettings]);
 
-  // ======================================================
-  // UPDATE ACTIVE SCHOOL-BRANCH SETTINGS
-  // ======================================================
+  const ready = Boolean(!loading && effectiveSettings && loadedFor);
+  const value = useMemo<SettingsContextValue>(() => ({
+    settings: effectiveSettings,
+    effectiveSettings,
+    effectiveScope,
+    platformSettings,
+    accountSettings,
+    schoolSettings,
+    branchSettings,
+    ready,
+    loading,
+    loadedFor,
+    activeSchoolId: loadedFor?.schoolId || null,
+    activeBranchId: loadedFor?.branchId || null,
+    refreshSettings,
+    refreshSettingsForContext,
+    hydrateSettingsForMembership,
+    updateSettings,
+  }), [
+    effectiveSettings, effectiveScope, accountSettings, schoolSettings,
+    branchSettings, ready, loading, loadedFor, refreshSettings,
+    refreshSettingsForContext, hydrateSettingsForMembership, updateSettings,
+  ]);
 
-  const updateSettings = useCallback(
-    async (patch: SettingsPatch) => {
-      const targetSchoolId =
-        Number(patch.schoolId || settings?.schoolId || activeSchoolId || 0) ||
-        null;
-
-      const targetBranchId =
-        Number(patch.branchId || settings?.branchId || activeBranchId || 0) ||
-        null;
-
-      if (!targetSchoolId || !targetBranchId) {
-        const fallback = normalizeSettings(
-          {
-            ...(settings || defaultSettings(targetSchoolId, targetBranchId)),
-            ...patch,
-          },
-          targetSchoolId,
-          targetBranchId
-        );
-
-        setSettings(fallback);
-        return fallback;
-      }
-
-      const existing = await getOrCreateSchoolBranchSettings(
-        targetSchoolId,
-        targetBranchId
-      );
-
-      const next = prepareSettingsSyncData(
-        {
-          ...existing,
-          ...patch,
-          id: existing.id,
-          schoolId: targetSchoolId,
-          branchId: targetBranchId,
-          isDeleted: false,
-          schoolGalleryImages: Array.isArray(patch.schoolGalleryImages)
-            ? patch.schoolGalleryImages
-            : Array.isArray(existing.schoolGalleryImages)
-            ? existing.schoolGalleryImages
-            : [],
-        },
-        targetSchoolId,
-        targetBranchId
-      );
-
-      if (existing.id) {
-        await db.schoolBranchSettings.update(existing.id, {
-          schoolId: targetSchoolId,
-          branchId: targetBranchId,
-
-          mode: next.mode,
-          theme: next.theme,
-          primaryColor: next.primaryColor,
-          fontFamily: next.fontFamily,
-          fontSize: next.fontSize,
-
-          academicYear: next.academicYear,
-          currentTerm: next.currentTerm,
-          currentAcademicStructureId: next.currentAcademicStructureId,
-          currentAcademicPeriodId: next.currentAcademicPeriodId,
-
-          logo: next.logo,
-          reportCardBackgroundImage: next.reportCardBackgroundImage,
-          reportCardWatermark: next.reportCardWatermark,
-          reportCardSignatureImage: next.reportCardSignatureImage,
-
-          dashboardHeroImage: next.dashboardHeroImage,
-          dashboardBannerImage: next.dashboardBannerImage,
-          studentPortalImage: next.studentPortalImage,
-          teacherPortalImage: next.teacherPortalImage,
-          classroomPlaceholderImage: next.classroomPlaceholderImage,
-          subjectPlaceholderImage: next.subjectPlaceholderImage,
-
-          schoolGalleryImages: next.schoolGalleryImages,
-
-          accountId: next.accountId,
-          cloudId: next.cloudId,
-          createdAt: next.createdAt,
-          updatedAt: next.updatedAt,
-          version: next.version,
-          deviceId: next.deviceId,
-          synced: next.synced,
-          isDeleted: false,
-        } as Partial<SchoolBranchSetting>);
-      } else {
-        const id = await db.schoolBranchSettings.add(
-          next as SchoolBranchSetting
-        );
-
-        next.id = Number(id);
-      }
-
-      setActiveSchoolId(targetSchoolId);
-      setActiveBranchId(targetBranchId);
-      setSettings(next);
-
-      localStorage.setItem(SCHOOL_STORAGE_KEY, String(targetSchoolId));
-      localStorage.setItem(BRANCH_STORAGE_KEY, String(targetBranchId));
-
-      window.dispatchEvent(new Event("school-branch-settings-updated"));
-
-      return next;
-    },
-    [settings, activeSchoolId, activeBranchId]
-  );
-
-  // ======================================================
-  // VALUE
-  // ======================================================
-
-  const value = useMemo<SettingsContextType>(
-    () => ({
-      settings,
-      loading,
-      activeSchoolId,
-      activeBranchId,
-      updateSettings,
-      refreshSettings,
-      refreshSettingsForContext,
-    }),
-    [
-      settings,
-      loading,
-      activeSchoolId,
-      activeBranchId,
-      updateSettings,
-      refreshSettings,
-      refreshSettingsForContext,
-    ]
-  );
-
-  return (
-    <SettingsContext.Provider value={value}>
-      {children}
-    </SettingsContext.Provider>
-  );
+  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
-
-// ======================================================
-// HOOK
-// ======================================================
 
 export function useSettings() {
   const context = useContext(SettingsContext);
-
-  if (!context) {
-    throw new Error("useSettings must be used inside SettingsProvider");
-  }
-
+  if (!context) throw new Error("useSettings must be used inside SettingsProvider");
   return context;
 }

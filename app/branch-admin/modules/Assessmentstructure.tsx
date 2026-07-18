@@ -34,14 +34,10 @@
  * - no input, modal layout, CRUD, sync or data behavior was changed
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-
 import {
   db,
   type AcademicStructure,
@@ -49,9 +45,24 @@ import {
   type AssessmentStructure,
   type AssessmentStructureItem,
   type Organization,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import {
+  softDeleteOwnerFieldAssets,
+  MediaOwners,
+  commitMediaAssetsToOwner,
+  createMediaSessionKey,
+  saveImageAsset,
+
+
+
+} from "../../lib/media/mediaAssetUtils";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
@@ -74,7 +85,9 @@ type StructureForm = {
   name: string;
   description: string;
   photo: string;
+  photoMediaId?: number;
   bannerImage: string;
+  bannerImageMediaId?: number;
   totalScore: string;
   active: boolean;
   locked: boolean;
@@ -107,13 +120,17 @@ type AssessmentStructureView = {
   items: AssessmentStructureItem[];
 };
 
+const ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE = MediaOwners.ASSESSMENT_STRUCTURES;
+
 const emptyStructureForm = (): StructureForm => ({
   organizationId: "",
   academicStructureId: "",
   name: "",
   description: "",
   photo: "",
+  photoMediaId: undefined,
   bannerImage: "",
+  bannerImageMediaId: undefined,
   totalScore: "100",
   active: true,
   locked: false,
@@ -258,13 +275,6 @@ const timeText = (value?: string | number | null) => {
   }
 };
 
-const fileToBase64 = (file: File) =>
-  new Promise<string>((resolve) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.readAsDataURL(file);
-  });
-
 function weightTone(weight: number): "green" | "red" | "orange" {
   if (weight === 100) return "green";
   if (weight > 100) return "red";
@@ -292,33 +302,26 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function Assessmentstructure() {
+  const dataRevision = useBranchTableRevision(["assessmentStructures", "assessmentStructureItems", "academicStructures", "organizations", "mediaAssets", "mediaBlobs"]);
+  const mediaSessionKeyRef = useRef(createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE));
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
@@ -327,6 +330,15 @@ export default function Assessmentstructure() {
   const [structureFilter, setStructureFilter] = useState("all");
 
   const [structures, setStructures] = useState<AssessmentStructure[]>([]);
+  const mediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
+    rows: structures,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [items, setItems] = useState<AssessmentStructureItem[]>([]);
   const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -423,7 +435,9 @@ export default function Assessmentstructure() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const academicStructureMap = useMemo(
     () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
@@ -548,6 +562,7 @@ export default function Assessmentstructure() {
   };
 
   const openCreateStructure = () => {
+    mediaSessionKeyRef.current = createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE);
     if (!requireTenant()) return;
 
     setSelectedItem(null);
@@ -570,8 +585,10 @@ export default function Assessmentstructure() {
       academicStructureId: structure.academicStructureId ? String(structure.academicStructureId) : "",
       name: structure.name || "",
       description: structure.description || "",
-      photo: structure.photo || "",
-      bannerImage: structure.bannerImage || "",
+      photo: mediaById[idOf(structure.id)]?.photo || structure.photo || "",
+      photoMediaId: structure.photoMediaId ? Number(structure.photoMediaId) : undefined,
+      bannerImage: mediaById[idOf(structure.id)]?.bannerImage || structure.bannerImage || "",
+      bannerImageMediaId: structure.bannerImageMediaId ? Number(structure.bannerImageMediaId) : undefined,
       totalScore: String(structure.totalScore || 100),
       active: isActiveRow(structure),
       locked: !!structure.locked,
@@ -696,20 +713,38 @@ export default function Assessmentstructure() {
         academicStructureId: idOf(structureForm.academicStructureId),
         name: structureForm.name.trim(),
         description: structureForm.description.trim() || undefined,
-        photo: structureForm.photo || undefined,
-        bannerImage: structureForm.bannerImage || undefined,
+        photo: safeRecordMediaValue(structureForm.photo),
+        photoMediaId: structureForm.photoMediaId || undefined,
+        bannerImage: safeRecordMediaValue(structureForm.bannerImage),
+        bannerImageMediaId: structureForm.bannerImageMediaId || undefined,
         totalScore: Number(structureForm.totalScore || 100),
         active: structureForm.active,
         locked: structureForm.locked,
         isDeleted: false,
       } as Partial<AssessmentStructure>;
 
-      if (structureForm.id && existing) {
-        await updateLocal("assessmentStructures", Number(structureForm.id), payload);
-      } else {
-        await createLocal("assessmentStructures", payload as AssessmentStructure);
+      const savedStructure =
+        structureForm.id && existing
+          ? await updateLocal("assessmentStructures", Number(structureForm.id), payload)
+          : await createLocal("assessmentStructures", payload as AssessmentStructure);
+
+      const savedStructureId = Number((savedStructure as any)?.id || structureForm.id || 0);
+
+      if (savedStructureId) {
+        await commitMediaAssetsToOwner({
+          accountId: String(accountId),
+          ownerTable: ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedStructureId,
+          ownerCloudId: (savedStructure as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: structureForm.photoMediaId, fieldKey: "photo" },
+            { assetId: structureForm.bannerImageMediaId, fieldKey: "bannerImage" },
+          ],
+        });
       }
 
+      mediaSessionKeyRef.current = createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE);
       setModalOpen(false);
       showToast("success", "Assessment structure saved.");
       await load();
@@ -784,6 +819,37 @@ export default function Assessmentstructure() {
 
     if (!confirmed) return;
 
+
+    await Promise.all(
+
+
+      ["photo", "bannerImage"].map((fieldKey) =>
+
+
+        softDeleteOwnerFieldAssets({
+
+
+          accountId: String(accountId),
+
+
+          ownerTable: "assessmentStructures",
+
+
+          ownerLocalId: Number(item.id),
+
+
+          fieldKey,
+
+
+        }),
+
+
+      ),
+
+
+    );
+
+
     await softDeleteLocal("assessmentStructures", item.id);
     setSelectedItem(null);
     showToast("success", "Assessment structure archived.");
@@ -800,9 +866,31 @@ export default function Assessmentstructure() {
   };
 
   const uploadStructureImage = async (target: "photo" | "bannerImage", file?: File) => {
-    if (!file) return;
-    const value = await fileToBase64(file);
-    setStructureForm((current) => ({ ...current, [target]: value }));
+    if (!file || !accountId || !schoolId || !branchId) return;
+
+    try {
+      const result = await saveImageAsset(file, {
+        accountId: String(accountId),
+        schoolId: Number(schoolId),
+        branchId: Number(branchId),
+        ownerTable: ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
+        ownerLocalId: structureForm.id || undefined,
+        ownerTempKey: structureForm.id ? undefined : mediaSessionKeyRef.current,
+        fieldKey: target,
+        variant: target === "photo" ? "avatar" : "cover",
+        replaceExisting: true,
+      });
+
+      setStructureForm((current) => ({
+        ...current,
+        [target]: result.previewUrl,
+        [target === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+      }));
+
+      showToast("info", `${target === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+    } catch (error: any) {
+      showToast("error", error?.message || "Failed to process image.");
+    }
   };
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
@@ -926,7 +1014,7 @@ export default function Assessmentstructure() {
       {viewMode === "cards" && (
         <section className="ba-list assessment-list">
           {filteredRows.map((item) => (
-            <AssessmentListItem key={String(item.id)} item={item} onOpen={() => setSelectedItem(item)} />
+            <AssessmentListItem key={String(item.id)} item={item} photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)} onOpen={() => setSelectedItem(item)} />
           ))}
 
           {!filteredRows.length && (
@@ -1015,7 +1103,7 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function AssessmentListItem({ item, onOpen }: { item: AssessmentStructureView; onOpen: () => void }) {
+function AssessmentListItem({ item, photo, onOpen }: { item: AssessmentStructureView; photo?: string; onOpen: () => void }) {
   const row: any = item.row;
 
   return (
@@ -1023,10 +1111,10 @@ function AssessmentListItem({ item, onOpen }: { item: AssessmentStructureView; o
       <span
         className="assessment-icon"
         style={{
-          backgroundImage: row.photo ? `url(${row.photo})` : undefined,
+          backgroundImage: photo ? `url(${photo})` : undefined,
         }}
       >
-        {!row.photo ? "🎯" : ""}
+        {!photo ? "🎯" : ""}
       </span>
 
       <span className="student-main">
@@ -2132,4 +2220,10 @@ const css = `
 
 
 
-`;
+`;const safeRecordMediaValue = (value?: string) => {
+  const media = String(value || "").trim();
+  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  return media;
+};
+
+

@@ -8,7 +8,7 @@ import type {
   CalendarEvent,
   CalendarEventReminder,
   CalendarEventStatus,
-} from "../db";
+} from "../db/db";
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;

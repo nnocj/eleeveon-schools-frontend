@@ -30,7 +30,7 @@ import { useRouter } from "next/navigation";
 
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
-import { db } from "../lib/db";
+import { db } from "../lib/db/db";
 import type { RoleNavSection } from "../components/role-portals/RolePortalShell";
 
 type AnyRow = Record<string, any>;

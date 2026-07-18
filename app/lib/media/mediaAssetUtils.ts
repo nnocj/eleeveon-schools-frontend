@@ -47,6 +47,14 @@
 
 import { db } from "../db";
 import { createLocal, updateLocal } from "../sync/syncUtils";
+import { getDeviceId } from "../sync/syncConfig";
+import {
+  buildMediaIdentityKey,
+  findExactOwnerFieldMediaAsset,
+  mediaIdentityMatches,
+  resolveMediaAssetUrl,
+} from "./mediaAssetResolver";
+import { scheduleMediaUpload } from "./mediaUpload";
 
 export type MediaKind = "image" | "document" | "video" | "audio" | "other";
 export type MediaUploadStatus = "local" | "queued" | "uploading" | "uploaded" | "failed";
@@ -138,6 +146,7 @@ export type SaveMediaAssetOptions = {
   ownerLocalId?: number | null;
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
+  deviceId?: string | null;
   fieldKey: string;
   variant?: MediaVariant;
   altText?: string;
@@ -356,30 +365,26 @@ function sameNumber(a?: number | string | null, b?: number | string | null) {
   return Number(a || 0) === Number(b || 0);
 }
 
-function hasOwnerIdentity(params: { ownerTempKey?: string | null; ownerLocalId?: number | null; ownerCloudId?: string | null }) {
-  return !!cleanString(params.ownerTempKey) || !!cleanNumber(params.ownerLocalId) || !!cleanString(params.ownerCloudId);
+function hasOwnerIdentity(params: {
+  accountId?: string | null;
+  ownerTempKey?: string | null;
+  ownerLocalId?: number | null;
+  ownerCloudId?: string | null;
+  ownerTable?: string | null;
+  fieldKey?: string | null;
+  deviceId?: string | null;
+}) {
+  return !!buildMediaIdentityKey({
+    ...params,
+    deviceId: params.deviceId || getDeviceId(),
+  });
 }
 
-function ownerIdentityMatches(
-  row: any,
-  params: { ownerTempKey?: string | null; ownerLocalId?: number | null; ownerCloudId?: string | null }
-) {
-  const ownerTempKey = cleanString(params.ownerTempKey);
-  const ownerLocalId = cleanNumber(params.ownerLocalId);
-  const ownerCloudId = cleanString(params.ownerCloudId);
-
-  // Priority 1: form/session key for unsaved records. This prevents the latest
-  // uploaded image from being reused by another open Student/Teacher/Parent form.
-  if (ownerTempKey) return sameString(row.ownerTempKey, ownerTempKey);
-
-  // Priority 2: local Dexie owner id after the record has been saved.
-  if (ownerLocalId) return sameNumber(row.ownerLocalId, ownerLocalId);
-
-  // Priority 3: cloud owner id when available after sync.
-  if (ownerCloudId) return sameString(row.ownerCloudId, ownerCloudId);
-
-  // No identity means unsafe to match. Never return the newest media globally.
-  return false;
+function ownerIdentityMatches(row: any, params: any) {
+  return mediaIdentityMatches(row, {
+    ...params,
+    deviceId: params.deviceId || getDeviceId(),
+  });
 }
 
 function createObjectUrl(blob: Blob) {
@@ -825,6 +830,17 @@ export async function saveImageAsset(file: File, options: SaveMediaAssetOptions)
     ownerCloudId: cleanString(options.ownerCloudId),
     ownerTempKey: cleanString(options.ownerTempKey),
     fieldKey: cleanFieldKey(options.fieldKey),
+    deviceId: cleanString(options.deviceId) || getDeviceId(),
+    ownerIdentityKey: buildMediaIdentityKey({
+      accountId: options.accountId,
+      ownerTable: options.ownerTable,
+      ownerCloudId: options.ownerCloudId,
+      ownerTempKey: options.ownerTempKey,
+      ownerLocalId: options.ownerLocalId,
+      deviceId: cleanString(options.deviceId) || getDeviceId(),
+      fieldKey: options.fieldKey,
+    }),
+    identityVersion: 1,
     kind: "image" as MediaKind,
     assetKind: "image" as MediaKind,
     variant,
@@ -862,6 +878,8 @@ export async function saveImageAsset(file: File, options: SaveMediaAssetOptions)
   // Blob URLs are short-lived and can appear to “bleed” across React renders
   // when they are revoked/recreated while list items are still mounted.
   const previewUrl = await fileToDataUrl(compressed.blob);
+
+  if (assetId) scheduleMediaUpload(assetId);
 
   return {
     assetId,
@@ -925,6 +943,17 @@ export async function saveGenericFileAsset(file: File, options: SaveMediaAssetOp
     ownerCloudId: cleanString(options.ownerCloudId),
     ownerTempKey: cleanString(options.ownerTempKey),
     fieldKey: cleanFieldKey(options.fieldKey),
+    deviceId: cleanString(options.deviceId) || getDeviceId(),
+    ownerIdentityKey: buildMediaIdentityKey({
+      accountId: options.accountId,
+      ownerTable: options.ownerTable,
+      ownerCloudId: options.ownerCloudId,
+      ownerTempKey: options.ownerTempKey,
+      ownerLocalId: options.ownerLocalId,
+      deviceId: cleanString(options.deviceId) || getDeviceId(),
+      fieldKey: options.fieldKey,
+    }),
+    identityVersion: 1,
     kind: getMediaKind(file),
     assetKind: getMediaKind(file),
     variant: options.variant || "attachment",
@@ -958,6 +987,8 @@ export async function saveGenericFileAsset(file: File, options: SaveMediaAssetOp
     );
     rememberMediaObjectUrl(assetId, cacheKey, previewUrl);
   }
+
+  if (assetId) scheduleMediaUpload(assetId);
 
   return {
     assetId,
@@ -1064,26 +1095,13 @@ export async function getOwnerFieldMediaAsset(params: {
   ownerLocalId?: number | null;
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
+  deviceId?: string | null;
   fieldKey: string;
 }) {
-  const table = tableSafe("mediaAssets");
-  if (!table) return undefined;
-
-  // Refuse ambiguous lookups. Without ownerTempKey, ownerLocalId, or
-  // ownerCloudId, a lookup can accidentally return the most recent image
-  // from another unsaved form.
-  if (!hasOwnerIdentity(params)) return undefined;
-
-  const rows = await table.toArray();
-  return rows
-    .filter((row: any) => {
-      if (row.isDeleted || row.active === false) return false;
-      if (params.accountId && row.accountId !== params.accountId) return false;
-      if (row.ownerTable !== cleanOwnerTable(params.ownerTable)) return false;
-      if (row.fieldKey !== cleanFieldKey(params.fieldKey)) return false;
-      return ownerIdentityMatches(row, params);
-    })
-    .sort(sortNewestMediaFirst)[0];
+  return findExactOwnerFieldMediaAsset({
+    ...params,
+    deviceId: params.deviceId || getDeviceId(),
+  });
 }
 
 
@@ -1093,6 +1111,7 @@ export async function resolveOwnerMediaUrl(params: {
   ownerLocalId?: number | null;
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
+  deviceId?: string | null;
   fieldKey: string;
   fallbackAssetId?: number | string | null;
 }) {
@@ -1102,11 +1121,12 @@ export async function resolveOwnerMediaUrl(params: {
     ownerLocalId: params.ownerLocalId,
     ownerCloudId: params.ownerCloudId,
     ownerTempKey: params.ownerTempKey,
+    deviceId: params.deviceId || getDeviceId(),
     fieldKey: params.fieldKey,
   });
 
   if (ownedAsset?.id) {
-    const url = await getMediaObjectUrl(Number(ownedAsset.id));
+    const url = await resolveMediaAssetUrl(ownedAsset);
     if (url) return url;
   }
 
@@ -1133,6 +1153,7 @@ export async function softDeleteOwnerFieldAssets(params: {
   ownerLocalId?: number | null;
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
+  deviceId?: string | null;
   fieldKey?: string;
   excludeAssetIds?: Array<number | string | null | undefined>;
 }) {
@@ -1181,6 +1202,12 @@ export async function attachMediaAssetToOwner(params: {
   ownerLocalId?: number | null;
   ownerCloudId?: string | null;
   ownerTempKey?: string | null;
+  /**
+   * The destination owner field is authoritative during commit.
+   * This repairs legacy assets whose fieldKey used an older alias such as
+   * "schoolLogo" while the current owner row stores the media ID under "logo".
+   */
+  fieldKey?: string | null;
 }) {
   const asset = await getMediaAsset(params.assetId);
   if (!asset?.id) return;
@@ -1190,11 +1217,24 @@ export async function attachMediaAssetToOwner(params: {
   const ownerTable = cleanOwnerTable(params.ownerTable);
   const ownerLocalId = cleanNumber(params.ownerLocalId);
   const ownerCloudId = cleanString(params.ownerCloudId);
+  const fieldKey = cleanFieldKey(params.fieldKey || asset.fieldKey);
+  const deviceId = asset.deviceId || getDeviceId();
 
   await updateLocal("mediaAssets" as any, Number(asset.id), {
     ownerTable,
     ownerLocalId,
     ownerCloudId,
+    fieldKey,
+    deviceId,
+    ownerIdentityKey: buildMediaIdentityKey({
+      accountId: asset.accountId,
+      ownerTable,
+      ownerCloudId,
+      ownerLocalId,
+      deviceId,
+      fieldKey,
+    }),
+    identityVersion: 1,
     // Once attached to a real record, clear the temporary form/session key so
     // future lookups use the permanent owner identity.
     ownerTempKey: undefined,
@@ -1205,7 +1245,6 @@ export async function attachMediaAssetToOwner(params: {
   // Replacement cleanup for unsaved-form uploads that become attached later:
   // once this asset has a permanent owner, deactivate older active assets for
   // the same owner + field. The current asset is excluded.
-  const fieldKey = cleanString(asset.fieldKey);
   if (fieldKey && (ownerLocalId || ownerCloudId)) {
     await softDeleteOwnerFieldAssets({
       accountId: asset.accountId,
@@ -1216,6 +1255,199 @@ export async function attachMediaAssetToOwner(params: {
       excludeAssetIds: [Number(asset.id)],
     });
   }
+}
+
+
+export async function verifyOwnerFieldMedia(params: {
+  assetId?: number | null;
+  accountId: string;
+  ownerTable: string;
+  ownerLocalId?: number | null;
+  ownerCloudId?: string | null;
+  ownerTempKey?: string | null;
+  fieldKey: string;
+}) {
+  const expectedId = cleanNumber(params.assetId);
+  const expectedOwnerTable = cleanOwnerTable(params.ownerTable);
+  const expectedFieldKey = cleanFieldKey(params.fieldKey);
+
+  /**
+   * When Save already knows the exact media ID, verify that row directly.
+   * Do not require an owner-index lookup to rediscover the same row: older
+   * IndexedDB schemas, stale ownerIdentityKey indexes, or a local→cloud owner
+   * transition can otherwise create a false “not found” error.
+   */
+  if (expectedId) {
+    const expected = await getMediaAsset(expectedId);
+
+    if (!expected?.id) {
+      throw new Error(`The ${params.fieldKey} media asset no longer exists after saving.`);
+    }
+
+    if (expected.isDeleted || expected.active === false) {
+      throw new Error(`The ${params.fieldKey} media asset was deleted before verification.`);
+    }
+
+    if (String(expected.accountId || "") !== String(params.accountId || "")) {
+      throw new Error(`The ${params.fieldKey} media asset belongs to another account.`);
+    }
+
+    if (cleanOwnerTable(expected.ownerTable) !== expectedOwnerTable) {
+      throw new Error(`The ${params.fieldKey} media asset was attached to the wrong owner table.`);
+    }
+
+    if (cleanFieldKey(expected.fieldKey) !== expectedFieldKey) {
+      // A legacy asset may still carry an old field alias. Commit is the
+      // authoritative boundary, so repair the exact asset instead of rejecting
+      // a valid image that is already referenced by the owner row.
+      const repairedDeviceId = expected.deviceId || getDeviceId();
+
+      await updateLocal("mediaAssets" as any, Number(expected.id), {
+        fieldKey: expectedFieldKey,
+        ownerIdentityKey: buildMediaIdentityKey({
+          accountId: params.accountId,
+          ownerTable: expectedOwnerTable,
+          ownerCloudId: params.ownerCloudId,
+          ownerTempKey: params.ownerTempKey,
+          ownerLocalId: params.ownerLocalId,
+          deviceId: repairedDeviceId,
+          fieldKey: expectedFieldKey,
+        }),
+        identityVersion: 1,
+        active: true,
+        isDeleted: false,
+      } as any);
+
+      const repaired = await getMediaAsset(Number(expected.id));
+
+      if (!repaired?.id || cleanFieldKey(repaired.fieldKey) !== expectedFieldKey) {
+        throw new Error(`The ${params.fieldKey} media asset could not be assigned to the correct field.`);
+      }
+
+      Object.assign(expected, repaired);
+    }
+
+    const expectedCloudId = cleanString(params.ownerCloudId);
+    const expectedLocalId = cleanNumber(params.ownerLocalId);
+    const expectedTempKey = cleanString(params.ownerTempKey);
+
+    const ownerMatches =
+      (!!expectedCloudId && cleanString(expected.ownerCloudId) === expectedCloudId) ||
+      (!!expectedLocalId && cleanNumber(expected.ownerLocalId) === expectedLocalId) ||
+      (!!expectedTempKey && cleanString(expected.ownerTempKey) === expectedTempKey);
+
+    if ((expectedCloudId || expectedLocalId || expectedTempKey) && !ownerMatches) {
+      throw new Error(`The ${params.fieldKey} media asset was not attached to the saved owner.`);
+    }
+
+    const url = await resolveMediaAssetUrl(expected);
+    if (!url) {
+      throw new Error(`The ${params.fieldKey} image was saved but cannot be displayed from local or remote storage.`);
+    }
+
+    return { asset: expected, url };
+  }
+
+  // Fallback for legacy callers that do not store a media ID on the owner row.
+  const asset = await getOwnerFieldMediaAsset({
+    accountId: params.accountId,
+    ownerTable: params.ownerTable,
+    ownerLocalId: params.ownerLocalId,
+    ownerCloudId: params.ownerCloudId,
+    ownerTempKey: params.ownerTempKey,
+    fieldKey: params.fieldKey,
+  });
+
+  if (!asset?.id) {
+    throw new Error(`The ${params.fieldKey} media asset could not be found after saving.`);
+  }
+
+  const url = await resolveMediaAssetUrl(asset);
+  if (!url) {
+    throw new Error(`The ${params.fieldKey} image was saved but cannot be displayed from local or remote storage.`);
+  }
+
+  return { asset, url };
+}
+
+export async function commitMediaAssetToOwner(params: {
+  assetId: number;
+  accountId: string;
+  ownerTable: string;
+  ownerLocalId?: number | null;
+  ownerCloudId?: string | null;
+  ownerTempKey?: string | null;
+  fieldKey: string;
+  allowMultiple?: boolean;
+}) {
+  const assetId = cleanNumber(params.assetId);
+  if (!assetId) throw new Error("A valid media asset ID is required.");
+  if (!cleanNumber(params.ownerLocalId) && !cleanString(params.ownerCloudId)) {
+    throw new Error(`Cannot attach ${params.fieldKey} media before the owner record exists.`);
+  }
+
+  await attachMediaAssetToOwner({
+    assetId,
+    ownerTable: params.ownerTable,
+    ownerLocalId: params.ownerLocalId,
+    ownerCloudId: params.ownerCloudId,
+    ownerTempKey: params.ownerTempKey,
+    fieldKey: params.fieldKey,
+  });
+
+  if (!params.allowMultiple) {
+    await softDeleteOwnerFieldAssets({
+      accountId: params.accountId,
+      ownerTable: params.ownerTable,
+      ownerLocalId: params.ownerLocalId,
+      ownerCloudId: params.ownerCloudId,
+      fieldKey: params.fieldKey,
+      excludeAssetIds: [assetId],
+    });
+  }
+
+  const verified = await verifyOwnerFieldMedia({
+    assetId,
+    accountId: params.accountId,
+    ownerTable: params.ownerTable,
+    ownerLocalId: params.ownerLocalId,
+    ownerCloudId: params.ownerCloudId,
+    fieldKey: params.fieldKey,
+  });
+
+  scheduleMediaUpload(assetId);
+  return verified;
+}
+
+export async function commitMediaAssetsToOwner(params: {
+  accountId: string;
+  ownerTable: string;
+  ownerLocalId?: number | null;
+  ownerCloudId?: string | null;
+  ownerTempKey?: string | null;
+  assets: Array<{ assetId?: number | null; fieldKey: string; allowMultiple?: boolean }>;
+}) {
+  const committed: Array<{ assetId: number; fieldKey: string; url: string }> = [];
+
+  for (const item of params.assets) {
+    const assetId = cleanNumber(item.assetId);
+    if (!assetId) continue;
+
+    const result = await commitMediaAssetToOwner({
+      assetId,
+      accountId: params.accountId,
+      ownerTable: params.ownerTable,
+      ownerLocalId: params.ownerLocalId,
+      ownerCloudId: params.ownerCloudId,
+      ownerTempKey: params.ownerTempKey,
+      fieldKey: item.fieldKey,
+      allowMultiple: item.allowMultiple,
+    });
+
+    committed.push({ assetId, fieldKey: item.fieldKey, url: result.url });
+  }
+
+  return committed;
 }
 
 export function revokeMediaObjectUrl(url?: string) {

@@ -46,7 +46,7 @@ import {
   type CurriculumPathway,
   type CurriculumSubject,
   type StudentCurriculum,
-} from "../../lib/db";
+} from "../../lib/db/db";
 import {
   createLocal,
   updateLocal,
@@ -54,6 +54,8 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type AnyRow = Record<string, any>;
@@ -285,6 +287,8 @@ function SliderIcon() {
 }
 
 export default function CurriculumPathways() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -317,7 +321,7 @@ export default function CurriculumPathways() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
@@ -445,6 +449,7 @@ export default function CurriculumPathways() {
     accountLoading,
     settingsLoading,
     contextLoading,
+    dataRevision,
   ]);
 
   const curriculumMap = useMemo(() => {

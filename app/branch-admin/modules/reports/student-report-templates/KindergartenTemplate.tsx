@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import KindergartenHeader from "../shared/headers/KindergartenHeader";
+import KindergartenHeader from "../shared/headers/student-reports/KindergartenHeader";
 
 import {
   createReportPageStyle,

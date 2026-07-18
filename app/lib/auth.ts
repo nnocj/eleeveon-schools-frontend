@@ -1,7 +1,7 @@
 // =========================
 // lib/auth.ts
 // =========================
-import { db } from "./db";
+import { db } from "./db/db";
 
 export async function loginStudent(studentId: number) {
   const student = await db.students.get(studentId);

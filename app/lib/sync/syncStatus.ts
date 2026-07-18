@@ -4,7 +4,7 @@
  * Backend sync status + local pending count helpers.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import { SYNC_ENDPOINTS, SyncStatusResponse } from "./syncConfig";
 import { syncHttp } from "./syncHttp";
 import { countPendingSync, isSyncError } from "./syncUtils";

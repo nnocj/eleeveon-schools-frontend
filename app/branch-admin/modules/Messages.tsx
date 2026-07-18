@@ -45,9 +45,11 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type Message, type MessageThread } from "../../lib/db";
+import { db, type Message, type MessageThread } from "../../lib/db/db";
 import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type FolderFilter = "inbox" | "sent" | "archived" | "all";
@@ -264,6 +266,8 @@ function SliderIcon() {
 }
 
 export default function Messages() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -290,7 +294,7 @@ export default function Messages() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<ViewMode>("cards");
   const [threads, setThreads] = useState<AnyRow[]>([]);
@@ -351,7 +355,9 @@ export default function Messages() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId]);
+  }, [accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   const contacts = useMemo(() => {
     return memberships

@@ -42,10 +42,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
 import SignaturePadModal from "../../components/media/SignaturePadModal";
 import {
   db,
@@ -55,13 +52,14 @@ import {
   type Organization,
   type Teacher,
   type TeacherAttendance,
-} from "../../lib/db";
+} from "../../lib/db/db";
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 import {
+  softDeleteOwnerFieldAssets,
   MediaOwners,
   MediaFieldKeys,
   attachCameraStreamToVideo,
-  attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
@@ -72,8 +70,15 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
+
+
+
 } from "../../lib/media/mediaAssetUtils";
 
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type TeacherRole = "teacher" | "head_teacher" | "lecturer" | "principal";
@@ -340,36 +345,37 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function TeachersPage() {
+  const dataRevision = useBranchTableRevision(["teachers", "organizations", "assignments", "classSubjects", "classTeachers", "teacherAttendance", "mediaAssets", "mediaBlobs"]);
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } =
-    useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Teacher[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "teachers",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "coverPhoto", mediaIdKey: "coverPhotoMediaId" },
+      { fieldKey: "signature", mediaIdKey: "signatureMediaId" },
+    ],
+  });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
@@ -582,7 +588,9 @@ export default function TeachersPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -661,9 +669,9 @@ export default function TeachersPage() {
     return {
       id,
       row,
-      photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-      coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
-      signatureUrl: mediaPreviewUrls[mediaKey(id, "signature")] || safeRecordMediaValue(row.signature),
+      photoUrl: resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
+      coverPhotoUrl: resolvedMediaById[id]?.coverPhoto || mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
+      signatureUrl: resolvedMediaById[id]?.signature || mediaPreviewUrls[mediaKey(id, "signature")] || safeRecordMediaValue(row.signature),
       organizationName: organization?.name || "No organization",
       assignmentCount,
       classSubjectCount,
@@ -885,18 +893,18 @@ export default function TeachersPage() {
       );
 
       if (savedTeacherId) {
-        await Promise.all(
-          [form.photoMediaId, form.coverPhotoMediaId, form.signatureMediaId]
-            .filter(Boolean)
-            .map((assetId) =>
-              attachMediaAssetToOwner({
-                assetId: Number(assetId),
-                ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedTeacherId,
-                ownerTempKey: mediaSessionKey.current,
-              })
-            )
-        );
+        await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable: TEACHER_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedTeacherId,
+          ownerCloudId: (savedTeacher as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKey.current,
+          assets: [
+            { assetId: form.photoMediaId, fieldKey: MediaFieldKeys.PHOTO },
+            { assetId: form.coverPhotoMediaId, fieldKey: MediaFieldKeys.COVER_PHOTO },
+            { assetId: form.signatureMediaId, fieldKey: MediaFieldKeys.SIGNATURE },
+          ],
+        });
       }
 
       setModalOpen(false);
@@ -917,6 +925,27 @@ export default function TeachersPage() {
     if (!id) return;
     const ok = window.confirm(item.totalUsage ? `"${row.fullName}" has ${item.totalUsage} related record(s). Delete anyway?` : `Delete "${row.fullName}"?`);
     if (!ok) return;
+
+    await Promise.all(
+
+      ["photo", "coverPhoto", "signature"].map((fieldKey) =>
+
+        softDeleteOwnerFieldAssets({
+
+          accountId: String(accountId),
+
+          ownerTable: "teachers",
+
+          ownerLocalId: Number(id),
+
+          fieldKey,
+
+        }),
+
+      ),
+
+    );
+
     await softDeleteLocal("teachers", Number(id));
     setSelectedItem(null);
     showToast("success", "Teacher deleted.");

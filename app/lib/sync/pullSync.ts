@@ -1,31 +1,36 @@
 /**
  * app/lib/sync/pullSync.ts
- * ---------------------------------------------------------
+ * --------------------------------------------------------------------------
  * Pulls cloud SyncRecord changes into Dexie.
- * Also understands optional backend cache records returned
- * by upgraded backend.
  *
- * Media source-of-truth upgrade:
- * - mediaAssets are synced metadata and are the cross-device image source.
- * - mediaBlobs remain local-only and are never expected from normal pull sync.
- * - mediaAssets are not matched by plain local numeric id first because local
- *   Dexie ids can collide across browsers/devices.
- * - incoming mediaAssets from cloud replace stale local metadata, including
- *   previewDataUrl, thumbnailDataUrl, remoteUrl/publicUrl, active and isDeleted.
- * - deleted/inactive mediaAssets are applied locally so replaced images stop
- *   appearing on other devices.
+ * Phase 4:
+ * - uses the stable compound cursor: updatedAt + id;
+ * - repeatedly requests pages until hasMore === false;
+ * - applies every page before advancing the persisted cursor;
+ * - preserves legacy `since` fallback for upgraded devices that do not yet
+ *   have a compound cursor;
+ * - never advances the stored cursor after a partial or failed pull.
+ *
+ * Phase 3 protections preserved:
+ * - the cursor is scoped to the active account + environment;
+ * - another account can never inherit this pull position;
+ * - records from another account are rejected;
+ * - mediaAssets are never matched by plain numeric local ID first.
  */
 
 import { db } from "../db";
+
 import {
   assertAccountId,
+  clearLastSyncCursor,
+  forceFullSyncNextRun,
   getDeviceId,
-  getLastSyncAt,
-  PullResponse,
-  setLastSyncAt,
+  getPullPosition,
+  type PullResponse,
+  type SyncPullCursor,
+  setLastSyncCursor,
   SYNC_ENDPOINTS,
   SYNC_STATUS_VALUE,
-  forceFullSyncNextRun,
 } from "./syncConfig";
 
 import { syncHttp } from "./syncHttp";
@@ -43,18 +48,33 @@ import {
 import { applyPlatformCacheRecords } from "./platformCache";
 
 import {
-  clearMediaObjectUrlCache,
-  revokeMediaObjectUrl,
-} from "../media/mediaAssetUtils";
+  integrityReason,
+  quarantineSyncRecord,
+  validatePullRecord,
+} from "./syncIntegrity";
+
+const DEFAULT_PULL_PAGE_LIMIT = 500;
+const MAX_PULL_PAGES_PER_RUN = 10_000;
 
 export type PullSyncResult = {
   pulled: number;
   skipped: number;
   errors: string[];
   cacheUpdated?: number;
+  accountId: string;
+
+  cursorBefore: SyncPullCursor | null;
+  cursorAfter: SyncPullCursor | null;
+
+  legacySinceBefore: number;
+  pages: number;
+  completed: boolean;
 };
 
-function cleanIncomingPayload(payload: Record<string, any>, localId?: number) {
+function cleanIncomingPayload(
+  payload: Record<string, any>,
+  localId?: number,
+) {
   const copy = { ...(payload || {}) };
 
   if (localId != null) {
@@ -67,109 +87,196 @@ function cleanIncomingPayload(payload: Record<string, any>, localId?: number) {
 }
 
 function hasValue(value: any) {
-  return value !== undefined && value !== null && String(value).trim() !== "";
+  return (
+    value !== undefined &&
+    value !== null &&
+    String(value).trim() !== ""
+  );
 }
 
 function sameValue(a: any, b: any) {
   return String(a ?? "") === String(b ?? "");
 }
 
-function toNumber(value: any) {
-  if (value === undefined || value === null || value === "") return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
+function sameCursor(
+  left: SyncPullCursor | null,
+  right: SyncPullCursor | null,
+) {
+  if (!left && !right) return true;
+  if (!left || !right) return false;
+
+  return (
+    Number(left.updatedAt) === Number(right.updatedAt) &&
+    String(left.id) === String(right.id)
+  );
 }
 
-function isMediaAssetsTable(tableName?: string | null) {
-  return String(tableName || "") === "mediaAssets";
+function normalizeCursor(
+  value: SyncPullCursor | null | undefined,
+): SyncPullCursor | null {
+  if (!value) return null;
+
+  const updatedAt = Number(value.updatedAt);
+  const id = String(value.id || "").trim();
+
+  if (!Number.isFinite(updatedAt) || updatedAt < 0 || !id) {
+    return null;
+  }
+
+  return {
+    updatedAt,
+    id,
+  };
 }
 
-function isMediaBlobsTable(tableName?: string | null) {
-  return String(tableName || "") === "mediaBlobs";
-}
-
-async function findByCloudId(table: any, cloudId?: string | null) {
+async function findByCloudId(
+  table: any,
+  cloudId?: string | null,
+) {
   if (!hasValue(cloudId)) return null;
 
   const cleanCloudId = String(cloudId);
 
   try {
-    const indexed = await table.where("cloudId").equals(cleanCloudId).first();
+    const indexed = await table
+      .where("cloudId")
+      .equals(cleanCloudId)
+      .first();
+
     if (indexed) return indexed;
   } catch {
-    // Some old Dexie versions/tables may not have the index available.
+    // Some legacy stores may not index cloudId.
   }
 
   const rows = await table.toArray();
-  return rows.find((row: any) => sameValue(row.cloudId, cleanCloudId)) || null;
+
+  return (
+    rows.find((row: any) =>
+      sameValue(row.cloudId, cleanCloudId),
+    ) || null
+  );
 }
 
-async function findExistingMediaAsset(table: any, record: any) {
+async function findExistingMediaAsset(
+  table: any,
+  record: any,
+) {
   const payload = record.payload || {};
   const cloudId = record.cloudId || payload.cloudId;
 
-  // 1) Cloud id is the only globally safe permanent identity.
   const byCloudId = await findByCloudId(table, cloudId);
   if (byCloudId) return byCloudId;
 
   const rows = await table.toArray();
+
+  const activeRows = rows.filter(
+    (row: any) => !row.isDeleted,
+  );
 
   const accountId = payload.accountId || record.accountId;
   const ownerTable = payload.ownerTable;
   const fieldKey = payload.fieldKey;
   const ownerTempKey = payload.ownerTempKey;
   const ownerCloudId = payload.ownerCloudId;
-  const ownerLocalId = payload.ownerLocalId;
+  const ownerLocalId =
+    payload.ownerLocalId ?? record.localId;
 
-  // 2) Temporary form key is safe for unsaved forms on the same device/session.
   if (hasValue(ownerTempKey)) {
-    const byTempKey = rows.find((row: any) => {
-      if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
-      if (hasValue(ownerTable) && !sameValue(row.ownerTable, ownerTable)) return false;
-      if (hasValue(fieldKey) && !sameValue(row.fieldKey, fieldKey)) return false;
-      return sameValue(row.ownerTempKey, ownerTempKey);
-    });
-    if (byTempKey) return byTempKey;
+    const match = activeRows.find(
+      (row: any) =>
+        (!hasValue(accountId) ||
+          sameValue(row.accountId, accountId)) &&
+        (!hasValue(ownerTable) ||
+          sameValue(row.ownerTable, ownerTable)) &&
+        (!hasValue(fieldKey) ||
+          sameValue(row.fieldKey, fieldKey)) &&
+        sameValue(row.ownerTempKey, ownerTempKey),
+    );
+
+    if (match) return match;
   }
 
-  // 3) Owner cloud id is stable after the owner has synced.
   if (hasValue(ownerCloudId)) {
-    const byOwnerCloud = rows.find((row: any) => {
-      if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
-      if (hasValue(ownerTable) && !sameValue(row.ownerTable, ownerTable)) return false;
-      if (hasValue(fieldKey) && !sameValue(row.fieldKey, fieldKey)) return false;
-      return sameValue(row.ownerCloudId, ownerCloudId);
-    });
-    if (byOwnerCloud) return byOwnerCloud;
+    const match = activeRows.find(
+      (row: any) =>
+        (!hasValue(accountId) ||
+          sameValue(row.accountId, accountId)) &&
+        (!hasValue(ownerTable) ||
+          sameValue(row.ownerTable, ownerTable)) &&
+        (!hasValue(fieldKey) ||
+          sameValue(row.fieldKey, fieldKey)) &&
+        sameValue(row.ownerCloudId, ownerCloudId),
+    );
+
+    if (match) return match;
   }
 
-  // 4) Strict ownerLocalId matching is allowed only with ownerTable + fieldKey.
-  // Never match mediaAssets by local numeric id alone because local ids collide
-  // across devices.
-  if (hasValue(ownerLocalId) && hasValue(ownerTable) && hasValue(fieldKey)) {
-    const byStrictOwnerLocal = rows.find((row: any) => {
-      if (hasValue(accountId) && !sameValue(row.accountId, accountId)) return false;
-      return (
+  if (
+    hasValue(ownerLocalId) &&
+    hasValue(ownerTable) &&
+    hasValue(fieldKey)
+  ) {
+    const match = activeRows.find(
+      (row: any) =>
+        (!hasValue(accountId) ||
+          sameValue(row.accountId, accountId)) &&
         sameValue(row.ownerTable, ownerTable) &&
         sameValue(row.fieldKey, fieldKey) &&
-        sameValue(row.ownerLocalId, ownerLocalId)
-      );
-    });
-    if (byStrictOwnerLocal) return byStrictOwnerLocal;
+        sameValue(row.ownerLocalId, ownerLocalId),
+    );
+
+    if (match) return match;
   }
 
-  // 5) Last fallback: payload.id only if it points to a row with the same cloudId.
   const payloadId = payload.id;
+
   if (hasValue(payloadId)) {
-    const byPayloadId = await table.get(Number(payloadId)).catch(() => null);
-    if (byPayloadId && hasValue(cloudId) && sameValue(byPayloadId.cloudId, cloudId)) return byPayloadId;
+    const candidate = await table
+      .get(Number(payloadId))
+      .catch(() => null);
+
+    if (
+      candidate &&
+      hasValue(cloudId) &&
+      sameValue(candidate.cloudId, cloudId)
+    ) {
+      return candidate;
+    }
   }
 
   return null;
 }
 
-async function findExistingRecordForPull(tableName: string, table: any, record: any) {
-  if (isMediaAssetsTable(tableName)) {
+function normalizeIncomingMediaPayload(
+  payload: Record<string, any>,
+) {
+  const copy = { ...(payload || {}) };
+
+  for (const key of [
+    "blob",
+    "file",
+    "originalFile",
+    "optimizedFile",
+    "localBlob",
+    "localBlobData",
+    "previewUrl",
+    "objectUrl",
+    "localObjectUrl",
+    "dataUrl",
+    "base64",
+  ]) {
+    delete copy[key];
+  }
+
+  return copy;
+}
+
+async function findExistingRecordForPull(
+  tableName: string,
+  table: any,
+  record: any,
+) {
+  if (tableName === "mediaAssets") {
     return findExistingMediaAsset(table, record);
   }
 
@@ -180,291 +287,446 @@ async function findExistingRecordForPull(tableName: string, table: any, record: 
   });
 }
 
-function normalizeIncomingMediaPayload(payload: Record<string, any>) {
-  if (!payload) return payload;
-  const copy = { ...payload };
+async function applyPulledRecord(input: {
+  record: any;
+  accountId: string;
+  deviceId: string;
+}): Promise<{
+  pulled: number;
+  skipped: number;
+  errors: string[];
+  cacheUpdated: number;
+}> {
+  const {
+    record,
+    accountId,
+    deviceId,
+  } = input;
 
-  // Keep media metadata small and safe. Actual Blob/File/object URLs are local-only.
-  delete copy.blob;
-  delete copy.file;
-  delete copy.originalFile;
-  delete copy.optimizedFile;
-  delete copy.localBlob;
-  delete copy.localBlobData;
-  delete copy.previewUrl;
-  delete copy.objectUrl;
-  delete copy.localObjectUrl;
-  delete copy.dataUrl;
-  delete copy.base64;
+  const errors: string[] = [];
 
-  // Never trust local blob pointers from another browser/device.
-  delete copy.localBlobId;
-  delete copy.localObjectUrl;
+  const integrity =
+    validatePullRecord(
+      record,
+      accountId,
+    );
 
-  return copy;
-}
+  if (!integrity.ok) {
+    const reason =
+      integrityReason(
+        integrity.issues,
+      );
 
-function normalizeIncomingPayloadForTable(tableName: string, payload: Record<string, any>) {
-  if (isMediaAssetsTable(tableName)) return normalizeIncomingMediaPayload(payload || {});
-  return payload || {};
-}
+    await quarantineSyncRecord({
+      source: "pull",
+      accountId:
+        record?.accountId ||
+        accountId,
+      tableName:
+        record?.tableName,
+      localId:
+        record?.localId,
+      cloudId:
+        record?.cloudId,
+      reason,
+      payload: record,
+    });
 
-function isIncomingMediaDeleted(incoming: any) {
-  return !!incoming?.isDeleted || incoming?.active === false;
-}
+    return {
+      pulled: 0,
+      skipped: 1,
+      cacheUpdated: 0,
+      errors,
+    };
+  }
 
-function mediaCloudWins(existing: any, incoming: any) {
-  const existingUpdatedAt = Number(existing?.updatedAt || 0);
-  const incomingUpdatedAt = Number(incoming?.updatedAt || 0);
+  if (
+    record.accountId &&
+    record.accountId !== accountId
+  ) {
+    return {
+      pulled: 0,
+      skipped: 1,
+      cacheUpdated: 0,
+      errors: [
+        `Rejected ${record.tableName}: account mismatch.`,
+      ],
+    };
+  }
 
-  if (!existing) return incoming;
+  if (!isPullSyncTable(record.tableName)) {
+    return {
+      pulled: 0,
+      skipped: 1,
+      cacheUpdated: 0,
+      errors,
+    };
+  }
 
-  // Deleted/inactive cloud media must always be applied locally.
-  if (isIncomingMediaDeleted(incoming)) return incoming;
+  if (
+    isBackendCacheTable(record.tableName) &&
+    !isSyncTable(record.tableName)
+  ) {
+    const result = await applyPlatformCacheRecords([
+      {
+        tableName: record.tableName,
+        payload: record.payload,
+        id:
+          record.payload?.id ??
+          record.cloudId ??
+          undefined,
+        accountId,
+      },
+    ]);
 
-  // If cloud is newer or equal, cloud metadata is source of truth.
-  if (incomingUpdatedAt >= existingUpdatedAt) return incoming;
+    return {
+      pulled: 0,
+      skipped: result.skipped,
+      cacheUpdated: result.updated,
+      errors: result.errors,
+    };
+  }
 
-  // If local has pending unsynced changes that are newer, keep local.
-  if (existing?.synced && existing.synced !== SYNC_STATUS_VALUE.SYNCED) return existing;
+  if (!isSyncTable(record.tableName)) {
+    return {
+      pulled: 0,
+      skipped: 1,
+      cacheUpdated: 0,
+      errors,
+    };
+  }
 
-  return existing;
-}
+  const table = (db as any)[record.tableName];
 
-async function invalidateMediaPreview(existing: any, incoming: any) {
-  const ids = [
-    existing?.id,
-    incoming?.id,
-    existing?.localId,
-    incoming?.localId,
-  ]
-    .map(toNumber)
-    .filter((value): value is number => value !== undefined);
+  if (!table) {
+    return {
+      pulled: 0,
+      skipped: 1,
+      cacheUpdated: 0,
+      errors: [
+        `No local Dexie table exists for ${record.tableName}.`,
+      ],
+    };
+  }
 
-  ids.forEach((id) => {
-    try {
-      revokeMediaObjectUrl(existing?.localObjectUrl);
-      revokeMediaObjectUrl(incoming?.localObjectUrl);
-    } catch {
-      // ignore
+  try {
+    const payload =
+      record.tableName === "mediaAssets"
+        ? normalizeIncomingMediaPayload(
+            record.payload || {},
+          )
+        : record.payload || {};
+
+    const incomingUpdatedAt = Number(
+      record.updatedAt ||
+        payload.updatedAt ||
+        Date.now(),
+    );
+
+    const existing: any =
+      await findExistingRecordForPull(
+        record.tableName,
+        table,
+        {
+          ...record,
+          payload,
+          accountId,
+        },
+      );
+
+    const existingId =
+      existing?.id ??
+      existing?.localId ??
+      undefined;
+
+    const incoming: any = {
+      ...cleanIncomingPayload(payload, existingId),
+      cloudId:
+        record.cloudId ||
+        payload.cloudId,
+      accountId,
+      deviceId:
+        record.deviceId ||
+        payload.deviceId ||
+        deviceId,
+      version: Number(
+        record.version ||
+          payload.version ||
+          1,
+      ),
+      updatedAt: incomingUpdatedAt,
+      isDeleted:
+        !!record.isDeleted ||
+        !!payload.isDeleted,
+      synced: SYNC_STATUS_VALUE.SYNCED,
+      syncError: undefined,
+    };
+
+    if (existingId != null) {
+      const winner = resolveConflict(
+        existing,
+        incoming,
+      ) as any;
+
+      if (winner === existing) {
+        return {
+          pulled: 0,
+          skipped: 1,
+          cacheUpdated: 0,
+          errors,
+        };
+      }
+
+      await table.update(existingId, {
+        ...winner,
+        id: existingId,
+        accountId,
+        synced: SYNC_STATUS_VALUE.SYNCED,
+      });
+    } else {
+      delete incoming.id;
+      await table.add(incoming);
     }
-  });
 
-  // The shared media utility keeps a small in-memory cache. Clearing it after a
-  // media pull is safer than letting list pages reuse a stale data/blob URL.
-  clearMediaObjectUrlCache();
+    return {
+      pulled: 1,
+      skipped: 0,
+      cacheUpdated: 0,
+      errors,
+    };
+  } catch (error: any) {
+    return {
+      pulled: 0,
+      skipped: 0,
+      cacheUpdated: 0,
+      errors: [
+        `${record.tableName}: ${
+          error?.message || String(error)
+        }`,
+      ],
+    };
+  }
 }
 
-function mergeIncomingMediaForUpdate(existing: any, incoming: any, existingId: number) {
-  const winner = mediaCloudWins(existing, incoming);
+export async function pullSync(options?: {
+  full?: boolean;
+  accountId?: string;
+  limit?: number;
+  tableNames?: string[];
+}): Promise<PullSyncResult> {
+  const activeAccountId = assertAccountId();
 
-  if (winner === existing) return existing;
+  const accountId =
+    options?.accountId ||
+    activeAccountId;
 
-  return {
-    ...existing,
-    ...incoming,
-
-    // Preserve this browser's local blob pointer only if the cloud did not mark
-    // the media deleted. mediaBlobs are local-only and cannot be trusted from cloud.
-    localBlobId: isIncomingMediaDeleted(incoming) ? undefined : existing?.localBlobId,
-    localObjectUrl: undefined,
-
-    id: existingId,
-    synced: SYNC_STATUS_VALUE.SYNCED,
-    syncError: undefined,
-  };
-}
-
-function mergeIncomingRecordForUpdate(tableName: string, existing: any, incoming: any, existingId: number) {
-  if (isMediaAssetsTable(tableName)) {
-    return mergeIncomingMediaForUpdate(existing, incoming, existingId);
+  if (accountId !== activeAccountId) {
+    throw new Error(
+      "Refusing to pull a different account into the active session.",
+    );
   }
 
-  const winner = resolveConflict(existing, incoming) as any;
-  if (winner === existing) return existing;
-
-  return {
-    ...winner,
-    id: existingId,
-    synced: SYNC_STATUS_VALUE.SYNCED,
-  };
-}
-
-function prepareIncomingForInsert(tableName: string, incoming: any) {
-  const copy = { ...incoming };
-  delete copy.id;
-
-  if (isMediaAssetsTable(tableName)) {
-    // Do not keep foreign local blob pointers from another device.
-    copy.localBlobId = undefined;
-    copy.localObjectUrl = undefined;
-  }
-
-  return copy;
-}
-
-export async function pullSync(options?: { full?: boolean }): Promise<PullSyncResult> {
-  const accountId = assertAccountId();
   const deviceId = getDeviceId();
 
-  const lastSyncAt = options?.full ? 0 : getLastSyncAt();
+  const storedPosition = getPullPosition(accountId);
+
+  const cursorBefore = options?.full
+    ? null
+    : storedPosition.cursor;
+
+  const legacySinceBefore = options?.full
+    ? 0
+    : storedPosition.since;
+
+  let workingCursor = cursorBefore;
+  let useLegacySince =
+    !workingCursor &&
+    legacySinceBefore > 0;
 
   const errors: string[] = [];
 
   let pulled = 0;
   let skipped = 0;
   let cacheUpdated = 0;
+  let pages = 0;
+  let completed = false;
 
   try {
-    const response = await syncHttp<PullResponse>(SYNC_ENDPOINTS.PULL, {
-      method: "POST",
-      body: {
+    while (pages < MAX_PULL_PAGES_PER_RUN) {
+      const body: Record<string, any> = {
         accountId,
         deviceId,
-        since: lastSyncAt,
-      },
-    });
-
-    for (const record of response.records || []) {
-      // mediaBlobs are local-only browser Blob records and must never be pulled
-      // through normal SyncRecord.
-      if (isMediaBlobsTable(record.tableName)) {
-        skipped++;
-        continue;
-      }
-
-      if (!isPullSyncTable(record.tableName)) {
-        skipped++;
-        continue;
-      }
-
-      // -------------------------------------------------
-      // BACKEND CACHE TABLES
-      // -------------------------------------------------
-
-      if (isBackendCacheTable(record.tableName) && !isSyncTable(record.tableName)) {
-        const result = await applyPlatformCacheRecords([
-          {
-            tableName: record.tableName,
-            payload: record.payload,
-            id: record.payload?.id ?? record.cloudId ?? undefined,
-            accountId,
-          },
-        ]);
-
-        cacheUpdated += result.updated;
-        skipped += result.skipped;
-        errors.push(...result.errors);
-
-        continue;
-      }
-
-      // -------------------------------------------------
-      // NORMAL SYNC TABLES
-      // -------------------------------------------------
-
-      if (!isSyncTable(record.tableName)) {
-        skipped++;
-        continue;
-      }
-
-      const table = (db as any)[record.tableName];
-
-      if (!table) {
-        skipped++;
-        continue;
-      }
-
-      const payload = normalizeIncomingPayloadForTable(record.tableName, record.payload || {});
-      const incomingUpdatedAt = Number(record.updatedAt || payload?.updatedAt || Date.now());
-
-      const existing: any = await findExistingRecordForPull(record.tableName, table, {
-        ...record,
-        payload,
-        accountId,
-      });
-
-      const existingId = existing?.id ?? existing?.localId ?? undefined;
-
-      const incoming: any = {
-        ...cleanIncomingPayload(payload || {}, existingId),
-
-        cloudId: record.cloudId || payload?.cloudId,
-
-        accountId,
-
-        deviceId: record.deviceId || payload?.deviceId || deviceId,
-
-        version: Number(record.version || payload?.version || 1),
-
-        updatedAt: incomingUpdatedAt,
-
-        isDeleted: !!record.isDeleted || !!payload?.isDeleted,
-
-        synced: SYNC_STATUS_VALUE.SYNCED,
-
-        syncError: undefined,
+        limit:
+          options?.limit ||
+          DEFAULT_PULL_PAGE_LIMIT,
       };
 
-      // -------------------------------------------------
-      // UPDATE EXISTING
-      // -------------------------------------------------
-
-      if (existingId != null) {
-        if (isMediaAssetsTable(record.tableName)) {
-          await invalidateMediaPreview(existing, incoming);
-        }
-
-        const merged = mergeIncomingRecordForUpdate(record.tableName, existing, incoming, Number(existingId));
-
-        if (merged === existing) {
-          skipped++;
-          continue;
-        }
-
-        await table.update(existingId, merged);
-
-        pulled++;
-        continue;
+      if (options?.tableNames?.length) {
+        body.tableNames = options.tableNames;
       }
 
-      // -------------------------------------------------
-      // INSERT NEW
-      // -------------------------------------------------
-
-      const insert = prepareIncomingForInsert(record.tableName, incoming);
-
-      if (isMediaAssetsTable(record.tableName)) {
-        await invalidateMediaPreview(undefined, insert);
+      if (workingCursor) {
+        body.cursorUpdatedAt =
+          workingCursor.updatedAt;
+        body.cursorId =
+          workingCursor.id;
+      } else if (useLegacySince) {
+        body.since =
+          legacySinceBefore;
+      } else {
+        body.since = 0;
       }
 
-      await table.add(insert);
+      const response =
+        await syncHttp<PullResponse>(
+          SYNC_ENDPOINTS.PULL,
+          {
+            method: "POST",
+            body,
+          },
+        );
 
-      pulled++;
+      pages++;
+
+      const quarantinedFromServer =
+        Array.isArray((response as any).quarantineRecords)
+          ? (response as any).quarantineRecords
+          : [];
+
+      for (const malformed of quarantinedFromServer) {
+        await quarantineSyncRecord({
+          source: "pull",
+          accountId:
+            malformed?.record?.accountId ||
+            accountId,
+          tableName:
+            malformed?.record?.tableName,
+          localId:
+            malformed?.record?.localId,
+          cloudId:
+            malformed?.record?.cloudId ||
+            malformed?.record?.id,
+          reason:
+            malformed?.reason ||
+            "The backend identified a malformed synchronization record.",
+          payload:
+            malformed?.record ||
+            malformed,
+        });
+
+        skipped++;
+      }
+
+      for (const record of response.records || []) {
+        const result = await applyPulledRecord({
+          record,
+          accountId,
+          deviceId,
+        });
+
+        pulled += result.pulled;
+        skipped += result.skipped;
+        cacheUpdated +=
+          result.cacheUpdated;
+        errors.push(...result.errors);
+      }
+
+      const cacheRecords = [
+        ...(response.cacheRecords || []),
+        ...(response.platformRecords || []),
+      ];
+
+      if (cacheRecords.length) {
+        const cache =
+          await applyPlatformCacheRecords(
+            cacheRecords,
+          );
+
+        cacheUpdated += cache.updated;
+        skipped += cache.skipped;
+        errors.push(...cache.errors);
+      }
+
+      if (errors.length) {
+        break;
+      }
+
+      const nextCursor =
+        normalizeCursor(
+          response.nextCursor,
+        );
+
+      if (
+        response.hasMore &&
+        !nextCursor
+      ) {
+        errors.push(
+          "The sync server reported another page but did not return a valid next cursor.",
+        );
+        break;
+      }
+
+      if (
+        response.hasMore &&
+        sameCursor(
+          nextCursor,
+          workingCursor,
+        )
+      ) {
+        errors.push(
+          "The sync cursor did not advance. Pull stopped to prevent an infinite loop.",
+        );
+        break;
+      }
+
+      if (nextCursor) {
+        workingCursor = nextCursor;
+        useLegacySince = false;
+      }
+
+      if (!response.hasMore) {
+        completed = true;
+        break;
+      }
     }
 
-    // -------------------------------------------------
-    // PLATFORM CACHE RECORDS
-    // -------------------------------------------------
-
-    const cacheRecords = [
-      ...(response.cacheRecords || []),
-      ...(response.platformRecords || []),
-    ];
-
-    if (cacheRecords.length) {
-      const cache = await applyPlatformCacheRecords(cacheRecords);
-
-      cacheUpdated += cache.updated;
-      skipped += cache.skipped;
-      errors.push(...cache.errors);
+    if (
+      pages >= MAX_PULL_PAGES_PER_RUN &&
+      !completed &&
+      !errors.length
+    ) {
+      errors.push(
+        "Pull stopped after the maximum page count to prevent an infinite loop.",
+      );
     }
 
-    if (response.serverTime) {
-      setLastSyncAt(Number(response.serverTime));
+    /**
+     * Critical Phase 4 rule:
+     *
+     * Persist only after every requested page has been applied successfully.
+     * If page 4 fails after pages 1–3 succeeded, the stored cursor remains at
+     * the original position. The next run safely replays pages 1–3; conflict
+     * resolution and cloud IDs make those applications idempotent.
+     */
+    if (
+      completed &&
+      !errors.length
+    ) {
+      if (workingCursor) {
+        setLastSyncCursor(
+          workingCursor,
+          accountId,
+        );
+      } else {
+        // A successful full pull with no records must remove any stale cursor.
+        clearLastSyncCursor(accountId);
+      }
     }
   } catch (error: any) {
-    errors.push(error?.message || String(error));
+    errors.push(
+      error?.message ||
+        String(error),
+    );
   }
 
   return {
@@ -472,25 +734,30 @@ export async function pullSync(options?: { full?: boolean }): Promise<PullSyncRe
     skipped,
     errors,
     cacheUpdated,
+    accountId,
+
+    cursorBefore,
+    cursorAfter:
+      completed &&
+      !errors.length
+        ? workingCursor
+        : cursorBefore,
+
+    legacySinceBefore,
+    pages,
+    completed:
+      completed &&
+      errors.length === 0,
   };
 }
 
-/**
- * ---------------------------------------------------------
- * REPAIR SYNC
- * ---------------------------------------------------------
- * Forces a full pull from backend regardless of lastSyncAt.
- *
- * Useful when:
- * - backend has records
- * - Dexie is missing records
- * - incremental pull cannot recover them
- * - mediaAssets changed on another device but this browser has stale metadata
- */
 export async function repairSync(): Promise<PullSyncResult> {
-  forceFullSyncNextRun();
+  const accountId = assertAccountId();
+
+  forceFullSyncNextRun(accountId);
 
   return pullSync({
     full: true,
+    accountId,
   });
 }

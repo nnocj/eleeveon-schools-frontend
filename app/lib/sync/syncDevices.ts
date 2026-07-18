@@ -4,7 +4,7 @@
  * Optional device registration helpers for upgraded Prisma SyncDevice.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import { assertAccountId, getDeviceId, SYNC_ENDPOINTS } from "./syncConfig";
 import { syncHttp } from "./syncHttp";
 

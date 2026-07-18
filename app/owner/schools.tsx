@@ -30,7 +30,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useActiveMembership } from "../context/active-membership-context";
-import { db, type Branch, type School } from "../lib/db";
+import { db, type Branch, type School } from "../lib/db/db";
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../lib/sync/syncUtils";
 import {
   MediaOwners,

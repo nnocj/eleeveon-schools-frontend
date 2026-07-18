@@ -4,13 +4,13 @@
  * Calendar Dexie service.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import type {
   CalendarEvent,
   CalendarEventParticipant,
   CalendarEventReminder,
   CalendarResponseStatus,
-} from "../db";
+} from "../db/db";
 
 import {
   createCalendarEventRecord,

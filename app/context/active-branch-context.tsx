@@ -29,9 +29,16 @@ import React, {
   useState,
 } from "react";
 
-import { db, Branch, School } from "../lib/db";
+import { db, type Branch, type School } from "../lib/db";
 import { useSettings } from "./settings-context";
 import { useAccount } from "./account-context";
+import { subscribeToAtomicLogout } from "../lib/auth/logout";
+import { getSessionGeneration, isSessionGenerationCurrent } from "../lib/auth/sessionGeneration";
+import { getStoredActiveMembership } from "../lib/auth/activeMembership";
+import {
+  appearanceScopeForRole,
+  normalizeAppearanceRole,
+} from "../lib/theme/appearanceScope";
 
 // ======================================================
 // TYPES
@@ -109,6 +116,22 @@ function normalizeId(value?: number | null) {
   return Number(value || 0);
 }
 
+function readSettingsId(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function canPersistBranchSettings() {
+  const membership = getStoredActiveMembership();
+  if (!membership) return false;
+
+  return (
+    appearanceScopeForRole(
+      normalizeAppearanceRole(membership.role),
+    ) === "branch"
+  );
+}
+
 // ======================================================
 // PROVIDER
 // ======================================================
@@ -121,19 +144,26 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   const refreshRunningRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const [activeSchoolId, setActiveSchoolIdState] = useState<number | null>(null);
-  const [activeBranchId, setActiveBranchIdState] = useState<number | null>(null);
+  const initialSchoolId = readStorageNumber(SCHOOL_STORAGE_KEY);
+  const initialBranchId = readStorageNumber(BRANCH_STORAGE_KEY);
+
+  const [activeSchoolId, setActiveSchoolIdState] =
+    useState<number | null>(initialSchoolId);
+  const [activeBranchId, setActiveBranchIdState] =
+    useState<number | null>(initialBranchId);
 
   const [schools, setSchools] = useState<School[]>([]);
   const [allBranches, setAllBranches] = useState<Branch[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(
+    !initialSchoolId && !initialBranchId,
+  );
 
   // Keep latest settings in a ref so refreshInstitution does not depend on
   // settings.schoolId/settings.branchId and recreate itself repeatedly.
   useEffect(() => {
     settingsRef.current = {
-      schoolId: settings?.schoolId,
-      branchId: settings?.branchId,
+      schoolId: readSettingsId(settings?.schoolId),
+      branchId: readSettingsId(settings?.branchId),
     };
   }, [settings?.schoolId, settings?.branchId]);
 
@@ -181,7 +211,10 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
     const currentSchoolId = normalizeId(settingsRef.current.schoolId);
     const currentBranchId = normalizeId(settingsRef.current.branchId);
 
-    if (currentSchoolId || currentBranchId) {
+    if (
+      (currentSchoolId || currentBranchId) &&
+      canPersistBranchSettings()
+    ) {
       await updateSettings({
         schoolId: undefined,
         branchId: undefined,
@@ -197,8 +230,13 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   const refreshInstitution = useCallback(async () => {
     if (refreshRunningRef.current) return;
 
+    const generation = getSessionGeneration();
     refreshRunningRef.current = true;
-    setLoading(true);
+
+    // Existing cached context remains usable while Dexie refreshes silently.
+    if (!activeSchoolId && !activeBranchId) {
+      setLoading(true);
+    }
 
     try {
       if (accountLoading) return;
@@ -213,7 +251,7 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
         db.branches.toArray(),
       ]);
 
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || !isSessionGenerationCurrent(generation)) return;
 
       const activeSchools = schoolRows
         .filter((row) => row.accountId === accountId && !row.isDeleted)
@@ -290,11 +328,13 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
           branchId: resolvedBranchId || undefined,
         };
 
-        await updateSettings({
-          schoolId: resolvedSchoolId || undefined,
-          branchId: resolvedBranchId || undefined,
-          updatedAt: Date.now(),
-        });
+        if (canPersistBranchSettings()) {
+          await updateSettings({
+            schoolId: resolvedSchoolId || undefined,
+            branchId: resolvedBranchId || undefined,
+            updatedAt: Date.now(),
+          });
+        }
       }
     } catch (error) {
       console.error("Failed to refresh active school/branch context:", error);
@@ -305,6 +345,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   }, [
     accountId,
     accountLoading,
+    activeSchoolId,
+    activeBranchId,
     clearInstitutionContext,
     setSchoolIdSafely,
     setBranchIdSafely,
@@ -312,6 +354,17 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
     setBranchesSafely,
     updateSettings,
   ]);
+
+  useEffect(() => subscribeToAtomicLogout(() => {
+    refreshRunningRef.current = false;
+    setSchoolIdSafely(null);
+    setBranchIdSafely(null);
+    setSchoolsSafely([]);
+    setBranchesSafely([]);
+    setLoading(false);
+    writeStorageNumber(SCHOOL_STORAGE_KEY, null);
+    writeStorageNumber(BRANCH_STORAGE_KEY, null);
+  }), [setSchoolIdSafely, setBranchIdSafely, setSchoolsSafely, setBranchesSafely]);
 
   // ======================================================
   // BOOT / ACCOUNT CHANGE
@@ -402,11 +455,13 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
           branchId: nextBranchId || undefined,
         };
 
-        await updateSettings({
-          schoolId: nextSchoolId || undefined,
-          branchId: nextBranchId || undefined,
-          updatedAt: Date.now(),
-        });
+        if (canPersistBranchSettings()) {
+          await updateSettings({
+            schoolId: nextSchoolId || undefined,
+            branchId: nextBranchId || undefined,
+            updatedAt: Date.now(),
+          });
+        }
       }
     },
     [
@@ -454,11 +509,13 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
           branchId: nextBranchId || undefined,
         };
 
-        await updateSettings({
-          schoolId: activeSchoolId || undefined,
-          branchId: nextBranchId || undefined,
-          updatedAt: Date.now(),
-        });
+        if (canPersistBranchSettings()) {
+          await updateSettings({
+            schoolId: activeSchoolId || undefined,
+            branchId: nextBranchId || undefined,
+            updatedAt: Date.now(),
+          });
+        }
       }
     },
     [

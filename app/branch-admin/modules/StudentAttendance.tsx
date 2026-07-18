@@ -64,10 +64,12 @@ import {
   type Class,
   type Student,
   type StudentEnrollment,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type AttendanceStatus = "present" | "absent" | "late";
@@ -263,6 +265,8 @@ function SliderIcon() {
 }
 
 export default function StudentAttendance() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -290,7 +294,7 @@ export default function StudentAttendance() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -392,7 +396,9 @@ export default function StudentAttendance() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     if (!academicStructureId && settings?.currentAcademicStructureId) setAcademicStructureId(String(settings.currentAcademicStructureId));

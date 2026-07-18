@@ -48,9 +48,11 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, type Teacher, type TeacherAttendance } from "../../lib/db";
+import { db, type Teacher, type TeacherAttendance } from "../../lib/db/db";
 import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type TeacherStatus = "present" | "incomplete" | "not_marked";
@@ -271,6 +273,8 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function TeacherAttendance() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -298,7 +302,7 @@ export default function TeacherAttendance() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<TeacherAttendance[]>([]);
@@ -369,7 +373,9 @@ export default function TeacherAttendance() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const attendanceKeyMap = useMemo(() => {
     const map = new Map<number, TeacherAttendance>();

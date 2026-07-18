@@ -1,545 +1,556 @@
-/lib
-  db.ts        → offline database (IndexedDB)
-  sync.ts      → sync engine (offline → server)
+Ordered fix plan
 
-  models/
-    student.ts
-    teacher.ts
-    class.ts
-    subject.ts
-    score.ts
-    assignment.ts
+The fixes should be completed in this order because theme readiness, role switching, and Branch Admin data consistency depend on one another.
 
-  calculations/
-    grading.ts
-    scoring.ts
+Phase 1 — Define role appearance scopes
 
-ClassTeacher table = responsibility
-Teacher.role = identity
+Create:
 
-Dashboard (UI only)
-   ↓
-Modules (Students, Teachers, Fees, Attendance, Promotion)
-   ↓
-Shared Database (Dexie)
-   ↓
-Shared “Academic State”
-   - term
-   - academicYear
-   - classId
-   - attendance
-   - payments
-   - scores
+app/lib/theme/appearanceScope.ts
 
+This file becomes the single authority for deciding which settings source a role may use.
 
-WHERE EACH MODULE ACTUALLY CONNECTS
+export type AppearanceScope =
+  | "platform"
+  | "account"
+  | "school"
+  | "branch";
 
-Let’s map it properly:
+Recommended mapping:
 
-👨‍🎓 STUDENTS (your current base)
+developer         → platform
+platform_team     → platform
 
-✔ Core entity
+owner             → account
+super_admin       → account
 
-Used by:
+admin             → school
+school_admin      → school
 
-attendance
-fees
-promotion
-scores
+branch_admin      → branch
+teacher           → branch
+student           → branch
+parent            → branch
+accountant        → branch
 
-👉 This is your ROOT TABLE
+It should also expose helpers such as:
 
-📊 SCORES
+appearanceScopeForRole(role)
+requiresSchoolAppearance(role)
+requiresBranchAppearance(role)
 
-Connects to:
+This must be completed first so every later provider uses the same rules.
 
-promotion.tsx (decision engine)
-reports.tsx (report cards)
+Phase 2 — Build explicit scoped-theme application and cleanup
 
-👉 Drives academic decisions
+Create:
 
-💰 FEES (VERY IMPORTANT)
+app/lib/theme/applyScopedAppearance.ts
 
-Connects to:
+This file should own all writes to global CSS variables and document attributes.
 
-students (classId → fee structure)
-receipts
-arrears system
+Functions:
 
-👉 Financial layer
+clearScopedAppearance()
+applyPlatformAppearance()
+applyAccountAppearance()
+applySchoolAppearance()
+applyBranchAppearance()
 
-🕒 STUDENT ATTENDANCE
+Before applying a new scope, always clear the previous one:
 
-Connects to:
+clearScopedAppearance();
+applyBranchAppearance(settings);
 
-reports (attendance summary on report cards)
-promotion (optional future rule)
-parents dashboard (future)
+Clear variables such as:
 
-👉 Academic discipline tracking
+--primary-color
+--dashboard-primary
+--branch-primary
+--font-family
+--font-size
+--card-radius
+--surface
 
-👨‍🏫 TEACHER ATTENDANCE
+Also clear scope markers:
 
-Connects to:
+data-appearance-scope
+data-role
+data-account-id
+data-school-id
+data-branch-id
 
-payroll (future upgrade)
-admin monitoring
-HR system
+This phase fixes the leakage problem where a branch colour remains active after switching to Owner or Developer.
 
-👉 Staff accountability layer
+Phase 3 — Make workspace bootstrap return exact settings
 
-🔁 PROMOTION ENGINE
+Update:
 
-Connects to EVERYTHING:
+app/lib/sync/workspaceBootstrap.ts
+backend/src/sync/sync.service.ts
 
-students (class movement)
-scores (performance)
-academicHistory (audit trail)
-classes (nextClassMap)
+The backend bootstrap response should explicitly return:
 
-👉 This is your SYSTEM ENGINE
+{
+  account,
+  school,
+  branch,
+  schoolBranchSettings,
+  requiredTables,
+  completed,
+  revision,
+}
 
-npm install html2pdf.js
+The frontend should commit the records to Dexie first and then return the exact committed settings row:
 
-Academic Configuration
-↓
-Assessment Components
-↓
-Assessments
-↓
-Results Computation Engine
-↓
-Computed Results
-↓
-Reports
-↓
-Promotion
+{
+  settings,
+  school,
+  branch,
+  completedAt,
+  revision,
+}
 
+It should also persist a scoped cache:
 
+accountId + schoolId + branchId
 
+Never store branch settings as an unscoped global object.
 
-RESULT EXECUTION LAYER
+Phase 4 — Rebuild SettingsContext as role-aware
 
-Meaning:
+Update:
 
-Define HOW marks are entered
-Define HOW marks are computed
-Define HOW reports are generated
-Define HOW promotion works
-Define HOW transcripts/history work
+app/context/settings-context.tsx
 
-Since you already built the foundation, this is what should come next in order:
+The current context must stop treating branch settings as universally applicable.
 
-1. Assessment Components (NEXT)
+Recommended state:
 
-This is the most important next step.
+type SettingsContextValue = {
+  effectiveSettings: unknown | null;
+  effectiveScope: AppearanceScope;
 
-Right now you only have:
+  platformSettings: unknown | null;
+  accountSettings: unknown | null;
+  schoolSettings: unknown | null;
+  branchSettings: unknown | null;
 
+  ready: boolean;
+  loading: boolean;
+
+  loadedFor: {
+    role: string;
+    accountId?: string;
+    schoolId?: number;
+    branchId?: number;
+  } | null;
+
+  refreshSettings(): Promise<void>;
+  hydrateSettingsForMembership(
+    membership: UserMembership,
+  ): Promise<void>;
+};
+
+Resolution must depend on the active role:
+
+platform role → platform settings only
+owner role    → account settings
+school role   → school settings
+branch role   → branch settings
+
+A cached branch row may remain in memory, but it must not become effectiveSettings while Owner is active.
+
+Phase 5 — Rebuild ThemeContext around exact applied scope
+
+Update:
+
+app/context/theme-context.tsx
+
+ThemeContext should no longer just expose a theme object and generic loading flag.
+
+It should expose:
+
+{
+  theme,
+  ready,
+  effectiveScope,
+
+  appliedFor: {
+    role: string;
+    accountId?: string;
+    schoolId?: number;
+    branchId?: number;
+  } | null;
+
+  applyForMembership(
+    membership: UserMembership,
+  ): Promise<void>;
+
+  resetAppearance(): void;
+}
+
+When the active role changes:
+
+clear old scoped appearance
+→ determine new scope
+→ load valid settings
+→ apply new appearance
+→ record appliedFor
+→ mark ready
+
+Theme readiness must require an exact match.
+
+For Branch Admin:
+
+role matches
+accountId matches
+schoolId matches
+branchId matches
+scope is branch
+
+For Owner:
+
+role matches
+accountId matches
+scope is account
+branch does not matter
+Phase 6 — Make membership switching atomic
+
+Update:
+
+app/context/active-membership-context.tsx
+app/select-role/page.tsx
+
+The role-switch sequence should become:
+
+start role transition
+→ clear previous scoped theme
+→ set active membership
+→ set active school and branch
+→ bootstrap required workspace
+→ hydrate role-appropriate settings
+→ apply target appearance
+→ verify appearance matches target role
+→ navigate
+
+For Owner or Developer:
+
+no branch bootstrap required
+→ clear branch theme
+→ apply account/platform theme
+→ navigate
+
+For Branch Admin:
+
+bootstrap branch workspace
+→ hydrate exact schoolBranchSettings
+→ apply branch theme
+→ navigate
+
+The target portal must not open until the target appearance has been applied.
+
+Phase 7 — Add a workspace-appearance readiness runtime
+
+Create:
+
+app/components/PortalAppearanceRuntime.tsx
+
+Responsibilities:
+
+observe active membership changes;
+determine the expected appearance scope;
+apply the correct settings;
+clear stale branch appearance;
+recover appearance after reload;
+react to Branch Settings changes;
+expose first-entry readiness.
+
+Mount it globally in:
+
+app/providers.tsx
+
+This component should be responsible for applying appearance outside the Branch Settings editor itself.
+
+Branch Settings edits the settings; the runtime applies them.
+
+Phase 8 — Correct provider order
+
+Update:
+
+app/providers.tsx
+
+Recommended dependency order:
+
+DatabaseBootstrap
+└── AccountProvider
+    └── ActiveBranchProvider
+        └── ActiveMembershipProvider
+            └── SettingsProvider
+                └── ThemeProvider
+                    └── PortalAppearanceRuntime
+                        └── RealtimeProvider
+                            └── SyncBootstrapProvider
+
+Important requirements:
+
+SettingsProvider must know the active membership and selected workspace.
+ThemeProvider must receive the resolved effective settings.
+PortalAppearanceRuntime must run before portal content renders.
+Realtime and sync should not become the source of initial appearance readiness.
+Phase 9 — Add exact readiness gating to RolePortalShell
+
+Update:
+
+app/components/role-portals/RolePortalShell.tsx
+
+The shell should calculate:
+
+const expectedScope =
+  appearanceScopeForRole(activeRole);
+
+Then verify:
+
+const appearanceMatchesRole =
+  theme.ready &&
+  theme.effectiveScope === expectedScope &&
+  theme.appliedFor?.role === activeRole;
+
+For branch roles, also require matching school and branch IDs.
+
+Before the portal has rendered once:
+
+appearance not ready
+→ show Preparing workspace
+
+After the portal is already visible:
+
+background settings refresh
+→ keep current page visible
+
+Use a ref such as:
+
+const renderedWorkspaceRef =
+  useRef<string | null>(null);
+
+This prevents the recurring “Opening…” flicker.
+
+Phase 10 — Correct Branch Settings save propagation
+
+Update:
+
+app/branch-admin/modules/Branchsettings.tsx
+app/lib/events/dataEvents.ts
+app/lib/sync/syncEvents.ts
+
+Saving Branch Settings should do:
+
+update schoolBranchSettings in Dexie
+→ publish changedTables: ["schoolBranchSettings"]
+→ SettingsContext reloads exact active row
+→ ThemeContext reapplies branch appearance
+→ schedule sync
+
+The Branch Settings page should not be the only component capable of applying the colour.
+
+Acceptance flow:
+
+save new branch colour
+→ whole branch portal changes immediately
+→ switch to Owner
+→ owner theme replaces branch theme
+→ switch back
+→ saved branch colour restores immediately
+Phase 11 — Separate local personal preferences
+
+Create or update:
+
+app/lib/theme/localPortalAppearance.ts
+app/components/LocalAppearanceRuntime.tsx
+app/components/role-portals/LocalSettings.tsx
+
+Local Settings should control only device-specific preferences:
+
+light/dark/system override
+density
+motion
+personal font-size override
+
+It must not control:
+
+branch primary colour
+branch logo
+branch branding
+shared branch font
+
+Recommended precedence:
+
+branch/account/platform branding
++
+local device display override
+
+For example:
+
+finalAppearanceMode =
+  localMode === "system"
+    ? branchOrPlatformDefaultMode
+    : localMode;
+
+This can be completed after the shared branch theme is stable.
+
+Phase 12 — Validate role transitions
+
+Before rebuilding more pages, test these transitions:
+
+Branch Admin → Owner
+Owner → Branch Admin
+Branch Admin A → Branch Admin B
+Teacher → Owner
+Developer → Branch Admin
+Branch Admin → Developer
+School Admin → Branch Admin
+Branch Admin → School Admin
+
+For every transition verify:
+
+no previous colour flash
+no previous logo
+no previous branch font
+correct settings before portal opens
+correct school/branch data
+no unnecessary broad resync
+
+This is the completion gate for the appearance foundation.
+
+Phase 13 — Standardize the Branch Admin data foundation
+
+Once appearance is stable, update every Branch Admin page to use:
+
+useBranchWorkspaceScope()
+useBranchTableRevision()
+createLocal()
+updateLocal()
+softDeleteLocal()
+
+Remove:
+
+manual localStorage workspace resolution
+unscoped Dexie reads
+duplicate settings lookups
+page-specific theme loading
+
+Recommended first module batch:
+
+Organizations
+Students
+Teachers
+Parents
+Classes
+Subjects
+Academic Structures
 Assessment Structures
-Assessment Items
-
-But you still do NOT have the actual link between:
-
-Class
-Subject
-Academic Period
-Assessment Structure
-
-You need something like:
-
-AssessmentComponent
-
-Example:
-
-Class	Subject	Structure
-Basic 5	English	Continuous Assessment
-Basic 5	Maths	CA + Exams
-SHS 1	Physics	Exams Only
-
-This becomes the live academic setup.
-
-WHY THIS IS IMPORTANT
-
-Because your computation engine cannot compute scores until it knows:
-
-WHICH STRUCTURE APPLIES
-TO WHICH CLASS + SUBJECT
-
-Without this:
-
-reports break
-assessments break
-promotion breaks
-ranking breaks
-2. Assessment Entries
-
-AFTER components.
-
-This is where teachers enter marks.
-
-Example:
-
-Student	Subject	Class Test	Exam
-John	Maths	18	72
-
-This feeds your engine.
-
-3. Results Computation Engine
-
-Then your engine becomes ACTIVE.
-
-It will:
-
-fetch component
-fetch structure
-fetch items
-fetch entries
-compute weighted totals
-compute grade
-compute GPA
-compute remarks
-compute aggregates
-compute ranking
-4. Report Generation Engine
-
-This powers:
-
-terminal reports
-cumulative reports
-transcripts
-promotion reports
-5. Promotion Engine
-
-This uses results.
-
-Example:
-
-Average >= 50
-AND no failed core subjects
-→ promote
-6. Ranking Engine
-
-Then:
-
-class position
-subject position
-overall ranking
-
-
-
-What I wrote describes a full orchestration engine, not just a calculator.
-
-So your resultsEngine.ts is essentially becoming the brain of the academic results system.
-
-It is coordinating the entire results workflow.
-
-Meaning this single engine is responsible for:
-
-1. Loading academic configuration
-2. Loading assessment setup
-3. Loading student scores
-4. Validating records
-5. Computing weighted totals
-6. Resolving grades
-7. Computing GPA
-8. Ranking students
-9. Saving computed results
-10. Preparing report data
-11. Locking/publishing results
-
-
-Academic Configuration
-        ↓
-Subject Offering
-        ↓
-Assessment Applicability
-        ↓
-Assessment Component
-        ↓
-Assessment Entry
-        ↓
-Results Engine
-        ↓
-Report Engine
-        ↓
-Promotion Engine
-        ↓
-Transcript Engine
-        ↓
-Analytics Engine
-
-
-The rewrite I’ll produce will therefore include:
-
-proper institutional awareness
-organizationId support
-academicStructureId awareness
-branch-safe filtering
-deleted-record protection
-responsive academic-config UI styling
-summary analytics cards
-graceful empty states
-session-based entry workflow
-safer score validation
-structured assessment session loading
-stable memoized filtering
-proper active entity filtering
-scroll-safe assessment grids
-expandable/clean table UX
-consistent buttons/cards/badges/inputs
-resilient no-data rendering
-reusable style architecture matching Academic Configuration exactly
-
-
-
-Great — the actual issue was the branchId filter removing all students before the class matching logic even ran.
-Now the page correctly:
-
-
-Reads all students from Dexie
-
-
-Matches student.currentClassId
-
-
-Updates the visual student count immediately
-
-
-Shows student names immediately after class selection
-
-
-Keeps your UI/layout/design unchanged
-
-
-Still supports subject-based assessment items separately
-
-
-Your Anthony Asa record now appears because the student is no longer filtered out prematurely.
-
-
-
-
-
-
-
-
-
-🧠 SYSTEM CONTRACT (Your Academic Engine Rules)
-
-This is the non-negotiable architecture agreement your whole system must follow.
-
-🔴 1. SINGLE SOURCE OF TRUTH RULE
-✔ Contract:
-
-computedResults is the ONLY authoritative academic performance dataset.
-
-Meaning:
-All academic performance is derived from computedResults
-No other table can override academic truth
-Therefore:
-Data source	Role
-assessmentEntries	raw input only
-scores	legacy / fallback only (optional)
-computedResults	✅ FINAL TRUTH
-❌ Forbidden:
-Analytics directly trusting scores
-Reports recalculating from assessmentEntries
-Transcripts mixing multiple sources unpredictably
-🔵 2. COMPUTATION RESPONSIBILITY RULE
-✔ Contract:
-
-Only ResultsEngine is allowed to compute academic results.
-
-Meaning:
-Only ONE place calculates:
-totals
-averages
-percentages
-grades
-GPA
-positions
-❌ Forbidden:
-ReportEngine calculating totals
-AnalyticsEngine recalculating grades
-TranscriptEngine recomputing subject scores
-✔ Everyone else:
-
-They ONLY read computedResults
-
-🟣 3. GRADE LOGIC CENTRALIZATION RULE
-✔ Contract:
-
-Grade calculation must exist in ONE reusable service.
-
-Example:
-GradingService.resolve(branchId, percentage)
-Meaning:
-NO inline grade logic in engines
-NO duplicated grade rule filtering
-NO manual min/max comparisons scattered
-❌ Forbidden:
-score >= 50
-repeating gradeRules logic in multiple files
-🟢 4. ENGINE RESPONSIBILITY SEPARATION
-✔ Contract:
-ResultsEngine
-
-"Compute academic truth"
-
-processes assessmentEntries
-generates computedResults
-assigns grades, GPA, totals, positions
-ReportEngine
-
-"Format + persist reports"
-
-reads computedResults ONLY
-builds report structure
-stores reportCards + reportItems
-never computes academic logic
-AnalyticsEngine
-
-"Read-only intelligence layer"
-
-reads computedResults ONLY
-aggregates stats (school/class/student)
-NEVER writes data
-TranscriptEngine
-
-"Multi-period aggregation"
-
-reads computedResults ONLY
-aggregates across periods
-produces historical academic output
-🟡 5. WRITING RULE (VERY IMPORTANT)
-✔ Contract:
-
-Only 2 systems can write to DB:
-
-ResultsEngine → computedResults
-ReportEngine → reportCards, reportItems
-❌ Forbidden:
-AnalyticsEngine writing anything
-TranscriptEngine writing computedResults
-random updates to computedResults outside ResultsEngine
-🔷 6. TIME / PERIOD CONSISTENCY RULE
-✔ Contract:
-
-All academic data MUST always be filtered by:
-
-branchId
-academicStructureId
-academicPeriodId
-classId
-Meaning:
-
-No cross-period mixing unless explicitly doing transcript aggregation.
-
-🟠 7. RANKING RULE
-✔ Contract:
-
-Rankings are derived ONLY from computedResults
-
-subject position → computedResults (subject scoped)
-class position → computedResults (aggregate)
-❌ Forbidden:
-recalculating ranking in ReportEngine independently
-using scores for ranking
-🟤 8. IMMUTABILITY RULE (VERY IMPORTANT)
-✔ Contract:
-
-Once computedResults.locked = true, it becomes immutable
-
-Meaning:
-no overwrite
-no recalculation
-no report regeneration changes it
-🔥 FINAL ARCHITECTURE SUMMARY
-
-Your system becomes:
-
-RAW INPUT
-   ↓
-assessmentEntries
-   ↓
-[ ResultsEngine ]
-   ↓
-computedResults   ← (TRUTH LAYER)
-   ↓
-────────────────────────────
-   ↓        ↓          ↓
-Report   Analytics   Transcript
-Engine    Engine      Engine
-(read)     (read)       (read)
-
-
-
-
-
-
-
-Got it — this db.ts is very solid and already tells a lot about your system design.
-
-Here’s what I’ve now clearly extracted from your architecture (important for the report page later):
-
-🔥 Key architecture insights
-
-1. Your report system is NOT standalone
-It must be driven by:
-
-AcademicStructure (school calendar / level setup)
-AcademicPeriod (term/semester context)
-AssessmentStructure + AssessmentStructureItems (this is your grading blueprint)
-AssessmentComponent (ties class + subject + period + structure + grading system)
-AssessmentEntry (raw teacher scores)
-ComputedResult (final processed results)
-
-👉 So the report page is basically a pipeline executor of rules, not just a display page.
-
-2. Your grading logic is configuration-driven
-That means:
-
-No hardcoded “Exam = 50%, Test = 30%”
-Everything must come from:
-AssessmentStructureItems.weight
-AssessmentStructure.totalScore
-GradingSystem + GradeRule
-
-3. Your system supports multi-view reporting
-We will design report.tsx to support:
-
-Class-wide report (all students)
-Single student report
-Subject-filtered view
-Optional breakdown per assessment item
-
-4. Important: This is a multi-layer join problem
-A proper report will need to combine:
-
-Students → Class → Enrollment
-Class → AssessmentComponent → Structure
-Structure → Items (weights)
-Entries → Scores per student per item
-Optional computed results override
-
-
-
-
-/reports
-  /engine
-    classReportEngine.ts   ✅ PURE LOGIC ONLY
-  /hooks
-    useAcademicData.ts     ✅ DATA LOADING ONLY
-  /components
-    ReportTemplateRenderer.tsx  ✅ UI ORCHESTRATION
-    ReportHeader.tsx
-    ReportFilters.tsx
-    ReportSummaryCards.tsx
-    SubjectReportTable.tsx
-    StudentReportCard.tsx
-    StudentCumulativeReport.tsx
-    ClassBroadsheet.tsx
-  /types
-    reportTypes.ts         ❌ MINIMAL OR OPTIONAL ONLY
-  page.tsx                 ✅ ENTRY ONLY
+Class Subjects
+Curriculum Setup
+Phase 14 — Standardize Branch Admin media
+
+All image-bearing pages must use:
+
+saveImageAsset()
+commitMediaAssetsToOwner()
+useEntityMediaUrls()
+softDeleteOwnerFieldAssets()
+
+Rules:
+
+no Base64
+no direct Blob URL in entity rows
+no loose media owner attachment
+no duplicate page-wide media resolver
+
+Media acceptance tests:
+
+save image
+reload
+switch page
+switch role
+switch device
+remove image
+sync removal
+Phase 15 — Rebuild remaining Branch Admin modules
+
+Proceed in this order:
+
+Academic setup
+Enrollment
+Assessment
+Attendance
+Scheduling
+Communication
+Reports
+Finance
+Dashboard
+
+The dashboard must be rebuilt last so it consumes the exact selectors used by the destination pages.
+
+Recommended delivery batches
+Batch 1 — Scope and appearance foundation
+appearanceScope.ts
+applyScopedAppearance.ts
+workspaceBootstrap.ts
+settings-context.tsx
+theme-context.tsx
+Batch 2 — Role switching and first portal entry
+active-membership-context.tsx
+select-role/page.tsx
+PortalAppearanceRuntime.tsx
+providers.tsx
+RolePortalShell.tsx
+Batch 3 — Live Branch Settings propagation
+Branchsettings.tsx
+dataEvents.ts
+syncEvents.ts
+Batch 4 — Personal appearance separation
+localPortalAppearance.ts
+LocalAppearanceRuntime.tsx
+LocalSettings.tsx
+Batch 5 — Core Branch Admin modules
+Organizations
+Students
+Teachers
+Parents
+Classes
+Subjects
+Academic Structures
+Assessment Structures
+Class Subjects
+Curriculum Setup
+Batch 6 — Remaining portal modules
+Academic
+Assessment
+Attendance
+Scheduling
+Communication
+Reports
+Finance
+Dashboard
+Final success condition
+
+The system is correct when all of these work:
+
+Branch Admin selected
+→ exact branch settings loaded
+→ branch colour applied
+→ branch portal opens
+
+Branch Admin → Owner
+→ branch appearance cleared
+→ account/platform appearance applied
+→ Owner opens with no branch styling
+
+Owner → Branch Admin
+→ cached branch appearance restored
+→ Branch Admin opens with no default flash
+
+Branch Settings colour saved
+→ current branch portal changes immediately
+→ other role scopes remain unaffected

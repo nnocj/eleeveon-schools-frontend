@@ -23,16 +23,27 @@
  * - table colors use theme variables for dark mode support
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-
-import { db, type ClassSubject, type CurriculumSubject, type Organization, type Subject } from "../../lib/db";
+import { db, type ClassSubject, type CurriculumSubject, type Organization, type Subject } from "../../lib/db/db";
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import {
+  softDeleteOwnerFieldAssets,
+  MediaOwners,
+  commitMediaAssetsToOwner,
+  createMediaSessionKey,
+  saveImageAsset,
+
+
+
+} from "../../lib/media/mediaAssetUtils";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
@@ -55,7 +66,9 @@ type FormState = {
   code: string;
   description: string;
   photo: string;
+  photoMediaId?: number;
   bannerImage: string;
+  bannerImageMediaId?: number;
   credits: string;
   category: SubjectCategory;
   active: boolean;
@@ -71,6 +84,8 @@ type SubjectView = {
   active: boolean;
 };
 
+const SUBJECT_MEDIA_OWNER_TABLE = MediaOwners.SUBJECTS;
+
 const categories: SubjectCategory[] = ["academic", "core", "elective", "technical", "vocational"];
 
 const emptyForm: FormState = {
@@ -79,10 +94,18 @@ const emptyForm: FormState = {
   code: "",
   description: "",
   photo: "",
+  photoMediaId: undefined,
   bannerImage: "",
+  bannerImageMediaId: undefined,
   credits: "",
   category: "academic",
   active: true,
+};
+
+const safeRecordMediaValue = (value?: string) => {
+  const media = String(value || "").trim();
+  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  return media;
 };
 
 const idOf = (v: any) => {
@@ -253,35 +276,37 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function Subjects() {
+  const dataRevision = useBranchTableRevision(["subjects", "organizations", "curriculumSubjects", "classSubjects", "mediaAssets", "mediaBlobs"]);
+  const mediaSessionKeyRef = useRef(createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE));
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Subject[]>([]);
+  const mediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: SUBJECT_MEDIA_OWNER_TABLE,
+    rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
@@ -360,7 +385,9 @@ export default function Subjects() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const organizationMap = useMemo(() => new Map(organizations.map((r: any) => [idOf(r.id), r])), [organizations]);
 
@@ -443,17 +470,31 @@ export default function Subjects() {
 
   const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
 
-  const fileToBase64 = (file: File) =>
-    new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-      reader.readAsDataURL(file);
-    });
-
   const handleImageUpload = async (field: "photo" | "bannerImage", file?: File) => {
-    if (!file) return;
-    const value = await fileToBase64(file);
-    updateForm({ [field]: value } as Partial<FormState>);
+    if (!file || !accountId || !schoolId || !branchId) return;
+
+    try {
+      const result = await saveImageAsset(file, {
+        accountId: String(accountId),
+        schoolId: Number(schoolId),
+        branchId: Number(branchId),
+        ownerTable: SUBJECT_MEDIA_OWNER_TABLE,
+        ownerLocalId: form.id || undefined,
+        ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
+        fieldKey: field,
+        variant: field === "photo" ? "avatar" : "cover",
+        replaceExisting: true,
+      });
+
+      updateForm({
+        [field]: result.previewUrl,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+      } as Partial<FormState>);
+
+      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+    } catch (error: any) {
+      showToast("error", error?.message || "Failed to process image.");
+    }
   };
 
   const requireTenant = () => {
@@ -466,6 +507,7 @@ export default function Subjects() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
+    mediaSessionKeyRef.current = createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE);
     setForm({ ...emptyForm, organizationId: filterOrganizationId !== "all" ? filterOrganizationId : "", category: filterCategory === "all" ? "academic" : filterCategory, active: filterStatus !== "inactive" });
     setModalOpen(true);
   };
@@ -479,8 +521,10 @@ export default function Subjects() {
       name: subject.name || "",
       code: subject.code || "",
       description: subject.description || "",
-      photo: subject.photo || "",
-      bannerImage: subject.bannerImage || "",
+      photo: mediaById[idOf(subject.id)]?.photo || safeRecordMediaValue(subject.photo) || "",
+      photoMediaId: subject.photoMediaId ? Number(subject.photoMediaId) : undefined,
+      bannerImage: mediaById[idOf(subject.id)]?.bannerImage || safeRecordMediaValue(subject.bannerImage) || "",
+      bannerImageMediaId: subject.bannerImageMediaId ? Number(subject.bannerImageMediaId) : undefined,
       credits: subject.credits == null ? "" : String(subject.credits),
       category: subject.category || "academic",
       active: isActiveRow(subject),
@@ -533,8 +577,10 @@ export default function Subjects() {
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         description: form.description.trim() || undefined,
-        photo: form.photo || undefined,
-        bannerImage: form.bannerImage || undefined,
+        photo: safeRecordMediaValue(form.photo),
+        photoMediaId: form.photoMediaId || undefined,
+        bannerImage: safeRecordMediaValue(form.bannerImage),
+        bannerImageMediaId: form.bannerImageMediaId || undefined,
         credits: form.credits === "" ? undefined : Number(form.credits),
         category: form.category || "academic",
         active: form.active,
@@ -542,9 +588,28 @@ export default function Subjects() {
         isDeleted: false,
       } as unknown as Partial<Subject>;
 
-      if (form.id && existing) await updateLocal("subjects", Number(form.id), payload);
-      else await createLocal("subjects", payload as Subject);
+      const savedSubject =
+        form.id && existing
+          ? await updateLocal("subjects", Number(form.id), payload)
+          : await createLocal("subjects", payload as Subject);
 
+      const savedSubjectId = Number((savedSubject as any)?.id || form.id || 0);
+
+      if (savedSubjectId) {
+        await commitMediaAssetsToOwner({
+          accountId: String(accountId),
+          ownerTable: SUBJECT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedSubjectId,
+          ownerCloudId: (savedSubject as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: form.photoMediaId, fieldKey: "photo" },
+            { assetId: form.bannerImageMediaId, fieldKey: "bannerImage" },
+          ],
+        });
+      }
+
+      mediaSessionKeyRef.current = createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE);
       setModalOpen(false);
       showToast("success", "Subject saved.");
       await load();
@@ -564,6 +629,27 @@ export default function Subjects() {
       ? `"${row.name}" is used in ${item.curriculumUseCount} curriculum subject(s) and ${item.classSubjectUseCount} class subject(s). Delete anyway?`
       : `Delete "${row.name}"?`;
     if (!window.confirm(warning)) return;
+
+    await Promise.all(
+
+      ["photo", "bannerImage"].map((fieldKey) =>
+
+        softDeleteOwnerFieldAssets({
+
+          accountId: String(accountId),
+
+          ownerTable: "subjects",
+
+          ownerLocalId: Number(id),
+
+          fieldKey,
+
+        }),
+
+      ),
+
+    );
+
     await softDeleteLocal("subjects", Number(id));
     setSelectedItem(null);
     showToast("success", "Subject deleted.");
@@ -633,7 +719,7 @@ export default function Subjects() {
       {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} remove={remove} toggleActive={toggleActive} />}
       {viewMode === "cards" && (
         <section className="ba-list">
-          {filteredRows.map((item) => <SubjectListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />)}
+          {filteredRows.map((item) => <SubjectListItem key={String(item.id)} item={item} photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)} primary={primary} onOpen={() => setSelectedItem(item)} />)}
           {!filteredRows.length && <Empty icon="📘" title="No subjects found" text="Create reusable subject identities such as Mathematics, English Language, Creative Arts, Computing, or Science." />}
         </section>
       )}
@@ -655,11 +741,11 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function SubjectListItem({ item, primary, onOpen }: { item: SubjectView; primary: string; onOpen: () => void }) {
+function SubjectListItem({ item, photo, primary, onOpen }: { item: SubjectView; photo?: string; primary: string; onOpen: () => void }) {
   const row: any = item.row;
   return (
     <button type="button" className="subject-row" onClick={onOpen}>
-      <Avatar name={row.name} photo={row.photo} primary={primary} />
+      <Avatar name={row.name} photo={photo} primary={primary} />
       <span className="subject-main">
         <strong>{row.name || "Unnamed subject"}</strong>
         <small>{item.organizationName}{row.code ? ` · ${row.code}` : ""}</small>

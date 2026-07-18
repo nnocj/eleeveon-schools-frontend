@@ -33,8 +33,9 @@
  * - The fallback mediaId is accepted only when it belongs to the same owner row.
  * - Then falls back to school/branch/settings string logo fields.
  * - Platform roles always use the default Eleeveon favicon.
- * - Favicon application replaces all existing icon links and cache-busts URLs
- *   so browser favicon cache does not keep showing the default icon.
+ * - Runtime favicon links are owned by this component only.
+ * - Next.js metadata icon links are never removed or mutated.
+ * - Runtime icon URLs are cache-busted so browsers do not keep stale branding.
  * - Falls back to /favicon.ico and /android-chrome-512x512.png.
  * - Does not mutate theme variables, does not write to IndexedDB, and does not
  *   perform any save/sync action.
@@ -163,18 +164,42 @@ function sameId(a: unknown, b: unknown) {
   return String(a ?? "") === String(b ?? "");
 }
 
-function upsertMeta(name: string, content: string) {
-  if (typeof document === "undefined") return;
+const RUNTIME_ICON_ATTRIBUTE = "data-eleeveon-runtime-icon";
+const RUNTIME_META_ATTRIBUTE = "data-eleeveon-runtime-meta";
 
-  let meta = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+function upsertRuntimeMeta(name: string, content: string) {
+  if (
+    typeof document === "undefined" ||
+    !document.head
+  ) {
+    return;
+  }
+
+  let meta =
+    document.head.querySelector<HTMLMetaElement>(
+      `meta[${RUNTIME_META_ATTRIBUTE}="${name}"]`,
+    );
 
   if (!meta) {
     meta = document.createElement("meta");
     meta.setAttribute("name", name);
+    meta.setAttribute(RUNTIME_META_ATTRIBUTE, name);
     document.head.appendChild(meta);
   }
 
   meta.setAttribute("content", content);
+}
+
+function removeRuntimeMetaElements() {
+  if (typeof document === "undefined") return;
+
+  document
+    .querySelectorAll<HTMLMetaElement>(
+      `meta[${RUNTIME_META_ATTRIBUTE}]`,
+    )
+    .forEach((meta) => {
+      meta.remove();
+    });
 }
 
 function withBrandCacheBust(href: string, key: string) {
@@ -183,40 +208,75 @@ function withBrandCacheBust(href: string, key: string) {
   if (href.startsWith("data:")) return href;
 
   const separator = href.includes("?") ? "&" : "?";
+
   return `${href}${separator}brand=${encodeURIComponent(key)}`;
 }
 
-function removeExistingIconLinks() {
+/**
+ * Remove only icon nodes created by this runtime.
+ *
+ * Never remove icon nodes created by Next.js metadata. React/Next owns those
+ * nodes and expects them to remain available during route transitions.
+ */
+function removeRuntimeIconLinks() {
   if (typeof document === "undefined") return;
 
   document
     .querySelectorAll<HTMLLinkElement>(
-      'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"], link[rel="mask-icon"]'
+      `link[${RUNTIME_ICON_ATTRIBUTE}="true"]`,
     )
-    .forEach((link) => link.parentNode?.removeChild(link));
+    .forEach((link) => {
+      link.remove();
+    });
 }
 
-function appendIconLink({
+function upsertRuntimeIconLink({
+  key,
   rel,
   href,
   sizes,
   type,
 }: {
+  key: string;
   rel: string;
   href: string;
   sizes?: string;
   type?: string;
 }) {
-  if (typeof document === "undefined" || !href) return;
+  if (
+    typeof document === "undefined" ||
+    !document.head ||
+    !href
+  ) {
+    return;
+  }
 
-  const link = document.createElement("link");
-  link.setAttribute("rel", rel);
-  link.setAttribute("href", href);
+  let link =
+    document.head.querySelector<HTMLLinkElement>(
+      `link[${RUNTIME_ICON_ATTRIBUTE}="true"][data-eleeveon-icon-key="${key}"]`,
+    );
 
-  if (sizes) link.setAttribute("sizes", sizes);
-  if (type) link.setAttribute("type", type);
+  if (!link) {
+    link = document.createElement("link");
+    link.setAttribute(RUNTIME_ICON_ATTRIBUTE, "true");
+    link.setAttribute("data-eleeveon-icon-key", key);
+    document.head.appendChild(link);
+  }
 
-  document.head.appendChild(link);
+  link.rel = rel;
+  link.href = href;
+
+  if (sizes) {
+    link.setAttribute("sizes", sizes);
+  } else {
+    link.removeAttribute("sizes");
+  }
+
+  if (type) {
+    link.type = type;
+  } else {
+    link.removeAttribute("type");
+  }
 }
 
 function applyBrowserIcons({
@@ -228,18 +288,54 @@ function applyBrowserIcons({
   appleIcon: string;
   cacheKey: string;
 }) {
-  if (typeof document === "undefined") return;
+  if (
+    typeof document === "undefined" ||
+    !document.head
+  ) {
+    return;
+  }
 
-  const faviconHref = withBrandCacheBust(favicon || DEFAULT_FAVICON, cacheKey);
-  const appleHref = withBrandCacheBust(appleIcon || DEFAULT_APPLE_ICON, cacheKey);
+  const faviconHref = withBrandCacheBust(
+    favicon || DEFAULT_FAVICON,
+    cacheKey,
+  );
 
-  removeExistingIconLinks();
+  const appleHref = withBrandCacheBust(
+    appleIcon || DEFAULT_APPLE_ICON,
+    cacheKey,
+  );
 
-  appendIconLink({ rel: "icon", href: faviconHref });
-  appendIconLink({ rel: "icon", href: faviconHref, sizes: "16x16" });
-  appendIconLink({ rel: "icon", href: faviconHref, sizes: "32x32" });
-  appendIconLink({ rel: "shortcut icon", href: faviconHref });
-  appendIconLink({ rel: "apple-touch-icon", href: appleHref });
+  upsertRuntimeIconLink({
+    key: "favicon-default",
+    rel: "icon",
+    href: faviconHref,
+  });
+
+  upsertRuntimeIconLink({
+    key: "favicon-16",
+    rel: "icon",
+    href: faviconHref,
+    sizes: "16x16",
+  });
+
+  upsertRuntimeIconLink({
+    key: "favicon-32",
+    rel: "icon",
+    href: faviconHref,
+    sizes: "32x32",
+  });
+
+  upsertRuntimeIconLink({
+    key: "shortcut-icon",
+    rel: "shortcut icon",
+    href: faviconHref,
+  });
+
+  upsertRuntimeIconLink({
+    key: "apple-touch-icon",
+    rel: "apple-touch-icon",
+    href: appleHref,
+  });
 }
 
 function setDocumentTitle(title: string) {
@@ -593,8 +689,20 @@ export default function GlobalBrandingRuntime() {
   }, [appleIconUrl, iconCacheKey, logoUrl]);
 
   useEffect(() => {
-    upsertMeta("theme-color", themeColor);
+    upsertRuntimeMeta("theme-color", themeColor);
   }, [themeColor]);
+
+  /**
+   * Clean up only DOM nodes created by this component.
+   *
+   * Next.js metadata nodes are intentionally left untouched.
+   */
+  useEffect(() => {
+    return () => {
+      removeRuntimeIconLinks();
+      removeRuntimeMetaElements();
+    };
+  }, []);
 
   return null;
 }

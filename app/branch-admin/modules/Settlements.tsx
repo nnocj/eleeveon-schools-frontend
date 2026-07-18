@@ -21,6 +21,8 @@ import { useActiveBranch } from "../../context/active-branch-context";
 import { listActiveLocal } from "../../lib/sync/syncUtils";
 
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type ToastTone = "success" | "error" | "info";
@@ -123,6 +125,8 @@ function State({ primary, title, text: body }: { primary: string; title: string;
 
 
 export default function SettlementsPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -131,7 +135,7 @@ export default function SettlementsPage() {
   const schoolId = cleanId(activeSchoolId || activeSchool?.id || settings?.schoolId);
   const branchId = cleanId(activeBranchId || activeBranch?.id || settings?.branchId);
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("cards");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -150,7 +154,9 @@ export default function SettlementsPage() {
     } finally { setLoading(false); }
   }
 
-  useEffect(() => { if (accountLoading || settingsLoading) return; load(); /* eslint-disable-next-line */ }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading]);
+  useEffect(() => { if (accountLoading || settingsLoading) return; load(); /* eslint-disable-next-line */ }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading,
+    dataRevision,
+  ]);
 
   const currency = text(rows[0]?.currencyCode || settings?.currencyCode, "GHS");
   const filtered = useMemo(() => {

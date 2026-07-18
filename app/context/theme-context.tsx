@@ -2,392 +2,144 @@
 
 /**
  * app/context/theme-context.tsx
- * ---------------------------------------------------------
- * ELEEVEON THEME ENGINE
- * ---------------------------------------------------------
- *
- * Central place where branch/school theme settings control the whole app.
- *
- * Usage in app/layout.tsx:
- *
- * <SettingsProvider>
- *   <ActiveBranchProvider>
- *     <ThemeProvider>
- *       {children}
- *     </ThemeProvider>
- *   </ActiveBranchProvider>
- * </SettingsProvider>
+ * --------------------------------------------------------------------------
+ * Exact role-scoped appearance engine.
  */
 
 import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
+import type { UserMembership } from "../lib/auth/roleRedirect";
+import { useActiveMembership } from "./active-membership-context";
 import { useSettings } from "./settings-context";
-import { useActiveBranch } from "./active-branch-context";
+import {
+  appearanceIdentityFor,
+  appearanceIdentityMatches,
+  type AppearanceScope,
+} from "../lib/theme/appearanceScope";
+import {
+  applyAppearanceForRole,
+  clearScopedAppearance,
+  PLATFORM_APPEARANCE_DEFAULTS,
+  type AppliedAppearance,
+  type ScopedAppearanceSettings,
+} from "../lib/theme/applyScopedAppearance";
 
-import { db, SchoolBranchSetting } from "../lib/db";
-
-// ======================================================
-// TYPES
-// ======================================================
-
-type ThemeMode = "light" | "dark";
-
-type ThemeState = {
+export type ThemeState = {
   loading: boolean;
-  mode: ThemeMode;
+  ready: boolean;
+  mode: "light" | "dark";
   primaryColor: string;
   fontFamily: string;
   fontSize: number;
   logo?: string;
-  branchSettings: SchoolBranchSetting | null;
+  branchSettings: Record<string, any> | null;
+  theme: ScopedAppearanceSettings | null;
+  effectiveScope: AppearanceScope;
+  appliedFor: AppliedAppearance | null;
   refreshTheme: () => Promise<void>;
+  applyForMembership: (membership: UserMembership) => Promise<AppliedAppearance | null>;
+  resetAppearance: () => void;
 };
 
 const ThemeContext = createContext<ThemeState | null>(null);
 
-// ======================================================
-// HELPERS
-// ======================================================
-
-function formSafeNumber(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function sameId(a: unknown, b: unknown) {
-  return String(a ?? "") === String(b ?? "");
-}
-
-function darken(hex: string, factor = 0.35) {
-  let col = (hex || "#2563eb").replace("#", "");
-
-  if (col.startsWith("rgb")) return hex || "#2563eb";
-
-  if (col.length === 3) {
-    col = col
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-
-  const num = parseInt(col, 16);
-  if (!Number.isFinite(num)) return "#1e293b";
-
-  let r = (num >> 16) & 255;
-  let g = (num >> 8) & 255;
-  let b = num & 255;
-
-  r = Math.floor(r * factor);
-  g = Math.floor(g * factor);
-  b = Math.floor(b * factor);
-
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function lighten(hex: string, amount = 0.94) {
-  let col = (hex || "#2563eb").replace("#", "");
-
-  if (col.startsWith("rgb")) return "#f8fafc";
-
-  if (col.length === 3) {
-    col = col
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-
-  const num = parseInt(col, 16);
-  if (!Number.isFinite(num)) return "#f8fafc";
-
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-
-  const nr = Math.round(r + (255 - r) * amount);
-  const ng = Math.round(g + (255 - g) * amount);
-  const nb = Math.round(b + (255 - b) * amount);
-
-  return `rgb(${nr}, ${ng}, ${nb})`;
-}
-
-function getContrastTextColor(hex: string) {
-  let col = (hex || "#ffffff").replace("#", "");
-
-  if (col.startsWith("rgb")) return "#ffffff";
-
-  if (col.length === 3) {
-    col = col
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-
-  const num = parseInt(col, 16);
-  if (!Number.isFinite(num)) return "#ffffff";
-
-  const r = (num >> 16) & 255;
-  const g = (num >> 8) & 255;
-  const b = num & 255;
-
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return brightness > 140 ? "#111827" : "#ffffff";
-}
-
-function setCssVariable(name: string, value: string) {
-  document.documentElement.style.setProperty(name, value);
-}
-
-function setFavicon(icon?: string) {
-  if (!icon) return;
-
-  const link: HTMLLinkElement =
-    document.querySelector("link[rel~='icon']") || document.createElement("link");
-
-  link.rel = "icon";
-  link.href = icon;
-  document.head.appendChild(link);
-}
-
-// ======================================================
-// PROVIDER
-// ======================================================
-
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { settings, loading: settingsLoading } = useSettings() as any;
-
-  const {
-    activeSchool,
-    activeSchoolId,
-    activeBranch,
-    activeBranchId,
-    loading: branchLoading,
-  } = useActiveBranch() as any;
-
-  const schoolId = formSafeNumber(activeSchoolId || activeSchool?.id || settings?.schoolId);
-  const branchId = formSafeNumber(activeBranchId || activeBranch?.id || settings?.branchId);
-
+  const { activeMembership } = useActiveMembership();
+  const settingsContext = useSettings();
+  const [appliedFor, setAppliedFor] = useState<AppliedAppearance | null>(null);
   const [loading, setLoading] = useState(true);
-  const [branchSettings, setBranchSettings] = useState<SchoolBranchSetting | null>(null);
+  const requestRef = useRef(0);
+
+  const resetAppearance = useCallback(() => {
+    requestRef.current += 1;
+    clearScopedAppearance();
+    setAppliedFor(null);
+    setLoading(false);
+  }, []);
+
+  const applyForMembership = useCallback(async (membership: UserMembership) => {
+    const request = ++requestRef.current;
+    setLoading(true);
+    clearScopedAppearance();
+
+    const resolved = await settingsContext.hydrateSettingsForMembership(membership);
+    if (request !== requestRef.current) return null;
+
+    const applied = applyAppearanceForRole({
+      role: String(membership.role || ""),
+      accountId: String(membership.accountId || "") || null,
+      schoolId: Number(membership.schoolId || 0) || null,
+      branchId: Number(membership.branchId || 0) || null,
+      settings: resolved as ScopedAppearanceSettings | null,
+    });
+
+    if (request === requestRef.current) {
+      setAppliedFor(applied);
+      setLoading(false);
+    }
+    return applied;
+  }, [settingsContext.hydrateSettingsForMembership]);
 
   const refreshTheme = useCallback(async () => {
-    if (!schoolId || !branchId) {
-      setBranchSettings(null);
-      setLoading(false);
+    if (!activeMembership) {
+      resetAppearance();
       return;
     }
+    await applyForMembership(activeMembership);
+  }, [activeMembership, applyForMembership, resetAppearance]);
 
-    try {
-      setLoading(true);
+  // Automatic application is intentionally owned by PortalAppearanceRuntime.
 
-      const rows = await db.schoolBranchSettings.toArray();
 
-      const exactAccountRow =
-        rows.find((row: any) => {
-          if (row.isDeleted) return false;
-          if (settings?.accountId && row.accountId && row.accountId !== settings.accountId) {
-            return false;
-          }
+  const expectedIdentity = activeMembership
+    ? appearanceIdentityFor({
+        role: activeMembership.role,
+        accountId: activeMembership.accountId,
+        schoolId: activeMembership.schoolId,
+        branchId: activeMembership.branchId,
+      })
+    : null;
 
-          return sameId(row.schoolId, schoolId) && sameId(row.branchId, branchId);
-        }) || null;
-
-      const fallbackRow =
-        exactAccountRow ||
-        rows.find(
-          (row: any) =>
-            !row.isDeleted &&
-            sameId(row.schoolId, schoolId) &&
-            sameId(row.branchId, branchId)
-        ) ||
-        null;
-
-      setBranchSettings(fallbackRow);
-    } catch (error) {
-      console.error("Failed to load branch theme settings:", error);
-      setBranchSettings(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [schoolId, branchId, settings?.accountId]);
-
-  useEffect(() => {
-    if (settingsLoading || branchLoading) return;
-    refreshTheme();
-  }, [settingsLoading, branchLoading, refreshTheme]);
-
-  useEffect(() => {
-    const handleThemeUpdate = () => refreshTheme();
-
-    window.addEventListener("school-branch-settings-updated", handleThemeUpdate);
-    window.addEventListener("storage", handleThemeUpdate);
-
-    return () => {
-      window.removeEventListener("school-branch-settings-updated", handleThemeUpdate);
-      window.removeEventListener("storage", handleThemeUpdate);
-    };
-  }, [refreshTheme]);
-
-  const effectiveTheme = useMemo(() => {
-    const primaryColor =
-      branchSettings?.primaryColor ||
-      settings?.primaryColor ||
-      "#2563eb";
-
-    const fontFamily =
-      branchSettings?.fontFamily ||
-      settings?.fontFamily ||
-      "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-
-    const fontSize = Number(
-      branchSettings?.fontSize ||
-        settings?.fontSize ||
-        16
-    );
-
-    const mode = ((branchSettings?.theme || settings?.theme || "light") as ThemeMode);
-
-    const logo =
-      branchSettings?.logo ||
-      activeBranch?.logo ||
-      activeBranch?.photo ||
-      activeSchool?.logo ||
-      activeSchool?.photo ||
-      settings?.logo ||
-      settings?.schoolLogo ||
-      undefined;
-
-    return {
-      primaryColor,
-      fontFamily,
-      fontSize,
-      mode,
-      logo,
-    };
-  }, [branchSettings, settings, activeBranch, activeSchool]);
-
-  useEffect(() => {
-    const primaryColor = effectiveTheme.primaryColor || "#2563eb";
-    const fontFamily =
-      effectiveTheme.fontFamily ||
-      "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-    const fontSize = Number(effectiveTheme.fontSize || 16);
-    const mode = effectiveTheme.mode || "light";
-
-    const root = document.documentElement;
-
-    root.setAttribute("data-theme", mode);
-
-    setCssVariable("--primary-color", primaryColor);
-    setCssVariable("--dashboard-primary", primaryColor);
-    setCssVariable("--theme-primary", primaryColor);
-
-    setCssVariable("--font-family", fontFamily);
-    setCssVariable("--font-size", `${fontSize}px`);
-
-    document.body.style.fontFamily = fontFamily;
-    document.body.style.fontSize = `${fontSize}px`;
-
-    if (mode === "dark") {
-      const bg = darken(primaryColor, 0.24);
-      const surface = darken(primaryColor, 0.31);
-      const card = darken(primaryColor, 0.38);
-      const soft = "rgba(255,255,255,.08)";
-      const hover = "rgba(255,255,255,.11)";
-      const border = "rgba(255,255,255,.16)";
-      const text = getContrastTextColor(bg);
-
-      setCssVariable("--bg", bg);
-      setCssVariable("--surface", surface);
-      setCssVariable("--card", card);
-      setCssVariable("--text", text);
-      setCssVariable("--muted", "rgba(255,255,255,.72)");
-      setCssVariable("--border", border);
-
-      setCssVariable("--shell-sidebar-bg", surface);
-      setCssVariable("--shell-section-bg", soft);
-      setCssVariable("--shell-hover-bg", hover);
-      setCssVariable("--shell-menu-bg", card);
-      setCssVariable("--shell-header-bg", "rgba(15,23,42,.72)");
-      setCssVariable("--shell-shadow", "0 24px 70px rgba(0,0,0,.38)");
-
-      setCssVariable("--input-bg", "rgba(255,255,255,.09)");
-      setCssVariable("--input-text", "#ffffff");
-      setCssVariable("--input-border", border);
-    } else {
-      const bg = "#f8fafc";
-      const surface = "#ffffff";
-      const soft = lighten(primaryColor, 0.94);
-      const hover = lighten(primaryColor, 0.88);
-      const border = "rgba(148,163,184,.22)";
-
-      setCssVariable("--bg", bg);
-      setCssVariable("--surface", surface);
-      setCssVariable("--card", "#ffffff");
-      setCssVariable("--text", "#0f172a");
-      setCssVariable("--muted", "#64748b");
-      setCssVariable("--border", border);
-
-      setCssVariable("--shell-sidebar-bg", "#ffffff");
-      setCssVariable("--shell-section-bg", soft);
-      setCssVariable("--shell-hover-bg", hover);
-      setCssVariable("--shell-menu-bg", "#ffffff");
-      setCssVariable(
-        "--shell-header-bg",
-        "color-mix(in srgb, var(--bg, #f8fafc) 93%, white)"
-      );
-      setCssVariable("--shell-shadow", "0 24px 70px rgba(15,23,42,.22)");
-
-      setCssVariable("--input-bg", "#ffffff");
-      setCssVariable("--input-text", "#0f172a");
-      setCssVariable("--input-border", border);
-    }
-
-    setFavicon(effectiveTheme.logo);
-  }, [effectiveTheme]);
-
-  const value = useMemo<ThemeState>(
-    () => ({
-      loading,
-      mode: effectiveTheme.mode,
-      primaryColor: effectiveTheme.primaryColor,
-      fontFamily: effectiveTheme.fontFamily,
-      fontSize: effectiveTheme.fontSize,
-      logo: effectiveTheme.logo,
-      branchSettings,
-      refreshTheme,
-    }),
-    [loading, effectiveTheme, branchSettings, refreshTheme]
+  const ready = Boolean(
+    !loading &&
+    activeMembership &&
+    appliedFor &&
+    appearanceIdentityMatches(appliedFor, expectedIdentity),
   );
+
+  const effective = settingsContext.effectiveSettings as any;
+  const value = useMemo<ThemeState>(() => ({
+    loading,
+    ready,
+    mode: appliedFor?.mode || "light",
+    primaryColor: appliedFor?.primaryColor || PLATFORM_APPEARANCE_DEFAULTS.primaryColor,
+    fontFamily: String(effective?.fontFamily || PLATFORM_APPEARANCE_DEFAULTS.fontFamily),
+    fontSize: Number(effective?.fontSize || 16),
+    logo: effective?.logo || undefined,
+    branchSettings: settingsContext.branchSettings,
+    theme: effective || null,
+    effectiveScope: appliedFor?.scope || settingsContext.effectiveScope,
+    appliedFor,
+    refreshTheme,
+    applyForMembership,
+    resetAppearance,
+  }), [
+    loading, ready, appliedFor, effective, settingsContext.branchSettings,
+    settingsContext.effectiveScope, refreshTheme, applyForMembership, resetAppearance,
+  ]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
-// ======================================================
-// HOOK
-// ======================================================
-
 export function useTheme() {
   const context = useContext(ThemeContext);
-
-  if (!context) {
-    return {
-      loading: false,
-      mode: "light" as ThemeMode,
-      primaryColor: "#2563eb",
-      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      fontSize: 16,
-      logo: undefined,
-      branchSettings: null,
-      refreshTheme: async () => {},
-    };
-  }
-
+  if (!context) throw new Error("useTheme must be used inside ThemeProvider");
   return context;
 }

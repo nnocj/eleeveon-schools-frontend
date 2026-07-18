@@ -41,7 +41,7 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import type { CalendarEvent, CalendarEventReminder } from "../../lib/db";
+import type { CalendarEvent, CalendarEventReminder } from "../../lib/db/db";
 import {
   createLocal,
   getSyncTable,
@@ -49,6 +49,8 @@ import {
   updateLocal,
 } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 
 type ViewMode = "calendar" | "cards" | "table" | "analytics";
@@ -543,6 +545,8 @@ function CalendarModeSwitch({
 }
 
 export default function Calendar() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -576,7 +580,7 @@ export default function Calendar() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("calendar");
   const [calendarMode, setCalendarMode] = useState<CalendarMode>("month");
   const [focusDate, setFocusDate] = useState(() => new Date());
@@ -647,7 +651,9 @@ export default function Calendar() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId]);
+  }, [accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   function resetForm() {
     setForm(emptyForm);

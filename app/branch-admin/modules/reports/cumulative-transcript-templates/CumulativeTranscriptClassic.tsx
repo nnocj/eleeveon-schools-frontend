@@ -2,7 +2,7 @@
 
 import React from "react";
 
-import type { ReportCardTemplateSetting } from "../../../../lib/db";
+import type { ReportCardTemplateSetting } from "../../../../lib/db/db";
 import type { ReportHeaderData } from "../engine/report-types";
 import type { StudentCumulativeTranscript } from "../engine/cumulative-report-types";
 

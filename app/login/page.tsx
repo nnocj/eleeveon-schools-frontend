@@ -17,6 +17,12 @@
  */
 
 import React, { useState } from "react";
+
+import WorkspaceBootstrapScreen from "../components/WorkspaceBootstrapScreen";
+import {
+  bootstrapSelectedWorkspace,
+  type WorkspaceBootstrapProgress,
+} from "../lib/sync/workspaceBootstrap";
 import { useRouter } from "next/navigation";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
@@ -92,6 +98,9 @@ type LoginResponse = {
 
 const AUTH_USER_KEY = "eleeveon_auth_user";
 const AUTH_ACCOUNT_KEY = "eleeveon_auth_account";
+const ACCOUNT_USER_KEY = "eleeveon_account_user";
+const ACCOUNT_INFO_KEY = "eleeveon_account_info";
+const MEMBERSHIP_BACKUP_KEY = "eleeveon_user_memberships";
 
 // ======================================================
 // HELPERS
@@ -236,6 +245,15 @@ function saveLoginContext(res: LoginResponse, memberships: UserMembership[]) {
 
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify(userToStore));
   localStorage.setItem(AUTH_ACCOUNT_KEY, JSON.stringify(accountToStore));
+  localStorage.setItem(ACCOUNT_USER_KEY, JSON.stringify(userToStore));
+  localStorage.setItem(ACCOUNT_INFO_KEY, JSON.stringify(accountToStore));
+  localStorage.setItem(MEMBERSHIP_BACKUP_KEY, JSON.stringify(memberships));
+
+  sessionStorage.setItem(AUTH_USER_KEY, JSON.stringify(userToStore));
+  sessionStorage.setItem(AUTH_ACCOUNT_KEY, JSON.stringify(accountToStore));
+  sessionStorage.setItem(ACCOUNT_USER_KEY, JSON.stringify(userToStore));
+  sessionStorage.setItem(ACCOUNT_INFO_KEY, JSON.stringify(accountToStore));
+  sessionStorage.setItem(MEMBERSHIP_BACKUP_KEY, JSON.stringify(memberships));
 
   // Compatibility with older contexts/pages that may read these keys.
   localStorage.setItem("user", JSON.stringify(userToStore));
@@ -297,6 +315,12 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [bootstrapProgress, setBootstrapProgress] =
+    useState<WorkspaceBootstrapProgress | null>(null);
+  const [bootstrapError, setBootstrapError] =
+    useState<string | null>(null);
+  const [pendingMembership, setPendingMembership] =
+    useState<UserMembership | null>(null);
 
   const update = (patch: Partial<typeof form>) => {
     setForm((prev) => ({ ...prev, ...patch }));
@@ -339,6 +363,9 @@ export default function LoginPage() {
       saveAuthToken(token);
       setAccountId(res.user.accountId);
       saveLoginContext(res, memberships);
+
+      // Phase 21: do not begin the broad account pull here. The selected
+      // workspace is bootstrapped first; ordinary sync continues afterward.
 
       // Developer does not need school/branch membership.
       if (role === "developer") {
@@ -383,12 +410,38 @@ export default function LoginPage() {
         return;
       }
 
-      // Single membership users: set active membership BEFORE opening portal.
+      // Single membership users receive the same priority workspace bootstrap
+      // as users who choose from Select Role.
       if (memberships.length === 1) {
         const membership = memberships[0];
 
         setStoredActiveMembership(membership);
-        openPath(router, getPortalPathByRole(membership.role));
+        setPendingMembership(membership);
+        setBootstrapError(null);
+
+        try {
+          await bootstrapSelectedWorkspace(
+            membership,
+            {
+              allowCached: true,
+              onProgress:
+                setBootstrapProgress,
+            },
+          );
+
+          openPath(
+            router,
+            getPortalPathByRole(
+              membership.role,
+            ),
+          );
+        } catch (error: any) {
+          setBootstrapError(
+            error?.message ||
+              "Failed to prepare this workspace.",
+          );
+        }
+
         return;
       }
 
@@ -426,9 +479,54 @@ export default function LoginPage() {
     if (event.key === "Enter" && !loading) submit();
   };
 
+  const retryWorkspaceBootstrap =
+    async () => {
+      if (!pendingMembership) return;
+
+      setBootstrapError(null);
+
+      try {
+        await bootstrapSelectedWorkspace(
+          pendingMembership,
+          {
+            force: true,
+            allowCached: true,
+            onProgress:
+              setBootstrapProgress,
+          },
+        );
+
+        openPath(
+          router,
+          getPortalPathByRole(
+            pendingMembership.role,
+          ),
+        );
+      } catch (error: any) {
+        setBootstrapError(
+          error?.message ||
+            "Failed to prepare this workspace.",
+        );
+      }
+    };
+
   return (
     <main className="login-page">
       <style>{css}</style>
+
+      {(bootstrapProgress || bootstrapError) && (
+        <WorkspaceBootstrapScreen
+          progress={bootstrapProgress}
+          error={bootstrapError}
+          onRetry={retryWorkspaceBootstrap}
+          onCancel={() => {
+            setBootstrapProgress(null);
+            setBootstrapError(null);
+            setPendingMembership(null);
+            openPath(router, "/select-role");
+          }}
+        />
+      )}
 
       <section className="login-card">
         <div className="login-badge">🔐</div>

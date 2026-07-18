@@ -44,7 +44,7 @@ import {
   type Class,
   type Student,
   type StudentEnrollment,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "summary";

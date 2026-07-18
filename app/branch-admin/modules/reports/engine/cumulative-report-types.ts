@@ -31,7 +31,7 @@ import type {
   StudentReportSnapshot,
   Subject,
   Teacher,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 import type {
   AttendanceSummary,

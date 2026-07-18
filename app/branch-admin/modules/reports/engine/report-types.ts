@@ -54,7 +54,7 @@ import type {
   StudentEnrollment,
   Subject,
   Teacher,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 // ======================================================
 // MODES
@@ -205,7 +205,7 @@ export interface ReportEngineDataset {
 
   attendance: Attendance[];
 
-  computedResults: import("../../../../lib/db").ComputedResult[];
+  computedResults: import("../../../../lib/db/db").ComputedResult[];
   reportCards: ReportCard[];
   reportCardItems: ReportCardItem[];
 }

@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import CambridgeHeader from "../shared/headers/CambridgeHeader";
+import CambridgeHeader from "../shared/headers/student-reports/CambridgeHeader";
 
 import {
   createReportPageStyle,

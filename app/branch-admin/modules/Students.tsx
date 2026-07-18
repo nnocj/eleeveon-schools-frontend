@@ -31,33 +31,48 @@
  * - photo and cover fields support Upload and real Take Photo camera capture
  * - media owner/session keys use shared mediaAssetUtils helpers so this page cannot save under teacher/parent ownership
  *
- * Compact mobile-first UI update:
- * - keeps the original page styling intact
- * - removed the duplicate Students / Branch / School header block
- * - removed the floating add button
- * - placed the + add action beside search
- * - replaced the gear filter with a horizontal slider filter icon
- * - replaced large status chips in list rows with small status dots
- * - removed the branch shell sync/online status dot and status sheet from this module
- * - removed the separate shown/total/active summary strip from all views
- * - shows the filtered count minimally inside the Student table header, for example Students (2)
- * - keeps analytics/table under More so the main page stays clean
- * - keeps table colors tied to existing theme variables for dark mode support
+ * Compact mobile-first UI:
+ * - removes the duplicate Students / Branch / School header block
+ * - keeps the + add action beside search and removes the floating add button
+ * - uses the horizontal slider filter icon and keeps table/analytics under More
+ * - replaces large status chips with compact status dots
+ * - removes duplicate module-level connection and summary strips
+ * - shows the filtered count only where it is useful, such as Students (2) in table view
+ * - keeps cards, tables and sheets responsive and theme-safe
+ *
+ * Exact Branch Settings action-system rebuild:
+ * - discards the former Students-specific toolbar/button imitation styles
+ * - copies the Branch Settings search strip, primary action, filter and More treatments directly
+ * - + Add uses the same filled branch-primary background, border and shadow as Branch Settings Save
+ * - inactive Filter uses the same soft primary tint; active Filter uses the same filled primary treatment
+ * - More uses the same neutral card/surface background, border and shadow
+ * - Upload, Apply, Save, Done and Capture use the same Branch Settings primary-action values
+ * - Camera, Cancel, Close and other secondary actions use the same neutral/outlined hierarchy
+ * - all action colors resolve from --ba-primary so Branch Settings theme changes flow into Students
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type Class, type Organization, type Student, type StudentEnrollment } from "../../lib/db";
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 import {
+  db,
+  type Class,
+  type Organization,
+  type Student,
+  type StudentEnrollment,
+} from "../../lib/db/db";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
+import {
+  softDeleteOwnerFieldAssets,
   MediaOwners,
   MediaFieldKeys,
   attachCameraStreamToVideo,
-  attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
@@ -70,7 +85,10 @@ import {
   type CameraFacingMode,
 } from "../../lib/media/mediaAssetUtils";
 
-
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type StudentStatus = "active" | "graduated" | "transferred" | "withdrawn";
@@ -106,7 +124,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -148,7 +168,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -157,7 +181,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -169,7 +193,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -179,10 +207,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 type FormState = {
   id?: number;
@@ -242,15 +269,24 @@ const idOf = (v: any) => {
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (v: any) => String(v || "").toLowerCase().trim();
+const safeLower = (v: any) =>
+  String(v || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) =>
-  !row?.isDeleted && !["withdrawn", "deleted", "archived", "inactive"].includes(safeLower(row?.status));
+  !row?.isDeleted &&
+  !["withdrawn", "deleted", "archived", "inactive"].includes(
+    safeLower(row?.status),
+  );
 
-const statusLabel = (s?: StudentStatus) => (!s ? "Active" : s.charAt(0).toUpperCase() + s.slice(1));
+const statusLabel = (s?: StudentStatus) =>
+  !s ? "Active" : s.charAt(0).toUpperCase() + s.slice(1);
 
-function statusTone(s?: StudentStatus): "green" | "red" | "blue" | "orange" | "gray" {
+function statusTone(
+  s?: StudentStatus,
+): "green" | "red" | "blue" | "orange" | "gray" {
   if (!s || s === "active") return "green";
   if (s === "graduated") return "blue";
   if (s === "transferred") return "orange";
@@ -263,13 +299,18 @@ const timeText = (v?: string | number | null) => {
   const t = typeof v === "number" ? v : new Date(v).getTime();
   if (!Number.isFinite(t)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(t));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(t));
   } catch {
     return "Not set";
   }
 };
 
-const mediaKey = (studentId: number, field: "photo" | "coverPhoto") => `students:${studentId}:${field}`;
+const mediaKey = (studentId: number, field: "photo" | "coverPhoto") =>
+  `students:${studentId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "");
@@ -282,7 +323,8 @@ const safeRecordMediaValue = (value?: string) => {
 const STUDENT_MEDIA_OWNER_TABLE = MediaOwners.STUDENTS;
 const STUDENT_MEDIA_ENTITY_LABEL = "Student";
 
-const makeMediaSessionKey = () => createMediaSessionKey(STUDENT_MEDIA_OWNER_TABLE);
+const makeMediaSessionKey = () =>
+  createMediaSessionKey(STUDENT_MEDIA_OWNER_TABLE);
 
 function Chip({
   children,
@@ -294,22 +336,72 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function getReadableTextColor(color: string) {
+  const value = String(color || "").trim();
+
+  if (!value.startsWith("#")) {
+    return "#fff";
+  }
+
+  let hex = value.slice(1);
+
+  if (hex.length === 3) {
+    hex = hex
+      .split("")
+      .map((character) => character + character)
+      .join("");
+  }
+
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return "#fff";
+  }
+
+  const numeric = Number.parseInt(hex, 16);
+  const red = (numeric >> 16) & 255;
+  const green = (numeric >> 8) & 255;
+  const blue = numeric & 255;
+  const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
+
+  return brightness > 155 ? "#111827" : "#ffffff";
+}
+
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
       style={{
-        background: photo
-          ? `url(${photo}) center/cover`
-          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+        background: photo ? `url(${photo}) center/cover` : primary,
+        color: photo ? "#ffffff" : getReadableTextColor(primary),
+        borderColor: photo
+          ? "transparent"
+          : `color-mix(in srgb, ${primary} 76%, transparent)`,
       }}
     >
-      {!photo && String(name || "S").slice(0, 1).toUpperCase()}
+      {!photo &&
+        String(name || "S")
+          .slice(0, 1)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -320,46 +412,59 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function StudentsPage() {
+  const dataRevision = useBranchTableRevision([
+    "students",
+    "classes",
+    "organizations",
+    "studentEnrollments",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
+  const primaryText = getReadableTextColor(primary);
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [rows, setRows] = useState<Student[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "students",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "coverPhoto", mediaIdKey: "coverPhotoMediaId" },
+    ],
+  });
   const [classes, setClasses] = useState<Class[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
   const [filterClassId, setFilterClassId] = useState("all");
   const [filterOrganizationId, setFilterOrganizationId] = useState("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | StudentStatus>("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | StudentStatus>(
+    "all",
+  );
   const [filterGender, setFilterGender] = useState("all");
 
   const [filterOpen, setFilterOpen] = useState(false);
@@ -368,14 +473,20 @@ export default function StudentsPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
   const mediaSessionKey = useRef(makeMediaSessionKey());
-  const uploadedMediaAssetIds = useRef<Partial<Record<CameraField, number>>>({});
+  const uploadedMediaAssetIds = useRef<Partial<Record<CameraField, number>>>(
+    {},
+  );
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("photo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
 
@@ -383,7 +494,15 @@ export default function StudentsPage() {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/account");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -393,7 +512,10 @@ export default function StudentsPage() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((c) => (c?.message === message ? null : c)), 4200);
+    window.setTimeout(
+      () => setToast((c) => (c?.message === message ? null : c)),
+      4200,
+    );
   };
 
   const stopCurrentCamera = () => {
@@ -486,11 +608,12 @@ export default function StudentsPage() {
             fieldKey: MediaFieldKeys.COVER_PHOTO,
             fallbackAssetId: student.coverPhotoMediaId,
           });
-          if (coverPhotoUrl) next[mediaKey(studentId, "coverPhoto")] = coverPhotoUrl;
+          if (coverPhotoUrl)
+            next[mediaKey(studentId, "coverPhoto")] = coverPhotoUrl;
         } catch (error) {
           console.error("Failed to resolve student media:", studentId, error);
         }
-      })
+      }),
     );
 
     // Do not revoke list preview URLs during a reload. In practice, revoking
@@ -510,31 +633,48 @@ export default function StudentsPage() {
 
     try {
       setLoading(true);
-      const [studentRows, classRows, organizationRows, enrollmentRows] = await Promise.all([
-        tableSafe("students")?.toArray?.() || [],
-        listActiveLocal("classes", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        tableSafe("studentEnrollments")?.toArray?.() || [],
-      ]);
+      const [studentRows, classRows, organizationRows, enrollmentRows] =
+        await Promise.all([
+          tableSafe("students")?.toArray?.() || [],
+          listActiveLocal("classes", {
+            accountId,
+            schoolId: Number(schoolId),
+            branchId: Number(branchId),
+          } as any),
+          listActiveLocal("organizations", {
+            accountId,
+            schoolId: Number(schoolId),
+            branchId: Number(branchId),
+          } as any),
+          tableSafe("studentEnrollments")?.toArray?.() || [],
+        ]);
 
       const scopedStudents = (studentRows as Student[])
         .filter((r) => sameTenant(r as TenantRow))
-        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")));
+        .sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")),
+        );
 
       setRows(scopedStudents);
       await resolveStudentMediaUrls(scopedStudents);
 
       setClasses(
-        (classRows as Class[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+        (classRows as Class[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setOrganizations(
         (organizationRows as Organization[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
-      setEnrollments((enrollmentRows as StudentEnrollment[]).filter((r) => sameTenant(r as TenantRow)));
+      setEnrollments(
+        (enrollmentRows as StudentEnrollment[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error(error);
       clearData();
@@ -548,7 +688,16 @@ export default function StudentsPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -600,8 +749,14 @@ export default function StudentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOpen, cameraFacing]);
 
-  const classMap = useMemo(() => new Map(classes.map((r: any) => [idOf(r.id), r])), [classes]);
-  const organizationMap = useMemo(() => new Map(organizations.map((r: any) => [idOf(r.id), r])), [organizations]);
+  const classMap = useMemo(
+    () => new Map(classes.map((r: any) => [idOf(r.id), r])),
+    [classes],
+  );
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
+    [organizations],
+  );
 
   const enrollmentMap = useMemo(() => {
     const m = new Map<number, StudentEnrollment[]>();
@@ -620,15 +775,25 @@ export default function StudentsPage() {
       rows.map((row: any) => {
         const id = idOf(row.id);
         const studentEnrollments = enrollmentMap.get(id) || [];
-        const activeEnrollment = studentEnrollments.find((i: any) => i.status === "active");
-        const classData: any = classMap.get(idOf((activeEnrollment as any)?.classId || row.currentClassId));
+        const activeEnrollment = studentEnrollments.find(
+          (i: any) => i.status === "active",
+        );
+        const classData: any = classMap.get(
+          idOf((activeEnrollment as any)?.classId || row.currentClassId),
+        );
         const organization: any = organizationMap.get(idOf(row.organizationId));
 
         return {
           id,
           row,
-          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-          coverPhotoUrl: mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
+          photoUrl:
+            resolvedMediaById[id]?.photo ||
+            mediaPreviewUrls[mediaKey(id, "photo")] ||
+            safeRecordMediaValue(row.photo),
+          coverPhotoUrl:
+            resolvedMediaById[id]?.coverPhoto ||
+            mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
+            safeRecordMediaValue(row.coverPhoto),
           className: classData?.name || "No class assigned",
           organizationName: organization?.name || "No organization",
           enrollmentCount: studentEnrollments.length,
@@ -636,7 +801,7 @@ export default function StudentsPage() {
           active: isActiveRow(row),
         };
       }),
-    [classMap, enrollmentMap, mediaPreviewUrls, organizationMap, rows]
+    [classMap, enrollmentMap, mediaPreviewUrls, organizationMap, rows],
   );
 
   const filteredRows = useMemo(() => {
@@ -647,11 +812,17 @@ export default function StudentsPage() {
         const row: any = item.row;
 
         if (filterClassId !== "all") {
-          const activeClassId = idOf((item.activeEnrollment as any)?.classId || row.currentClassId);
+          const activeClassId = idOf(
+            (item.activeEnrollment as any)?.classId || row.currentClassId,
+          );
           if (!sameId(activeClassId, filterClassId)) return false;
         }
 
-        if (filterOrganizationId !== "all" && !sameId(row.organizationId, filterOrganizationId)) return false;
+        if (
+          filterOrganizationId !== "all" &&
+          !sameId(row.organizationId, filterOrganizationId)
+        )
+          return false;
         if (filterStatus !== "all" && row.status !== filterStatus) return false;
         if (filterGender !== "all" && row.gender !== filterGender) return false;
 
@@ -666,36 +837,80 @@ export default function StudentsPage() {
           .includes(q);
       })
       .sort((a, b) =>
-        String((a.row as any).fullName || "").localeCompare(String((b.row as any).fullName || ""))
+        String((a.row as any).fullName || "").localeCompare(
+          String((b.row as any).fullName || ""),
+        ),
       );
-  }, [filterClassId, filterGender, filterOrganizationId, filterStatus, search, viewRows]);
+  }, [
+    filterClassId,
+    filterGender,
+    filterOrganizationId,
+    filterStatus,
+    search,
+    viewRows,
+  ]);
 
   const summary = useMemo(
     () => ({
       total: rows.length,
-      active: rows.filter((r: any) => r.status === "active" || !r.status).length,
+      active: rows.filter((r: any) => r.status === "active" || !r.status)
+        .length,
       graduated: rows.filter((r: any) => r.status === "graduated").length,
       transferred: rows.filter((r: any) => r.status === "transferred").length,
       withdrawn: rows.filter((r: any) => r.status === "withdrawn").length,
-      withClass: new Set(enrollments.filter((r: any) => r.status === "active").map((r: any) => r.studentId)).size,
+      withClass: new Set(
+        enrollments
+          .filter((r: any) => r.status === "active")
+          .map((r: any) => r.studentId),
+      ).size,
       showing: filteredRows.length,
     }),
-    [enrollments, filteredRows.length, rows]
+    [enrollments, filteredRows.length, rows],
   );
 
   const activeFilterCount = useMemo(() => {
-    return [filterClassId, filterOrganizationId, filterStatus, filterGender].filter((v) => v !== "all").length;
+    return [
+      filterClassId,
+      filterOrganizationId,
+      filterStatus,
+      filterGender,
+    ].filter((v) => v !== "all").length;
   }, [filterClassId, filterGender, filterOrganizationId, filterStatus]);
 
-  const genderOptions = useMemo(() => Array.from(new Set(rows.map((r: any) => r.gender).filter(Boolean))) as string[], [rows]);
-  const countsByClass = useMemo(() => groupedCounts(viewRows, (i) => i.className), [viewRows]);
-  const countsByOrganization = useMemo(() => groupedCounts(viewRows, (i) => i.organizationName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (i) => statusLabel((i.row as any).status)), [viewRows]);
-  const countsByGender = useMemo(() => groupedCounts(viewRows, (i) => String((i.row as any).gender || "Not set")), [viewRows]);
+  const genderOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(rows.map((r: any) => r.gender).filter(Boolean)),
+      ) as string[],
+    [rows],
+  );
+  const countsByClass = useMemo(
+    () => groupedCounts(viewRows, (i) => i.className),
+    [viewRows],
+  );
+  const countsByOrganization = useMemo(
+    () => groupedCounts(viewRows, (i) => i.organizationName),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () => groupedCounts(viewRows, (i) => statusLabel((i.row as any).status)),
+    [viewRows],
+  );
+  const countsByGender = useMemo(
+    () =>
+      groupedCounts(viewRows, (i) =>
+        String((i.row as any).gender || "Not set"),
+      ),
+    [viewRows],
+  );
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const handleImageUpload = async (field: "photo" | "coverPhoto", file?: File) => {
+  const handleImageUpload = async (
+    field: "photo" | "coverPhoto",
+    file?: File,
+  ) => {
     if (!file) return;
 
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -711,7 +926,8 @@ export default function StudentsPage() {
         ownerTable: STUDENT_MEDIA_OWNER_TABLE,
         ownerLocalId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKey.current,
-        fieldKey: field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
+        fieldKey:
+          field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
       });
@@ -726,7 +942,12 @@ export default function StudentsPage() {
         [`${field}MediaId`]: result.assetId,
       } as Partial<FormState>);
 
-      showToast("success", field === "photo" ? "Student photo optimized." : "Cover photo optimized.");
+      showToast(
+        "success",
+        field === "photo"
+          ? "Student photo optimized."
+          : "Cover photo optimized.",
+      );
     } catch (error: any) {
       console.error("Failed to process student image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -750,7 +971,8 @@ export default function StudentsPage() {
     setForm({
       ...emptyForm,
       currentClassId: filterClassId !== "all" ? filterClassId : "",
-      organizationId: filterOrganizationId !== "all" ? filterOrganizationId : "",
+      organizationId:
+        filterOrganizationId !== "all" ? filterOrganizationId : "",
       status: filterStatus !== "all" ? filterStatus : "active",
     });
     setModalOpen(true);
@@ -759,8 +981,14 @@ export default function StudentsPage() {
   const openEdit = (row: Student) => {
     const s: any = row;
     const studentId = idOf(s.id);
-    const resolvedPhoto = mediaPreviewUrls[mediaKey(studentId, "photo")] || "";
-    const resolvedCoverPhoto = mediaPreviewUrls[mediaKey(studentId, "coverPhoto")] || "";
+    const resolvedPhoto =
+      resolvedMediaById[studentId]?.photo ||
+      mediaPreviewUrls[mediaKey(studentId, "photo")] ||
+      "";
+    const resolvedCoverPhoto =
+      resolvedMediaById[studentId]?.coverPhoto ||
+      mediaPreviewUrls[mediaKey(studentId, "coverPhoto")] ||
+      "";
 
     mediaSessionKey.current = makeMediaSessionKey();
     uploadedMediaAssetIds.current = {};
@@ -781,7 +1009,9 @@ export default function StudentsPage() {
       photo: resolvedPhoto,
       photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
       coverPhoto: resolvedCoverPhoto,
-      coverPhotoMediaId: s.coverPhotoMediaId ? Number(s.coverPhotoMediaId) : undefined,
+      coverPhotoMediaId: s.coverPhotoMediaId
+        ? Number(s.coverPhotoMediaId)
+        : undefined,
       parentName: s.parentName || "",
       parentPhone: s.parentPhone || "",
       parentEmail: s.parentEmail || "",
@@ -803,16 +1033,24 @@ export default function StudentsPage() {
     if (!schoolId) return "Select a school first.";
     if (!branchId) return "Select a branch first.";
     if (!form.fullName.trim()) return "Enter student full name.";
-    if (form.age !== "" && Number(form.age) < 0) return "Age cannot be negative.";
+    if (form.age !== "" && Number(form.age) < 0)
+      return "Age cannot be negative.";
 
     const duplicate = rows.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
-      return !!form.admissionNumber.trim() && safeLower(row.admissionNumber) === safeLower(form.admissionNumber) && !row.isDeleted;
+      return (
+        !!form.admissionNumber.trim() &&
+        safeLower(row.admissionNumber) === safeLower(form.admissionNumber) &&
+        !row.isDeleted
+      );
     });
 
-    if (duplicate) return "A student with this admission number already exists in this branch.";
-    if (form.currentClassId && !classMap.get(idOf(form.currentClassId))) return "Selected class is not in this branch.";
-    if (form.organizationId && !organizationMap.get(idOf(form.organizationId))) return "Selected organization is not in this branch.";
+    if (duplicate)
+      return "A student with this admission number already exists in this branch.";
+    if (form.currentClassId && !classMap.get(idOf(form.currentClassId)))
+      return "Selected class is not in this branch.";
+    if (form.organizationId && !organizationMap.get(idOf(form.organizationId)))
+      return "Selected organization is not in this branch.";
 
     return "";
   };
@@ -831,14 +1069,20 @@ export default function StudentsPage() {
     try {
       setSaving(true);
 
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
 
       const payload: Partial<Student> = {
         accountId,
         schoolId: Number(schoolId),
         branchId: Number(branchId),
-        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
-        currentClassId: form.currentClassId ? Number(form.currentClassId) : undefined,
+        organizationId: form.organizationId
+          ? Number(form.organizationId)
+          : undefined,
+        currentClassId: form.currentClassId
+          ? Number(form.currentClassId)
+          : undefined,
         admissionNumber: form.admissionNumber.trim() || undefined,
         fullName: form.fullName.trim(),
         gender: form.gender.trim() || undefined,
@@ -857,26 +1101,35 @@ export default function StudentsPage() {
         isDeleted: false,
       } as Partial<Student>;
 
-      const savedStudent = form.id && existing
-        ? await updateLocal("students", Number(form.id), payload)
-        : await createLocal("students", payload as unknown as Student);
+      const savedStudent =
+        form.id && existing
+          ? await updateLocal("students", Number(form.id), payload)
+          : await createLocal("students", payload as unknown as Student);
 
       const savedStudentId = Number(
-        typeof savedStudent === "number" ? savedStudent : (savedStudent as any)?.id || form.id || 0
+        typeof savedStudent === "number"
+          ? savedStudent
+          : (savedStudent as any)?.id || form.id || 0,
       );
-      const newlyUploadedAssetIds = Object.values(uploadedMediaAssetIds.current).filter(Boolean);
-
-      if (savedStudentId && newlyUploadedAssetIds.length) {
-        await Promise.all(
-          newlyUploadedAssetIds.map((assetId) =>
-            attachMediaAssetToOwner({
-              assetId: Number(assetId),
-              ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-              ownerLocalId: savedStudentId,
-              ownerTempKey: mediaSessionKey.current,
-            })
-          )
-        );
+      if (savedStudentId) {
+        await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedStudentId,
+          ownerCloudId:
+            (savedStudent as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKey.current,
+          assets: [
+            {
+              assetId: uploadedMediaAssetIds.current.photo,
+              fieldKey: MediaFieldKeys.PHOTO,
+            },
+            {
+              assetId: uploadedMediaAssetIds.current.coverPhoto,
+              fieldKey: MediaFieldKeys.COVER_PHOTO,
+            },
+          ],
+        });
       }
 
       uploadedMediaAssetIds.current = {};
@@ -900,10 +1153,24 @@ export default function StudentsPage() {
     const ok = window.confirm(
       item.enrollmentCount
         ? `"${row.fullName}" has ${item.enrollmentCount} enrollment record(s). Delete anyway?`
-        : `Delete "${row.fullName}"?`
+        : `Delete "${row.fullName}"?`,
     );
 
     if (!ok) return;
+
+    await Promise.all(
+      ["photo", "coverPhoto"].map((fieldKey) =>
+        softDeleteOwnerFieldAssets({
+          accountId: String(accountId),
+
+          ownerTable: "students",
+
+          ownerLocalId: Number(id),
+
+          fieldKey,
+        }),
+      ),
+    );
 
     await softDeleteLocal("students", Number(id));
     setSelectedItem(null);
@@ -937,17 +1204,38 @@ export default function StudentsPage() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing students." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing students."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page students-page"
+        style={
+          {
+            "--ba-primary": primary,
+            "--ba-primary-text": primaryText,
+          } as React.CSSProperties
+        }
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Students belong to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <p>
+            Students belong to the selected branch-admin workspace. Use Select
+            Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -956,19 +1244,34 @@ export default function StudentsPage() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page students-page"
+      style={
+        {
+          "--ba-primary": primary,
+          "--ba-primary-text": primaryText,
+        } as React.CSSProperties
+      }
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Student search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Student search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -979,7 +1282,12 @@ export default function StudentsPage() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add student">
+        <button
+          type="button"
+          className="ba-add-inline settings-save-button"
+          onClick={openCreate}
+          aria-label="Add student"
+        >
           +
         </button>
 
@@ -994,7 +1302,12 @@ export default function StudentsPage() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
@@ -1003,12 +1316,21 @@ export default function StudentsPage() {
         <section className="ba-filter-chips" aria-label="Active filters">
           {filterClassId !== "all" && (
             <button type="button" onClick={() => setFilterClassId("all")}>
-              Class: {(classMap.get(idOf(filterClassId)) as any)?.name || filterClassId} ×
+              Class:{" "}
+              {(classMap.get(idOf(filterClassId)) as any)?.name ||
+                filterClassId}{" "}
+              ×
             </button>
           )}
           {filterOrganizationId !== "all" && (
-            <button type="button" onClick={() => setFilterOrganizationId("all")}>
-              Organization: {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name || filterOrganizationId} ×
+            <button
+              type="button"
+              onClick={() => setFilterOrganizationId("all")}
+            >
+              Organization:{" "}
+              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
+                filterOrganizationId}{" "}
+              ×
             </button>
           )}
           {filterStatus !== "all" && (
@@ -1026,14 +1348,33 @@ export default function StudentsPage() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Students by Class" rows={countsByClass} total={summary.total} />
-          <AnalysisCard title="Students by Organization" rows={countsByOrganization} total={summary.total} />
-          <AnalysisCard title="Students by Status" rows={countsByStatus} total={summary.total} />
-          <AnalysisCard title="Students by Gender" rows={countsByGender} total={summary.total} />
+          <AnalysisCard
+            title="Students by Class"
+            rows={countsByClass}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Students by Organization"
+            rows={countsByOrganization}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Students by Status"
+            rows={countsByStatus}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Students by Gender"
+            rows={countsByGender}
+            total={summary.total}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{summary.showing}</strong>
-            <p>Student record(s) currently match your search and filter conditions.</p>
+            <p>
+              Student record(s) currently match your search and filter
+              conditions.
+            </p>
           </article>
         </section>
       )}
@@ -1067,7 +1408,6 @@ export default function StudentsPage() {
           )}
         </section>
       )}
-
 
       {filterOpen && (
         <FilterSheet
@@ -1143,9 +1483,25 @@ export default function StudentsPage() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page students-page"
+      style={
+        {
+          "--ba-primary": primary,
+          "--ba-primary-text": getReadableTextColor(primary),
+        } as React.CSSProperties
+      }
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1178,12 +1534,20 @@ function StudentListItem({
           {row.admissionNumber ? ` · ${row.admissionNumber}` : ""}
         </small>
         <em>
-          {row.parentPhone ? `Parent: ${row.parentPhone}` : row.parentName ? `Parent: ${row.parentName}` : item.organizationName}
+          {row.parentPhone
+            ? `Parent: ${row.parentPhone}`
+            : row.parentName
+              ? `Parent: ${row.parentName}`
+              : item.organizationName}
         </em>
       </span>
 
       <span className="student-side">
-        <span className={`status-dot-mini ${statusTone(row.status)}`} title={statusLabel(row.status)} aria-label={statusLabel(row.status)} />
+        <span
+          className={`status-dot-mini ${statusTone(row.status)}`}
+          title={statusLabel(row.status)}
+          aria-label={statusLabel(row.status)}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1248,7 +1612,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Class</span>
-            <select value={filterClassId} onChange={(e) => setFilterClassId(e.target.value)}>
+            <select
+              value={filterClassId}
+              onChange={(e) => setFilterClassId(e.target.value)}
+            >
               <option value="all">All classes</option>
               {classes.map((r: any) => (
                 <option key={String(r.id)} value={String(r.id)}>
@@ -1260,7 +1627,10 @@ function FilterSheet({
 
           <label>
             <span>Organization</span>
-            <select value={filterOrganizationId} onChange={(e) => setFilterOrganizationId(e.target.value)}>
+            <select
+              value={filterOrganizationId}
+              onChange={(e) => setFilterOrganizationId(e.target.value)}
+            >
               <option value="all">All organizations</option>
               {organizations.map((r: any) => (
                 <option key={String(r.id)} value={String(r.id)}>
@@ -1273,7 +1643,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as "all" | StudentStatus)}>
+            <select
+              value={filterStatus}
+              onChange={(e) =>
+                setFilterStatus(e.target.value as "all" | StudentStatus)
+              }
+            >
               <option value="all">All status</option>
               <option value="active">Active</option>
               <option value="graduated">Graduated</option>
@@ -1284,7 +1659,10 @@ function FilterSheet({
 
           <label>
             <span>Gender</span>
-            <select value={filterGender} onChange={(e) => setFilterGender(e.target.value)}>
+            <select
+              value={filterGender}
+              onChange={(e) => setFilterGender(e.target.value)}
+            >
               <option value="all">All gender</option>
               {genderOptions.map((g) => (
                 <option key={g} value={g}>
@@ -1333,19 +1711,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Simple student records</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Class, gender, status and organization summaries</small>
@@ -1387,7 +1777,11 @@ function ActionSheet({
               {item.className} · {statusLabel(row.status)}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close student actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close student actions"
+          >
             ✕
           </button>
         </div>
@@ -1431,7 +1825,10 @@ function ActionSheet({
           )}
 
           {row.status !== "transferred" && (
-            <button type="button" onClick={() => setStatus(item, "transferred")}>
+            <button
+              type="button"
+              onClick={() => setStatus(item, "transferred")}
+            >
               <span>↗</span>
               <b>Transfer</b>
               <small>Mark this student as transferred</small>
@@ -1507,7 +1904,9 @@ function TableView({
                   <td>{row.parentPhone || "—"}</td>
                   <td>{item.enrollmentCount}</td>
                   <td>
-                    <Chip tone={statusTone(row.status)}>{statusLabel(row.status)}</Chip>
+                    <Chip tone={statusTone(row.status)}>
+                      {statusLabel(row.status)}
+                    </Chip>
                   </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
@@ -1515,13 +1914,23 @@ function TableView({
                       <button type="button" onClick={() => openEdit(item.row)}>
                         Edit
                       </button>
-                      <button type="button" onClick={() => setStatus(item, "active")}>
+                      <button
+                        type="button"
+                        onClick={() => setStatus(item, "active")}
+                      >
                         Activate
                       </button>
-                      <button type="button" onClick={() => setStatus(item, "graduated")}>
+                      <button
+                        type="button"
+                        onClick={() => setStatus(item, "graduated")}
+                      >
                         Graduate
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => remove(item)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(item)}
+                      >
                         Delete
                       </button>
                     </div>
@@ -1532,7 +1941,9 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No student matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">No student matches your filters.</div>
+        )}
       </div>
     </section>
   );
@@ -1555,7 +1966,10 @@ function StudentModal({
   organizations: Organization[];
   setModalOpen: (open: boolean) => void;
   updateForm: (patch: Partial<FormState>) => void;
-  handleImageUpload: (field: "photo" | "coverPhoto", file?: File) => void | Promise<void>;
+  handleImageUpload: (
+    field: "photo" | "coverPhoto",
+    file?: File,
+  ) => void | Promise<void>;
   openCameraForField: (field: CameraField) => void;
   save: (event?: React.FormEvent) => void;
 }) {
@@ -1567,7 +1981,11 @@ function StudentModal({
             <h2>{form.id ? "Edit Student" : "Add Student"}</h2>
             <p>Student will be saved under the selected school branch.</p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close student form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close student form"
+          >
             ✕
           </button>
         </div>
@@ -1577,21 +1995,30 @@ function StudentModal({
           <div className="ba-form">
             <label>
               <span>Full Name</span>
-              <input value={form.fullName} onChange={(e) => updateForm({ fullName: e.target.value })} placeholder="Student full name" />
+              <input
+                value={form.fullName}
+                onChange={(e) => updateForm({ fullName: e.target.value })}
+                placeholder="Student full name"
+              />
             </label>
 
             <label>
               <span>Admission Number</span>
               <input
                 value={form.admissionNumber}
-                onChange={(e) => updateForm({ admissionNumber: e.target.value })}
+                onChange={(e) =>
+                  updateForm({ admissionNumber: e.target.value })
+                }
                 placeholder="Admission number"
               />
             </label>
 
             <label>
               <span>Gender</span>
-              <select value={form.gender} onChange={(e) => updateForm({ gender: e.target.value })}>
+              <select
+                value={form.gender}
+                onChange={(e) => updateForm({ gender: e.target.value })}
+              >
                 <option value="">Select gender</option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
@@ -1601,17 +2028,31 @@ function StudentModal({
 
             <label>
               <span>Date of Birth</span>
-              <input type="date" value={form.dateOfBirth} onChange={(e) => updateForm({ dateOfBirth: e.target.value })} />
+              <input
+                type="date"
+                value={form.dateOfBirth}
+                onChange={(e) => updateForm({ dateOfBirth: e.target.value })}
+              />
             </label>
 
             <label>
               <span>Age</span>
-              <input type="number" value={form.age} onChange={(e) => updateForm({ age: e.target.value })} placeholder="Age" />
+              <input
+                type="number"
+                value={form.age}
+                onChange={(e) => updateForm({ age: e.target.value })}
+                placeholder="Age"
+              />
             </label>
 
             <label>
               <span>Status</span>
-              <select value={form.status} onChange={(e) => updateForm({ status: e.target.value as StudentStatus })}>
+              <select
+                value={form.status}
+                onChange={(e) =>
+                  updateForm({ status: e.target.value as StudentStatus })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="graduated">Graduated</option>
                 <option value="transferred">Transferred</option>
@@ -1626,7 +2067,10 @@ function StudentModal({
           <div className="ba-form two">
             <label>
               <span>Current Class</span>
-              <select value={form.currentClassId} onChange={(e) => updateForm({ currentClassId: e.target.value })}>
+              <select
+                value={form.currentClassId}
+                onChange={(e) => updateForm({ currentClassId: e.target.value })}
+              >
                 <option value="">No class assigned</option>
                 {classes.map((r: any) => (
                   <option key={String(r.id)} value={String(r.id)}>
@@ -1638,7 +2082,10 @@ function StudentModal({
 
             <label>
               <span>Organization / House / Department</span>
-              <select value={form.organizationId} onChange={(e) => updateForm({ organizationId: e.target.value })}>
+              <select
+                value={form.organizationId}
+                onChange={(e) => updateForm({ organizationId: e.target.value })}
+              >
                 <option value="">No organization</option>
                 {organizations.map((r: any) => (
                   <option key={String(r.id)} value={String(r.id)}>
@@ -1665,17 +2112,29 @@ function StudentModal({
 
             <label>
               <span>Parent Phone</span>
-              <input value={form.parentPhone} onChange={(e) => updateForm({ parentPhone: e.target.value })} placeholder="Parent phone" />
+              <input
+                value={form.parentPhone}
+                onChange={(e) => updateForm({ parentPhone: e.target.value })}
+                placeholder="Parent phone"
+              />
             </label>
 
             <label>
               <span>Parent Email</span>
-              <input value={form.parentEmail} onChange={(e) => updateForm({ parentEmail: e.target.value })} placeholder="Parent email" />
+              <input
+                value={form.parentEmail}
+                onChange={(e) => updateForm({ parentEmail: e.target.value })}
+                placeholder="Parent email"
+              />
             </label>
 
             <label className="wide">
               <span>Address</span>
-              <textarea value={form.address} onChange={(e) => updateForm({ address: e.target.value })} placeholder="Student address" />
+              <textarea
+                value={form.address}
+                onChange={(e) => updateForm({ address: e.target.value })}
+                placeholder="Student address"
+              />
             </label>
           </div>
         </section>
@@ -1691,17 +2150,32 @@ function StudentModal({
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => handleImageUpload("photo", e.target.files?.[0])}
+                    onChange={(e) =>
+                      handleImageUpload("photo", e.target.files?.[0])
+                    }
                     hidden
                   />
                 </label>
 
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("photo")}
+                >
                   Take Photo
                 </button>
               </div>
-              <small className="ba-media-hint">Upload from files or take a quick camera photo. The image is optimized and saved as a media asset.</small>
-              {form.photo && <img src={form.photo} alt="Student preview" className="ba-preview-photo" />}
+              <small className="ba-media-hint">
+                Upload from files or take a quick camera photo. The image is
+                optimized and saved as a media asset.
+              </small>
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Student preview"
+                  className="ba-preview-photo"
+                />
+              )}
             </label>
 
             <label>
@@ -1712,26 +2186,45 @@ function StudentModal({
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => handleImageUpload("coverPhoto", e.target.files?.[0])}
+                    onChange={(e) =>
+                      handleImageUpload("coverPhoto", e.target.files?.[0])
+                    }
                     hidden
                   />
                 </label>
 
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("coverPhoto")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("coverPhoto")}
+                >
                   Take Photo
                 </button>
               </div>
-              <small className="ba-media-hint">Upload from files or use the camera. The cover is compressed separately so sync records stay small.</small>
-              {form.coverPhoto && <img src={form.coverPhoto} alt="Student cover preview" className="ba-preview-banner" />}
+              <small className="ba-media-hint">
+                Upload from files or use the camera. The cover is compressed
+                separately so sync records stay small.
+              </small>
+              {form.coverPhoto && (
+                <img
+                  src={form.coverPhoto}
+                  alt="Student cover preview"
+                  className="ba-preview-banner"
+                />
+              )}
             </label>
           </div>
         </section>
 
         <div className="ba-modal-actions">
-          <button type="button" onClick={() => setModalOpen(false)}>
+          <button
+            type="button"
+            className="ba-cancel-button"
+            onClick={() => setModalOpen(false)}
+          >
             Cancel
           </button>
-          <button type="submit" disabled={saving}>
+          <button type="submit" className="ba-save-button" disabled={saving}>
             {saving ? "Saving..." : form.id ? "Save Changes" : "Add Student"}
           </button>
         </div>
@@ -1761,15 +2254,25 @@ function CameraCaptureModal({
   close: () => void;
   entityLabel: string;
 }) {
-  const title = field === "photo" ? `Take ${entityLabel} Photo` : `Take ${entityLabel} Cover Photo`;
+  const title =
+    field === "photo"
+      ? `Take ${entityLabel} Photo`
+      : `Take ${entityLabel} Cover Photo`;
 
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
-            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+            <p>
+              Use the live camera preview, then capture. The image will still be
+              compressed and saved as a media asset.
+            </p>
           </div>
           <button type="button" onClick={close} aria-label="Close camera">
             ✕
@@ -1778,22 +2281,36 @@ function CameraCaptureModal({
 
         <div className="ba-camera-preview">
           <video ref={videoRef} autoPlay muted playsInline />
-          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
         </div>
 
         <div className="ba-camera-actions">
           <button
             type="button"
             className="ba-camera-secondary"
-            onClick={() => setFacing(facing === "environment" ? "user" : "environment")}
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
             disabled={starting || capturing}
           >
             Switch Camera
           </button>
-          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
             Cancel
           </button>
-          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
             {capturing ? "Capturing..." : "Capture Photo"}
           </button>
         </div>
@@ -1802,7 +2319,10 @@ function CameraCaptureModal({
   );
 }
 
-function groupedCounts(rows: StudentView[], keyFn: (item: StudentView) => string) {
+function groupedCounts(
+  rows: StudentView[],
+  keyFn: (item: StudentView) => string,
+) {
   const m = new Map<string, number>();
   rows.forEach((r) => {
     const k = keyFn(r) || "Unknown";
@@ -1814,7 +2334,15 @@ function groupedCounts(rows: StudentView[], keyFn: (item: StudentView) => string
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -2632,6 +3160,7 @@ const css = `
   text-transform: none !important;
   cursor: pointer;
   box-shadow: 0 10px 22px color-mix(in srgb, var(--ba-primary) 18%, transparent);
+  transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), filter .18s var(--ease);
 }
 
 .ba-media-button.secondary {
@@ -3166,4 +3695,177 @@ const css = `
     padding: 11px;
   }
 }
+
+/* ======================================================
+   STUDENTS — BRANCH SETTINGS ACTION SYSTEM
+   These declarations intentionally mirror Branchsettings.tsx.
+   Do not create a second Students-specific color hierarchy here.
+   ====================================================== */
+
+/* Same compact Branch Settings search/action strip. */
+.students-page .ba-search-card {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+/* The + occupies the Branch Settings Save action slot while retaining its icon label. */
+.students-page .settings-save-button {
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  font-size: 25px;
+  letter-spacing: 0;
+}
+
+/* Branch Settings primary action: Save / + / Upload / Apply / Done / Capture. */
+.students-page .ba-add-inline,
+.students-page .ba-modal-actions button:last-child,
+.students-page .ba-sheet-actions .primary,
+.students-page .ba-state-button,
+.students-page .ba-camera-primary,
+.students-page .ba-media-button:not(.secondary) {
+  border-color: var(--ba-primary);
+  background: var(--ba-primary);
+  color: #fff !important;
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--ba-primary) 22%, transparent);
+}
+
+/* Branch Settings filter treatment. */
+.students-page .ba-filter-button {
+  position: relative;
+  border-color: var(--border, rgba(0,0,0,.10));
+  background: color-mix(in srgb, var(--ba-primary) 8%, var(--card-bg,#fff));
+  color: var(--ba-primary) !important;
+  box-shadow: 0 10px 22px rgba(15,23,42,.045);
+}
+
+.students-page .ba-filter-button.active {
+  border-color: var(--ba-primary);
+  background: var(--ba-primary);
+  color: #fff !important;
+}
+
+.students-page .ba-filter-button b {
+  border-color: var(--card-bg,#fff);
+}
+
+/* Branch Settings More action: neutral card/surface. */
+.students-page .ba-icon-button {
+  border-color: var(--border, rgba(0,0,0,.10));
+  background: var(--card-bg, var(--surface,#fff));
+  color: var(--text,#111827) !important;
+  box-shadow: 0 10px 22px rgba(15,23,42,.045);
+}
+
+/* Branch Settings secondary hierarchy. */
+.students-page .ba-media-button.secondary,
+.students-page .ba-camera-secondary {
+  border-color: var(--ba-primary);
+  background: var(--surface,#fff);
+  color: var(--ba-primary) !important;
+  box-shadow: none;
+}
+
+.students-page .ba-cancel-button,
+.students-page .ba-modal-actions button:not(:last-child),
+.students-page .ba-sheet-actions button:not(.primary) {
+  border-color: var(--border, rgba(0,0,0,.10));
+  background: color-mix(in srgb, var(--muted,#64748b) 8%, var(--surface,#fff));
+  color: var(--text,#111827) !important;
+  box-shadow: none;
+}
+
+.students-page .ba-add-inline:hover,
+.students-page .ba-filter-button.active:hover,
+.students-page .ba-modal-actions button:last-child:hover,
+.students-page .ba-sheet-actions .primary:hover,
+.students-page .ba-state-button:hover,
+.students-page .ba-camera-primary:hover,
+.students-page .ba-media-button:not(.secondary):hover {
+  filter: brightness(.96);
+  transform: translateY(-1px);
+}
+
+.students-page .ba-filter-button:not(.active):hover {
+  background: color-mix(in srgb, var(--ba-primary) 12%, var(--card-bg,#fff));
+  transform: translateY(-1px);
+}
+
+.students-page .ba-icon-button:hover {
+  background: color-mix(in srgb, var(--ba-primary) 4%, var(--card-bg, var(--surface,#fff)));
+  transform: translateY(-1px);
+}
+
+.students-page .ba-media-button.secondary:hover,
+.students-page .ba-camera-secondary:hover {
+  background: color-mix(in srgb, var(--ba-primary) 7%, var(--surface,#fff));
+  transform: translateY(-1px);
+}
+
+.students-page .ba-add-inline:focus-visible,
+.students-page .ba-filter-button:focus-visible,
+.students-page .ba-icon-button:focus-visible,
+.students-page .ba-media-button:focus-visible,
+.students-page .ba-camera-primary:focus-visible,
+.students-page .ba-camera-secondary:focus-visible,
+.students-page .ba-modal-actions button:focus-visible,
+.students-page .ba-sheet-actions button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ba-primary) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.students-page button:disabled,
+.students-page .ba-media-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .58;
+  transform: none !important;
+  filter: none !important;
+  box-shadow: none !important;
+}
+
+.students-page .ba-search:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ba-primary) 12%, transparent);
+}
+
+/* Subtle branch-color accents for records and data surfaces. */
+.students-page .student-row {
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--ba-primary) 15%, var(--border, rgba(0,0,0,.10)));
+}
+
+.students-page .student-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--ba-primary);
+  opacity: .78;
+}
+
+.students-page .student-row:hover,
+.students-page .student-row:focus-within {
+  border-color: color-mix(in srgb, var(--ba-primary) 46%, var(--border, rgba(0,0,0,.10)));
+  background: color-mix(in srgb, var(--ba-primary) 5%, var(--card-bg, var(--surface, #fff)));
+  box-shadow: 0 14px 30px color-mix(in srgb, var(--ba-primary) 10%, transparent);
+}
+
+.students-page .ba-avatar {
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 42%, transparent);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--ba-primary) 18%, transparent);
+}
+
+.students-page .ba-filter-chips button,
+.students-page .ba-chip.blue,
+.students-page .ba-chip.purple {
+  border-color: color-mix(in srgb, var(--ba-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--ba-primary) 10%, var(--card-bg, var(--surface, #fff)));
+  color: var(--ba-primary);
+}
+
+.students-page .ba-table-scroll th {
+  background: color-mix(in srgb, var(--ba-primary) 9%, var(--table-head, var(--card-bg, #fff)));
+  color: var(--text, #111827);
+}
+
+
 `;

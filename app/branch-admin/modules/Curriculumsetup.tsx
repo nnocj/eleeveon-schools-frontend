@@ -42,13 +42,10 @@
  * - table actions stay horizontal and no-wrap
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
 import {
   db,
   type AcademicStructure,
@@ -58,8 +55,23 @@ import {
   type Organization,
   type Program,
   type StudentCurriculum,
-} from "../../lib/db";
+} from "../../lib/db/db";
 import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import {
+  softDeleteOwnerFieldAssets,
+  MediaOwners,
+  commitMediaAssetsToOwner,
+  createMediaSessionKey,
+  saveImageAsset,
+
+
+
+} from "../../lib/media/mediaAssetUtils";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
@@ -107,6 +119,8 @@ type FormState = {
   locked: boolean;
 };
 
+const CURRICULUM_MEDIA_OWNER_TABLE = MediaOwners.CURRICULUMS;
+
 const emptyForm: FormState = {
   academicStructureId: "",
   programId: "",
@@ -125,6 +139,12 @@ const emptyForm: FormState = {
   bannerImageMediaId: undefined,
   active: true,
   locked: false,
+};
+
+const safeRecordMediaValue = (value?: string) => {
+  const media = String(value || "").trim();
+  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  return media;
 };
 
 const idOf = (value: any) => {
@@ -298,35 +318,37 @@ function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function Curriculumsetup() {
+  const dataRevision = useBranchTableRevision(["curriculums", "academicStructures", "programs", "organizations", "curriculumPathways", "curriculumSubjects", "studentCurriculums", "mediaAssets", "mediaBlobs"]);
+  const mediaSessionKeyRef = useRef(createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE));
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Curriculum[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "curriculums",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -414,7 +436,9 @@ export default function Curriculumsetup() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const academicStructureMap = useMemo(() => new Map(academicStructures.map((row: any) => [idOf(row.id), row])), [academicStructures]);
   const programMap = useMemo(() => new Map(programs.map((row: any) => [idOf(row.id), row])), [programs]);
@@ -497,6 +521,33 @@ export default function Curriculumsetup() {
 
   const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
 
+  const handleImageUpload = async (field: "photo" | "bannerImage", file?: File) => {
+    if (!file || !accountId || !schoolId || !branchId) return;
+
+    try {
+      const result = await saveImageAsset(file, {
+        accountId: String(accountId),
+        schoolId: Number(schoolId),
+        branchId: Number(branchId),
+        ownerTable: CURRICULUM_MEDIA_OWNER_TABLE,
+        ownerLocalId: form.id || undefined,
+        ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
+        fieldKey: field,
+        variant: field === "photo" ? "avatar" : "cover",
+        replaceExisting: true,
+      });
+
+      updateForm({
+        [field]: result.previewUrl,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+      } as Partial<FormState>);
+
+      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+    } catch (error: any) {
+      showToast("error", error?.message || "Failed to process image.");
+    }
+  };
+
   const clearFilters = () => {
     setFilterAcademicStructureId("all");
     setFilterProgramId("all");
@@ -514,6 +565,7 @@ export default function Curriculumsetup() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
+    mediaSessionKeyRef.current = createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE);
     setSelectedItem(null);
     setForm({
       ...emptyForm,
@@ -594,18 +646,37 @@ export default function Curriculumsetup() {
         durationPeriods: form.durationPeriods === "" ? undefined : Number(form.durationPeriods),
         effectiveFrom: form.effectiveFrom || undefined,
         effectiveTo: form.effectiveTo || undefined,
-        photo: form.photo || undefined,
+        photo: safeRecordMediaValue(form.photo),
         photoMediaId: form.photoMediaId || undefined,
-        bannerImage: form.bannerImage || undefined,
+        bannerImage: safeRecordMediaValue(form.bannerImage),
         bannerImageMediaId: form.bannerImageMediaId || undefined,
         active: form.active,
         locked: form.locked,
         isDeleted: false,
       } as Partial<Curriculum>;
 
-      if (form.id && existing) await updateLocal("curriculums", Number(form.id), payload);
-      else await createLocal("curriculums", payload as Curriculum);
+      const savedCurriculum =
+        form.id && existing
+          ? await updateLocal("curriculums", Number(form.id), payload)
+          : await createLocal("curriculums", payload as Curriculum);
 
+      const savedCurriculumId = Number((savedCurriculum as any)?.id || form.id || 0);
+
+      if (savedCurriculumId) {
+        await commitMediaAssetsToOwner({
+          accountId: String(accountId),
+          ownerTable: CURRICULUM_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedCurriculumId,
+          ownerCloudId: (savedCurriculum as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: form.photoMediaId, fieldKey: "photo" },
+            { assetId: form.bannerImageMediaId, fieldKey: "bannerImage" },
+          ],
+        });
+      }
+
+      mediaSessionKeyRef.current = createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE);
       setModalOpen(false);
       showToast("success", "Curriculum saved.");
       await load();
@@ -648,6 +719,27 @@ export default function Curriculumsetup() {
     const ok = window.confirm(totalUsage ? `"${(item.row as any).name}" has ${totalUsage} linked record(s). Delete anyway?` : `Delete "${(item.row as any).name}"?`);
     if (!ok) return;
     try {
+
+      await Promise.all(
+
+        ["photo", "bannerImage"].map((fieldKey) =>
+
+          softDeleteOwnerFieldAssets({
+
+            accountId: String(accountId),
+
+            ownerTable: "curriculums",
+
+            ownerLocalId: Number(item.id),
+
+            fieldKey,
+
+          }),
+
+        ),
+
+      );
+
       await softDeleteLocal("curriculums", item.id);
       setSelectedItem(null);
       showToast("success", "Curriculum deleted.");
@@ -731,7 +823,7 @@ export default function Curriculumsetup() {
 
       {selectedItem && <ActionSheet item={selectedItem} openEdit={openEdit} toggleActive={toggleActive} toggleLocked={toggleLocked} remove={remove} onClose={() => setSelectedItem(null)} />}
 
-      {modalOpen && <CurriculumModal form={form} saving={saving} academicStructures={academicStructures} programs={programs} organizations={organizations} updateForm={updateForm} setModalOpen={setModalOpen} save={save} />}
+      {modalOpen && <CurriculumModal form={form} saving={saving} academicStructures={academicStructures} programs={programs} organizations={organizations} updateForm={updateForm} handleImageUpload={handleImageUpload} setModalOpen={setModalOpen} save={save} />}
     </main>
   );
 }
@@ -882,7 +974,7 @@ function ActionSheet({ item, openEdit, toggleActive, toggleLocked, remove, onClo
   );
 }
 
-function CurriculumModal({ form, saving, academicStructures, programs, organizations, updateForm, setModalOpen, save }: { form: FormState; saving: boolean; academicStructures: AcademicStructure[]; programs: Program[]; organizations: Organization[]; updateForm: (patch: Partial<FormState>) => void; setModalOpen: (open: boolean) => void; save: (event?: React.FormEvent) => void }) {
+function CurriculumModal({ form, saving, academicStructures, programs, organizations, updateForm, handleImageUpload, setModalOpen, save }: { form: FormState; saving: boolean; academicStructures: AcademicStructure[]; programs: Program[]; organizations: Organization[]; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: "photo" | "bannerImage", file?: File) => void | Promise<void>; setModalOpen: (open: boolean) => void; save: (event?: React.FormEvent) => void }) {
   return (
     <div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
@@ -900,6 +992,8 @@ function CurriculumModal({ form, saving, academicStructures, programs, organizat
           <label><span>Effective To</span><input type="date" value={form.effectiveTo} onChange={(e) => updateForm({ effectiveTo: e.target.value })} /></label>
           <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
           <label><span>Lock</span><select value={form.locked ? "locked" : "open"} onChange={(e) => updateForm({ locked: e.target.value === "locked" })}><option value="open">Open</option><option value="locked">Locked</option></select></label>
+          <label><span>Curriculum Photo</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("photo", e.target.files?.[0])} />{form.photo && <img src={form.photo} alt="Curriculum preview" className="ba-media-preview" />}</label>
+          <label><span>Banner Image</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("bannerImage", e.target.files?.[0])} />{form.bannerImage && <img src={form.bannerImage} alt="Curriculum banner preview" className="ba-media-preview banner" />}</label>
           <label className="wide"><span>Description</span><textarea value={form.description} onChange={(e) => updateForm({ description: e.target.value })} placeholder="Describe this curriculum." /></label>
         </div></section>
         <div className="ba-modal-actions"><button type="button" onClick={() => setModalOpen(false)}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Add Curriculum"}</button></div>
@@ -925,5 +1019,5 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
 
 const css = `
 @keyframes spin { to { transform: rotate(360deg); } }
-.ba-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--ba-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.ba-page *,.ba-page *::before,.ba-page *::after{box-sizing:border-box;min-width:0}.ba-page button,.ba-page input,.ba-page select,.ba-page textarea{font:inherit;max-width:100%}.ba-page button{-webkit-tap-highlight-color:transparent}.ba-page input,.ba-page select,.ba-page textarea{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.ba-page textarea{min-height:92px;padding-top:10px;resize:vertical}.ba-page input:focus,.ba-page select:focus,.ba-page textarea:focus{border-color:color-mix(in srgb,var(--ba-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--ba-primary) 12%,transparent)}.ba-state,.ba-search-card,.ba-table-card,.ba-analysis,.ba-empty,.ba-sheet,.ba-modal,.curriculum-row{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.ba-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.ba-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--ba-primary) 18%,transparent);border-top-color:var(--ba-primary);animation:spin .8s linear infinite}.ba-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.ba-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ba-state-button{min-height:42px;border:0;border-radius:999px;padding:0 16px;background:var(--ba-primary);color:#fff;font-weight:950;cursor:pointer}.ba-toast{position:sticky;top:8px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:12px 14px;border-radius:18px;font-size:13px;font-weight:850;box-shadow:0 18px 40px rgba(15,23,42,.12)}.ba-toast.success{background:rgba(34,197,94,.14);color:#166534}.ba-toast.error{background:rgba(239,68,68,.12);color:#991b1b}.ba-toast.info{background:rgba(59,130,246,.13);color:#1d4ed8}.ba-toast button{border:0;background:transparent;color:currentColor;font-weight:1000;cursor:pointer}.ba-search-card{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.ba-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.ba-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.ba-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.ba-add-inline{flex:0 0 42px;border-color:var(--ba-primary);background:var(--ba-primary);color:#fff;font-size:25px;line-height:1;box-shadow:0 12px 28px color-mix(in srgb,var(--ba-primary) 22%,transparent)}.ba-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.ba-filter-button{position:relative;background:color-mix(in srgb,var(--ba-primary) 8%,var(--card-bg,#fff));color:var(--ba-primary)}.ba-filter-button.active{background:var(--ba-primary);color:#fff;border-color:var(--ba-primary)}.ba-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.ba-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.ba-filter-chips::-webkit-scrollbar{display:none}.ba-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ba-primary) 11%,transparent);color:var(--ba-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.ba-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;margin-top:10px}.curriculum-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left;cursor:pointer;transition:transform .16s var(--ease),box-shadow .16s var(--ease),border-color .16s var(--ease)}.curriculum-row:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--ba-primary) 32%,var(--border,rgba(0,0,0,.10)));box-shadow:0 18px 34px rgba(15,23,42,.07)}.curriculum-icon{width:46px;height:46px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--ba-primary) 13%,var(--card-bg,#fff));font-size:22px;flex:0 0 auto}.curriculum-main{display:grid;gap:2px}.curriculum-main strong,.curriculum-main small,.curriculum-main em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.curriculum-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000}.curriculum-main small{color:var(--muted,#64748b);font-size:12px;font-weight:850}.curriculum-main em{color:var(--muted,#64748b);font-size:11px;font-style:normal;font-weight:750}.curriculum-side{display:flex;align-items:center;gap:9px;color:var(--muted,#64748b)}.curriculum-side i{font-style:normal;font-weight:1000}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-block;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}.status-dot-mini.green{background:#22c55e;color:#22c55e}.status-dot-mini.gray{background:#94a3b8;color:#94a3b8}.status-dot-mini.orange{background:#f59e0b;color:#f59e0b}.ba-chip{max-width:100%;display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ba-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.ba-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.ba-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.ba-chip.gray{background:rgba(107,114,128,.12);color:var(--muted,#64748b)}.ba-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.ba-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.ba-table-card{margin-top:10px;padding:0;border-radius:24px;overflow:hidden}.ba-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.10))}.ba-table-scroll table{width:100%;min-width:1240px;border-collapse:collapse;background:var(--card-bg,var(--surface,#fff))}.ba-table-scroll th,.ba-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px;color:var(--text,#111827)}.ba-table-scroll th{background:color-mix(in srgb,var(--ba-primary) 6%,var(--card-bg,var(--surface,#fff)));color:var(--table-header-text,var(--muted,#64748b));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}.ba-table-scroll td strong,.ba-table-scroll td span{display:block}.ba-table-scroll td strong{font-weight:1000}.ba-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.ba-table-actions{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;white-space:nowrap}.ba-table-actions button{flex:0 0 auto;min-height:34px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ba-primary) 10%,var(--card-bg,#fff));color:var(--ba-primary);font-size:11px;font-weight:950;cursor:pointer}.ba-table-actions button:first-child{background:var(--ba-primary);color:#fff}.ba-table-actions .ba-delete{color:var(--muted,#64748b);background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));border:1px solid color-mix(in srgb,var(--muted,#64748b) 24%,var(--border,rgba(0,0,0,.10)))}.ba-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.ba-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.ba-analysis{padding:14px;border-radius:24px}.ba-analysis span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.ba-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.ba-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.ba-analysis-list{display:grid;gap:10px;margin-top:12px}.ba-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.ba-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.ba-analysis-list b,.ba-analysis-list small{font-size:12px}.ba-analysis-list small{color:var(--muted,#64748b);font-weight:850}.ba-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.ba-progress i{display:block;height:100%;border-radius:inherit;background:var(--ba-primary)}.ba-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed;border-radius:24px;padding:13px}.ba-empty-icon{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--ba-primary) 12%,var(--card-bg,#fff));font-size:28px}.ba-empty h3{margin:0;font-size:18px;font-weight:1000}.ba-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ba-sheet-backdrop,.ba-modal-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.58);backdrop-filter:blur(12px)}.ba-sheet,.ba-modal{width:min(760px,100%);max-height:min(92dvh,900px);overflow-y:auto;border-radius:28px;padding:14px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 30px 90px rgba(15,23,42,.35)}.ba-sheet.small{width:min(460px,100%)}.ba-sheet-head,.ba-modal-head,.ba-sheet-profile{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:4px 2px 14px}.ba-sheet-head h2,.ba-modal-head h2,.ba-sheet-profile h2{margin:0;font-size:20px;font-weight:1000;letter-spacing:-.05em}.ba-sheet-head p,.ba-modal-head p,.ba-sheet-profile p{margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.ba-sheet-head button,.ba-modal-head button,.ba-sheet-profile button{width:38px;height:38px;border:0;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));color:var(--text,#111827);font-weight:1000;cursor:pointer}.ba-form{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}.ba-form.compact{margin-top:4px}.ba-form-section{margin-top:10px}.ba-form-section h3{margin:0 0 10px;font-size:13px;font-weight:1000;color:var(--muted,#64748b);text-transform:uppercase;letter-spacing:.08em}.ba-form label{display:grid;gap:6px}.ba-form label span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.ba-form .wide{grid-column:1/-1}.ba-sheet-actions,.ba-modal-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:14px}.ba-sheet-actions button,.ba-modal-actions button{min-height:40px;border:0;border-radius:999px;padding:0 14px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.ba-sheet-actions button.primary,.ba-modal-actions button:last-child{background:var(--ba-primary);color:#fff}.ba-menu-list{display:grid;gap:8px}.ba-menu-list button{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:center;padding:11px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);text-align:left;cursor:pointer}.ba-menu-list button span{grid-row:1/3;width:34px;height:34px;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--ba-primary) 10%,transparent);color:var(--ba-primary);font-weight:1000}.ba-menu-list button b{font-size:13px;font-weight:1000}.ba-menu-list button small{color:var(--muted,#64748b);font-size:11px;font-weight:750}.ba-menu-list button.active{background:var(--ba-primary);border-color:var(--ba-primary);color:#fff;box-shadow:0 12px 26px color-mix(in srgb,var(--ba-primary) 22%,transparent)}.ba-menu-list button.active span{background:rgba(255,255,255,.18);color:#fff}.ba-menu-list button.active small{color:rgba(255,255,255,.82)}.ba-menu-list button.danger span{background:color-mix(in srgb,var(--muted,#64748b) 10%,transparent);color:var(--muted,#64748b)}.student-detail-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:10px}.student-detail-strip span{display:grid;gap:2px;padding:9px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent);font-size:12px;font-weight:850}.student-detail-strip b{color:var(--muted,#64748b);font-size:10px;text-transform:uppercase;letter-spacing:.06em}.ba-modal{width:min(960px,100%)}@media (min-width:680px){.ba-page{padding:12px}.ba-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-form{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-sheet-backdrop,.ba-modal-backdrop{place-items:center;padding:18px}.ba-sheet,.ba-modal{padding:18px}}@media (min-width:1040px){.ba-page{padding:16px}.ba-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ba-analysis-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (min-width:1320px){.ba-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (min-width:1640px){.ba-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}@media (max-width:520px){.ba-page{padding:6px}.ba-search-card{gap:6px;padding:7px;border-radius:22px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:40px;height:40px}.ba-grid{gap:7px}.ba-analysis,.ba-table-card,.ba-empty,.ba-modal,.ba-sheet{border-radius:20px;padding:11px}.student-detail-strip{grid-template-columns:1fr}.ba-modal-actions,.ba-sheet-actions{display:grid;grid-template-columns:1fr}.ba-modal-actions button,.ba-sheet-actions button{width:100%}}
+.ba-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--ba-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.ba-page *,.ba-page *::before,.ba-page *::after{box-sizing:border-box;min-width:0}.ba-page button,.ba-page input,.ba-page select,.ba-page textarea{font:inherit;max-width:100%}.ba-page button{-webkit-tap-highlight-color:transparent}.ba-page input,.ba-page select,.ba-page textarea{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.ba-page textarea{min-height:92px;padding-top:10px;resize:vertical}.ba-page input:focus,.ba-page select:focus,.ba-page textarea:focus{border-color:color-mix(in srgb,var(--ba-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--ba-primary) 12%,transparent)}.ba-state,.ba-search-card,.ba-table-card,.ba-analysis,.ba-empty,.ba-sheet,.ba-modal,.curriculum-row{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.ba-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.ba-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--ba-primary) 18%,transparent);border-top-color:var(--ba-primary);animation:spin .8s linear infinite}.ba-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.ba-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ba-state-button{min-height:42px;border:0;border-radius:999px;padding:0 16px;background:var(--ba-primary);color:#fff;font-weight:950;cursor:pointer}.ba-toast{position:sticky;top:8px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:12px 14px;border-radius:18px;font-size:13px;font-weight:850;box-shadow:0 18px 40px rgba(15,23,42,.12)}.ba-toast.success{background:rgba(34,197,94,.14);color:#166534}.ba-toast.error{background:rgba(239,68,68,.12);color:#991b1b}.ba-toast.info{background:rgba(59,130,246,.13);color:#1d4ed8}.ba-toast button{border:0;background:transparent;color:currentColor;font-weight:1000;cursor:pointer}.ba-search-card{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.ba-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.ba-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.ba-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.ba-add-inline{flex:0 0 42px;border-color:var(--ba-primary);background:var(--ba-primary);color:#fff;font-size:25px;line-height:1;box-shadow:0 12px 28px color-mix(in srgb,var(--ba-primary) 22%,transparent)}.ba-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.ba-filter-button{position:relative;background:color-mix(in srgb,var(--ba-primary) 8%,var(--card-bg,#fff));color:var(--ba-primary)}.ba-filter-button.active{background:var(--ba-primary);color:#fff;border-color:var(--ba-primary)}.ba-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.ba-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.ba-filter-chips::-webkit-scrollbar{display:none}.ba-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ba-primary) 11%,transparent);color:var(--ba-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.ba-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;margin-top:10px}.curriculum-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left;cursor:pointer;transition:transform .16s var(--ease),box-shadow .16s var(--ease),border-color .16s var(--ease)}.curriculum-row:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--ba-primary) 32%,var(--border,rgba(0,0,0,.10)));box-shadow:0 18px 34px rgba(15,23,42,.07)}.curriculum-icon{width:46px;height:46px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--ba-primary) 13%,var(--card-bg,#fff));font-size:22px;flex:0 0 auto}.curriculum-main{display:grid;gap:2px}.curriculum-main strong,.curriculum-main small,.curriculum-main em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.curriculum-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000}.curriculum-main small{color:var(--muted,#64748b);font-size:12px;font-weight:850}.curriculum-main em{color:var(--muted,#64748b);font-size:11px;font-style:normal;font-weight:750}.curriculum-side{display:flex;align-items:center;gap:9px;color:var(--muted,#64748b)}.curriculum-side i{font-style:normal;font-weight:1000}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-block;box-shadow:0 0 0 4px color-mix(in srgb,currentColor 12%,transparent)}.status-dot-mini.green{background:#22c55e;color:#22c55e}.status-dot-mini.gray{background:#94a3b8;color:#94a3b8}.status-dot-mini.orange{background:#f59e0b;color:#f59e0b}.ba-chip{max-width:100%;display:inline-flex;align-items:center;min-height:25px;padding:4px 9px;border-radius:999px;font-size:11px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ba-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.ba-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.ba-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.ba-chip.gray{background:rgba(107,114,128,.12);color:var(--muted,#64748b)}.ba-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.ba-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.ba-table-card{margin-top:10px;padding:0;border-radius:24px;overflow:hidden}.ba-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.10))}.ba-table-scroll table{width:100%;min-width:1240px;border-collapse:collapse;background:var(--card-bg,var(--surface,#fff))}.ba-table-scroll th,.ba-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px;color:var(--text,#111827)}.ba-table-scroll th{background:color-mix(in srgb,var(--ba-primary) 6%,var(--card-bg,var(--surface,#fff)));color:var(--table-header-text,var(--muted,#64748b));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em;white-space:nowrap}.ba-table-scroll td strong,.ba-table-scroll td span{display:block}.ba-table-scroll td strong{font-weight:1000}.ba-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.ba-table-actions{display:flex;align-items:center;gap:7px;flex-wrap:nowrap;white-space:nowrap}.ba-table-actions button{flex:0 0 auto;min-height:34px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ba-primary) 10%,var(--card-bg,#fff));color:var(--ba-primary);font-size:11px;font-weight:950;cursor:pointer}.ba-table-actions button:first-child{background:var(--ba-primary);color:#fff}.ba-table-actions .ba-delete{color:var(--muted,#64748b);background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));border:1px solid color-mix(in srgb,var(--muted,#64748b) 24%,var(--border,rgba(0,0,0,.10)))}.ba-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.ba-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.ba-analysis{padding:14px;border-radius:24px}.ba-analysis span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.ba-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.ba-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.ba-analysis-list{display:grid;gap:10px;margin-top:12px}.ba-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.ba-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.ba-analysis-list b,.ba-analysis-list small{font-size:12px}.ba-analysis-list small{color:var(--muted,#64748b);font-weight:850}.ba-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.ba-progress i{display:block;height:100%;border-radius:inherit;background:var(--ba-primary)}.ba-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed;border-radius:24px;padding:13px}.ba-empty-icon{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--ba-primary) 12%,var(--card-bg,#fff));font-size:28px}.ba-empty h3{margin:0;font-size:18px;font-weight:1000}.ba-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ba-sheet-backdrop,.ba-modal-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.58);backdrop-filter:blur(12px)}.ba-sheet,.ba-modal{width:min(760px,100%);max-height:min(92dvh,900px);overflow-y:auto;border-radius:28px;padding:14px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 30px 90px rgba(15,23,42,.35)}.ba-sheet.small{width:min(460px,100%)}.ba-sheet-head,.ba-modal-head,.ba-sheet-profile{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:4px 2px 14px}.ba-sheet-head h2,.ba-modal-head h2,.ba-sheet-profile h2{margin:0;font-size:20px;font-weight:1000;letter-spacing:-.05em}.ba-sheet-head p,.ba-modal-head p,.ba-sheet-profile p{margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.ba-sheet-head button,.ba-modal-head button,.ba-sheet-profile button{width:38px;height:38px;border:0;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));color:var(--text,#111827);font-weight:1000;cursor:pointer}.ba-form{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}.ba-form.compact{margin-top:4px}.ba-form-section{margin-top:10px}.ba-form-section h3{margin:0 0 10px;font-size:13px;font-weight:1000;color:var(--muted,#64748b);text-transform:uppercase;letter-spacing:.08em}.ba-form label{display:grid;gap:6px}.ba-form label span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.ba-form .wide{grid-column:1/-1}.ba-sheet-actions,.ba-modal-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:14px}.ba-sheet-actions button,.ba-modal-actions button{min-height:40px;border:0;border-radius:999px;padding:0 14px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--card-bg,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.ba-sheet-actions button.primary,.ba-modal-actions button:last-child{background:var(--ba-primary);color:#fff}.ba-menu-list{display:grid;gap:8px}.ba-menu-list button{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:2px;align-items:center;padding:11px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);text-align:left;cursor:pointer}.ba-menu-list button span{grid-row:1/3;width:34px;height:34px;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--ba-primary) 10%,transparent);color:var(--ba-primary);font-weight:1000}.ba-menu-list button b{font-size:13px;font-weight:1000}.ba-menu-list button small{color:var(--muted,#64748b);font-size:11px;font-weight:750}.ba-menu-list button.active{background:var(--ba-primary);border-color:var(--ba-primary);color:#fff;box-shadow:0 12px 26px color-mix(in srgb,var(--ba-primary) 22%,transparent)}.ba-menu-list button.active span{background:rgba(255,255,255,.18);color:#fff}.ba-menu-list button.active small{color:rgba(255,255,255,.82)}.ba-menu-list button.danger span{background:color-mix(in srgb,var(--muted,#64748b) 10%,transparent);color:var(--muted,#64748b)}.student-detail-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-bottom:10px}.student-detail-strip span{display:grid;gap:2px;padding:9px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent);font-size:12px;font-weight:850}.student-detail-strip b{color:var(--muted,#64748b);font-size:10px;text-transform:uppercase;letter-spacing:.06em}.ba-media-preview{width:72px;height:72px;object-fit:cover;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.10));margin-top:6px}.ba-media-preview.banner{width:100%;height:120px}.ba-modal{width:min(960px,100%)}@media (min-width:680px){.ba-page{padding:12px}.ba-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-form{grid-template-columns:repeat(2,minmax(0,1fr))}.ba-sheet-backdrop,.ba-modal-backdrop{place-items:center;padding:18px}.ba-sheet,.ba-modal{padding:18px}}@media (min-width:1040px){.ba-page{padding:16px}.ba-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ba-analysis-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (min-width:1320px){.ba-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (min-width:1640px){.ba-grid{grid-template-columns:repeat(5,minmax(0,1fr))}}@media (max-width:520px){.ba-page{padding:6px}.ba-search-card{gap:6px;padding:7px;border-radius:22px}.ba-icon-button,.ba-filter-button,.ba-add-inline{width:40px;height:40px}.ba-grid{gap:7px}.ba-analysis,.ba-table-card,.ba-empty,.ba-modal,.ba-sheet{border-radius:20px;padding:11px}.student-detail-strip{grid-template-columns:1fr}.ba-modal-actions,.ba-sheet-actions{display:grid;grid-template-columns:1fr}.ba-modal-actions button,.ba-sheet-actions button{width:100%}}
 `;

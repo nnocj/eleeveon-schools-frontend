@@ -7,7 +7,7 @@
 import type {
   ScheduleDayOfWeek,
   ScheduleSession,
-} from "../db";
+} from "../db/db";
 
 export const SCHEDULE_DAYS: ScheduleDayOfWeek[] = [
   "monday",

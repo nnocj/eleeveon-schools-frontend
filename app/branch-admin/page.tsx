@@ -28,14 +28,16 @@
  * - BranchAdminDashboard receives NAV_SECTIONS from this page.
  * - Adding/removing/reordering nav items here automatically changes dashboard cards.
  *
- * Workspace-session aligned:
- * - RolePortalShell opens this portal from the selected workspace session
- *   written by /select-role.
- * - Local settings also reads the selected workspace session first so branch
- *   settings do not accidentally use another active branch from stale context.
+ * Workspace and synchronization alignment:
+ * - RolePortalShell opens this portal from the selected workspace session.
+ * - Live account/branch context is authoritative; stored workspace values are
+ *   used only as a recovery fallback.
+ * - Entering the portal requests a role-selection sync. Phase 5 single-flight
+ *   behavior makes this safe even when startup/focus/online sync is active.
+ * - Child modules are reactive through the Phase 6/7 Dexie revision system.
  */
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 
 
 import RolePortalShell, {
@@ -49,6 +51,7 @@ import LocalSettings from "../components/role-portals/LocalSettings";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useActiveBranch } from "../context/active-branch-context";
+import { runSync } from "../lib/sync/syncEngine";
 
 // ======================================================
 // DASHBOARD
@@ -222,13 +225,16 @@ function selectedWorkspaceSchoolId(args: {
   const membership = workspace?.membership || readStoredActiveMembership();
 
   return firstPositiveNumber(
-    workspace?.schoolId,
-    membership?.schoolId,
-    membership?.school?.id,
+    // Live provider state is authoritative.
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeRead("activeSchoolId")
+
+    // Stored values are recovery fallbacks only.
+    workspace?.schoolId,
+    membership?.schoolId,
+    membership?.school?.id,
+    safeRead("activeSchoolId"),
   );
 }
 
@@ -241,14 +247,17 @@ function selectedWorkspaceBranchId(args: {
   const membership = workspace?.membership || readStoredActiveMembership();
 
   return firstPositiveNumber(
+    // Live provider state is authoritative.
+    args.activeBranchId,
+    args.activeBranch?.id,
+    args.settings?.branchId,
+
+    // Stored values are recovery fallbacks only.
     workspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
     membership?.branch?.id,
-    args.activeBranchId,
-    args.activeBranch?.id,
-    args.settings?.branchId,
-    safeRead("activeBranchId")
+    safeRead("activeBranchId"),
   );
 }
 
@@ -748,10 +757,68 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
 // ======================================================
 
 export default function BranchAdminPage() {
-  
+  const {
+    authenticated,
+    accountId,
+    loading: accountLoading,
+  } = useAccount();
+
+  const {
+    activeSchoolId,
+    activeBranchId,
+  } = useActiveBranch();
+
+  const lastRoleEntrySyncKeyRef = useRef<string | null>(null);
+
+  /**
+   * Request fresh branch data when this selected workspace opens.
+   *
+   * This does not create a competing operation. Phase 5 runSync() returns the
+   * currently active shared Promise when startup, focus, visibility, online,
+   * timer, or another role-entry trigger is already synchronizing.
+   */
+  useEffect(() => {
+    if (
+      accountLoading ||
+      !authenticated ||
+      !accountId ||
+      !activeSchoolId ||
+      !activeBranchId
+    ) {
+      return;
+    }
+
+    const syncKey = [
+      accountId,
+      activeSchoolId,
+      activeBranchId,
+    ].join(":");
+
+    if (lastRoleEntrySyncKeyRef.current === syncKey) {
+      return;
+    }
+
+    lastRoleEntrySyncKeyRef.current = syncKey;
+
+    void runSync({
+      includePlatformCache: true,
+      trigger: "role-selection",
+    }).catch((error) => {
+      console.error(
+        "[branch-admin] role-entry sync failed",
+        error,
+      );
+    });
+  }, [
+    accountLoading,
+    authenticated,
+    accountId,
+    activeSchoolId,
+    activeBranchId,
+  ]);
+
   return (
     <RolePortalShell
-    
       portalTitle="Branch Admin Portal"
       portalSubtitle="Branch operations, academics, finance and administration"
       homeKey="branchAdminDashboard"

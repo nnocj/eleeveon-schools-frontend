@@ -35,7 +35,7 @@ import type {
   StudentParent,
   StudentPromotion,
   StudentReportSnapshot,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 import type {
   AttendanceSummary,

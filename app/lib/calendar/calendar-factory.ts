@@ -19,7 +19,7 @@ import type {
   CalendarResponseStatus,
   CalendarVisibility,
   ScheduleScopeType,
-} from "../db";
+} from "../db/db";
 import { SYNC_STATUS_VALUE } from "../sync/syncConfig";
 
 function now() {

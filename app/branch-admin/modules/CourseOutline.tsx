@@ -50,8 +50,10 @@ import {
   type CurriculumSubject,
   type Subject,
   type Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ReadinessFilter = "all" | "ready" | "incomplete" | "locked" | "inactive" | "unassigned";
 
@@ -262,6 +264,8 @@ function typeTone(type: string): "green" | "orange" | "purple" {
 }
 
 export default function CourseOutline() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -288,7 +292,7 @@ export default function CourseOutline() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
   const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
@@ -384,7 +388,9 @@ export default function CourseOutline() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const classMap = useMemo(() => new Map(classes.map((row: any) => [idOf(row.id), row])), [classes]);
   const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);

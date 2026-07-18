@@ -35,6 +35,8 @@ import { useActiveMembership } from "../../context/active-membership-context";
 import { listActiveLocal } from "../../lib/sync/syncUtils";
 
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type ToastTone = "success" | "error" | "info";
@@ -173,6 +175,8 @@ function State({ primary, title, text: body }: { primary: string; title: string;
 
 
 export default function BranchWalletPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -231,7 +235,7 @@ export default function BranchWalletPage() {
     ]
   );
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("cards");
   const [query, setQuery] = useState("");
   const [section, setSection] = useState<"transactions" | "settlements" | "withdrawals">("transactions");
@@ -295,6 +299,7 @@ export default function BranchWalletPage() {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   const currency = text(transactions[0]?.currencyCode || payments[0]?.currencyCode || settings?.currencyCode, "GHS");

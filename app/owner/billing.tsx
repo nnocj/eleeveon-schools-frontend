@@ -37,7 +37,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { apiRequest } from "../lib/platformApi";
-import { db } from "../lib/db";
+import { db } from "../lib/db/db";
 
 type InvoiceStatus = "draft" | "issued" | "part_paid" | "paid" | "overdue" | "cancelled" | "void" | string;
 type PaymentStatus = "pending" | "processing" | "paid" | "failed" | "cancelled" | "refunded" | string;

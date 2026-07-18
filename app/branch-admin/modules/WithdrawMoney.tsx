@@ -42,6 +42,8 @@ import { useActiveMembership } from "../../context/active-membership-context";
 import { listActiveLocal, updateLocal } from "../../lib/sync/syncUtils";
 import { apiRequest } from "../../lib/platformApi";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type StatusFilter = "all" | "requested" | "processing" | "paid" | "failed" | "rejected";
@@ -206,6 +208,8 @@ function State({primary, title, text: body,}: { primary: string; title: string; 
 
 // WITHDRAW_MONEY_VERSION: golden-compact-real-payout-v1
 export default function WithdrawMoneyPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -265,7 +269,7 @@ export default function WithdrawMoneyPage() {
     ]
   );
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [withdrawing, setWithdrawing] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -337,6 +341,7 @@ export default function WithdrawMoneyPage() {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   const payoutSetting = useMemo(

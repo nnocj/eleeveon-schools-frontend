@@ -12,6 +12,13 @@ import { useRouter } from "next/navigation";
 
 import { apiRequest, extractToken, saveAuthToken } from "../lib/platformApi";
 import { setAccountId } from "../lib/sync/syncConfig";
+import {
+  clearStoredActiveMembership,
+  setStoredActiveMembership,
+} from "../lib/auth/activeMembership";
+import type {
+  UserMembership,
+} from "../lib/auth/roleRedirect";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -49,7 +56,9 @@ export default function RegisterPage() {
           role: string;
           fullName?: string;
           name?: string;
+          memberships?: UserMembership[];
         };
+        memberships?: UserMembership[];
         account?: {
           id: string;
           name: string;
@@ -73,15 +82,129 @@ export default function RegisterPage() {
         throw new Error("Account created but no login token was returned.");
       }
 
+      clearStoredActiveMembership();
       saveAuthToken(token);
       setAccountId(res.user.accountId);
 
-      localStorage.setItem("eleeveon_auth_user", JSON.stringify(res.user));
-      localStorage.setItem("eleeveon_auth_account", JSON.stringify(res.account));
-      localStorage.setItem("user", JSON.stringify(res.user));
-      localStorage.setItem("account", JSON.stringify(res.account));
+      const memberships =
+        (
+          res.user.memberships ||
+          res.memberships ||
+          []
+        ).filter(
+          (membership) =>
+            membership.active !==
+            false,
+        );
 
-      router.replace("/owner");
+      const userToStore = {
+        ...res.user,
+        memberships,
+        userMemberships:
+          memberships,
+      };
+
+      const accountToStore =
+        res.account
+          ? {
+              ...res.account,
+              memberships,
+              userMemberships:
+                memberships,
+            }
+          : null;
+
+      localStorage.setItem(
+        "eleeveon_auth_user",
+        JSON.stringify(
+          userToStore,
+        ),
+      );
+      localStorage.setItem(
+        "eleeveon_auth_account",
+        JSON.stringify(
+          accountToStore,
+        ),
+      );
+      localStorage.setItem(
+        "eleeveon_account_user",
+        JSON.stringify(
+          userToStore,
+        ),
+      );
+      localStorage.setItem(
+        "eleeveon_account_info",
+        JSON.stringify(
+          accountToStore,
+        ),
+      );
+      localStorage.setItem(
+        "eleeveon_user_memberships",
+        JSON.stringify(
+          memberships,
+        ),
+      );
+      localStorage.setItem(
+        "user",
+        JSON.stringify(
+          userToStore,
+        ),
+      );
+      localStorage.setItem(
+        "account",
+        JSON.stringify(
+          accountToStore,
+        ),
+      );
+
+      sessionStorage.setItem(
+        "eleeveon_auth_user",
+        JSON.stringify(
+          userToStore,
+        ),
+      );
+      sessionStorage.setItem(
+        "eleeveon_auth_account",
+        JSON.stringify(
+          accountToStore,
+        ),
+      );
+      sessionStorage.setItem(
+        "eleeveon_user_memberships",
+        JSON.stringify(
+          memberships,
+        ),
+      );
+
+      const ownerMembership =
+        memberships.find(
+          (membership) =>
+            [
+              "super_admin",
+              "owner",
+            ].includes(
+              String(
+                membership.role ||
+                  "",
+              ),
+            ),
+        ) ||
+        memberships[0] ||
+        {
+          id:
+            `owner-${res.user.id}`,
+          role:
+            "super_admin",
+          active: true,
+        };
+
+      setStoredActiveMembership(
+        ownerMembership,
+      );
+
+      window.location.replace(
+        "/owner",
+      );
           } catch (error: any) {
             alert(error?.message || "Registration failed");
           } finally {

@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import SideProfileHeader from "../shared/headers/SideProfileHeader";
+import SideProfileHeader from "../shared/headers/student-reports/SideProfileHeader";
 
 import {
   createReportPageStyle,

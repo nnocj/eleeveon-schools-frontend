@@ -41,7 +41,7 @@ import type {
   ReportCard,
   Student,
   StudentEnrollment,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import {
   createLocal,
@@ -49,6 +49,8 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "single" | "group" | "analytics";
 type RemarkFilter = "all" | "missing" | "complete" | "published" | "unpublished";
 
@@ -170,6 +172,8 @@ function labelOf<T extends { id?: number; name?: string; fullName?: string }>(ro
 }
 
 export default function ReportRemarks() {
+  const dataRevision = useDataRevision();
+
   const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings() as any;
   const { activeMembership } = useActiveMembership() as any;
@@ -246,7 +250,7 @@ export default function ReportRemarks() {
 
   const primary = cleanText(settings?.primaryColor) || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [students, setStudents] = useState<Student[]>([]);
@@ -357,7 +361,9 @@ export default function ReportRemarks() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, selectedAccountId, schoolId, branchId]);
+  }, [authenticated, selectedAccountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   const studentMap = useMemo(() => new Map(students.map((row) => [row.id, row])), [students]);
   const classMap = useMemo(() => new Map(classes.map((row) => [row.id, row])), [classes]);

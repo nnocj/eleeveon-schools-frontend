@@ -55,9 +55,11 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db";
+import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db/db";
 import { createLocal, getSyncTable, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "timetable" | "cards" | "table" | "analytics";
 type TimetableMode = "week" | "day" | "resource" | "teacher" | "class";
@@ -506,6 +508,8 @@ function TimetableModeSwitch({ mode, setMode }: { mode: TimetableMode; setMode: 
 }
 
 export default function ResourceTimetable() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -532,7 +536,7 @@ export default function ResourceTimetable() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("timetable");
   const [timetableMode, setTimetableMode] = useState<TimetableMode>("resource");
   const [selectedDay, setSelectedDay] = useState("monday");
@@ -612,7 +616,9 @@ export default function ResourceTimetable() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId]);
+  }, [accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   function openCreate() {
     setEditorMode("create");

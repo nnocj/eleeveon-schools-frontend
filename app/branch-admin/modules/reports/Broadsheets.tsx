@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -33,7 +32,21 @@
  * - adds Annual Broadsheet as a selectable broadsheet mode
  * - reuses the existing cumulative AnnualBroadsheet component and cumulative engine
  * - loads StudentReportSnapshot and StudentPromotion rows for annual calculations
- * - keeps Subject and Class broadsheet behavior unchanged
+ *
+ * Template-system upgrade:
+ * - loads reportCardTemplates, reportCardTemplateSettings and assignments
+ * - resolves independent subject/class/annual branch defaults
+ * - routes all three outputs through BroadsheetCard compatibility wrappers
+ * - supports Classic, Modern, Compact and Executive with safe Classic fallback
+ *
+ * Isolated print upgrade:
+ * - uses ReportExportTools.printReportTarget(...)
+ * - prints only #broadsheet-print-zone in A4 landscape
+ * - never prints the branch-admin shell, search bar, filters or preview controls
+ *
+ * Media upgrade:
+ * - resolves logo, watermark, background, signature and student photos
+ * - injects the resolved values into broadsheet headers and student rows
  *
  * Golden cleanup: top row stays Search + Print + Filter + More only.
  */
@@ -74,7 +87,7 @@ import {
   SchoolBranchSetting,
   StudentReportSnapshot,
   StudentPromotion,
-} from "../../../lib/db";
+} from "../../../lib/db/db";
 
 import {
   MediaOwners,
@@ -87,6 +100,19 @@ import {
 import SubjectBroadsheet from "./components/SubjectBroadSheet";
 import ClassBroadsheet from "./components/ClassBroadSheet";
 import AnnualBroadsheet from "./components/AnnualBroadsheet";
+import { printReportTarget } from "./components/ReportExportTools";
+
+import {
+  getBroadsheetTemplateDefinition,
+  resolveBroadsheetTemplateSettings,
+} from "./broadsheet-templates";
+
+import type {
+  BroadsheetKind,
+  BroadsheetReportType,
+  BroadsheetTemplateRecord,
+  BroadsheetTemplateSettings,
+} from "./broadsheet-templates";
 
 import { buildReportEngineOutput } from "./engine/report-engine";
 import { buildCumulativeReportEngineOutput } from "./engine/cumulative-report-engine";
@@ -98,6 +124,8 @@ import type {
 } from "./engine/report-types";
 import type { CumulativeReportEngineDataset } from "./engine/cumulative-report-types";
 
+import { useDataRevision } from "../../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
 type BroadsheetMode = ReportMode | "annual-broadsheet";
 
 type TenantRow = {
@@ -126,6 +154,7 @@ function firstExistingId<T extends { id?: number }>(rows: T[]) {
 
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
+const BROADSHEET_PRINT_ZONE_ID = "broadsheet-print-zone";
 
 const BROADSHEET_MEDIA_OWNER_SCHOOLS = String((MediaOwners as any).SCHOOLS || "schools");
 const BROADSHEET_MEDIA_OWNER_BRANCHES = String((MediaOwners as any).BRANCHES || "branches");
@@ -136,6 +165,11 @@ const BROADSHEET_MEDIA_OWNER_SETTINGS = String(
 );
 
 const BROADSHEET_FIELD_LOGO = String((MediaFieldKeys as any).LOGO || "logo");
+const BROADSHEET_FIELD_PHOTO = String((MediaFieldKeys as any).PHOTO || "photo");
+const BROADSHEET_FIELD_REPORT_BACKGROUND = "reportCardBackgroundImage";
+const BROADSHEET_FIELD_REPORT_WATERMARK = "reportCardWatermark";
+const BROADSHEET_FIELD_REPORT_SIGNATURE = "reportCardSignatureImage";
+const BROADSHEET_MEDIA_OWNER_STUDENTS = String((MediaOwners as any).STUDENTS || "students");
 
 function hasOwn(row: any, key: string) {
   return !!row && Object.prototype.hasOwnProperty.call(row, key);
@@ -266,6 +300,34 @@ function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: numbe
   return rows.find((row) => row.id === id)?.name || "Not found";
 }
 
+
+function broadsheetKindFromMode(mode: BroadsheetMode): BroadsheetKind {
+  if (mode === "class-broadsheet") return "class";
+  if (mode === "annual-broadsheet") return "annual";
+  return "subject";
+}
+
+function broadsheetReportTypeFromMode(mode: BroadsheetMode): BroadsheetReportType {
+  if (mode === "class-broadsheet") return "class_broadsheet";
+  if (mode === "annual-broadsheet") return "annual_broadsheet";
+  return "subject_broadsheet";
+}
+
+function templateCodeOf(row?: Record<string, any> | null) {
+  return String(
+    row?.code ||
+      row?.templateCode ||
+      row?.layoutKey ||
+      row?.templateKey ||
+      "",
+  ).trim();
+}
+
+function sameOptionalId(value: unknown, expected: number) {
+  const parsed = idOf(value);
+  return !parsed || parsed === expected;
+}
+
 function withBranchHeader<T extends Record<string, any>>(header: T | undefined, branch?: Branch): T | undefined {
   if (!header) return header;
 
@@ -303,11 +365,37 @@ function withBranchHeader<T extends Record<string, any>>(header: T | undefined, 
         (header as any).branch?.logo ||
         (header as any).school?.logo ||
         "",
+      resolvedReportCardBackgroundImageUrl:
+        ((header as any).branding || {}).resolvedReportCardBackgroundImageUrl ||
+        (header as any).schoolBranchSetting?.reportCardBackgroundImage ||
+        "",
+      reportCardBackgroundImage:
+        ((header as any).branding || {}).reportCardBackgroundImage ||
+        (header as any).schoolBranchSetting?.reportCardBackgroundImage ||
+        "",
+      resolvedReportCardWatermarkUrl:
+        ((header as any).branding || {}).resolvedReportCardWatermarkUrl ||
+        (header as any).schoolBranchSetting?.reportCardWatermark ||
+        "",
+      reportCardWatermark:
+        ((header as any).branding || {}).reportCardWatermark ||
+        (header as any).schoolBranchSetting?.reportCardWatermark ||
+        "",
+      resolvedReportCardSignatureImageUrl:
+        ((header as any).branding || {}).resolvedReportCardSignatureImageUrl ||
+        (header as any).schoolBranchSetting?.reportCardSignatureImage ||
+        "",
+      reportCardSignatureImage:
+        ((header as any).branding || {}).reportCardSignatureImage ||
+        (header as any).schoolBranchSetting?.reportCardSignatureImage ||
+        "",
     },
   } as T;
 }
 
 export default function Broadsheets() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const {
@@ -347,7 +435,17 @@ export default function Broadsheets() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [pageLoading, setPageLoading] = useState(true);
+  /**
+   * The settings context may return appearance-only settings, so academic IDs
+   * must be normalized before they are used in ReportFiltersState.
+   */
+  const currentAcademicStructureId: number | undefined =
+    idOf(settings?.currentAcademicStructureId) || undefined;
+
+  const currentAcademicPeriodId: number | undefined =
+    idOf(settings?.currentAcademicPeriodId) || undefined;
+
+  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
   const [mode, setMode] = useState<BroadsheetMode>("subject-broadsheet");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -355,8 +453,8 @@ export default function Broadsheets() {
 
   const [filters, setFilters] = useState<ReportFiltersState>({
     branchId: branchId || 0,
-    academicStructureId: settings?.currentAcademicStructureId,
-    academicPeriodId: settings?.currentAcademicPeriodId,
+    academicStructureId: currentAcademicStructureId,
+    academicPeriodId: currentAcademicPeriodId,
     classId: undefined,
     classSubjectId: undefined,
     studentId: undefined,
@@ -389,6 +487,9 @@ export default function Broadsheets() {
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
   const [studentReportSnapshots, setStudentReportSnapshots] = useState<StudentReportSnapshot[]>([]);
   const [studentPromotions, setStudentPromotions] = useState<StudentPromotion[]>([]);
+  const [reportCardTemplates, setReportCardTemplates] = useState<BroadsheetTemplateRecord[]>([]);
+  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<BroadsheetTemplateSettings[]>([]);
+  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] = useState<Record<string, any>[]>([]);
   const [broadsheetMediaUrls, setBroadsheetMediaUrls] = useState<string[]>([]);
 
   useEffect(() => {
@@ -438,6 +539,9 @@ export default function Broadsheets() {
     setReportCardItems([]);
     setStudentReportSnapshots([]);
     setStudentPromotions([]);
+    setReportCardTemplates([]);
+    setReportCardTemplateSettings([]);
+    setReportCardTemplateAssignments([]);
   };
 
   const resolveBroadsheetMediaUrl = async ({
@@ -532,6 +636,9 @@ export default function Broadsheets() {
         reportCardItemRows,
         snapshotRows,
         promotionRows,
+        reportCardTemplateRows,
+        reportCardTemplateSettingRows,
+        reportCardTemplateAssignmentRows,
       ] = await Promise.all([
         db.schools.toArray(),
         db.branches.toArray(),
@@ -559,6 +666,9 @@ export default function Broadsheets() {
         db.reportCardItems.toArray(),
         db.studentReportSnapshots.toArray(),
         db.studentPromotions.toArray(),
+        (db as any).reportCardTemplates?.toArray?.() || [],
+        (db as any).reportCardTemplateSettings?.toArray?.() || [],
+        (db as any).reportCardTemplateAssignments?.toArray?.() || [],
       ]);
 
       const sameSchool = (row: SchoolRow) =>
@@ -637,7 +747,70 @@ export default function Broadsheets() {
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
             })) || fallbackMediaValue(row, "logo", "logoMediaId"),
-        }))
+          reportCardBackgroundImage:
+            (await resolveBroadsheetMediaUrl({
+              ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: BROADSHEET_FIELD_REPORT_BACKGROUND,
+              fallbackMediaId: row.reportCardBackgroundImageMediaId,
+              nextUrls: nextMediaUrls,
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardBackgroundImage",
+              "reportCardBackgroundImageMediaId",
+            ),
+          reportCardWatermark:
+            (await resolveBroadsheetMediaUrl({
+              ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: BROADSHEET_FIELD_REPORT_WATERMARK,
+              fallbackMediaId: row.reportCardWatermarkMediaId,
+              nextUrls: nextMediaUrls,
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardWatermark",
+              "reportCardWatermarkMediaId",
+            ),
+          reportCardSignatureImage:
+            (await resolveBroadsheetMediaUrl({
+              ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
+              ownerLocalId: row.id,
+              ownerCloudId: row.cloudId,
+              fieldKey: BROADSHEET_FIELD_REPORT_SIGNATURE,
+              fallbackMediaId: row.reportCardSignatureImageMediaId,
+              nextUrls: nextMediaUrls,
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardSignatureImage",
+              "reportCardSignatureImageMediaId",
+            ),
+        })),
+      );
+
+      const scopedStudentsWithMedia = await Promise.all(
+        studentRows.filter(sameTenant).map(async (student: any) => {
+          const photo =
+            (await resolveBroadsheetMediaUrl({
+              ownerTable: BROADSHEET_MEDIA_OWNER_STUDENTS,
+              ownerLocalId: student.id,
+              ownerCloudId: student.cloudId,
+              fieldKey: BROADSHEET_FIELD_PHOTO,
+              fallbackMediaId: student.photoMediaId,
+              nextUrls: nextMediaUrls,
+            })) || fallbackMediaValue(student, "photo", "photoMediaId");
+
+          return {
+            ...student,
+            photo,
+            studentPhoto: photo,
+            resolvedStudentPhotoUrl: photo,
+          };
+        }),
       );
 
       const branchPeriodIds = new Set(scopedAcademicPeriods.map((row) => row.id).filter(Boolean) as number[]);
@@ -653,7 +826,7 @@ export default function Broadsheets() {
       setSchoolBranchSettings(scopedSettingsWithMedia as SchoolBranchSetting[]);
       setAcademicStructures(academicStructureRows.filter(sameTenant));
       setAcademicPeriods(scopedAcademicPeriods);
-      setStudents(studentRows.filter(sameTenant));
+      setStudents(scopedStudentsWithMedia as Student[]);
       setParents(parentRows.filter(sameTenant));
       setTeachers(teacherRows.filter(sameTenant));
       setClasses(classRows.filter((row) => sameTenant(row) && row.active !== false));
@@ -700,6 +873,52 @@ export default function Broadsheets() {
           return true;
         })
       );
+
+      setReportCardTemplates(
+        (reportCardTemplateRows as BroadsheetTemplateRecord[]).filter((row: any) => {
+          if (row.isDeleted || row.active === false) return false;
+          if (row.accountId && row.accountId !== accountId) return false;
+          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+          if (row.branchId && Number(row.branchId) !== branchId) return false;
+          return [
+            "subject_broadsheet",
+            "class_broadsheet",
+            "annual_broadsheet",
+          ].includes(String(row.reportType || ""));
+        }),
+      );
+
+      setReportCardTemplateSettings(
+        (reportCardTemplateSettingRows as BroadsheetTemplateSettings[]).filter(
+          (row: any) => {
+            if (row.isDeleted || row.active === false) return false;
+            if (row.accountId && row.accountId !== accountId) return false;
+            if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+            if (row.branchId && Number(row.branchId) !== branchId) return false;
+            return [
+              "subject_broadsheet",
+              "class_broadsheet",
+              "annual_broadsheet",
+            ].includes(String(row.reportType || ""));
+          },
+        ),
+      );
+
+      setReportCardTemplateAssignments(
+        (reportCardTemplateAssignmentRows as Record<string, any>[]).filter(
+          (row: any) => {
+            if (row.isDeleted || row.active === false) return false;
+            if (row.accountId && row.accountId !== accountId) return false;
+            if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
+            if (row.branchId && Number(row.branchId) !== branchId) return false;
+            return [
+              "subject_broadsheet",
+              "class_broadsheet",
+              "annual_broadsheet",
+            ].includes(String(row.reportType || ""));
+          },
+        ),
+      );
     } catch (error) {
       console.error("Failed to load report data:", error);
       clearState();
@@ -711,7 +930,9 @@ export default function Broadsheets() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     setFilters((prev) => {
@@ -722,31 +943,31 @@ export default function Broadsheets() {
         ...prev,
         branchId: nextBranchId,
         academicStructureId: branchChanged
-          ? settings?.currentAcademicStructureId
-          : prev.academicStructureId || settings?.currentAcademicStructureId,
+          ? currentAcademicStructureId
+          : prev.academicStructureId || currentAcademicStructureId,
         academicPeriodId: branchChanged
-          ? settings?.currentAcademicPeriodId
-          : prev.academicPeriodId || settings?.currentAcademicPeriodId,
+          ? currentAcademicPeriodId
+          : prev.academicPeriodId || currentAcademicPeriodId,
         classId: branchChanged ? undefined : prev.classId,
         classSubjectId: branchChanged ? undefined : prev.classSubjectId,
         studentId: branchChanged ? undefined : prev.studentId,
       };
     });
-  }, [branchId, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
+  }, [branchId, currentAcademicStructureId, currentAcademicPeriodId]);
 
   useEffect(() => {
     if (!filters.academicStructureId) {
-      const fallbackId = settings?.currentAcademicStructureId || firstExistingId(academicStructures);
+      const fallbackId = currentAcademicStructureId || firstExistingId(academicStructures);
       if (fallbackId) setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
     }
-  }, [filters.academicStructureId, settings?.currentAcademicStructureId, academicStructures]);
+  }, [filters.academicStructureId, currentAcademicStructureId, academicStructures]);
 
   useEffect(() => {
     if (!filters.academicPeriodId) {
-      const fallbackId = settings?.currentAcademicPeriodId || firstExistingId(academicPeriods);
+      const fallbackId = currentAcademicPeriodId || firstExistingId(academicPeriods);
       if (fallbackId) setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
     }
-  }, [filters.academicPeriodId, settings?.currentAcademicPeriodId, academicPeriods]);
+  }, [filters.academicPeriodId, currentAcademicPeriodId, academicPeriods]);
 
   const lockedBranches = useMemo(() => {
     return activeBranch && activeBranch.id === branchId ? [activeBranch] : branches;
@@ -990,6 +1211,171 @@ export default function Broadsheets() {
         ? Boolean(output.classBroadsheet)
         : Boolean(cumulativeOutput.annualBroadsheet));
 
+  const activeBroadsheetKind = broadsheetKindFromMode(mode);
+  const activeBroadsheetReportType = broadsheetReportTypeFromMode(mode);
+
+  const activeBroadsheetAssignment = useMemo(() => {
+    const rows = reportCardTemplateAssignments.filter(
+      (row: any) =>
+        String(row.reportType || "") === activeBroadsheetReportType &&
+        row.active !== false &&
+        sameOptionalId(row.scopeId, branchId) &&
+        (!row.scopeType || row.scopeType === "branch"),
+    );
+
+    return (
+      rows.find((row: any) => row.isDefault === true) ||
+      rows[0] ||
+      null
+    );
+  }, [
+    activeBroadsheetReportType,
+    branchId,
+    reportCardTemplateAssignments,
+  ]);
+
+  const activeBroadsheetTemplate = useMemo(() => {
+    const assignedTemplateId = idOf(activeBroadsheetAssignment?.templateId);
+    const assignedTemplateCode = templateCodeOf(activeBroadsheetAssignment);
+
+    const scopedTemplates = reportCardTemplates.filter(
+      (row: any) =>
+        String(row.reportType || "") === activeBroadsheetReportType &&
+        row.active !== false,
+    );
+
+    return (
+      scopedTemplates.find(
+        (row: any) =>
+          assignedTemplateId > 0 && idOf(row.id) === assignedTemplateId,
+      ) ||
+      scopedTemplates.find(
+        (row: any) =>
+          assignedTemplateCode &&
+          templateCodeOf(row) === assignedTemplateCode,
+      ) ||
+      scopedTemplates.find((row: any) => row.isDefault === true) ||
+      scopedTemplates[0] ||
+      getBroadsheetTemplateDefinition("broadsheet_classic")
+    );
+  }, [
+    activeBroadsheetAssignment,
+    activeBroadsheetReportType,
+    reportCardTemplates,
+  ]);
+
+  const activeBroadsheetSettingsRow = useMemo(() => {
+    const assignedSettingsId = idOf(
+      activeBroadsheetAssignment?.templateSettingsId,
+    );
+    const templateId = idOf((activeBroadsheetTemplate as any)?.id);
+    const templateCode = templateCodeOf(activeBroadsheetTemplate as any);
+
+    const scopedSettings = reportCardTemplateSettings.filter(
+      (row: any) =>
+        String(row.reportType || "") === activeBroadsheetReportType &&
+        row.active !== false,
+    );
+
+    return (
+      scopedSettings.find(
+        (row: any) =>
+          assignedSettingsId > 0 && idOf(row.id) === assignedSettingsId,
+      ) ||
+      scopedSettings.find(
+        (row: any) =>
+          templateId > 0 && idOf(row.templateId) === templateId,
+      ) ||
+      scopedSettings.find(
+        (row: any) =>
+          templateCode &&
+          templateCodeOf(row as any) === templateCode,
+      ) ||
+      scopedSettings[0] ||
+      null
+    );
+  }, [
+    activeBroadsheetAssignment,
+    activeBroadsheetReportType,
+    activeBroadsheetTemplate,
+    reportCardTemplateSettings,
+  ]);
+
+  const activeBroadsheetSettings = useMemo(
+    () =>
+      resolveBroadsheetTemplateSettings({
+        kind: activeBroadsheetKind,
+        template: activeBroadsheetTemplate,
+        settings: activeBroadsheetSettingsRow,
+      }),
+    [
+      activeBroadsheetKind,
+      activeBroadsheetSettingsRow,
+      activeBroadsheetTemplate,
+    ],
+  );
+
+  const studentPhotoById = useMemo(() => {
+    const map = new Map<number, string>();
+
+    students.forEach((student: any) => {
+      const studentId = idOf(student.id);
+      if (!studentId) return;
+
+      const photo =
+        student.resolvedStudentPhotoUrl ||
+        student.studentPhoto ||
+        student.photo ||
+        "";
+
+      if (photo) map.set(studentId, photo);
+    });
+
+    return map;
+  }, [students]);
+
+  function withResolvedStudentPhotos<T extends Record<string, any> | undefined>(
+    value: T,
+  ): T {
+    if (!value || !Array.isArray((value as any).students)) return value;
+
+    return {
+      ...(value as any),
+      students: (value as any).students.map((student: any) => {
+        const photo =
+          student.resolvedStudentPhotoUrl ||
+          student.studentPhoto ||
+          student.photo ||
+          studentPhotoById.get(idOf(student.studentId)) ||
+          "";
+
+        return {
+          ...student,
+          photo,
+          studentPhoto: photo,
+          resolvedStudentPhotoUrl: photo,
+        };
+      }),
+    } as T;
+  }
+
+  const triggerBroadsheetPrint = () => {
+  if (!canPrint) return;
+
+  printReportTarget({
+    targetId: BROADSHEET_PRINT_ZONE_ID,
+    mode: "current-view",
+    orientation: "landscape",
+    pageSize: "A4",
+    title:
+      mode === "annual-broadsheet"
+        ? "Annual Broadsheet"
+        : mode === "class-broadsheet"
+          ? "Class Broadsheet"
+          : "Subject Broadsheet",
+  });
+};
+
   const renderActiveReport = () => {
     if (!hasCoreSetup) {
       return (
@@ -1001,12 +1387,22 @@ export default function Broadsheets() {
       );
     }
 
+    const sharedProps = {
+      template: activeBroadsheetTemplate,
+      settings: activeBroadsheetSettings,
+      showWatermark: activeBroadsheetSettings.showBroadsheetWatermark,
+      generatedAt: new Date(),
+      pageBreakAfter: false,
+    };
+
     if (mode === "subject-broadsheet") {
       return (
         <SubjectBroadsheet
+          {...sharedProps}
           header={broadsheetHeader}
-          broadsheet={output.subjectBroadsheet}
-          pageBreakAfter={false}
+          broadsheet={withResolvedStudentPhotos(
+            output.subjectBroadsheet as any,
+          )}
         />
       );
     }
@@ -1014,18 +1410,22 @@ export default function Broadsheets() {
     if (mode === "annual-broadsheet") {
       return (
         <AnnualBroadsheet
+          {...sharedProps}
           header={annualBroadsheetHeader}
-          broadsheet={cumulativeOutput.annualBroadsheet}
-          pageBreakAfter={false}
+          broadsheet={withResolvedStudentPhotos(
+            cumulativeOutput.annualBroadsheet as any,
+          )}
         />
       );
     }
 
     return (
       <ClassBroadsheet
+        {...sharedProps}
         header={broadsheetHeader}
-        broadsheet={output.classBroadsheet}
-        pageBreakAfter={false}
+        broadsheet={withResolvedStudentPhotos(
+          output.classBroadsheet as any,
+        )}
       />
     );
   };
@@ -1077,11 +1477,10 @@ export default function Broadsheets() {
         <button
           type="button"
           className="ba-add-inline"
-          onClick={() => {
-            if (canPrint) window.print();
-          }}
+          onClick={triggerBroadsheetPrint}
           aria-label="Print broadsheet"
           title="Print"
+          disabled={!canPrint}
         >
           ⎙
         </button>
@@ -1165,16 +1564,24 @@ export default function Broadsheets() {
         <div className="ba-print-head report-no-print">
           <div>
             <strong>{mode === "annual-broadsheet" ? "Annual Broadsheet" : mode === "class-broadsheet" ? "Class Broadsheet" : "Subject Broadsheet"}</strong>
-            <p>{selectedStructureName} · {selectedPeriodName}</p>
+            <p>
+              {selectedStructureName} · {selectedPeriodName} ·{" "}
+              {(activeBroadsheetTemplate as any)?.name || "Classic Broadsheet"}
+            </p>
           </div>
           <div className="ba-report-toolbar">
-            <button type="button" className="primary" onClick={() => window.print()}>
+            <button
+              type="button"
+              className="primary"
+              onClick={triggerBroadsheetPrint}
+              disabled={!canPrint}
+            >
               Print
             </button>
           </div>
         </div>
 
-        <div id="broadsheet-print-zone" className="ba-print-zone">
+        <div id={BROADSHEET_PRINT_ZONE_ID} className="ba-print-zone">
           {renderActiveReport()}
         </div>
       </section>
@@ -1208,7 +1615,7 @@ export default function Broadsheets() {
           }}
           onPrint={() => {
             setMoreOpen(false);
-            window.print();
+            triggerBroadsheetPrint();
           }}
           onClose={() => setMoreOpen(false)}
         />
@@ -1665,6 +2072,14 @@ const css = `
   font-size: 25px;
   line-height: 1;
   box-shadow: 0 12px 28px color-mix(in srgb, var(--ba-primary) 22%, transparent);
+}
+
+
+.ba-add-inline:disabled,
+.ba-report-toolbar button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .ba-search-card {

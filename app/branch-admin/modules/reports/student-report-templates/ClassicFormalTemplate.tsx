@@ -39,7 +39,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import ClassicFormalHeader from "../shared/headers/ClassicFormalHeader";
+import ClassicFormalHeader from "../shared/headers/student-reports/ClassicFormalHeader";
 
 import {
   createReportPageStyle,

@@ -30,12 +30,10 @@
  * - Table headers use theme variables for dark mode
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
 import {
   db,
   type AssessmentStructure,
@@ -47,12 +45,27 @@ import {
   type Student,
   type Subject,
   type Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 import {
   createLocal,
   updateLocal,
   softDeleteLocal,
 } from "../../lib/sync/syncUtils";
+
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import {
+  softDeleteOwnerFieldAssets,
+  MediaOwners,
+  commitMediaAssetsToOwner,
+  createMediaSessionKey,
+  saveImageAsset,
+
+
+
+} from "../../lib/media/mediaAssetUtils";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
@@ -84,7 +97,9 @@ type FormState = {
   type: OrganizationType;
   description: string;
   photo: string;
+  photoMediaId?: number;
   bannerImage: string;
+  bannerImageMediaId?: number;
   active: boolean;
 };
 
@@ -106,6 +121,8 @@ type OrganizationView = {
   active: boolean;
 };
 
+const ORGANIZATION_MEDIA_OWNER_TABLE = MediaOwners.ORGANIZATIONS;
+
 const organizationTypes: OrganizationType[] = [
   "department",
   "faculty",
@@ -121,8 +138,16 @@ const emptyForm: FormState = {
   type: "department",
   description: "",
   photo: "",
+  photoMediaId: undefined,
   bannerImage: "",
+  bannerImageMediaId: undefined,
   active: true,
+};
+
+const safeRecordMediaValue = (value?: string) => {
+  const media = String(value || "").trim();
+  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  return media;
 };
 
 const idOf = (value: any) => {
@@ -364,41 +389,36 @@ function Avatar({
 }
 
 export default function Organizations() {
-  const accountContext = useAccount() as any;
-  const { accountId, authenticated, loading: accountLoading } = accountContext;
-
+  const { activeSchool, activeBranch } = useActiveBranch();
+  const dataRevision = useBranchTableRevision(["organizations", "students", "teachers", "classes", "subjects", "curriculums", "incomes", "expenses", "assessmentStructures", "mediaAssets", "mediaBlobs"]);
+  const mediaSessionKeyRef = useRef(createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE));
   const { settings, loading: settingsLoading } = useSettings();
+  const workspace = useBranchWorkspaceScope();
   const {
-    activeSchool,
-    activeSchoolId,
-    activeBranch,
-    activeBranchId,
-    loading: contextLoading,
-  } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [rows, setRows] = useState<Organization[]>([]);
+  const mediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: ORGANIZATION_MEDIA_OWNER_TABLE,
+    rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -550,6 +570,7 @@ export default function Organizations() {
     accountLoading,
     settingsLoading,
     contextLoading,
+    dataRevision,
   ]);
 
   const organizationMap = useMemo(() => {
@@ -738,21 +759,34 @@ export default function Organizations() {
   const updateForm = (patch: Partial<FormState>) =>
     setForm((current) => ({ ...current, ...patch }));
 
-  const fileToBase64 = (file: File) =>
-    new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () =>
-        resolve(typeof reader.result === "string" ? reader.result : "");
-      reader.readAsDataURL(file);
-    });
-
   const handleImageUpload = async (
     field: "photo" | "bannerImage",
     file?: File,
   ) => {
-    if (!file) return;
-    const value = await fileToBase64(file);
-    updateForm({ [field]: value });
+    if (!file || !accountId || !schoolId || !branchId) return;
+
+    try {
+      const result = await saveImageAsset(file, {
+        accountId: String(accountId),
+        schoolId: Number(schoolId),
+        branchId: Number(branchId),
+        ownerTable: ORGANIZATION_MEDIA_OWNER_TABLE,
+        ownerLocalId: form.id || undefined,
+        ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
+        fieldKey: field,
+        variant: field === "photo" ? "avatar" : "cover",
+        replaceExisting: true,
+      });
+
+      updateForm({
+        [field]: result.previewUrl,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+      } as Partial<FormState>);
+
+      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+    } catch (error: any) {
+      showToast("error", error?.message || "Failed to process image.");
+    }
   };
 
   const requireContext = () => {
@@ -771,6 +805,7 @@ export default function Organizations() {
 
   const openCreate = () => {
     if (!requireContext()) return;
+    mediaSessionKeyRef.current = createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE);
     setForm({
       ...emptyForm,
       type: filterType === "all" ? "department" : filterType,
@@ -791,8 +826,10 @@ export default function Organizations() {
       name: row.name || "",
       type: (row.type || "department") as OrganizationType,
       description: row.description || "",
-      photo: row.photo || "",
-      bannerImage: row.bannerImage || "",
+      photo: mediaById[idOf(row.id)]?.photo || safeRecordMediaValue(row.photo) || "",
+      photoMediaId: row.photoMediaId ? Number(row.photoMediaId) : undefined,
+      bannerImage: mediaById[idOf(row.id)]?.bannerImage || safeRecordMediaValue(row.bannerImage) || "",
+      bannerImageMediaId: row.bannerImageMediaId ? Number(row.bannerImageMediaId) : undefined,
       active: item.active,
     });
 
@@ -856,19 +893,37 @@ export default function Organizations() {
         name: form.name.trim(),
         type: form.type,
         description: form.description.trim() || undefined,
-        photo: form.photo || undefined,
-        bannerImage: form.bannerImage || undefined,
+        photo: safeRecordMediaValue(form.photo),
+        photoMediaId: form.photoMediaId || undefined,
+        bannerImage: safeRecordMediaValue(form.bannerImage),
+        bannerImageMediaId: form.bannerImageMediaId || undefined,
         active: form.active,
         status: form.active ? "active" : "inactive",
         isDeleted: false,
       } as unknown as Partial<Organization>;
 
-      if (form.id && existing) {
-        await updateLocal("organizations", Number(form.id), payload);
-      } else {
-        await createLocal("organizations", payload as unknown as Organization);
+      const savedOrganization =
+        form.id && existing
+          ? await updateLocal("organizations", Number(form.id), payload)
+          : await createLocal("organizations", payload as unknown as Organization);
+
+      const savedOrganizationId = Number((savedOrganization as any)?.id || form.id || 0);
+
+      if (savedOrganizationId) {
+        await commitMediaAssetsToOwner({
+          accountId: String(accountId),
+          ownerTable: ORGANIZATION_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedOrganizationId,
+          ownerCloudId: (savedOrganization as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: form.photoMediaId, fieldKey: "photo" },
+            { assetId: form.bannerImageMediaId, fieldKey: "bannerImage" },
+          ],
+        });
       }
 
+      mediaSessionKeyRef.current = createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE);
       setModalOpen(false);
       showToast("success", "Organization saved.");
       await load();
@@ -913,6 +968,27 @@ export default function Organizations() {
     if (!window.confirm(warning)) return;
 
     try {
+
+      await Promise.all(
+
+        ["photo", "bannerImage"].map((fieldKey) =>
+
+          softDeleteOwnerFieldAssets({
+
+            accountId: String(accountId),
+
+            ownerTable: "organizations",
+
+            ownerLocalId: Number(id),
+
+            fieldKey,
+
+          }),
+
+        ),
+
+      );
+
       await softDeleteLocal("organizations", Number(id));
       setSelectedItem(null);
       showToast("success", "Organization deleted.");
@@ -1137,6 +1213,7 @@ export default function Organizations() {
             <OrganizationListItem
               key={String(item.id)}
               item={item}
+              photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)}
               primary={primary}
               onOpen={() => setSelectedItem(item)}
             />
@@ -1348,10 +1425,12 @@ function SliderIcon() {
 
 function OrganizationListItem({
   item,
+  photo,
   primary,
   onOpen,
 }: {
   item: OrganizationView;
+  photo?: string;
   primary: string;
   onOpen: () => void;
 }) {
@@ -1362,7 +1441,7 @@ function OrganizationListItem({
       className="student-row organization-row"
       onClick={onOpen}
     >
-      <Avatar name={row.name} photo={row.photo} primary={primary} />
+      <Avatar name={row.name} photo={photo} primary={primary} />
       <span className="student-main">
         <strong>{row.name || "Unnamed organization"}</strong>
         <small>

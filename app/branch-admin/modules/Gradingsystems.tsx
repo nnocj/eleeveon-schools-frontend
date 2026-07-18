@@ -38,10 +38,12 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, type AssessmentApplicability, type GradeRule, type GradingSystem } from "../../lib/db";
+import { db, type AssessmentApplicability, type GradeRule, type GradingSystem } from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type StatusFilter = "all" | "active" | "inactive";
 type ToastTone = "success" | "error" | "info";
@@ -236,6 +238,8 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function GradingSystems() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
@@ -262,7 +266,7 @@ export default function GradingSystems() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
@@ -347,7 +351,9 @@ export default function GradingSystems() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const ruleCountBySystem = useMemo(() => {
     const map = new Map<number, number>();

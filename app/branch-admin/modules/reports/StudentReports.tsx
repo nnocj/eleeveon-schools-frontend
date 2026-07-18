@@ -73,7 +73,7 @@ import {
   Subject,
   Teacher,
   SchoolBranchSetting,
-} from "../../../lib/db";
+} from "../../../lib/db/db";
 
 import {
   MediaOwners,
@@ -108,6 +108,8 @@ import {
   normalizeStudentReportTemplateDefinition,
 } from "./shared/ReportTemplateTypes";
 
+import { useDataRevision } from "../../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
 const TemplateAwareStudentReportCard = StudentReportCard as React.ComponentType<any>;
 
 type TenantRow = {
@@ -286,6 +288,8 @@ function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: numbe
 }
 
 export default function StudentReports() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const {
@@ -325,15 +329,25 @@ export default function StudentReports() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [pageLoading, setPageLoading] = useState(true);
+  /**
+   * The settings context may return appearance-only settings, so academic IDs
+   * must be normalized before they are used in ReportFiltersState.
+   */
+  const currentAcademicStructureId: number | undefined =
+    idOf(settings?.currentAcademicStructureId) || undefined;
+
+  const currentAcademicPeriodId: number | undefined =
+    idOf(settings?.currentAcademicPeriodId) || undefined;
+
+  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
   const [mode, setMode] = useState<ReportMode>("student-report");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [filters, setFilters] = useState<ReportFiltersState>({
     branchId: branchId || 0,
-    academicStructureId: settings?.currentAcademicStructureId,
-    academicPeriodId: settings?.currentAcademicPeriodId,
+    academicStructureId: currentAcademicStructureId,
+    academicPeriodId: currentAcademicPeriodId,
     classId: undefined,
     classSubjectId: undefined,
     studentId: undefined,
@@ -750,7 +764,9 @@ export default function StudentReports() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     setFilters((prev) => {
@@ -761,31 +777,31 @@ export default function StudentReports() {
         ...prev,
         branchId: nextBranchId,
         academicStructureId: branchChanged
-          ? settings?.currentAcademicStructureId
-          : prev.academicStructureId || settings?.currentAcademicStructureId,
+          ? currentAcademicStructureId
+          : prev.academicStructureId || currentAcademicStructureId,
         academicPeriodId: branchChanged
-          ? settings?.currentAcademicPeriodId
-          : prev.academicPeriodId || settings?.currentAcademicPeriodId,
+          ? currentAcademicPeriodId
+          : prev.academicPeriodId || currentAcademicPeriodId,
         classId: branchChanged ? undefined : prev.classId,
         classSubjectId: branchChanged ? undefined : prev.classSubjectId,
         studentId: branchChanged ? undefined : prev.studentId,
       };
     });
-  }, [branchId, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
+  }, [branchId, currentAcademicStructureId, currentAcademicPeriodId]);
 
   useEffect(() => {
     if (!filters.academicStructureId) {
-      const fallbackId = settings?.currentAcademicStructureId || firstExistingId(academicStructures);
+      const fallbackId = currentAcademicStructureId || firstExistingId(academicStructures);
       if (fallbackId) setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
     }
-  }, [filters.academicStructureId, settings?.currentAcademicStructureId, academicStructures]);
+  }, [filters.academicStructureId, currentAcademicStructureId, academicStructures]);
 
   useEffect(() => {
     if (!filters.academicPeriodId) {
-      const fallbackId = settings?.currentAcademicPeriodId || firstExistingId(academicPeriods);
+      const fallbackId = currentAcademicPeriodId || firstExistingId(academicPeriods);
       if (fallbackId) setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
     }
-  }, [filters.academicPeriodId, settings?.currentAcademicPeriodId, academicPeriods]);
+  }, [filters.academicPeriodId, currentAcademicPeriodId, academicPeriods]);
 
   const lockedBranches = useMemo(() => {
     return activeBranch && activeBranch.id === branchId ? [activeBranch] : branches;

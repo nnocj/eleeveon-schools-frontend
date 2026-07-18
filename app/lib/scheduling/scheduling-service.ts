@@ -4,13 +4,13 @@
  * Timetable/scheduling Dexie service.
  */
 
-import { db } from "../db";
+import { db } from "../db/db";
 import type {
   ScheduleConflict,
   ScheduleResource,
   ScheduleSession,
   ScheduleTimetable,
-} from "../db";
+} from "../db/db";
 
 import {
   createScheduleResourceRecord,

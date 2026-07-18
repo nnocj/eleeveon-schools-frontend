@@ -29,10 +29,12 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, Parent, Student, Teacher } from "../../lib/db";
+import { db, Parent, Student, Teacher } from "../../lib/db/db";
 import { apiRequest } from "../../lib/platformApi";
 import { listActiveLocal, prepareSyncData } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 // ======================================================
 // TYPES
 // ======================================================
@@ -1002,6 +1004,8 @@ function profileSub(role: BranchAssignableRole, item: Teacher | Student | Parent
 // ======================================================
 
 export default function Usersroles() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -1028,7 +1032,7 @@ export default function Usersroles() {
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
@@ -1182,7 +1186,9 @@ export default function Usersroles() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   const candidates = useMemo<Candidate[]>(() => {
     const list: Candidate[] = [];

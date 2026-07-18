@@ -37,7 +37,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import ModernCleanHeader from "../shared/headers/ModernCleanHeader";
+import ModernCleanHeader from "../shared/headers/student-reports/ModernCleanHeader";
 
 import {
   createReportPageStyle,

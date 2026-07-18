@@ -36,6 +36,8 @@ import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 import { createLocal, listActiveLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 
@@ -166,6 +168,8 @@ function State({ primary, title, text: body }: { primary: string; title: string;
 
 // PAYOUT_SETTINGS_COMPACT_VERSION: v3-no-main-cards-intelligent-bank-momo-fields
 export default function SchoolPayoutSettingsPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -225,7 +229,7 @@ export default function SchoolPayoutSettingsPage() {
     ]
   );
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [form, setForm] = useState<PayoutForm>(emptyForm);
@@ -294,6 +298,7 @@ export default function SchoolPayoutSettingsPage() {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   const status = useMemo(() => {

@@ -1,12 +1,18 @@
-
 "use client";
 
 /**
  * app/components/role-portals/RolePortalShell.tsx
  * ---------------------------------------------------------
- * ROLE PORTAL SHELL - WORKSPACE SESSION VERSION
+ * ROLE PORTAL SHELL - FULL CONTEXT VERSION
  * ---------------------------------------------------------
  * Drop-in replacement.
+ *
+ * Full-context upgrade:
+ * - consumes the live account, membership, institution, settings, theme,
+ *   database, sync, status-sheet and realtime contexts;
+ * - applies the active theme values at the shell root;
+ * - passes one stable RolePortalRuntimeContext object to every active route;
+ * - keeps existing route components compatible because extra props are additive.
  *
  * New contract:
  * - /select-role opens a workspace and writes a complete workspace session.
@@ -19,11 +25,12 @@
  * - School/branch context is resolved from ActiveBranchContext first, then the
  *   selected membership, then localStorage/sessionStorage. This prevents bounce
  *   during route transitions.
- * - Logout still clears localStorage, sessionStorage, Cache Storage and
- *   IndexedDB/Dexie before redirecting to login.
+ * - Routine sync/account checks stay silent; only real applied data changes
+ *   show the small nonblocking background indicator.
+ * - Logout is atomic and preserves offline IndexedDB school data.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../../context/account-context";
@@ -31,8 +38,27 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useSyncBootstrap } from "../../context/sync-bootstrap-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db } from "../../lib/db";
-import SyncStatusStrip from "../SyncStatusStrip";
+import { useRealtimeStatus } from "../../hooks/useRealtimeStatus";
+import { useRealtime } from "../../context/realtime-context";
+import { useTheme } from "../../context/theme-context";
+import { useDatabase } from "../../context/database-context";
+import SyncStatusSheet from "../SyncStatusSheet";
+import { useSyncContext } from "../../context/sync-context";
+import {
+  WorkspaceTransitionProvider,
+  useWorkspaceTransition,
+} from "../workspace";
+import { bootstrapSelectedWorkspace } from "../../lib/sync/workspaceBootstrap";
+
+import {
+  usePortalAppearanceReadiness,
+} from "../PortalAppearanceRuntime";
+
+import {
+  appearanceIdentityFor,
+  appearanceIdentityMatches,
+  appearanceScopeForRole,
+} from "../../lib/theme/appearanceScope";
 
 import type { AppRole, UserMembership } from "../../lib/auth/roleRedirect";
 import {
@@ -53,13 +79,72 @@ export type RoleNavSection = {
   items: RoleNavItem[];
 };
 
+export type RolePortalRuntimeContext = {
+  accountId: string | null;
+  user: ReturnType<typeof useAccount>["user"];
+  account: ReturnType<typeof useAccount>["account"];
+  subscription: ReturnType<typeof useAccount>["subscription"];
+  authenticated: boolean;
+  offline: boolean;
+  restoring: boolean;
+  verifying: boolean;
+  sessionVerified: boolean;
+
+  membership: UserMembership | null;
+  memberships: UserMembership[];
+  activeRole: string | null;
+  teacherLocalId: number | null;
+  studentLocalId: number | null;
+  parentLocalId: number | null;
+
+  schoolId: number | null;
+  school: ReturnType<typeof useActiveBranch>["activeSchool"];
+  schools: ReturnType<typeof useActiveBranch>["schools"];
+  branchId: number | null;
+  branch: ReturnType<typeof useActiveBranch>["activeBranch"];
+  branches: ReturnType<typeof useActiveBranch>["branches"];
+  allBranches: ReturnType<typeof useActiveBranch>["allBranches"];
+
+  settings: ReturnType<typeof useSettings>["settings"];
+  theme: ReturnType<typeof useTheme>;
+  database: ReturnType<typeof useDatabase>;
+  sync: ReturnType<typeof useSyncBootstrap>;
+  syncPanel: ReturnType<typeof useSyncContext>;
+  realtime: ReturnType<typeof useRealtime>;
+  appearance: ReturnType<typeof usePortalAppearanceReadiness>;
+
+  refreshAccount: ReturnType<typeof useAccount>["refreshAccount"];
+  refreshInstitution: ReturnType<typeof useActiveBranch>["refreshInstitution"];
+  refreshSettings: ReturnType<typeof useSettings>["refreshSettings"];
+  refreshTheme: ReturnType<typeof useTheme>["refreshTheme"];
+  setActiveMembership: ReturnType<typeof useActiveMembership>["setActiveMembership"];
+  setActiveSchoolId: ReturnType<typeof useActiveBranch>["setActiveSchoolId"];
+  setActiveBranchId: ReturnType<typeof useActiveBranch>["setActiveBranchId"];
+};
+
+export type RolePortalRouteProps = {
+  navigate: (key: string) => void;
+  context?: RolePortalRuntimeContext;
+};
+
+/**
+ * Route components in the existing portals were created over several phases.
+ * Some accept only `{ navigate }`; rebuilt routes may also accept `context`.
+ *
+ * React.ComponentType is invariant enough that a record explicitly typed with
+ * the legacy props cannot be assigned to a record typed with the newer props,
+ * even though `context` is optional. Keep the registry backward-compatible and
+ * provide the strongly typed props for newly rebuilt modules separately.
+ */
+export type RolePortalRouteComponent = React.ComponentType<any>;
+
 export type RolePortalShellProps = {
   portalTitle: string;
   portalSubtitle: string;
   homeKey: string;
   allowedRoles: AppRole[];
   navSections: RoleNavSection[];
-  routes: Record<string, React.ComponentType<{ navigate: (key: string) => void }>>;
+  routes: Record<string, RolePortalRouteComponent>;
   lockedContext?: boolean;
   requireSchool?: boolean;
   requireBranch?: boolean;
@@ -403,49 +488,9 @@ function protectedPortalCanAccess(selectedMembership: UserMembership | null, all
   return profileRoleHasLocalId(selectedMembership);
 }
 
-function requestToPromise(request: IDBRequest | IDBOpenDBRequest) {
-  return new Promise<void>((resolve) => {
-    request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    if ("onblocked" in request) {
-      (request as IDBOpenDBRequest).onblocked = () => resolve();
-    }
-  });
-}
 
-async function deleteIndexedDbDatabase(name?: string | null) {
-  if (typeof window === "undefined" || !name || !window.indexedDB) return;
-  try { await requestToPromise(window.indexedDB.deleteDatabase(name)); } catch {}
-}
 
-async function clearLocalBrowserData() {
-  if (typeof window === "undefined") return;
-  try { db.close(); } catch {}
-  try { window.sessionStorage.clear(); } catch {}
-  try { window.localStorage.clear(); } catch {}
-  try {
-    if ("caches" in window) {
-      const cacheNames = await window.caches.keys();
-      await Promise.all(cacheNames.map((name) => window.caches.delete(name)));
-    }
-  } catch {}
-  try {
-    const indexedDb = window.indexedDB as IDBFactory & {
-      databases?: () => Promise<Array<{ name?: string | null }>>;
-    };
-    if (indexedDb.databases) {
-      const databases = await indexedDb.databases();
-      await Promise.all(databases.map((database) => deleteIndexedDbDatabase(database.name)));
-    } else {
-      await deleteIndexedDbDatabase((db as any).name);
-      await deleteIndexedDbDatabase("eleeveon");
-      await deleteIndexedDbDatabase("eleeveon-school");
-      await deleteIndexedDbDatabase("eleeveon_school");
-    }
-  } catch {}
-}
-
-export default function RolePortalShell({
+function RolePortalShellContent({
   portalTitle,
   portalSubtitle,
   homeKey,
@@ -457,19 +502,66 @@ export default function RolePortalShell({
   requireBranch = true,
 }: RolePortalShellProps) {
   const router = useRouter();
-  const { initialSyncDone, initialSyncing } = useSyncBootstrap();
+  const { runTransition } = useWorkspaceTransition();
+
+  const accountContext = useAccount();
+  const membershipContext = useActiveMembership();
+  const institutionContext = useActiveBranch();
+  const settingsContext = useSettings();
+  const themeContext = useTheme();
+  const databaseContext = useDatabase();
+  const syncContext = useSyncBootstrap();
+  const syncPanelContext = useSyncContext();
+  const realtimeContext = useRealtime();
+  const appearanceContext = usePortalAppearanceReadiness();
+
+  const {
+    initialSyncDone,
+    applyingChanges,
+  } = syncContext;
+
+  const {
+    openStatusSheet,
+  } = syncPanelContext;
+
+  const {
+    connected: realtimeConnected,
+    status: realtimeStatus,
+  } = useRealtimeStatus();
 
   const {
     accountId,
     user,
     account,
+    subscription,
     logout,
+    refreshAccount,
     loading: accountLoading,
+    restoring: accountRestoring,
+    verifying: accountVerifying,
+    sessionVerified,
     authenticated,
-  } = useAccount() as any;
+    offline: accountOffline,
+  } = accountContext;
 
-  const { activeMembership, setActiveMembership } = useActiveMembership();
-  const { loading: settingsLoading } = useSettings() as any;
+  const {
+    activeMembership,
+    activeRole,
+    activeTeacherId,
+    activeStudentId,
+    activeParentId,
+    restored: membershipRestored,
+    setActiveMembership,
+    beginMembershipTransition,
+    completeMembershipTransition,
+    failMembershipTransition,
+  } = membershipContext;
+
+  const {
+    settings,
+    loading: settingsLoading,
+    refreshSettings,
+  } = settingsContext;
 
   const {
     activeSchoolId,
@@ -479,9 +571,11 @@ export default function RolePortalShell({
     activeBranchId,
     activeBranch,
     branches,
+    allBranches,
     setActiveBranchId,
     loading: contextLoading,
-  } = useActiveBranch() as any;
+    refreshInstitution,
+  } = institutionContext;
 
   const openedWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
 
@@ -577,6 +671,94 @@ export default function RolePortalShell({
     [activeBranchId, selectedMembership?.branchId, openedWorkspace]
   );
 
+  /**
+   * Exact appearance identity expected by the currently opened portal.
+   *
+   * The role mapping is centralized in appearanceScopeForRole(). Branch
+   * identities include school and branch IDs; Owner/Developer identities do
+   * not, so a previously applied branch theme can never satisfy their gate.
+   */
+  const expectedAppearance = useMemo(() => {
+    const role =
+      activeRole ||
+      selectedMembership?.role ||
+      null;
+
+    if (!role) return null;
+
+    return appearanceIdentityFor({
+      role,
+      accountId,
+      schoolId: effectiveSchoolId,
+      branchId: effectiveBranchId,
+    });
+  }, [
+    activeRole,
+    selectedMembership?.role,
+    accountId,
+    effectiveSchoolId,
+    effectiveBranchId,
+  ]);
+
+  const expectedScope = useMemo(
+    () =>
+      appearanceScopeForRole(
+        activeRole ||
+          selectedMembership?.role ||
+          "",
+      ),
+    [
+      activeRole,
+      selectedMembership?.role,
+    ],
+  );
+
+  /**
+   * Records the exact appearance identity that has successfully rendered.
+   *
+   * Once an identity has rendered, later background settings refreshes do not
+   * replace the visible portal with an opening screen. A new role, school, or
+   * branch produces a different key and receives its own first-entry gate.
+   */
+  const renderedWorkspaceRef =
+    useRef<string | null>(null);
+
+  const appearanceMatchesRole = Boolean(
+    expectedAppearance &&
+      themeContext.ready &&
+      appearanceContext.firstEntryReady &&
+      themeContext.effectiveScope ===
+        expectedScope &&
+      appearanceIdentityMatches(
+        themeContext.appliedFor,
+        expectedAppearance,
+      ) &&
+      appearanceIdentityMatches(
+        appearanceContext.appliedFor,
+        expectedAppearance,
+      ),
+  );
+
+  const currentAppearanceWasRendered =
+    Boolean(
+      expectedAppearance &&
+        renderedWorkspaceRef.current ===
+          expectedAppearance.key,
+    );
+
+  useEffect(() => {
+    if (
+      appearanceMatchesRole &&
+      expectedAppearance
+    ) {
+      renderedWorkspaceRef.current =
+        expectedAppearance.key;
+    }
+  }, [
+    appearanceMatchesRole,
+    expectedAppearance,
+  ]);
+
   useEffect(() => {
     if (!authenticated || !accountId || !selectedMembership) return;
     if (activeMembership && sameMembership(normalizeMembership(activeMembership), selectedMembership)) return;
@@ -623,28 +805,30 @@ export default function RolePortalShell({
   ]);
 
   useEffect(() => {
-    if (accountLoading || contextLoading || initialSyncing) return;
+    // Background sync/account verification must not remove the visible portal.
+    if (accountRestoring || contextLoading) return;
 
     if (!authenticated || !accountId) {
       router.replace("/login");
       return;
     }
 
-    if (initialSyncDone && !canAccess) {
+    if (sessionVerified && initialSyncDone && !canAccess) {
       router.replace("/select-role");
       return;
     }
 
     if (
+      sessionVerified &&
       initialSyncDone &&
       ((requireSchool && !effectiveSchoolId) || (requireBranch && !effectiveBranchId))
     ) {
       router.replace("/select-role");
     }
   }, [
-    accountLoading,
+    accountRestoring,
     contextLoading,
-    initialSyncing,
+    sessionVerified,
     initialSyncDone,
     authenticated,
     accountId,
@@ -684,7 +868,6 @@ export default function RolePortalShell({
   const [roleSwitchOpen, setRoleSwitchOpen] = useState(false);
   const [switchingMembershipId, setSwitchingMembershipId] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [syncOpen, setSyncOpen] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
 
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
@@ -734,13 +917,129 @@ export default function RolePortalShell({
 
   const activeLabel = labels[tab] ?? portalTitle;
   const activeGroup = groups[tab] ?? portalSubtitle;
-  const checking = accountLoading || contextLoading || settingsLoading || initialSyncing;
+  const hasUsableWorkspace = Boolean(
+    selectedMembership &&
+      canAccess,
+  );
+
+  const accountOrWorkspaceChecking =
+    (
+      accountRestoring ||
+      accountLoading ||
+      !membershipRestored ||
+      contextLoading ||
+      !databaseContext.ready
+    ) &&
+    !hasUsableWorkspace;
+
+  /**
+   * Appearance blocks only the first render of the exact role/workspace.
+   *
+   * Once this identity has rendered, settings/theme refreshes are treated as
+   * background work and the active module remains mounted.
+   */
+  const firstAppearanceChecking =
+    Boolean(
+      hasUsableWorkspace &&
+        expectedAppearance &&
+        !currentAppearanceWasRendered &&
+        !appearanceMatchesRole,
+    );
+
+  const checking =
+    accountOrWorkspaceChecking ||
+    firstAppearanceChecking;
+
+  const portalRuntimeContext = useMemo<RolePortalRuntimeContext>(
+    () => ({
+      accountId,
+      user,
+      account,
+      subscription,
+      authenticated,
+      offline: accountOffline || !isOnline,
+      restoring: accountRestoring,
+      verifying: accountVerifying,
+      sessionVerified,
+
+      membership: selectedMembership,
+      memberships: switchableMemberships,
+      activeRole: activeRole || selectedMembership?.role || null,
+      teacherLocalId:
+        activeTeacherId || toPositiveNumber(selectedMembership?.teacherLocalId),
+      studentLocalId:
+        activeStudentId || toPositiveNumber(selectedMembership?.studentLocalId),
+      parentLocalId:
+        activeParentId || toPositiveNumber(selectedMembership?.parentLocalId),
+
+      schoolId: effectiveSchoolId,
+      school: activeSchool,
+      schools,
+      branchId: effectiveBranchId,
+      branch: activeBranch,
+      branches,
+      allBranches,
+
+      settings,
+      theme: themeContext,
+      database: databaseContext,
+      sync: syncContext,
+      syncPanel: syncPanelContext,
+      realtime: realtimeContext,
+      appearance: appearanceContext,
+
+      refreshAccount,
+      refreshInstitution,
+      refreshSettings,
+      refreshTheme: themeContext.refreshTheme,
+      setActiveMembership,
+      setActiveSchoolId,
+      setActiveBranchId,
+    }),
+    [
+      accountId,
+      user,
+      account,
+      subscription,
+      authenticated,
+      accountOffline,
+      isOnline,
+      accountRestoring,
+      accountVerifying,
+      sessionVerified,
+      selectedMembership,
+      switchableMemberships,
+      activeRole,
+      activeTeacherId,
+      activeStudentId,
+      activeParentId,
+      effectiveSchoolId,
+      activeSchool,
+      schools,
+      effectiveBranchId,
+      activeBranch,
+      branches,
+      allBranches,
+      settings,
+      themeContext,
+      databaseContext,
+      syncContext,
+      syncPanelContext,
+      realtimeContext,
+      appearanceContext,
+      refreshAccount,
+      refreshInstitution,
+      refreshSettings,
+      setActiveMembership,
+      setActiveSchoolId,
+      setActiveBranchId,
+    ],
+  );
 
   const navigate = (key: string) => {
     setTab(key);
     setSidebarOpen(false);
     setMoreOpen(false);
-    setSyncOpen(false);
     setRoleSwitchOpen(false);
 
     if (typeof window !== "undefined") {
@@ -753,18 +1052,8 @@ export default function RolePortalShell({
     setContextOpen(false);
     setRoleSwitchOpen(false);
     setSidebarOpen(false);
-    setSyncOpen(false);
-
-    await clearLocalBrowserData();
-
-    try {
-      await Promise.resolve(logout?.());
-    } catch {
-      // Local browser data is already cleared. Continue to login.
-    }
-
-    router.replace("/login");
-  }, [logout, router]);
+    await logout();
+  }, [logout]);
 
   const toggleSection = (title: string) => {
     setOpenSections((prev) => ({ ...prev, [title]: !prev[title] }));
@@ -776,15 +1065,87 @@ export default function RolePortalShell({
 
     try {
       setSwitchingMembershipId(id);
-      const opened = writeWorkspaceSession(normalized) || normalized;
-      await setActiveMembership(opened);
-      setMoreOpen(false);
-      setContextOpen(false);
-      setRoleSwitchOpen(false);
-      window.location.assign(getPortalPathByRole(opened.role));
+
+      await runTransition(
+        {
+          mode: "role-switch",
+          membership: normalized,
+          title: "Switching workspace…",
+          detail: "Preparing the selected role and downloading its permitted data.",
+        },
+        async ({ setStage, setBootstrapProgress }) => {
+          setStage("access", {
+            detail: "Validating access for the selected role and workspace.",
+          });
+
+          const opened = writeWorkspaceSession(normalized) || normalized;
+          beginMembershipTransition(opened);
+
+          setStage("membership", {
+            detail: `Activating ${roleLabel(opened.role)} and its profile context.`,
+          });
+          await setActiveMembership(opened);
+
+          /*
+           * This is the critical part that was missing before.
+           * The transition now runs the same protected workspace bootstrap used
+           * by the first role-selection load. It does not merely animate a data
+           * stage: it downloads, validates and commits every permitted table.
+           */
+          const scope = appearanceScopeForRole(opened.role);
+          if (scope === "school" || scope === "branch") {
+            await bootstrapSelectedWorkspace(opened, {
+              force: true,
+              allowCached: false,
+              onProgress: setBootstrapProgress,
+            });
+          }
+
+          /*
+           * Refresh contexts only after the bootstrap transaction has committed
+           * its records to IndexedDB, so each context reads the new workspace.
+           */
+          setStage("institution");
+          await refreshInstitution();
+
+          setStage("settings");
+          await refreshSettings();
+
+          setStage("branding");
+          await refreshAccount({
+            background: true,
+            reason: "membership-change",
+          });
+
+          setStage("appearance");
+          await themeContext.refreshTheme();
+
+          /* Let React publish the refreshed context values before navigation. */
+          await new Promise<void>((resolve) => {
+            window.requestAnimationFrame(() =>
+              window.requestAnimationFrame(() => resolve()),
+            );
+          });
+
+          completeMembershipTransition();
+
+          setMoreOpen(false);
+          setContextOpen(false);
+          setRoleSwitchOpen(false);
+
+          setStage("dashboard", {
+            detail: `Opening the ${roleLabel(opened.role)} workspace with its prepared local data.`,
+          });
+
+          window.location.replace(getPortalPathByRole(opened.role));
+        },
+      );
     } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "Failed to prepare the selected workspace.";
+      failMembershipTransition(message);
       console.error("Failed to switch role/workspace:", error);
-      alert("Failed to switch workspace. Please try again.");
       setSwitchingMembershipId(null);
     }
   };
@@ -814,11 +1175,23 @@ export default function RolePortalShell({
   );
 
   if (checking) {
+    const preparingAppearance =
+      firstAppearanceChecking;
+
     return (
       <CenterCard
-        title={`Opening ${portalTitle}...`}
-        text="Checking account, selected workspace, sync, school, and branch context."
-        spin
+        title={
+          preparingAppearance
+            ? "Preparing your workspace"
+            : `Opening ${portalTitle}...`
+        }
+        text={
+          preparingAppearance
+            ? appearanceContext.error ||
+              "Applying the correct role, school, branch, colour, branding, and display settings."
+            : "Checking your account and selected workspace."
+        }
+        spin={!appearanceContext.error}
       />
     );
   }
@@ -848,13 +1221,46 @@ export default function RolePortalShell({
   return (
     <main
       className="role-shell"
+      data-appearance-scope={
+        themeContext.effectiveScope
+      }
+      data-appearance-key={
+        themeContext.appliedFor?.key ||
+        undefined
+      }
       style={
         {
           "--sidebar-width": `${sidebarWidth}px`,
+          "--primary-color":
+            themeContext.primaryColor ||
+            settings?.primaryColor ||
+            "#2f6fed",
+          "--dashboard-primary":
+            themeContext.primaryColor ||
+            settings?.primaryColor ||
+            "#2f6fed",
+          "--font-family":
+            themeContext.fontFamily ||
+            settings?.fontFamily ||
+            "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          "--font-size": `${
+            themeContext.fontSize ||
+            Number(settings?.fontSize) ||
+            16
+          }px`,
         } as React.CSSProperties
       }
     >
       <style>{css}</style>
+
+      {/* Phase 20: mounted in the active portal so the status dot can open it. */}
+      <SyncStatusSheet />
+
+      {applyingChanges && (
+        <div className="background-refresh-indicator" aria-live="polite">
+          Applying new data…
+        </div>
+      )}
 
       {(sidebarOpen || contextOpen || roleSwitchOpen) && (
         <button
@@ -865,8 +1271,7 @@ export default function RolePortalShell({
             setContextOpen(false);
             setRoleSwitchOpen(false);
             setMoreOpen(false);
-            setSyncOpen(false);
-          }}
+                  }}
         />
       )}
 
@@ -991,8 +1396,20 @@ export default function RolePortalShell({
           </div>
 
           <div>
-            <strong>{isOnline ? "Online" : "Offline"}</strong>
-            <span>{isOnline ? "Sync ready" : "Local mode"}</span>
+            <strong>
+              {!isOnline
+                ? "Offline"
+                : realtimeConnected
+                  ? "Live"
+                  : "Online"}
+            </strong>
+            <span>
+              {!isOnline
+                ? "Local mode"
+                : realtimeConnected
+                  ? "Realtime connected"
+                  : "Polling fallback"}
+            </span>
           </div>
         </div>
 
@@ -1099,22 +1516,33 @@ export default function RolePortalShell({
           <div className="sync-dot-wrap">
             <button
               type="button"
-              className={`sync-dot-btn ${isOnline && initialSyncDone ? "ok" : "warn"}`}
+              className={`sync-dot-btn ${
+                !isOnline
+                  ? "warn"
+                  : realtimeConnected
+                    ? "live"
+                    : initialSyncDone
+                      ? "ok"
+                      : "warn"
+              }`}
               onClick={() => {
-                setSyncOpen((prev) => !prev);
+                openStatusSheet();
                 setMoreOpen(false);
               }}
-              aria-label="Open sync details"
-              title={isOnline && initialSyncDone ? "Account data synced" : "Sync needs attention"}
+              aria-label="Open system status, sync details and data actions"
+              title={
+                !isOnline
+                  ? "Offline — using local data"
+                  : realtimeConnected
+                    ? "Live updates connected"
+                    : initialSyncDone
+                      ? `Synced — realtime ${realtimeStatus.status}`
+                      : "Sync needs attention"
+              }
             >
               <span />
             </button>
 
-            {syncOpen && (
-              <div className="sync-popover">
-                <SyncStatusStrip />
-              </div>
-            )}
           </div>
 
           <div className="more-wrap">
@@ -1164,7 +1592,7 @@ export default function RolePortalShell({
 
         <section className="app-content">
           <div className="app-content-inner">
-            <ActiveComponent navigate={navigate} />
+            <ActiveComponent navigate={navigate} context={portalRuntimeContext} />
           </div>
         </section>
       </section>
@@ -1182,6 +1610,8 @@ function CenterCard({
 }) {
   return (
     <main className="center-page">
+      <SyncStatusSheet />
+
       <style>{css}</style>
       <section className="loading-card">
         {spin && <div className="loading-spinner" />}
@@ -1192,9 +1622,33 @@ function CenterCard({
   );
 }
 
+
+export default function RolePortalShell(props: RolePortalShellProps) {
+  return (
+    <WorkspaceTransitionProvider>
+      <RolePortalShellContent {...props} />
+    </WorkspaceTransitionProvider>
+  );
+}
+
 const css = `
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.background-refresh-indicator {
+  position: fixed;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 5000;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--text, #111827);
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  box-shadow: 0 10px 28px rgba(15,23,42,.14);
+  font-size: 11px;
+  font-weight: 850;
+  pointer-events: none;
+}
 
 .role-shell {
   --shell-sidebar-bg: var(--surface, #ffffff);
@@ -1686,6 +2140,11 @@ body {
 .sync-dot-btn.ok span {
   background: #22c55e;
   box-shadow: 0 0 0 5px rgba(34,197,94,.13);
+}
+
+.sync-dot-btn.live span {
+  background: #0ea5e9;
+  box-shadow: 0 0 0 5px rgba(14,165,233,.14);
 }
 
 .sync-dot-btn.warn span {

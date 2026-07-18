@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import MontessoriHeader from "../shared/headers/MontessoriHeader";
+import MontessoriHeader from "../shared/headers/student-reports/MontessoriHeader";
 
 import {
   createReportPageStyle,

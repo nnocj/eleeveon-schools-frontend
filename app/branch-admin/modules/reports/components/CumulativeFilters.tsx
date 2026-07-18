@@ -41,7 +41,7 @@ import type {
   Student,
   StudentReportSnapshot,
   Subject,
-} from "../../../../lib/db";
+} from "../../../../lib/db/db";
 
 import type {
   CumulativeDecision,

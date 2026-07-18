@@ -49,6 +49,8 @@ import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
 type ToastTone = "success" | "error" | "info";
@@ -249,6 +251,8 @@ function Empty({ title, text: body }: { title: string; text: string }) {
 }
 
 export default function ExpensesPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
@@ -308,7 +312,7 @@ export default function ExpensesPage() {
     ]
   );
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<ViewMode>("cards");
   const [query, setQuery] = useState("");
@@ -380,6 +384,7 @@ export default function ExpensesPage() {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   const currency = useMemo(() => {

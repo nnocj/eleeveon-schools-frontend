@@ -32,7 +32,6 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
 
 import { apiClient, clearAuthToken, getAuthToken } from "../lib/api/apiClient";
 import {
@@ -41,6 +40,8 @@ import {
   setAccountId,
 } from "../lib/sync/syncConfig";
 import { clearStoredActiveMembership } from "../lib/auth/activeMembership";
+import { performAtomicLogout, subscribeToAtomicLogout } from "../lib/auth/logout";
+import { getSessionGeneration, isSessionGenerationCurrent } from "../lib/auth/sessionGeneration";
 import { AccountSubscriptionDTO } from "../lib/billing/subscriptionAccess";
 import {
   collectUserMemberships,
@@ -96,15 +97,29 @@ export type AccountInfo = {
   [key: string]: any;
 };
 
+export type RefreshAccountOptions = {
+  background?: boolean;
+  reason?: "startup" | "sync" | "focus" | "membership-change" | "manual";
+};
+
 type AccountContextType = {
   user: AccountUser | null;
   account: AccountInfo | null;
   subscription: AccountSubscriptionDTO | null;
   accountId: string | null;
+
+  /** Initial cached/session restoration only. */
   loading: boolean;
+  restoring: boolean;
+
+  /** Non-blocking /auth/me verification. */
+  verifying: boolean;
+  sessionVerified: boolean;
+  offline: boolean;
+
   authenticated: boolean;
-  refreshAccount: () => Promise<void>;
-  logout: () => void;
+  refreshAccount: (options?: RefreshAccountOptions) => Promise<void>;
+  logout: () => Promise<void>;
 };
 
 const AccountContext = createContext<AccountContextType | undefined>(undefined);
@@ -112,6 +127,10 @@ const AccountContext = createContext<AccountContextType | undefined>(undefined);
 const STORED_USER_MEMBERSHIPS_KEY = "eleeveon_user_memberships";
 const STORED_ACCOUNT_USER_KEY = "eleeveon_account_user";
 const STORED_ACCOUNT_INFO_KEY = "eleeveon_account_info";
+
+// Login-page compatibility keys. Both generations are read and written.
+const AUTH_USER_KEY = "eleeveon_auth_user";
+const AUTH_ACCOUNT_KEY = "eleeveon_auth_account";
 
 function safeGetStorage(key: string): string | null {
   if (typeof window === "undefined") return null;
@@ -178,6 +197,10 @@ function clearStoredAccountSessionCache() {
   safeRemoveStorage(STORED_USER_MEMBERSHIPS_KEY);
   safeRemoveStorage(STORED_ACCOUNT_USER_KEY);
   safeRemoveStorage(STORED_ACCOUNT_INFO_KEY);
+  safeRemoveStorage(AUTH_USER_KEY);
+  safeRemoveStorage(AUTH_ACCOUNT_KEY);
+  safeRemoveStorage("user");
+  safeRemoveStorage("account");
 }
 
 function clearLocalInstitutionContext() {
@@ -277,16 +300,24 @@ function mergeUserWithMembershipFallback(args: {
   };
 
   writeJson(STORED_ACCOUNT_USER_KEY, nextUser);
+  writeJson(AUTH_USER_KEY, nextUser);
+  writeJson("user", nextUser);
 
   if (args.incomingAccount) {
     writeJson(STORED_ACCOUNT_INFO_KEY, args.incomingAccount);
+    writeJson(AUTH_ACCOUNT_KEY, args.incomingAccount);
+    writeJson("account", args.incomingAccount);
   }
 
   return nextUser;
 }
 
 function readStoredUserWithFallback(storedAccountId?: string | null) {
-  const storedUser = readJson<AccountUser>(STORED_ACCOUNT_USER_KEY);
+  const storedUser =
+    readJson<AccountUser>(STORED_ACCOUNT_USER_KEY) ||
+    readJson<AccountUser>(AUTH_USER_KEY) ||
+    readJson<AccountUser>("user");
+
   const memberships = readStoredMemberships();
 
   if (!storedUser && !memberships.length) return null;
@@ -303,28 +334,54 @@ function readStoredUserWithFallback(storedAccountId?: string | null) {
   } as AccountUser;
 }
 
+function readStoredAccountInfo() {
+  return (
+    readJson<AccountInfo>(STORED_ACCOUNT_INFO_KEY) ||
+    readJson<AccountInfo>(AUTH_ACCOUNT_KEY) ||
+    readJson<AccountInfo>("account")
+  );
+}
+
 export function AccountProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const initialAccountId = getAccountId();
+  const initialUser = readStoredUserWithFallback(initialAccountId);
+  const initialAccount = normalizeAccountInfo(
+    readStoredAccountInfo(),
+    initialUser?.accountId || initialAccountId,
+  );
+  const hasInitialCachedSession = Boolean(initialUser && getAuthToken());
 
-  const [user, setUser] = useState<AccountUser | null>(null);
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [fallbackAccountId, setFallbackAccountId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<AccountUser | null>(initialUser);
+  const [account, setAccount] = useState<AccountInfo | null>(initialAccount);
+  const [fallbackAccountId, setFallbackAccountId] = useState<string | null>(
+    initialUser?.accountId || initialAccountId || null,
+  );
+  const [restoring, setRestoring] = useState(!hasInitialCachedSession);
+  const [verifying, setVerifying] = useState(false);
+  const [sessionVerified, setSessionVerified] = useState(false);
+  const [offline, setOffline] = useState(false);
 
-  const refreshAccount = useCallback(async () => {
-    setLoading(true);
+  const refreshAccount = useCallback(async (
+    options: RefreshAccountOptions = {},
+  ) => {
+    const background = options.background === true;
+    const generation = getSessionGeneration();
+
+    if (background) setVerifying(true);
+    else setRestoring(true);
 
     try {
       const token = getAuthToken();
       const storedAccountId = getAccountId();
 
       if (!token) {
-        const storedAccount = readJson<AccountInfo>(STORED_ACCOUNT_INFO_KEY);
-        const restoredUser = readStoredUserWithFallback(storedAccountId);
+        const storedAccount = readStoredAccountInfo();
 
         setUser(null);
         setAccount(normalizeAccountInfo(storedAccount || null, storedAccountId || null));
-        setFallbackAccountId(restoredUser?.accountId || storedAccountId || null);
+        setFallbackAccountId(storedAccountId || null);
+        setSessionVerified(true);
+        setOffline(false);
         return;
       }
 
@@ -332,6 +389,8 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
         user: AccountUser;
         account?: AccountInfo | null;
       }>("/auth/me");
+
+      if (!isSessionGenerationCurrent(generation)) return;
 
       const resolvedAccountId =
         res.user?.accountId || res.account?.id || storedAccountId || null;
@@ -355,38 +414,83 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       }
 
       saveMembershipBackup(nextUser, normalizedAccount);
-    } catch (error) {
-      console.error("Failed to restore account session:", error);
+      setSessionVerified(true);
+      setOffline(false);
+    } catch (error: any) {
+      if (!isSessionGenerationCurrent(generation)) return;
 
-      setUser(null);
-      setAccount(null);
-      setFallbackAccountId(null);
+      const status = Number(error?.status || error?.statusCode || 0);
+      const message = String(error?.message || error || "");
+      const networkFailure =
+        error?.isNetworkError === true ||
+        error instanceof TypeError ||
+        /failed to fetch|network|offline|unable to reach|load failed|timeout|timed out|dns|econn|connection refused|server unavailable|service unavailable/i.test(message);
 
-      clearAuthToken();
-      clearAccountId();
-      clearStoredAccountSessionCache();
-      clearLocalInstitutionContext();
+      if (status === 401 || status === 403) {
+        setUser(null);
+        setAccount(null);
+        setFallbackAccountId(null);
+        setSessionVerified(true);
+        setOffline(false);
+
+        clearAuthToken();
+        clearAccountId();
+        clearStoredAccountSessionCache();
+        clearLocalInstitutionContext();
+        return;
+      }
+
+      if (networkFailure) {
+        // Keep the cached user/account/memberships and current workspace alive.
+        setOffline(true);
+        console.warn(
+          `[account] ${options.reason || "background"} verification unavailable; using cached session.`,
+        );
+        return;
+      }
+
+      console.error("Failed to refresh account session:", error);
     } finally {
-      setLoading(false);
+      if (!isSessionGenerationCurrent(generation)) return;
+      if (background) setVerifying(false);
+      else setRestoring(false);
     }
   }, []);
 
   useEffect(() => {
-    refreshAccount();
+    const storedAccountId = getAccountId();
+    const storedAccount = readStoredAccountInfo();
+    const restoredUser = readStoredUserWithFallback(storedAccountId);
+    const hasCachedSession = Boolean(restoredUser && getAuthToken());
+
+    if (hasCachedSession) {
+      setUser(restoredUser);
+      setAccount(normalizeAccountInfo(storedAccount || null, restoredUser?.accountId || storedAccountId));
+      setFallbackAccountId(restoredUser?.accountId || storedAccountId || null);
+      setRestoring(false);
+    }
+
+    void refreshAccount({
+      background: hasCachedSession,
+      reason: "startup",
+    });
   }, [refreshAccount]);
 
-  const logout = useCallback(() => {
-    clearAuthToken();
-    clearAccountId();
-    clearStoredAccountSessionCache();
-    clearLocalInstitutionContext();
-
+  const clearAccountReactState = useCallback(() => {
     setUser(null);
     setAccount(null);
     setFallbackAccountId(null);
+    setRestoring(false);
+    setVerifying(false);
+    setSessionVerified(false);
+    setOffline(false);
+  }, []);
 
-    router.push("/login");
-  }, [router]);
+  useEffect(() => subscribeToAtomicLogout(clearAccountReactState), [clearAccountReactState]);
+
+  const logout = useCallback(async () => {
+    await performAtomicLogout({ clearReactState: clearAccountReactState, redirectTo: "/login" });
+  }, [clearAccountReactState]);
 
   const value = useMemo<AccountContextType>(
     () => ({
@@ -394,12 +498,26 @@ export function AccountProvider({ children }: { children: React.ReactNode }) {
       account,
       subscription: account?.subscription || null,
       accountId: user?.accountId || account?.id || fallbackAccountId,
-      loading,
+      loading: restoring,
+      restoring,
+      verifying,
+      sessionVerified,
+      offline,
       authenticated: !!user && !!getAuthToken(),
       refreshAccount,
       logout,
     }),
-    [user, account, fallbackAccountId, loading, refreshAccount, logout]
+    [
+      user,
+      account,
+      fallbackAccountId,
+      restoring,
+      verifying,
+      sessionVerified,
+      offline,
+      refreshAccount,
+      logout,
+    ]
   );
 
   return (

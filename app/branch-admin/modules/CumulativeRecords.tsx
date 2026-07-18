@@ -70,7 +70,7 @@ import {
   StudentReportSnapshot,
   Subject,
   Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import {
   MediaOwners,
@@ -99,6 +99,8 @@ import type {
   CumulativeReportFiltersState,
 } from "./reports/engine/cumulative-report-types";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 // ======================================================
 // TYPES
 // ======================================================
@@ -968,6 +970,8 @@ function studentReportDatasetFromSnapshot(
 // ======================================================
 
 export default function CumulativeRecordsPage() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -986,6 +990,14 @@ export default function CumulativeRecordsPage() {
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
+
+  /**
+   * The settings context can also return scoped appearance settings, so
+   * currentAcademicStructureId is not guaranteed to already be a number.
+   * Normalize it once before using it in the cumulative-report filters.
+   */
+  const currentAcademicStructureId =
+    idOf(settings?.currentAcademicStructureId) || undefined;
 
   const schoolId = selectedWorkspaceSchoolId({
     openWorkspace,
@@ -1007,14 +1019,14 @@ export default function CumulativeRecordsPage() {
   // SESSION STATE
   // ======================================================
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const [filters, setFilters] = useState<CumulativeReportFiltersState>({
     branchId: branchId || 0,
-    academicStructureId: settings?.currentAcademicStructureId,
+    academicStructureId: currentAcademicStructureId,
     academicPeriodId: undefined,
     fromAcademicPeriodId: undefined,
     toAcademicPeriodId: undefined,
@@ -1461,7 +1473,9 @@ export default function CumulativeRecordsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId]);
+  }, [authenticated, accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   // ======================================================
   // KEEP FILTERS LOCKED TO ACTIVE BRANCH
@@ -1475,15 +1489,15 @@ export default function CumulativeRecordsPage() {
         ...prev,
         branchId: branchId || 0,
         academicStructureId: branchChanged
-          ? settings?.currentAcademicStructureId
-          : prev.academicStructureId || settings?.currentAcademicStructureId,
+          ? currentAcademicStructureId
+          : prev.academicStructureId || currentAcademicStructureId,
         academicPeriodId: branchChanged ? undefined : prev.academicPeriodId,
         classId: branchChanged ? undefined : prev.classId,
         studentId: branchChanged ? undefined : prev.studentId,
         subjectId: branchChanged ? undefined : prev.subjectId,
       };
     });
-  }, [branchId, settings?.currentAcademicStructureId]);
+  }, [branchId, currentAcademicStructureId]);
 
   useEffect(() => {
     if (!filters.academicStructureId && academicStructures[0]?.id) {

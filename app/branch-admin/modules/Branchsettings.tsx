@@ -56,6 +56,8 @@
  * Theme safety fix:
  * - opening the Branch Settings tab is passive and never changes the active app theme
  * - Save, Save All, sheet saves and the More modal never mutate document theme variables
+ * - successful settings commits publish schoolBranchSettings through syncEvents
+ * - SettingsContext + PortalAppearanceRuntime reload and apply the exact active branch
  * - this module stores theme values only; global theme application remains outside this page
  *
  * Media removal fix:
@@ -93,10 +95,11 @@ import {
   Branch,
   School,
   SchoolBranchSetting,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import {
   attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   createMediaSessionKey as createSharedMediaSessionKey,
   getMediaObjectUrl,
   getOwnerFieldMediaAsset,
@@ -112,6 +115,10 @@ import {
 } from "../../lib/sync/syncUtils";
 
 import {
+  publishBranchSettingsSaved,
+} from "../../lib/sync/syncEvents";
+
+import {
   STUDENT_REPORT_TEMPLATE_REGISTRY,
   getStudentReportTemplateRegistryItem,
 } from "./reports/student-report-templates";
@@ -121,13 +128,22 @@ import {
   getCumulativeTranscriptTemplateRegistryItem,
 } from "./reports/cumulative-transcript-templates";
 
+import {
+  BROADSHEET_TEMPLATE_REGISTRY,
+  getBroadsheetTemplateRegistryItem,
+} from "./reports/broadsheet-templates";
+
 import StudentReportCard from "./reports/components/StudentReportCard";
 import CumulativeReportBook from "./reports/components/CumulativeReportBook";
 import CumulativeTranscriptCard from "./reports/components/CumulativeTranscriptCard";
+import BroadsheetCard from "./reports/components/BroadsheetCard";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 const TemplatePreviewStudentReportCard = StudentReportCard as React.ComponentType<any>;
 const TemplatePreviewCumulativeReportBook = CumulativeReportBook as React.ComponentType<any>;
 const TemplatePreviewCumulativeTranscriptCard = CumulativeTranscriptCard as React.ComponentType<any>;
+const TemplatePreviewBroadsheetCard = BroadsheetCard as React.ComponentType<any>;
 
 // ======================================================
 // COLOR UTILITIES
@@ -195,7 +211,13 @@ const generatedDateLabelOptions = [
 ];
 
 type ToastTone = "success" | "error" | "info";
-type ReportTemplateReportType = "student_report" | "cumulative_book" | "cumulative_transcript";
+type ReportTemplateReportType =
+  | "student_report"
+  | "cumulative_book"
+  | "cumulative_transcript"
+  | "subject_broadsheet"
+  | "class_broadsheet"
+  | "annual_broadsheet";
 type SettingsSection = "academic" | "school" | "branch" | "appearance" | "dashboardMedia" | "reportMedia" | "reportTemplates" | "gallery";
 
 type ImageField =
@@ -336,6 +358,41 @@ type ReportTemplateForm = {
   showTranscriptGPAProgression: boolean;
   showTranscriptFinalRecommendation: boolean;
 
+  showBroadsheetLogo: boolean;
+  showBroadsheetWatermark: boolean;
+  showBroadsheetGeneratedDate: boolean;
+  showBroadsheetPageNumber: boolean;
+  showBroadsheetSignatures: boolean;
+  showBroadsheetSummary: boolean;
+  showBroadsheetStatistics: boolean;
+  showBroadsheetStudentPhoto: boolean;
+  showBroadsheetAssessmentBreakdown: boolean;
+  showBroadsheetWeightedTotal: boolean;
+  showBroadsheetPercentage: boolean;
+  showBroadsheetGrade: boolean;
+  showBroadsheetRemark: boolean;
+  showBroadsheetGPA: boolean;
+  showBroadsheetPosition: boolean;
+  showBroadsheetHighestScore: boolean;
+  showBroadsheetLowestScore: boolean;
+  showBroadsheetClassAverage: boolean;
+  showBroadsheetSubjectScores: boolean;
+  showBroadsheetSubjectGrades: boolean;
+  showBroadsheetTotal: boolean;
+  showBroadsheetAverage: boolean;
+  showBroadsheetClassPosition: boolean;
+  showBroadsheetAttendance: boolean;
+  showBroadsheetClassHighestAverage: boolean;
+  showBroadsheetClassLowestAverage: boolean;
+  showBroadsheetPeriodScores: boolean;
+  showBroadsheetAnnualAverage: boolean;
+  showBroadsheetAnnualGPA: boolean;
+  showBroadsheetAnnualPosition: boolean;
+  showBroadsheetTrend: boolean;
+  showBroadsheetPromotionDecision: boolean;
+  showBroadsheetBestPeriod: boolean;
+  showBroadsheetLatestPeriod: boolean;
+
   classTeacherLabel: string;
   headTeacherLabel: string;
   parentLabel: string;
@@ -360,6 +417,14 @@ type ReportTemplateForm = {
   gradeLabel: string;
   gpaLabel: string;
   footerText: string;
+  broadsheetTitleLabel: string;
+  broadsheetGeneratedDateLabel: string;
+  broadsheetFooterText: string;
+  studentColumnLabel: string;
+  admissionNumberColumnLabel: string;
+  positionColumnLabel: string;
+  gradeColumnLabel: string;
+  remarkColumnLabel: string;
 
   active: boolean;
 };
@@ -504,11 +569,31 @@ function cumulativeTranscriptTemplateDefinitionOptions(): ReportTemplateRow[] {
   }));
 }
 
+function broadsheetTemplateDefinitionOptions(
+  reportType: "subject_broadsheet" | "class_broadsheet" | "annual_broadsheet"
+): ReportTemplateRow[] {
+  return BROADSHEET_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
+    name: item.name,
+    code: item.code,
+    layoutKey: item.layoutKey,
+    reportType,
+    orientation: item.orientation || "landscape",
+    paperSize: item.paperSize || "A4",
+    density: item.density || "compact",
+    description: item.description || "Configurable broadsheet template.",
+    active: item.active !== false,
+    isDefault: item.isDefault === true || index === 0,
+  }));
+}
+
 function reportTemplateDefinitionOptions(reportType?: ReportTemplateReportType): ReportTemplateRow[] {
   const all = [
     ...studentReportTemplateDefinitionOptions(),
     ...cumulativeBookTemplateDefinitionOptions(),
     ...cumulativeTranscriptTemplateDefinitionOptions(),
+    ...broadsheetTemplateDefinitionOptions("subject_broadsheet"),
+    ...broadsheetTemplateDefinitionOptions("class_broadsheet"),
+    ...broadsheetTemplateDefinitionOptions("annual_broadsheet"),
   ];
 
   return reportType ? all.filter((item: any) => item.reportType === reportType) : all;
@@ -567,6 +652,41 @@ function reportTemplateFormFromDefinition(
     showTranscriptGPAProgression: true,
     showTranscriptFinalRecommendation: true,
 
+    showBroadsheetLogo: true,
+    showBroadsheetWatermark: true,
+    showBroadsheetGeneratedDate: true,
+    showBroadsheetPageNumber: true,
+    showBroadsheetSignatures: true,
+    showBroadsheetSummary: true,
+    showBroadsheetStatistics: true,
+    showBroadsheetStudentPhoto: false,
+    showBroadsheetAssessmentBreakdown: true,
+    showBroadsheetWeightedTotal: true,
+    showBroadsheetPercentage: true,
+    showBroadsheetGrade: true,
+    showBroadsheetRemark: true,
+    showBroadsheetGPA: true,
+    showBroadsheetPosition: true,
+    showBroadsheetHighestScore: true,
+    showBroadsheetLowestScore: true,
+    showBroadsheetClassAverage: true,
+    showBroadsheetSubjectScores: true,
+    showBroadsheetSubjectGrades: true,
+    showBroadsheetTotal: true,
+    showBroadsheetAverage: true,
+    showBroadsheetClassPosition: true,
+    showBroadsheetAttendance: true,
+    showBroadsheetClassHighestAverage: true,
+    showBroadsheetClassLowestAverage: true,
+    showBroadsheetPeriodScores: false,
+    showBroadsheetAnnualAverage: true,
+    showBroadsheetAnnualGPA: true,
+    showBroadsheetAnnualPosition: true,
+    showBroadsheetTrend: true,
+    showBroadsheetPromotionDecision: true,
+    showBroadsheetBestPeriod: true,
+    showBroadsheetLatestPeriod: true,
+
     classTeacherLabel: "Class Teacher",
     headTeacherLabel: "Headteacher / Principal",
     parentLabel: "Parent / Guardian",
@@ -591,6 +711,21 @@ function reportTemplateFormFromDefinition(
     gradeLabel: "Grade",
     gpaLabel: "GPA",
     footerText: "Official academic document generated by Eleeveon Schools.",
+    broadsheetTitleLabel:
+      selectedReportType === "subject_broadsheet"
+        ? "Subject Broadsheet"
+        : selectedReportType === "class_broadsheet"
+          ? "Class Broadsheet"
+          : selectedReportType === "annual_broadsheet"
+            ? "Annual Cumulative Broadsheet"
+            : "Broadsheet",
+    broadsheetGeneratedDateLabel: "Generated",
+    broadsheetFooterText: "Official academic broadsheet generated by Eleeveon Schools.",
+    studentColumnLabel: "Student",
+    admissionNumberColumnLabel: "Admission No.",
+    positionColumnLabel: "Position",
+    gradeColumnLabel: "Grade",
+    remarkColumnLabel: "Remark",
 
     active: true,
   };
@@ -959,6 +1094,181 @@ function createDummyCumulativeTranscriptPreviewDataset(args: {
   };
 }
 
+function createDummyBroadsheetPreviewHeader(args: {
+  schoolName?: string;
+  branchName?: string;
+  primaryColor?: string;
+  fontFamily?: string;
+  logo?: string;
+  reportCardBackgroundImage?: string;
+  reportCardWatermark?: string;
+  reportCardSignatureImage?: string;
+}) {
+  return {
+    branding: {
+      schoolName: args.schoolName || "Eleeveon International Academy",
+      branchName: args.branchName || "Main Campus",
+      motto: "Excellence, Character and Service",
+      address: "P.O. Box 100, Accra",
+      branchAddress: "Main Campus, Accra",
+      phone: "+233 24 000 0000",
+      email: "records@school.edu.gh",
+      website: "www.school.edu.gh",
+      primaryColor: args.primaryColor || "#2f6fed",
+      fontFamily: args.fontFamily || "Arial, sans-serif",
+      logo: args.logo || "",
+      resolvedLogoUrl: args.logo || "",
+      reportCardBackgroundImage: args.reportCardBackgroundImage || "",
+      resolvedReportCardBackgroundImageUrl: args.reportCardBackgroundImage || "",
+      reportCardWatermark: args.reportCardWatermark || args.logo || "",
+      resolvedReportCardWatermarkUrl: args.reportCardWatermark || args.logo || "",
+      reportCardSignatureImage: args.reportCardSignatureImage || "",
+      resolvedReportCardSignatureImageUrl: args.reportCardSignatureImage || "",
+    },
+    academicStructure: { id: 1, name: "Basic School" },
+    academicStructureName: "Basic School",
+    academicPeriod: { id: 2, name: "Term 2, 2026" },
+    academicPeriodName: "Term 2, 2026",
+    classData: { id: 1, name: "Grade 6" },
+    className: "Grade 6",
+  };
+}
+
+function createDummySubjectBroadsheetPreviewDataset() {
+  const assessmentColumns = [
+    { assessmentStructureItemId: 1, name: "Class Score", maxScore: 50, weight: 50, order: 1 },
+    { assessmentStructureItemId: 2, name: "Exam", maxScore: 100, weight: 50, order: 2 },
+  ];
+  const rows = [
+    ["Jonathan Commey", "STD-014", 42, 88, 86, "A", 2, "Excellent"],
+    ["Ama Owusu", "STD-015", 46, 94, 93, "A+", 1, "Outstanding"],
+    ["Kwesi Mensah", "STD-016", 37, 76, 75, "B", 4, "Good"],
+    ["Nana Boateng", "STD-017", 40, 82, 81, "A", 3, "Very Good"],
+  ] as const;
+  return {
+    classSubjectId: 1,
+    classId: 1,
+    subjectId: 1,
+    className: "Grade 6",
+    subjectName: "Mathematics",
+    teacherName: "Mr. Kofi Addo",
+    assessmentColumns,
+    students: rows.map((row, index) => ({
+      studentId: index + 1,
+      studentName: row[0],
+      admissionNumber: row[1],
+      resolvedStudentPhotoUrl: "",
+      breakdown: assessmentColumns.map((column) => ({
+        ...column,
+        score: column.assessmentStructureItemId === 1 ? row[2] : row[3],
+      })),
+      weightedTotal: row[4],
+      percentage: row[4],
+      grade: row[5],
+      gpa: row[4] >= 90 ? 4 : row[4] >= 80 ? 3.7 : 3,
+      position: row[6],
+      remark: row[7],
+    })),
+    highestScore: 93,
+    lowestScore: 75,
+    classAverage: 83.75,
+  };
+}
+
+function createDummyClassBroadsheetPreviewDataset() {
+  const subjectColumns = [
+    { classSubjectId: 1, subjectId: 1, subjectName: "English Language", subjectCode: "ENG", shortName: "ENG" },
+    { classSubjectId: 2, subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", shortName: "MATH" },
+    { classSubjectId: 3, subjectId: 3, subjectName: "Science", subjectCode: "SCI", shortName: "SCI" },
+  ];
+  const rows: any[] = [
+    ["Jonathan Commey", "STD-014", [88, 92, 84], 88, 2],
+    ["Ama Owusu", "STD-015", [94, 96, 91], 93.7, 1],
+    ["Kwesi Mensah", "STD-016", [76, 80, 78], 78, 4],
+    ["Nana Boateng", "STD-017", [84, 86, 82], 84, 3],
+  ];
+  return {
+    classId: 1,
+    className: "Grade 6",
+    subjectColumns,
+    students: rows.map((row, index) => ({
+      studentId: index + 1,
+      studentName: row[0],
+      admissionNumber: row[1],
+      resolvedStudentPhotoUrl: "",
+      subjects: subjectColumns.map((subject, subjectIndex) => ({
+        ...subject,
+        percentage: row[2][subjectIndex],
+        grade: row[2][subjectIndex] >= 90 ? "A+" : row[2][subjectIndex] >= 80 ? "A" : "B",
+      })),
+      total: row[2].reduce((sum: number, value: number) => sum + value, 0),
+      average: row[3],
+      gpa: row[3] >= 90 ? 4 : row[3] >= 80 ? 3.7 : 3,
+      position: row[4],
+      attendancePercent: 94 - index,
+    })),
+    highestAverage: 93.7,
+    lowestAverage: 78,
+    classAverage: 85.9,
+  };
+}
+
+function createDummyAnnualBroadsheetPreviewDataset() {
+  const subjectColumns = [
+    { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", shortName: "ENG" },
+    { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", shortName: "MATH" },
+    { subjectId: 3, subjectName: "Science", subjectCode: "SCI", shortName: "SCI" },
+  ];
+  const periods = ["Term 1, 2026", "Term 2, 2026", "Term 3, 2026"];
+  const rows: any[] = [
+    ["Jonathan Commey", "STD-014", [87, 91, 85], 87.7, 2, "promote"],
+    ["Ama Owusu", "STD-015", [93, 95, 92], 93.3, 1, "promote"],
+    ["Kwesi Mensah", "STD-016", [76, 79, 77], 77.3, 4, "repeat"],
+    ["Nana Boateng", "STD-017", [84, 86, 83], 84.3, 3, "promote"],
+  ];
+  return {
+    classId: 1,
+    className: "Grade 6",
+    academicYear: "2026",
+    periodNames: periods,
+    totalPeriods: periods.length,
+    totalStudents: rows.length,
+    totalSubjects: subjectColumns.length,
+    subjectColumns,
+    students: rows.map((row, index) => ({
+      studentId: index + 1,
+      studentName: row[0],
+      admissionNumber: row[1],
+      className: "Grade 6",
+      resolvedStudentPhotoUrl: "",
+      subjects: subjectColumns.map((subject, subjectIndex) => ({
+        ...subject,
+        average: row[2][subjectIndex],
+        grade: row[2][subjectIndex] >= 90 ? "A+" : row[2][subjectIndex] >= 80 ? "A" : "B",
+        periodScores: periods.map((academicPeriodName, periodIndex) => ({
+          academicPeriodId: periodIndex + 1,
+          academicPeriodName,
+          percentage: row[2][subjectIndex] - 2 + periodIndex * 2,
+        })),
+      })),
+      periodsCount: periods.length,
+      subjectsCount: subjectColumns.length,
+      total: row[2].reduce((sum: number, value: number) => sum + value, 0),
+      average: row[3],
+      gpa: row[3] >= 90 ? 4 : row[3] >= 80 ? 3.7 : 3,
+      position: row[4],
+      recommendation: row[5],
+      finalDecision: row[5],
+    })),
+    highestAverage: 93.3,
+    lowestAverage: 77.3,
+    classAverage: 85.65,
+    promotionCount: 3,
+    repeatCount: 1,
+    graduateCount: 0,
+  };
+}
+
 const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showSubjectPosition",
   "showClassPosition",
@@ -989,6 +1299,40 @@ const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showTranscriptCumulativePosition",
   "showTranscriptGPAProgression",
   "showTranscriptFinalRecommendation",
+  "showBroadsheetLogo",
+  "showBroadsheetWatermark",
+  "showBroadsheetGeneratedDate",
+  "showBroadsheetPageNumber",
+  "showBroadsheetSignatures",
+  "showBroadsheetSummary",
+  "showBroadsheetStatistics",
+  "showBroadsheetStudentPhoto",
+  "showBroadsheetAssessmentBreakdown",
+  "showBroadsheetWeightedTotal",
+  "showBroadsheetPercentage",
+  "showBroadsheetGrade",
+  "showBroadsheetRemark",
+  "showBroadsheetGPA",
+  "showBroadsheetPosition",
+  "showBroadsheetHighestScore",
+  "showBroadsheetLowestScore",
+  "showBroadsheetClassAverage",
+  "showBroadsheetSubjectScores",
+  "showBroadsheetSubjectGrades",
+  "showBroadsheetTotal",
+  "showBroadsheetAverage",
+  "showBroadsheetClassPosition",
+  "showBroadsheetAttendance",
+  "showBroadsheetClassHighestAverage",
+  "showBroadsheetClassLowestAverage",
+  "showBroadsheetPeriodScores",
+  "showBroadsheetAnnualAverage",
+  "showBroadsheetAnnualGPA",
+  "showBroadsheetAnnualPosition",
+  "showBroadsheetTrend",
+  "showBroadsheetPromotionDecision",
+  "showBroadsheetBestPeriod",
+  "showBroadsheetLatestPeriod",
 ];
 
 
@@ -1283,7 +1627,13 @@ function makeReportTemplatePayload(args: {
         ? "Default configurable cumulative report book template."
         : args.form.reportType === "cumulative_transcript"
           ? "Default configurable cumulative transcript template."
-          : "Default configurable student report card template."
+          : args.form.reportType === "subject_broadsheet"
+            ? "Default configurable subject broadsheet template."
+            : args.form.reportType === "class_broadsheet"
+              ? "Default configurable class broadsheet template."
+              : args.form.reportType === "annual_broadsheet"
+                ? "Default configurable annual broadsheet template."
+                : "Default configurable student report card template."
     ),
     active: args.form.active !== false,
     isDefault: true,
@@ -1353,6 +1703,40 @@ function makeReportTemplateSettingsPayload(args: {
     showTranscriptCumulativePosition: !!args.form.showTranscriptCumulativePosition,
     showTranscriptGPAProgression: !!args.form.showTranscriptGPAProgression,
     showTranscriptFinalRecommendation: !!args.form.showTranscriptFinalRecommendation,
+    showBroadsheetLogo: !!args.form.showBroadsheetLogo,
+    showBroadsheetWatermark: !!args.form.showBroadsheetWatermark,
+    showBroadsheetGeneratedDate: !!args.form.showBroadsheetGeneratedDate,
+    showBroadsheetPageNumber: !!args.form.showBroadsheetPageNumber,
+    showBroadsheetSignatures: !!args.form.showBroadsheetSignatures,
+    showBroadsheetSummary: !!args.form.showBroadsheetSummary,
+    showBroadsheetStatistics: !!args.form.showBroadsheetStatistics,
+    showBroadsheetStudentPhoto: !!args.form.showBroadsheetStudentPhoto,
+    showBroadsheetAssessmentBreakdown: !!args.form.showBroadsheetAssessmentBreakdown,
+    showBroadsheetWeightedTotal: !!args.form.showBroadsheetWeightedTotal,
+    showBroadsheetPercentage: !!args.form.showBroadsheetPercentage,
+    showBroadsheetGrade: !!args.form.showBroadsheetGrade,
+    showBroadsheetRemark: !!args.form.showBroadsheetRemark,
+    showBroadsheetGPA: !!args.form.showBroadsheetGPA,
+    showBroadsheetPosition: !!args.form.showBroadsheetPosition,
+    showBroadsheetHighestScore: !!args.form.showBroadsheetHighestScore,
+    showBroadsheetLowestScore: !!args.form.showBroadsheetLowestScore,
+    showBroadsheetClassAverage: !!args.form.showBroadsheetClassAverage,
+    showBroadsheetSubjectScores: !!args.form.showBroadsheetSubjectScores,
+    showBroadsheetSubjectGrades: !!args.form.showBroadsheetSubjectGrades,
+    showBroadsheetTotal: !!args.form.showBroadsheetTotal,
+    showBroadsheetAverage: !!args.form.showBroadsheetAverage,
+    showBroadsheetClassPosition: !!args.form.showBroadsheetClassPosition,
+    showBroadsheetAttendance: !!args.form.showBroadsheetAttendance,
+    showBroadsheetClassHighestAverage: !!args.form.showBroadsheetClassHighestAverage,
+    showBroadsheetClassLowestAverage: !!args.form.showBroadsheetClassLowestAverage,
+    showBroadsheetPeriodScores: !!args.form.showBroadsheetPeriodScores,
+    showBroadsheetAnnualAverage: !!args.form.showBroadsheetAnnualAverage,
+    showBroadsheetAnnualGPA: !!args.form.showBroadsheetAnnualGPA,
+    showBroadsheetAnnualPosition: !!args.form.showBroadsheetAnnualPosition,
+    showBroadsheetTrend: !!args.form.showBroadsheetTrend,
+    showBroadsheetPromotionDecision: !!args.form.showBroadsheetPromotionDecision,
+    showBroadsheetBestPeriod: !!args.form.showBroadsheetBestPeriod,
+    showBroadsheetLatestPeriod: !!args.form.showBroadsheetLatestPeriod,
 
     classTeacherLabel: args.form.classTeacherLabel?.trim() || "Class Teacher",
     headTeacherLabel: args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
@@ -1378,6 +1762,14 @@ function makeReportTemplateSettingsPayload(args: {
     gradeLabel: args.form.gradeLabel?.trim() || "Grade",
     gpaLabel: args.form.gpaLabel?.trim() || "GPA",
     footerText: args.form.footerText?.trim() || "Official academic document generated by Eleeveon Schools.",
+    broadsheetTitleLabel: args.form.broadsheetTitleLabel?.trim() || "Broadsheet",
+    broadsheetGeneratedDateLabel: args.form.broadsheetGeneratedDateLabel?.trim() || "Generated",
+    broadsheetFooterText: args.form.broadsheetFooterText?.trim() || "Official academic broadsheet generated by Eleeveon Schools.",
+    studentColumnLabel: args.form.studentColumnLabel?.trim() || "Student",
+    admissionNumberColumnLabel: args.form.admissionNumberColumnLabel?.trim() || "Admission No.",
+    positionColumnLabel: args.form.positionColumnLabel?.trim() || "Position",
+    gradeColumnLabel: args.form.gradeColumnLabel?.trim() || "Grade",
+    remarkColumnLabel: args.form.remarkColumnLabel?.trim() || "Remark",
 
     active: args.form.active !== false,
     createdAt: existing.createdAt || now,
@@ -1436,10 +1828,13 @@ void softDeleteLocal;
 // ======================================================
 
 export default function Branchsettings() {
+  const dataRevision = useDataRevision();
+
   const accountContext = useAccount() as any;
   const { accountId, authenticated, loading: accountLoading } = accountContext;
 
-  const { settings, loading: settingsLoading } = useSettings();
+  const { settings,
+    refreshSettings, loading: settingsLoading } = useSettings();
 
   const {
     activeSchool,
@@ -1497,7 +1892,7 @@ export default function Branchsettings() {
   const [branchForm, setBranchForm] = useState<BranchForm>({});
   const [reportTemplateForm, setReportTemplateForm] = useState<ReportTemplateForm>(defaultReportTemplateForm());
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [savingAll, setSavingAll] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [savingSchool, setSavingSchool] = useState(false);
@@ -2036,6 +2431,7 @@ export default function Branchsettings() {
     accountLoading,
     settingsLoading,
     contextLoading,
+    dataRevision,
   ]);
 
   useEffect(() => {
@@ -2253,9 +2649,15 @@ export default function Branchsettings() {
         branchId: Number(selectedBranchId),
         ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
         ownerLocalId,
+        ownerCloudId: (settingsRow as any)?.cloudId,
         ownerTempKey,
         fieldKey: field,
-        variant: field.includes("logo") || field.includes("Signature") ? "avatar" : "cover",
+        variant:
+          field === "logo"
+            ? "logo"
+            : field === "reportCardSignatureImage"
+              ? "signature"
+              : "cover",
         replaceExisting: true,
       });
 
@@ -2269,7 +2671,7 @@ export default function Branchsettings() {
             item.fieldKey !== field
         )
       );
-      showToast("success", "Image optimized and stored as a media asset.");
+      showToast("info", "Image prepared locally. Click Save to attach and verify it.");
     } catch (error: any) {
       console.error("Failed to process settings image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2290,8 +2692,9 @@ export default function Branchsettings() {
         branchId: selectedBranchId ? Number(selectedBranchId) : undefined,
         ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
         ownerLocalId: Number(schoolForm.id),
+        ownerCloudId: (school as any)?.cloudId,
         fieldKey: String(field),
-        variant: String(field).toLowerCase().includes("logo") ? "avatar" : "cover",
+        variant: String(field).toLowerCase().includes("logo") ? "logo" : "cover",
         replaceExisting: true,
       });
 
@@ -2305,7 +2708,7 @@ export default function Branchsettings() {
             item.fieldKey !== String(field)
         )
       );
-      showToast("success", "School image optimized and stored as a media asset.");
+      showToast("info", "School image prepared locally. Click Save to attach and verify it.");
     } catch (error: any) {
       console.error("Failed to process school image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2326,6 +2729,7 @@ export default function Branchsettings() {
         branchId: Number(selectedBranchId),
         ownerTable: BRANCH_MEDIA_OWNER_TABLE,
         ownerLocalId: Number(branchForm.id),
+        ownerCloudId: (branch as any)?.cloudId,
         fieldKey: String(field),
         variant: String(field).toLowerCase().includes("logo") ? "avatar" : "cover",
         replaceExisting: true,
@@ -2341,7 +2745,7 @@ export default function Branchsettings() {
             item.fieldKey !== String(field)
         )
       );
-      showToast("success", "Branch image optimized and stored as a media asset.");
+      showToast("info", "Branch image prepared locally. Click Save to attach and verify it.");
     } catch (error: any) {
       console.error("Failed to process branch image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2611,31 +3015,67 @@ export default function Branchsettings() {
           ...(form.schoolGalleryMediaIds || []),
         ].filter(Boolean);
 
-        await Promise.all(
-          mediaIds.map((assetId) =>
-            attachMediaAssetToOwner({
-              assetId: Number(assetId),
-              ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
-              ownerLocalId: savedSettingsId,
-              ownerTempKey: settingsMediaSessionKeyRef.current,
-            })
-          )
-        );
+        const savedSettingsRow = await (db as any).schoolBranchSettings?.get?.(savedSettingsId);
+        const settingsFieldAssets = [
+          { assetId: form.logoMediaId, fieldKey: "logo" },
+          { assetId: form.reportCardBackgroundImageMediaId, fieldKey: "reportCardBackgroundImage" },
+          { assetId: form.reportCardWatermarkMediaId, fieldKey: "reportCardWatermark" },
+          { assetId: form.reportCardSignatureImageMediaId, fieldKey: "reportCardSignatureImage" },
+          { assetId: form.dashboardHeroImageMediaId, fieldKey: "dashboardHeroImage" },
+          { assetId: form.dashboardBannerImageMediaId, fieldKey: "dashboardBannerImage" },
+          { assetId: form.studentPortalImageMediaId, fieldKey: "studentPortalImage" },
+          { assetId: form.teacherPortalImageMediaId, fieldKey: "teacherPortalImage" },
+          { assetId: form.classroomPlaceholderImageMediaId, fieldKey: "classroomPlaceholderImage" },
+          { assetId: form.subjectPlaceholderImageMediaId, fieldKey: "subjectPlaceholderImage" },
+          ...(form.schoolGalleryMediaIds || []).map((assetId) => ({
+            assetId,
+            fieldKey: GALLERY_FIELD_KEY,
+            allowMultiple: true,
+          })),
+        ];
+
+        await commitMediaAssetsToOwner({
+          accountId: selectedAccountId,
+          ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedSettingsId,
+          ownerCloudId: (savedSettingsRow as any)?.cloudId,
+          ownerTempKey: settingsMediaSessionKeyRef.current,
+          assets: settingsFieldAssets,
+        });
+
         settingsMediaSessionKeyRef.current = createSettingsMediaSessionKey();
       }
 
       await persistPendingMediaRemovals();
 
 
-      await load();
+      if (reloadAfterSave) {
+        await load();
+      }
+
       await refreshInstitution?.();
-      window.dispatchEvent(new Event("school-branch-settings-updated"));
+
+      /**
+       * Phase 10 post-commit propagation:
+       * 1. publish selective schoolBranchSettings revision;
+       * 2. SettingsContext reloads the exact active branch row;
+       * 3. PortalAppearanceRuntime asks ThemeContext to reapply it;
+       * 4. background sync is requested through the central sync runtime.
+       */
+      publishBranchSettingsSaved({
+        accountId: selectedAccountId,
+        schoolId: Number(selectedSchoolId),
+        branchId: Number(selectedBranchId),
+        localId: savedSettingsId || null,
+      });
+
+      await refreshSettings?.();
 
       if (!silent) showToast("success", "School branch settings saved successfully.");
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save school branch settings:", error);
-      showToast("error", "Failed to save school branch settings.");
+      showToast("error", error?.message || "Failed to save school branch settings.");
       return false;
     } finally {
       setSavingSettings(false);
@@ -2683,17 +3123,17 @@ export default function Branchsettings() {
         synced: "pending",
       } as any);
 
-      await Promise.all(
-        [schoolForm.logoMediaId, schoolForm.bannerImageMediaId]
-          .filter(Boolean)
-          .map((assetId) =>
-            attachMediaAssetToOwner({
-              assetId: Number(assetId),
-              ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-              ownerLocalId: Number(schoolForm.id),
-            })
-          )
-      );
+      const savedSchoolRow = await (db as any).schools?.get?.(Number(schoolForm.id));
+      await commitMediaAssetsToOwner({
+        accountId: selectedAccountId,
+        ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
+        ownerLocalId: Number(schoolForm.id),
+        ownerCloudId: (savedSchoolRow as any)?.cloudId || (school as any)?.cloudId,
+        assets: [
+          { assetId: schoolForm.logoMediaId, fieldKey: "logo" },
+          { assetId: schoolForm.bannerImageMediaId, fieldKey: "bannerImage" },
+        ],
+      });
 
       if (shouldPersistRemovals) await persistPendingMediaRemovals();
 
@@ -2703,9 +3143,9 @@ export default function Branchsettings() {
 
       if (!silent) showToast("success", "School identity saved successfully.");
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save school identity:", error);
-      showToast("error", "Failed to save school identity.");
+      showToast("error", error?.message || "Failed to save school identity.");
       return false;
     } finally {
       setSavingSchool(false);
@@ -2754,17 +3194,17 @@ export default function Branchsettings() {
         synced: "pending",
       } as any);
 
-      await Promise.all(
-        [branchForm.logoMediaId, branchForm.bannerImageMediaId]
-          .filter(Boolean)
-          .map((assetId) =>
-            attachMediaAssetToOwner({
-              assetId: Number(assetId),
-              ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-              ownerLocalId: Number(branchForm.id),
-            })
-          )
-      );
+      const savedBranchRow = await (db as any).branches?.get?.(Number(branchForm.id));
+      await commitMediaAssetsToOwner({
+        accountId: selectedAccountId,
+        ownerTable: BRANCH_MEDIA_OWNER_TABLE,
+        ownerLocalId: Number(branchForm.id),
+        ownerCloudId: (savedBranchRow as any)?.cloudId || (branch as any)?.cloudId,
+        assets: [
+          { assetId: branchForm.logoMediaId, fieldKey: "logo" },
+          { assetId: branchForm.bannerImageMediaId, fieldKey: "bannerImage" },
+        ],
+      });
 
       if (shouldPersistRemovals) await persistPendingMediaRemovals();
 
@@ -2774,9 +3214,9 @@ export default function Branchsettings() {
 
       if (!silent) showToast("success", "Branch identity saved successfully.");
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save branch identity:", error);
-      showToast("error", "Failed to save branch identity.");
+      showToast("error", error?.message || "Failed to save branch identity.");
       return false;
     } finally {
       setSavingBranch(false);
@@ -2920,7 +3360,18 @@ export default function Branchsettings() {
       window.dispatchEvent(new Event("school-branch-settings-updated"));
 
       if (!silent) {
-        const savedLabel = activeReportType === "cumulative_book" ? "Cumulative report book" : activeReportType === "cumulative_transcript" ? "Cumulative transcript" : "Student report card";
+        const savedLabel =
+          activeReportType === "cumulative_book"
+            ? "Cumulative report book"
+            : activeReportType === "cumulative_transcript"
+              ? "Cumulative transcript"
+              : activeReportType === "subject_broadsheet"
+                ? "Subject broadsheet"
+                : activeReportType === "class_broadsheet"
+                  ? "Class broadsheet"
+                  : activeReportType === "annual_broadsheet"
+                    ? "Annual broadsheet"
+                    : "Student report card";
         showToast("success", `${savedLabel} template settings saved successfully.`);
       }
       return true;
@@ -2970,7 +3421,7 @@ export default function Branchsettings() {
       await persistPendingMediaRemovals();
       await load();
       await refreshInstitution?.();
-      window.dispatchEvent(new Event("school-branch-settings-updated"));
+      await refreshSettings?.();
 
       showToast("success", "All school branch settings saved successfully.");
     } finally {
@@ -3977,10 +4428,26 @@ function ReportTemplateSheet({
   saveReportCardTemplateSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
   onClose: () => void;
 }) {
-  const reportTabs: { key: ReportTemplateReportType; label: string; note: string }[] = [
-    { key: "student_report", label: "Student Report Cards", note: "Existing template gallery and display controls." },
-    { key: "cumulative_book", label: "Cumulative Report Book", note: "Student report templates assembled as printable booklets." },
-    { key: "cumulative_transcript", label: "Cumulative Transcript", note: "Official transcript-style academic history." },
+  const reportTabGroups: {
+    title: string;
+    tabs: { key: ReportTemplateReportType; label: string; note: string }[];
+  }[] = [
+    {
+      title: "Academic Reports",
+      tabs: [
+        { key: "student_report", label: "Student Report Cards", note: "Existing template gallery and display controls." },
+        { key: "cumulative_book", label: "Cumulative Report Book", note: "Student report templates assembled as printable booklets." },
+        { key: "cumulative_transcript", label: "Cumulative Transcript", note: "Official transcript-style academic history." },
+      ],
+    },
+    {
+      title: "Broadsheets",
+      tabs: [
+        { key: "subject_broadsheet", label: "Subject Broadsheet", note: "Assessment breakdown and subject performance." },
+        { key: "class_broadsheet", label: "Class Broadsheet", note: "Students across all subjects for one period." },
+        { key: "annual_broadsheet", label: "Annual Broadsheet", note: "Cumulative class performance across periods." },
+      ],
+    },
   ];
 
   const activeReportType = (form.reportType || "student_report") as ReportTemplateReportType;
@@ -4009,12 +4476,22 @@ function ReportTemplateSheet({
     return { ...definition, ...(existing || {}) };
   });
 
+  const subjectBroadsheetTemplates = reportTemplateDefinitionOptions("subject_broadsheet");
+  const classBroadsheetTemplates = reportTemplateDefinitionOptions("class_broadsheet");
+  const annualBroadsheetTemplates = reportTemplateDefinitionOptions("annual_broadsheet");
+
   const galleryTemplates =
     activeReportType === "cumulative_book"
       ? bookTemplates
       : activeReportType === "cumulative_transcript"
         ? transcriptTemplates
-        : studentTemplates;
+        : activeReportType === "subject_broadsheet"
+          ? subjectBroadsheetTemplates
+          : activeReportType === "class_broadsheet"
+            ? classBroadsheetTemplates
+            : activeReportType === "annual_broadsheet"
+              ? annualBroadsheetTemplates
+              : studentTemplates;
 
   const previewDataset = useMemo(
     () =>
@@ -4068,12 +4545,47 @@ function ReportTemplateSheet({
     [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardWatermark]
   );
 
+  const broadsheetPreviewHeader = useMemo(
+    () =>
+      createDummyBroadsheetPreviewHeader({
+        schoolName,
+        branchName,
+        primaryColor: settingsForm.primaryColor,
+        fontFamily: settingsForm.fontFamily,
+        logo: settingsForm.logo,
+        reportCardBackgroundImage: settingsForm.reportCardBackgroundImage,
+        reportCardWatermark: settingsForm.reportCardWatermark,
+        reportCardSignatureImage: settingsForm.reportCardSignatureImage,
+      }),
+    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardBackgroundImage, settingsForm.reportCardWatermark, settingsForm.reportCardSignatureImage]
+  );
+
+  const subjectBroadsheetPreviewDataset = useMemo(() => createDummySubjectBroadsheetPreviewDataset(), []);
+  const classBroadsheetPreviewDataset = useMemo(() => createDummyClassBroadsheetPreviewDataset(), []);
+  const annualBroadsheetPreviewDataset = useMemo(() => createDummyAnnualBroadsheetPreviewDataset(), []);
+
+  const isBroadsheetType = activeReportType.endsWith("_broadsheet");
+  const activeBroadsheetKind =
+    activeReportType === "class_broadsheet"
+      ? "class"
+      : activeReportType === "annual_broadsheet"
+        ? "annual"
+        : "subject";
+  const activeBroadsheetDataset =
+    activeReportType === "class_broadsheet"
+      ? classBroadsheetPreviewDataset
+      : activeReportType === "annual_broadsheet"
+        ? annualBroadsheetPreviewDataset
+        : subjectBroadsheetPreviewDataset;
+
   const selectedPreviewTemplate =
     galleryTemplates.find((item) => sameId(item.code, form.templateCode)) ||
     galleryTemplates.find((item) => sameId(item.layoutKey, form.layoutKey)) ||
     (activeReportType === "cumulative_transcript"
       ? getCumulativeTranscriptTemplateRegistryItem(form.templateCode)
-      : getStudentReportTemplateRegistryItem(form.templateCode)) ||
+      : isBroadsheetType
+        ? getBroadsheetTemplateRegistryItem(form.templateCode)
+        : getStudentReportTemplateRegistryItem(form.templateCode)) ||
     defaultReportTemplateDefinition(activeReportType);
 
   const selectedPreviewSettings = reportTemplatePreviewSettingsFromForm(
@@ -4124,7 +4636,65 @@ function ReportTemplateSheet({
     { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on transcripts." },
   ];
 
-  const activeControls = activeReportType === "cumulative_book" ? bookControls : activeReportType === "cumulative_transcript" ? transcriptControls : studentVisibilityControls;
+  const broadsheetSharedControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
+    { key: "showBroadsheetLogo", label: "School Logo", note: "Show the resolved school or branch logo." },
+    { key: "showBroadsheetWatermark", label: "Watermark", note: "Use the saved report watermark." },
+    { key: "showBroadsheetGeneratedDate", label: "Generated Date", note: "Show generated or printed date." },
+    { key: "showBroadsheetPageNumber", label: "Page Number", note: "Show page numbering in the footer." },
+    { key: "showBroadsheetSignatures", label: "Signatures", note: "Show official sign-off areas." },
+    { key: "showBroadsheetSummary", label: "Summary", note: "Show top academic summary statistics." },
+    { key: "showBroadsheetStatistics", label: "Statistics", note: "Show additional statistics and period context." },
+    { key: "showBroadsheetStudentPhoto", label: "Student Photos", note: "Show student photos when available." },
+  ];
+  const subjectBroadsheetControls = [
+    ...broadsheetSharedControls,
+    { key: "showBroadsheetAssessmentBreakdown", label: "Assessment Breakdown", note: "Show assessment component columns." },
+    { key: "showBroadsheetWeightedTotal", label: "Weighted Total", note: "Show weighted total." },
+    { key: "showBroadsheetPercentage", label: "Percentage", note: "Show final percentage." },
+    { key: "showBroadsheetGrade", label: "Grade", note: "Show grade column." },
+    { key: "showBroadsheetGPA", label: "GPA", note: "Show GPA." },
+    { key: "showBroadsheetPosition", label: "Position", note: "Show subject position." },
+    { key: "showBroadsheetRemark", label: "Remark", note: "Show remark column." },
+    { key: "showBroadsheetHighestScore", label: "Highest Score", note: "Show highest score statistic." },
+    { key: "showBroadsheetLowestScore", label: "Lowest Score", note: "Show lowest score statistic." },
+    { key: "showBroadsheetClassAverage", label: "Class Average", note: "Show class average statistic." },
+  ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
+  const classBroadsheetControls = [
+    ...broadsheetSharedControls,
+    { key: "showBroadsheetSubjectScores", label: "Subject Scores", note: "Show all subject columns." },
+    { key: "showBroadsheetSubjectGrades", label: "Subject Grades", note: "Show grades below scores." },
+    { key: "showBroadsheetTotal", label: "Total", note: "Show total column." },
+    { key: "showBroadsheetAverage", label: "Average", note: "Show average column." },
+    { key: "showBroadsheetGPA", label: "GPA", note: "Show GPA column." },
+    { key: "showBroadsheetClassPosition", label: "Class Position", note: "Show class position." },
+    { key: "showBroadsheetAttendance", label: "Attendance", note: "Show attendance percentage." },
+    { key: "showBroadsheetClassHighestAverage", label: "Highest Average", note: "Show highest average." },
+    { key: "showBroadsheetClassLowestAverage", label: "Lowest Average", note: "Show lowest average." },
+  ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
+  const annualBroadsheetControls = [
+    ...broadsheetSharedControls,
+    { key: "showBroadsheetPeriodScores", label: "Period Scores", note: "Show period scores under subject averages." },
+    { key: "showBroadsheetAnnualAverage", label: "Annual Average", note: "Show annual average." },
+    { key: "showBroadsheetAnnualGPA", label: "Annual GPA", note: "Show annual GPA." },
+    { key: "showBroadsheetAnnualPosition", label: "Annual Position", note: "Show annual rank." },
+    { key: "showBroadsheetTrend", label: "Trend", note: "Show performance trend where supported." },
+    { key: "showBroadsheetPromotionDecision", label: "Promotion Decision", note: "Show promote, repeat or graduate decision." },
+    { key: "showBroadsheetBestPeriod", label: "Best Period", note: "Show best period where supported." },
+    { key: "showBroadsheetLatestPeriod", label: "Latest Period", note: "Show latest period where supported." },
+  ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
+
+  const activeControls =
+    activeReportType === "cumulative_book"
+      ? bookControls
+      : activeReportType === "cumulative_transcript"
+        ? transcriptControls
+        : activeReportType === "subject_broadsheet"
+          ? subjectBroadsheetControls
+          : activeReportType === "class_broadsheet"
+            ? classBroadsheetControls
+            : activeReportType === "annual_broadsheet"
+              ? annualBroadsheetControls
+              : studentVisibilityControls;
 
   const switchReportType = (reportType: ReportTemplateReportType) => {
     const defaultTemplate = defaultReportTemplateDefinition(reportType);
@@ -4133,6 +4703,21 @@ function ReportTemplateSheet({
   };
 
   const renderPreviewCard = (template: ReportTemplateRow, templateSettings: any) => {
+    if (isBroadsheetType) {
+      return (
+        <TemplatePreviewBroadsheetCard
+          kind={activeBroadsheetKind}
+          dataset={activeBroadsheetDataset}
+          header={broadsheetPreviewHeader}
+          template={template}
+          settings={templateSettings}
+          compact
+          showWatermark={form.showBroadsheetWatermark}
+          pageBreakAfter={false}
+          mobilePreview={false}
+        />
+      );
+    }
     if (activeReportType === "cumulative_book") {
       return (
         <TemplatePreviewCumulativeReportBook
@@ -4175,6 +4760,21 @@ function ReportTemplateSheet({
   };
 
   const renderFocusedPreview = () => {
+    if (isBroadsheetType) {
+      return (
+        <TemplatePreviewBroadsheetCard
+          kind={activeBroadsheetKind}
+          dataset={activeBroadsheetDataset}
+          header={broadsheetPreviewHeader}
+          template={selectedPreviewTemplate}
+          settings={selectedPreviewSettings}
+          compact
+          showWatermark={form.showBroadsheetWatermark}
+          pageBreakAfter={false}
+          mobilePreview
+        />
+      );
+    }
     if (activeReportType === "cumulative_book") {
       return (
         <TemplatePreviewCumulativeReportBook
@@ -4221,23 +4821,30 @@ function ReportTemplateSheet({
       <section className="ba-sheet report-template-suite-sheet">
         <div className="ba-sheet-head">
           <div>
-            <h2>Report Template & Document Controls</h2>
-            <p>Configure student report cards, cumulative report books and cumulative transcripts. Each tab saves to reportCardTemplates, reportCardTemplateSettings and reportCardTemplateAssignments with its own reportType.</p>
+            <h2>Academic Document & Broadsheet Templates</h2>
+            <p>Configure student reports, cumulative documents and separate subject, class and annual broadsheet defaults. Every tab saves its own template, settings and branch assignment.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close report template settings">✕</button>
         </div>
 
-        <div className="report-template-tabs" role="tablist" aria-label="Report template setting tabs">
-          {reportTabs.map((tab) => (
-            <button
-              type="button"
-              key={tab.key}
-              className={activeReportType === tab.key ? "active" : ""}
-              onClick={() => switchReportType(tab.key)}
-            >
-              <strong>{tab.label}</strong>
-              <span>{tab.note}</span>
-            </button>
+        <div className="report-template-tab-groups">
+          {reportTabGroups.map((group) => (
+            <section key={group.title} className="report-template-tab-group">
+              <div className="report-template-tab-group-title">{group.title}</div>
+              <div className="report-template-tabs" role="tablist" aria-label={`${group.title} template tabs`}>
+                {group.tabs.map((tab) => (
+                  <button
+                    type="button"
+                    key={tab.key}
+                    className={activeReportType === tab.key ? "active" : ""}
+                    onClick={() => switchReportType(tab.key)}
+                  >
+                    <strong>{tab.label}</strong>
+                    <span>{tab.note}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
 
@@ -4252,7 +4859,9 @@ function ReportTemplateSheet({
                   galleryTemplates.find((item) => sameId(item.layoutKey, templateCode)) ||
                   (activeReportType === "cumulative_transcript"
                     ? getCumulativeTranscriptTemplateRegistryItem(templateCode)
-                    : getStudentReportTemplateRegistryItem(templateCode));
+                    : isBroadsheetType
+                      ? getBroadsheetTemplateRegistryItem(templateCode)
+                      : getStudentReportTemplateRegistryItem(templateCode));
 
                 selectReportTemplateIntoForm(selected as any, updateField, activeReportType);
               }}
@@ -4416,7 +5025,20 @@ function ReportTemplateSheet({
               </>
             )}
 
-            <Field label="Generated Date Label">
+            {isBroadsheetType && (
+              <>
+                <Field label="Broadsheet Title"><input value={form.broadsheetTitleLabel} onChange={(event) => updateField("broadsheetTitleLabel", event.target.value)} /></Field>
+                <Field label="Student Column"><input value={form.studentColumnLabel} onChange={(event) => updateField("studentColumnLabel", event.target.value)} /></Field>
+                <Field label="Admission Number Column"><input value={form.admissionNumberColumnLabel} onChange={(event) => updateField("admissionNumberColumnLabel", event.target.value)} /></Field>
+                <Field label="Position Column"><input value={form.positionColumnLabel} onChange={(event) => updateField("positionColumnLabel", event.target.value)} /></Field>
+                <Field label="Grade Column"><input value={form.gradeColumnLabel} onChange={(event) => updateField("gradeColumnLabel", event.target.value)} /></Field>
+                <Field label="Remark Column"><input value={form.remarkColumnLabel} onChange={(event) => updateField("remarkColumnLabel", event.target.value)} /></Field>
+                <Field label="Generated Date Label"><input value={form.broadsheetGeneratedDateLabel} onChange={(event) => updateField("broadsheetGeneratedDateLabel", event.target.value)} /></Field>
+                <Field label="Broadsheet Footer"><input value={form.broadsheetFooterText} onChange={(event) => updateField("broadsheetFooterText", event.target.value)} /></Field>
+              </>
+            )}
+
+            {!isBroadsheetType && <Field label="Generated Date Label">
               <select
                 value={generatedDateLabelOptions.includes(form.generatedDateLabel) ? form.generatedDateLabel : "__custom__"}
                 onChange={(event) => {
@@ -4427,15 +5049,18 @@ function ReportTemplateSheet({
                 {generatedDateLabelOptions.map((label) => <option key={label} value={label}>{label}</option>)}
                 <option value="__custom__">Custom label...</option>
               </select>
-            </Field>
+            </Field>}
 
-            <Field label="Custom Generated Date Label">
-              <input value={form.generatedDateLabel} onChange={(event) => updateField("generatedDateLabel", event.target.value)} placeholder="Generated" />
-            </Field>
-
-            <Field label="Footer Text">
-              <input value={form.footerText} onChange={(event) => updateField("footerText", event.target.value)} placeholder="Official academic document generated by Eleeveon Schools." />
-            </Field>
+            {!isBroadsheetType && (
+              <>
+                <Field label="Custom Generated Date Label">
+                  <input value={form.generatedDateLabel} onChange={(event) => updateField("generatedDateLabel", event.target.value)} placeholder="Generated" />
+                </Field>
+                <Field label="Footer Text">
+                  <input value={form.footerText} onChange={(event) => updateField("footerText", event.target.value)} placeholder="Official academic document generated by Eleeveon Schools." />
+                </Field>
+              </>
+            )}
           </div>
         </section>
 
@@ -4450,7 +5075,19 @@ function ReportTemplateSheet({
               onClose();
             }}
           >
-            {saving ? "Saving..." : activeReportType === "cumulative_book" ? "Save Cumulative Book" : activeReportType === "cumulative_transcript" ? "Save Cumulative Transcript" : "Save Student Report"}
+            {saving
+              ? "Saving..."
+              : activeReportType === "cumulative_book"
+                ? "Save Cumulative Book"
+                : activeReportType === "cumulative_transcript"
+                  ? "Save Cumulative Transcript"
+                  : activeReportType === "subject_broadsheet"
+                    ? "Save Subject Broadsheet"
+                    : activeReportType === "class_broadsheet"
+                      ? "Save Class Broadsheet"
+                      : activeReportType === "annual_broadsheet"
+                        ? "Save Annual Broadsheet"
+                        : "Save Student Report"}
           </button>
         </div>
       </section>
@@ -5233,6 +5870,27 @@ const css = `
 
 .report-template-suite-sheet {
   width: min(980px, 100%);
+}
+
+.report-template-tab-groups {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.report-template-tab-group {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148,163,184,.22);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface, #fff) 94%, var(--ba-primary) 6%);
+}
+
+.report-template-tab-group-title {
+  margin-bottom: 8px;
+  color: var(--text, #0f172a);
+  font-size: 12px;
+  font-weight: 950;
 }
 
 .report-template-tabs {

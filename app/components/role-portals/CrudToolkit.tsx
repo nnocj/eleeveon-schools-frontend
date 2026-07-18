@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 import { apiCreate, apiDelete, apiList, apiUpdate } from "../../lib/platformApi";
 
 export type CrudField = {

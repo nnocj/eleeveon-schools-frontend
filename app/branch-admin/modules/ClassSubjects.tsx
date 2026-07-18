@@ -30,11 +30,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-
 import {
   db,
   type AcademicPeriod,
@@ -47,12 +43,13 @@ import {
   type CurriculumSubjectType,
   type Subject,
   type Teacher,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
 import {
+  softDeleteOwnerFieldAssets,
   attachCameraStreamToVideo,
-  attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
@@ -65,8 +62,15 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
+
+
+
 } from "../../lib/media/mediaAssetUtils";
 
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type StatusFilter = "all" | "active" | "inactive" | "locked" | "unassigned";
@@ -182,9 +186,35 @@ function selectedWorkspaceBranchId(args: {
 
 
 type SettingsLike = {
-  currentAcademicStructureId?: number;
-  currentAcademicPeriodId?: number;
-} | null | undefined;
+  currentAcademicStructureId?: unknown;
+  currentAcademicPeriodId?: unknown;
+};
+
+function readOptionalPositiveId(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : undefined;
+}
+
+function readClassSubjectSettings(value: unknown): SettingsLike | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    currentAcademicStructureId: record.currentAcademicStructureId,
+    currentAcademicPeriodId: record.currentAcademicPeriodId,
+  };
+}
+
 
 type FormState = {
   id?: number;
@@ -257,27 +287,43 @@ const CLASS_SUBJECT_MEDIA_OWNER_TABLE = "classSubjects";
 const CLASS_SUBJECT_MEDIA_ENTITY_LABEL = "Class Subject";
 const CLASS_SUBJECT_BANNER_FIELD_KEY = "bannerImage";
 
-const makeEmptyForm = (settings?: SettingsLike): FormState => ({
-  classId: "",
-  subjectId: "",
-  curriculumSubjectId: "",
-  academicStructureId: settings?.currentAcademicStructureId ? String(settings.currentAcademicStructureId) : "",
-  academicPeriodId: settings?.currentAcademicPeriodId ? String(settings.currentAcademicPeriodId) : "",
-  teacherId: "",
-  name: "",
-  code: "",
-  credits: "",
-  contactHours: "",
-  type: "core" as CurriculumSubjectType,
-  compulsory: true,
-  elective: false,
-  photo: "",
-  photoMediaId: undefined,
-  bannerImage: "",
-  bannerImageMediaId: undefined,
-  active: true,
-  locked: false,
-});
+const makeEmptyForm = (settings?: unknown): FormState => {
+  const resolvedSettings = readClassSubjectSettings(settings);
+
+  const currentAcademicStructureId = readOptionalPositiveId(
+    resolvedSettings?.currentAcademicStructureId,
+  );
+
+  const currentAcademicPeriodId = readOptionalPositiveId(
+    resolvedSettings?.currentAcademicPeriodId,
+  );
+
+  return {
+    classId: "",
+    subjectId: "",
+    curriculumSubjectId: "",
+    academicStructureId: currentAcademicStructureId
+      ? String(currentAcademicStructureId)
+      : "",
+    academicPeriodId: currentAcademicPeriodId
+      ? String(currentAcademicPeriodId)
+      : "",
+    teacherId: "",
+    name: "",
+    code: "",
+    credits: "",
+    contactHours: "",
+    type: "core" as CurriculumSubjectType,
+    compulsory: true,
+    elective: false,
+    photo: "",
+    photoMediaId: undefined,
+    bannerImage: "",
+    bannerImageMediaId: undefined,
+    active: true,
+    locked: false,
+  };
+};
 
 const isActiveRow = (row: any) => !row?.isDeleted && row?.active !== false;
 
@@ -345,35 +391,36 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function ClassSubjectsPage() {
+  const dataRevision = useBranchTableRevision(["classSubjects", "classes", "subjects", "teachers", "academicStructures", "academicPeriods", "curriculumSubjects", "assessmentApplicabilities", "assessmentEntries", "mediaAssets", "mediaBlobs"]);
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+  const workspace = useBranchWorkspaceScope();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<ClassSubject[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "classSubjects",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
+    ],
+  });
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -580,7 +627,9 @@ export default function ClassSubjectsPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -678,8 +727,8 @@ export default function ClassSubjectsPage() {
         return {
           id,
           row,
-          photoUrl: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-          bannerImageUrl: mediaPreviewUrls[mediaKey(id, "bannerImage")] || safeRecordMediaValue(row.bannerImage),
+          photoUrl: resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
+          bannerImageUrl: resolvedMediaById[id]?.bannerImage || mediaPreviewUrls[mediaKey(id, "bannerImage")] || safeRecordMediaValue(row.bannerImage),
           className: classData?.name || "Unknown Class",
           subjectName: row.name || subject?.name || "Unknown Subject",
           subjectCode: row.code || subject?.code || "",
@@ -1012,18 +1061,17 @@ export default function ClassSubjectsPage() {
       );
 
       if (savedClassSubjectId) {
-        await Promise.all(
-          [form.photoMediaId, form.bannerImageMediaId]
-            .filter(Boolean)
-            .map((assetId) =>
-              attachMediaAssetToOwner({
-                assetId: Number(assetId),
-                ownerTable: CLASS_SUBJECT_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedClassSubjectId,
-                ownerTempKey: mediaSessionKeyRef.current,
-              })
-            )
-        );
+        await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable: CLASS_SUBJECT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedClassSubjectId,
+          ownerCloudId: (savedClassSubject as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: form.photoMediaId, fieldKey: MediaFieldKeys.PHOTO },
+            { assetId: form.bannerImageMediaId, fieldKey: CLASS_SUBJECT_BANNER_FIELD_KEY },
+          ],
+        });
       }
 
       mediaSessionKeyRef.current = createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE);
@@ -1047,6 +1095,27 @@ export default function ClassSubjectsPage() {
         : `Delete ${item.subjectName} for ${item.className}?`
     );
     if (!ok) return;
+
+    await Promise.all(
+
+      ["photo", "bannerImage"].map((fieldKey) =>
+
+        softDeleteOwnerFieldAssets({
+
+          accountId: String(accountId),
+
+          ownerTable: "classSubjects",
+
+          ownerLocalId: Number(id),
+
+          fieldKey,
+
+        }),
+
+      ),
+
+    );
+
     await softDeleteLocal("classSubjects", Number(id));
     setSelectedItem(null);
     showToast("success", "Class subject deleted.");

@@ -12,11 +12,12 @@
  * - Controls local, per-browser display preferences for a portal.
  * - Keeps school and branch branding protected.
  * - Saves local preferences in localStorage.
- * - Applies the old Eleeveon theme variables safely.
+ * - Applies each local preference immediately and publishes it for LocalAppearanceRuntime.
+ * - The runtime applies the exact historical LocalSettings light/dark palette.
  *
  * Preserved behavior:
  * - Same exported types.
- * - Same exported helper functions.
+ * - Helper functions are re-exported from localPortalAppearance.
  * - Same localStorage key pattern.
  * - Same appearance modes: light, dark, system.
  * - Same local font-size comfort controls.
@@ -51,18 +52,44 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 // ======================================================
-// TYPES
+// DEVICE-LOCAL APPEARANCE CONTRACT
 // ======================================================
 
-export type LocalAppearanceMode = "light" | "dark" | "system";
-export type LocalFontSize = "branch" | "small" | "normal" | "large" | "extra-large";
-export type LocalDensity = "compact" | "comfortable";
+import {
+  applyLocalPortalSettings,
+  announceLocalSettingsChange,
+  clearLocalPortalSettings,
+  DEFAULT_LOCAL_PORTAL_SETTINGS,
+  getLocalSettingsStorageKey,
+  readLocalPortalSettings,
+  resolveLocalAppearance,
+  resolveLocalFontSize,
+  resolveSharedFontSize,
+  saveLocalPortalSettings,
+  type LocalAppearanceMode,
+  type LocalDensity,
+  type LocalFontSize,
+  type LocalPortalSettings,
+} from "../../lib/theme/localPortalAppearance";
 
-export type LocalPortalSettings = {
-  appearanceMode: LocalAppearanceMode;
-  fontSize: LocalFontSize;
-  density: LocalDensity;
-  reduceMotion: boolean;
+export {
+  applyLocalPortalSettings,
+  announceLocalSettingsChange,
+  clearLocalPortalSettings,
+  DEFAULT_LOCAL_PORTAL_SETTINGS,
+  getLocalSettingsStorageKey,
+  readLocalPortalSettings,
+  resolveLocalAppearance,
+  resolveLocalFontSize,
+  resolveSharedFontSize,
+  saveLocalPortalSettings,
+};
+
+export type {
+  LocalAppearanceMode,
+  LocalDensity,
+  LocalFontSize,
+  LocalPortalSettings,
 };
 
 type Props = {
@@ -72,352 +99,46 @@ type Props = {
   schoolId?: number | string | null;
   branchId?: number | string | null;
 
-  /** Pass settings?.primaryColor here. It is used only by the protected branch theme engine. */
+  /**
+   * Shared branding colour. It is used by this settings UI only and is never
+   * changed by a local preference.
+   */
   primaryColor?: string;
 
-  /** Pass settings?.fontSize here if available. Branch Default preserves it. */
+  /** Shared role/branch font size used by the "Branch Default" option. */
   branchFontSize?: number | string | null;
+
+  /**
+   * Shared branch/account/platform default mode. Local "system" follows this.
+   */
+  sharedDefaultMode?: "light" | "dark" | string | null;
 
   triggerLabel?: string;
   triggerIcon?: string;
   inline?: boolean;
-  onChange?: (settings: LocalPortalSettings) => void;
+  onChange?: (
+    settings: LocalPortalSettings,
+  ) => void;
 };
 
-type CssVars = React.CSSProperties & {
-  "--ba-primary"?: string;
-};
-
-type SettingsSection = "appearance" | "text" | "density" | "motion";
-type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
-
-// ======================================================
-// DEFAULTS
-// ======================================================
-
-export const DEFAULT_LOCAL_PORTAL_SETTINGS: LocalPortalSettings = {
-  appearanceMode: "system",
-  fontSize: "branch",
-  density: "comfortable",
-  reduceMotion: false,
-};
-
-// ======================================================
-// OLD THEME HELPERS — PRESERVED
-// ======================================================
-
-function extractCssVarFallback(value: string) {
-  const match = value.match(/var\([^,]+,\s*([^\)]+)\)/);
-  return match?.[1]?.trim() || "";
-}
-
-function normalizeCssColor(value?: string, fallback = "#2f6fed") {
-  const raw = String(value || "").trim();
-
-  if (!raw) return fallback;
-
-  if (raw.startsWith("var(")) {
-    return extractCssVarFallback(raw) || getCssPrimary(fallback);
-  }
-
-  if (raw.startsWith("#") || raw.startsWith("rgb") || /^[0-9a-fA-F]{3,8}$/.test(raw)) {
-    return raw;
-  }
-
-  return fallback;
-}
-
-function darken(color: string, factor: number) {
-  const normalized = normalizeCssColor(color, "#2f6fed");
-
-  if (normalized.startsWith("rgb")) {
-    const channels = normalized.match(/\d+(?:\.\d+)?/g)?.slice(0, 3).map(Number) || [];
-    if (channels.length >= 3 && channels.every((channel) => Number.isFinite(channel))) {
-      const [r, g, b] = channels.map((channel) =>
-        Math.max(0, Math.min(255, Math.floor(channel * factor)))
-      );
-      return `rgb(${r}, ${g}, ${b})`;
-    }
-
-    return normalized;
-  }
-
-  let col = normalized.replace("#", "").trim();
-
-  if (col.length === 3) {
-    col = col
-      .split("")
-      .map((c) => c + c)
-      .join("");
-  }
-
-  if (col.length > 6) col = col.slice(0, 6);
-
-  const num = parseInt(col || "2f6fed", 16);
-  const safeNum = Number.isFinite(num) ? num : parseInt("2f6fed", 16);
-
-  const r = Math.floor(((safeNum >> 16) & 255) * factor);
-  const g = Math.floor(((safeNum >> 8) & 255) * factor);
-  const b = Math.floor((safeNum & 255) * factor);
-
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function getCssPrimary(fallback = "#2f6fed") {
-  if (typeof window === "undefined") return fallback;
-
-  const value = getComputedStyle(document.documentElement)
-    .getPropertyValue("--primary-color")
-    .trim();
-
-  return value || fallback;
-}
-
-function updateMetaThemeColor(color: string) {
-  if (typeof document === "undefined") return;
-
-  let meta = document.querySelector("meta[name='theme-color']");
-
-  if (!meta) {
-    meta = document.createElement("meta");
-    meta.setAttribute("name", "theme-color");
-    document.head.appendChild(meta);
-  }
-
-  meta.setAttribute("content", color);
-}
-
-// ======================================================
-// STORAGE HELPERS — PRESERVED EXPORTS
-// ======================================================
-
-export function getLocalSettingsStorageKey(input: {
-  accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  roleKey?: string | null;
-}) {
-  const account = input.accountId || "guest";
-  const school = input.schoolId || "no-school";
-  const branch = input.branchId || "no-branch";
-  const role = input.roleKey || "portal";
-
-  return `eleeveon:local-settings:${account}:${school}:${branch}:${role}`;
-}
-
-export function readLocalPortalSettings(storageKey: string): LocalPortalSettings {
-  if (typeof window === "undefined") return DEFAULT_LOCAL_PORTAL_SETTINGS;
-
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return DEFAULT_LOCAL_PORTAL_SETTINGS;
-
-    const parsed = JSON.parse(raw) as Partial<LocalPortalSettings>;
-
-    return {
-      appearanceMode:
-        parsed.appearanceMode === "light" ||
-        parsed.appearanceMode === "dark" ||
-        parsed.appearanceMode === "system"
-          ? parsed.appearanceMode
-          : DEFAULT_LOCAL_PORTAL_SETTINGS.appearanceMode,
-
-      fontSize:
-        parsed.fontSize === "branch" ||
-        parsed.fontSize === "small" ||
-        parsed.fontSize === "normal" ||
-        parsed.fontSize === "large" ||
-        parsed.fontSize === "extra-large"
-          ? parsed.fontSize
-          : DEFAULT_LOCAL_PORTAL_SETTINGS.fontSize,
-
-      density:
-        parsed.density === "compact" || parsed.density === "comfortable"
-          ? parsed.density
-          : DEFAULT_LOCAL_PORTAL_SETTINGS.density,
-
-      reduceMotion: Boolean(parsed.reduceMotion),
-    };
-  } catch {
-    return DEFAULT_LOCAL_PORTAL_SETTINGS;
-  }
-}
-
-export function saveLocalPortalSettings(storageKey: string, settings: LocalPortalSettings) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(storageKey, JSON.stringify(settings));
-}
-
-export function clearLocalPortalSettings(storageKey: string) {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(storageKey);
-}
-
-// ======================================================
-// APPLY HELPERS — PRESERVED EXPORTS
-// ======================================================
-
-export function resolveLocalAppearance(mode: LocalAppearanceMode): "light" | "dark" {
-  if (typeof window === "undefined") return "light";
-
-  if (mode === "system") {
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-
-  return mode;
-}
-
-function resolveBranchFontSize(branchFontSize?: number | string | null) {
-  if (typeof branchFontSize === "number") return `${branchFontSize}px`;
-
-  if (branchFontSize === "large") return "18px";
-  if (branchFontSize === "small") return "12px";
-
-  if (typeof branchFontSize === "string" && branchFontSize.trim()) {
-    if (branchFontSize.endsWith("px")) return branchFontSize;
-    const parsed = Number(branchFontSize);
-    if (Number.isFinite(parsed)) return `${parsed}px`;
-  }
-
-  return "14px";
-}
-
-function resolveLocalFontSize(mode: LocalFontSize, branchFontSize?: number | string | null) {
-  if (mode === "branch") return resolveBranchFontSize(branchFontSize);
-  if (mode === "small") return "12px";
-  if (mode === "normal") return "14px";
-  if (mode === "large") return "18px";
-  if (mode === "extra-large") return "20px";
-  return resolveBranchFontSize(branchFontSize);
-}
-
-function applyOldThemeVariables(input: {
-  appearanceMode: LocalAppearanceMode;
-  primaryColor?: string;
-}) {
-  if (typeof document === "undefined") return;
-
-  const root = document.documentElement;
-  const primary = normalizeCssColor(input.primaryColor || getCssPrimary("#2f6fed"), "#2f6fed");
-  const resolvedMode = resolveLocalAppearance(input.appearanceMode);
-
-  root.style.setProperty("--primary-color", primary);
-
-  const darkBg = darken(primary, 0.25);
-  const darkerBg = darken(primary, 0.15);
-
-  root.setAttribute("data-theme", resolvedMode);
-  root.dataset.theme = resolvedMode;
-  root.dataset.localAppearance = input.appearanceMode;
-  root.dataset.eleeveonResolvedMode = resolvedMode;
-
-  root.classList.toggle("dark", resolvedMode === "dark");
-  root.classList.toggle("light", resolvedMode === "light");
-
-  updateMetaThemeColor(resolvedMode === "dark" ? darkBg : primary);
-
-  if (resolvedMode === "dark") {
-    root.style.setProperty("--bg", darkBg);
-    root.style.setProperty("--surface", darkerBg);
-    root.style.setProperty("--text", "#ffffff");
-    root.style.setProperty("--border", "rgba(255,255,255,0.14)");
-    root.style.setProperty("--card-bg", darkerBg);
-
-    root.style.setProperty("--card", darkerBg);
-    root.style.setProperty("--muted", "rgba(255,255,255,0.74)");
-    root.style.setProperty("--input-bg", darkerBg);
-    root.style.setProperty("--input-text", "#ffffff");
-    root.style.setProperty("--input-border", "rgba(255,255,255,0.14)");
-    root.style.setProperty("--shell-section-bg", "rgba(255,255,255,0.06)");
-    root.style.setProperty("--shell-shadow", "0 24px 70px rgba(0,0,0,0.28)");
-  } else {
-    root.style.setProperty("--bg", "#f7f8fb");
-    root.style.setProperty("--surface", "#ffffff");
-    root.style.setProperty("--text", "#111111");
-    root.style.setProperty("--border", "rgba(0,0,0,0.10)");
-    root.style.setProperty("--card-bg", "#ffffff");
-
-    root.style.setProperty("--card", "#ffffff");
-    root.style.setProperty("--muted", "#64748b");
-    root.style.setProperty("--input-bg", "#ffffff");
-    root.style.setProperty("--input-text", "#111111");
-    root.style.setProperty("--input-border", "rgba(0,0,0,0.10)");
-    root.style.setProperty("--shell-section-bg", "rgba(255,255,255,0.88)");
-    root.style.setProperty("--shell-shadow", "0 24px 70px rgba(15,23,42,0.10)");
-  }
-
-  if (document.body) {
-    document.body.style.background = "var(--bg)";
-    document.body.style.color = "var(--text)";
-  }
-}
-
-function applyComfortVariables(settings: LocalPortalSettings, branchFontSize?: number | string | null) {
-  if (typeof document === "undefined") return;
-
-  const root = document.documentElement;
-  const fontSize = resolveLocalFontSize(settings.fontSize, branchFontSize);
-
-  root.style.setProperty("--font-size", fontSize);
-  root.style.fontSize = fontSize;
-
-  if (document.body) document.body.style.fontSize = fontSize;
-
-  root.dataset.localFontSize = settings.fontSize;
-  root.dataset.localDensity = settings.density;
-  root.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
-
-  root.style.setProperty("--local-density-scale", settings.density === "compact" ? "0.88" : "1");
-
-  if (settings.reduceMotion) {
-    root.style.setProperty("--motion-duration", "0ms");
-    root.style.setProperty("--animation-duration", "0ms");
-  } else {
-    root.style.removeProperty("--motion-duration");
-    root.style.removeProperty("--animation-duration");
-  }
-}
-
-export function applyLocalPortalSettings(
-  settings: LocalPortalSettings,
-  options?: {
-    primaryColor?: string;
-    branchFontSize?: number | string | null;
-  }
-) {
-  applyOldThemeVariables({
-    appearanceMode: settings.appearanceMode,
-    primaryColor: options?.primaryColor,
-  });
-
-  applyComfortVariables(settings, options?.branchFontSize);
-}
-
-export function announceLocalSettingsChange(
-  storageKey: string,
-  settings: LocalPortalSettings,
-  options?: {
-    primaryColor?: string;
-    branchFontSize?: number | string | null;
-  }
-) {
-  if (typeof window === "undefined") return;
-
-  window.dispatchEvent(
-    new CustomEvent("eleeveon:local-settings-changed", {
-      detail: {
-        storageKey,
-        settings,
-        appearanceMode: settings.appearanceMode,
-        resolvedMode: resolveLocalAppearance(settings.appearanceMode),
-        primaryColor: options?.primaryColor,
-        branchFontSize: options?.branchFontSize,
-      },
-    })
-  );
-
-  window.dispatchEvent(new Event("eleeveon:theme-refresh"));
-}
+type CssVars =
+  React.CSSProperties & {
+    "--ba-primary"?: string;
+  };
+
+type SettingsSection =
+  | "appearance"
+  | "text"
+  | "density"
+  | "motion";
+
+type Tone =
+  | "green"
+  | "red"
+  | "blue"
+  | "gray"
+  | "orange"
+  | "purple";
 
 // ======================================================
 // COMPONENT
@@ -434,6 +155,7 @@ export default function LocalSettings({
   inline = false,
   primaryColor = "var(--primary-color, #2563eb)",
   branchFontSize,
+  sharedDefaultMode = "light",
   onChange,
 }: Props) {
   const storageKey = useMemo(
@@ -442,46 +164,82 @@ export default function LocalSettings({
   );
 
   const [open, setOpen] = useState(inline);
-  const [settings, setSettings] = useState<LocalPortalSettings>(DEFAULT_LOCAL_PORTAL_SETTINGS);
   const [search, setSearch] = useState("");
   const [sectionOpen, setSectionOpen] = useState<SettingsSection | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const applyAndAnnounce = (next: LocalPortalSettings) => {
-    applyLocalPortalSettings(next, { primaryColor, branchFontSize });
-    announceLocalSettingsChange(storageKey, next, { primaryColor, branchFontSize });
+  /**
+   * Apply locally first, then notify the global runtime.
+   *
+   * This makes Light/Dark/Portal Default switch immediately even when the
+   * global runtime is remounting, changing workspace, or handling another
+   * appearance event at the same moment.
+   */
+  const applyAndAnnounce = (
+    next: LocalPortalSettings,
+  ) => {
+    applyLocalPortalSettings(
+      next,
+      {
+        sharedDefaultMode,
+        sharedPrimaryColor:
+          primaryColor,
+        sharedFontSize:
+          branchFontSize,
+      },
+    );
+
+    announceLocalSettingsChange(
+      storageKey,
+      next,
+      {
+        sharedDefaultMode,
+        sharedPrimaryColor:
+          primaryColor,
+        sharedFontSize:
+          branchFontSize,
+      },
+    );
+
     onChange?.(next);
   };
 
+  const [settings, setSettings] =
+    useState<LocalPortalSettings>(
+      () =>
+        readLocalPortalSettings(
+          storageKey,
+        ),
+    );
+
+  /**
+   * A mounted portal can switch role, school, or branch without unmounting this
+   * component. Reload the settings for the new exact storage key and apply them.
+   */
   useEffect(() => {
-    const loaded = readLocalPortalSettings(storageKey);
+    const loaded =
+      readLocalPortalSettings(
+        storageKey,
+      );
+
     setSettings(loaded);
-    applyAndAnnounce(loaded);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, primaryColor, branchFontSize]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!media) return;
-
-    const handleChange = () => {
-      setSettings((current) => {
-        if (current.appearanceMode === "system") applyAndAnnounce(current);
-        return current;
-      });
-    };
-
-    if (media.addEventListener) {
-      media.addEventListener("change", handleChange);
-      return () => media.removeEventListener("change", handleChange);
-    }
-
-    media.addListener?.(handleChange);
-    return () => media.removeListener?.(handleChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storageKey, primaryColor, branchFontSize]);
+    applyLocalPortalSettings(
+      loaded,
+      {
+        sharedDefaultMode,
+        sharedPrimaryColor:
+          primaryColor,
+        sharedFontSize:
+          branchFontSize,
+      },
+    );
+  }, [
+    storageKey,
+    sharedDefaultMode,
+    primaryColor,
+    branchFontSize,
+  ]);
 
   const updateSettings = (patch: Partial<LocalPortalSettings>) => {
     const next = { ...settings, ...patch };
@@ -497,7 +255,11 @@ export default function LocalSettings({
     applyAndAnnounce(DEFAULT_LOCAL_PORTAL_SETTINGS);
   };
 
-  const resolvedAppearance = resolveLocalAppearance(settings.appearanceMode);
+  const resolvedAppearance =
+    resolveLocalAppearance(
+      settings.appearanceMode,
+      sharedDefaultMode,
+    );
 
   const rows = useMemo(() => {
     const items: Array<{
@@ -513,7 +275,7 @@ export default function LocalSettings({
         icon: "◐",
         title: "Appearance",
         subtitle: `${labelFromDash(settings.appearanceMode)} · ${labelFromDash(resolvedAppearance)}`,
-        detail: "Light, dark, or system",
+        detail: "Light, dark, or portal default",
         tone: resolvedAppearance === "dark" ? "orange" : "green",
       },
       {
@@ -705,7 +467,7 @@ function AppearanceSheet({
       <div className="ba-menu-list">
         <OptionRow active={value === "light"} icon="☀" title="Light" note="Use old light mode" onClick={() => onChange("light")} />
         <OptionRow active={value === "dark"} icon="☾" title="Dark" note="Use protected branch dark mode" onClick={() => onChange("dark")} />
-        <OptionRow active={value === "system"} icon="▣" title="System" note="Follow this device setting" onClick={() => onChange("system")} />
+        <OptionRow active={value === "system"} icon="▣" title="Portal Default" note="Follow the branch, account, or platform default" onClick={() => onChange("system")} />
       </div>
 
       <div className="ba-sheet-actions">
@@ -727,7 +489,7 @@ function TextSizeSheet({
   onClose: () => void;
 }) {
   const options: Array<{ value: LocalFontSize; title: string; note: string }> = [
-    { value: "branch", title: "Branch Default", note: `Uses ${resolveBranchFontSize(branchFontSize)}` },
+    { value: "branch", title: "Branch Default", note: `Uses ${resolveSharedFontSize(branchFontSize)}` },
     { value: "small", title: "Small", note: "12px" },
     { value: "normal", title: "Normal", note: "14px" },
     { value: "large", title: "Large", note: "18px" },

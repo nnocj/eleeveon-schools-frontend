@@ -34,7 +34,7 @@ import {
   Student,
   StudentEnrollment,
   StudentParent,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 // ======================================================
 // TYPES

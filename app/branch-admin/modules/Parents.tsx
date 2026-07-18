@@ -43,17 +43,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
-
 import {
   db,
   type Parent,
   type Student,
   type StudentParent,
-} from "../../lib/db";
+} from "../../lib/db/db";
 import {
   createLocal,
   updateLocal,
@@ -61,8 +57,9 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 import {
+  softDeleteOwnerFieldAssets,
   attachCameraStreamToVideo,
-  attachMediaAssetToOwner,
+  commitMediaAssetsToOwner,
   captureImageFileFromVideo,
   createMediaSessionKey,
   getCameraUnavailableMessage,
@@ -75,8 +72,15 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
+
+
+
 } from "../../lib/media/mediaAssetUtils";
 
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type Relationship = "father" | "mother" | "guardian";
@@ -373,44 +377,38 @@ function Empty({
 }
 
 export default function ParentsPage() {
+  const dataRevision = useBranchTableRevision(["parents", "students", "studentParents", "mediaAssets", "mediaBlobs"]);
   const router = useRouter();
-
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
+  const workspace = useBranchWorkspaceScope();
   const {
-    activeSchool,
-    activeSchoolId,
-    activeBranch,
-    activeBranchId,
-    loading: contextLoading,
-  } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
+    accountId,
+    schoolId,
+    branchId,
+    membership: activeMembership,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+    ready: workspaceReady,
+    error: workspaceError,
+  } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [linkSaving, setLinkSaving] = useState(false);
 
   const [rows, setRows] = useState<Parent[]>([]);
+  const resolvedMediaById = useEntityMediaUrls({
+    accountId,
+    ownerTable: "parents",
+    rows: rows,
+    fields: [
+      { fieldKey: "photo", mediaIdKey: "photoMediaId" },
+      { fieldKey: "coverPhoto", mediaIdKey: "coverPhotoMediaId" },
+    ],
+  });
   const [students, setStudents] = useState<Student[]>([]);
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
   const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
@@ -638,6 +636,7 @@ export default function ParentsPage() {
     accountLoading,
     settingsLoading,
     contextLoading,
+    dataRevision,
   ]);
 
   useEffect(() => {
@@ -805,10 +804,10 @@ export default function ParentsPage() {
         id,
         row,
         photoUrl:
-          mediaPreviewUrls[mediaKey(id, "photo")] ||
+          resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] ||
           safeRecordMediaValue(row.photo),
         coverPhotoUrl:
-          mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
+          resolvedMediaById[id]?.coverPhoto || mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
           safeRecordMediaValue(row.coverPhoto),
         linkedStudents,
         relations,
@@ -1057,20 +1056,17 @@ export default function ParentsPage() {
       );
 
       if (savedParentId) {
-        const newlyUploadedAssetIds = Object.values(
-          uploadedMediaIdsRef.current,
-        ).filter(Boolean);
-
-        await Promise.all(
-          newlyUploadedAssetIds.map((assetId) =>
-            attachMediaAssetToOwner({
-              assetId: Number(assetId),
-              ownerTable: PARENT_MEDIA_OWNER_TABLE,
-              ownerLocalId: savedParentId,
-              ownerTempKey: mediaSessionKeyRef.current,
-            }),
-          ),
-        );
+        await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable: PARENT_MEDIA_OWNER_TABLE,
+          ownerLocalId: savedParentId,
+          ownerCloudId: (savedParent as any)?.cloudId || (existing as any)?.cloudId,
+          ownerTempKey: mediaSessionKeyRef.current,
+          assets: [
+            { assetId: uploadedMediaIdsRef.current.photo, fieldKey: MediaFieldKeys.PHOTO },
+            { assetId: uploadedMediaIdsRef.current.coverPhoto, fieldKey: MediaFieldKeys.COVER_PHOTO },
+          ],
+        });
       }
 
       const wasNew = !form.id;
@@ -1191,6 +1187,37 @@ export default function ParentsPage() {
       : `Delete "${row.fullName}"?`;
 
     if (!window.confirm(warning)) return;
+
+
+    await Promise.all(
+
+
+      ["photo", "coverPhoto"].map((fieldKey) =>
+
+
+        softDeleteOwnerFieldAssets({
+
+
+          accountId: String(accountId),
+
+
+          ownerTable: "parents",
+
+
+          ownerLocalId: Number(id),
+
+
+          fieldKey,
+
+
+        }),
+
+
+      ),
+
+
+    );
+
 
     await softDeleteLocal("parents", Number(id));
     setSelectedItem(null);

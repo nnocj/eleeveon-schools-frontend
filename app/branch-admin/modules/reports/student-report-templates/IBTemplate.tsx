@@ -36,7 +36,7 @@ import {
   mergeStudentReportTemplateSettings,
 } from "../shared/ReportTemplateTypes";
 
-import IBHeader from "../shared/headers/IBHeader";
+import IBHeader from "../shared/headers/student-reports/IBHeader";
 
 import {
   createReportPageStyle,

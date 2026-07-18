@@ -51,9 +51,11 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "analytics";
 type ToastTone = "success" | "error" | "info";
 type AnyRow = Record<string, any>;
@@ -324,6 +326,8 @@ function SliderIcon() {
 }
 
 export default function Announcements() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -351,7 +355,7 @@ export default function Announcements() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("cards");
   const [announcements, setAnnouncements] = useState<AnyRow[]>([]);
   const [recipients, setRecipients] = useState<AnyRow[]>([]);
@@ -430,7 +434,9 @@ export default function Announcements() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading]);
+  }, [accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+    dataRevision,
+  ]);
 
   const candidates = useMemo(() => {
     const rows: AnyRow[] = [];

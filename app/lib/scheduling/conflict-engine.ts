@@ -8,7 +8,7 @@ import type {
   CalendarEvent,
   ScheduleConflict,
   ScheduleSession,
-} from "../db";
+} from "../db/db";
 
 import { eventsOverlap } from "../calendar/calendar-utils";
 import {

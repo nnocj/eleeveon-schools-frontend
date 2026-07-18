@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";

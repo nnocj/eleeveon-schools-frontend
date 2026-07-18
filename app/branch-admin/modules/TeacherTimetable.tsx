@@ -56,7 +56,7 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db";
+import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db/db";
 import {
   createLocal,
   getSyncTable,
@@ -66,6 +66,8 @@ import {
 import { TeacherAvailability } from "./TeacherAvailability";
 import { TeacherLoadAnalytics, TeacherWorkload } from "./TeacherWorkload";
 
+import { useDataRevision } from "../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 
 type ViewMode = "timetable" | "cards" | "table" | "analytics" | "workload" | "availability";
@@ -583,6 +585,8 @@ function SliderIcon() {
 }
 
 export default function TeacherTimetable() {
+  const dataRevision = useDataRevision();
+
   const router = useRouter();
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
@@ -616,7 +620,7 @@ export default function TeacherTimetable() {
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [view, setView] = useState<ViewMode>("timetable");
   const [timetableMode, setTimetableMode] = useState<TimetableMode>("teacher");
   const [selectedDay, setSelectedDay] = useState("monday");
@@ -752,7 +756,9 @@ export default function TeacherTimetable() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId]);
+  }, [accountId, schoolId, branchId,
+    dataRevision,
+  ]);
 
   function resetForm() {
     setForm(emptyForm);

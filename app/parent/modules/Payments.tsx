@@ -41,7 +41,7 @@ import {
   StudentFeeInvoice,
   StudentFeePayment,
   StudentParent,
-} from "../../lib/db";
+} from "../../lib/db/db";
 
 // ======================================================
 // TYPES

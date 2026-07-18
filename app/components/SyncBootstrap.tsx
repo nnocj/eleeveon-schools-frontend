@@ -2,9 +2,19 @@
 
 /**
  * app/components/SyncBootstrap.tsx
- * ---------------------------------------------------------
- * LOGIN / NEW DEVICE SYNC BOOTSTRAP - PLATFORM READY
- * ---------------------------------------------------------
+ * --------------------------------------------------------------------------
+ * Phase 10 synchronization trigger owner.
+ *
+ * Covers:
+ * - authenticated startup and database readiness;
+ * - browser online/focus/visibility lifecycle;
+ * - backend WebSocket invalidations;
+ * - periodic safety polling;
+ * - shared single-flight result handling.
+ *
+ * Successful login and role-selection screens may also call:
+ * - triggerLoginSync()
+ * - triggerRoleSelectionSync()
  */
 
 import { useEffect, useRef } from "react";
@@ -12,68 +22,53 @@ import { useEffect, useRef } from "react";
 import { useAccount } from "../context/account-context";
 import { useActiveBranch } from "../context/active-branch-context";
 import { useSyncBootstrap } from "../context/sync-bootstrap-context";
-import { runSync, startAutoSync } from "../lib/sync/syncEngine";
+import { useDatabase } from "../context/database-context";
+import { useRealtime } from "../context/realtime-context";
 
-type OptionalSyncDevicesModule = {
-  upsertLocalSyncDevice?: (patch?: Record<string, any>) => Promise<any>;
-  registerSyncDevice?: (options?: {
-    silent?: boolean;
-    patch?: Record<string, any>;
-  }) => Promise<any>;
+import { getDeviceId } from "../lib/sync/syncConfig";
 
-  // Backward compatibility if older/generated sync file used this name.
-  registerOrTouchSyncDevice?: () => Promise<any>;
-};
+import {
+  runSync,
+  startAutoSync,
+  subscribeToSync,
+  triggerSyncNow,
+} from "../lib/sync/syncEngine";
 
-type OptionalPlatformCacheModule = {
-  refreshPlatformCache?: () => Promise<any>;
-};
-
-async function tryRegisterDevice() {
-  try {
-    const mod = (await import("../lib/sync/syncDevices")) as OptionalSyncDevicesModule;
-
-    if (typeof mod.registerSyncDevice === "function") {
-      await mod.registerSyncDevice({ silent: true });
-      return;
-    }
-
-    if (typeof mod.registerOrTouchSyncDevice === "function") {
-      await mod.registerOrTouchSyncDevice();
-      return;
-    }
-
-    if (typeof mod.upsertLocalSyncDevice === "function") {
-      await mod.upsertLocalSyncDevice();
-    }
-  } catch {
-    // Optional device registration must never block the dashboard.
-  }
-}
-
-async function tryRefreshPlatformCache() {
-  try {
-    const mod = (await import("../lib/sync/platformCache")) as OptionalPlatformCacheModule;
-    await mod.refreshPlatformCache?.();
-  } catch {
-    // Platform cache is helpful but should never block the dashboard.
-  }
-}
-
-function getReadableError(error: unknown) {
+function readableError(error: unknown) {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
 
   try {
     return JSON.stringify(error);
   } catch {
-    return "Unknown sync error";
+    return "Unknown synchronization error.";
   }
 }
 
+const PLATFORM_CACHE_EVENT_TYPES =
+  new Set([
+    "MEMBERSHIPS_CHANGED",
+    "PERMISSIONS_CHANGED",
+    "APP_MAINTENANCE_CHANGED",
+  ]);
+
 export default function SyncBootstrap() {
-  const { authenticated, accountId, loading: accountLoading } = useAccount();
-  const { refreshInstitution } = useActiveBranch();
+  const database = useDatabase();
+
+  const {
+    authenticated,
+    accountId,
+    loading: accountLoading,
+    refreshAccount,
+  } = useAccount();
+
+  const {
+    refreshInstitution,
+  } = useActiveBranch();
+
+  const {
+    lastEvent,
+  } = useRealtime();
 
   const {
     initialSyncDone,
@@ -82,21 +77,41 @@ export default function SyncBootstrap() {
     markSyncSuccess,
     markSyncFailure,
     markSyncOffline,
+    markApplyingChanges,
   } = useSyncBootstrap();
 
-  const bootstrappedAccountRef = useRef<string | null>(null);
-  const refreshInstitutionRef = useRef(refreshInstitution);
+  const bootstrappedAccountRef =
+    useRef<string | null>(null);
+
+  const refreshInstitutionRef =
+    useRef(refreshInstitution);
+
+  const refreshAccountRef =
+    useRef(refreshAccount);
 
   const markersRef = useRef({
     markSyncStart,
     markSyncSuccess,
     markSyncFailure,
     markSyncOffline,
+    markApplyingChanges,
   });
 
+  const lastHandledFinishedAtRef =
+    useRef(0);
+
+  const lastRealtimeRevisionRef =
+    useRef(0);
+
   useEffect(() => {
-    refreshInstitutionRef.current = refreshInstitution;
+    refreshInstitutionRef.current =
+      refreshInstitution;
   }, [refreshInstitution]);
+
+  useEffect(() => {
+    refreshAccountRef.current =
+      refreshAccount;
+  }, [refreshAccount]);
 
   useEffect(() => {
     markersRef.current = {
@@ -104,111 +119,271 @@ export default function SyncBootstrap() {
       markSyncSuccess,
       markSyncFailure,
       markSyncOffline,
+      markApplyingChanges,
     };
-  }, [markSyncStart, markSyncSuccess, markSyncFailure, markSyncOffline]);
+  }, [
+    markSyncStart,
+    markSyncSuccess,
+    markSyncFailure,
+    markSyncOffline,
+    markApplyingChanges,
+  ]);
 
+  useEffect(() => {
+    return subscribeToSync(
+      (result, syncing) => {
+        if (syncing) {
+          markersRef.current
+            .markSyncStart();
+          return;
+        }
+
+        if (
+          !result ||
+          result.finishedAt <=
+            lastHandledFinishedAtRef
+              .current
+        ) {
+          return;
+        }
+
+        lastHandledFinishedAtRef
+          .current =
+          result.finishedAt;
+
+        const visibleDataChanged =
+          Number(result.pulled || 0) > 0 ||
+          Number(
+            result.cacheUpdated || 0,
+          ) > 0;
+
+        const finish = async () => {
+          if (visibleDataChanged) {
+            markersRef.current
+              .markApplyingChanges(true);
+
+            try {
+              await refreshInstitutionRef
+                .current();
+            } catch (error) {
+              console.error(
+                "[sync] institution refresh failed",
+                error,
+              );
+            } finally {
+              markersRef.current
+                .markApplyingChanges(false);
+            }
+          } else {
+            markersRef.current
+              .markApplyingChanges(false);
+          }
+
+          if (result.ok) {
+            markersRef.current
+              .markSyncSuccess(
+                result.pushed,
+                result.pulled,
+                Number(
+                  result.conflicts || 0,
+                ),
+              );
+          } else if (
+            result.errors.some(
+              (message) =>
+                /offline/i.test(message),
+            )
+          ) {
+            markersRef.current
+              .markSyncOffline();
+          } else {
+            markersRef.current
+              .markSyncFailure(
+                result.errors,
+              );
+          }
+        };
+
+        void finish();
+      },
+    );
+  }, []);
+
+  /**
+   * Authenticated startup + database-ready trigger.
+   */
   useEffect(() => {
     let cancelled = false;
 
-    const runInitialSync = async () => {
-      if (accountLoading) return;
-
-      if (!authenticated || !accountId) {
-        bootstrappedAccountRef.current = null;
+    const start = async () => {
+      if (
+        !database.ready ||
+        accountLoading
+      ) {
         return;
       }
 
-      if (bootstrappedAccountRef.current === accountId || initialSyncDone) return;
-
-      bootstrappedAccountRef.current = accountId;
-
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        markersRef.current.markSyncOffline();
-        await refreshInstitutionRef.current();
+      if (
+        !authenticated ||
+        !accountId
+      ) {
+        bootstrappedAccountRef.current =
+          null;
         return;
       }
 
-      markersRef.current.markSyncStart();
+      if (
+        bootstrappedAccountRef.current ===
+          accountId ||
+        initialSyncDone
+      ) {
+        return;
+      }
+
+      bootstrappedAccountRef.current =
+        accountId;
+
+      if (
+        typeof navigator !==
+          "undefined" &&
+        !navigator.onLine
+      ) {
+        markersRef.current
+          .markSyncOffline();
+
+        await refreshInstitutionRef
+          .current()
+          .catch(() => undefined);
+
+        return;
+      }
 
       try {
-        await tryRegisterDevice();
-
-        const result = await runSync({ includePlatformCache: true } as any);
-
-        if (cancelled) return;
-
-        await tryRefreshPlatformCache();
-        await refreshInstitutionRef.current();
-
-        if (result.ok) {
-          markersRef.current.markSyncSuccess(result.pushed, result.pulled);
-        } else {
-          markersRef.current.markSyncFailure(result.errors);
-        }
+        triggerSyncNow({
+          trigger: "startup",
+          includePlatformCache: true,
+        });
       } catch (error) {
         if (cancelled) return;
 
-        await refreshInstitutionRef.current();
-        markersRef.current.markSyncFailure([getReadableError(error)]);
+        markersRef.current
+          .markSyncFailure([
+            readableError(error),
+          ]);
       }
     };
 
-    runInitialSync();
+    void start();
 
     return () => {
       cancelled = true;
     };
-  }, [accountLoading, authenticated, accountId, initialSyncDone]);
+  }, [
+    database.ready,
+    accountLoading,
+    authenticated,
+    accountId,
+    initialSyncDone,
+  ]);
 
+  /**
+   * Backend WebSocket invalidation trigger.
+   */
   useEffect(() => {
-    if (!authenticated || !accountId || !autoSyncEnabled) return;
+    if (
+      !lastEvent ||
+      !authenticated ||
+      !accountId ||
+      lastEvent.accountId !==
+        accountId ||
+      lastEvent.revision <=
+        lastRealtimeRevisionRef.current
+    ) {
+      return;
+    }
 
-    const stopAutoSync = startAutoSync(60_000, {
-      includePlatformCache: true,
-    } as any);
+    lastRealtimeRevisionRef.current =
+      lastEvent.revision;
 
-    return () => {
-      stopAutoSync();
-    };
-  }, [authenticated, accountId, autoSyncEnabled]);
+    if (
+      lastEvent.sourceDeviceId &&
+      lastEvent.sourceDeviceId ===
+        getDeviceId()
+    ) {
+      return;
+    }
 
-  useEffect(() => {
-    if (!authenticated || !accountId) return;
+    const includePlatformCache =
+      PLATFORM_CACHE_EVENT_TYPES.has(
+        lastEvent.type,
+      );
 
-    let running = false;
-
-    const onOnline = async () => {
-      if (running) return;
-      running = true;
-
-      markersRef.current.markSyncStart();
-
-      try {
-        await tryRegisterDevice();
-
-        const result = await runSync({ includePlatformCache: true } as any);
-
-        await tryRefreshPlatformCache();
-        await refreshInstitutionRef.current();
-
-        if (result.ok) {
-          markersRef.current.markSyncSuccess(result.pushed, result.pulled);
-        } else {
-          markersRef.current.markSyncFailure(result.errors);
-        }
-      } catch (error) {
-        markersRef.current.markSyncFailure([getReadableError(error)]);
-      } finally {
-        running = false;
+    const handle = async () => {
+      if (
+        lastEvent.type ===
+          "MEMBERSHIPS_CHANGED" ||
+        lastEvent.type ===
+          "PERMISSIONS_CHANGED"
+      ) {
+        await refreshAccountRef.current({
+          background: true,
+          reason:
+            "membership-change",
+        }).catch(() => undefined);
       }
+
+      await runSync({
+        includePlatformCache,
+        pullTableNames:
+          lastEvent.changedTables
+            .length > 0
+            ? lastEvent.changedTables
+            : undefined,
+        trigger:
+          "backend-notification",
+      });
     };
 
-    window.addEventListener("online", onOnline);
+    void handle().catch((error) => {
+      console.error(
+        "[realtime] invalidation sync failed",
+        error,
+      );
+    });
+  }, [
+    lastEvent,
+    authenticated,
+    accountId,
+  ]);
 
-    return () => {
-      window.removeEventListener("online", onOnline);
-    };
-  }, [authenticated, accountId]);
+  /**
+   * Browser lifecycle + one-minute safety fallback.
+   */
+  useEffect(() => {
+    if (
+      !database.ready ||
+      !authenticated ||
+      !accountId ||
+      !autoSyncEnabled
+    ) {
+      return;
+    }
+
+    return startAutoSync({
+      intervalMs: 60_000,
+      includePlatformCache: true,
+      syncOnOnline: true,
+      syncOnFocus: true,
+      syncOnVisibility: true,
+      syncImmediately: false,
+      minimumTriggerGapMs: 1_500,
+    });
+  }, [
+    database.ready,
+    authenticated,
+    accountId,
+    autoSyncEnabled,
+  ]);
 
   return null;
 }

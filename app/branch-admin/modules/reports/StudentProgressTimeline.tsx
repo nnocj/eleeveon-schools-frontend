@@ -53,7 +53,7 @@ import {
   type School,
   type SchoolBranchSetting,
   type Student,
-} from "../../../lib/db";
+} from "../../../lib/db/db";
 
 import ReportHeader from "./components/ReportHeader";
 
@@ -68,6 +68,8 @@ import {
   revokeMediaObjectUrl,
 } from "../../../lib/media/mediaAssetUtils";
 
+import { useDataRevision } from "../../../hooks/useDataRevision";
+import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
 // ======================================================
 // PAGE TYPES
 // ======================================================
@@ -298,6 +300,8 @@ const fallbackHeader: ReportHeaderData = {
 // ======================================================
 
 export default function StudentProgressTimelinePage(_: RouteProps) {
+  const dataRevision = useDataRevision();
+
   const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings() as any;
   const { activeMembership } = useActiveMembership() as any;
@@ -373,7 +377,7 @@ export default function StudentProgressTimelinePage(_: RouteProps) {
 
   const primary = cleanText(settings?.primaryColor) || "var(--primary-color, #2563eb)";
 
-  const [loading, setLoading] = useState(true);
+  const { loading, setLoading } = useBackgroundLoader();
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [schoolBranchSettings, setSchoolBranchSettings] = useState<SchoolBranchSetting[]>([]);
@@ -610,6 +614,7 @@ export default function StudentProgressTimelinePage(_: RouteProps) {
     activeMembership?.schoolBranchId,
     openWorkspace?.openedAt,
     openWorkspace?.membershipId,
+    dataRevision,
   ]);
 
   useEffect(() => {

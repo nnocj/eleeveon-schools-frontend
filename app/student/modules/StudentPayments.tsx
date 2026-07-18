@@ -40,7 +40,7 @@ import { useRouter } from "next/navigation";
 
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
-import { db } from "../../lib/db";
+import { db } from "../../lib/db/db";
 import { listActiveLocal } from "../../lib/sync/syncUtils";
 import { apiRequest } from "../../lib/platformApi";
 import PaymentCheckout from "../../components/payments/PaymentCheckout";

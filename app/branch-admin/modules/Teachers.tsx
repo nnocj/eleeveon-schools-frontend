@@ -271,6 +271,32 @@ const cleanId = (value: unknown): string => {
   return normalized && normalized !== "0" ? normalized : "";
 };
 
+/**
+ * Resolve the permanent teacher ID returned by createLocal/updateLocal.
+ * The sync helpers may return a string, number, saved record, or object.
+ */
+const savedEntityId = (
+  result: unknown,
+  fallback?: unknown,
+): string => {
+  if (typeof result === "string" || typeof result === "number") {
+    return cleanId(result);
+  }
+
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+
+    return firstLocalId(
+      record.id,
+      record.localId,
+      record.teacherId,
+      fallback,
+    );
+  }
+
+  return cleanId(fallback);
+};
+
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
 const safeLower = (v: any) =>
   String(v || "")
@@ -478,6 +504,9 @@ export default function TeachersPage() {
   } | null>(null);
 
   const mediaSessionKey = useRef(makeMediaSessionKey());
+  const uploadedMediaAssetIds = useRef<
+    Partial<Record<CameraField, string>>
+  >({});
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -866,7 +895,13 @@ export default function TeachersPage() {
           active: isActiveRow(row),
         };
       }),
-    [mediaPreviewUrls, organizationMap, rows, usageMaps],
+    [
+      mediaPreviewUrls,
+      organizationMap,
+      resolvedMediaById,
+      rows,
+      usageMaps,
+    ],
   );
 
   const filteredRows = useMemo(() => {
@@ -980,8 +1015,13 @@ export default function TeachersPage() {
         schoolId: schoolId,
         branchId: branchId,
         ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-        ownerId: form.id || undefined,
-        ownerTempKey: form.id ? undefined : mediaSessionKey.current,
+
+        /*
+         * Always stage under the current form session. This keeps the existing
+         * committed teacher image untouched until Save, including during edits.
+         */
+        ownerId: undefined,
+        ownerTempKey: mediaSessionKey.current,
         fieldKey:
           field === "photo"
             ? MediaFieldKeys.PHOTO
@@ -997,9 +1037,22 @@ export default function TeachersPage() {
         replaceExisting: true,
       });
 
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The image was processed but no media asset ID was created.",
+        );
+      }
+
+      uploadedMediaAssetIds.current = {
+        ...uploadedMediaAssetIds.current,
+        [field]: uploadedAssetId,
+      };
+
       updateForm({
         [field]: result.previewUrl,
-        [`${field}MediaId`]: result.assetId,
+        [`${field}MediaId`]: uploadedAssetId,
       } as Partial<FormState>);
 
       showToast(
@@ -1046,6 +1099,7 @@ export default function TeachersPage() {
   const openCreate = () => {
     if (!requireTenant()) return;
     mediaSessionKey.current = makeMediaSessionKey();
+    uploadedMediaAssetIds.current = {};
     setForm({
       ...emptyForm,
       organizationId:
@@ -1059,6 +1113,7 @@ export default function TeachersPage() {
   const openEdit = (row: Teacher) => {
     const t: any = row;
     mediaSessionKey.current = makeMediaSessionKey();
+    uploadedMediaAssetIds.current = {};
     setSelectedItem(null);
     setForm({
       id: idOf(t.id),
@@ -1067,13 +1122,13 @@ export default function TeachersPage() {
       gender: t.gender || "",
       age: t.age == null ? "" : String(t.age),
       photo:
+        resolvedMediaById[idOf(t.id)]?.photo ||
         mediaPreviewUrls[mediaKey(idOf(t.id), "photo")] ||
-        safeRecordMediaValue(t.photo) ||
         "",
       photoMediaId: t.photoMediaId ? String(t.photoMediaId) : undefined,
       coverPhoto:
+        resolvedMediaById[idOf(t.id)]?.coverPhoto ||
         mediaPreviewUrls[mediaKey(idOf(t.id), "coverPhoto")] ||
-        safeRecordMediaValue(t.coverPhoto) ||
         "",
       coverPhotoMediaId: t.coverPhotoMediaId
         ? String(t.coverPhotoMediaId)
@@ -1086,8 +1141,8 @@ export default function TeachersPage() {
       role: t.role || "teacher",
       qualification: t.qualification || "",
       signature:
+        resolvedMediaById[idOf(t.id)]?.signature ||
         mediaPreviewUrls[mediaKey(idOf(t.id), "signature")] ||
-        safeRecordMediaValue(t.signature) ||
         "",
       signatureMediaId: t.signatureMediaId
         ? String(t.signatureMediaId)
@@ -1177,40 +1232,106 @@ export default function TeachersPage() {
           ? await updateLocal("teachers", String(form.id), payload)
           : await createLocal("teachers", payload as unknown as Teacher);
 
-      const savedTeacherId = idOf(
-        typeof savedTeacher === "number"
-          ? savedTeacher
-          : (savedTeacher as any)?.id || form.id || 0,
+      const savedTeacherId = savedEntityId(
+        savedTeacher,
+        form.id,
       );
 
-      if (savedTeacherId) {
-        await commitMediaAssetsToOwner({
-          accountId,
-          ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-          ownerId: savedTeacherId,
-
-          ownerTempKey: mediaSessionKey.current,
-          assets: [
-            { assetId: form.photoMediaId, fieldKey: MediaFieldKeys.PHOTO },
-            {
-              assetId: form.coverPhotoMediaId,
-              fieldKey: MediaFieldKeys.COVER_PHOTO,
-            },
-            {
-              assetId: form.signatureMediaId,
-              fieldKey: MediaFieldKeys.SIGNATURE,
-            },
-          ],
-        });
+      if (!savedTeacherId) {
+        throw new Error(
+          "The teacher record was saved, but its permanent ID could not be resolved for media attachment.",
+        );
       }
 
-      setModalOpen(false);
+      const stagedPhotoId = cleanId(
+        uploadedMediaAssetIds.current.photo,
+      );
+      const stagedCoverPhotoId = cleanId(
+        uploadedMediaAssetIds.current.coverPhoto,
+      );
+      const stagedSignatureId = cleanId(
+        uploadedMediaAssetIds.current.signature,
+      );
+
+      const committedMedia = await commitMediaAssetsToOwner({
+        accountId,
+        ownerTable: TEACHER_MEDIA_OWNER_TABLE,
+        ownerId: savedTeacherId,
+        ownerTempKey: mediaSessionKey.current,
+        assets: [
+          {
+            assetId: stagedPhotoId || undefined,
+            fieldKey: MediaFieldKeys.PHOTO,
+          },
+          {
+            assetId: stagedCoverPhotoId || undefined,
+            fieldKey: MediaFieldKeys.COVER_PHOTO,
+          },
+          {
+            assetId: stagedSignatureId || undefined,
+            fieldKey: MediaFieldKeys.SIGNATURE,
+          },
+        ],
+      });
+
+      const committedPhotoId = committedMedia.find(
+        (item) => item.fieldKey === MediaFieldKeys.PHOTO,
+      )?.assetId;
+
+      const committedCoverPhotoId = committedMedia.find(
+        (item) => item.fieldKey === MediaFieldKeys.COVER_PHOTO,
+      )?.assetId;
+
+      const committedSignatureId = committedMedia.find(
+        (item) => item.fieldKey === MediaFieldKeys.SIGNATURE,
+      )?.assetId;
+
+      /*
+       * Persist the exact committed IDs onto the teacher record. New media is
+       * always resolved through mediaAssets/mediaBlobs, never preview strings.
+       */
+      if (
+        committedPhotoId ||
+        committedCoverPhotoId ||
+        committedSignatureId
+      ) {
+        await updateLocal(
+          "teachers",
+          savedTeacherId,
+          {
+            photoMediaId:
+              committedPhotoId ||
+              form.photoMediaId ||
+              existing?.photoMediaId ||
+              undefined,
+            coverPhotoMediaId:
+              committedCoverPhotoId ||
+              form.coverPhotoMediaId ||
+              existing?.coverPhotoMediaId ||
+              undefined,
+            signatureMediaId:
+              committedSignatureId ||
+              form.signatureMediaId ||
+              existing?.signatureMediaId ||
+              undefined,
+            photo: safeRecordMediaValue(existing?.photo),
+            coverPhoto: safeRecordMediaValue(existing?.coverPhoto),
+            signature: safeRecordMediaValue(existing?.signature),
+          } as Partial<Teacher>,
+        );
+      }
+
+      uploadedMediaAssetIds.current = {};
       mediaSessionKey.current = makeMediaSessionKey();
+      setModalOpen(false);
       showToast("success", "Teacher saved.");
       await load();
-    } catch (error) {
-      console.error(error);
-      showToast("error", "Failed to save teacher.");
+    } catch (error: any) {
+      console.error("Failed to save teacher and media:", error);
+      showToast(
+        "error",
+        error?.message || "Failed to save teacher.",
+      );
     } finally {
       setSaving(false);
     }

@@ -264,7 +264,36 @@ const idOf = (value: any): string => {
   return String(value).trim();
 };
 
-const cleanId = (value: any): string => idOf(value);
+const cleanId = (value: unknown): string => {
+  const normalized = idOf(value);
+  return normalized && normalized !== "0" ? normalized : "";
+};
+
+/**
+ * Resolve the permanent parent ID returned by createLocal/updateLocal.
+ * The sync helpers may return a string, number, saved record, or object.
+ */
+const savedEntityId = (
+  result: unknown,
+  fallback?: unknown,
+): string => {
+  if (typeof result === "string" || typeof result === "number") {
+    return cleanId(result);
+  }
+
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+
+    return firstLocalId(
+      record.id,
+      record.localId,
+      record.parentId,
+      fallback,
+    );
+  }
+
+  return cleanId(fallback);
+};
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
 const safeLower = (value: any) =>
@@ -709,19 +738,35 @@ export default function ParentsPage() {
         schoolId: schoolId,
         branchId: branchId,
         ownerTable: PARENT_MEDIA_OWNER_TABLE,
-        ownerId: form.id || undefined,
-        ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
+
+        /*
+         * Always stage under the current form session. This preserves the
+         * existing committed parent media until Save, including during edits.
+         */
+        ownerId: undefined,
+        ownerTempKey: mediaSessionKeyRef.current,
         fieldKey:
           field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
       });
 
-      uploadedMediaIdsRef.current[field] = String(result.assetId);
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The image was processed but no media asset ID was created.",
+        );
+      }
+
+      uploadedMediaIdsRef.current = {
+        ...uploadedMediaIdsRef.current,
+        [field]: uploadedAssetId,
+      };
 
       updateForm({
         [field]: result.previewUrl,
-        [`${field}MediaId`]: String(result.assetId),
+        [`${field}MediaId`]: uploadedAssetId,
       } as Partial<FormState>);
 
       showToast(
@@ -822,7 +867,13 @@ export default function ParentsPage() {
           .length,
       };
     });
-  }, [mediaPreviewUrls, relationByParent, rows, studentMap]);
+  }, [
+    mediaPreviewUrls,
+    relationByParent,
+    resolvedMediaById,
+    rows,
+    studentMap,
+  ]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -958,15 +1009,15 @@ export default function ParentsPage() {
       fullName: parent.fullName || "",
       phone: parent.phone || "",
       photo:
+        resolvedMediaById[idOf(parent.id)]?.photo ||
         mediaPreviewUrls[mediaKey(idOf(parent.id), "photo")] ||
-        safeRecordMediaValue(parent.photo) ||
         "",
       photoMediaId: parent.photoMediaId
         ? String(parent.photoMediaId)
         : undefined,
       coverPhoto:
+        resolvedMediaById[idOf(parent.id)]?.coverPhoto ||
         mediaPreviewUrls[mediaKey(idOf(parent.id), "coverPhoto")] ||
-        safeRecordMediaValue(parent.coverPhoto) ||
         "",
       coverPhotoMediaId: parent.coverPhotoMediaId
         ? String(parent.coverPhotoMediaId)
@@ -1055,34 +1106,81 @@ export default function ParentsPage() {
           ? await updateLocal("parents", String(form.id), payload)
           : await createLocal("parents", payload as unknown as Parent);
 
-      const savedParentId = idOf(
-        typeof savedParent === "string" || typeof savedParent === "number"
-          ? savedParent
-          : (savedParent as any)?.id || form.id,
+      const savedParentId = savedEntityId(
+        savedParent,
+        form.id,
       );
 
-      if (savedParentId) {
-        await commitMediaAssetsToOwner({
-          accountId,
-          ownerTable: PARENT_MEDIA_OWNER_TABLE,
-          ownerId: savedParentId,
+      if (!savedParentId) {
+        throw new Error(
+          "The parent record was saved, but its permanent ID could not be resolved for media attachment.",
+        );
+      }
 
-          ownerTempKey: mediaSessionKeyRef.current,
-          assets: [
-            {
-              assetId: uploadedMediaIdsRef.current.photo,
-              fieldKey: MediaFieldKeys.PHOTO,
-            },
-            {
-              assetId: uploadedMediaIdsRef.current.coverPhoto,
-              fieldKey: MediaFieldKeys.COVER_PHOTO,
-            },
-          ],
-        });
+      const stagedPhotoId = cleanId(
+        uploadedMediaIdsRef.current.photo,
+      );
+      const stagedCoverPhotoId = cleanId(
+        uploadedMediaIdsRef.current.coverPhoto,
+      );
+
+      const committedMedia = await commitMediaAssetsToOwner({
+        accountId,
+        ownerTable: PARENT_MEDIA_OWNER_TABLE,
+        ownerId: savedParentId,
+        ownerTempKey: mediaSessionKeyRef.current,
+        assets: [
+          {
+            assetId: stagedPhotoId || undefined,
+            fieldKey: MediaFieldKeys.PHOTO,
+          },
+          {
+            assetId: stagedCoverPhotoId || undefined,
+            fieldKey: MediaFieldKeys.COVER_PHOTO,
+          },
+        ],
+      });
+
+      const committedPhotoId = committedMedia.find(
+        (item) => item.fieldKey === MediaFieldKeys.PHOTO,
+      )?.assetId;
+
+      const committedCoverPhotoId = committedMedia.find(
+        (item) => item.fieldKey === MediaFieldKeys.COVER_PHOTO,
+      )?.assetId;
+
+      /*
+       * Persist the exact committed IDs onto the parent record. New media is
+       * resolved from mediaAssets/mediaBlobs, never from preview strings.
+       */
+      if (committedPhotoId || committedCoverPhotoId) {
+        await updateLocal(
+          "parents",
+          savedParentId,
+          {
+            photoMediaId:
+              committedPhotoId ||
+              form.photoMediaId ||
+              existing?.photoMediaId ||
+              undefined,
+            coverPhotoMediaId:
+              committedCoverPhotoId ||
+              form.coverPhotoMediaId ||
+              existing?.coverPhotoMediaId ||
+              undefined,
+            photo: safeRecordMediaValue(existing?.photo),
+            coverPhoto: safeRecordMediaValue(existing?.coverPhoto),
+          } as Partial<Parent>,
+        );
       }
 
       const wasNew = !form.id;
-      const parentToLink = savedParent as Parent | undefined;
+      const parentToLink = {
+        ...(savedParent && typeof savedParent === "object"
+          ? (savedParent as Parent)
+          : payload),
+        id: savedParentId,
+      } as Parent;
 
       mediaSessionKeyRef.current = createMediaSessionKey(
         PARENT_MEDIA_OWNER_TABLE,
@@ -1092,11 +1190,15 @@ export default function ParentsPage() {
       showToast("success", "Parent saved.");
       await load();
 
-      if (wasNew && (parentToLink as any)?.id)
-        openLinkModal(parentToLink as Parent);
-    } catch (error) {
-      console.error("Failed to save parent:", error);
-      showToast("error", "Failed to save parent.");
+      if (wasNew && parentToLink.id) {
+        openLinkModal(parentToLink);
+      }
+    } catch (error: any) {
+      console.error("Failed to save parent and media:", error);
+      showToast(
+        "error",
+        error?.message || "Failed to save parent.",
+      );
     } finally {
       setSaving(false);
     }

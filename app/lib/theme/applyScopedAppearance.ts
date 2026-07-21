@@ -34,8 +34,8 @@ export type ScopedAppearanceSettings = {
 export type ScopedAppearanceInput = {
   role: string;
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   settings?: ScopedAppearanceSettings | null;
 };
 

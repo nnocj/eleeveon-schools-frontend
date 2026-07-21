@@ -1,14 +1,7 @@
 import Dexie, { Table } from "dexie";
 import { SyncStatus } from "../constants/syncStatus";
 import { APP_DB_VERSION, APP_DB_NAME } from "./db-version";
-import {
-  LOCAL_PROTECTION_STORES,
-  runVersion39Migration,
-  type DatabaseRecoveryBackup,
-  type LocalMigrationJournal,
-  type SyncQuarantineRecord,
-} from "./db-migrations";
-import { buildMediaIdentityKey } from "../media/mediaAssetResolver";
+import { LOCAL_PROTECTION_STORES, type DatabaseRecoveryBackup, type LocalMigrationJournal, type SyncQuarantineRecord } from "./db-migrations";
 
 // ======================================================
 // GLOBAL TYPES
@@ -222,19 +215,68 @@ export type MediaFieldKey = string;
 
 
 // ======================================================
+// SHARED ADDRESS / MAP LOCATION
+// ======================================================
+
+export type LocationSource = "manual" | "device_gps" | "geocoded" | "imported";
+export type LocationPrecision = "exact" | "approximate" | "area_only";
+export type PersonLocationType =
+  | "home"
+  | "boarding"
+  | "pickup_point"
+  | "dropoff_point"
+  | "workplace"
+  | "other";
+
+export interface AddressFields {
+  address?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  locality?: string | null;
+  city?: string | null;
+  district?: string | null;
+  region?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
+}
+
+export interface MapLocationFields {
+  latitude?: number | null;
+  longitude?: number | null;
+  altitudeMeters?: number | null;
+  accuracyMeters?: number | null;
+  geohash?: string | null;
+  locationLabel?: string | null;
+  formattedAddress?: string | null;
+  locationSource?: LocationSource | null;
+  locationPrecision?: LocationPrecision | null;
+  locationCapturedAt?: number | null;
+  mapVisible?: boolean;
+}
+
+export interface PersonMapLocationFields extends MapLocationFields {
+  locationType?: PersonLocationType | null;
+  locationConsentGiven?: boolean;
+  locationConsentAt?: number | null;
+  locationRestricted?: boolean;
+}
+
+// ======================================================
 // BASE SYNC
 // ======================================================
 
 export interface BaseSync {
-  id?: number;          // local Dexie id
-  cloudId?: string;     // cloud UUID
-  accountId: string;    // client/account owner
-  createdAt?: number;
+  id: string;
+  accountId: string;
+  createdAt: number;
   updatedAt: number;
   version: number;
   deviceId: string;
+  createdByDeviceId: string;
+  updatedByDeviceId: string;
   synced: SyncStatus;
-  isDeleted?: boolean;
+  isDeleted: boolean;
 }
 
 // ======================================================
@@ -245,53 +287,45 @@ export interface BaseSync {
 // stay small. Records such as Student, Teacher, Parent, School, Branch,
 // Announcement, Income, Expense, etc. may keep their old string fields for
 // backwards compatibility, but new uploads should be stored here and linked
-// by ownerTable + ownerLocalId + fieldKey or by the optional *MediaId fields.
+// by accountId + ownerTable + ownerId + fieldKey.
 //
 // ownerTempKey prevents unsaved upload collisions. New records do not yet
 // have a local id, so Students, Teachers, Parents, Classes, Settings, etc.
 // can attach media with a temporary form/session key first, then clear it
-// after attachMediaAssetToOwner(...) sets ownerLocalId / ownerCloudId.
+// after the owner permanent ID is known.
 
 export interface MediaAsset extends BaseSync {
-  schoolId?: number | null;
-  branchId?: number | null;
-
-  ownerTable?: MediaOwnerTable | null;
-  ownerLocalId?: number | null;
-  ownerCloudId?: string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  ownerTable: MediaOwnerTable;
+  ownerId: string;
   ownerTempKey?: string | null;
-  fieldKey?: MediaFieldKey | null;
-  ownerIdentityKey?: string | null;
-  identityVersion?: number;
-
+  fieldKey: MediaFieldKey;
+  ownerIdentityKey: string;
+  identityVersion: number;
   fileName: string;
   originalFileName?: string | null;
   extension?: string | null;
   mimeType: string;
   assetKind: MediaAssetKind;
-
   sizeBytes: number;
   originalSizeBytes?: number | null;
   width?: number | null;
   height?: number | null;
   durationMs?: number | null;
   checksum?: string | null;
-
   localBlobId?: number | null;
   localObjectUrl?: string | null;
   thumbnailDataUrl?: string | null;
   previewDataUrl?: string | null;
-
   remoteUrl?: string | null;
   publicUrl?: string | null;
   remoteKey?: string | null;
   remoteProvider?: string | null;
-
   uploadStatus: MediaUploadStatus;
   uploadedAt?: string | null;
   lastUploadAttemptAt?: string | null;
   uploadError?: string | null;
-
   metadata?: any;
   active?: boolean;
 }
@@ -299,12 +333,12 @@ export interface MediaAsset extends BaseSync {
 export interface MediaBlob {
   id?: number;
   accountId: string;
-  assetLocalId?: number | null;
+  assetId: string;
   mimeType: string;
   sizeBytes: number;
   blob: Blob;
-  createdAt?: number;
-  updatedAt?: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ======================================================
@@ -315,8 +349,7 @@ export interface MediaBlob {
 // and PermissionRule models for offline/PWA context.
 // They do NOT replace the school people records such as Teacher,
 // Student, and Parent. Instead, memberships link login users to
-// those local records through teacherLocalId, studentLocalId,
-// and parentLocalId.
+// those permanent records through teacherId, studentId and parentId.
 
 export interface LocalAppUser {
   id: string;           // cloud UUID from AppUser
@@ -337,14 +370,12 @@ export interface LocalUserMembership {
   userId: string;
   role: Role;
 
-  // These remain local Dexie IDs because schools/branches and people
-  // records are synced as local-first data.
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
 
   active: boolean;
   createdAt?: string;
@@ -582,8 +613,7 @@ export interface LocalSyncConflict {
   id: string;
   accountId: string;
   tableName: string;
-  localId?: number | null;
-  cloudId?: string | null;
+  localId?: string | null;
   deviceId?: string | null;
   status: "open" | "resolved" | "ignored" | string;
   resolution?: "server_wins" | "client_wins" | "manual_merge" | string | null;
@@ -662,8 +692,7 @@ export interface LocalIntegrationMapping {
   accountId: string;
   integrationKey: string; // eleeveon_learn | external_lms | external_sms etc.
   localTable: string;
-  localId?: number | null;
-  cloudId?: string | null;
+  localId?: string | null;
   externalTable?: string | null;
   externalId: string;
   metadata?: any;
@@ -678,8 +707,8 @@ export interface LocalAuditLog {
   action: string;
   entityType?: string | null;
   entityId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   before?: any;
   after?: any;
   metadata?: any;
@@ -768,72 +797,72 @@ export interface LocalNotificationDeliveryLog {
 // CORE (SCHOOL STRUCTURE)
 // ======================================================
 
-export interface School extends BaseSync {
+export interface School extends BaseSync, AddressFields, MapLocationFields {
   name: string;
   logo?: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   motto?: string;
   phone?: string;
   email?: string;
-  address?: string;
+  address?: string | null;
   website?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   galleryImages?: string[];
   galleryMediaIds?: number[];
 }
 
-export interface Branch extends BaseSync {
-  schoolId: number;
+export interface Branch extends BaseSync, AddressFields, MapLocationFields {
+  schoolId: string;
   name: string;
   code?: string;
   logo?: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   phone?: string;
   email?: string;
-  address?: string;
-  city?: string;
+  address?: string | null;
+  city?: string | null;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active?: boolean;
 }
 
 export interface AcademicStructure extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   name: string;
   level: AcademicLevel;
   startDate: string;
   endDate: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active?: boolean;
 }
 
 export interface AcademicPeriod extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  academicStructureId: number;
+  schoolId: string;
+  branchId: string;
+  academicStructureId: string;
   name: string;
   type?: TermType;
   startDate: string;
   endDate: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   order: number;
   active?: boolean;
 }
 
 export interface Organization extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  parentOrganizationId?: number;
+  schoolId: string;
+  branchId: string;
+  parentOrganizationId?: string;
   name: string;
   type:
     | "department"
@@ -844,9 +873,9 @@ export interface Organization extends BaseSync {
     | "administration";
   description?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active?: boolean;
 }
 
@@ -854,11 +883,11 @@ export interface Organization extends BaseSync {
 // PEOPLE
 // ======================================================
 
-export interface Student extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
-  currentClassId?: number;
+export interface Student extends BaseSync, AddressFields, PersonMapLocationFields {
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
+  currentClassId?: string;
   admissionNumber?: string;
   fullName: string;
   email?: string;
@@ -866,28 +895,28 @@ export interface Student extends BaseSync {
   age?: number;
   dateOfBirth?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto?: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   parentName?: string;
   parentPhone?: string;
   parentEmail?: string;
-  address?: string;
+  address?: string | null;
   status?: "active" | "graduated" | "transferred" | "withdrawn";
 }
 
-export interface Teacher extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+export interface Teacher extends BaseSync, AddressFields, PersonMapLocationFields {
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   fullName: string;
   title: string;
   gender?: string;
   age?: number;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto?: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   email?: string;
   phone?: string;
   relativePhone?: string;
@@ -896,32 +925,32 @@ export interface Teacher extends BaseSync {
   role: "teacher" | "head_teacher" | "lecturer" | "principal";
   qualification?: string;
   signature?: string;
-  signatureMediaId?: number;
+  signatureMediaId?: string;
   active?: boolean;
 }
 
-export interface Parent extends BaseSync {
-  schoolId: number;
-  branchId: number;
+export interface Parent extends BaseSync, AddressFields, PersonMapLocationFields {
+  schoolId: string;
+  branchId: string;
   fullName: string;
   title: string;
   phone: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto?: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   email?: string;
-  address?: string;
+  address?: string | null;
   occupation?: string;
   emergencyContact?: string;
   relationship?: "father" | "mother" | "guardian";
 }
 
 export interface StudentParent extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  parentId: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  parentId: string;
   relationship: "father" | "mother" | "guardian" | "other";
   isPrimary?: boolean;
 }
@@ -931,46 +960,46 @@ export interface StudentParent extends BaseSync {
 // ======================================================
 
 export interface Class extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   name: string;
   code?: string;
   level?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   capacity?: number;
   active?: boolean;
 }
 
 export interface Subject extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   name: string;
   code?: string;
   description?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   credits?: number;
   category?: "academic" | "technical" | "vocational" | "elective" | "core";
   active?: boolean;
 }
 
 export interface Program extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   name: string;
   code?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   awardType?: string;
   durationYears?: number;
   description?: string;
@@ -978,17 +1007,17 @@ export interface Program extends BaseSync {
 }
 
 export interface Curriculum extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
-  programId?: number;
-  academicStructureId: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
+  programId?: string;
+  academicStructureId: string;
   name: string;
   code?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   description?: string;
   curriculumVersion?: string;
   totalCredits?: number;
@@ -1000,29 +1029,29 @@ export interface Curriculum extends BaseSync {
 }
 
 export interface CurriculumPathway extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  curriculumId: number;
+  schoolId: string;
+  branchId: string;
+  curriculumId: string;
   name: string;
   code?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   description?: string;
   active?: boolean;
 }
 
 export interface CurriculumSubject extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  curriculumId: number;
-  subjectId: number;
+  curriculumId: string;
+  subjectId: string;
 
-  pathwayId?: number;
+  pathwayId?: string;
 
-  organizationId?: number;
+  organizationId?: string;
 
   // =========================
   // ACADEMIC RULES (GLOBAL)
@@ -1040,24 +1069,24 @@ export interface CurriculumSubject extends BaseSync {
 }
 
 export interface ClassSubject extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  classId: number;
-  subjectId: number;
+  classId: string;
+  subjectId: string;
 
-  curriculumSubjectId: number;
+  curriculumSubjectId: string;
 
   // =========================
   // ACADEMIC CONTEXT
   // =========================
-  academicStructureId: number;
-  academicPeriodId?: number;
+  academicStructureId: string;
+  academicPeriodId?: string;
 
   // =========================
   // TEACHING ASSIGNMENT
   // =========================
-  teacherId?: number;
+  teacherId?: string;
 
   // =========================
   // OVERRIDES (ONLY IF NEEDED)
@@ -1077,9 +1106,9 @@ export interface ClassSubject extends BaseSync {
   // MEDIA
   // =========================
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
 
   // =========================
   // STATUS
@@ -1089,10 +1118,10 @@ export interface ClassSubject extends BaseSync {
 }
 
 export interface SubjectPrerequisite extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  curriculumSubjectId: number;
-  prerequisiteSubjectId: number;
+  schoolId: string;
+  branchId: string;
+  curriculumSubjectId: string;
+  prerequisiteSubjectId: string;
   minimumGrade?: string;
   minimumScore?: number;
   type?: "prerequisite" | "corequisite" | "recommended";
@@ -1101,27 +1130,27 @@ export interface SubjectPrerequisite extends BaseSync {
 }
 
 export interface StudentCurriculum extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  curriculumId: number;
-  pathwayId?: number;
-  startAcademicPeriodId?: number;
-  endAcademicPeriodId?: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  curriculumId: string;
+  pathwayId?: string;
+  startAcademicPeriodId?: string;
+  endAcademicPeriodId?: string;
   status?: "active" | "completed" | "withdrawn";
   active?: boolean;
 }
 
 export interface SubjectOffering extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  curriculumSubjectId?: number;
-  classSubjectId?: number;
-  subjectId: number;
-  classId?: number;
-  academicPeriodId?: number;
-  organizationId?: number;
-  teacherId?: number;
+  schoolId: string;
+  branchId: string;
+  curriculumSubjectId?: string;
+  classSubjectId?: string;
+  subjectId: string;
+  classId?: string;
+  academicPeriodId?: string;
+  organizationId?: string;
+  teacherId?: string;
   room?: string;
   deliveryMode?: DeliveryMode;
   capacity?: number;
@@ -1130,27 +1159,27 @@ export interface SubjectOffering extends BaseSync {
 }
 
 export interface Assignment extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  teacherId: number;
-  classId: number;
-  subjectId: number;
+  schoolId: string;
+  branchId: string;
+  teacherId: string;
+  classId: string;
+  subjectId: string;
 }
 
 export interface ClassTeacher extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  classId: number;
-  teacherId: number;
+  schoolId: string;
+  branchId: string;
+  classId: string;
+  teacherId: string;
 }
 
 export interface StudentEnrollment extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
   startDate: string;
   endDate?: string;
   status: "active" | "completed" | "promoted" | "withdrawn";
@@ -1161,15 +1190,15 @@ export interface StudentEnrollment extends BaseSync {
 // ======================================================
 
 export interface AssessmentApplicability extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  classSubjectId: number; // 🔥 ONLY source of truth
+  classSubjectId: string; // 🔥 ONLY source of truth
 
-  assessmentStructureId: number;
-  gradingSystemId?: number;
+  assessmentStructureId: string;
+  gradingSystemId?: string;
 
-  organizationId?: number;
+  organizationId?: string;
 
   active: boolean;
   locked?: boolean;
@@ -1190,23 +1219,23 @@ export type GradingSystemType =
   | "custom";
 
 export interface GradingSystem extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   name: string;
   type: GradingSystemType;
   description?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   active?: boolean;
   default?: boolean;
   locked?: boolean;
 }
 
 export interface GradeRule extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  gradingSystemId: number;
+  schoolId: string;
+  branchId: string;
+  gradingSystemId: string;
   minScore: number;
   maxScore: number;
   grade: string;
@@ -1218,25 +1247,25 @@ export interface GradeRule extends BaseSync {
 }
 
 export interface AssessmentStructure extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
-  academicStructureId: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
+  academicStructureId: string;
   name: string;
   description?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   totalScore?: number;
   active?: boolean;
   locked?: boolean;
 }
 
 export interface AssessmentStructureItem extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  assessmentStructureId: number;
+  schoolId: string;
+  branchId: string;
+  assessmentStructureId: string;
   name: string;
   weight: number;
   maxScore: number;
@@ -1250,34 +1279,34 @@ export interface AssessmentStructureItem extends BaseSync {
 // ======================================================
 
 export interface AssessmentComponent extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
-  classId: number;
-  subjectId: number;
-  academicPeriodId: number;
-  assessmentStructureId: number;
-  gradingSystemId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
+  classId: string;
+  subjectId: string;
+  academicPeriodId: string;
+  assessmentStructureId: string;
+  gradingSystemId?: string;
   active: boolean;
 }
 
 export interface AssessmentEntry extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  classSubjectId?: number;
+  classSubjectId?: string;
 
-  organizationId?: number;
-  academicStructureId?: number;
-  academicPeriodId: number;
+  organizationId?: string;
+  academicStructureId?: string;
+  academicPeriodId: string;
 
-  gradingSystemId?: number;
-  assessmentStructureId?: number;
-  assessmentStructureItemId: number;
+  gradingSystemId?: string;
+  assessmentStructureId?: string;
+  assessmentStructureItemId: string;
 
-  studentId: number;
-  classId: number;
-  subjectId: number;
+  studentId: string;
+  classId: string;
+  subjectId: string;
 
   score: number;
   grade?: string;
@@ -1290,19 +1319,19 @@ export interface AssessmentEntry extends BaseSync {
 
 export interface ComputedResult extends BaseSync {
  
-  branchId: number;
-  organizationId?: number;
- schoolId: number;
-  classSubjectId?: number;
+  branchId: string;
+  organizationId?: string;
+ schoolId: string;
+  classSubjectId?: string;
 
-  studentId: number;
-  classId: number;
-  subjectId: number;
+  studentId: string;
+  classId: string;
+  subjectId: string;
 
-  academicStructureId: number;
-  academicPeriodId: number;
+  academicStructureId: string;
+  academicPeriodId: string;
 
-  gradingSystemId?: number;
+  gradingSystemId?: string;
 
   total: number;
   average?: number;
@@ -1322,20 +1351,20 @@ export interface ComputedResult extends BaseSync {
 // ======================================================
 
 export interface Attendance extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
   date: string;
   status: AttendanceStatus;
 }
 
 export interface TeacherAttendance extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  teacherId: number;
+  schoolId: string;
+  branchId: string;
+  teacherId: string;
   date: string;
   clockIn?: string;
   clockOut?: string;
@@ -1346,12 +1375,12 @@ export interface TeacherAttendance extends BaseSync {
 // ======================================================
 
 export interface ReportCard extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
   total: number;
   average: number;
   position?: number;
@@ -1362,16 +1391,16 @@ export interface ReportCard extends BaseSync {
 }
 
 export interface ReportCardItem extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  reportCardId: number;
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
-  subjectId: number;
+  schoolId: string;
+  branchId: string;
+  reportCardId: string;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
+  subjectId: string;
   subjectName: string;
-  teacherId?: number;
+  teacherId?: string;
   teacherName?: string;
   total: number;
   average?: number;
@@ -1453,8 +1482,8 @@ export type ReportCardTemplateScopeType =
   | string;
 
 export interface ReportCardTemplate extends BaseSync {
-  schoolId: number;
-  branchId?: number | null;
+  schoolId: string;
+  branchId?: string | null;
 
   name: string;
 
@@ -1486,7 +1515,7 @@ export interface ReportCardTemplate extends BaseSync {
   density?: ReportCardDensity;
 
   previewImage?: string;
-  previewImageMediaId?: number;
+  previewImageMediaId?: string;
 
   isDefault?: boolean;
   active?: boolean;
@@ -1496,10 +1525,10 @@ export interface ReportCardTemplate extends BaseSync {
 }
 
 export interface ReportCardTemplateSetting extends BaseSync {
-  schoolId: number;
-  branchId?: number | null;
+  schoolId: string;
+  branchId?: string | null;
 
-  templateId?: number | null;
+  templateId?: string | null;
 
   /**
    * Stored redundantly for offline fallback and easier filtering.
@@ -1709,11 +1738,11 @@ export interface ReportCardTemplateSetting extends BaseSync {
 }
 
 export interface ReportCardTemplateAssignment extends BaseSync {
-  schoolId: number;
-  branchId?: number | null;
+  schoolId: string;
+  branchId?: string | null;
 
-  templateId: number;
-  templateSettingsId?: number | null;
+  templateId: string;
+  templateSettingsId?: string | null;
 
   /**
    * Assignment family. Each branch can therefore keep separate defaults for
@@ -1737,13 +1766,13 @@ export interface ReportCardTemplateAssignment extends BaseSync {
   templateKey?: ReportCardTemplateKey;
 
   scopeType: ReportCardTemplateScopeType;
-  scopeId?: number | string | null;
+  scopeId?: string | null;
 
-  academicStructureId?: number | null;
-  academicPeriodId?: number | null;
-  classId?: number | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
+  classId?: string | null;
   level?: string | null;
-  studentId?: number | null;
+  studentId?: string | null;
 
   isDefault?: boolean;
   active?: boolean;
@@ -1753,13 +1782,13 @@ export interface ReportCardTemplateAssignment extends BaseSync {
 
 
 export interface StudentReportSnapshot extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
 
   academicYear?: string;
   term?: string;
@@ -1770,32 +1799,32 @@ export interface StudentReportSnapshot extends BaseSync {
   average?: number;
   position?: number;
   recommendation?: "promote" | "repeat" | "graduate";
-  promotedToClassId?: number;
+  promotedToClassId?: string;
 
   snapshotType: "promotion" | "terminal" | "manual";
 }
 
 
 export interface StudentPromotion extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  studentId: number;
+  studentId: string;
 
-  fromClassId: number;
-  toClassId?: number;
+  fromClassId: string;
+  toClassId?: string;
 
-  fromAcademicStructureId: number;
-  toAcademicStructureId?: number;
+  fromAcademicStructureId: string;
+  toAcademicStructureId?: string;
 
-  fromAcademicPeriodId: number;
-  toAcademicPeriodId?: number;
+  fromAcademicPeriodId: string;
+  toAcademicPeriodId?: string;
 
   average?: number;
   recommendation: "promote" | "repeat" | "graduate";
   finalDecision: "promote" | "repeat" | "graduate";
 
-  snapshotId?: number;
+  snapshotId?: string;
   note?: string;
 }
 
@@ -1804,18 +1833,18 @@ export interface StudentPromotion extends BaseSync {
 // ======================================================
 
 export interface FeeStructure extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  classId?: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  schoolId: string;
+  branchId: string;
+  classId?: string;
+  academicStructureId: string;
+  academicPeriodId: string;
   items: { name: string; amount: number }[];
 }
 
 export interface Payment extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
   amount: number;
   method: PaymentMethod;
   date: string;
@@ -1824,9 +1853,9 @@ export interface Payment extends BaseSync {
 }
 
 export interface Income extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   title: string;
   description?: string;
   amount: number;
@@ -1837,13 +1866,13 @@ export interface Income extends BaseSync {
   referenceNumber?: string;
   receiptNumber?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
 }
 
 export interface Expense extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  organizationId?: number;
+  schoolId: string;
+  branchId: string;
+  organizationId?: string;
   title: string;
   description?: string;
   amount: number;
@@ -1879,8 +1908,8 @@ export interface Currency extends BaseSync {
 }
 
 export interface SchoolCurrencySetting extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   currencyCode: CurrencyCode;
   currencySymbol: string;
   currencyName: string;
@@ -1896,16 +1925,16 @@ export interface SchoolCurrencySetting extends BaseSync {
 // ======================================================
 
 export interface PaymentIntent extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   purpose: "student_fee" | "subscription" | "income" | "payroll" | "other";
-  studentId?: number;
-  parentId?: number;
-  teacherId?: number;
-  feeInvoiceId?: number;
-  incomeId?: number;
-  payrollRunId?: number;
-  payrollItemId?: number;
+  studentId?: string;
+  parentId?: string;
+  teacherId?: string;
+  feeInvoiceId?: string;
+  incomeId?: string;
+  payrollRunId?: string;
+  payrollItemId?: string;
   amount: number;
   channel: PaymentChannel;
   provider?: PaymentProvider;
@@ -1925,9 +1954,9 @@ export interface PaymentIntent extends BaseSync, MoneyFields {
 }
 
 export interface PaymentTransaction extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  paymentIntentId?: number;
+  schoolId: string;
+  branchId: string;
+  paymentIntentId?: string;
   purpose: "student_fee" | "subscription" | "income" | "expense" | "payroll" | "refund" | "other";
   amount: number;
   channel: PaymentChannel;
@@ -1950,13 +1979,13 @@ export interface PaymentTransaction extends BaseSync, MoneyFields {
 }
 
 export interface PaymentProviderEvent extends BaseSync {
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   provider: PaymentProvider;
   eventType: string;
   providerReference?: string;
-  paymentIntentId?: number;
-  paymentTransactionId?: number;
+  paymentIntentId?: string;
+  paymentTransactionId?: string;
   rawPayload: any;
   processed?: boolean;
   processedAt?: string;
@@ -1964,9 +1993,9 @@ export interface PaymentProviderEvent extends BaseSync {
 }
 
 export interface PaymentRefund extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  paymentTransactionId: number;
+  schoolId: string;
+  branchId: string;
+  paymentTransactionId: string;
   amount: number;
   reason?: string;
   status: PaymentStatus;
@@ -1984,9 +2013,9 @@ export interface PaymentRefund extends BaseSync, MoneyFields {
 // ======================================================
 
 export interface PaymentSettlement extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  paymentTransactionId?: number;
+  schoolId: string;
+  branchId: string;
+  paymentTransactionId?: string;
   provider?: PaymentProvider;
   amount: number;
   grossAmount?: number;
@@ -2003,8 +2032,8 @@ export interface PaymentSettlement extends BaseSync, MoneyFields {
 }
 
 export interface WithdrawalRequest extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   amount: number;
   method: "bank" | "momo" | PaymentChannel | string;
   accountName?: string;
@@ -2023,8 +2052,8 @@ export interface WithdrawalRequest extends BaseSync, MoneyFields {
 }
 
 export interface SchoolPayoutSetting extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   settlementMode: "direct_subaccount" | "platform_wallet" | string;
   preferredMethod: "bank" | "momo" | string;
@@ -2054,12 +2083,12 @@ export interface SchoolPayoutSetting extends BaseSync {
 // ======================================================
 
 export interface StudentFeeInvoice extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  studentId: number;
-  classId?: number;
-  academicStructureId?: number;
-  academicPeriodId?: number;
+  schoolId: string;
+  branchId: string;
+  studentId: string;
+  classId?: string;
+  academicStructureId?: string;
+  academicPeriodId?: string;
   invoiceNumber: string;
   subtotal: number;
   discount?: number;
@@ -2076,10 +2105,10 @@ export interface StudentFeeInvoice extends BaseSync, MoneyFields {
 }
 
 export interface StudentFeeInvoiceItem extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  invoiceId: number;
-  feeStructureId?: number;
+  schoolId: string;
+  branchId: string;
+  invoiceId: string;
+  feeStructureId?: string;
   name: string;
   description?: string;
   quantity?: number;
@@ -2090,17 +2119,17 @@ export interface StudentFeeInvoiceItem extends BaseSync, MoneyFields {
 }
 
 export interface StudentFeePayment extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  invoiceId?: number;
-  studentId: number;
-  parentId?: number;
+  schoolId: string;
+  branchId: string;
+  invoiceId?: string;
+  studentId: string;
+  parentId?: string;
   amount: number;
   method: PaymentChannel;
   provider?: PaymentProvider;
   status: PaymentStatus;
-  paymentIntentId?: number;
-  paymentTransactionId?: number;
+  paymentIntentId?: string;
+  paymentTransactionId?: string;
   receiptNumber?: string;
   referenceNumber?: string;
   providerReference?: string;
@@ -2111,7 +2140,7 @@ export interface StudentFeePayment extends BaseSync, MoneyFields {
   paidAt?: string;
   note?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
 }
 
 // ======================================================
@@ -2119,9 +2148,9 @@ export interface StudentFeePayment extends BaseSync, MoneyFields {
 // ======================================================
 
 export interface StaffPayrollProfile extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  teacherId?: number;
+  schoolId: string;
+  branchId: string;
+  teacherId?: string;
   staffUserId?: string;
   fullName: string;
   role?: string;
@@ -2142,8 +2171,8 @@ export interface StaffPayrollProfile extends BaseSync, MoneyFields {
 }
 
 export interface PayrollRun extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   title: string;
   description?: string;
   periodStart: string;
@@ -2164,11 +2193,11 @@ export interface PayrollRun extends BaseSync, MoneyFields {
 }
 
 export interface PayrollItem extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  payrollRunId: number;
-  payrollProfileId?: number;
-  teacherId?: number;
+  schoolId: string;
+  branchId: string;
+  payrollRunId: string;
+  payrollProfileId?: string;
+  teacherId?: string;
   staffUserId?: string;
   fullName: string;
   role?: string;
@@ -2182,8 +2211,8 @@ export interface PayrollItem extends BaseSync, MoneyFields {
   status: PayrollItemStatus;
   paymentMethod?: PaymentChannel;
   provider?: PaymentProvider;
-  paymentIntentId?: number;
-  paymentTransactionId?: number;
+  paymentIntentId?: string;
+  paymentTransactionId?: string;
   receiptNumber?: string;
   referenceNumber?: string;
   providerReference?: string;
@@ -2192,12 +2221,12 @@ export interface PayrollItem extends BaseSync, MoneyFields {
 }
 
 export interface StaffPaymentRecord extends BaseSync, MoneyFields {
-  schoolId: number;
-  branchId: number;
-  teacherId?: number;
+  schoolId: string;
+  branchId: string;
+  teacherId?: string;
   staffUserId?: string;
-  payrollRunId?: number;
-  payrollItemId?: number;
+  payrollRunId?: string;
+  payrollItemId?: string;
   amount: number;
   method: PaymentChannel;
   provider?: PaymentProvider;
@@ -2216,7 +2245,7 @@ export interface StaffPaymentRecord extends BaseSync, MoneyFields {
   paidAt?: string;
   note?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
 }
 
 // ======================================================
@@ -2224,13 +2253,13 @@ export interface StaffPaymentRecord extends BaseSync, MoneyFields {
 // ======================================================
 
 export interface Announcement extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   title: string;
   body: string;
   audience: AnnouncementAudience;
-  classId?: number;
-  organizationId?: number;
+  classId?: string;
+  organizationId?: string;
   channels: CommunicationChannel[];
   priority?: NotificationPriority;
   publishAt?: string;
@@ -2239,18 +2268,18 @@ export interface Announcement extends BaseSync {
   publishedAt?: string;
   createdBy?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   attachmentUrl?: string;
-  attachmentMediaId?: number;
+  attachmentMediaId?: string;
   metadata?: any;
 }
 
 export interface AnnouncementRecipient extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  announcementId: number;
+  schoolId: string;
+  branchId: string;
+  announcementId: string;
   recipientType: MessageRecipientType;
-  recipientLocalId?: number;
+  recipientId?: string;
   userId?: string;
   recipientName?: string;
   recipientPhone?: string;
@@ -2264,47 +2293,47 @@ export interface AnnouncementRecipient extends BaseSync {
 }
 
 export interface MessageThread extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   title?: string;
   threadType: "direct" | "group" | "class" | "parent_teacher" | "support" | "announcement";
-  classId?: number;
-  organizationId?: number;
-  studentId?: number;
-  teacherId?: number;
-  parentId?: number;
+  classId?: string;
+  organizationId?: string;
+  studentId?: string;
+  teacherId?: string;
+  parentId?: string;
   createdBy?: string;
   lastMessageAt?: string;
   archived?: boolean;
 }
 
 export interface Message extends BaseSync {
-  schoolId: number;
-  branchId: number;
-  threadId: number;
+  schoolId: string;
+  branchId: string;
+  threadId: string;
   senderUserId?: string;
   senderRole?: Role;
   senderName?: string;
   body: string;
   channel?: CommunicationChannel;
   attachmentUrl?: string;
-  attachmentMediaId?: number;
+  attachmentMediaId?: string;
   photo?: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   deliveredAt?: string;
   readAt?: string;
   status?: DeliveryStatus;
 }
 
 export interface CommunicationLog extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   channel: CommunicationChannel;
   purpose: "announcement" | "message" | "fee_reminder" | "payroll" | "attendance" | "report" | "other";
   relatedTable?: string;
-  relatedLocalId?: number;
+  relatedId?: string;
   recipientType?: MessageRecipientType;
-  recipientLocalId?: number;
+  recipientId?: string;
   recipientName?: string;
   recipientPhone?: string;
   recipientEmail?: string;
@@ -2322,8 +2351,8 @@ export interface CommunicationLog extends BaseSync {
 }
 
 export interface NotificationTemplate extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   name: string;
   purpose: "announcement" | "fee_reminder" | "payment_receipt" | "payroll_notice" | "attendance_alert" | "report_ready" | "custom";
   channel: CommunicationChannel;
@@ -2337,8 +2366,8 @@ export interface NotificationTemplate extends BaseSync {
 // ======================================================
 
 export interface SchoolBranchSetting extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   mode?: string;
   theme?: "light" | "dark";
@@ -2348,33 +2377,33 @@ export interface SchoolBranchSetting extends BaseSync {
 
   academicYear?: string;
   currentTerm?: string;
-  currentAcademicStructureId?: number;
-  currentAcademicPeriodId?: number;
+  currentAcademicStructureId?: string;
+  currentAcademicPeriodId?: string;
 
   logo?: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   reportCardBackgroundImage?: string;
-  reportCardBackgroundImageMediaId?: number;
+  reportCardBackgroundImageMediaId?: string;
   reportCardWatermark?: string;
-  reportCardWatermarkMediaId?: number;
+  reportCardWatermarkMediaId?: string;
   reportCardSignatureImage?: string;
-  reportCardSignatureImageMediaId?: number;
+  reportCardSignatureImageMediaId?: string;
 
   dashboardHeroImage?: string;
-  dashboardHeroImageMediaId?: number;
+  dashboardHeroImageMediaId?: string;
   dashboardBannerImage?: string;
-  dashboardBannerImageMediaId?: number;
+  dashboardBannerImageMediaId?: string;
   studentPortalImage?: string;
-  studentPortalImageMediaId?: number;
+  studentPortalImageMediaId?: string;
   teacherPortalImage?: string;
-  teacherPortalImageMediaId?: number;
+  teacherPortalImageMediaId?: string;
   classroomPlaceholderImage?: string;
-  classroomPlaceholderImageMediaId?: number;
+  classroomPlaceholderImageMediaId?: string;
   subjectPlaceholderImage?: string;
-  subjectPlaceholderImageMediaId?: number;
+  subjectPlaceholderImageMediaId?: string;
 
   schoolGalleryImages?: string[];
-  schoolGalleryMediaIds?: number[];
+  schoolGalleryMediaIds?: string[];
 }
 
 // ======================================================
@@ -2521,8 +2550,8 @@ export type ScheduleConflictStatus =
 // ======================================================
 
 export interface CalendarEvent extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   /**
    * Generic reusable scope.
@@ -2532,7 +2561,7 @@ export interface CalendarEvent extends BaseSync {
    * scopeType="business", scopeId=businessId in another Eleeveon app
    */
   scopeType: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 
   title: string;
   description?: string;
@@ -2555,15 +2584,15 @@ export interface CalendarEvent extends BaseSync {
   /**
    * Optional school links.
    */
-  classId?: number | null;
-  subjectId?: number | null;
-  classSubjectId?: number | null;
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
+  classId?: string | null;
+  subjectId?: string | null;
+  classSubjectId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
 
-  academicStructureId?: number | null;
-  academicPeriodId?: number | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
 
   /**
    * Optional recurrence rule for repeated events.
@@ -2572,18 +2601,18 @@ export interface CalendarEvent extends BaseSync {
    */
   recurrenceRule?: string;
   recurrenceEndAt?: number | null;
-  parentEventId?: number | null;
+  parentEventId?: string | null;
 
   /**
    * Communication links.
    */
-  announcementId?: number | null;
-  messageThreadId?: number | null;
+  announcementId?: string | null;
+  messageThreadId?: string | null;
 
   color?: string;
   priority?: "low" | "normal" | "high" | "urgent";
 
-  createdByUserId?: number | string | null;
+  createdByUserId?: string | null;
   createdByRole?: string;
 
   active?: boolean;
@@ -2594,14 +2623,14 @@ export interface CalendarEvent extends BaseSync {
 // ======================================================
 
 export interface CalendarEventParticipant extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
+  eventId: string;
 
   participantType: CalendarParticipantType;
-  participantId?: number | null;
-  userLocalId?: number | null;
+  participantId?: string | null;
+  userId?: string | null;
 
   role?: string;
   displayName?: string;
@@ -2622,11 +2651,11 @@ export interface CalendarEventParticipant extends BaseSync {
 // ======================================================
 
 export interface CalendarEventReminder extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
-  participantId?: number | null;
+  eventId: string;
+  participantId?: string | null;
 
   channel: CalendarReminderChannel;
 
@@ -2651,13 +2680,13 @@ export interface CalendarEventReminder extends BaseSync {
 // ======================================================
 
 export interface CalendarEventResponse extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
-  participantId?: number | null;
+  eventId: string;
+  participantId?: string | null;
 
-  userLocalId?: number | null;
+  userId?: string | null;
   participantType?: CalendarParticipantType;
 
   responseStatus: CalendarResponseStatus;
@@ -2670,8 +2699,8 @@ export interface CalendarEventResponse extends BaseSync {
 // ======================================================
 
 export interface ScheduleTimetable extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   name: string;
   description?: string;
@@ -2686,13 +2715,13 @@ export interface ScheduleTimetable extends BaseSync {
    * exam timetable: scopeType="branch", scopeId=branchId
    */
   scopeType: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 
-  academicStructureId?: number | null;
-  academicPeriodId?: number | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
 
-  classId?: number | null;
-  teacherLocalId?: number | null;
+  classId?: string | null;
+  teacherId?: string | null;
 
   effectiveFrom?: number | null;
   effectiveTo?: number | null;
@@ -2702,7 +2731,7 @@ export interface ScheduleTimetable extends BaseSync {
   active?: boolean;
   isDefault?: boolean;
 
-  createdByUserId?: number | string | null;
+  createdByUserId?: string | null;
   createdByRole?: string;
 }
 
@@ -2711,10 +2740,10 @@ export interface ScheduleTimetable extends BaseSync {
 // ======================================================
 
 export interface ScheduleSession extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  timetableId: number;
+  timetableId: string;
 
   sessionType: ScheduleSessionType;
   dayOfWeek: ScheduleDayOfWeek;
@@ -2730,12 +2759,12 @@ export interface ScheduleSession extends BaseSync {
   title?: string;
   description?: string;
 
-  classId?: number | null;
-  subjectId?: number | null;
-  classSubjectId?: number | null;
-  teacherLocalId?: number | null;
+  classId?: string | null;
+  subjectId?: string | null;
+  classSubjectId?: string | null;
+  teacherId?: string | null;
 
-  resourceId?: number | null;
+  resourceId?: string | null;
   roomName?: string;
   location?: string;
 
@@ -2752,8 +2781,8 @@ export interface ScheduleSession extends BaseSync {
 // ======================================================
 
 export interface ScheduleResource extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   name: string;
   resourceType: ScheduleResourceType;
@@ -2766,7 +2795,7 @@ export interface ScheduleResource extends BaseSync {
    * Reusable scope for future Eleeveon apps.
    */
   scopeType?: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 
   active?: boolean;
 }
@@ -2776,8 +2805,8 @@ export interface ScheduleResource extends BaseSync {
 // ======================================================
 
 export interface ScheduleConflict extends BaseSync {
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   conflictType: ScheduleConflictType;
   severity: ScheduleConflictSeverity;
@@ -2790,17 +2819,17 @@ export interface ScheduleConflict extends BaseSync {
    * Link either calendar event conflict,
    * timetable session conflict, or both.
    */
-  eventIdA?: number | null;
-  eventIdB?: number | null;
+  eventIdA?: string | null;
+  eventIdB?: string | null;
 
-  sessionIdA?: number | null;
-  sessionIdB?: number | null;
+  sessionIdA?: string | null;
+  sessionIdB?: string | null;
 
-  resourceId?: number | null;
+  resourceId?: string | null;
 
-  teacherLocalId?: number | null;
-  classId?: number | null;
-  studentLocalId?: number | null;
+  teacherId?: string | null;
+  classId?: string | null;
+  studentId?: string | null;
 
   conflictStartAt?: number | null;
   conflictEndAt?: number | null;
@@ -2811,7 +2840,7 @@ export interface ScheduleConflict extends BaseSync {
 
   detectedAt: number;
   resolvedAt?: number | null;
-  resolvedByUserId?: number | string | null;
+  resolvedByUserId?: string | null;
   resolutionNote?: string;
 }
 
@@ -2820,245 +2849,240 @@ export interface ScheduleConflict extends BaseSync {
 // DATABASE
 // ======================================================
 
-/**
- * Exact schema shipped as version 38.
- *
- * IMPORTANT: Do not edit this object after deployment. Future versions must
- * spread it and add/replace stores in a new Dexie version declaration.
- */
-export const APP_DB_STORES_V38: Record<string, string> = {
-      schools: "++id,cloudId,accountId, name,updatedAt",
+/** Fresh permanent-ID schema for Eleeveon Schools Version 1. */
+export const APP_DB_STORES_V1: Record<string, string> = {
+      schools: "id,accountId,name,region,city,geohash,mapVisible,updatedAt,synced",
 
       branches:
-        "++id,cloudId,accountId,schoolId,name,updatedAt",
+        "id,accountId,schoolId,name,region,city,geohash,mapVisible,updatedAt,synced,[accountId+schoolId]",
 
       academicStructures:
-        "++id,cloudId,accountId, schoolId, branchId,level,updatedAt",
+        "id,accountId, schoolId, branchId,level,updatedAt",
 
       academicPeriods:
-        "++id,cloudId,accountId, schoolId, branchId,academicStructureId,order,updatedAt",
+        "id,accountId, schoolId, branchId,academicStructureId,order,updatedAt",
 
       organizations:
-        "++id,cloudId,accountId,schoolId,branchId,parentOrganizationId,type,updatedAt",
+        "id,accountId,schoolId,branchId,parentOrganizationId,type,updatedAt",
 
       students:
-        "++id,cloudId,accountId,schoolId,branchId,currentClassId,admissionNumber,fullName,email,status,updatedAt",
+        "id,accountId,schoolId,branchId,currentClassId,admissionNumber,fullName,email,status,geohash,mapVisible,updatedAt,synced,[accountId+branchId]",
 
       teachers:
-        "++id,cloudId,accountId,schoolId,branchId,role,fullName,title,updatedAt",
+        "id,accountId,schoolId,branchId,role,fullName,title,geohash,mapVisible,updatedAt,synced,[accountId+branchId]",
 
       parents:
-        "++id,cloudId,accountId,schoolId,branchId,phone,email,title,fullName",
+        "id,accountId,schoolId,branchId,phone,email,title,fullName,geohash,mapVisible,updatedAt,synced,[accountId+branchId]",
 
       studentParents:
-        "++id,cloudId,accountId,schoolId,branchId,studentId,parentId",
+        "id,accountId,schoolId,branchId,studentId,parentId",
 
       classes:
-        "++id,cloudId,accountId,schoolId,branchId,organizationId,name,updatedAt",
+        "id,accountId,schoolId,branchId,organizationId,name,updatedAt",
 
       subjects:
-        "++id,cloudId,accountId, schoolId, branchId,organizationId,name,code,category,updatedAt",
+        "id,accountId, schoolId, branchId,organizationId,name,code,category,updatedAt",
 
       programs:
-        "++id,cloudId,accountId,schoolId,branchId,organizationId,code,name,active,updatedAt",
+        "id,accountId,schoolId,branchId,organizationId,code,name,active,updatedAt",
 
       curriculums:
-        "++id,cloudId,accountId,schoolId,branchId,organizationId,programId,academicStructureId,name,active,updatedAt",
+        "id,accountId,schoolId,branchId,organizationId,programId,academicStructureId,name,active,updatedAt",
 
       curriculumPathways:
-        "++id,cloudId,accountId,schoolId,branchId,curriculumId,active,updatedAt",
+        "id,accountId,schoolId,branchId,curriculumId,active,updatedAt",
 
-      curriculumSubjects: "++id,cloudId,accountId, schoolId, branchId,curriculumId,subjectId,pathwayId,organizationId,active",
+      curriculumSubjects: "id,accountId, schoolId, branchId,curriculumId,subjectId,pathwayId,organizationId,active",
 
       classSubjects: 
-        "++id,cloudId,accountId, schoolId, branchId, classId, subjectId, curriculumSubjectId,academicStructureId, academicPeriodId, teacherId, active, locked",
+        "id,accountId, schoolId, branchId, classId, subjectId, curriculumSubjectId,academicStructureId, academicPeriodId, teacherId, active, locked",
         
         
       subjectPrerequisites:
-        "++id,cloudId,accountId, schoolId, branchId,curriculumSubjectId,prerequisiteSubjectId,type,active,updatedAt",
+        "id,accountId, schoolId, branchId,curriculumSubjectId,prerequisiteSubjectId,type,active,updatedAt",
 
       studentCurriculums:
-        "++id,cloudId,accountId,schoolId,branchId,studentId,curriculumId,status,active,updatedAt",
+        "id,accountId,schoolId,branchId,studentId,curriculumId,status,active,updatedAt",
 
       subjectOfferings:
-        "++id,cloudId,accountId,schoolId,branchId,classSubjectId,curriculumSubjectId,subjectId,classId,academicPeriodId,teacherId,active,updatedAt",
+        "id,accountId,schoolId,branchId,classSubjectId,curriculumSubjectId,subjectId,classId,academicPeriodId,teacherId,active,updatedAt",
 
       assignments:
-        "++id,cloudId,accountId,schoolId,branchId,teacherId,classId,subjectId",
+        "id,accountId,schoolId,branchId,teacherId,classId,subjectId",
 
       classTeachers:
-        "++id,cloudId,accountId,schoolId,branchId,classId,teacherId",
+        "id,accountId,schoolId,branchId,classId,teacherId",
 
       studentEnrollments:
-        "++id,cloudId,accountId,schoolId,branchId,studentId,classId,academicPeriodId,status,updatedAt",
+        "id,accountId,schoolId,branchId,studentId,classId,academicPeriodId,status,updatedAt",
 
       gradingSystems:
-        "++id,cloudId,accountId, schoolId, branchId,organizationId,name,type,active,updatedAt",
+        "id,accountId, schoolId, branchId,organizationId,name,type,active,updatedAt",
 
       gradeRules:
-        "++id,cloudId,accountId, schoolId, branchId,gradingSystemId,minScore,maxScore,grade,order,updatedAt",
+        "id,accountId, schoolId, branchId,gradingSystemId,minScore,maxScore,grade,order,updatedAt",
 
       assessmentStructures:
-        "++id,cloudId,accountId, schoolId, branchId,organizationId,academicStructureId,name,active,updatedAt",
+        "id,accountId, schoolId, branchId,organizationId,academicStructureId,name,active,updatedAt",
 
       assessmentStructureItems:
-        "++id,cloudId,accountId, schoolId, branchId,assessmentStructureId,order,active,updatedAt",
+        "id,accountId, schoolId, branchId,assessmentStructureId,order,active,updatedAt",
 
       assessmentApplicabilities:
-        "++id,cloudId,accountId, schoolId, branchId,classSubjectId,assessmentStructureId,gradingSystemId,active,locked",
+        "id,accountId, schoolId, branchId,classSubjectId,assessmentStructureId,gradingSystemId,active,locked",
 
       assessmentComponents:
-        "++id,cloudId,accountId, schoolId, branchId,classId,subjectId,academicPeriodId,assessmentStructureId,active",
+        "id,accountId, schoolId, branchId,classId,subjectId,academicPeriodId,assessmentStructureId,active",
 
       assessmentEntries:
-        "++id,cloudId,accountId, schoolId, branchId,classSubjectId,studentId,assessmentStructureItemId,published,active",
+        "id,accountId, schoolId, branchId,classSubjectId,studentId,assessmentStructureItemId,published,active",
 
       computedResults:
-        "++id,cloudId,accountId, schoolId, branchId,classSubjectId,studentId,grade,gpa,position,published",
+        "id,accountId, schoolId, branchId,classSubjectId,studentId,grade,gpa,position,published",
 
       attendance:
-        "++id,cloudId,accountId, schoolId, branchId,studentId,classId,academicPeriodId,date",
+        "id,accountId, schoolId, branchId,studentId,classId,academicPeriodId,date",
 
       teacherAttendance:
-        "++id,cloudId,accountId, schoolId, branchId,teacherId,date",
+        "id,accountId, schoolId, branchId,teacherId,date",
 
       reportCards:
-        "++id,cloudId,accountId, schoolId, branchId,studentId,classId,academicPeriodId",
+        "id,accountId, schoolId, branchId,studentId,classId,academicPeriodId",
 
       reportCardItems:
-        "++id,cloudId,accountId, schoolId, branchId,reportCardId,subjectId,academicPeriodId",
+        "id,accountId, schoolId, branchId,reportCardId,subjectId,academicPeriodId",
 
       reportCardTemplates:
-        "++id,cloudId,accountId,schoolId,branchId,code,layoutKey,templateKey,name,reportType,isDefault,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active]",
+        "id,accountId,schoolId,branchId,code,layoutKey,templateKey,name,reportType,isDefault,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active]",
 
       reportCardTemplateSettings:
-        "++id,cloudId,accountId,schoolId,branchId,templateId,templateCode,layoutKey,templateKey,name,reportType,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active],[templateId+reportType]",
+        "id,accountId,schoolId,branchId,templateId,templateCode,layoutKey,templateKey,name,reportType,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active],[templateId+reportType]",
 
       reportCardTemplateAssignments:
-        "++id,cloudId,accountId,schoolId,branchId,templateId,templateSettingsId,templateCode,layoutKey,templateKey,reportType,scopeType,scopeId,academicStructureId,academicPeriodId,classId,level,studentId,isDefault,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active],[reportType+scopeType+scopeId]",
+        "id,accountId,schoolId,branchId,templateId,templateSettingsId,templateCode,layoutKey,templateKey,reportType,scopeType,scopeId,academicStructureId,academicPeriodId,classId,level,studentId,isDefault,active,updatedAt,[accountId+schoolId+branchId+reportType],[branchId+reportType+active],[reportType+scopeType+scopeId]",
 
       studentReportSnapshots:
-        "++id,cloudId,accountId, schoolId, branchId, studentId, classId, academicStructureId, academicPeriodId, promotedToClassId, snapshotType, synced, isDeleted, updatedAt",
+        "id,accountId, schoolId, branchId, studentId, classId, academicStructureId, academicPeriodId, promotedToClassId, snapshotType, synced, isDeleted, updatedAt",
 
       studentPromotions:
-        "++id,cloudId,accountId, schoolId, branchId, studentId, fromClassId, toClassId, fromAcademicStructureId, toAcademicStructureId, fromAcademicPeriodId, toAcademicPeriodId, average, recommendation, finalDecision, snapshotId, note",
+        "id,accountId, schoolId, branchId, studentId, fromClassId, toClassId, fromAcademicStructureId, toAcademicStructureId, fromAcademicPeriodId, toAcademicPeriodId, average, recommendation, finalDecision, snapshotId, note",
 
       schoolBranchSettings:
-        "++id,cloudId,accountId, schoolId, branchId, currentAcademicStructureId, currentAcademicPeriodId, synced, isDeleted, updatedAt",
+        "id,accountId, schoolId, branchId, currentAcademicStructureId, currentAcademicPeriodId, synced, isDeleted, updatedAt",
 
       currencies:
-        "++id,cloudId,accountId,code,countryCode,active,default,updatedAt",
+        "id,accountId,code,countryCode,active,default,updatedAt",
 
       schoolCurrencySettings:
-        "++id,cloudId,accountId,schoolId,branchId,currencyCode,active,updatedAt",
+        "id,accountId,schoolId,branchId,currencyCode,active,updatedAt",
 
       paymentIntents:
-        "++id,cloudId,accountId,schoolId,branchId,purpose,studentId,parentId,teacherId,feeInvoiceId,incomeId,payrollRunId,payrollItemId,status,channel,provider,providerReference,updatedAt",
+        "id,accountId,schoolId,branchId,purpose,studentId,parentId,teacherId,feeInvoiceId,incomeId,payrollRunId,payrollItemId,status,channel,provider,providerReference,updatedAt",
 
       paymentTransactions:
-        "++id,cloudId,accountId,schoolId,branchId,paymentIntentId,purpose,direction,status,channel,provider,providerReference,receiptNumber,referenceNumber,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,paymentIntentId,purpose,direction,status,channel,provider,providerReference,receiptNumber,referenceNumber,paidAt,updatedAt",
 
       paymentProviderEvents:
-        "++id,cloudId,accountId,schoolId,branchId,provider,eventType,providerReference,paymentIntentId,paymentTransactionId,processed,createdAt,updatedAt",
+        "id,accountId,schoolId,branchId,provider,eventType,providerReference,paymentIntentId,paymentTransactionId,processed,createdAt,updatedAt",
 
       paymentRefunds:
-        "++id,cloudId,accountId,schoolId,branchId,paymentTransactionId,status,provider,providerReference,refundedAt,updatedAt",
+        "id,accountId,schoolId,branchId,paymentTransactionId,status,provider,providerReference,refundedAt,updatedAt",
 
       paymentSettlements:
-        "++id,cloudId,accountId,schoolId,branchId,paymentTransactionId,status,provider,providerReference,referenceNumber,settledAt,updatedAt",
+        "id,accountId,schoolId,branchId,paymentTransactionId,status,provider,providerReference,referenceNumber,settledAt,updatedAt",
 
       withdrawalRequests:
-        "++id,cloudId,accountId,schoolId,branchId,status,method,referenceNumber,requestedAt,approvedAt,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,status,method,referenceNumber,requestedAt,approvedAt,paidAt,updatedAt",
 
       schoolPayoutSettings:
-        "++id,cloudId,accountId,schoolId,branchId,preferredMethod,settlementMode,paystackSubaccountCode,status,active,updatedAt",
+        "id,accountId,schoolId,branchId,preferredMethod,settlementMode,paystackSubaccountCode,status,active,updatedAt",
 
       studentFeeInvoices:
-        "++id,cloudId,accountId,schoolId,branchId,studentId,classId,academicStructureId,academicPeriodId,invoiceNumber,status,dueDate,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,studentId,classId,academicStructureId,academicPeriodId,invoiceNumber,status,dueDate,paidAt,updatedAt",
 
       studentFeeInvoiceItems:
-        "++id,cloudId,accountId,schoolId,branchId,invoiceId,feeStructureId,name,required,order,updatedAt",
+        "id,accountId,schoolId,branchId,invoiceId,feeStructureId,name,required,order,updatedAt",
 
       studentFeePayments:
-        "++id,cloudId,accountId,schoolId,branchId,invoiceId,studentId,parentId,status,method,provider,paymentIntentId,paymentTransactionId,receiptNumber,referenceNumber,providerReference,date,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,invoiceId,studentId,parentId,status,method,provider,paymentIntentId,paymentTransactionId,receiptNumber,referenceNumber,providerReference,date,paidAt,updatedAt",
 
       staffPayrollProfiles:
-        "++id,cloudId,accountId,schoolId,branchId,teacherId,staffUserId,fullName,payType,preferredPaymentMethod,active,updatedAt",
+        "id,accountId,schoolId,branchId,teacherId,staffUserId,fullName,payType,preferredPaymentMethod,active,updatedAt",
 
       payrollRuns:
-        "++id,cloudId,accountId,schoolId,branchId,status,periodStart,periodEnd,payDate,approvedAt,processedAt,locked,updatedAt",
+        "id,accountId,schoolId,branchId,status,periodStart,periodEnd,payDate,approvedAt,processedAt,locked,updatedAt",
 
       payrollItems:
-        "++id,cloudId,accountId,schoolId,branchId,payrollRunId,payrollProfileId,teacherId,staffUserId,status,paymentMethod,provider,paymentIntentId,paymentTransactionId,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,payrollRunId,payrollProfileId,teacherId,staffUserId,status,paymentMethod,provider,paymentIntentId,paymentTransactionId,paidAt,updatedAt",
 
       staffPaymentRecords:
-        "++id,cloudId,accountId,schoolId,branchId,teacherId,staffUserId,payrollRunId,payrollItemId,status,method,provider,referenceNumber,receiptNumber,providerReference,date,paidAt,updatedAt",
+        "id,accountId,schoolId,branchId,teacherId,staffUserId,payrollRunId,payrollItemId,status,method,provider,referenceNumber,receiptNumber,providerReference,date,paidAt,updatedAt",
 
       announcements:
-        "++id,cloudId,accountId,schoolId,branchId,audience,classId,organizationId,published,publishAt,expiresAt,createdBy,updatedAt",
+        "id,accountId,schoolId,branchId,audience,classId,organizationId,published,publishAt,expiresAt,createdBy,updatedAt",
 
       announcementRecipients:
-        "++id,cloudId,accountId,schoolId,branchId,announcementId,recipientType,recipientLocalId,userId,status,deliveredAt,readAt,updatedAt",
+        "id,accountId,schoolId,branchId,announcementId,recipientType,recipientId,userId,status,deliveredAt,readAt,updatedAt",
 
       messageThreads:
-        "++id,cloudId,accountId,schoolId,branchId,threadType,classId,organizationId,studentId,teacherId,parentId,createdBy,lastMessageAt,archived,updatedAt",
+        "id,accountId,schoolId,branchId,threadType,classId,organizationId,studentId,teacherId,parentId,createdBy,lastMessageAt,archived,updatedAt",
 
       messages:
-        "++id,cloudId,accountId,schoolId,branchId,threadId,senderUserId,senderRole,channel,status,deliveredAt,readAt,updatedAt",
+        "id,accountId,schoolId,branchId,threadId,senderUserId,senderRole,channel,status,deliveredAt,readAt,updatedAt",
 
 
       calendarEvents:
-    "++id, cloudId, accountId, schoolId, branchId, scopeType, scopeId, eventType, status, visibility, startAt, endAt, classId, subjectId, classSubjectId, teacherLocalId, studentLocalId, parentLocalId, academicStructureId, academicPeriodId, announcementId, messageThreadId, createdByUserId, active, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, scopeType, scopeId, eventType, status, visibility, startAt, endAt, classId, subjectId, classSubjectId, teacherId, studentId, parentId, academicStructureId, academicPeriodId, announcementId, messageThreadId, createdByUserId, active, isDeleted, updatedAt, synced",
 
   calendarEventParticipants:
-    "++id, cloudId, accountId, schoolId, branchId, eventId, participantType, participantId, userLocalId, role, email, responseStatus, required, active, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, eventId, participantType, participantId, userId, role, email, responseStatus, required, active, isDeleted, updatedAt, synced",
 
   calendarEventReminders:
-    "++id, cloudId, accountId, schoolId, branchId, eventId, participantId, channel, minutesBefore, scheduledAt, sentAt, status, active, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, eventId, participantId, channel, minutesBefore, scheduledAt, sentAt, status, active, isDeleted, updatedAt, synced",
 
   calendarEventResponses:
-    "++id, cloudId, accountId, schoolId, branchId, eventId, participantId, userLocalId, participantType, responseStatus, respondedAt, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, eventId, participantId, userId, participantType, responseStatus, respondedAt, isDeleted, updatedAt, synced",
 
   scheduleTimetables:
-    "++id, cloudId, accountId, schoolId, branchId, name, timetableType, scopeType, scopeId, academicStructureId, academicPeriodId, classId, teacherLocalId, effectiveFrom, effectiveTo, status, active, isDefault, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, name, timetableType, scopeType, scopeId, academicStructureId, academicPeriodId, classId, teacherId, effectiveFrom, effectiveTo, status, active, isDefault, isDeleted, updatedAt, synced",
 
   scheduleSessions:
-    "++id, cloudId, accountId, schoolId, branchId, timetableId, sessionType, dayOfWeek, startMinute, endMinute, classId, subjectId, classSubjectId, teacherLocalId, resourceId, active, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, timetableId, sessionType, dayOfWeek, startMinute, endMinute, classId, subjectId, classSubjectId, teacherId, resourceId, active, isDeleted, updatedAt, synced",
 
   scheduleResources:
-    "++id, cloudId, accountId, schoolId, branchId, name, resourceType, scopeType, scopeId, active, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, name, resourceType, scopeType, scopeId, active, isDeleted, updatedAt, synced",
 
   scheduleConflicts:
-    "++id, cloudId, accountId, schoolId, branchId, conflictType, severity, status, eventIdA, eventIdB, sessionIdA, sessionIdB, resourceId, teacherLocalId, classId, studentLocalId, detectedAt, resolvedAt, isDeleted, updatedAt, synced",
+    "id,accountId, schoolId, branchId, conflictType, severity, status, eventIdA, eventIdB, sessionIdA, sessionIdB, resourceId, teacherId, classId, studentId, detectedAt, resolvedAt, isDeleted, updatedAt, synced",
       communicationLogs:
-        "++id,cloudId,accountId,schoolId,branchId,channel,purpose,relatedTable,relatedLocalId,recipientType,recipientLocalId,status,provider,providerReference,sentAt,deliveredAt,readAt,updatedAt",
+        "id,accountId,schoolId,branchId,channel,purpose,relatedTable,relatedId,recipientType,recipientId,status,provider,providerReference,sentAt,deliveredAt,readAt,updatedAt",
 
       notificationTemplates:
-        "++id,cloudId,accountId,schoolId,branchId,purpose,channel,name,active,updatedAt",
+        "id,accountId,schoolId,branchId,purpose,channel,name,active,updatedAt",
 
       feeStructures:
-        "++id,cloudId,accountId,schoolId,branchId,classId,academicStructureId,academicPeriodId,currencyCode,updatedAt",
+        "id,accountId,schoolId,branchId,classId,academicStructureId,academicPeriodId,currencyCode,updatedAt",
 
       payments:
-        "++id,cloudId,accountId,schoolId,branchId,studentId,method,currencyCode,date,receiptNumber,updatedAt",
+        "id,accountId,schoolId,branchId,studentId,method,currencyCode,date,receiptNumber,updatedAt",
 
       incomes:
-        "++id,cloudId,accountId,schoolId,branchId,organizationId,title,date,amount,paymentMethod,currencyCode,updatedAt",
+        "id,accountId,schoolId,branchId,organizationId,title,date,amount,paymentMethod,currencyCode,updatedAt",
 
       expenses:
-        "++id,cloudId,accountId,schoolId,branchId,organizationId,title,date,amount,expenseSourceType,paymentMethod,currencyCode,updatedAt",
+        "id,accountId,schoolId,branchId,organizationId,title,date,amount,expenseSourceType,paymentMethod,currencyCode,updatedAt",
       
       mediaAssets:
-        "++id,cloudId,accountId,schoolId,branchId,ownerTable,ownerLocalId,ownerCloudId,ownerTempKey,fieldKey,ownerIdentityKey,assetKind,mimeType,uploadStatus,active,isDeleted,updatedAt,synced,[accountId+ownerIdentityKey],[accountId+ownerTable+fieldKey]",
+        "id,accountId,schoolId,branchId,ownerTable,ownerId,ownerTempKey,fieldKey,ownerIdentityKey,assetKind,mimeType,uploadStatus,active,isDeleted,updatedAt,synced,[accountId+ownerIdentityKey],[accountId+ownerTable+fieldKey]",
 
       mediaBlobs:
-        "++id,accountId,assetLocalId,mimeType,sizeBytes,createdAt,updatedAt,[accountId+assetLocalId]",
+        "++id,accountId,assetId,mimeType,sizeBytes,createdAt,updatedAt,[accountId+assetId]",
       
       appUsers:
         "id,accountId,email,role,active,updatedAt",
 
       userMemberships:
-        "id,accountId,userId,role,schoolId,branchId,teacherLocalId,studentLocalId,parentLocalId,active,updatedAt",
+        "id,accountId,userId,role,schoolId,branchId,teacherId,studentId,parentId,active,updatedAt",
 
       permissionRules:
         "id,accountId,moduleKey,developer,owner,admin,branch,teacher,student,parent,accountant,locked,updatedAt",
@@ -3091,7 +3115,7 @@ export const APP_DB_STORES_V38: Record<string, string> = {
         "id,accountId,deviceId,userId,lastSeenAt,active,updatedAt",
 
       syncConflicts:
-        "id,accountId,tableName,localId,cloudId,deviceId,status,resolvedAt,updatedAt",
+        "id,accountId,tableName,localId,deviceId,status,resolvedAt,updatedAt",
 
       apiClients:
         "id,accountId,clientId,name,active,lastUsedAt,updatedAt",
@@ -3106,7 +3130,7 @@ export const APP_DB_STORES_V38: Record<string, string> = {
         "id,accountId,webhookId,eventType,status,statusCode,deliveredAt,createdAt",
 
       integrationMappings:
-        "id,accountId,integrationKey,localTable,localId,cloudId,externalId,updatedAt",
+        "id,accountId,integrationKey,localTable,localId,externalId,updatedAt",
 
       auditLogs:
         "id,accountId,userId,action,entityType,entityId,schoolId,branchId,createdAt",
@@ -3174,12 +3198,12 @@ export class EleeveonDatabase extends Dexie {
 
   reportCards!: Table<ReportCard>;
   reportCardItems!: Table<ReportCardItem>;
-  reportCardTemplates!: Table<ReportCardTemplate, number>;
-  reportCardTemplateSettings!: Table<ReportCardTemplateSetting, number>;
-  reportCardTemplateAssignments!: Table<ReportCardTemplateAssignment, number>;
+  reportCardTemplates!: Table<ReportCardTemplate, string>;
+  reportCardTemplateSettings!: Table<ReportCardTemplateSetting, string>;
+  reportCardTemplateAssignments!: Table<ReportCardTemplateAssignment, string>;
 
-  studentReportSnapshots!: Table<StudentReportSnapshot, number>;
-  studentPromotions!: Table<StudentPromotion, number>;
+  studentReportSnapshots!: Table<StudentReportSnapshot, string>;
+  studentPromotions!: Table<StudentPromotion, string>;
 
   feeStructures!: Table<FeeStructure>;
   payments!: Table<Payment>;
@@ -3216,18 +3240,18 @@ export class EleeveonDatabase extends Dexie {
 
   schoolBranchSettings!: Table<SchoolBranchSetting>;
 
-  mediaAssets!: Table<MediaAsset, number>;
+  mediaAssets!: Table<MediaAsset, string>;
   mediaBlobs!: Table<MediaBlob, number>;
 
-  calendarEvents!: Table<CalendarEvent, number>;
-  calendarEventParticipants!: Table<CalendarEventParticipant, number>;
-  calendarEventReminders!: Table<CalendarEventReminder, number>;
-  calendarEventResponses!: Table<CalendarEventResponse, number>;
+  calendarEvents!: Table<CalendarEvent, string>;
+  calendarEventParticipants!: Table<CalendarEventParticipant, string>;
+  calendarEventReminders!: Table<CalendarEventReminder, string>;
+  calendarEventResponses!: Table<CalendarEventResponse, string>;
  
-  scheduleTimetables!: Table<ScheduleTimetable, number>;
-  scheduleSessions!: Table<ScheduleSession, number>;
-  scheduleResources!: Table<ScheduleResource, number>;
-  scheduleConflicts!: Table<ScheduleConflict, number>;
+  scheduleTimetables!: Table<ScheduleTimetable, string>;
+  scheduleSessions!: Table<ScheduleSession, string>;
+  scheduleResources!: Table<ScheduleResource, string>;
+  scheduleConflicts!: Table<ScheduleConflict, string>;
  
 
   appUsers!: Table<LocalAppUser, string>;
@@ -3263,52 +3287,10 @@ export class EleeveonDatabase extends Dexie {
 
   constructor() {
     super(APP_DB_NAME);
-
-    /**
-     * Version 38
-     * - Adds broadsheet document families to the generic report template system.
-     * - Indexes reportType on templates, settings and assignments.
-     * - Adds compound branch/report-type indexes for fast offline resolution.
-     * - Preserves every existing table and record; no destructive migration.
-     */
-    this.version(38).stores(APP_DB_STORES_V38);
-
-    /**
-     * Version 39 — database protection foundation.
-     *
-     * Adds only local safety stores. Existing application stores and indexes
-     * remain identical to version 38. No school record is deleted or renamed.
-     */
-    this.version(39)
-      .stores({
-        ...APP_DB_STORES_V38,
-        ...LOCAL_PROTECTION_STORES,
-      })
-      .upgrade(runVersion39Migration);
-
-    /**
-     * Version 40 — exact media identity indexes and safe normalization.
-     * No media is merged during migration. Ambiguous legacy rows remain for
-     * mediaRepair.ts to report and repair explicitly.
-     */
-    this.version(APP_DB_VERSION)
-      .stores({
-        ...APP_DB_STORES_V38,
-        mediaAssets:
-          "++id,cloudId,accountId,schoolId,branchId,ownerTable,ownerLocalId,ownerCloudId,ownerTempKey,fieldKey,ownerIdentityKey,assetKind,mimeType,uploadStatus,active,isDeleted,updatedAt,synced,[accountId+ownerIdentityKey],[accountId+ownerTable+fieldKey]",
-        mediaBlobs:
-          "++id,accountId,assetLocalId,mimeType,sizeBytes,createdAt,updatedAt,[accountId+assetLocalId]",
-        ...LOCAL_PROTECTION_STORES,
-      })
-      .upgrade(async (tx) => {
-        await tx.table("mediaAssets").toCollection().modify((asset: any) => {
-          asset.ownerIdentityKey = buildMediaIdentityKey(asset);
-          asset.identityVersion = 1;
-          if (String(asset.localObjectUrl || "").startsWith("blob:")) {
-            delete asset.localObjectUrl;
-          }
-        });
-      });
+    this.version(APP_DB_VERSION).stores({
+      ...APP_DB_STORES_V1,
+      ...LOCAL_PROTECTION_STORES,
+    });
   }
 }
 

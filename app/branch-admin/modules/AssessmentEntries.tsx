@@ -45,7 +45,12 @@ import {
   type Teacher,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -58,8 +63,8 @@ type ScoreMap = Record<string, ScoreValue>;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -69,13 +74,13 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
 type ClassSubjectOption = {
-  id: number;
+  id: string;
   row: ClassSubject;
   className: string;
   subjectName: string;
@@ -85,7 +90,7 @@ type ClassSubjectOption = {
   academicPeriodName: string;
   curriculumName: string;
   pathwayName: string;
-  organizationId?: number;
+  organizationId?: string;
   ready: boolean;
   display: string;
 };
@@ -104,7 +109,7 @@ type StudentScoreRow = {
 };
 
 type ClassEntryView = {
-  id: number;
+  id: string;
   row: Class;
   name: string;
   code: string;
@@ -115,7 +120,7 @@ type ClassEntryView = {
 };
 
 type ClassSubjectEntryView = {
-  id: number;
+  id: string;
   option: ClassSubjectOption;
   studentCount: number;
   itemCount: number;
@@ -124,24 +129,28 @@ type ClassSubjectEntryView = {
   completion: number;
 };
 
-
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+const idOf = (v: any): string => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (v: any) => String(v || "").toLowerCase().trim();
+const safeLower = (v: any) =>
+  String(v || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
-const scoreKey = (studentId?: number, itemId?: number) => `${studentId || 0}-${itemId || 0}`;
+const scoreKey = (studentId?: string, itemId?: string) =>
+  `${studentId || ""}-${itemId || ""}`;
 
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -165,12 +174,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
-  return 0;
+
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -181,15 +191,19 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
-  return firstLocalId(
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -201,8 +215,12 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
-  return firstLocalId(
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -210,7 +228,7 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
@@ -245,7 +263,13 @@ export default function AssessmentEntriesPage() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -269,20 +293,29 @@ export default function AssessmentEntriesPage() {
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
   const [structures, setStructures] = useState<AssessmentStructure[]>([]);
   const [items, setItems] = useState<AssessmentStructureItem[]>([]);
   const [entries, setEntries] = useState<AssessmentEntry[]>([]);
@@ -297,8 +330,10 @@ export default function AssessmentEntriesPage() {
   const [filterClassId, setFilterClassId] = useState("all");
   const [filterSubjectId, setFilterSubjectId] = useState("all");
   const [filterPeriodId, setFilterPeriodId] = useState("all");
-  const [filterReadiness, setFilterReadiness] = useState<ReadinessFilter>("all");
-  const [filterCompletion, setFilterCompletion] = useState<CompletionFilter>("all");
+  const [filterReadiness, setFilterReadiness] =
+    useState<ReadinessFilter>("all");
+  const [filterCompletion, setFilterCompletion] =
+    useState<CompletionFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
@@ -307,7 +342,15 @@ export default function AssessmentEntriesPage() {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/account");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -317,7 +360,10 @@ export default function AssessmentEntriesPage() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((c) => (c?.message === message ? null : c)), 4200);
+    window.setTimeout(
+      () => setToast((c) => (c?.message === message ? null : c)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -352,7 +398,11 @@ export default function AssessmentEntriesPage() {
 
     try {
       setLoading(true);
-      const tenant = { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any;
+      const tenant = {
+        accountId,
+        schoolId: schoolId,
+        branchId: branchId,
+      } as any;
       const [
         studentRows,
         classRows,
@@ -396,26 +446,59 @@ export default function AssessmentEntriesPage() {
       setStudents(
         (studentRows as Student[])
           .filter((r) => sameTenant(r as TenantRow))
-          .filter((r: any) => !["withdrawn", "deleted", "archived"].includes(safeLower(r.status)))
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")))
+          .filter(
+            (r: any) =>
+              !["withdrawn", "deleted", "archived"].includes(
+                safeLower(r.status),
+              ),
+          )
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
-      setClasses((classRows as Class[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setSubjects((subjectRows as Subject[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setTeachers((teacherRows as Teacher[]).sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))));
+      setClasses(
+        (classRows as Class[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setSubjects(
+        (subjectRows as Subject[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setTeachers(
+        (teacherRows as Teacher[]).sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")),
+        ),
+      );
       setAcademicStructures(academicStructureRows as AcademicStructure[]);
       setPeriods(periodRows as AcademicPeriod[]);
       setOrganizations(organizationRows as Organization[]);
       setCurriculums(curriculumRows as Curriculum[]);
       setPathways(pathwayRows as CurriculumPathway[]);
       setCurriculumSubjects(curriculumSubjectRows as CurriculumSubject[]);
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter(isActiveRow));
-      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter(isActiveRow));
-      setStructures((structureRows as AssessmentStructure[]).filter(isActiveRow));
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter(isActiveRow),
+      );
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter(isActiveRow),
+      );
+      setStructures(
+        (structureRows as AssessmentStructure[]).filter(isActiveRow),
+      );
       setItems((itemRows as AssessmentStructureItem[]).filter(isActiveRow));
-      setEntries((entryRows as AssessmentEntry[]).filter((r) => sameTenant(r as TenantRow) && !r.isDeleted));
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter(
+          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
+        ),
+      );
       setGradings((gradingRows as GradingSystem[]).filter(isActiveRow));
       setRules((ruleRows as GradeRule[]).filter(isActiveRow));
-      setEnrollments((enrollmentRows as StudentEnrollment[]).filter((r) => sameTenant(r as TenantRow) && !r.isDeleted));
+      setEnrollments(
+        (enrollmentRows as StudentEnrollment[]).filter(
+          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
+        ),
+      );
     } catch (error) {
       console.error(error);
       clearData();
@@ -429,24 +512,59 @@ export default function AssessmentEntriesPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const classMap = useMemo(() => new Map(classes.map((r: any) => [idOf(r.id), r])), [classes]);
-  const subjectMap = useMemo(() => new Map(subjects.map((r: any) => [idOf(r.id), r])), [subjects]);
-  const teacherMap = useMemo(() => new Map(teachers.map((r: any) => [idOf(r.id), r])), [teachers]);
-  const academicStructureMap = useMemo(() => new Map(academicStructures.map((r: any) => [idOf(r.id), r])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(periods.map((r: any) => [idOf(r.id), r])), [periods]);
-  const organizationMap = useMemo(() => new Map(organizations.map((r: any) => [idOf(r.id), r])), [organizations]);
-  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map((r: any) => [idOf(r.id), r])), [curriculumSubjects]);
-  const curriculumMap = useMemo(() => new Map(curriculums.map((r: any) => [idOf(r.id), r])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((r: any) => [idOf(r.id), r])), [pathways]);
+  const classMap = useMemo(
+    () => new Map(classes.map((r: any) => [idOf(r.id), r])),
+    [classes],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((r: any) => [idOf(r.id), r])),
+    [subjects],
+  );
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((r: any) => [idOf(r.id), r])),
+    [teachers],
+  );
+  const academicStructureMap = useMemo(
+    () => new Map(academicStructures.map((r: any) => [idOf(r.id), r])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(periods.map((r: any) => [idOf(r.id), r])),
+    [periods],
+  );
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
+    [organizations],
+  );
+  const curriculumSubjectMap = useMemo(
+    () => new Map(curriculumSubjects.map((r: any) => [idOf(r.id), r])),
+    [curriculumSubjects],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((r: any) => [idOf(r.id), r])),
+    [curriculums],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((r: any) => [idOf(r.id), r])),
+    [pathways],
+  );
 
   const applicabilityMap = useMemo(() => {
-    const m = new Map<number, AssessmentApplicability>();
+    const m = new Map<string, AssessmentApplicability>();
     applicabilities.forEach((row: any) => {
-      if (idOf(row.classSubjectId) && row.active !== false && !row.isDeleted) m.set(idOf(row.classSubjectId), row);
+      if (idOf(row.classSubjectId) && row.active !== false && !row.isDeleted)
+        m.set(idOf(row.classSubjectId), row);
     });
     return m;
   }, [applicabilities]);
@@ -457,12 +575,24 @@ export default function AssessmentEntriesPage() {
         const id = idOf(row.id);
         const cls: any = classMap.get(idOf(row.classId));
         const subj: any = subjectMap.get(idOf(row.subjectId));
-        const teacher: any = row.teacherId ? teacherMap.get(idOf(row.teacherId)) : undefined;
-        const academicStructure: any = academicStructureMap.get(idOf(row.academicStructureId));
-        const period: any = row.academicPeriodId ? periodMap.get(idOf(row.academicPeriodId)) : undefined;
-        const curriculumSubject: any = curriculumSubjectMap.get(idOf(row.curriculumSubjectId));
-        const curriculum: any = curriculumSubject ? curriculumMap.get(idOf(curriculumSubject.curriculumId)) : undefined;
-        const pathway: any = curriculumSubject?.pathwayId ? pathwayMap.get(idOf(curriculumSubject.pathwayId)) : undefined;
+        const teacher: any = row.teacherId
+          ? teacherMap.get(idOf(row.teacherId))
+          : undefined;
+        const academicStructure: any = academicStructureMap.get(
+          idOf(row.academicStructureId),
+        );
+        const period: any = row.academicPeriodId
+          ? periodMap.get(idOf(row.academicPeriodId))
+          : undefined;
+        const curriculumSubject: any = curriculumSubjectMap.get(
+          idOf(row.curriculumSubjectId),
+        );
+        const curriculum: any = curriculumSubject
+          ? curriculumMap.get(idOf(curriculumSubject.curriculumId))
+          : undefined;
+        const pathway: any = curriculumSubject?.pathwayId
+          ? pathwayMap.get(idOf(curriculumSubject.pathwayId))
+          : undefined;
         const subjectName = row.name || subj?.name || "Unknown Subject";
         const subjectCode = row.code || subj?.code || "";
         const className = cls?.name || "Unknown Class";
@@ -485,11 +615,26 @@ export default function AssessmentEntriesPage() {
           display: `${className} • ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} • ${academicPeriodName}`,
         };
       })
-      .filter((option) => option.id > 0)
-      .filter((option) => filterClassId === "all" || sameId(option.row.classId, filterClassId))
-      .filter((option) => filterSubjectId === "all" || sameId(option.row.subjectId, filterSubjectId))
-      .filter((option) => filterPeriodId === "all" || sameId(option.row.academicPeriodId || 0, filterPeriodId))
-      .filter((option) => filterReadiness === "all" || (filterReadiness === "ready" ? option.ready : !option.ready))
+      .filter((option) => Boolean(option.id))
+      .filter(
+        (option) =>
+          filterClassId === "all" || sameId(option.row.classId, filterClassId),
+      )
+      .filter(
+        (option) =>
+          filterSubjectId === "all" ||
+          sameId(option.row.subjectId, filterSubjectId),
+      )
+      .filter(
+        (option) =>
+          filterPeriodId === "all" ||
+          sameId(option.row.academicPeriodId || "", filterPeriodId),
+      )
+      .filter(
+        (option) =>
+          filterReadiness === "all" ||
+          (filterReadiness === "ready" ? option.ready : !option.ready),
+      )
       .sort((a, b) => a.display.localeCompare(b.display));
   }, [
     classSubjects,
@@ -508,36 +653,77 @@ export default function AssessmentEntriesPage() {
     filterReadiness,
   ]);
 
-  const selectedClass = useMemo(() => (selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null), [classMap, selectedClassId]);
+  const selectedClass = useMemo(
+    () =>
+      selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null,
+    [classMap, selectedClassId],
+  );
 
   const selectedClassSubjectOptions = useMemo(() => {
     if (!selectedClassId) return [];
-    return classSubjectOptions.filter((option) => sameId((option.row as any).classId, selectedClassId));
+    return classSubjectOptions.filter((option) =>
+      sameId((option.row as any).classId, selectedClassId),
+    );
   }, [classSubjectOptions, selectedClassId]);
 
   const classSubjectEntryViews = useMemo<ClassSubjectEntryView[]>(() => {
     return selectedClassSubjectOptions.map((option) => {
       const app = applicabilityMap.get(option.id) as any;
       const optionItems = app?.assessmentStructureId
-        ? items.filter((row: any) => sameId(row.assessmentStructureId, app.assessmentStructureId) && isActiveRow(row))
+        ? items.filter(
+            (row: any) =>
+              sameId(row.assessmentStructureId, app.assessmentStructureId) &&
+              isActiveRow(row),
+          )
         : [];
       const periodId = idOf((option.row as any).academicPeriodId);
       const studentCount = enrollments.filter((row: any) => {
         if (!sameId(row.classId, (option.row as any).classId)) return false;
-        if (!sameId(row.academicStructureId, (option.row as any).academicStructureId)) return false;
+        if (
+          !sameId(
+            row.academicStructureId,
+            (option.row as any).academicStructureId,
+          )
+        )
+          return false;
         if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
         return row.status === "active" && !row.isDeleted;
       }).length;
       const expected = studentCount * optionItems.length;
       const entered = entries.filter((entry: any) => {
         if (!sameId(entry.classSubjectId, option.id)) return false;
-        if (!app || !sameId(entry.assessmentStructureId || 0, app.assessmentStructureId)) return false;
-        return !entry.isDeleted && entry.score !== undefined && entry.score !== null && entry.score !== "";
+        if (
+          !app ||
+          !sameId(entry.assessmentStructureId || "", app.assessmentStructureId)
+        )
+          return false;
+        return (
+          !entry.isDeleted &&
+          entry.score !== undefined &&
+          entry.score !== null &&
+          entry.score !== ""
+        );
       }).length;
-      const completion = expected ? Math.round((Math.min(entered, expected) / expected) * 100) : 0;
-      return { id: option.id, option, studentCount, itemCount: optionItems.length, entered, expected, completion };
+      const completion = expected
+        ? Math.round((Math.min(entered, expected) / expected) * 100)
+        : 0;
+      return {
+        id: option.id,
+        option,
+        studentCount,
+        itemCount: optionItems.length,
+        entered,
+        expected,
+        completion,
+      };
     });
-  }, [selectedClassSubjectOptions, applicabilityMap, items, enrollments, entries]);
+  }, [
+    selectedClassSubjectOptions,
+    applicabilityMap,
+    items,
+    enrollments,
+    entries,
+  ]);
 
   const classCards = useMemo<ClassEntryView[]>(() => {
     const term = search.trim().toLowerCase();
@@ -545,13 +731,20 @@ export default function AssessmentEntriesPage() {
       .filter(isActiveRow)
       .map((classRow: any) => {
         const id = idOf(classRow.id);
-        const options = classSubjectOptions.filter((option) => sameId((option.row as any).classId, id));
+        const options = classSubjectOptions.filter((option) =>
+          sameId((option.row as any).classId, id),
+        );
         const readyCount = options.filter((option) => option.ready).length;
         const studentIds = new Set(
           enrollments
-            .filter((row: any) => sameId(row.classId, id) && row.status === "active" && !row.isDeleted)
+            .filter(
+              (row: any) =>
+                sameId(row.classId, id) &&
+                row.status === "active" &&
+                !row.isDeleted,
+            )
             .map((row: any) => idOf(row.studentId))
-            .filter(Boolean)
+            .filter(Boolean),
         );
         return {
           id,
@@ -564,7 +757,13 @@ export default function AssessmentEntriesPage() {
           studentCount: studentIds.size,
         };
       })
-      .filter((item) => !term || `${item.name} ${item.code} ${item.subjectCount} subjects`.toLowerCase().includes(term))
+      .filter(
+        (item) =>
+          !term ||
+          `${item.name} ${item.code} ${item.subjectCount} subjects`
+            .toLowerCase()
+            .includes(term),
+      )
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [classes, classSubjectOptions, enrollments, search]);
 
@@ -574,39 +773,81 @@ export default function AssessmentEntriesPage() {
   }, [classSubjectOptions, classSubjectId]);
 
   const currentClassSubject = selectedOption?.row;
-  const applicability = useMemo(() => (selectedOption ? applicabilityMap.get(selectedOption.id) : undefined), [applicabilityMap, selectedOption]);
+  const applicability = useMemo(
+    () =>
+      selectedOption ? applicabilityMap.get(selectedOption.id) : undefined,
+    [applicabilityMap, selectedOption],
+  );
   const assessmentStructure = useMemo(
-    () => structures.find((row: any) => sameId(row.id, applicability?.assessmentStructureId)),
-    [structures, applicability]
+    () =>
+      structures.find((row: any) =>
+        sameId(row.id, applicability?.assessmentStructureId),
+      ),
+    [structures, applicability],
   );
   const gradingSystem = useMemo(
-    () => gradings.find((row: any) => sameId(row.id, applicability?.gradingSystemId)),
-    [gradings, applicability]
+    () =>
+      gradings.find((row: any) =>
+        sameId(row.id, applicability?.gradingSystemId),
+      ),
+    [gradings, applicability],
   );
   const structureItems = useMemo(() => {
     if (!applicability?.assessmentStructureId) return [];
     return items
-      .filter((row: any) => sameId(row.assessmentStructureId, applicability.assessmentStructureId) && isActiveRow(row))
+      .filter(
+        (row: any) =>
+          sameId(
+            row.assessmentStructureId,
+            applicability.assessmentStructureId,
+          ) && isActiveRow(row),
+      )
       .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
   }, [items, applicability]);
   const gradeRules = useMemo(() => {
     if (!gradingSystem?.id) return [];
     return rules
-      .filter((row: any) => sameId(row.gradingSystemId, gradingSystem.id) && isActiveRow(row))
-      .sort((a: any, b: any) => Number(b.minScore || 0) - Number(a.minScore || 0));
+      .filter(
+        (row: any) =>
+          sameId(row.gradingSystemId, gradingSystem.id) && isActiveRow(row),
+      )
+      .sort(
+        (a: any, b: any) => Number(b.minScore || 0) - Number(a.minScore || 0),
+      );
   }, [rules, gradingSystem]);
 
   const relevantEntries = useMemo(() => {
     if (!currentClassSubject || !applicability) return [];
-    const academicPeriodId = idOf((currentClassSubject as any).academicPeriodId);
+    const academicPeriodId = idOf(
+      (currentClassSubject as any).academicPeriodId,
+    );
     return entries.filter((entry: any) => {
-      if (!sameId(entry.classSubjectId, (currentClassSubject as any).id)) return false;
-      if (!sameId(entry.classId, (currentClassSubject as any).classId)) return false;
-      if (!sameId(entry.subjectId, (currentClassSubject as any).subjectId)) return false;
-      if (!sameId(entry.academicStructureId || 0, (currentClassSubject as any).academicStructureId)) return false;
-      if (!sameId(entry.academicPeriodId || 0, academicPeriodId)) return false;
-      if (!sameId(entry.assessmentStructureId || 0, applicability.assessmentStructureId)) return false;
-      if (applicability.gradingSystemId && !sameId(entry.gradingSystemId || 0, applicability.gradingSystemId)) return false;
+      if (!sameId(entry.classSubjectId, (currentClassSubject as any).id))
+        return false;
+      if (!sameId(entry.classId, (currentClassSubject as any).classId))
+        return false;
+      if (!sameId(entry.subjectId, (currentClassSubject as any).subjectId))
+        return false;
+      if (
+        !sameId(
+          entry.academicStructureId || "",
+          (currentClassSubject as any).academicStructureId,
+        )
+      )
+        return false;
+      if (!sameId(entry.academicPeriodId || "", academicPeriodId)) return false;
+      if (
+        !sameId(
+          entry.assessmentStructureId || "",
+          applicability.assessmentStructureId,
+        )
+      )
+        return false;
+      if (
+        applicability.gradingSystemId &&
+        !sameId(entry.gradingSystemId || "", applicability.gradingSystemId)
+      )
+        return false;
       return !entry.isDeleted;
     });
   }, [entries, currentClassSubject, applicability]);
@@ -620,7 +861,9 @@ export default function AssessmentEntriesPage() {
 
     const nextScores: ScoreMap = {};
     relevantEntries.forEach((entry: any) => {
-      nextScores[scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId))] = Number(entry.score || 0);
+      nextScores[
+        scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId))
+      ] = Number(entry.score || 0);
     });
     setScores(nextScores);
     setSessionStarted(false);
@@ -633,8 +876,15 @@ export default function AssessmentEntriesPage() {
       .map((student: any) => {
         const enrollment = enrollments.find((row: any) => {
           if (!sameId(row.studentId, student.id)) return false;
-          if (!sameId(row.classId, (currentClassSubject as any).classId)) return false;
-          if (!sameId(row.academicStructureId, (currentClassSubject as any).academicStructureId)) return false;
+          if (!sameId(row.classId, (currentClassSubject as any).classId))
+            return false;
+          if (
+            !sameId(
+              row.academicStructureId,
+              (currentClassSubject as any).academicStructureId,
+            )
+          )
+            return false;
           if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
           return row.status === "active";
         });
@@ -645,7 +895,12 @@ export default function AssessmentEntriesPage() {
 
   const existingEntryMap = useMemo(() => {
     const m = new Map<string, AssessmentEntry>();
-    relevantEntries.forEach((entry: any) => m.set(scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId)), entry));
+    relevantEntries.forEach((entry: any) =>
+      m.set(
+        scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId)),
+        entry,
+      ),
+    );
     return m;
   }, [relevantEntries]);
 
@@ -657,7 +912,8 @@ export default function AssessmentEntriesPage() {
       let rowEntered = 0;
 
       for (const item of structureItems as any[]) {
-        const value = scores[scoreKey(idOf((student as any).id), idOf(item.id))];
+        const value =
+          scores[scoreKey(idOf((student as any).id), idOf(item.id))];
         const hasScore = value !== "" && value !== undefined && value !== null;
         const score = hasScore ? Number(value) : 0;
         const maxScore = Math.max(1, Number(item.maxScore || 100));
@@ -672,10 +928,12 @@ export default function AssessmentEntriesPage() {
       const percentage = structureItems.length
         ? Number(weightedTotal.toFixed(2))
         : maxTotal
-        ? Number(((rawTotal / maxTotal) * 100).toFixed(2))
-        : 0;
+          ? Number(((rawTotal / maxTotal) * 100).toFixed(2))
+          : 0;
       const matchedRule = gradeRules.find(
-        (rule: any) => percentage >= Number(rule.minScore || 0) && percentage <= Number(rule.maxScore || 100)
+        (rule: any) =>
+          percentage >= Number(rule.minScore || 0) &&
+          percentage <= Number(rule.maxScore || 100),
       );
 
       return {
@@ -700,8 +958,16 @@ export default function AssessmentEntriesPage() {
         const entered = item.rowEntered;
         const expected = item.rowExpected;
         if (filterCompletion === "empty" && entered !== 0) return false;
-        if (filterCompletion === "partial" && !(entered > 0 && entered < expected)) return false;
-        if (filterCompletion === "complete" && !(expected > 0 && entered >= expected)) return false;
+        if (
+          filterCompletion === "partial" &&
+          !(entered > 0 && entered < expected)
+        )
+          return false;
+        if (
+          filterCompletion === "complete" &&
+          !(expected > 0 && entered >= expected)
+        )
+          return false;
       }
       if (!q) return true;
       const s: any = item.student;
@@ -716,19 +982,37 @@ export default function AssessmentEntriesPage() {
     let entered = 0;
     studentScoreRows.forEach((row) => (entered += row.rowEntered));
     const completion = expected ? Math.round((entered / expected) * 100) : 0;
-    const completeStudents = studentScoreRows.filter((row) => row.rowExpected > 0 && row.rowEntered >= row.rowExpected).length;
+    const completeStudents = studentScoreRows.filter(
+      (row) => row.rowExpected > 0 && row.rowEntered >= row.rowExpected,
+    ).length;
     return { expected, entered, completion, completeStudents };
   }, [studentScoreRows, structureItems]);
 
   const activeFilterCount = useMemo(() => {
-    return [filterClassId, filterSubjectId, filterPeriodId, filterReadiness, filterCompletion].filter((v) => v !== "all").length;
-  }, [filterClassId, filterSubjectId, filterPeriodId, filterReadiness, filterCompletion]);
+    return [
+      filterClassId,
+      filterSubjectId,
+      filterPeriodId,
+      filterReadiness,
+      filterCompletion,
+    ].filter((v) => v !== "all").length;
+  }, [
+    filterClassId,
+    filterSubjectId,
+    filterPeriodId,
+    filterReadiness,
+    filterCompletion,
+  ]);
 
   const contextSubtitle = selectedOption
     ? `${selectedOption.className} · ${selectedOption.academicStructureName} · ${selectedOption.academicPeriodName}`
     : activeBranch?.name || "Selected branch";
 
-  const updateScore = (studentId: number, item: AssessmentStructureItem, value: string) => {
+  const updateScore = (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => {
     const key = scoreKey(studentId, idOf((item as any).id));
     if (value === "") {
       setScores((prev) => ({ ...prev, [key]: "" }));
@@ -736,28 +1020,53 @@ export default function AssessmentEntriesPage() {
     }
     const num = Number(value);
     if (Number.isNaN(num)) return;
-    const sanitized = Math.max(0, Math.min(num, Number((item as any).maxScore || 100)));
+    const sanitized = Math.max(
+      0,
+      Math.min(num, Number((item as any).maxScore || 100)),
+    );
     setScores((prev) => ({ ...prev, [key]: sanitized }));
   };
 
   const startSession = () => {
-    if (!authenticated || !accountId || !schoolId || !branchId) return showToast("error", "Sign in and select a school branch first.");
-    if (!currentClassSubject) return showToast("error", "Select a class subject first.");
-    if (!applicability) return showToast("error", "No assessment applicability is configured for this class subject.");
-    if (!structureItems.length) return showToast("error", "The selected assessment structure has no active items.");
-    if (!studentScoreRows.length) return showToast("error", "No active student enrollment was found for this class subject.");
+    if (!authenticated || !accountId || !schoolId || !branchId)
+      return showToast("error", "Sign in and select a school branch first.");
+    if (!currentClassSubject)
+      return showToast("error", "Select a class subject first.");
+    if (!applicability)
+      return showToast(
+        "error",
+        "No assessment applicability is configured for this class subject.",
+      );
+    if (!structureItems.length)
+      return showToast(
+        "error",
+        "The selected assessment structure has no active items.",
+      );
+    if (!studentScoreRows.length)
+      return showToast(
+        "error",
+        "No active student enrollment was found for this class subject.",
+      );
     setSessionStarted(true);
     showToast("success", "Score entry session started.");
   };
 
   const saveEntries = async () => {
-    if (!sessionStarted) return showToast("error", "Start the score entry session first.");
-    if (!authenticated || !accountId || !schoolId || !branchId) return showToast("error", "Sign in and select a school branch first.");
-    if (!currentClassSubject || !applicability) return showToast("error", "Select a valid class subject with assessment applicability.");
+    if (!sessionStarted)
+      return showToast("error", "Start the score entry session first.");
+    if (!authenticated || !accountId || !schoolId || !branchId)
+      return showToast("error", "Sign in and select a school branch first.");
+    if (!currentClassSubject || !applicability)
+      return showToast(
+        "error",
+        "Select a valid class subject with assessment applicability.",
+      );
 
     try {
       setSaving(true);
-      const academicPeriodId = idOf((currentClassSubject as any).academicPeriodId);
+      const academicPeriodId = idOf(
+        (currentClassSubject as any).academicPeriodId,
+      );
       let savedCount = 0;
       let clearedCount = 0;
       let lockedCount = 0;
@@ -787,11 +1096,14 @@ export default function AssessmentEntriesPage() {
 
           const payload: Partial<AssessmentEntry> = {
             accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId),
+            schoolId: schoolId,
+            branchId: branchId,
             classSubjectId: idOf((currentClassSubject as any).id),
-            organizationId: applicability.organizationId || selectedOption?.organizationId,
-            academicStructureId: idOf((currentClassSubject as any).academicStructureId),
+            organizationId:
+              applicability.organizationId || selectedOption?.organizationId,
+            academicStructureId: idOf(
+              (currentClassSubject as any).academicStructureId,
+            ),
             academicPeriodId,
             gradingSystemId: applicability.gradingSystemId,
             assessmentStructureId: applicability.assessmentStructureId,
@@ -808,8 +1120,14 @@ export default function AssessmentEntriesPage() {
             isDeleted: false,
           } as Partial<AssessmentEntry>;
 
-          if (existing?.id) await updateLocal("assessmentEntries", idOf(existing.id), payload as AssessmentEntry);
-          else await createLocal("assessmentEntries", payload as AssessmentEntry);
+          if (existing?.id)
+            await updateLocal(
+              "assessmentEntries",
+              idOf(existing.id),
+              payload as AssessmentEntry,
+            );
+          else
+            await createLocal("assessmentEntries", payload as AssessmentEntry);
           savedCount += 1;
         }
       }
@@ -820,7 +1138,7 @@ export default function AssessmentEntriesPage() {
         "success",
         `Saved ${savedCount} score${savedCount === 1 ? "" : "s"}${clearedCount ? ` · cleared ${clearedCount}` : ""}${
           lockedCount ? ` · skipped ${lockedCount} locked` : ""
-        }.`
+        }.`,
       );
     } catch (error) {
       console.error(error);
@@ -839,62 +1157,139 @@ export default function AssessmentEntriesPage() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Assessment Entries..." text="Checking branch workspace, class subjects, assessment structures, students, and saved scores." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Assessment Entries..."
+        text="Checking branch workspace, class subjects, assessment structures, students, and saved scores."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before entering assessment scores." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before entering assessment scores."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+      <main
+        className="ae-page"
+        style={{ "--ae-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ae-state">
           <h2>No branch workspace selected</h2>
-          <p>Assessment entries belong to one selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ae-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <p>
+            Assessment entries belong to one selected branch-admin workspace.
+            Use Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ae-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+    <main
+      className="ae-page"
+      style={{ "--ae-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ae-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="ae-search-card" aria-label="Assessment entry search and actions">
+      <section
+        className="ae-search-card"
+        aria-label="Assessment entry search and actions"
+      >
         <label className="ae-search">
           <span>⌕</span>
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={!selectedClassId ? "Search classes..." : classSubjectId === "all" ? "Search class subjects..." : "Search students..."}
+            placeholder={
+              !selectedClassId
+                ? "Search classes..."
+                : classSubjectId === "all"
+                  ? "Search class subjects..."
+                  : "Search students..."
+            }
             aria-label="Search assessment entries"
           />
         </label>
 
-        <button type="button" className={`ae-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ae-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ae-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ae-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {activeFilterCount > 0 && selectedClassId && (
         <section className="ae-filter-chips" aria-label="Active filters">
-          {filterSubjectId !== "all" && <button type="button" onClick={() => setFilterSubjectId("all")}>Subject: {(subjectMap.get(idOf(filterSubjectId)) as any)?.name || filterSubjectId} ×</button>}
-          {filterPeriodId !== "all" && <button type="button" onClick={() => setFilterPeriodId("all")}>Period: {(periodMap.get(idOf(filterPeriodId)) as any)?.name || filterPeriodId} ×</button>}
-          {filterReadiness !== "all" && <button type="button" onClick={() => setFilterReadiness("all")}>{filterReadiness === "ready" ? "Ready only" : "Missing setup"} ×</button>}
-          {filterCompletion !== "all" && <button type="button" onClick={() => setFilterCompletion("all")}>Completion: {filterCompletion} ×</button>}
+          {filterSubjectId !== "all" && (
+            <button type="button" onClick={() => setFilterSubjectId("all")}>
+              Subject:{" "}
+              {(subjectMap.get(idOf(filterSubjectId)) as any)?.name ||
+                filterSubjectId}{" "}
+              ×
+            </button>
+          )}
+          {filterPeriodId !== "all" && (
+            <button type="button" onClick={() => setFilterPeriodId("all")}>
+              Period:{" "}
+              {(periodMap.get(idOf(filterPeriodId)) as any)?.name ||
+                filterPeriodId}{" "}
+              ×
+            </button>
+          )}
+          {filterReadiness !== "all" && (
+            <button type="button" onClick={() => setFilterReadiness("all")}>
+              {filterReadiness === "ready" ? "Ready only" : "Missing setup"} ×
+            </button>
+          )}
+          {filterCompletion !== "all" && (
+            <button type="button" onClick={() => setFilterCompletion("all")}>
+              Completion: {filterCompletion} ×
+            </button>
+          )}
         </section>
       )}
 
@@ -912,13 +1307,35 @@ export default function AssessmentEntriesPage() {
               }}
             />
           ))}
-          {!classCards.length && <Empty icon="🏫" title="No classes found" text="Create or sync classes first, then enter assessment scores by class subject." />}
+          {!classCards.length && (
+            <Empty
+              icon="🏫"
+              title="No classes found"
+              text="Create or sync classes first, then enter assessment scores by class subject."
+            />
+          )}
         </section>
       ) : classSubjectId === "all" ? (
         <>
-          <section className="ae-filter-chips class-breadcrumb" aria-label="Selected class">
-            <button type="button" onClick={() => { setSelectedClassId(""); setFilterClassId("all"); setClassSubjectId("all"); setSearch(""); }}>← Classes</button>
-            <button type="button" onClick={() => setFilterOpen(true)}>{(selectedClass as any)?.name || "Selected class"} · {selectedClassSubjectOptions.length} class subject(s)</button>
+          <section
+            className="ae-filter-chips class-breadcrumb"
+            aria-label="Selected class"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedClassId("");
+                setFilterClassId("all");
+                setClassSubjectId("all");
+                setSearch("");
+              }}
+            >
+              ← Classes
+            </button>
+            <button type="button" onClick={() => setFilterOpen(true)}>
+              {(selectedClass as any)?.name || "Selected class"} ·{" "}
+              {selectedClassSubjectOptions.length} class subject(s)
+            </button>
           </section>
 
           <section className="ae-list ae-picker-list">
@@ -933,59 +1350,156 @@ export default function AssessmentEntriesPage() {
                 }}
               />
             ))}
-            {!classSubjectEntryViews.length && <Empty icon="📝" title="No class subjects" text="This class has no class subjects matching the current filters." />}
+            {!classSubjectEntryViews.length && (
+              <Empty
+                icon="📝"
+                title="No class subjects"
+                text="This class has no class subjects matching the current filters."
+              />
+            )}
           </section>
         </>
       ) : (
         <>
-          <section className="ae-filter-chips class-breadcrumb" aria-label="Selected class subject">
-            <button type="button" onClick={() => { setClassSubjectId("all"); setSessionStarted(false); setSearch(""); }}>← Class subjects</button>
-            <button type="button" onClick={() => setFilterOpen(true)}>{selectedOption?.className || "Class"} · {selectedOption?.subjectName || "Subject"}</button>
+          <section
+            className="ae-filter-chips class-breadcrumb"
+            aria-label="Selected class subject"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setClassSubjectId("all");
+                setSessionStarted(false);
+                setSearch("");
+              }}
+            >
+              ← Class subjects
+            </button>
+            <button type="button" onClick={() => setFilterOpen(true)}>
+              {selectedOption?.className || "Class"} ·{" "}
+              {selectedOption?.subjectName || "Subject"}
+            </button>
           </section>
 
           {selectedOption && (
             <section className="ae-session-strip">
-              <span className={`ae-status-dot ${applicability ? "green" : "orange"}`} />
+              <span
+                className={`ae-status-dot ${applicability ? "green" : "orange"}`}
+              />
               <div>
                 <strong>{selectedOption.subjectName}</strong>
-                <small>{contextSubtitle} · {selectedOption.teacherName}</small>
+                <small>
+                  {contextSubtitle} · {selectedOption.teacherName}
+                </small>
               </div>
-              <button type="button" onClick={startSession}>{sessionStarted ? "Active" : "Start"}</button>
-              <button type="button" className="primary" onClick={saveEntries} disabled={!sessionStarted || saving}>{saving ? "Saving" : "Save"}</button>
+              <button type="button" onClick={startSession}>
+                {sessionStarted ? "Active" : "Start"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={saveEntries}
+                disabled={!sessionStarted || saving}
+              >
+                {saving ? "Saving" : "Save"}
+              </button>
             </section>
           )}
 
           {selectedOption && (
             <section className="ae-compact-meta">
-              {applicability ? <Chip tone="green">Ready</Chip> : <Chip tone="red">No applicability</Chip>}
-              {assessmentStructure && <Chip tone="blue">{assessmentStructure.name}</Chip>}
+              {applicability ? (
+                <Chip tone="green">Ready</Chip>
+              ) : (
+                <Chip tone="red">No applicability</Chip>
+              )}
+              {assessmentStructure && (
+                <Chip tone="blue">{assessmentStructure.name}</Chip>
+              )}
               {gradingSystem && <Chip tone="purple">{gradingSystem.name}</Chip>}
               <Chip tone="gray">{studentScoreRows.length} students</Chip>
               <Chip tone="gray">{structureItems.length} items</Chip>
-              <Chip tone="orange">{completionStats.entered}/{completionStats.expected} entered</Chip>
+              <Chip tone="orange">
+                {completionStats.entered}/{completionStats.expected} entered
+              </Chip>
             </section>
           )}
 
-          {classSubjectId !== "all" && !applicability && <Empty icon="⚠️" title="No assessment applicability" text="Go to Assessment Applicability and connect this class subject to an assessment structure and grading system first." />}
-          {applicability && !structureItems.length && <Empty icon="🧩" title="No assessment items" text="The selected assessment structure has no active items to enter." />}
-          {selectedOption && applicability && !!structureItems.length && !studentScoreRows.length && <Empty icon="🎓" title="No enrolled students" text="No active student enrollment was found for this class subject, class, academic structure, and period." />}
-
-          {selectedOption && applicability && !!structureItems.length && !!studentScoreRows.length && viewMode === "summary" && (
-            <SummaryView rows={studentScoreRows} completion={completionStats} structureItems={structureItems} classSubjectOptions={classSubjectOptions} />
+          {classSubjectId !== "all" && !applicability && (
+            <Empty
+              icon="⚠️"
+              title="No assessment applicability"
+              text="Go to Assessment Applicability and connect this class subject to an assessment structure and grading system first."
+            />
           )}
-
-          {selectedOption && applicability && !!structureItems.length && !!studentScoreRows.length && viewMode === "table" && (
-            <ScoreTable rows={filteredRows} items={structureItems} scores={scores} updateScore={updateScore} />
+          {applicability && !structureItems.length && (
+            <Empty
+              icon="🧩"
+              title="No assessment items"
+              text="The selected assessment structure has no active items to enter."
+            />
           )}
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !studentScoreRows.length && (
+              <Empty
+                icon="🎓"
+                title="No enrolled students"
+                text="No active student enrollment was found for this class subject, class, academic structure, and period."
+              />
+            )}
 
-          {selectedOption && applicability && !!structureItems.length && !!studentScoreRows.length && viewMode === "cards" && (
-            <section className="ae-list ae-entry-list">
-              {filteredRows.map((row) => (
-                <StudentScoreCard key={String((row.student as any).id)} row={row} items={structureItems} scores={scores} updateScore={updateScore} />
-              ))}
-              {!filteredRows.length && <Empty icon="🔎" title="No student matches" text="Change your search or completion filter to see students." />}
-            </section>
-          )}
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "summary" && (
+              <SummaryView
+                rows={studentScoreRows}
+                completion={completionStats}
+                structureItems={structureItems}
+                classSubjectOptions={classSubjectOptions}
+              />
+            )}
+
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "table" && (
+              <ScoreTable
+                rows={filteredRows}
+                items={structureItems}
+                scores={scores}
+                updateScore={updateScore}
+              />
+            )}
+
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "cards" && (
+              <section className="ae-list ae-entry-list">
+                {filteredRows.map((row) => (
+                  <StudentScoreCard
+                    key={String((row.student as any).id)}
+                    row={row}
+                    items={structureItems}
+                    scores={scores}
+                    updateScore={updateScore}
+                  />
+                ))}
+                {!filteredRows.length && (
+                  <Empty
+                    icon="🔎"
+                    title="No student matches"
+                    text="Change your search or completion filter to see students."
+                  />
+                )}
+              </section>
+            )}
         </>
       )}
 
@@ -1027,45 +1541,92 @@ export default function AssessmentEntriesPage() {
   );
 }
 
-
-function ClassPickerRow({ item, onOpen }: { item: ClassEntryView; onOpen: () => void }) {
+function ClassPickerRow({
+  item,
+  onOpen,
+}: {
+  item: ClassEntryView;
+  onOpen: () => void;
+}) {
   return (
-    <button type="button" className="student-row assessment-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row assessment-row"
+      onClick={onOpen}
+    >
       <span className="app-icon">🏫</span>
       <span className="student-main">
         <strong>{item.name}</strong>
-        <small>{item.subjectCount} class subject(s) · {item.studentCount} active student(s)</small>
-        <em>{item.missingCount ? `${item.missingCount} missing setup` : "All class subjects ready"}</em>
+        <small>
+          {item.subjectCount} class subject(s) · {item.studentCount} active
+          student(s)
+        </small>
+        <em>
+          {item.missingCount
+            ? `${item.missingCount} missing setup`
+            : "All class subjects ready"}
+        </em>
       </span>
       <span className="student-side">
-        <span className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`} />
+        <span
+          className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`}
+        />
         <i>›</i>
       </span>
     </button>
   );
 }
 
-function ClassSubjectPickerRow({ item, onOpen }: { item: ClassSubjectEntryView; onOpen: () => void }) {
+function ClassSubjectPickerRow({
+  item,
+  onOpen,
+}: {
+  item: ClassSubjectEntryView;
+  onOpen: () => void;
+}) {
   const ready = item.option.ready && item.itemCount > 0;
   return (
-    <button type="button" className="student-row assessment-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row assessment-row"
+      onClick={onOpen}
+    >
       <span className="app-icon">📝</span>
       <span className="student-main">
         <strong>{item.option.subjectName}</strong>
-        <small>{item.option.teacherName} · {item.option.academicPeriodName}</small>
-        <em>{ready ? `${item.studentCount} students · ${item.itemCount} items · ${item.completion}% done` : "Needs applicability or assessment items"}</em>
+        <small>
+          {item.option.teacherName} · {item.option.academicPeriodName}
+        </small>
+        <em>
+          {ready
+            ? `${item.studentCount} students · ${item.itemCount} items · ${item.completion}% done`
+            : "Needs applicability or assessment items"}
+        </em>
       </span>
       <span className="student-side">
-        <span className={`status-dot-mini ${ready ? (item.completion >= 100 ? "green" : "orange") : "red"}`} />
+        <span
+          className={`status-dot-mini ${ready ? (item.completion >= 100 ? "green" : "orange") : "red"}`}
+        />
         <i>›</i>
       </span>
     </button>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+    <main
+      className="ae-page"
+      style={{ "--ae-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ae-state">
         <div className="ae-spinner" />
@@ -1076,7 +1637,13 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function SummaryPill({ label, value }: { label: string; value: React.ReactNode }) {
+function SummaryPill({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
   return (
     <article>
       <span>{label}</span>
@@ -1085,7 +1652,15 @@ function SummaryPill({ label, value }: { label: string; value: React.ReactNode }
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ae-empty">
       <div className="ae-empty-icon">{icon}</div>
@@ -1101,10 +1676,14 @@ function ScoreInput({
   scores,
   updateScore,
 }: {
-  studentId: number;
+  studentId: string;
   item: AssessmentStructureItem;
   scores: ScoreMap;
-  updateScore: (studentId: number, item: AssessmentStructureItem, value: string) => void;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
   const value = scores[scoreKey(studentId, idOf((item as any).id))];
   return (
@@ -1131,7 +1710,11 @@ function StudentScoreCard({
   row: StudentScoreRow;
   items: AssessmentStructureItem[];
   scores: ScoreMap;
-  updateScore: (studentId: number, item: AssessmentStructureItem, value: string) => void;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
   const student: any = row.student;
   const studentId = idOf(student.id);
@@ -1144,22 +1727,36 @@ function StudentScoreCard({
           <strong>{student.fullName || "Unnamed student"}</strong>
           <span>{student.admissionNumber || "No admission number"}</span>
         </div>
-        <i className={complete ? "done" : row.rowEntered ? "partial" : "empty"}>{complete ? "Done" : row.rowEntered ? "Partial" : "Empty"}</i>
+        <i className={complete ? "done" : row.rowEntered ? "partial" : "empty"}>
+          {complete ? "Done" : row.rowEntered ? "Partial" : "Empty"}
+        </i>
       </div>
 
       <div className="ae-score-grid">
         {items.map((item: any) => (
           <label key={String(item.id)}>
             <span>{item.name}</span>
-            <small>Max {Number(item.maxScore || 100)} · Weight {Number(item.weight || 0)}</small>
-            <ScoreInput studentId={studentId} item={item} scores={scores} updateScore={updateScore} />
+            <small>
+              Max {Number(item.maxScore || 100)} · Weight{" "}
+              {Number(item.weight || 0)}
+            </small>
+            <ScoreInput
+              studentId={studentId}
+              item={item}
+              scores={scores}
+              updateScore={updateScore}
+            />
           </label>
         ))}
       </div>
 
       <div className="ae-result-row">
-        <span>Total: <b>{row.weightedTotal}</b></span>
-        <span>Grade: <b>{row.grade || "—"}</b></span>
+        <span>
+          Total: <b>{row.weightedTotal}</b>
+        </span>
+        <span>
+          Grade: <b>{row.grade || "—"}</b>
+        </span>
         <span>{row.remark || "No remark"}</span>
       </div>
     </article>
@@ -1175,7 +1772,11 @@ function ScoreTable({
   rows: StudentScoreRow[];
   items: AssessmentStructureItem[];
   scores: ScoreMap;
-  updateScore: (studentId: number, item: AssessmentStructureItem, value: string) => void;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
   return (
     <section className="ae-table-card">
@@ -1184,7 +1785,12 @@ function ScoreTable({
           <thead>
             <tr>
               <th>Students ({rows.length})</th>
-              {items.map((item: any) => <th key={String(item.id)}>{item.name}<span>/{Number(item.maxScore || 100)}</span></th>)}
+              {items.map((item: any) => (
+                <th key={String(item.id)}>
+                  {item.name}
+                  <span>/{Number(item.maxScore || 100)}</span>
+                </th>
+              ))}
               <th>Total</th>
               <th>Grade</th>
               <th>Remark</th>
@@ -1196,11 +1802,23 @@ function ScoreTable({
               const studentId = idOf(student.id);
               return (
                 <tr key={String(studentId)}>
-                  <td><strong>{student.fullName || "Unnamed student"}</strong><span>{student.admissionNumber || "—"}</span></td>
+                  <td>
+                    <strong>{student.fullName || "Unnamed student"}</strong>
+                    <span>{student.admissionNumber || "—"}</span>
+                  </td>
                   {items.map((item: any) => (
-                    <td key={String(item.id)}><ScoreInput studentId={studentId} item={item} scores={scores} updateScore={updateScore} /></td>
+                    <td key={String(item.id)}>
+                      <ScoreInput
+                        studentId={studentId}
+                        item={item}
+                        scores={scores}
+                        updateScore={updateScore}
+                      />
+                    </td>
                   ))}
-                  <td><b>{row.weightedTotal}</b></td>
+                  <td>
+                    <b>{row.weightedTotal}</b>
+                  </td>
                   <td>{row.grade || "—"}</td>
                   <td>{row.remark || "—"}</td>
                 </tr>
@@ -1208,7 +1826,9 @@ function ScoreTable({
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ae-empty-table">No student matches your filters.</div>}
+        {!rows.length && (
+          <div className="ae-empty-table">No student matches your filters.</div>
+        )}
       </div>
     </section>
   );
@@ -1221,23 +1841,59 @@ function SummaryView({
   classSubjectOptions,
 }: {
   rows: StudentScoreRow[];
-  completion: { expected: number; entered: number; completion: number; completeStudents: number };
+  completion: {
+    expected: number;
+    entered: number;
+    completion: number;
+    completeStudents: number;
+  };
   structureItems: AssessmentStructureItem[];
   classSubjectOptions: ClassSubjectOption[];
 }) {
   const gradeCounts = useMemo(() => {
     const map = new Map<string, number>();
-    rows.forEach((row) => map.set(row.grade || "Ungraded", (map.get(row.grade || "Ungraded") || 0) + 1));
+    rows.forEach((row) =>
+      map.set(
+        row.grade || "Ungraded",
+        (map.get(row.grade || "Ungraded") || 0) + 1,
+      ),
+    );
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
   }, [rows]);
 
   return (
     <section className="ae-analysis-grid">
-      <article className="ae-analysis ae-current-filter"><span>Completion</span><strong>{completion.completion}%</strong><p>{completion.entered} of {completion.expected} expected score cells entered.</p></article>
-      <article className="ae-analysis ae-current-filter"><span>Complete Students</span><strong>{completion.completeStudents}</strong><p>Students with every active assessment item entered.</p></article>
-      <article className="ae-analysis ae-current-filter"><span>Assessment Items</span><strong>{structureItems.length}</strong><p>Active score components in the selected assessment structure.</p></article>
-      <article className="ae-analysis ae-current-filter"><span>Class Subjects</span><strong>{classSubjectOptions.length}</strong><p>Class subjects currently matching your filters.</p></article>
-      <article className="ae-analysis ae-wide"><span>Grade Distribution</span>{gradeCounts.map(([grade, count]) => <p key={grade}><b>{grade}</b> — {count}</p>)}</article>
+      <article className="ae-analysis ae-current-filter">
+        <span>Completion</span>
+        <strong>{completion.completion}%</strong>
+        <p>
+          {completion.entered} of {completion.expected} expected score cells
+          entered.
+        </p>
+      </article>
+      <article className="ae-analysis ae-current-filter">
+        <span>Complete Students</span>
+        <strong>{completion.completeStudents}</strong>
+        <p>Students with every active assessment item entered.</p>
+      </article>
+      <article className="ae-analysis ae-current-filter">
+        <span>Assessment Items</span>
+        <strong>{structureItems.length}</strong>
+        <p>Active score components in the selected assessment structure.</p>
+      </article>
+      <article className="ae-analysis ae-current-filter">
+        <span>Class Subjects</span>
+        <strong>{classSubjectOptions.length}</strong>
+        <p>Class subjects currently matching your filters.</p>
+      </article>
+      <article className="ae-analysis ae-wide">
+        <span>Grade Distribution</span>
+        {gradeCounts.map(([grade, count]) => (
+          <p key={grade}>
+            <b>{grade}</b> — {count}
+          </p>
+        ))}
+      </article>
     </section>
   );
 }
@@ -1278,15 +1934,94 @@ function FilterSheet({
   return (
     <div className="ae-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ae-sheet">
-        <div className="ae-sheet-head"><div><h2>Filters</h2><p>Narrow class subjects and score completion.</p></div><button type="button" onClick={onClose}>✕</button></div>
-        <div className="ae-form-grid">
-          <label><span>Class</span><select value={filterClassId} onChange={(e) => setFilterClassId(e.target.value)}><option value="all">All classes</option>{classes.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Subject</span><select value={filterSubjectId} onChange={(e) => setFilterSubjectId(e.target.value)}><option value="all">All subjects</option>{subjects.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Academic Period</span><select value={filterPeriodId} onChange={(e) => setFilterPeriodId(e.target.value)}><option value="all">All periods</option>{periods.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Setup Status</span><select value={filterReadiness} onChange={(e) => setFilterReadiness(e.target.value as ReadinessFilter)}><option value="all">All</option><option value="ready">Applicability ready</option><option value="missing">Missing applicability</option></select></label>
-          <label><span>Score Completion</span><select value={filterCompletion} onChange={(e) => setFilterCompletion(e.target.value as CompletionFilter)}><option value="all">All</option><option value="empty">Empty</option><option value="partial">Partial</option><option value="complete">Complete</option></select></label>
+        <div className="ae-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Narrow class subjects and score completion.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
         </div>
-        <div className="ae-sheet-actions"><button type="button" onClick={clearFilters}>Clear</button><button type="button" className="ae-primary" onClick={onClose}>Apply</button></div>
+        <div className="ae-form-grid">
+          <label>
+            <span>Class</span>
+            <select
+              value={filterClassId}
+              onChange={(e) => setFilterClassId(e.target.value)}
+            >
+              <option value="all">All classes</option>
+              {classes.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Subject</span>
+            <select
+              value={filterSubjectId}
+              onChange={(e) => setFilterSubjectId(e.target.value)}
+            >
+              <option value="all">All subjects</option>
+              {subjects.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Academic Period</span>
+            <select
+              value={filterPeriodId}
+              onChange={(e) => setFilterPeriodId(e.target.value)}
+            >
+              <option value="all">All periods</option>
+              {periods.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Setup Status</span>
+            <select
+              value={filterReadiness}
+              onChange={(e) =>
+                setFilterReadiness(e.target.value as ReadinessFilter)
+              }
+            >
+              <option value="all">All</option>
+              <option value="ready">Applicability ready</option>
+              <option value="missing">Missing applicability</option>
+            </select>
+          </label>
+          <label>
+            <span>Score Completion</span>
+            <select
+              value={filterCompletion}
+              onChange={(e) =>
+                setFilterCompletion(e.target.value as CompletionFilter)
+              }
+            >
+              <option value="all">All</option>
+              <option value="empty">Empty</option>
+              <option value="partial">Partial</option>
+              <option value="complete">Complete</option>
+            </select>
+          </label>
+        </div>
+        <div className="ae-sheet-actions">
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="ae-primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -1306,11 +2041,39 @@ function MoreSheet({
   return (
     <div className="ae-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ae-sheet ae-more-sheet">
-        <div className="ae-sheet-head"><div><h2>More</h2><p>Change how you enter and review scores.</p></div><button type="button" onClick={onClose}>✕</button></div>
-        <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>Card entry <span>Best for phones</span></button>
-        <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>Table entry <span>Best for laptop/tablet</span></button>
-        <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>Summary <span>Completion and grade overview</span></button>
-        <button type="button" onClick={onRefresh}>Refresh data <span>Reload records from IndexedDB</span></button>
+        <div className="ae-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Change how you enter and review scores.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <button
+          type="button"
+          className={viewMode === "cards" ? "active" : ""}
+          onClick={() => setViewMode("cards")}
+        >
+          Card entry <span>Best for phones</span>
+        </button>
+        <button
+          type="button"
+          className={viewMode === "table" ? "active" : ""}
+          onClick={() => setViewMode("table")}
+        >
+          Table entry <span>Best for laptop/tablet</span>
+        </button>
+        <button
+          type="button"
+          className={viewMode === "summary" ? "active" : ""}
+          onClick={() => setViewMode("summary")}
+        >
+          Summary <span>Completion and grade overview</span>
+        </button>
+        <button type="button" onClick={onRefresh}>
+          Refresh data <span>Reload records from IndexedDB</span>
+        </button>
       </section>
     </div>
   );

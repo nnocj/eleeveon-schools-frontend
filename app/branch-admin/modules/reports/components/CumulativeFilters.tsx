@@ -60,7 +60,9 @@ import type { ReportSortMode } from "../engine/report-types";
 
 type Props = {
   filters: CumulativeReportFiltersState;
-  setFilters: React.Dispatch<React.SetStateAction<CumulativeReportFiltersState>>;
+  setFilters: React.Dispatch<
+    React.SetStateAction<CumulativeReportFiltersState>
+  >;
 
   branches: Branch[];
   academicStructures: AcademicStructure[];
@@ -75,21 +77,21 @@ type Props = {
    * the selected workspace session. This prevents this filter component
    * from becoming a second branch source of truth.
    */
-  lockedBranchId?: number;
+  lockedBranchId?: string;
   lockBranch?: boolean;
 
   primaryColor?: string;
 };
 
-
 // ======================================================
 // LOCAL HELPERS
 // ======================================================
 
-function localId(value: unknown) {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function localId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const normalized = String(value).trim();
+  if (!normalized || normalized === "0" || normalized === "undefined" || normalized === "null") return "";
+  return normalized;
 }
 
 function labelFromSnapshot(value: unknown, fallback: string) {
@@ -97,16 +99,11 @@ function labelFromSnapshot(value: unknown, fallback: string) {
   return fallback;
 }
 
-function uniqueSortedNumbers(values: unknown[]) {
-  return Array.from(
-    new Set(
-      values
-        .map(localId)
-        .filter((value) => value > 0)
-    )
-  ).sort((a, b) => a - b);
+function uniqueSortedNumbers(values: unknown[]): string[] {
+  return Array.from(new Set(values.map(localId).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
 }
-
 
 // ======================================================
 // COMPONENT
@@ -126,12 +123,14 @@ export default function CumulativeFilters({
   lockBranch = false,
   primaryColor = "var(--primary-color)",
 }: Props) {
-  const effectiveBranchId = localId(lockBranch && lockedBranchId ? lockedBranchId : filters.branchId);
+  const effectiveBranchId = localId(
+    lockBranch && lockedBranchId ? lockedBranchId : filters.branchId,
+  );
 
   useEffect(() => {
     if (!lockBranch || !lockedBranchId) return;
 
-    setFilters(prev => {
+    setFilters((prev) => {
       if (prev.branchId === lockedBranchId) return prev;
 
       return {
@@ -156,37 +155,46 @@ export default function CumulativeFilters({
   // ======================================================
 
   const classMap = useMemo(
-    () => new Map(classes.map(item => [item.id, item])),
-    [classes]
+    () => new Map(classes.map((item) => [item.id, item])),
+    [classes],
   );
 
   const snapshotPool = useMemo(() => {
-    return snapshots.filter(snapshot => {
+    return snapshots.filter((snapshot) => {
       if (snapshot.isDeleted) return false;
-      if (effectiveBranchId && localId(snapshot.branchId) !== effectiveBranchId) return false;
+      if (effectiveBranchId && localId(snapshot.branchId) !== effectiveBranchId)
+        return false;
       return true;
     });
   }, [snapshots, effectiveBranchId]);
 
   const snapshotAcademicStructureIds = useMemo(() => {
-    return uniqueSortedNumbers(snapshotPool.map(snapshot => localId(snapshot.academicStructureId)));
+    return uniqueSortedNumbers(
+      snapshotPool.map((snapshot) => localId(snapshot.academicStructureId)),
+    );
   }, [snapshotPool]);
 
   const snapshotAcademicPeriodIds = useMemo(() => {
-    return uniqueSortedNumbers(snapshotPool.map(snapshot => localId(snapshot.academicPeriodId)));
+    return uniqueSortedNumbers(
+      snapshotPool.map((snapshot) => localId(snapshot.academicPeriodId)),
+    );
   }, [snapshotPool]);
 
   const snapshotClassIds = useMemo(() => {
-    return uniqueSortedNumbers(snapshotPool.map(snapshot => localId(snapshot.classId)));
+    return uniqueSortedNumbers(
+      snapshotPool.map((snapshot) => localId(snapshot.classId)),
+    );
   }, [snapshotPool]);
 
   const snapshotStudentIds = useMemo(() => {
-    return uniqueSortedNumbers(snapshotPool.map(snapshot => localId(snapshot.studentId)));
+    return uniqueSortedNumbers(
+      snapshotPool.map((snapshot) => localId(snapshot.studentId)),
+    );
   }, [snapshotPool]);
 
   const availableBranches = useMemo(() => {
     const liveRows = branches
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
         if (item.active === false) return false;
         if (effectiveBranchId) return localId(item.id) === effectiveBranchId;
@@ -199,15 +207,19 @@ export default function CumulativeFilters({
     const ids = uniqueSortedNumbers([
       effectiveBranchId,
       ...snapshots
-        .filter(snapshot => !snapshot.isDeleted)
-        .map(snapshot => localId(snapshot.branchId)),
+        .filter((snapshot) => !snapshot.isDeleted)
+        .map((snapshot) => localId(snapshot.branchId)),
     ]);
 
-    return ids.map(id => ({
-      id,
-      name: id === effectiveBranchId ? `Assigned Branch ${id}` : `Branch ${id}`,
-      active: true,
-    } as Branch));
+    return ids.map(
+      (id) =>
+        ({
+          id,
+          name:
+            id === effectiveBranchId ? `Assigned Branch ${id}` : `Branch ${id}`,
+          active: true,
+        }) as Branch,
+    );
   }, [branches, snapshots, effectiveBranchId]);
 
   // ======================================================
@@ -216,9 +228,14 @@ export default function CumulativeFilters({
 
   const availableAcademicStructures = useMemo(() => {
     return academicStructures
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId && localId(item.branchId) !== effectiveBranchId) return false;
+        if (
+          effectiveBranchId &&
+          item.branchId &&
+          localId(item.branchId) !== effectiveBranchId
+        )
+          return false;
         return item.active !== false;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -226,13 +243,19 @@ export default function CumulativeFilters({
 
   const availableAcademicPeriods = useMemo(() => {
     return academicPeriods
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId && localId(item.branchId) !== effectiveBranchId) return false;
+        if (
+          effectiveBranchId &&
+          item.branchId &&
+          localId(item.branchId) !== effectiveBranchId
+        )
+          return false;
         if (
           filters.academicStructureId &&
           item.academicStructureId &&
-          localId(item.academicStructureId) !== localId(filters.academicStructureId)
+          localId(item.academicStructureId) !==
+            localId(filters.academicStructureId)
         ) {
           return false;
         }
@@ -243,9 +266,14 @@ export default function CumulativeFilters({
 
   const availableClasses = useMemo(() => {
     return classes
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId && localId(item.branchId) !== effectiveBranchId) return false;
+        if (
+          effectiveBranchId &&
+          item.branchId &&
+          localId(item.branchId) !== effectiveBranchId
+        )
+          return false;
         return item.active !== false;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -253,10 +281,20 @@ export default function CumulativeFilters({
 
   const availableStudents = useMemo(() => {
     return students
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId && localId(item.branchId) !== effectiveBranchId) return false;
-        if (filters.classId && item.currentClassId && localId(item.currentClassId) !== localId(filters.classId)) return false;
+        if (
+          effectiveBranchId &&
+          item.branchId &&
+          localId(item.branchId) !== effectiveBranchId
+        )
+          return false;
+        if (
+          filters.classId &&
+          item.currentClassId &&
+          localId(item.currentClassId) !== localId(filters.classId)
+        )
+          return false;
         return item.status !== "withdrawn";
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
@@ -264,9 +302,14 @@ export default function CumulativeFilters({
 
   const availableSubjects = useMemo(() => {
     return subjects
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId && localId(item.branchId) !== effectiveBranchId) return false;
+        if (
+          effectiveBranchId &&
+          item.branchId &&
+          localId(item.branchId) !== effectiveBranchId
+        )
+          return false;
         return item.active !== false;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -276,13 +319,17 @@ export default function CumulativeFilters({
     return Array.from(
       new Set(
         snapshots
-          .filter(snapshot => {
+          .filter((snapshot) => {
             if (snapshot.isDeleted) return false;
-            if (effectiveBranchId && localId(snapshot.branchId) !== effectiveBranchId) return false;
+            if (
+              effectiveBranchId &&
+              localId(snapshot.branchId) !== effectiveBranchId
+            )
+              return false;
             return !!snapshot.academicYear;
           })
-          .map(snapshot => snapshot.academicYear as string)
-      )
+          .map((snapshot) => snapshot.academicYear as string),
+      ),
     ).sort();
   }, [snapshots, effectiveBranchId]);
 
@@ -291,16 +338,16 @@ export default function CumulativeFilters({
   // ======================================================
 
   const updateFilters = (patch: Partial<CumulativeReportFiltersState>) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       ...patch,
     }));
   };
 
-  const selectBranch = (branchId?: number) => {
+  const selectBranch = (branchId?: string) => {
     if (lockBranch) return;
 
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       branchId,
       academicStructureId: undefined,
@@ -316,8 +363,8 @@ export default function CumulativeFilters({
     }));
   };
 
-  const selectAcademicStructure = (academicStructureId?: number) => {
-    setFilters(prev => ({
+  const selectAcademicStructure = (academicStructureId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       academicStructureId,
       academicPeriodId: undefined,
@@ -329,8 +376,8 @@ export default function CumulativeFilters({
     }));
   };
 
-  const selectAcademicPeriod = (academicPeriodId?: number) => {
-    setFilters(prev => ({
+  const selectAcademicPeriod = (academicPeriodId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       academicPeriodId,
       classId: undefined,
@@ -338,8 +385,8 @@ export default function CumulativeFilters({
     }));
   };
 
-  const selectClass = (classId?: number) => {
-    setFilters(prev => ({
+  const selectClass = (classId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       classId,
       studentId: undefined,
@@ -347,7 +394,7 @@ export default function CumulativeFilters({
   };
 
   const selectMode = (mode: CumulativeReportMode) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       mode,
     }));
@@ -485,11 +532,13 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={effectiveBranchId || ""}
-            onChange={e => selectBranch(Number(e.target.value) || undefined)}
+            onChange={(e) => selectBranch(Number(e.target.value) || undefined)}
             disabled={lockBranch}
           >
-            <option value="">{lockBranch ? "Locked Branch" : "Select Branch"}</option>
-            {availableBranches.map(branch => (
+            <option value="">
+              {lockBranch ? "Locked Branch" : "Select Branch"}
+            </option>
+            {availableBranches.map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name}
               </option>
@@ -502,12 +551,12 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.academicStructureId || ""}
-            onChange={e =>
+            onChange={(e) =>
               selectAcademicStructure(Number(e.target.value) || undefined)
             }
           >
             <option value="">All Academic Structures</option>
-            {availableAcademicStructures.map(item => (
+            {availableAcademicStructures.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
               </option>
@@ -520,7 +569,7 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.academicYear || ""}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 academicYear: e.target.value || undefined,
                 studentId: undefined,
@@ -528,7 +577,7 @@ export default function CumulativeFilters({
             }
           >
             <option value="">All Academic Years</option>
-            {availableAcademicYears.map(year => (
+            {availableAcademicYears.map((year) => (
               <option key={year} value={year}>
                 {year}
               </option>
@@ -541,10 +590,12 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.academicPeriodId || ""}
-            onChange={e => selectAcademicPeriod(Number(e.target.value) || undefined)}
+            onChange={(e) =>
+              selectAcademicPeriod(Number(e.target.value) || undefined)
+            }
           >
             <option value="">All Periods</option>
-            {availableAcademicPeriods.map(period => (
+            {availableAcademicPeriods.map((period) => (
               <option key={period.id} value={period.id}>
                 {period.name}
               </option>
@@ -557,10 +608,10 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.classId || ""}
-            onChange={e => selectClass(Number(e.target.value) || undefined)}
+            onChange={(e) => selectClass(Number(e.target.value) || undefined)}
           >
             <option value="">All Classes</option>
-            {availableClasses.map(item => (
+            {availableClasses.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
               </option>
@@ -573,12 +624,14 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.studentId || ""}
-            onChange={e =>
-              updateFilters({ studentId: Number(e.target.value) || undefined })
+            onChange={(e) =>
+              updateFilters({
+                studentId: cleanId(e.target.value) || undefined,
+              })
             }
           >
             <option value="">Select Student</option>
-            {availableStudents.map(student => {
+            {availableStudents.map((student) => {
               const className = student.currentClassId
                 ? classMap.get(student.currentClassId)?.name
                 : undefined;
@@ -586,7 +639,9 @@ export default function CumulativeFilters({
               return (
                 <option key={student.id} value={student.id}>
                   {student.fullName}
-                  {student.admissionNumber ? ` (${student.admissionNumber})` : ""}
+                  {student.admissionNumber
+                    ? ` (${student.admissionNumber})`
+                    : ""}
                   {className ? ` • ${className}` : ""}
                 </option>
               );
@@ -599,12 +654,14 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.subjectId || ""}
-            onChange={e =>
-              updateFilters({ subjectId: Number(e.target.value) || undefined })
+            onChange={(e) =>
+              updateFilters({
+                subjectId: cleanId(e.target.value) || undefined,
+              })
             }
           >
             <option value="">Select Subject</option>
-            {availableSubjects.map(subject => (
+            {availableSubjects.map((subject) => (
               <option key={subject.id} value={subject.id}>
                 {subject.name}
                 {subject.code ? ` (${subject.code})` : ""}
@@ -618,7 +675,7 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.snapshotType}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 snapshotType: e.target.value as CumulativeSnapshotType,
               })
@@ -636,7 +693,7 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.decision || "all"}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 decision: e.target.value as CumulativeDecision | "all",
               })
@@ -654,7 +711,7 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.sortMode}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({ sortMode: e.target.value as ReportSortMode })
             }
           >
@@ -670,14 +727,16 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.groupingMode}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 groupingMode: e.target.value as CumulativeGroupingMode,
               })
             }
           >
             <option value="academic-year">Group by Academic Year</option>
-            <option value="academic-structure">Group by Academic Structure</option>
+            <option value="academic-structure">
+              Group by Academic Structure
+            </option>
             <option value="class">Group by Class</option>
             <option value="period">Group by Period</option>
           </select>
@@ -688,10 +747,10 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.subjectAggregationMode}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
-                subjectAggregationMode:
-                  e.target.value as CumulativeSubjectAggregationMode,
+                subjectAggregationMode: e.target
+                  .value as CumulativeSubjectAggregationMode,
               })
             }
           >
@@ -718,12 +777,12 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.fromAcademicYear || ""}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({ fromAcademicYear: e.target.value || undefined })
             }
           >
             <option value="">No Start Year</option>
-            {availableAcademicYears.map(year => (
+            {availableAcademicYears.map((year) => (
               <option key={year} value={year}>
                 {year}
               </option>
@@ -736,12 +795,12 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.toAcademicYear || ""}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({ toAcademicYear: e.target.value || undefined })
             }
           >
             <option value="">No End Year</option>
-            {availableAcademicYears.map(year => (
+            {availableAcademicYears.map((year) => (
               <option key={year} value={year}>
                 {year}
               </option>
@@ -754,14 +813,14 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.fromAcademicPeriodId || ""}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 fromAcademicPeriodId: Number(e.target.value) || undefined,
               })
             }
           >
             <option value="">No Start Period</option>
-            {availableAcademicPeriods.map(period => (
+            {availableAcademicPeriods.map((period) => (
               <option key={period.id} value={period.id}>
                 {period.name}
               </option>
@@ -774,14 +833,14 @@ export default function CumulativeFilters({
           <select
             style={input}
             value={filters.toAcademicPeriodId || ""}
-            onChange={e =>
+            onChange={(e) =>
               updateFilters({
                 toAcademicPeriodId: Number(e.target.value) || undefined,
               })
             }
           >
             <option value="">No End Period</option>
-            {availableAcademicPeriods.map(period => (
+            {availableAcademicPeriods.map((period) => (
               <option key={period.id} value={period.id}>
                 {period.name}
               </option>

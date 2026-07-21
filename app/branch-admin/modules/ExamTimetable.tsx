@@ -48,13 +48,31 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db/db";
-import { createLocal, getSyncTable, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  db,
+  type ScheduleConflict,
+  type ScheduleSession,
+  type ScheduleTimetable,
+} from "../../lib/db/db";
+import {
+  createLocal,
+  getSyncTable,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
-type ViewMode = "overview" | "calendar" | "schedule" | "cards" | "rooms" | "invigilators" | "conflicts" | "analytics";
+type ViewMode =
+  | "overview"
+  | "calendar"
+  | "schedule"
+  | "cards"
+  | "rooms"
+  | "invigilators"
+  | "conflicts"
+  | "analytics";
 type CalendarMode = "week" | "day" | "agenda";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 type EditorMode = "create" | "edit" | "duplicate" | "move";
@@ -63,7 +81,15 @@ type ToastTone = "success" | "error" | "info";
 const MODE_LABEL = "Exam Timetable";
 const MODE_ICON = "📝";
 
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
 const DAY_LABELS: Record<string, string> = {
   monday: "Monday",
   tuesday: "Tuesday",
@@ -84,7 +110,7 @@ const SHORT_DAY_LABELS: Record<string, string> = {
 };
 
 const emptyForm = {
-  id: 0,
+  id: "",
   timetableName: "",
   timetableId: "",
   dayOfWeek: "monday",
@@ -93,7 +119,7 @@ const emptyForm = {
   endTime: "10:00",
   classId: "",
   subjectId: "",
-  teacherLocalId: "",
+  teacherId: "",
   resourceId: "",
   roomName: "",
 };
@@ -112,13 +138,25 @@ function text(value: any, fallback = "") {
   return raw;
 }
 
-function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId;
+function idOf(value: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "object") {
+    const row = value as AnyRow;
+    return String(row.id ?? row.localId ?? row.cloudId ?? "").trim();
+  }
+
+  return String(value).trim();
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  return idOf(value);
+}
+
+function sameId(left: unknown, right: unknown): boolean {
+  const a = idOf(left);
+  const b = idOf(right);
+  return Boolean(a && b && a === b);
 }
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -127,11 +165,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -142,7 +180,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -167,13 +207,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = cleanId(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -184,7 +224,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -193,7 +237,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -205,7 +249,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -215,14 +263,19 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 function looksLikeCssLeak(value: any) {
   const raw = String(value || "");
-  return raw.includes("{") || raw.includes("}") || raw.includes("@media") || raw.includes(".ba-") || raw.includes("color-mix(");
+  return (
+    raw.includes("{") ||
+    raw.includes("}") ||
+    raw.includes("@media") ||
+    raw.includes(".ba-") ||
+    raw.includes("color-mix(")
+  );
 }
 
 function safeMinute(value: any, fallback = 0) {
@@ -255,25 +308,38 @@ function formatMinuteRange(start: number, end: number) {
 }
 
 function sameAccount(row: AnyRow, accountId?: string | null) {
-  return row && row.isDeleted !== true && (!row.accountId || !accountId || row.accountId === accountId);
+  return (
+    row &&
+    row.isDeleted !== true &&
+    (!row.accountId || !accountId || row.accountId === accountId)
+  );
 }
 
 function schoolIdOf(row: AnyRow) {
-  return cleanId(row?.schoolId ?? row?.schoolLocalId ?? row?.payload?.schoolId);
+  return cleanId(row?.schoolId ?? row?.schoolId ?? row?.payload?.schoolId);
 }
 
 function branchIdOf(row: AnyRow) {
-  return cleanId(row?.branchId ?? row?.branchLocalId ?? row?.payload?.branchId);
+  return cleanId(row?.branchId ?? row?.branchId ?? row?.payload?.branchId);
 }
 
-function isBranchRow(row: AnyRow, accountId?: string | null, schoolId?: number | null, branchId?: number | null) {
+function isBranchRow(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+  branchId?: string | null,
+) {
   if (!sameAccount(row, accountId)) return false;
-  return schoolIdOf(row) === Number(schoolId || 0) && branchIdOf(row) === Number(branchId || 0);
+  return sameId(schoolIdOf(row), schoolId) && sameId(branchIdOf(row), branchId);
 }
 
-function isSchoolLevelRow(row: AnyRow, accountId?: string | null, schoolId?: number | null) {
+function isSchoolLevelRow(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+) {
   if (!sameAccount(row, accountId)) return false;
-  return schoolIdOf(row) === Number(schoolId || 0) && !branchIdOf(row);
+  return sameId(schoolIdOf(row), schoolId) && !branchIdOf(row);
 }
 
 async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
@@ -282,7 +348,10 @@ async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
 }
 
 function rowName(row?: AnyRow) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function normalizeDay(value: any) {
@@ -300,12 +369,18 @@ function dayIndex(day: string) {
 }
 
 function startMinute(row: AnyRow) {
-  return safeMinute(row?.startMinute ?? row?.start ?? row?.startTimeMinute, 480);
+  return safeMinute(
+    row?.startMinute ?? row?.start ?? row?.startTimeMinute,
+    480,
+  );
 }
 
 function endMinute(row: AnyRow) {
   const start = startMinute(row);
-  const end = safeMinute(row?.endMinute ?? row?.end ?? row?.endTimeMinute, start + 120);
+  const end = safeMinute(
+    row?.endMinute ?? row?.end ?? row?.endTimeMinute,
+    start + 120,
+  );
   return end > start ? end : Math.min(1439, start + 120);
 }
 
@@ -314,27 +389,44 @@ function sessionTime(row: AnyRow) {
 }
 
 function className(classes: AnyRow[], classId: any) {
-  const row = classes.find((item) => Number(idOf(item)) === Number(classId));
+  const row = classes.find(
+    (item) => String(idOf(item) ?? "") === String(classId ?? ""),
+  );
   return text(row?.name || row?.className, "No class");
 }
 
 function subjectName(subjects: AnyRow[], subjectId: any) {
-  const row = subjects.find((item) => Number(idOf(item)) === Number(subjectId));
+  const row = subjects.find(
+    (item) => String(idOf(item) ?? "") === String(subjectId ?? ""),
+  );
   return text(row?.name || row?.subjectName, "No subject");
 }
 
 function teacherName(teachers: AnyRow[], teacherId: any) {
-  const row = teachers.find((item) => Number(idOf(item)) === Number(teacherId));
+  const row = teachers.find(
+    (item) => String(idOf(item) ?? "") === String(teacherId ?? ""),
+  );
   return rowName(row || {});
 }
 
 function resourceName(resources: AnyRow[], session: AnyRow) {
-  const row = resources.find((item) => Number(idOf(item)) === Number(session.resourceId));
-  return text(row?.name || row?.roomName || session.roomName || session.room, "No room");
+  const row = resources.find(
+    (item) =>
+      sameId(idOf(item), sessionResourceId(session)),
+  );
+  return text(
+    row?.name || row?.roomName || session.roomName || session.room,
+    "No room",
+  );
 }
 
 function sessionTeacherId(session: AnyRow) {
-  return cleanId(session.teacherLocalId ?? session.teacherId ?? session.staffId ?? session.invigilatorId);
+  return cleanId(
+    session.teacherId ??
+      session.teacherId ??
+      session.staffId ??
+      session.invigilatorId,
+  );
 }
 
 function sessionClassId(session: AnyRow) {
@@ -350,13 +442,22 @@ function sessionResourceId(session: AnyRow) {
 }
 
 function isExamSession(row: AnyRow) {
-  const type = String(row?.sessionType || row?.type || row?.category || "").toLowerCase();
+  const type = String(
+    row?.sessionType || row?.type || row?.category || "",
+  ).toLowerCase();
   const title = String(row?.title || row?.name || "").toLowerCase();
-  return type.includes("exam") || type.includes("assessment") || title.includes("exam");
+  return (
+    type.includes("exam") ||
+    type.includes("assessment") ||
+    title.includes("exam")
+  );
 }
 
 function examTitle(row: AnyRow, subjects: AnyRow[]) {
-  return text(row?.title || row?.examTitle || row?.name, `${subjectName(subjects, sessionSubjectId(row))} Exam`);
+  return text(
+    row?.title || row?.examTitle || row?.name,
+    `${subjectName(subjects, sessionSubjectId(row))} Exam`,
+  );
 }
 
 function sortExams(rows: AnyRow[]) {
@@ -364,8 +465,8 @@ function sortExams(rows: AnyRow[]) {
     (a, b) =>
       dayIndex(sessionDay(a)) - dayIndex(sessionDay(b)) ||
       startMinute(a) - startMinute(b) ||
-      sessionClassId(a) - sessionClassId(b) ||
-      sessionSubjectId(a) - sessionSubjectId(b)
+      sessionClassId(a).localeCompare(sessionClassId(b)) ||
+      sessionSubjectId(a).localeCompare(sessionSubjectId(b)),
   );
 }
 
@@ -375,7 +476,9 @@ function groupedCounts(rows: AnyRow[], keyFn: (row: AnyRow) => string) {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value);
 }
 
 function overlap(a: AnyRow, b: AnyRow) {
@@ -385,7 +488,7 @@ function overlap(a: AnyRow, b: AnyRow) {
 
 function examKey(row: AnyRow) {
   return [
-    Number(row.timetableId || 0),
+    idOf(row.timetableId),
     sessionDay(row),
     startMinute(row),
     endMinute(row),
@@ -395,12 +498,24 @@ function examKey(row: AnyRow) {
   ].join("|");
 }
 
-function conflictKey(type: string, aId: number, bId: number) {
-  return `${type}-${Math.min(aId, bId)}-${Math.max(aId, bId)}`;
+function conflictKey(type: string, aId: string, bId: string) {
+  const [first, second] = [idOf(aId), idOf(bId)].sort();
+  return `${type}-${first}-${second}`;
 }
 
-function detectExamConflicts(exams: AnyRow[], classes: AnyRow[], teachers: AnyRow[], resources: AnyRow[]) {
-  const items: { id: string; title: string; description: string; severity: Tone; rows: AnyRow[] }[] = [];
+function detectExamConflicts(
+  exams: AnyRow[],
+  classes: AnyRow[],
+  teachers: AnyRow[],
+  resources: AnyRow[],
+) {
+  const items: {
+    id: string;
+    title: string;
+    description: string;
+    severity: Tone;
+    rows: AnyRow[];
+  }[] = [];
 
   for (let i = 0; i < exams.length; i += 1) {
     for (let j = i + 1; j < exams.length; j += 1) {
@@ -408,11 +523,15 @@ function detectExamConflicts(exams: AnyRow[], classes: AnyRow[], teachers: AnyRo
       const b = exams[j];
       if (!overlap(a, b)) continue;
 
-      const sameClass = sessionClassId(a) && sessionClassId(a) === sessionClassId(b);
-      const sameTeacher = sessionTeacherId(a) && sessionTeacherId(a) === sessionTeacherId(b);
+      const sameClass =
+        sessionClassId(a) && sameId(sessionClassId(a), sessionClassId(b));
+      const sameTeacher =
+        sessionTeacherId(a) && sameId(sessionTeacherId(a), sessionTeacherId(b));
       const sameRoom =
-        (sessionResourceId(a) && sessionResourceId(a) === sessionResourceId(b)) ||
-        (text(a.roomName) && text(a.roomName).toLowerCase() === text(b.roomName).toLowerCase());
+        (sessionResourceId(a) &&
+          sameId(sessionResourceId(a), sessionResourceId(b))) ||
+        (text(a.roomName) &&
+          text(a.roomName).toLowerCase() === text(b.roomName).toLowerCase());
 
       if (sameClass) {
         items.push({
@@ -456,7 +575,13 @@ function toneForConflict(severity?: string): Tone {
   return "blue";
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
@@ -499,7 +624,13 @@ export default function ExamTimetable() {
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -534,7 +665,9 @@ export default function ExamTimetable() {
   const [resources, setResources] = useState<AnyRow[]>([]);
   const [scheduleConflicts, setScheduleConflicts] = useState<AnyRow[]>([]);
   const [query, setQuery] = useState("");
-  const [selectedTimetableId, setSelectedTimetableId] = useState<number | "">("");
+  const [selectedTimetableId, setSelectedTimetableId] = useState<string | "">(
+    "",
+  );
   const [classFilter, setClassFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [invigilatorFilter, setInvigilatorFilter] = useState("all");
@@ -547,7 +680,10 @@ export default function ExamTimetable() {
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
   const [form, setForm] = useState(emptyForm);
 
   useEffect(() => {
@@ -557,7 +693,13 @@ export default function ExamTimetable() {
 
   const showToast = (tone: ToastTone, nextMessage: string) => {
     setToast({ tone, message: nextMessage });
-    window.setTimeout(() => setToast((current) => (current?.message === nextMessage ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) =>
+          current?.message === nextMessage ? null : current,
+        ),
+      4200,
+    );
   };
 
   async function load() {
@@ -573,7 +715,15 @@ export default function ExamTimetable() {
     setLoading(true);
 
     try {
-      const [timetableRows, sessionRows, classRows, subjectRows, teacherRows, resourceRows, conflictRows] = await Promise.all([
+      const [
+        timetableRows,
+        sessionRows,
+        classRows,
+        subjectRows,
+        teacherRows,
+        resourceRows,
+        conflictRows,
+      ] = await Promise.all([
         getSyncTable("scheduleTimetables").toArray(),
         getSyncTable("scheduleSessions").toArray(),
         safeArray<AnyRow>("classes"),
@@ -587,7 +737,9 @@ export default function ExamTimetable() {
         .filter((row) => isBranchRow(row, accountId, schoolId, branchId))
         .filter((row) => row?.isDeleted !== true)
         .filter((row) => {
-          const value = String(row.timetableType || row.scopeType || row.name || "").toLowerCase();
+          const value = String(
+            row.timetableType || row.scopeType || row.name || "",
+          ).toLowerCase();
           return value.includes("exam") || value.includes("assessment");
         });
 
@@ -598,18 +750,45 @@ export default function ExamTimetable() {
 
       setTimetables(examTimetables);
       setSessions(examSessions);
-      setClasses((classRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId) || isSchoolLevelRow(row, accountId, schoolId)));
-      setSubjects((subjectRows as AnyRow[]).filter((row) => sameAccount(row, accountId) && (schoolIdOf(row) === schoolId || !schoolIdOf(row) || branchIdOf(row) === branchId)));
-      setTeachers((teacherRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId) || isSchoolLevelRow(row, accountId, schoolId)));
-      setResources((resourceRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId)).filter((row) => row?.isDeleted !== true));
+      setClasses(
+        (classRows as AnyRow[]).filter(
+          (row) =>
+            isBranchRow(row, accountId, schoolId, branchId) ||
+            isSchoolLevelRow(row, accountId, schoolId),
+        ),
+      );
+      setSubjects(
+        (subjectRows as AnyRow[]).filter(
+          (row) =>
+            sameAccount(row, accountId) &&
+            (sameId(schoolIdOf(row), schoolId) ||
+              !schoolIdOf(row) ||
+              sameId(branchIdOf(row), branchId)),
+        ),
+      );
+      setTeachers(
+        (teacherRows as AnyRow[]).filter(
+          (row) =>
+            isBranchRow(row, accountId, schoolId, branchId) ||
+            isSchoolLevelRow(row, accountId, schoolId),
+        ),
+      );
+      setResources(
+        (resourceRows as AnyRow[])
+          .filter((row) => isBranchRow(row, accountId, schoolId, branchId))
+          .filter((row) => row?.isDeleted !== true),
+      );
       setScheduleConflicts(
         (conflictRows as AnyRow[])
           .filter((row) => isBranchRow(row, accountId, schoolId, branchId))
           .filter((row) => row?.isDeleted !== true)
-          .filter((row) => String(row.status || "open").toLowerCase() === "open")
+          .filter(
+            (row) => String(row.status || "open").toLowerCase() === "open",
+          ),
       );
 
-      if (!selectedTimetableId && examTimetables[0]?.id) setSelectedTimetableId(Number(examTimetables[0].id));
+      if (!selectedTimetableId && examTimetables[0]?.id)
+        setSelectedTimetableId(String(examTimetables[0].id));
     } catch (error) {
       console.error("Failed to load exam timetable:", error);
       setMessage("Failed to load exam timetable.");
@@ -621,14 +800,16 @@ export default function ExamTimetable() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [accountId, schoolId, branchId, dataRevision]);
 
   function openCreate() {
     setEditorMode("create");
     setMessage("");
-    setForm({ ...emptyForm, timetableId: selectedTimetableId ? String(selectedTimetableId) : "", dayOfWeek: selectedDay });
+    setForm({
+      ...emptyForm,
+      timetableId: selectedTimetableId ? String(selectedTimetableId) : "",
+      dayOfWeek: selectedDay,
+    });
     setDrawer(true);
   }
 
@@ -636,7 +817,7 @@ export default function ExamTimetable() {
     setEditorMode("edit");
     setMessage("");
     setForm({
-      id: cleanId(exam.id || exam.localId),
+      id: cleanId(exam.id),
       timetableName: "",
       timetableId: exam.timetableId ? String(exam.timetableId) : "",
       dayOfWeek: sessionDay(exam),
@@ -645,8 +826,10 @@ export default function ExamTimetable() {
       endTime: minuteToTime(endMinute(exam)),
       classId: sessionClassId(exam) ? String(sessionClassId(exam)) : "",
       subjectId: sessionSubjectId(exam) ? String(sessionSubjectId(exam)) : "",
-      teacherLocalId: sessionTeacherId(exam) ? String(sessionTeacherId(exam)) : "",
-      resourceId: sessionResourceId(exam) ? String(sessionResourceId(exam)) : "",
+      teacherId: sessionTeacherId(exam) ? String(sessionTeacherId(exam)) : "",
+      resourceId: sessionResourceId(exam)
+        ? String(sessionResourceId(exam))
+        : "",
       roomName: text(exam.roomName || exam.room, ""),
     });
     setDrawer(true);
@@ -655,7 +838,11 @@ export default function ExamTimetable() {
   function openDuplicate(exam: AnyRow) {
     openEdit(exam);
     setEditorMode("duplicate");
-    setForm((current) => ({ ...current, id: 0, title: current.title ? `${current.title} Copy` : "" }));
+    setForm((current) => ({
+      ...current,
+      id: "",
+      title: current.title ? `${current.title} Copy` : "",
+    }));
   }
 
   function openMove(exam: AnyRow) {
@@ -668,12 +855,35 @@ export default function ExamTimetable() {
 
     return sortExams(
       sessions
-        .filter((session) => !selectedTimetableId || Number(session.timetableId) === Number(selectedTimetableId))
-        .filter((session) => classFilter === "all" || sessionClassId(session) === Number(classFilter))
-        .filter((session) => subjectFilter === "all" || sessionSubjectId(session) === Number(subjectFilter))
-        .filter((session) => invigilatorFilter === "all" || sessionTeacherId(session) === Number(invigilatorFilter))
-        .filter((session) => resourceFilter === "all" || sessionResourceId(session) === Number(resourceFilter) || text(session.roomName) === resourceFilter)
-        .filter((session) => dayFilter === "all" || sessionDay(session) === dayFilter)
+        .filter(
+          (session) =>
+            !selectedTimetableId ||
+            String(session.timetableId) === String(selectedTimetableId),
+        )
+        .filter(
+          (session) =>
+            classFilter === "all" ||
+            sameId(sessionClassId(session), classFilter),
+        )
+        .filter(
+          (session) =>
+            subjectFilter === "all" ||
+            sameId(sessionSubjectId(session), subjectFilter),
+        )
+        .filter(
+          (session) =>
+            invigilatorFilter === "all" ||
+            sameId(sessionTeacherId(session), invigilatorFilter),
+        )
+        .filter(
+          (session) =>
+            resourceFilter === "all" ||
+            sameId(sessionResourceId(session), resourceFilter) ||
+            text(session.roomName) === resourceFilter,
+        )
+        .filter(
+          (session) => dayFilter === "all" || sessionDay(session) === dayFilter,
+        )
         .filter((session) => {
           if (!q) return true;
           return [
@@ -688,14 +898,30 @@ export default function ExamTimetable() {
             .join(" ")
             .toLowerCase()
             .includes(q);
-        })
+        }),
     );
-  }, [classFilter, classes, dayFilter, invigilatorFilter, query, resourceFilter, resources, selectedTimetableId, sessions, subjectFilter, subjects, teachers]);
+  }, [
+    classFilter,
+    classes,
+    dayFilter,
+    invigilatorFilter,
+    query,
+    resourceFilter,
+    resources,
+    selectedTimetableId,
+    sessions,
+    subjectFilter,
+    subjects,
+    teachers,
+  ]);
 
-  const internalConflicts = useMemo(() => detectExamConflicts(visibleExams, classes, teachers, resources), [visibleExams, classes, teachers, resources]);
+  const internalConflicts = useMemo(
+    () => detectExamConflicts(visibleExams, classes, teachers, resources),
+    [visibleExams, classes, teachers, resources],
+  );
 
   const conflictExamIds = useMemo(() => {
-    const ids = new Set<number>();
+    const ids = new Set<string>();
     for (const conflict of scheduleConflicts) {
       const a = cleanId(conflict.sessionIdA);
       const b = cleanId(conflict.sessionIdB);
@@ -704,7 +930,7 @@ export default function ExamTimetable() {
     }
     for (const conflict of internalConflicts) {
       for (const exam of conflict.rows) {
-        const id = cleanId(exam.id || exam.localId);
+        const id = cleanId(exam.id);
         if (id) ids.add(id);
       }
     }
@@ -712,8 +938,14 @@ export default function ExamTimetable() {
   }, [internalConflicts, scheduleConflicts]);
 
   const filteredExams = useMemo(() => {
-    if (conflictFilter === "with_conflicts") return visibleExams.filter((exam) => conflictExamIds.has(cleanId(exam.id || exam.localId)));
-    if (conflictFilter === "no_conflicts") return visibleExams.filter((exam) => !conflictExamIds.has(cleanId(exam.id || exam.localId)));
+    if (conflictFilter === "with_conflicts")
+      return visibleExams.filter((exam) =>
+        conflictExamIds.has(cleanId(exam.id)),
+      );
+    if (conflictFilter === "no_conflicts")
+      return visibleExams.filter(
+        (exam) => !conflictExamIds.has(cleanId(exam.id)),
+      );
     return visibleExams;
   }, [conflictExamIds, conflictFilter, visibleExams]);
 
@@ -728,7 +960,15 @@ export default function ExamTimetable() {
         dayFilter !== "all" ? dayFilter : "",
         conflictFilter !== "all" ? conflictFilter : "",
       ].filter(Boolean).length,
-    [classFilter, conflictFilter, dayFilter, invigilatorFilter, resourceFilter, selectedTimetableId, subjectFilter]
+    [
+      classFilter,
+      conflictFilter,
+      dayFilter,
+      invigilatorFilter,
+      resourceFilter,
+      selectedTimetableId,
+      subjectFilter,
+    ],
   );
 
   const filtersActive = !!query.trim() || activeFilterCount > 0;
@@ -745,32 +985,58 @@ export default function ExamTimetable() {
   }
 
   const summary = useMemo(() => {
-    const completeRows = filteredExams.filter((row) => sessionClassId(row) && sessionSubjectId(row) && endMinute(row) > startMinute(row));
+    const completeRows = filteredExams.filter(
+      (row) =>
+        sessionClassId(row) &&
+        sessionSubjectId(row) &&
+        endMinute(row) > startMinute(row),
+    );
     return {
       timetables: timetables.length,
       exams: filteredExams.length,
       classes: new Set(filteredExams.map(sessionClassId).filter(Boolean)).size,
-      subjects: new Set(filteredExams.map(sessionSubjectId).filter(Boolean)).size,
-      rooms: new Set(filteredExams.map((row) => sessionResourceId(row) || text(row.roomName)).filter(Boolean)).size,
-      invigilators: new Set(filteredExams.map(sessionTeacherId).filter(Boolean)).size,
+      subjects: new Set(filteredExams.map(sessionSubjectId).filter(Boolean))
+        .size,
+      rooms: new Set(
+        filteredExams
+          .map((row) => sessionResourceId(row) || text(row.roomName))
+          .filter(Boolean),
+      ).size,
+      invigilators: new Set(filteredExams.map(sessionTeacherId).filter(Boolean))
+        .size,
       conflicts: scheduleConflicts.length + internalConflicts.length,
-      completion: Math.round((completeRows.length / Math.max(filteredExams.length, 1)) * 100),
+      completion: Math.round(
+        (completeRows.length / Math.max(filteredExams.length, 1)) * 100,
+      ),
     };
-  }, [filteredExams, internalConflicts.length, scheduleConflicts.length, timetables.length]);
+  }, [
+    filteredExams,
+    internalConflicts.length,
+    scheduleConflicts.length,
+    timetables.length,
+  ]);
 
-  async function saveDetectedConflicts(savedExam: AnyRow, editingId: number) {
+  async function saveDetectedConflicts(savedExam: AnyRow, editingId: string) {
     const related = sessions.filter((session: AnyRow) => {
-      const id = cleanId(session.id || session.localId);
-      if (!id || id === editingId) return false;
+      const id = cleanId(session.id);
+      if (!id || sameId(id, editingId)) return false;
       if (!isExamSession(session)) return false;
       return overlap(savedExam, session);
     });
 
-    const existing = new Set(scheduleConflicts.map((conflict: AnyRow) => conflictKey(String(conflict.conflictType || "custom"), cleanId(conflict.sessionIdA), cleanId(conflict.sessionIdB))));
+    const existing = new Set(
+      scheduleConflicts.map((conflict: AnyRow) =>
+        conflictKey(
+          String(conflict.conflictType || "custom"),
+          cleanId(conflict.sessionIdA),
+          cleanId(conflict.sessionIdB),
+        ),
+      ),
+    );
     const newConflicts: Partial<ScheduleConflict>[] = [];
 
     for (const session of related) {
-      const otherId = cleanId(session.id || session.localId);
+      const otherId = cleanId(session.id);
       const classId = sessionClassId(savedExam);
       const teacherId = sessionTeacherId(savedExam);
       const resourceId = sessionResourceId(savedExam);
@@ -778,10 +1044,38 @@ export default function ExamTimetable() {
       const roomB = text(session.roomName || session.room, "");
 
       const possible = [
-        { active: classId && classId === sessionClassId(session), type: "class_double_booked", title: "Class exam clash", description: `${className(classes, classId)} has overlapping exams.`, severity: "high", classId },
-        { active: teacherId && teacherId === sessionTeacherId(session), type: "teacher_double_booked", title: "Invigilator clash", description: `${teacherName(teachers, teacherId)} is assigned to overlapping exams.`, severity: "medium", teacherLocalId: teacherId },
-        { active: resourceId && resourceId === sessionResourceId(session), type: "resource_double_booked", title: "Room/resource clash", description: `${resourceName(resources, savedExam)} is booked for overlapping exams.`, severity: "high", resourceId },
-        { active: !resourceId && roomA && roomA.toLowerCase() === roomB.toLowerCase(), type: "room_double_booked", title: "Room clash", description: `${roomA} is booked for overlapping exams.`, severity: "high" },
+        {
+          active: Boolean(classId && sameId(classId, sessionClassId(session))),
+          type: "class_double_booked",
+          title: "Class exam clash",
+          description: `${className(classes, classId)} has overlapping exams.`,
+          severity: "high",
+          classId,
+        },
+        {
+          active: Boolean(teacherId && sameId(teacherId, sessionTeacherId(session))),
+          type: "teacher_double_booked",
+          title: "Invigilator clash",
+          description: `${teacherName(teachers, teacherId)} is assigned to overlapping exams.`,
+          severity: "medium",
+          teacherId: teacherId,
+        },
+        {
+          active: Boolean(resourceId && sameId(resourceId, sessionResourceId(session))),
+          type: "resource_double_booked",
+          title: "Room/resource clash",
+          description: `${resourceName(resources, savedExam)} is booked for overlapping exams.`,
+          severity: "high",
+          resourceId,
+        },
+        {
+          active:
+            !resourceId && roomA && roomA.toLowerCase() === roomB.toLowerCase(),
+          type: "room_double_booked",
+          title: "Room clash",
+          description: `${roomA} is booked for overlapping exams.`,
+          severity: "high",
+        },
       ];
 
       for (const item of possible) {
@@ -792,8 +1086,8 @@ export default function ExamTimetable() {
 
         newConflicts.push({
           accountId: String(accountId),
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           conflictType: item.type as ScheduleConflict["conflictType"],
           severity: item.severity as ScheduleConflict["severity"],
           status: "open",
@@ -802,7 +1096,7 @@ export default function ExamTimetable() {
           sessionIdA: editingId,
           sessionIdB: otherId,
           resourceId: (item as AnyRow).resourceId || undefined,
-          teacherLocalId: (item as AnyRow).teacherLocalId || undefined,
+          teacherId: (item as AnyRow).teacherId || undefined,
           classId: (item as AnyRow).classId || undefined,
           dayOfWeek: sessionDay(savedExam) as ScheduleConflict["dayOfWeek"],
           startMinute: Math.max(startMinute(savedExam), startMinute(session)),
@@ -813,7 +1107,8 @@ export default function ExamTimetable() {
       }
     }
 
-    for (const conflict of newConflicts.slice(0, 20)) await createLocal("scheduleConflicts", conflict as ScheduleConflict);
+    for (const conflict of newConflicts.slice(0, 20))
+      await createLocal("scheduleConflicts", conflict as ScheduleConflict);
   }
 
   async function save() {
@@ -840,29 +1135,29 @@ export default function ExamTimetable() {
     setSaving(true);
 
     try {
-      let timetableId = Number(form.timetableId || selectedTimetableId || 0);
+      let timetableId = cleanId(form.timetableId || selectedTimetableId);
       const safeAccountId = String(accountId);
 
       if (!timetableId) {
         const created = (await createLocal("scheduleTimetables", {
           accountId: safeAccountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           name: form.timetableName.trim() || "Exam Timetable",
           timetableType: "exam",
           scopeType: "branch",
-          scopeId: Number(branchId),
-          classId: Number(form.classId || 0) || undefined,
-          teacherLocalId: Number(form.teacherLocalId || 0) || undefined,
+          scopeId: branchId,
+          classId: cleanId(form.classId) || undefined,
+          teacherId: cleanId(form.teacherId) || undefined,
           status: "active",
           active: true,
           isDefault: !timetables.length,
           createdByRole: "branch_admin",
           createdByUserId: safeAccountId,
           isDeleted: false,
-        } as ScheduleTimetable)) as ScheduleTimetable | undefined;
+        } as unknown as ScheduleTimetable)) as ScheduleTimetable | undefined;
 
-        timetableId = Number((created as AnyRow)?.id || 0);
+        timetableId = cleanId((created as AnyRow)?.id);
       }
 
       if (!timetableId) {
@@ -872,18 +1167,19 @@ export default function ExamTimetable() {
 
       const payload: Partial<ScheduleSession> = {
         accountId: safeAccountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         timetableId,
         sessionType: "exam" as ScheduleSession["sessionType"],
         dayOfWeek: normalizeDay(form.dayOfWeek) as ScheduleSession["dayOfWeek"],
         startMinute: start,
         endMinute: end,
-        title: form.title.trim() || `${subjectName(subjects, form.subjectId)} Exam`,
-        classId: Number(form.classId || 0),
-        subjectId: Number(form.subjectId || 0),
-        teacherLocalId: Number(form.teacherLocalId || 0) || undefined,
-        resourceId: Number(form.resourceId || 0) || undefined,
+        title:
+          form.title.trim() || `${subjectName(subjects, form.subjectId)} Exam`,
+        classId: cleanId(form.classId) || undefined,
+        subjectId: cleanId(form.subjectId) || undefined,
+        teacherId: cleanId(form.teacherId) || undefined,
+        resourceId: cleanId(form.resourceId) || undefined,
         roomName: form.roomName.trim() || undefined,
         active: true,
         isDeleted: false,
@@ -892,11 +1188,19 @@ export default function ExamTimetable() {
       const editingId = cleanId(form.id);
       const savedExam =
         editingId && editorMode !== "duplicate"
-          ? ((await updateLocal("scheduleSessions", editingId, payload as Partial<ScheduleSession>)) as ScheduleSession | undefined)
-          : ((await createLocal("scheduleSessions", payload as ScheduleSession)) as ScheduleSession | undefined);
+          ? ((await updateLocal(
+              "scheduleSessions",
+              editingId,
+              payload as Partial<ScheduleSession>,
+            )) as ScheduleSession | undefined)
+          : ((await createLocal(
+              "scheduleSessions",
+              payload as ScheduleSession,
+            )) as ScheduleSession | undefined);
 
       const savedId = cleanId((savedExam as AnyRow)?.id);
-      if (savedExam && savedId) await saveDetectedConflicts(savedExam as AnyRow, savedId);
+      if (savedExam && savedId)
+        await saveDetectedConflicts(savedExam as AnyRow, savedId);
 
       setDrawer(false);
       setForm(emptyForm);
@@ -911,10 +1215,12 @@ export default function ExamTimetable() {
   }
 
   async function deleteExam(exam: AnyRow) {
-    const id = cleanId(exam.id || exam.localId);
+    const id = cleanId(exam.id);
     if (!id) return;
 
-    const ok = window.confirm(`Delete "${examTitle(exam, subjects)}"? This will soft-delete the exam and sync safely.`);
+    const ok = window.confirm(
+      `Delete "${examTitle(exam, subjects)}"? This will soft-delete the exam and sync safely.`,
+    );
     if (!ok) return;
 
     try {
@@ -928,7 +1234,7 @@ export default function ExamTimetable() {
   }
 
   async function resolveConflict(conflict: AnyRow) {
-    const id = cleanId(conflict.id || conflict.localId);
+    const id = cleanId(conflict.id);
     if (!id) return;
 
     try {
@@ -947,7 +1253,10 @@ export default function ExamTimetable() {
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <div className="ba-spinner" />
@@ -959,25 +1268,45 @@ export default function ExamTimetable() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Exam timetable search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Exam timetable search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search exams..." aria-label="Search exams" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search exams..."
+            aria-label="Search exams"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add exam">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add exam"
+        >
           +
         </button>
 
@@ -992,19 +1321,48 @@ export default function ExamTimetable() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {filtersActive ? (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {query.trim() ? <button type="button" onClick={() => setQuery("")}>Search: {query} ×</button> : null}
-          {selectedTimetableId ? <button type="button" onClick={() => setSelectedTimetableId("")}>Timetable ×</button> : null}
-          {classFilter !== "all" ? <button type="button" onClick={() => setClassFilter("all")}>Class: {className(classes, classFilter)} ×</button> : null}
-          {subjectFilter !== "all" ? <button type="button" onClick={() => setSubjectFilter("all")}>Subject: {subjectName(subjects, subjectFilter)} ×</button> : null}
-          {dayFilter !== "all" ? <button type="button" onClick={() => setDayFilter("all")}>Day: {DAY_LABELS[dayFilter]} ×</button> : null}
-          {conflictFilter !== "all" ? <button type="button" onClick={() => setConflictFilter("all")}>Conflict ×</button> : null}
+          {query.trim() ? (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query} ×
+            </button>
+          ) : null}
+          {selectedTimetableId ? (
+            <button type="button" onClick={() => setSelectedTimetableId("")}>
+              Timetable ×
+            </button>
+          ) : null}
+          {classFilter !== "all" ? (
+            <button type="button" onClick={() => setClassFilter("all")}>
+              Class: {className(classes, classFilter)} ×
+            </button>
+          ) : null}
+          {subjectFilter !== "all" ? (
+            <button type="button" onClick={() => setSubjectFilter("all")}>
+              Subject: {subjectName(subjects, subjectFilter)} ×
+            </button>
+          ) : null}
+          {dayFilter !== "all" ? (
+            <button type="button" onClick={() => setDayFilter("all")}>
+              Day: {DAY_LABELS[dayFilter]} ×
+            </button>
+          ) : null}
+          {conflictFilter !== "all" ? (
+            <button type="button" onClick={() => setConflictFilter("all")}>
+              Conflict ×
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -1015,24 +1373,55 @@ export default function ExamTimetable() {
           <article className="ba-analysis ba-current-filter">
             <span>Exam Readiness</span>
             <strong>{summary.completion}%</strong>
-            <p>{summary.exams} visible exam(s), {summary.rooms} room(s), {summary.invigilators} invigilator(s).</p>
-            <div className="ba-progress"><div style={{ width: `${summary.completion}%` }} /></div>
+            <p>
+              {summary.exams} visible exam(s), {summary.rooms} room(s),{" "}
+              {summary.invigilators} invigilator(s).
+            </p>
+            <div className="ba-progress">
+              <div style={{ width: `${summary.completion}%` }} />
+            </div>
           </article>
 
           <article className="ba-analysis">
             <span>Current View</span>
             <strong>{summary.exams}</strong>
             <div className="student-detail-strip">
-              <span><b>Classes</b>{summary.classes}</span>
-              <span><b>Subjects</b>{summary.subjects}</span>
-              <span><b>Conflicts</b>{summary.conflicts}</span>
+              <span>
+                <b>Classes</b>
+                {summary.classes}
+              </span>
+              <span>
+                <b>Subjects</b>
+                {summary.subjects}
+              </span>
+              <span>
+                <b>Conflicts</b>
+                {summary.conflicts}
+              </span>
             </div>
           </article>
 
           <article className="ba-analysis wide">
             <span>{DAY_LABELS[selectedDay]}</span>
-            <strong>{filteredExams.filter((row) => sessionDay(row) === selectedDay).length}</strong>
-            <ExamList exams={filteredExams.filter((row) => sessionDay(row) === selectedDay).slice(0, 4)} classes={classes} subjects={subjects} teachers={teachers} resources={resources} onEdit={openEdit} onDuplicate={openDuplicate} onMove={openMove} onDelete={deleteExam} />
+            <strong>
+              {
+                filteredExams.filter((row) => sessionDay(row) === selectedDay)
+                  .length
+              }
+            </strong>
+            <ExamList
+              exams={filteredExams
+                .filter((row) => sessionDay(row) === selectedDay)
+                .slice(0, 4)}
+              classes={classes}
+              subjects={subjects}
+              teachers={teachers}
+              resources={resources}
+              onEdit={openEdit}
+              onDuplicate={openDuplicate}
+              onMove={openMove}
+              onDelete={deleteExam}
+            />
           </article>
         </section>
       ) : null}
@@ -1042,67 +1431,176 @@ export default function ExamTimetable() {
           <div className="ba-head">
             <div>
               <p>Exam Calendar</p>
-              <h3>{calendarMode === "agenda" ? "Agenda" : `${calendarMode} view`}</h3>
+              <h3>
+                {calendarMode === "agenda" ? "Agenda" : `${calendarMode} view`}
+              </h3>
             </div>
             <div className="ba-mode-tabs">
               {(["week", "day", "agenda"] as CalendarMode[]).map((mode) => (
-                <button key={mode} type="button" className={calendarMode === mode ? "active" : ""} onClick={() => setCalendarMode(mode)}>
+                <button
+                  key={mode}
+                  type="button"
+                  className={calendarMode === mode ? "active" : ""}
+                  onClick={() => setCalendarMode(mode)}
+                >
                   {mode}
                 </button>
               ))}
             </div>
           </div>
           {calendarMode === "agenda" ? (
-            <AgendaView exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} onEdit={openEdit} onDuplicate={openDuplicate} onMove={openMove} onDelete={deleteExam} />
+            <AgendaView
+              exams={filteredExams}
+              classes={classes}
+              subjects={subjects}
+              teachers={teachers}
+              resources={resources}
+              onEdit={openEdit}
+              onDuplicate={openDuplicate}
+              onMove={openMove}
+              onDelete={deleteExam}
+            />
           ) : (
-            <CalendarView mode={calendarMode} selectedDay={selectedDay} exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} />
+            <CalendarView
+              mode={calendarMode}
+              selectedDay={selectedDay}
+              exams={filteredExams}
+              classes={classes}
+              subjects={subjects}
+              teachers={teachers}
+              resources={resources}
+            />
           )}
         </section>
       ) : null}
 
       {view === "schedule" ? (
-        <ExamSchedule exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} conflictExamIds={conflictExamIds} onEdit={openEdit} onDuplicate={openDuplicate} onMove={openMove} onDelete={deleteExam} />
+        <ExamSchedule
+          exams={filteredExams}
+          classes={classes}
+          subjects={subjects}
+          teachers={teachers}
+          resources={resources}
+          conflictExamIds={conflictExamIds}
+          onEdit={openEdit}
+          onDuplicate={openDuplicate}
+          onMove={openMove}
+          onDelete={deleteExam}
+        />
       ) : null}
 
       {view === "cards" ? (
         <section className="ba-list">
-          <ExamList exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} onEdit={openEdit} onDuplicate={openDuplicate} onMove={openMove} onDelete={deleteExam} />
+          <ExamList
+            exams={filteredExams}
+            classes={classes}
+            subjects={subjects}
+            teachers={teachers}
+            resources={resources}
+            onEdit={openEdit}
+            onDuplicate={openDuplicate}
+            onMove={openMove}
+            onDelete={deleteExam}
+          />
         </section>
       ) : null}
 
       {view === "rooms" ? (
-        <GroupedExamView title="Room Allocation" empty="No room allocation found." exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} groupLabel={(exam) => resourceName(resources, exam)} />
+        <GroupedExamView
+          title="Room Allocation"
+          empty="No room allocation found."
+          exams={filteredExams}
+          classes={classes}
+          subjects={subjects}
+          teachers={teachers}
+          resources={resources}
+          groupLabel={(exam) => resourceName(resources, exam)}
+        />
       ) : null}
 
       {view === "invigilators" ? (
-        <GroupedExamView title="Invigilator Allocation" empty="No invigilator allocation found." exams={filteredExams} classes={classes} subjects={subjects} teachers={teachers} resources={resources} groupLabel={(exam) => teacherName(teachers, sessionTeacherId(exam))} />
+        <GroupedExamView
+          title="Invigilator Allocation"
+          empty="No invigilator allocation found."
+          exams={filteredExams}
+          classes={classes}
+          subjects={subjects}
+          teachers={teachers}
+          resources={resources}
+          groupLabel={(exam) => teacherName(teachers, sessionTeacherId(exam))}
+        />
       ) : null}
 
       {view === "conflicts" ? (
         <section className="ba-list">
-          {[...internalConflicts, ...scheduleConflicts].map((conflict: AnyRow, index) => (
-            <article className="student-row" key={String(conflict.id || idOf(conflict) || index)}>
-              <div className="ba-avatar small">⚠️</div>
-              <span className="student-main">
-                <strong>{conflict.title || "Schedule conflict"}</strong>
-                <small>{conflict.description || "Conflict detected"}</small>
-                <em>{conflict.conflictType || conflict.severity || "warning"}</em>
-              </span>
-              <span className="student-side">
-                {conflict.status ? <button type="button" className="ba-mini-action" onClick={() => resolveConflict(conflict)}>Resolve</button> : <Chip tone={(conflict.severity as Tone) || "orange"}>Local</Chip>}
-              </span>
-            </article>
-          ))}
-          {!summary.conflicts ? <EmptyCard text="No exam conflicts found." /> : null}
+          {[...internalConflicts, ...scheduleConflicts].map(
+            (conflict: AnyRow, index) => (
+              <article
+                className="student-row"
+                key={String(conflict.id || idOf(conflict) || index)}
+              >
+                <div className="ba-avatar small">⚠️</div>
+                <span className="student-main">
+                  <strong>{conflict.title || "Schedule conflict"}</strong>
+                  <small>{conflict.description || "Conflict detected"}</small>
+                  <em>
+                    {conflict.conflictType || conflict.severity || "warning"}
+                  </em>
+                </span>
+                <span className="student-side">
+                  {conflict.status ? (
+                    <button
+                      type="button"
+                      className="ba-mini-action"
+                      onClick={() => resolveConflict(conflict)}
+                    >
+                      Resolve
+                    </button>
+                  ) : (
+                    <Chip tone={(conflict.severity as Tone) || "orange"}>
+                      Local
+                    </Chip>
+                  )}
+                </span>
+              </article>
+            ),
+          )}
+          {!summary.conflicts ? (
+            <EmptyCard text="No exam conflicts found." />
+          ) : null}
         </section>
       ) : null}
 
       {view === "analytics" ? (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Exams by Class" rows={groupedCounts(filteredExams, (exam) => className(classes, sessionClassId(exam)))} total={filteredExams.length} />
-          <AnalysisCard title="Exams by Subject" rows={groupedCounts(filteredExams, (exam) => subjectName(subjects, sessionSubjectId(exam)))} total={filteredExams.length} />
-          <AnalysisCard title="Room Usage" rows={groupedCounts(filteredExams, (exam) => resourceName(resources, exam))} total={filteredExams.length} />
-          <AnalysisCard title="Invigilator Load" rows={groupedCounts(filteredExams, (exam) => teacherName(teachers, sessionTeacherId(exam)))} total={filteredExams.length} />
+          <AnalysisCard
+            title="Exams by Class"
+            rows={groupedCounts(filteredExams, (exam) =>
+              className(classes, sessionClassId(exam)),
+            )}
+            total={filteredExams.length}
+          />
+          <AnalysisCard
+            title="Exams by Subject"
+            rows={groupedCounts(filteredExams, (exam) =>
+              subjectName(subjects, sessionSubjectId(exam)),
+            )}
+            total={filteredExams.length}
+          />
+          <AnalysisCard
+            title="Room Usage"
+            rows={groupedCounts(filteredExams, (exam) =>
+              resourceName(resources, exam),
+            )}
+            total={filteredExams.length}
+          />
+          <AnalysisCard
+            title="Invigilator Load"
+            rows={groupedCounts(filteredExams, (exam) =>
+              teacherName(teachers, sessionTeacherId(exam)),
+            )}
+            total={filteredExams.length}
+          />
         </section>
       ) : null}
 
@@ -1201,14 +1699,14 @@ function FilterSheet({
   subjects: AnyRow[];
   teachers: AnyRow[];
   resources: AnyRow[];
-  selectedTimetableId: number | "";
+  selectedTimetableId: string | "";
   classFilter: string;
   subjectFilter: string;
   invigilatorFilter: string;
   resourceFilter: string;
   dayFilter: string;
   conflictFilter: string;
-  setSelectedTimetableId: (value: number | "") => void;
+  setSelectedTimetableId: (value: string) => void;
   setClassFilter: (value: string) => void;
   setSubjectFilter: (value: string) => void;
   setInvigilatorFilter: (value: string) => void;
@@ -1226,61 +1724,110 @@ function FilterSheet({
             <h2>Filters</h2>
             <p>Choose exactly what you need for this exam timetable.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
           <label>
             <span>Timetable</span>
-            <select value={selectedTimetableId} onChange={(event) => setSelectedTimetableId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={selectedTimetableId}
+              onChange={(event) =>
+                setSelectedTimetableId(event.target.value)
+              }
+            >
               <option value="">All timetables</option>
-              {timetables.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name}</option>)}
+              {timetables.map((row) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Class</span>
-            <select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}>
+            <select
+              value={classFilter}
+              onChange={(event) => setClassFilter(event.target.value)}
+            >
               <option value="all">All classes</option>
-              {classes.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.className}</option>)}
+              {classes.map((row) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.className}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Subject</span>
-            <select value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}>
+            <select
+              value={subjectFilter}
+              onChange={(event) => setSubjectFilter(event.target.value)}
+            >
               <option value="all">All subjects</option>
-              {subjects.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.subjectName}</option>)}
+              {subjects.map((row) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.subjectName}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Invigilator</span>
-            <select value={invigilatorFilter} onChange={(event) => setInvigilatorFilter(event.target.value)}>
+            <select
+              value={invigilatorFilter}
+              onChange={(event) => setInvigilatorFilter(event.target.value)}
+            >
               <option value="all">All invigilators</option>
-              {teachers.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{rowName(row)}</option>)}
+              {teachers.map((row) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {rowName(row)}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Room</span>
-            <select value={resourceFilter} onChange={(event) => setResourceFilter(event.target.value)}>
+            <select
+              value={resourceFilter}
+              onChange={(event) => setResourceFilter(event.target.value)}
+            >
               <option value="all">All rooms</option>
-              {resources.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.roomName}</option>)}
+              {resources.map((row) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.roomName}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Day</span>
-            <select value={dayFilter} onChange={(event) => setDayFilter(event.target.value)}>
+            <select
+              value={dayFilter}
+              onChange={(event) => setDayFilter(event.target.value)}
+            >
               <option value="all">All days</option>
-              {DAYS.map((day) => <option key={day} value={day}>{DAY_LABELS[day]}</option>)}
+              {DAYS.map((day) => (
+                <option key={day} value={day}>
+                  {DAY_LABELS[day]}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Conflict</span>
-            <select value={conflictFilter} onChange={(event) => setConflictFilter(event.target.value)}>
+            <select
+              value={conflictFilter}
+              onChange={(event) => setConflictFilter(event.target.value)}
+            >
               <option value="all">All conflict status</option>
               <option value="with_conflicts">With conflicts</option>
               <option value="no_conflicts">No conflicts</option>
@@ -1289,8 +1836,12 @@ function FilterSheet({
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={clearFilters}>Clear</button>
-          <button type="button" className="primary" onClick={onClose}>Apply</button>
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
@@ -1308,15 +1859,50 @@ function MoreSheet({
   onRefresh: () => void | Promise<void>;
   onClose: () => void;
 }) {
-  const options: { key: ViewMode; icon: string; title: string; note: string }[] = [
-    { key: "overview", icon: "🏠", title: "Overview", note: "Readiness, totals and selected day" },
-    { key: "calendar", icon: "📅", title: "Calendar", note: "Agenda, week and day views" },
-    { key: "schedule", icon: "☷", title: "Schedule table", note: "Dense exam timetable" },
+  const options: {
+    key: ViewMode;
+    icon: string;
+    title: string;
+    note: string;
+  }[] = [
+    {
+      key: "overview",
+      icon: "🏠",
+      title: "Overview",
+      note: "Readiness, totals and selected day",
+    },
+    {
+      key: "calendar",
+      icon: "📅",
+      title: "Calendar",
+      note: "Agenda, week and day views",
+    },
+    {
+      key: "schedule",
+      icon: "☷",
+      title: "Schedule table",
+      note: "Dense exam timetable",
+    },
     { key: "cards", icon: "▦", title: "Cards", note: "Compact exam cards" },
     { key: "rooms", icon: "🚪", title: "Rooms", note: "Room allocation" },
-    { key: "invigilators", icon: "👨‍🏫", title: "Invigilators", note: "Invigilator allocation" },
-    { key: "conflicts", icon: "⚠️", title: "Conflicts", note: "Exam clashes and warnings" },
-    { key: "analytics", icon: "◔", title: "Analytics", note: "Class, subject, room and invigilator load" },
+    {
+      key: "invigilators",
+      icon: "👨‍🏫",
+      title: "Invigilators",
+      note: "Invigilator allocation",
+    },
+    {
+      key: "conflicts",
+      icon: "⚠️",
+      title: "Conflicts",
+      note: "Exam clashes and warnings",
+    },
+    {
+      key: "analytics",
+      icon: "◔",
+      title: "Analytics",
+      note: "Class, subject, room and invigilator load",
+    },
   ];
 
   return (
@@ -1327,12 +1913,19 @@ function MoreSheet({
             <h2>More</h2>
             <p>Advanced views are here so the main page stays simple.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="ba-menu-list">
           {options.map((item) => (
-            <button key={item.key} type="button" className={view === item.key ? "active" : ""} onClick={() => setView(item.key)}>
+            <button
+              key={item.key}
+              type="button"
+              className={view === item.key ? "active" : ""}
+              onClick={() => setView(item.key)}
+            >
               <span>{item.icon}</span>
               <b>{item.title}</b>
               <small>{item.note}</small>
@@ -1371,7 +1964,7 @@ function ExamDrawer({
   form: typeof emptyForm;
   setForm: React.Dispatch<React.SetStateAction<typeof emptyForm>>;
   timetables: AnyRow[];
-  selectedTimetableId: number | "";
+  selectedTimetableId: string | "";
   classes: AnyRow[];
   subjects: AnyRow[];
   teachers: AnyRow[];
@@ -1386,10 +1979,20 @@ function ExamDrawer({
       <section className="ba-modal">
         <div className="ba-modal-head">
           <div>
-            <h2>{editorMode === "create" ? "New Exam" : editorMode === "duplicate" ? "Duplicate Exam" : editorMode === "move" ? "Move Exam" : "Edit Exam"}</h2>
+            <h2>
+              {editorMode === "create"
+                ? "New Exam"
+                : editorMode === "duplicate"
+                  ? "Duplicate Exam"
+                  : editorMode === "move"
+                    ? "Move Exam"
+                    : "Edit Exam"}
+            </h2>
             <p>{activeBranchName}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close exam form">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close exam form">
+            ✕
+          </button>
         </div>
 
         {message ? <div className="ba-message">{message}</div> : null}
@@ -1399,134 +2002,304 @@ function ExamDrawer({
           <div className="ba-form">
             <label className="wide">
               <span>Use Existing Exam Timetable</span>
-              <select value={form.timetableId || selectedTimetableId} onChange={(event) => setForm({ ...form, timetableId: event.target.value })}>
+              <select
+                value={form.timetableId || selectedTimetableId}
+                onChange={(event) =>
+                  setForm({ ...form, timetableId: event.target.value })
+                }
+              >
                 <option value="">Create / use default</option>
-                {timetables.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name}</option>)}
+                {timetables.map((row) => (
+                  <option key={String(idOf(row))} value={String(idOf(row))}>
+                    {row.name}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label className="wide">
               <span>New Timetable Name</span>
-              <input value={form.timetableName} onChange={(event) => setForm({ ...form, timetableName: event.target.value })} placeholder="End of Term Examination" />
+              <input
+                value={form.timetableName}
+                onChange={(event) =>
+                  setForm({ ...form, timetableName: event.target.value })
+                }
+                placeholder="End of Term Examination"
+              />
             </label>
 
             <label>
               <span>Day</span>
-              <select value={form.dayOfWeek} onChange={(event) => setForm({ ...form, dayOfWeek: event.target.value })}>
-                {DAYS.map((day) => <option key={day} value={day}>{DAY_LABELS[day]}</option>)}
+              <select
+                value={form.dayOfWeek}
+                onChange={(event) =>
+                  setForm({ ...form, dayOfWeek: event.target.value })
+                }
+              >
+                {DAYS.map((day) => (
+                  <option key={day} value={day}>
+                    {DAY_LABELS[day]}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               <span>Class</span>
-              <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value })}>
+              <select
+                value={form.classId}
+                onChange={(event) =>
+                  setForm({ ...form, classId: event.target.value })
+                }
+              >
                 <option value="">Select class</option>
-                {classes.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.className}</option>)}
+                {classes.map((row) => (
+                  <option key={String(idOf(row))} value={String(idOf(row))}>
+                    {row.name || row.className}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               <span>Subject</span>
-              <select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}>
+              <select
+                value={form.subjectId}
+                onChange={(event) =>
+                  setForm({ ...form, subjectId: event.target.value })
+                }
+              >
                 <option value="">Select subject</option>
-                {subjects.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.subjectName}</option>)}
+                {subjects.map((row) => (
+                  <option key={String(idOf(row))} value={String(idOf(row))}>
+                    {row.name || row.subjectName}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               <span>Invigilator</span>
-              <select value={form.teacherLocalId} onChange={(event) => setForm({ ...form, teacherLocalId: event.target.value })}>
+              <select
+                value={form.teacherId}
+                onChange={(event) =>
+                  setForm({ ...form, teacherId: event.target.value })
+                }
+              >
                 <option value="">No invigilator</option>
-                {teachers.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{rowName(row)}</option>)}
+                {teachers.map((row) => (
+                  <option key={String(idOf(row))} value={String(idOf(row))}>
+                    {rowName(row)}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               <span>Room / Resource</span>
-              <select value={form.resourceId} onChange={(event) => setForm({ ...form, resourceId: event.target.value })}>
+              <select
+                value={form.resourceId}
+                onChange={(event) =>
+                  setForm({ ...form, resourceId: event.target.value })
+                }
+              >
                 <option value="">No resource</option>
-                {resources.map((row) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.roomName}</option>)}
+                {resources.map((row) => (
+                  <option key={String(idOf(row))} value={String(idOf(row))}>
+                    {row.name || row.roomName}
+                  </option>
+                ))}
               </select>
             </label>
 
             <label>
               <span>Start</span>
-              <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
+              <input
+                type="time"
+                value={form.startTime}
+                onChange={(event) =>
+                  setForm({ ...form, startTime: event.target.value })
+                }
+              />
             </label>
 
             <label>
               <span>End</span>
-              <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
+              <input
+                type="time"
+                value={form.endTime}
+                onChange={(event) =>
+                  setForm({ ...form, endTime: event.target.value })
+                }
+              />
             </label>
 
             <label className="wide">
               <span>Custom Title</span>
-              <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Optional title" />
+              <input
+                value={form.title}
+                onChange={(event) =>
+                  setForm({ ...form, title: event.target.value })
+                }
+                placeholder="Optional title"
+              />
             </label>
 
             <label className="wide">
               <span>Room name if no resource</span>
-              <input value={form.roomName} onChange={(event) => setForm({ ...form, roomName: event.target.value })} />
+              <input
+                value={form.roomName}
+                onChange={(event) =>
+                  setForm({ ...form, roomName: event.target.value })
+                }
+              />
             </label>
           </div>
         </section>
 
         <div className="ba-modal-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" disabled={saving} onClick={onSave}>{saving ? "Saving..." : "Save Exam"}</button>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" disabled={saving} onClick={onSave}>
+            {saving ? "Saving..." : "Save Exam"}
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function ExamActions({ exam, onEdit, onDuplicate, onMove, onDelete }: { exam: AnyRow; onEdit: (exam: AnyRow) => void; onDuplicate: (exam: AnyRow) => void; onMove: (exam: AnyRow) => void; onDelete: (exam: AnyRow) => void }) {
+function ExamActions({
+  exam,
+  onEdit,
+  onDuplicate,
+  onMove,
+  onDelete,
+}: {
+  exam: AnyRow;
+  onEdit: (exam: AnyRow) => void;
+  onDuplicate: (exam: AnyRow) => void;
+  onMove: (exam: AnyRow) => void;
+  onDelete: (exam: AnyRow) => void;
+}) {
   return (
     <div className="ba-row-actions">
-      <button className="ba-btn" type="button" onClick={() => onEdit(exam)}>Edit</button>
-      <button className="ba-btn" type="button" onClick={() => onDuplicate(exam)}>Duplicate</button>
-      <button className="ba-btn" type="button" onClick={() => onMove(exam)}>Move</button>
-      <button className="ba-delete" type="button" onClick={() => onDelete(exam)}>Delete</button>
+      <button className="ba-btn" type="button" onClick={() => onEdit(exam)}>
+        Edit
+      </button>
+      <button
+        className="ba-btn"
+        type="button"
+        onClick={() => onDuplicate(exam)}
+      >
+        Duplicate
+      </button>
+      <button className="ba-btn" type="button" onClick={() => onMove(exam)}>
+        Move
+      </button>
+      <button
+        className="ba-delete"
+        type="button"
+        onClick={() => onDelete(exam)}
+      >
+        Delete
+      </button>
     </div>
   );
 }
 
-function ExamList({ exams, classes, subjects, teachers, resources, onEdit, onDuplicate, onMove, onDelete }: { exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRow[]; teachers: AnyRow[]; resources: AnyRow[]; onEdit: (exam: AnyRow) => void; onDuplicate: (exam: AnyRow) => void; onMove: (exam: AnyRow) => void; onDelete: (exam: AnyRow) => void }) {
+function ExamList({
+  exams,
+  classes,
+  subjects,
+  teachers,
+  resources,
+  onEdit,
+  onDuplicate,
+  onMove,
+  onDelete,
+}: {
+  exams: AnyRow[];
+  classes: AnyRow[];
+  subjects: AnyRow[];
+  teachers: AnyRow[];
+  resources: AnyRow[];
+  onEdit: (exam: AnyRow) => void;
+  onDuplicate: (exam: AnyRow) => void;
+  onMove: (exam: AnyRow) => void;
+  onDelete: (exam: AnyRow) => void;
+}) {
   return (
     <div className="ba-list">
       {exams.map((exam, index) => (
-        <article className="ba-card" key={String(idOf(exam) || examKey(exam) || index)}>
+        <article
+          className="ba-card"
+          key={String(idOf(exam) || examKey(exam) || index)}
+        >
           <div className="ba-card-top">
             <div className="ba-avatar">{MODE_ICON}</div>
             <div className="ba-card-main">
               <h3>{examTitle(exam, subjects)}</h3>
-              <p>{DAY_LABELS[sessionDay(exam)]} · {sessionTime(exam)}</p>
+              <p>
+                {DAY_LABELS[sessionDay(exam)]} · {sessionTime(exam)}
+              </p>
               <div className="ba-chip-row">
-                <Chip tone="blue">{className(classes, sessionClassId(exam))}</Chip>
-                <Chip tone="purple">{teacherName(teachers, sessionTeacherId(exam))}</Chip>
+                <Chip tone="blue">
+                  {className(classes, sessionClassId(exam))}
+                </Chip>
+                <Chip tone="purple">
+                  {teacherName(teachers, sessionTeacherId(exam))}
+                </Chip>
                 <Chip tone="orange">{resourceName(resources, exam)}</Chip>
               </div>
             </div>
           </div>
           <div className="ba-mini-grid">
-            <MiniStat label="Subject" value={subjectName(subjects, sessionSubjectId(exam))} />
+            <MiniStat
+              label="Subject"
+              value={subjectName(subjects, sessionSubjectId(exam))}
+            />
             <MiniStat label="Room" value={resourceName(resources, exam)} />
-            <MiniStat label="Invigilator" value={teacherName(teachers, sessionTeacherId(exam))} />
+            <MiniStat
+              label="Invigilator"
+              value={teacherName(teachers, sessionTeacherId(exam))}
+            />
           </div>
-          <ExamActions exam={exam} onEdit={onEdit} onDuplicate={onDuplicate} onMove={onMove} onDelete={onDelete} />
+          <ExamActions
+            exam={exam}
+            onEdit={onEdit}
+            onDuplicate={onDuplicate}
+            onMove={onMove}
+            onDelete={onDelete}
+          />
         </article>
       ))}
 
-      {!exams.length ? <EmptyCard text="No exams found for this view." /> : null}
+      {!exams.length ? (
+        <EmptyCard text="No exams found for this view." />
+      ) : null}
     </div>
   );
 }
 
-function AgendaView(props: { exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRow[]; teachers: AnyRow[]; resources: AnyRow[]; onEdit: (exam: AnyRow) => void; onDuplicate: (exam: AnyRow) => void; onMove: (exam: AnyRow) => void; onDelete: (exam: AnyRow) => void }) {
+function AgendaView(props: {
+  exams: AnyRow[];
+  classes: AnyRow[];
+  subjects: AnyRow[];
+  teachers: AnyRow[];
+  resources: AnyRow[];
+  onEdit: (exam: AnyRow) => void;
+  onDuplicate: (exam: AnyRow) => void;
+  onMove: (exam: AnyRow) => void;
+  onDelete: (exam: AnyRow) => void;
+}) {
   return (
     <div className="ba-agenda">
       {DAYS.map((day) => {
-        const rows = sortExams(props.exams.filter((exam) => sessionDay(exam) === day));
+        const rows = sortExams(
+          props.exams.filter((exam) => sessionDay(exam) === day),
+        );
         return (
           <section key={day} className="ba-agenda-day">
             <strong>{DAY_LABELS[day]}</strong>
@@ -1538,12 +2311,30 @@ function AgendaView(props: { exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRo
   );
 }
 
-function CalendarView({ mode, selectedDay, exams, classes, subjects, teachers, resources }: { mode: CalendarMode; selectedDay: string; exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRow[]; teachers: AnyRow[]; resources: AnyRow[] }) {
+function CalendarView({
+  mode,
+  selectedDay,
+  exams,
+  classes,
+  subjects,
+  teachers,
+  resources,
+}: {
+  mode: CalendarMode;
+  selectedDay: string;
+  exams: AnyRow[];
+  classes: AnyRow[];
+  subjects: AnyRow[];
+  teachers: AnyRow[];
+  resources: AnyRow[];
+}) {
   const days = mode === "day" ? [selectedDay] : DAYS;
   return (
     <section className="ba-week-grid">
       {days.map((day) => {
-        const rows = sortExams(exams.filter((exam) => sessionDay(exam) === day));
+        const rows = sortExams(
+          exams.filter((exam) => sessionDay(exam) === day),
+        );
         return (
           <article key={day} className="ba-week-day">
             <div className="ba-week-day-head">
@@ -1552,10 +2343,19 @@ function CalendarView({ mode, selectedDay, exams, classes, subjects, teachers, r
             </div>
             <div className="ba-week-day-body">
               {rows.map((exam, index) => (
-                <article className="ba-session-block compact" key={String(idOf(exam) || index)}>
+                <article
+                  className="ba-session-block compact"
+                  key={String(idOf(exam) || index)}
+                >
                   <strong>{examTitle(exam, subjects)}</strong>
-                  <span>{sessionTime(exam)} · {className(classes, sessionClassId(exam))}</span>
-                  <small>{teacherName(teachers, sessionTeacherId(exam))} · {resourceName(resources, exam)}</small>
+                  <span>
+                    {sessionTime(exam)} ·{" "}
+                    {className(classes, sessionClassId(exam))}
+                  </span>
+                  <small>
+                    {teacherName(teachers, sessionTeacherId(exam))} ·{" "}
+                    {resourceName(resources, exam)}
+                  </small>
                 </article>
               ))}
               {!rows.length ? <p>No exams</p> : null}
@@ -1567,7 +2367,29 @@ function CalendarView({ mode, selectedDay, exams, classes, subjects, teachers, r
   );
 }
 
-function ExamSchedule({ exams, classes, subjects, teachers, resources, conflictExamIds, onEdit, onDuplicate, onMove, onDelete }: { exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRow[]; teachers: AnyRow[]; resources: AnyRow[]; conflictExamIds: Set<number>; onEdit: (exam: AnyRow) => void; onDuplicate: (exam: AnyRow) => void; onMove: (exam: AnyRow) => void; onDelete: (exam: AnyRow) => void }) {
+function ExamSchedule({
+  exams,
+  classes,
+  subjects,
+  teachers,
+  resources,
+  conflictExamIds,
+  onEdit,
+  onDuplicate,
+  onMove,
+  onDelete,
+}: {
+  exams: AnyRow[];
+  classes: AnyRow[];
+  subjects: AnyRow[];
+  teachers: AnyRow[];
+  resources: AnyRow[];
+  conflictExamIds: Set<string>;
+  onEdit: (exam: AnyRow) => void;
+  onDuplicate: (exam: AnyRow) => void;
+  onMove: (exam: AnyRow) => void;
+  onDelete: (exam: AnyRow) => void;
+}) {
   return (
     <section className="ba-table-card">
       <div className="ba-table-scroll">
@@ -1587,7 +2409,7 @@ function ExamSchedule({ exams, classes, subjects, teachers, resources, conflictE
           </thead>
           <tbody>
             {exams.map((exam, index) => {
-              const id = cleanId(exam.id || exam.localId);
+              const id = cleanId(exam.id);
               const hasConflict = id ? conflictExamIds.has(id) : false;
 
               return (
@@ -1602,21 +2424,55 @@ function ExamSchedule({ exams, classes, subjects, teachers, resources, conflictE
                   <td>{subjectName(subjects, sessionSubjectId(exam))}</td>
                   <td>{teacherName(teachers, sessionTeacherId(exam))}</td>
                   <td>{resourceName(resources, exam)}</td>
-                  <td>{hasConflict ? <Chip tone="orange">Conflict</Chip> : <Chip tone="green">Clear</Chip>}</td>
-                  <td><ExamActions exam={exam} onEdit={onEdit} onDuplicate={onDuplicate} onMove={onMove} onDelete={onDelete} /></td>
+                  <td>
+                    {hasConflict ? (
+                      <Chip tone="orange">Conflict</Chip>
+                    ) : (
+                      <Chip tone="green">Clear</Chip>
+                    )}
+                  </td>
+                  <td>
+                    <ExamActions
+                      exam={exam}
+                      onEdit={onEdit}
+                      onDuplicate={onDuplicate}
+                      onMove={onMove}
+                      onDelete={onDelete}
+                    />
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
 
-        {!exams.length ? <div className="ba-empty-table">No exam sessions found.</div> : null}
+        {!exams.length ? (
+          <div className="ba-empty-table">No exam sessions found.</div>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function GroupedExamView({ title, empty, exams, classes, subjects, teachers, resources, groupLabel }: { title: string; empty: string; exams: AnyRow[]; classes: AnyRow[]; subjects: AnyRow[]; teachers: AnyRow[]; resources: AnyRow[]; groupLabel: (exam: AnyRow) => string }) {
+function GroupedExamView({
+  title,
+  empty,
+  exams,
+  classes,
+  subjects,
+  teachers,
+  resources,
+  groupLabel,
+}: {
+  title: string;
+  empty: string;
+  exams: AnyRow[];
+  classes: AnyRow[];
+  subjects: AnyRow[];
+  teachers: AnyRow[];
+  resources: AnyRow[];
+  groupLabel: (exam: AnyRow) => string;
+}) {
   const groups = useMemo(() => {
     const map = new Map<string, AnyRow[]>();
     exams.forEach((exam) => {
@@ -1636,10 +2492,20 @@ function GroupedExamView({ title, empty, exams, classes, subjects, teachers, res
           <strong>{label}</strong>
           <div className="ba-list">
             {sortExams(rows).map((exam, index) => (
-              <article className="ba-session-block" key={String(idOf(exam) || index)}>
+              <article
+                className="ba-session-block"
+                key={String(idOf(exam) || index)}
+              >
                 <strong>{examTitle(exam, subjects)}</strong>
-                <span>{DAY_LABELS[sessionDay(exam)]} · {sessionTime(exam)} · {className(classes, sessionClassId(exam))}</span>
-                <small>{subjectName(subjects, sessionSubjectId(exam))} · {teacherName(teachers, sessionTeacherId(exam))} · {resourceName(resources, exam)}</small>
+                <span>
+                  {DAY_LABELS[sessionDay(exam)]} · {sessionTime(exam)} ·{" "}
+                  {className(classes, sessionClassId(exam))}
+                </span>
+                <small>
+                  {subjectName(subjects, sessionSubjectId(exam))} ·{" "}
+                  {teacherName(teachers, sessionTeacherId(exam))} ·{" "}
+                  {resourceName(resources, exam)}
+                </small>
               </article>
             ))}
           </div>
@@ -1651,7 +2517,15 @@ function GroupedExamView({ title, empty, exams, classes, subjects, teachers, res
   );
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   const cleanRows = rows.filter((row) => row.value > 0).slice(0, 8);
 
   return (
@@ -1666,7 +2540,9 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
             <section key={row.label}>
               <div>
                 <b>{row.label}</b>
-                <small>{row.value} · {share}%</small>
+                <small>
+                  {row.value} · {share}%
+                </small>
               </div>
               <div className="ba-progress">
                 <i style={{ width: `${Math.max(4, share)}%` }} />

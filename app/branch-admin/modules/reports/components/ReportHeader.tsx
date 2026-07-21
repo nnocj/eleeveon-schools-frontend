@@ -87,7 +87,7 @@ export default function ReportHeader({
     dynamicHeader.branch?.logo,
     dynamicHeader.school?.resolvedLogoUrl,
     dynamicHeader.school?.logo,
-    branding.logo
+    branding.logo,
   );
 
   const branchName = firstText(
@@ -97,14 +97,14 @@ export default function ReportHeader({
     dynamicHeader.campusName,
     dynamicBranding.branchName,
     dynamicBranding.branchLabel,
-    dynamicBranding.campusName
+    dynamicBranding.campusName,
   );
 
   const branchAddress = firstText(
     dynamicBranding.branchAddress,
     dynamicHeader.branchAddress,
     dynamicHeader.branch?.address,
-    dynamicBranding.address
+    dynamicBranding.address,
   );
 
   const logoSize = compact ? 56 : orientation === "landscape" ? 74 : 70;
@@ -127,11 +127,7 @@ export default function ReportHeader({
           {showLogo && (
             <div className="rh-logo-wrap">
               {logoUrl ? (
-                <img
-                  src={logoUrl}
-                  alt="School logo"
-                  className="rh-logo"
-                />
+                <img src={logoUrl} alt="School logo" className="rh-logo" />
               ) : (
                 <div className="rh-logo-placeholder">LOGO</div>
               )}
@@ -143,35 +139,23 @@ export default function ReportHeader({
               {branding.schoolName || "School Name"}
             </h1>
 
-            {branding.motto && (
-              <div className="rh-motto">{branding.motto}</div>
-            )}
+            {branding.motto && <div className="rh-motto">{branding.motto}</div>}
 
             {showContact && (
               <div className="rh-contact">
-                {branchName && (
-                  <div className="rh-line">{branchName}</div>
-                )}
+                {branchName && <div className="rh-line">{branchName}</div>}
 
                 {branchAddress && (
-                  <div className="rh-line">
-                    {branchAddress}
-                  </div>
+                  <div className="rh-line">{branchAddress}</div>
                 )}
 
                 {(branding.phone || branding.email || branding.website) && (
                   <div className="rh-line rh-contact-row">
-                    {branding.phone && (
-                      <span>Tel: {branding.phone}</span>
-                    )}
+                    {branding.phone && <span>Tel: {branding.phone}</span>}
 
-                    {branding.email && (
-                      <span>Email: {branding.email}</span>
-                    )}
+                    {branding.email && <span>Email: {branding.email}</span>}
 
-                    {branding.website && (
-                      <span>{branding.website}</span>
-                    )}
+                    {branding.website && <span>{branding.website}</span>}
                   </div>
                 )}
               </div>
@@ -179,9 +163,7 @@ export default function ReportHeader({
 
             <div className="rh-title-pill">{title}</div>
 
-            {subtitle && (
-              <div className="rh-subtitle">{subtitle}</div>
-            )}
+            {subtitle && <div className="rh-subtitle">{subtitle}</div>}
           </div>
 
           {showLogo && <div className="rh-spacer" />}

@@ -27,8 +27,19 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useSettings } from "../../context/settings-context";
-import { db, type ClassSubject, type CurriculumSubject, type Organization, type Subject } from "../../lib/db/db";
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  db,
+  type ClassSubject,
+  type CurriculumSubject,
+  type Organization,
+  type Subject,
+} from "../../lib/db/db";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
@@ -39,43 +50,45 @@ import {
   commitMediaAssetsToOwner,
   createMediaSessionKey,
   saveImageAsset,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
-type SubjectCategory = "academic" | "technical" | "vocational" | "elective" | "core";
+type SubjectCategory =
+  | "academic"
+  | "technical"
+  | "vocational"
+  | "elective"
+  | "core";
 type SubjectStatusFilter = "all" | "active" | "inactive";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   organizationId: string;
   name: string;
   code: string;
   description: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   credits: string;
   category: SubjectCategory;
   active: boolean;
 };
 
 type SubjectView = {
-  id: number;
+  id: string;
   row: Subject;
   organizationName: string;
   curriculumUseCount: number;
@@ -86,7 +99,13 @@ type SubjectView = {
 
 const SUBJECT_MEDIA_OWNER_TABLE = MediaOwners.SUBJECTS;
 
-const categories: SubjectCategory[] = ["academic", "core", "elective", "technical", "vocational"];
+const categories: SubjectCategory[] = [
+  "academic",
+  "core",
+  "elective",
+  "technical",
+  "vocational",
+];
 
 const emptyForm: FormState = {
   organizationId: "",
@@ -104,14 +123,19 @@ const emptyForm: FormState = {
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "").trim();
-  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  if (!media || media.startsWith("blob:") || media.startsWith("data:"))
+    return undefined;
   return media;
 };
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+const idOf = (v: any): string => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+};
+
+const cleanId = (value: unknown): string => {
+  const normalized = idOf(value);
+  return normalized && normalized !== "0" ? normalized : "";
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -120,11 +144,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -135,7 +159,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -160,13 +186,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -177,7 +203,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -186,7 +216,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -198,7 +228,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -208,20 +242,23 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (v: any) => String(v || "").toLowerCase().trim();
+const safeLower = (v: any) =>
+  String(v || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
   const status = safeLower(row?.status);
   if (row?.isDeleted) return false;
   if (row?.active === false) return false;
-  if (["inactive", "deleted", "archived", "suspended"].includes(status)) return false;
+  if (["inactive", "deleted", "archived", "suspended"].includes(status))
+    return false;
   return true;
 };
 
@@ -230,7 +267,9 @@ const categoryLabel = (category?: string) => {
   return category.charAt(0).toUpperCase() + category.slice(1);
 };
 
-function categoryTone(category?: SubjectCategory): "green" | "blue" | "gray" | "orange" | "purple" {
+function categoryTone(
+  category?: SubjectCategory,
+): "green" | "blue" | "gray" | "orange" | "purple" {
   if (category === "core") return "green";
   if (category === "elective") return "orange";
   if (category === "technical") return "purple";
@@ -243,29 +282,71 @@ const timeText = (v?: string | number | null) => {
   const t = typeof v === "number" ? v : new Date(v).getTime();
   if (!Number.isFinite(t)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(t));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(t));
   } catch {
     return "Not set";
   }
 };
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
 function StatusDot({ active }: { active: boolean }) {
-  return <span className={`status-dot-mini ${active ? "green" : "gray"}`} title={active ? "Active" : "Inactive"} aria-label={active ? "Active" : "Inactive"} />;
+  return (
+    <span
+      className={`status-dot-mini ${active ? "green" : "gray"}`}
+      title={active ? "Active" : "Inactive"}
+      aria-label={active ? "Active" : "Inactive"}
+    />
+  );
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
-    <div className="ba-avatar" style={{ background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))` }}>
-      {!photo && String(name || "SB").slice(0, 2).toUpperCase()}
+    <div
+      className="ba-avatar"
+      style={{
+        background: photo
+          ? `url(${photo}) center/cover`
+          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+      }}
+    >
+      {!photo &&
+        String(name || "SB")
+          .slice(0, 2)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -276,8 +357,17 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function Subjects() {
-  const dataRevision = useBranchTableRevision(["subjects", "organizations", "curriculumSubjects", "classSubjects", "mediaAssets", "mediaBlobs"]);
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE));
+  const dataRevision = useBranchTableRevision([
+    "subjects",
+    "organizations",
+    "curriculumSubjects",
+    "classSubjects",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE),
+  );
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -308,27 +398,43 @@ export default function Subjects() {
     ],
   });
   const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
   const [filterOrganizationId, setFilterOrganizationId] = useState("all");
-  const [filterCategory, setFilterCategory] = useState<"all" | SubjectCategory>("all");
-  const [filterStatus, setFilterStatus] = useState<SubjectStatusFilter>("active");
+  const [filterCategory, setFilterCategory] = useState<"all" | SubjectCategory>(
+    "all",
+  );
+  const [filterStatus, setFilterStatus] =
+    useState<SubjectStatusFilter>("active");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<SubjectView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -338,7 +444,10 @@ export default function Subjects() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((c) => (c?.message === message ? null : c)), 4200);
+    window.setTimeout(
+      () => setToast((c) => (c?.message === message ? null : c)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -357,9 +466,18 @@ export default function Subjects() {
 
     try {
       setLoading(true);
-      const [subjectRows, organizationRows, curriculumSubjectRows, classSubjectRows] = await Promise.all([
+      const [
+        subjectRows,
+        organizationRows,
+        curriculumSubjectRows,
+        classSubjectRows,
+      ] = await Promise.all([
         tableSafe("subjects")?.toArray?.() || [],
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("curriculumSubjects")?.toArray?.() || [],
         tableSafe("classSubjects")?.toArray?.() || [],
       ]);
@@ -367,11 +485,25 @@ export default function Subjects() {
       setRows(
         (subjectRows as Subject[])
           .filter((r) => sameTenant(r as TenantRow))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
-      setOrganizations((organizationRows as Organization[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setCurriculumSubjects((curriculumSubjectRows as CurriculumSubject[]).filter((r) => sameTenant(r as TenantRow)));
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((r) => sameTenant(r as TenantRow)));
+      setOrganizations(
+        (organizationRows as Organization[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setCurriculumSubjects(
+        (curriculumSubjectRows as CurriculumSubject[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load subjects:", error);
       clearData();
@@ -385,14 +517,24 @@ export default function Subjects() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const organizationMap = useMemo(() => new Map(organizations.map((r: any) => [idOf(r.id), r])), [organizations]);
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
+    [organizations],
+  );
 
   const curriculumSubjectCountMap = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     curriculumSubjects.forEach((r: any) => {
       const id = idOf(r.subjectId);
       if (id) map.set(id, (map.get(id) || 0) + 1);
@@ -401,7 +543,7 @@ export default function Subjects() {
   }, [curriculumSubjects]);
 
   const classSubjectCountMap = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     classSubjects.forEach((r: any) => {
       const id = idOf(r.subjectId);
       if (id) map.set(id, (map.get(id) || 0) + 1);
@@ -412,7 +554,9 @@ export default function Subjects() {
   const viewRows = useMemo<SubjectView[]>(() => {
     return rows.map((row: any) => {
       const id = idOf(row.id);
-      const organization = row.organizationId ? (organizationMap.get(idOf(row.organizationId)) as any) : undefined;
+      const organization = row.organizationId
+        ? (organizationMap.get(idOf(row.organizationId)) as any)
+        : undefined;
       const curriculumUseCount = curriculumSubjectCountMap.get(id) || 0;
       const classSubjectUseCount = classSubjectCountMap.get(id) || 0;
       return {
@@ -432,8 +576,13 @@ export default function Subjects() {
     return viewRows
       .filter((item) => {
         const row: any = item.row;
-        if (filterOrganizationId !== "all" && !sameId(row.organizationId, filterOrganizationId)) return false;
-        if (filterCategory !== "all" && row.category !== filterCategory) return false;
+        if (
+          filterOrganizationId !== "all" &&
+          !sameId(row.organizationId, filterOrganizationId)
+        )
+          return false;
+        if (filterCategory !== "all" && row.category !== filterCategory)
+          return false;
         if (filterStatus === "active" && !item.active) return false;
         if (filterStatus === "inactive" && item.active) return false;
         if (!q) return true;
@@ -441,7 +590,11 @@ export default function Subjects() {
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => String((a.row as any).name || "").localeCompare(String((b.row as any).name || "")));
+      .sort((a, b) =>
+        String((a.row as any).name || "").localeCompare(
+          String((b.row as any).name || ""),
+        ),
+      );
   }, [filterCategory, filterOrganizationId, filterStatus, search, viewRows]);
 
   const summary = useMemo(
@@ -454,32 +607,57 @@ export default function Subjects() {
       core: viewRows.filter((i) => (i.row as any).category === "core").length,
       showing: filteredRows.length,
     }),
-    [classSubjects.length, curriculumSubjects.length, filteredRows.length, viewRows]
+    [
+      classSubjects.length,
+      curriculumSubjects.length,
+      filteredRows.length,
+      viewRows,
+    ],
   );
 
-  const countsByCategory = useMemo(() => groupedCounts(viewRows, (i) => categoryLabel((i.row as any).category)), [viewRows]);
-  const countsByOrganization = useMemo(() => groupedCounts(viewRows, (i) => i.organizationName), [viewRows]);
+  const countsByCategory = useMemo(
+    () =>
+      groupedCounts(viewRows, (i) => categoryLabel((i.row as any).category)),
+    [viewRows],
+  );
+  const countsByOrganization = useMemo(
+    () => groupedCounts(viewRows, (i) => i.organizationName),
+    [viewRows],
+  );
   const countsByUsage = useMemo(
-    () => viewRows.map((i) => ({ label: (i.row as any).name || "Subject", value: i.totalUsage })).filter((r) => r.value > 0).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
-    [viewRows]
+    () =>
+      viewRows
+        .map((i) => ({
+          label: (i.row as any).name || "Subject",
+          value: i.totalUsage,
+        }))
+        .filter((r) => r.value > 0)
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+    [viewRows],
   );
 
   const activeFilterCount = useMemo(() => {
-    return [filterOrganizationId, filterCategory, filterStatus].filter((v) => v !== "all" && v !== "active").length;
+    return [filterOrganizationId, filterCategory, filterStatus].filter(
+      (v) => v !== "all" && v !== "active",
+    ).length;
   }, [filterCategory, filterOrganizationId, filterStatus]);
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const handleImageUpload = async (field: "photo" | "bannerImage", file?: File) => {
+  const handleImageUpload = async (
+    field: "photo" | "bannerImage",
+    file?: File,
+  ) => {
     if (!file || !accountId || !schoolId || !branchId) return;
 
     try {
       const result = await saveImageAsset(file, {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: SUBJECT_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
         fieldKey: field,
         variant: field === "photo" ? "avatar" : "cover",
@@ -488,10 +666,14 @@ export default function Subjects() {
 
       updateForm({
         [field]: result.previewUrl,
-        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]:
+          result.assetId,
       } as Partial<FormState>);
 
-      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+      showToast(
+        "info",
+        `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`,
+      );
     } catch (error: any) {
       showToast("error", error?.message || "Failed to process image.");
     }
@@ -507,8 +689,16 @@ export default function Subjects() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
-    mediaSessionKeyRef.current = createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE);
-    setForm({ ...emptyForm, organizationId: filterOrganizationId !== "all" ? filterOrganizationId : "", category: filterCategory === "all" ? "academic" : filterCategory, active: filterStatus !== "inactive" });
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      SUBJECT_MEDIA_OWNER_TABLE,
+    );
+    setForm({
+      ...emptyForm,
+      organizationId:
+        filterOrganizationId !== "all" ? filterOrganizationId : "",
+      category: filterCategory === "all" ? "academic" : filterCategory,
+      active: filterStatus !== "inactive",
+    });
     setModalOpen(true);
   };
 
@@ -517,14 +707,26 @@ export default function Subjects() {
     setSelectedItem(null);
     setForm({
       id: idOf(subject.id),
-      organizationId: subject.organizationId ? String(subject.organizationId) : "",
+      organizationId: subject.organizationId
+        ? String(subject.organizationId)
+        : "",
       name: subject.name || "",
       code: subject.code || "",
       description: subject.description || "",
-      photo: mediaById[idOf(subject.id)]?.photo || safeRecordMediaValue(subject.photo) || "",
-      photoMediaId: subject.photoMediaId ? Number(subject.photoMediaId) : undefined,
-      bannerImage: mediaById[idOf(subject.id)]?.bannerImage || safeRecordMediaValue(subject.bannerImage) || "",
-      bannerImageMediaId: subject.bannerImageMediaId ? Number(subject.bannerImageMediaId) : undefined,
+      photo:
+        mediaById[idOf(subject.id)]?.photo ||
+        safeRecordMediaValue(subject.photo) ||
+        "",
+      photoMediaId: subject.photoMediaId
+        ? String(subject.photoMediaId)
+        : undefined,
+      bannerImage:
+        mediaById[idOf(subject.id)]?.bannerImage ||
+        safeRecordMediaValue(subject.bannerImage) ||
+        "",
+      bannerImageMediaId: subject.bannerImageMediaId
+        ? String(subject.bannerImageMediaId)
+        : undefined,
       credits: subject.credits == null ? "" : String(subject.credits),
       category: subject.category || "academic",
       active: isActiveRow(subject),
@@ -543,14 +745,17 @@ export default function Subjects() {
     if (!schoolId) return "Select a school first.";
     if (!branchId) return "Select a branch first.";
     if (!form.name.trim()) return "Enter subject name.";
-    if (form.organizationId && !organizationMap.get(idOf(form.organizationId))) return "Selected organization is not in this branch.";
-    if (form.credits && Number(form.credits) < 0) return "Credits cannot be negative.";
+    if (form.organizationId && !organizationMap.get(idOf(form.organizationId)))
+      return "Selected organization is not in this branch.";
+    if (form.credits && Number(form.credits) < 0)
+      return "Credits cannot be negative.";
 
     const duplicate = rows.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
       if (row.isDeleted) return false;
       const sameName = safeLower(row.name) === safeLower(form.name);
-      const sameCode = !!form.code.trim() && safeLower(row.code) === safeLower(form.code);
+      const sameCode =
+        !!form.code.trim() && safeLower(row.code) === safeLower(form.code);
       return sameName || sameCode;
     });
     if (duplicate) return "A subject with this name or code already exists.";
@@ -568,12 +773,16 @@ export default function Subjects() {
 
     try {
       setSaving(true);
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
+        schoolId: schoolId,
+        branchId: branchId,
+        organizationId: form.organizationId
+          ? String(form.organizationId)
+          : undefined,
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         description: form.description.trim() || undefined,
@@ -590,17 +799,17 @@ export default function Subjects() {
 
       const savedSubject =
         form.id && existing
-          ? await updateLocal("subjects", Number(form.id), payload)
+          ? await updateLocal("subjects", String(form.id), payload)
           : await createLocal("subjects", payload as Subject);
 
-      const savedSubjectId = Number((savedSubject as any)?.id || form.id || 0);
+      const savedSubjectId = idOf((savedSubject as any)?.id || form.id || 0);
 
       if (savedSubjectId) {
         await commitMediaAssetsToOwner({
           accountId: String(accountId),
           ownerTable: SUBJECT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedSubjectId,
-          ownerCloudId: (savedSubject as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedSubjectId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: "photo" },
@@ -609,7 +818,9 @@ export default function Subjects() {
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(SUBJECT_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        SUBJECT_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
       showToast("success", "Subject saved.");
       await load();
@@ -631,26 +842,20 @@ export default function Subjects() {
     if (!window.confirm(warning)) return;
 
     await Promise.all(
-
       ["photo", "bannerImage"].map((fieldKey) =>
-
         softDeleteOwnerFieldAssets({
-
           accountId: String(accountId),
 
           ownerTable: "subjects",
 
-          ownerLocalId: Number(id),
+          ownerId: cleanId(id) || undefined,
 
           fieldKey,
-
         }),
-
       ),
-
     );
 
-    await softDeleteLocal("subjects", Number(id));
+    await softDeleteLocal("subjects", String(id));
     setSelectedItem(null);
     showToast("success", "Subject deleted.");
     await load();
@@ -659,230 +864,819 @@ export default function Subjects() {
   const toggleActive = async (item: SubjectView) => {
     const id = idOf((item.row as any).id);
     if (!id) return;
-    await updateLocal("subjects", Number(id), {
+    await updateLocal("subjects", String(id), {
       active: !item.active,
       status: !item.active ? "active" : "inactive",
       isDeleted: false,
     } as unknown as Partial<Subject>);
     setSelectedItem(null);
-    showToast("success", item.active ? "Subject deactivated." : "Subject activated.");
+    showToast(
+      "success",
+      item.active ? "Subject deactivated." : "Subject activated.",
+    );
     await load();
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Subjects..." text="Checking account, branch, subjects, organizations, curriculum links, and class delivery links." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Subjects..."
+        text="Checking account, branch, subjects, organizations, curriculum links, and class delivery links."
+      />
+    );
   }
 
-  if (!authenticated || !accountId) return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing subjects." />;
+  if (!authenticated || !accountId)
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing subjects."
+      />
+    );
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Subjects belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {toast && <section className={`ba-toast ${toast.tone}`}>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button></section>}
+      {toast && (
+        <section className={`ba-toast ${toast.tone}`}>
+          {toast.message}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
+        </section>
+      )}
 
-      <section className="ba-search-card" aria-label="Subject search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Subject search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search subjects..." aria-label="Search subjects" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search subjects..."
+            aria-label="Search subjects"
+          />
         </label>
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add subject">+</button>
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
-          <SliderIcon />{activeFilterCount ? <b>{activeFilterCount}</b> : null}
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add subject"
+        >
+          +
         </button>
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
+          <SliderIcon />
+          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
+        </button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(activeFilterCount > 0 || search.trim()) && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {search.trim() && <button type="button" onClick={() => setSearch("")}>Search: {search} ×</button>}
-          {filterOrganizationId !== "all" && <button type="button" onClick={() => setFilterOrganizationId("all")}>Organization: {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name || filterOrganizationId} ×</button>}
-          {filterCategory !== "all" && <button type="button" onClick={() => setFilterCategory("all")}>Category: {categoryLabel(filterCategory)} ×</button>}
-          {filterStatus !== "active" && <button type="button" onClick={() => setFilterStatus("active")}>Status: {filterStatus === "all" ? "All" : "Inactive"} ×</button>}
+          {search.trim() && (
+            <button type="button" onClick={() => setSearch("")}>
+              Search: {search} ×
+            </button>
+          )}
+          {filterOrganizationId !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilterOrganizationId("all")}
+            >
+              Organization:{" "}
+              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
+                filterOrganizationId}{" "}
+              ×
+            </button>
+          )}
+          {filterCategory !== "all" && (
+            <button type="button" onClick={() => setFilterCategory("all")}>
+              Category: {categoryLabel(filterCategory)} ×
+            </button>
+          )}
+          {filterStatus !== "active" && (
+            <button type="button" onClick={() => setFilterStatus("active")}>
+              Status: {filterStatus === "all" ? "All" : "Inactive"} ×
+            </button>
+          )}
         </section>
       )}
 
-      {viewMode === "summary" && <SummaryView summary={summary} countsByCategory={countsByCategory} countsByOrganization={countsByOrganization} countsByUsage={countsByUsage} />}
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} remove={remove} toggleActive={toggleActive} />}
+      {viewMode === "summary" && (
+        <SummaryView
+          summary={summary}
+          countsByCategory={countsByCategory}
+          countsByOrganization={countsByOrganization}
+          countsByUsage={countsByUsage}
+        />
+      )}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          remove={remove}
+          toggleActive={toggleActive}
+        />
+      )}
       {viewMode === "cards" && (
         <section className="ba-list">
-          {filteredRows.map((item) => <SubjectListItem key={String(item.id)} item={item} photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)} primary={primary} onOpen={() => setSelectedItem(item)} />)}
-          {!filteredRows.length && <Empty icon="📘" title="No subjects found" text="Create reusable subject identities such as Mathematics, English Language, Creative Arts, Computing, or Science." />}
+          {filteredRows.map((item) => (
+            <SubjectListItem
+              key={String(item.id)}
+              item={item}
+              photo={
+                mediaById[item.id]?.photo ||
+                safeRecordMediaValue((item.row as any).photo)
+              }
+              primary={primary}
+              onOpen={() => setSelectedItem(item)}
+            />
+          ))}
+          {!filteredRows.length && (
+            <Empty
+              icon="📘"
+              title="No subjects found"
+              text="Create reusable subject identities such as Mathematics, English Language, Creative Arts, Computing, or Science."
+            />
+          )}
         </section>
       )}
 
-      {filterOpen && <FilterSheet organizations={organizations} filterOrganizationId={filterOrganizationId} filterCategory={filterCategory} filterStatus={filterStatus} setFilterOrganizationId={setFilterOrganizationId} setFilterCategory={setFilterCategory} setFilterStatus={setFilterStatus} clearFilters={clearFilters} onClose={() => setFilterOpen(false)} />}
-      {moreOpen && <MoreSheet viewMode={viewMode} setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
-      {selectedItem && <ActionSheet item={selectedItem} openEdit={openEdit} remove={remove} toggleActive={toggleActive} onClose={() => setSelectedItem(null)} />}
-      {modalOpen && <SubjectModal form={form} saving={saving} organizations={organizations} setModalOpen={setModalOpen} updateForm={updateForm} handleImageUpload={handleImageUpload} save={save} />}
+      {filterOpen && (
+        <FilterSheet
+          organizations={organizations}
+          filterOrganizationId={filterOrganizationId}
+          filterCategory={filterCategory}
+          filterStatus={filterStatus}
+          setFilterOrganizationId={setFilterOrganizationId}
+          setFilterCategory={setFilterCategory}
+          setFilterStatus={setFilterStatus}
+          clearFilters={clearFilters}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
+      {moreOpen && (
+        <MoreSheet
+          viewMode={viewMode}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
+      {selectedItem && (
+        <ActionSheet
+          item={selectedItem}
+          openEdit={openEdit}
+          remove={remove}
+          toggleActive={toggleActive}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
+      {modalOpen && (
+        <SubjectModal
+          form={form}
+          saving={saving}
+          organizations={organizations}
+          setModalOpen={setModalOpen}
+          updateForm={updateForm}
+          handleImageUpload={handleImageUpload}
+          save={save}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
-      <section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
     </main>
   );
 }
 
-function SubjectListItem({ item, photo, primary, onOpen }: { item: SubjectView; photo?: string; primary: string; onOpen: () => void }) {
+function SubjectListItem({
+  item,
+  photo,
+  primary,
+  onOpen,
+}: {
+  item: SubjectView;
+  photo?: string;
+  primary: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
   return (
     <button type="button" className="subject-row" onClick={onOpen}>
       <Avatar name={row.name} photo={photo} primary={primary} />
       <span className="subject-main">
         <strong>{row.name || "Unnamed subject"}</strong>
-        <small>{item.organizationName}{row.code ? ` · ${row.code}` : ""}</small>
-        <em>{categoryLabel(row.category)} · {row.credits ?? "—"} credits · {item.totalUsage} linked</em>
+        <small>
+          {item.organizationName}
+          {row.code ? ` · ${row.code}` : ""}
+        </small>
+        <em>
+          {categoryLabel(row.category)} · {row.credits ?? "—"} credits ·{" "}
+          {item.totalUsage} linked
+        </em>
       </span>
-      <span className="subject-side"><StatusDot active={item.active} /><i>⋯</i></span>
+      <span className="subject-side">
+        <StatusDot active={item.active} />
+        <i>⋯</i>
+      </span>
     </button>
   );
 }
 
-function TableView({ rows, openEdit, remove, toggleActive }: { rows: SubjectView[]; openEdit: (row: Subject) => void; remove: (item: SubjectView) => void; toggleActive: (item: SubjectView) => void }) {
+function TableView({
+  rows,
+  openEdit,
+  remove,
+  toggleActive,
+}: {
+  rows: SubjectView[];
+  openEdit: (row: Subject) => void;
+  remove: (item: SubjectView) => void;
+  toggleActive: (item: SubjectView) => void;
+}) {
   return (
     <section className="ba-table-card">
-      <div className="ba-table-head"><h3>Subjects ({rows.length})</h3></div>
+      <div className="ba-table-head">
+        <h3>Subjects ({rows.length})</h3>
+      </div>
       <div className="ba-table-scroll">
         <table>
-          <thead><tr><th>Subject</th><th>Organization</th><th>Category</th><th>Credits</th><th>Links</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Subject</th>
+              <th>Organization</th>
+              <th>Category</th>
+              <th>Credits</th>
+              <th>Links</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((item) => {
               const row: any = item.row;
               return (
                 <tr key={String(item.id)}>
-                  <td><strong>{row.name}</strong><span>{row.code || row.description || "No code"}</span></td>
+                  <td>
+                    <strong>{row.name}</strong>
+                    <span>{row.code || row.description || "No code"}</span>
+                  </td>
                   <td>{item.organizationName}</td>
-                  <td><Chip tone={categoryTone(row.category)}>{categoryLabel(row.category)}</Chip></td>
+                  <td>
+                    <Chip tone={categoryTone(row.category)}>
+                      {categoryLabel(row.category)}
+                    </Chip>
+                  </td>
                   <td>{row.credits ?? "—"}</td>
-                  <td>{item.curriculumUseCount} curriculum · {item.classSubjectUseCount} class</td>
-                  <td><span className="ba-inline-status"><StatusDot active={item.active} />{item.active ? "Active" : "Inactive"}</span></td>
+                  <td>
+                    {item.curriculumUseCount} curriculum ·{" "}
+                    {item.classSubjectUseCount} class
+                  </td>
+                  <td>
+                    <span className="ba-inline-status">
+                      <StatusDot active={item.active} />
+                      {item.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
-                  <td><div className="ba-table-actions"><button type="button" onClick={() => openEdit(item.row)}>Edit</button><button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button><button type="button" className="danger" onClick={() => remove(item)}>Delete</button></div></td>
+                  <td>
+                    <div className="ba-table-actions">
+                      <button type="button" onClick={() => openEdit(item.row)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => toggleActive(item)}>
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => remove(item)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No subject matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">No subject matches your filters.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function SummaryView({ summary, countsByCategory, countsByOrganization, countsByUsage }: { summary: any; countsByCategory: { label: string; value: number }[]; countsByOrganization: { label: string; value: number }[]; countsByUsage: { label: string; value: number }[] }) {
+function SummaryView({
+  summary,
+  countsByCategory,
+  countsByOrganization,
+  countsByUsage,
+}: {
+  summary: any;
+  countsByCategory: { label: string; value: number }[];
+  countsByOrganization: { label: string; value: number }[];
+  countsByUsage: { label: string; value: number }[];
+}) {
   return (
     <section className="ba-analysis-grid">
-      <article className="ba-analysis ba-current-filter"><span>Current Filter</span><strong>{summary.showing}</strong><p>Subject record(s) currently match your search and filter conditions.</p></article>
-      <article className="ba-analysis"><span>Active Subjects</span><strong>{summary.active}</strong><p>{summary.inactive} inactive · {summary.core} core · {summary.total} total.</p></article>
-      <article className="ba-analysis"><span>Usage Links</span><strong>{summary.curriculumUsage + summary.classUsage}</strong><p>{summary.curriculumUsage} curriculum links · {summary.classUsage} class delivery links.</p></article>
-      <AnalysisCard title="Subjects by Category" rows={countsByCategory} total={summary.total} />
-      <AnalysisCard title="Subjects by Organization" rows={countsByOrganization} total={summary.total} />
-      <AnalysisCard title="Most Used Subjects" rows={countsByUsage} total={Math.max(summary.curriculumUsage + summary.classUsage, 1)} />
+      <article className="ba-analysis ba-current-filter">
+        <span>Current Filter</span>
+        <strong>{summary.showing}</strong>
+        <p>
+          Subject record(s) currently match your search and filter conditions.
+        </p>
+      </article>
+      <article className="ba-analysis">
+        <span>Active Subjects</span>
+        <strong>{summary.active}</strong>
+        <p>
+          {summary.inactive} inactive · {summary.core} core · {summary.total}{" "}
+          total.
+        </p>
+      </article>
+      <article className="ba-analysis">
+        <span>Usage Links</span>
+        <strong>{summary.curriculumUsage + summary.classUsage}</strong>
+        <p>
+          {summary.curriculumUsage} curriculum links · {summary.classUsage}{" "}
+          class delivery links.
+        </p>
+      </article>
+      <AnalysisCard
+        title="Subjects by Category"
+        rows={countsByCategory}
+        total={summary.total}
+      />
+      <AnalysisCard
+        title="Subjects by Organization"
+        rows={countsByOrganization}
+        total={summary.total}
+      />
+      <AnalysisCard
+        title="Most Used Subjects"
+        rows={countsByUsage}
+        total={Math.max(summary.curriculumUsage + summary.classUsage, 1)}
+      />
     </section>
   );
 }
 
-function FilterSheet(props: { organizations: Organization[]; filterOrganizationId: string; filterCategory: "all" | SubjectCategory; filterStatus: SubjectStatusFilter; setFilterOrganizationId: (v: string) => void; setFilterCategory: (v: "all" | SubjectCategory) => void; setFilterStatus: (v: SubjectStatusFilter) => void; clearFilters: () => void; onClose: () => void }) {
+function FilterSheet(props: {
+  organizations: Organization[];
+  filterOrganizationId: string;
+  filterCategory: "all" | SubjectCategory;
+  filterStatus: SubjectStatusFilter;
+  setFilterOrganizationId: (v: string) => void;
+  setFilterCategory: (v: "all" | SubjectCategory) => void;
+  setFilterStatus: (v: SubjectStatusFilter) => void;
+  clearFilters: () => void;
+  onClose: () => void;
+}) {
   return (
     <section className="ba-sheet-backdrop" onClick={props.onClose}>
       <div className="ba-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="ba-sheet-head"><div><h3>Filter Subjects</h3><p>Keep the page clean while narrowing records.</p></div><button type="button" onClick={props.onClose}>✕</button></div>
-        <div className="ba-sheet-form">
-          <label><span>Organization</span><select value={props.filterOrganizationId} onChange={(e) => props.setFilterOrganizationId(e.target.value)}><option value="all">All organizations</option>{props.organizations.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}{row.type ? ` · ${row.type}` : ""}</option>)}</select></label>
-          <label><span>Category</span><select value={props.filterCategory} onChange={(e) => props.setFilterCategory(e.target.value as any)}><option value="all">All categories</option>{categories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>
-          <label><span>Status</span><select value={props.filterStatus} onChange={(e) => props.setFilterStatus(e.target.value as SubjectStatusFilter)}><option value="active">Active only</option><option value="all">All status</option><option value="inactive">Inactive only</option></select></label>
+        <div className="ba-sheet-head">
+          <div>
+            <h3>Filter Subjects</h3>
+            <p>Keep the page clean while narrowing records.</p>
+          </div>
+          <button type="button" onClick={props.onClose}>
+            ✕
+          </button>
         </div>
-        <div className="ba-sheet-actions"><button type="button" onClick={props.clearFilters}>Reset</button><button type="button" onClick={props.onClose}>Apply</button></div>
+        <div className="ba-sheet-form">
+          <label>
+            <span>Organization</span>
+            <select
+              value={props.filterOrganizationId}
+              onChange={(e) => props.setFilterOrganizationId(e.target.value)}
+            >
+              <option value="all">All organizations</option>
+              {props.organizations.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                  {row.type ? ` · ${row.type}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Category</span>
+            <select
+              value={props.filterCategory}
+              onChange={(e) => props.setFilterCategory(e.target.value as any)}
+            >
+              <option value="all">All categories</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {categoryLabel(category)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={props.filterStatus}
+              onChange={(e) =>
+                props.setFilterStatus(e.target.value as SubjectStatusFilter)
+              }
+            >
+              <option value="active">Active only</option>
+              <option value="all">All status</option>
+              <option value="inactive">Inactive only</option>
+            </select>
+          </label>
+        </div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={props.clearFilters}>
+            Reset
+          </button>
+          <button type="button" onClick={props.onClose}>
+            Apply
+          </button>
+        </div>
       </div>
     </section>
   );
 }
 
-function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onRefresh: () => void; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
   return (
     <section className="ba-sheet-backdrop" onClick={onClose}>
       <div className="ba-sheet compact" onClick={(e) => e.stopPropagation()}>
-        <div className="ba-sheet-head"><div><h3>More</h3><p>Views and quick actions.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h3>More</h3>
+            <p>Views and quick actions.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="ba-more-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>▦ Cards</button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>☷ Table</button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>📊 Analytics</button>
-          <button type="button" onClick={onRefresh}>↻ Refresh</button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            ▦ Cards
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            ☷ Table
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            📊 Analytics
+          </button>
+          <button type="button" onClick={onRefresh}>
+            ↻ Refresh
+          </button>
         </div>
       </div>
     </section>
   );
 }
 
-function ActionSheet({ item, openEdit, remove, toggleActive, onClose }: { item: SubjectView; openEdit: (row: Subject) => void; remove: (item: SubjectView) => void; toggleActive: (item: SubjectView) => void; onClose: () => void }) {
+function ActionSheet({
+  item,
+  openEdit,
+  remove,
+  toggleActive,
+  onClose,
+}: {
+  item: SubjectView;
+  openEdit: (row: Subject) => void;
+  remove: (item: SubjectView) => void;
+  toggleActive: (item: SubjectView) => void;
+  onClose: () => void;
+}) {
   const row: any = item.row;
   return (
     <section className="ba-sheet-backdrop" onClick={onClose}>
       <div className="ba-sheet compact" onClick={(e) => e.stopPropagation()}>
-        <div className="ba-sheet-head"><div><h3>{row.name || "Subject"}</h3><p>{item.organizationName} · {categoryLabel(row.category)} · {item.totalUsage} linked</p></div><button type="button" onClick={onClose}>✕</button></div>
-        <div className="ba-more-list"><button type="button" onClick={() => openEdit(item.row)}>Edit subject</button><button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button><button type="button" className="danger" onClick={() => remove(item)}>Delete subject</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h3>{row.name || "Subject"}</h3>
+            <p>
+              {item.organizationName} · {categoryLabel(row.category)} ·{" "}
+              {item.totalUsage} linked
+            </p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="ba-more-list">
+          <button type="button" onClick={() => openEdit(item.row)}>
+            Edit subject
+          </button>
+          <button type="button" onClick={() => toggleActive(item)}>
+            {item.active ? "Deactivate" : "Activate"}
+          </button>
+          <button type="button" className="danger" onClick={() => remove(item)}>
+            Delete subject
+          </button>
+        </div>
       </div>
     </section>
   );
 }
 
-function SubjectModal({ form, saving, organizations, setModalOpen, updateForm, handleImageUpload, save }: { form: FormState; saving: boolean; organizations: Organization[]; setModalOpen: (v: boolean) => void; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: "photo" | "bannerImage", file?: File) => void; save: (event?: React.FormEvent) => void }) {
+function SubjectModal({
+  form,
+  saving,
+  organizations,
+  setModalOpen,
+  updateForm,
+  handleImageUpload,
+  save,
+}: {
+  form: FormState;
+  saving: boolean;
+  organizations: Organization[];
+  setModalOpen: (v: boolean) => void;
+  updateForm: (patch: Partial<FormState>) => void;
+  handleImageUpload: (field: "photo" | "bannerImage", file?: File) => void;
+  save: (event?: React.FormEvent) => void;
+}) {
   return (
     <div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
-        <div className="ba-modal-head"><div><h2>{form.id ? "Edit Subject" : "New Subject"}</h2><p>Subjects are reusable academic identities attached later to curriculum rules and class delivery.</p></div><button type="button" onClick={() => setModalOpen(false)}>✕</button></div>
-        <div className="ba-form">
-          <label><span>Subject Name</span><input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} placeholder="e.g. Mathematics" /></label>
-          <label><span>Subject Code</span><input value={form.code} onChange={(e) => updateForm({ code: e.target.value })} placeholder="e.g. MATH" /></label>
-          <label><span>Credits</span><input type="number" value={form.credits} onChange={(e) => updateForm({ credits: e.target.value })} placeholder="Optional" /></label>
-          <label><span>Category</span><select value={form.category} onChange={(e) => updateForm({ category: e.target.value as SubjectCategory })}>{categories.map((category) => <option key={category} value={category}>{categoryLabel(category)}</option>)}</select></label>
-          <label><span>Organization / Department</span><select value={form.organizationId} onChange={(e) => updateForm({ organizationId: e.target.value })}><option value="">No organization</option>{organizations.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}{row.type ? ` · ${row.type}` : ""}</option>)}</select></label>
-          <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-          <label className="wide"><span>Description</span><textarea value={form.description} onChange={(e) => updateForm({ description: e.target.value })} placeholder="Brief subject description" /></label>
-          <label><span>Subject Photo</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("photo", e.target.files?.[0])} />{form.photo ? <img src={form.photo} alt="Subject preview" className="ba-preview-photo" /> : null}</label>
-          <label className="wide"><span>Subject Banner</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("bannerImage", e.target.files?.[0])} />{form.bannerImage ? <img src={form.bannerImage} alt="Subject banner preview" className="ba-preview-banner" /> : null}</label>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{form.id ? "Edit Subject" : "New Subject"}</h2>
+            <p>
+              Subjects are reusable academic identities attached later to
+              curriculum rules and class delivery.
+            </p>
+          </div>
+          <button type="button" onClick={() => setModalOpen(false)}>
+            ✕
+          </button>
         </div>
-        <div className="ba-modal-actions"><button type="button" onClick={() => setModalOpen(false)}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Create Subject"}</button></div>
+        <div className="ba-form">
+          <label>
+            <span>Subject Name</span>
+            <input
+              value={form.name}
+              onChange={(e) => updateForm({ name: e.target.value })}
+              placeholder="e.g. Mathematics"
+            />
+          </label>
+          <label>
+            <span>Subject Code</span>
+            <input
+              value={form.code}
+              onChange={(e) => updateForm({ code: e.target.value })}
+              placeholder="e.g. MATH"
+            />
+          </label>
+          <label>
+            <span>Credits</span>
+            <input
+              type="number"
+              value={form.credits}
+              onChange={(e) => updateForm({ credits: e.target.value })}
+              placeholder="Optional"
+            />
+          </label>
+          <label>
+            <span>Category</span>
+            <select
+              value={form.category}
+              onChange={(e) =>
+                updateForm({ category: e.target.value as SubjectCategory })
+              }
+            >
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {categoryLabel(category)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Organization / Department</span>
+            <select
+              value={form.organizationId}
+              onChange={(e) => updateForm({ organizationId: e.target.value })}
+            >
+              <option value="">No organization</option>
+              {organizations.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                  {row.type ? ` · ${row.type}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={form.active ? "active" : "inactive"}
+              onChange={(e) =>
+                updateForm({ active: e.target.value === "active" })
+              }
+            >
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+          <label className="wide">
+            <span>Description</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => updateForm({ description: e.target.value })}
+              placeholder="Brief subject description"
+            />
+          </label>
+          <label>
+            <span>Subject Photo</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImageUpload("photo", e.target.files?.[0])}
+            />
+            {form.photo ? (
+              <img
+                src={form.photo}
+                alt="Subject preview"
+                className="ba-preview-photo"
+              />
+            ) : null}
+          </label>
+          <label className="wide">
+            <span>Subject Banner</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) =>
+                handleImageUpload("bannerImage", e.target.files?.[0])
+              }
+            />
+            {form.bannerImage ? (
+              <img
+                src={form.bannerImage}
+                alt="Subject banner preview"
+                className="ba-preview-banner"
+              />
+            ) : null}
+          </label>
+        </div>
+        <div className="ba-modal-actions">
+          <button type="button" onClick={() => setModalOpen(false)}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : form.id ? "Save Changes" : "Create Subject"}
+          </button>
+        </div>
       </form>
     </div>
   );
 }
 
-function groupedCounts(rows: SubjectView[], keyFn: (item: SubjectView) => string) {
+function groupedCounts(
+  rows: SubjectView[],
+  keyFn: (item: SubjectView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
-      <span>{title}</span><strong>{rows.reduce((sum, row) => sum + row.value, 0)}</strong>
+      <span>{title}</span>
+      <strong>{rows.reduce((sum, row) => sum + row.value, 0)}</strong>
       <div className="ba-analysis-list">
         {rows.slice(0, 8).map((row) => {
           const share = total ? Math.round((row.value / total) * 100) : 0;
-          return <section key={row.label}><div><b>{row.label}</b><small>{row.value} · {share}%</small></div><div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div></section>;
+          return (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
+            </section>
+          );
         })}
         {!rows.length ? <p>No data available.</p> : null}
       </div>

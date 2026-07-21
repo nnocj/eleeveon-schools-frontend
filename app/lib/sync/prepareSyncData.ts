@@ -5,10 +5,9 @@
  */
 
 import { getDeviceId } from "./syncConfig";
-import { buildMediaIdentityKey } from "../media/mediaAssetResolver";
 
 const LOCAL_ONLY_FIELDS = new Set([
-  "id", "blob", "file", "fileBlob", "arrayBuffer", "buffer", "binary",
+"blob", "file", "fileBlob", "arrayBuffer", "buffer", "binary",
   "localBlob", "localBlobData", "localBlobId", "localObjectUrl", "objectUrl",
   "previewUrl", "localPreviewUrl", "originalFile", "optimizedFile",
 ]);
@@ -43,7 +42,7 @@ export function prepareSyncData<T extends Record<string, any>>(
   if (tableName === "mediaAssets") {
     const deviceId = String(payload.deviceId || options?.deviceId || getDeviceId() || "").trim();
     payload.deviceId = deviceId;
-    payload.ownerIdentityKey = buildMediaIdentityKey({ ...payload, deviceId });
+    payload.ownerIdentityKey = [payload.accountId, payload.ownerTable, payload.ownerId || payload.ownerTempKey, payload.fieldKey].filter(Boolean).join(":");
     payload.identityVersion = 1;
 
     if (!payload.isDeleted && payload.active !== false && !payload.ownerIdentityKey) {

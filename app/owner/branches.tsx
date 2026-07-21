@@ -18,6 +18,12 @@
  * - unsaved uploads use ownerTempKey and are attached after create/update
  * - UI uses the same ba-* theme classes as Students for dark mode and local settings support
  *
+ * Permanent-ID persistence fix:
+ * - Preserves stable string UUIDs for Branch and School IDs.
+ * - Verifies every create/update directly from Dexie before reporting success.
+ * - Confirms the saved branch belongs to the active account and selected school.
+ * - Keeps media ownership linked to the real branch UUID.
+ *
  * Workspace source fix:
  * - Resolves account/workspace from eleeveon_open_workspace first.
  * - Falls back to active membership, AccountContext, settings, then storage.
@@ -68,7 +74,7 @@ type TenantRow = {
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   schoolId: string;
   name: string;
   code: string;
@@ -77,16 +83,16 @@ type FormState = {
   address: string;
   city: string;
   logo: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
 };
 
 type BranchView = {
-  id: number;
+  id: string;
   row: Branch;
   school?: School;
   schoolName: string;
@@ -151,9 +157,8 @@ const emptyForm: FormState = {
 };
 
 const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+  if (v === undefined || v === null || v === "") return "";
+  return String(v).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -181,7 +186,7 @@ const timeText = (v?: string | number | null) => {
   }
 };
 
-const mediaKey = (branchId: number, field: CameraField) => `branches:${branchId}:${field}`;
+const mediaKey = (branchId: string, field: CameraField) => `branches:${branchId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "");
@@ -294,7 +299,7 @@ export default function OwnerBranchesPage() {
     if (!authenticated || !selectedAccountId) router.replace("/login");
   }, [accountLoading, authenticated, selectedAccountId, router]);
 
-  const sameAccount = (row: TenantRow) => (!row.accountId || row.accountId === selectedAccountId) && !row.isDeleted;
+  const sameAccount = (row: TenantRow) => (!row.accountId || cleanText(row.accountId) === selectedAccountId) && !row.isDeleted;
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
@@ -377,13 +382,12 @@ export default function OwnerBranchesPage() {
           const ownedAsset = await getOwnerFieldMediaAsset({
             accountId: selectedAccountId || undefined,
             ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-            ownerLocalId: branchId,
-            ownerCloudId: branch.cloudId || undefined,
+            ownerId: branchId,
             fieldKey: BRANCH_FIELD_KEYS[field],
           });
 
           if (ownedAsset?.id) {
-            const url = await getMediaObjectUrl(Number(ownedAsset.id));
+            const url = await getMediaObjectUrl(String(ownedAsset.id));
             if (url) return url;
           }
 
@@ -398,10 +402,10 @@ export default function OwnerBranchesPage() {
             fallbackAsset.accountId === selectedAccountId &&
             fallbackAsset.ownerTable === BRANCH_MEDIA_OWNER_TABLE &&
             fallbackAsset.fieldKey === BRANCH_FIELD_KEYS[field] &&
-            sameId(fallbackAsset.ownerLocalId, branchId);
+            sameId(fallbackAsset.ownerId, branchId);
 
           if (!belongsToThisBranch) return "";
-          return getMediaObjectUrl(fallbackId);
+          return getMediaObjectUrl(String(fallbackId));
         };
 
         try {
@@ -445,7 +449,7 @@ export default function OwnerBranchesPage() {
         .filter((r: any) => sameAccount(r as TenantRow) && r.active !== false)
         .sort((a: any, b: any) => schoolName(a).localeCompare(schoolName(b)));
 
-      const schoolIds = new Set(scopedSchools.map((r: any) => idOf(r.id)).filter(Boolean));
+      const schoolIds = new Set<string>(scopedSchools.map((r: any) => idOf(r.id)).filter(Boolean));
 
       const scopedBranches = (branchRows as Branch[])
         .filter((r: any) => sameAccount(r as TenantRow) && (!r.schoolId || schoolIds.has(idOf(r.schoolId))))
@@ -520,7 +524,7 @@ export default function OwnerBranchesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOpen, cameraFacing]);
 
-  const schoolMap = useMemo(() => new Map(schools.map((r: any) => [idOf(r.id), r])), [schools]);
+  const schoolMap = useMemo(() => new Map<string, School>(schools.map((r: any) => [idOf(r.id), r])), [schools]);
 
   const viewRows = useMemo<BranchView[]>(
     () =>
@@ -588,10 +592,10 @@ export default function OwnerBranchesPage() {
       const ownerTempKey = form.id ? undefined : mediaSessionKeyRef.current;
       const result = await saveImageAsset(file, {
         accountId: selectedAccountId!,
-        schoolId: form.schoolId ? Number(form.schoolId) : undefined,
+        schoolId: form.schoolId || undefined,
         branchId: form.id || undefined,
         ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey,
         fieldKey: BRANCH_FIELD_KEYS[field],
         variant: field === "logo" ? "avatar" : field === "bannerImage" ? "cover" : "image",
@@ -615,7 +619,7 @@ export default function OwnerBranchesPage() {
     if (!requireAccount()) return;
     mediaSessionKeyRef.current = createBranchMediaSessionKey();
     setSelectedItem(null);
-    setForm({ ...emptyForm, schoolId: String(idOf((schools[0] as any)?.id) || ""), active: filterStatus === "inactive" ? false : true });
+    setForm({ ...emptyForm, schoolId: idOf((schools[0] as any)?.id), active: filterStatus === "inactive" ? false : true });
     setModalOpen(true);
   };
 
@@ -634,11 +638,11 @@ export default function OwnerBranchesPage() {
       address: s.address || "",
       city: s.city || "",
       logo: mediaPreviewUrls[mediaKey(id, "logo")] || safeRecordMediaValue(s.logo) || "",
-      logoMediaId: s.logoMediaId ? Number(s.logoMediaId) : undefined,
+      logoMediaId: s.logoMediaId ? String(s.logoMediaId) : undefined,
       photo: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(s.photo) || "",
-      photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
+      photoMediaId: s.photoMediaId ? String(s.photoMediaId) : undefined,
       bannerImage: mediaPreviewUrls[mediaKey(id, "bannerImage")] || safeRecordMediaValue(s.bannerImage) || "",
-      bannerImageMediaId: s.bannerImageMediaId ? Number(s.bannerImageMediaId) : undefined,
+      bannerImageMediaId: s.bannerImageMediaId ? String(s.bannerImageMediaId) : undefined,
       active: s.active !== false,
     });
     setModalOpen(true);
@@ -654,10 +658,14 @@ export default function OwnerBranchesPage() {
 
     const duplicate = rows.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
-      return cleanText(row.name).toLowerCase() === cleanText(form.name).toLowerCase() && !row.isDeleted;
+      return (
+        sameId(row.schoolId, form.schoolId) &&
+        cleanText(row.name).toLowerCase() === cleanText(form.name).toLowerCase() &&
+        !row.isDeleted
+      );
     });
 
-    if (duplicate) return "A branch with this name already exists on this account.";
+    if (duplicate) return "A branch with this name already exists for the selected school.";
     if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return "Enter a valid branch email.";
     return "";
   };
@@ -679,7 +687,7 @@ export default function OwnerBranchesPage() {
       const payload: Partial<Branch> = {
         accountId: selectedAccountId,
         name: form.name.trim(),
-        schoolId: Number(form.schoolId),
+        schoolId: form.schoolId,
         code: form.code.trim() || undefined,
         phone: form.phone.trim() || undefined,
         email: form.email.trim() || undefined,
@@ -695,35 +703,68 @@ export default function OwnerBranchesPage() {
         isDeleted: false,
       } as Partial<Branch>;
 
-      const savedBranch = form.id && existing ? await updateLocal("branches", Number(form.id), payload) : await createLocal("branches", payload as Branch);
-      const savedBranchId = Number(typeof savedBranch === "number" ? savedBranch : (savedBranch as any)?.id || form.id || 0);
+      const savedBranch =
+        form.id && existing
+          ? await updateLocal("branches", form.id, payload)
+          : await createLocal("branches", payload as Branch);
 
-      if (savedBranchId) {
-        await Promise.all(
-          [
-            { id: form.logoMediaId, field: "logo" as CameraField },
-            { id: form.photoMediaId, field: "photo" as CameraField },
-            { id: form.bannerImageMediaId, field: "bannerImage" as CameraField },
-          ]
-            .filter((asset) => Boolean(asset.id))
-            .map((asset) =>
-              attachMediaAssetToOwner({
-                assetId: Number(asset.id),
-                ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedBranchId,
-                ownerTempKey: mediaSessionKeyRef.current,
-              })
-            )
-        );
+      const savedBranchId = idOf((savedBranch as any)?.id || form.id);
+
+      if (!savedBranchId) {
+        throw new Error("The branch record was written without a valid permanent ID.");
       }
+
+      const persistedBranch = await tableSafe("branches")?.get?.(savedBranchId);
+
+      if (!persistedBranch || persistedBranch.isDeleted) {
+        throw new Error("The branch could not be verified in local storage after saving.");
+      }
+
+      if (cleanText(persistedBranch.accountId) !== selectedAccountId) {
+        throw new Error("The branch was saved under the wrong account workspace.");
+      }
+
+      if (!sameId(persistedBranch.schoolId, form.schoolId)) {
+        throw new Error("The branch was not linked to the selected school.");
+      }
+
+      const selectedSchool = await tableSafe("schools")?.get?.(form.schoolId);
+
+      if (
+        !selectedSchool ||
+        selectedSchool.isDeleted ||
+        cleanText(selectedSchool.accountId) !== selectedAccountId
+      ) {
+        throw new Error("The selected school is unavailable in this owner account.");
+      }
+
+      await Promise.all(
+        [
+          { id: form.logoMediaId, field: "logo" as CameraField },
+          { id: form.photoMediaId, field: "photo" as CameraField },
+          { id: form.bannerImageMediaId, field: "bannerImage" as CameraField },
+        ]
+          .filter((asset) => Boolean(asset.id))
+          .map((asset) =>
+            attachMediaAssetToOwner({
+              assetId: String(asset.id),
+              ownerTable: BRANCH_MEDIA_OWNER_TABLE,
+              ownerId: savedBranchId,
+              ownerTempKey: mediaSessionKeyRef.current,
+              fieldKey: BRANCH_FIELD_KEYS[asset.field],
+              schoolId: form.schoolId,
+              branchId: savedBranchId,
+            } as any)
+          )
+      );
 
       mediaSessionKeyRef.current = createBranchMediaSessionKey();
       setModalOpen(false);
-      showToast("success", "Branch saved.");
       await load();
-    } catch (error) {
-      console.error(error);
-      showToast("error", "Failed to save branch.");
+      showToast("success", form.id ? "Branch changes saved." : "Branch created and saved locally.");
+    } catch (error: any) {
+      console.error("Failed to save branch:", error);
+      showToast("error", error?.message || "Failed to save branch.");
     } finally {
       setSaving(false);
     }
@@ -736,7 +777,7 @@ export default function OwnerBranchesPage() {
     const ok = window.confirm(`Delete "${branchName(item.row)}"?`);
 
     if (!ok) return;
-    await softDeleteLocal("branches", Number(id));
+    await softDeleteLocal("branches", id);
     setSelectedItem(null);
     showToast("success", "Branch deleted.");
     await load();

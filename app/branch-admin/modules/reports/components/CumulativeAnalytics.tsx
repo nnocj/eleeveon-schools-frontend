@@ -139,7 +139,7 @@ export default function CumulativeAnalytics({
           gap: 12,
         }}
       >
-        {cards.map(card => (
+        {cards.map((card) => (
           <div
             key={card.label}
             style={{
@@ -228,7 +228,7 @@ export default function CumulativeAnalytics({
             gap: 10,
           }}
         >
-          {trendCards.map(card => (
+          {trendCards.map((card) => (
             <div
               key={card.label}
               style={{

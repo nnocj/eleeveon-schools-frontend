@@ -76,7 +76,12 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -86,8 +91,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -95,7 +100,14 @@ type ViewMode = "cards" | "table" | "analytics";
 type ActiveSection = "fees" | "invoices" | "payments";
 type ToastTone = "success" | "error" | "info";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
-type StatusFilter = "all" | "draft" | "issued" | "part_paid" | "paid" | "overdue" | "cancelled";
+type StatusFilter =
+  | "all"
+  | "draft"
+  | "issued"
+  | "part_paid"
+  | "paid"
+  | "overdue"
+  | "cancelled";
 type DrawerMode = "fee" | "invoice" | "payment";
 type InvoiceTarget = "single_student" | "selected_class" | "matching_students";
 
@@ -106,7 +118,7 @@ type InvoiceRow = AnyRow & {
 };
 
 type FeeForm = {
-  id: number;
+  id: string;
   classId: string;
   academicStructureId: string;
   academicPeriodId: string;
@@ -143,7 +155,7 @@ type PaymentForm = {
 };
 
 const emptyFeeForm: FeeForm = {
-  id: 0,
+  id: "",
   classId: "all",
   academicStructureId: "",
   academicPeriodId: "",
@@ -192,13 +204,19 @@ const BILLABLE_ENROLLMENT_STATUSES = new Set(["active", "promoted"]);
  * Branch billing uses BILLABLE_ENROLLMENT_STATUSES, while student read views may
  * also show completed records for history.
  */
-const VISIBLE_ENROLLMENT_STATUSES = new Set(["active", "promoted", "completed"]);
+const VISIBLE_ENROLLMENT_STATUSES = new Set([
+  "active",
+  "promoted",
+  "completed",
+]);
 
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -232,25 +250,59 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+function idOf(value?: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "object") {
+    const row = value as AnyRow;
+    return String(
+      row?.id ??
+        row?.localId ??
+        row?.cloudId ??
+        row?.payload?.id ??
+        row?.payload?.localId ??
+        "",
+    ).trim();
+  }
+
+  return String(value).trim();
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  return idOf(value);
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameId(left: unknown, right: unknown): boolean {
+  const a = cleanId(left);
+  const b = cleanId(right);
+  return Boolean(a && b && a === b);
+}
+
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && !sameId(row.schoolId, schoolId))
+    return false;
+  if (branchId && !sameId(row.branchId, branchId))
+    return false;
   return true;
 }
 
 function rowName(row?: AnyRow | null) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.invoiceNumber || row?.email, "Unnamed");
+  return text(
+    row?.fullName ||
+      row?.name ||
+      row?.title ||
+      row?.label ||
+      row?.invoiceNumber ||
+      row?.email,
+    "Unnamed",
+  );
 }
 
 function dateLabel(value?: number | string | null) {
@@ -258,7 +310,11 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -267,13 +323,21 @@ function dateLabel(value?: number | string | null) {
 function money(value: any, currency = "GHS") {
   const amount = n(value);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "GHS", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GHS",
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
     return `${currency || "GHS"} ${amount.toLocaleString()}`;
   }
 }
 
-function invoiceStatus(total: number, paid: number, dueDate?: string): "issued" | "part_paid" | "paid" | "overdue" {
+function invoiceStatus(
+  total: number,
+  paid: number,
+  dueDate?: string,
+): "issued" | "part_paid" | "paid" | "overdue" {
   if (paid >= total && total > 0) return "paid";
   if (paid > 0) return "part_paid";
   if (dueDate && new Date(dueDate).getTime() < Date.now()) return "overdue";
@@ -292,7 +356,8 @@ function statusTone(status?: string): Tone {
 function paymentTone(status?: string): Tone {
   const value = String(status || "").toLowerCase();
   if (["paid", "success", "succeeded"].includes(value)) return "green";
-  if (["failed", "cancelled", "reversed", "refunded"].includes(value)) return "red";
+  if (["failed", "cancelled", "reversed", "refunded"].includes(value))
+    return "red";
   if (["pending", "processing"].includes(value)) return "orange";
   return "blue";
 }
@@ -312,7 +377,13 @@ function dueIn(days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`bf-chip ${tone}`}>{children}</span>;
 }
 
@@ -345,10 +416,15 @@ export default function FeesPage() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId: rawAccountId, authenticated, loading: accountLoading } = useAccount();
+  const {
+    accountId: rawAccountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch() as any;
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch() as any;
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
 
   const accountId = useMemo(
@@ -357,7 +433,12 @@ export default function FeesPage() {
       cleanText(openWorkspace?.membership?.accountId) ||
       cleanText(activeMembership?.accountId) ||
       cleanText(settings?.accountId),
-    [activeMembership?.accountId, openWorkspace?.membership?.accountId, rawAccountId, settings?.accountId]
+    [
+      activeMembership?.accountId,
+      openWorkspace?.membership?.accountId,
+      rawAccountId,
+      settings?.accountId,
+    ],
   );
 
   const schoolId = useMemo(
@@ -380,7 +461,7 @@ export default function FeesPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -407,7 +488,7 @@ export default function FeesPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
@@ -425,7 +506,10 @@ export default function FeesPage() {
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<AnyRow | null>(null);
   const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const [students, setStudents] = useState<AnyRow[]>([]);
   const [studentEnrollments, setStudentEnrollments] = useState<AnyRow[]>([]);
@@ -449,7 +533,11 @@ export default function FeesPage() {
 
   function showToast(tone: ToastTone, message: string) {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   }
 
   async function load() {
@@ -461,7 +549,18 @@ export default function FeesPage() {
     setLoading(true);
 
     try {
-      const [studentRows, enrollmentRows, classRows, structureRows, periodRows, currencyRows, feeRows, invoiceRows, itemRows, paymentRows] = await Promise.all([
+      const [
+        studentRows,
+        enrollmentRows,
+        classRows,
+        structureRows,
+        periodRows,
+        currencyRows,
+        feeRows,
+        invoiceRows,
+        itemRows,
+        paymentRows,
+      ] = await Promise.all([
         listActiveLocal<AnyRow>("students" as any),
         listActiveLocal<AnyRow>("studentEnrollments" as any),
         listActiveLocal<AnyRow>("classes" as any),
@@ -474,22 +573,56 @@ export default function FeesPage() {
         listActiveLocal<AnyRow>("studentFeePayments" as any),
       ]);
 
-      setStudents(studentRows.filter((row) => sameScope(row, accountId, schoolId, branchId)).sort((a, b) => rowName(a).localeCompare(rowName(b))));
+      setStudents(
+        studentRows
+          .filter((row) => sameScope(row, accountId, schoolId, branchId))
+          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
+      );
       setStudentEnrollments(
         enrollmentRows.filter(
           (row) =>
             sameScope(row, accountId, schoolId, branchId) &&
-            BILLABLE_ENROLLMENT_STATUSES.has(String(row.status || "active").toLowerCase())
-        )
+            BILLABLE_ENROLLMENT_STATUSES.has(
+              String(row.status || "active").toLowerCase(),
+            ),
+        ),
       );
-      setClasses(classRows.filter((row) => sameScope(row, accountId, schoolId, branchId)).sort((a, b) => rowName(a).localeCompare(rowName(b))));
-      setAcademicStructures(structureRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setAcademicPeriods(periodRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setCurrencySettings(currencyRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setFeeStructures(feeRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setInvoices(invoiceRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setInvoiceItems(itemRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setPayments(paymentRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
+      setClasses(
+        classRows
+          .filter((row) => sameScope(row, accountId, schoolId, branchId))
+          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
+      );
+      setAcademicStructures(
+        structureRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setAcademicPeriods(
+        periodRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setCurrencySettings(
+        currencyRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setFeeStructures(
+        feeRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setInvoices(
+        invoiceRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setInvoiceItems(
+        itemRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setPayments(
+        paymentRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load branch fees:", error);
       showToast("error", "Failed to load fees.");
@@ -502,26 +635,49 @@ export default function FeesPage() {
     if (accountLoading || settingsLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
     dataRevision,
   ]);
 
   const currency = useMemo(() => {
-    const preferred = currencySettings.find((row) => row.defaultForFees || row.active !== false) || currencySettings[0];
+    const preferred =
+      currencySettings.find(
+        (row) => row.defaultForFees || row.active !== false,
+      ) || currencySettings[0];
     return {
-      code: text(preferred?.currencyCode || invoices[0]?.currencyCode || payments[0]?.currencyCode, "GHS"),
+      code: text(
+        preferred?.currencyCode ||
+          invoices[0]?.currencyCode ||
+          payments[0]?.currencyCode,
+        "GHS",
+      ),
       symbol: text(preferred?.currencySymbol, "₵"),
       name: text(preferred?.currencyName, "Ghana Cedi"),
     };
   }, [currencySettings, invoices, payments]);
 
-  const classMap = useMemo(() => new Map(classes.map((item) => [Number(idOf(item)), rowName(item)])), [classes]);
-  const studentMap = useMemo(() => new Map(students.map((item) => [Number(idOf(item)), rowName(item)])), [students]);
+  const classMap = useMemo(
+    () => new Map<string, string>(classes.map((item) => [idOf(item), rowName(item)])),
+    [classes],
+  );
+  const studentMap = useMemo(
+    () => new Map<string, string>(students.map((item) => [idOf(item), rowName(item)])),
+    [students],
+  );
 
-  const studentById = useMemo(() => new Map(students.map((student) => [Number(idOf(student)), student])), [students]);
+  const studentById = useMemo(
+    () => new Map<string, AnyRow>(students.map((student) => [idOf(student), student])),
+    [students],
+  );
 
   const enrollmentByStudentId = useMemo(() => {
-    const map = new Map<number, AnyRow[]>();
+    const map = new Map<string, AnyRow[]>();
     studentEnrollments.forEach((enrollment) => {
       const studentId = cleanId(enrollment.studentId);
       if (!studentId) return;
@@ -532,50 +688,99 @@ export default function FeesPage() {
     return map;
   }, [studentEnrollments]);
 
-
   const invoiceRows = useMemo<InvoiceRow[]>(() => {
     const q = query.toLowerCase().trim();
     return invoices
       .map((invoice) => {
         const paidFromRows = payments
-          .filter((payment) => Number(payment.invoiceId || 0) === Number(idOf(invoice)))
-          .filter((payment) => ["paid", "success", "succeeded"].includes(String(payment.status || "paid").toLowerCase()))
+          .filter((payment) => sameId(payment.invoiceId, idOf(invoice)))
+          .filter((payment) =>
+            ["paid", "success", "succeeded"].includes(
+              String(payment.status || "paid").toLowerCase(),
+            ),
+          )
           .reduce((sum, payment) => sum + n(payment.amount), 0);
         const amountPaid = Math.max(n(invoice.amountPaid), paidFromRows);
         const total = n(invoice.total);
         const balance = Math.max(0, total - amountPaid);
-        const computedStatus = invoiceStatus(total, amountPaid, invoice.dueDate);
-        return { ...(invoice as AnyRow), amountPaid, balance, computedStatus } as InvoiceRow;
+        const computedStatus = invoiceStatus(
+          total,
+          amountPaid,
+          invoice.dueDate,
+        );
+        return {
+          ...(invoice as AnyRow),
+          amountPaid,
+          balance,
+          computedStatus,
+        } as InvoiceRow;
       })
-      .filter((invoice) => status === "all" || String(invoice.status || invoice.computedStatus || "issued") === status || invoice.computedStatus === status)
-      .filter((invoice) => classFilter === "all" || String(invoice.classId || "") === classFilter)
+      .filter(
+        (invoice) =>
+          status === "all" ||
+          String(invoice.status || invoice.computedStatus || "issued") ===
+            status ||
+          invoice.computedStatus === status,
+      )
+      .filter(
+        (invoice) =>
+          classFilter === "all" ||
+          sameId(invoice.classId, classFilter),
+      )
       .filter((invoice) => {
         if (!q) return true;
-        return [invoice.invoiceNumber, studentMap.get(Number(invoice.studentId)), classMap.get(Number(invoice.classId)), invoice.status, invoice.note]
+        return [
+          invoice.invoiceNumber,
+          studentMap.get(cleanId(invoice.studentId)),
+          classMap.get(cleanId(invoice.classId)),
+          invoice.status,
+          invoice.note,
+        ]
           .join(" ")
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => n(b.updatedAt || b.issueDate || b.createdAt) - n(a.updatedAt || a.issueDate || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.updatedAt || b.issueDate || b.createdAt) -
+          n(a.updatedAt || a.issueDate || a.createdAt),
+      );
   }, [classFilter, classMap, invoices, payments, query, status, studentMap]);
 
   const filteredFeeStructures = useMemo(() => {
     const q = query.toLowerCase().trim();
     return feeStructures
-      .filter((row) => classFilter === "all" || String(row.classId || "all") === classFilter)
+      .filter(
+        (row) =>
+          classFilter === "all" || sameId(row.classId, classFilter),
+      )
       .filter((row) => {
         if (!q) return true;
-        return [classMap.get(Number(row.classId)) || "All classes", (row.items || []).map((item: any) => item.name).join(" ")].join(" ").toLowerCase().includes(q);
+        return [
+          classMap.get(cleanId(row.classId)) || "All classes",
+          (row.items || []).map((item: any) => item.name).join(" "),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
-      .sort((a, b) => n(b.updatedAt || b.createdAt) - n(a.updatedAt || a.createdAt));
+      .sort(
+        (a, b) => n(b.updatedAt || b.createdAt) - n(a.updatedAt || a.createdAt),
+      );
   }, [classFilter, classMap, feeStructures, query]);
 
   const filteredPayments = useMemo(() => {
     const q = query.toLowerCase().trim();
     return payments
       .filter((payment) => {
-        const invoice = invoices.find((row) => Number(idOf(row)) === Number(payment.invoiceId || 0));
-        if (classFilter !== "all" && String(invoice?.classId || "") !== classFilter) return false;
+        const invoice = invoices.find(
+          (row) => sameId(idOf(row), payment.invoiceId),
+        );
+        if (
+          classFilter !== "all" &&
+          !sameId(invoice?.classId, classFilter)
+        )
+          return false;
         if (!q) return true;
         return [
           payment.receiptNumber,
@@ -584,20 +789,33 @@ export default function FeesPage() {
           payment.payerPhone,
           payment.method,
           payment.status,
-          studentMap.get(Number(payment.studentId)),
+          studentMap.get(cleanId(payment.studentId)),
           invoice?.invoiceNumber,
         ]
           .join(" ")
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => n(b.paidAt || b.date || b.createdAt) - n(a.paidAt || a.date || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.paidAt || b.date || b.createdAt) -
+          n(a.paidAt || a.date || a.createdAt),
+      );
   }, [classFilter, invoices, payments, query, studentMap]);
 
   const summary = useMemo(() => {
-    const total = invoiceRows.reduce((sum, invoice) => sum + n(invoice.total), 0);
-    const paid = invoiceRows.reduce((sum, invoice) => sum + n(invoice.amountPaid), 0);
-    const balance = invoiceRows.reduce((sum, invoice) => sum + n(invoice.balance), 0);
+    const total = invoiceRows.reduce(
+      (sum, invoice) => sum + n(invoice.total),
+      0,
+    );
+    const paid = invoiceRows.reduce(
+      (sum, invoice) => sum + n(invoice.amountPaid),
+      0,
+    );
+    const balance = invoiceRows.reduce(
+      (sum, invoice) => sum + n(invoice.balance),
+      0,
+    );
     return {
       invoices: invoiceRows.length,
       allInvoices: invoices.length,
@@ -607,22 +825,45 @@ export default function FeesPage() {
       total,
       paid,
       balance,
-      paidInvoices: invoiceRows.filter((row) => String(row.computedStatus || row.status) === "paid").length,
-      overdue: invoiceRows.filter((row) => String(row.computedStatus || row.status) === "overdue").length,
-      partPaid: invoiceRows.filter((row) => String(row.computedStatus || row.status) === "part_paid").length,
+      paidInvoices: invoiceRows.filter(
+        (row) => String(row.computedStatus || row.status) === "paid",
+      ).length,
+      overdue: invoiceRows.filter(
+        (row) => String(row.computedStatus || row.status) === "overdue",
+      ).length,
+      partPaid: invoiceRows.filter(
+        (row) => String(row.computedStatus || row.status) === "part_paid",
+      ).length,
     };
-  }, [feeStructures.length, invoiceRows, invoices.length, payments.length, students.length]);
+  }, [
+    feeStructures.length,
+    invoiceRows,
+    invoices.length,
+    payments.length,
+    students.length,
+  ]);
 
-  const activeFilterCount = useMemo(() => [status !== "all", classFilter !== "all"].filter(Boolean).length, [classFilter, status]);
+  const activeFilterCount = useMemo(
+    () => [status !== "all", classFilter !== "all"].filter(Boolean).length,
+    [classFilter, status],
+  );
 
   const selectedInvoiceItems = useMemo(() => {
     const id = cleanId(idOf(selectedInvoice));
-    return invoiceItems.filter((item) => Number(item.invoiceId) === Number(id)).sort((a, b) => n(a.order) - n(b.order));
+    return invoiceItems
+      .filter((item) => sameId(item.invoiceId, id))
+      .sort((a, b) => n(a.order) - n(b.order));
   }, [invoiceItems, selectedInvoice]);
 
   const selectedInvoicePayments = useMemo(() => {
     const id = cleanId(idOf(selectedInvoice));
-    return payments.filter((item) => Number(item.invoiceId) === Number(id)).sort((a, b) => n(b.paidAt || b.date || b.createdAt) - n(a.paidAt || a.date || a.createdAt));
+    return payments
+      .filter((item) => sameId(item.invoiceId, id))
+      .sort(
+        (a, b) =>
+          n(b.paidAt || b.date || b.createdAt) -
+          n(a.paidAt || a.date || a.createdAt),
+      );
   }, [payments, selectedInvoice]);
 
   function openFeeDrawer(existing?: AnyRow) {
@@ -631,17 +872,25 @@ export default function FeesPage() {
     setFeeForm(
       existing
         ? {
-            id: cleanId(idOf(existing)),
+            id: idOf(existing),
             classId: existing.classId ? String(existing.classId) : "all",
-            academicStructureId: existing.academicStructureId ? String(existing.academicStructureId) : "",
-            academicPeriodId: existing.academicPeriodId ? String(existing.academicPeriodId) : "",
+            academicStructureId: existing.academicStructureId
+              ? String(existing.academicStructureId)
+              : "",
+            academicPeriodId: existing.academicPeriodId
+              ? String(existing.academicPeriodId)
+              : "",
             itemName: "",
             itemAmount: "",
             items: Array.isArray(existing.items) ? existing.items : [],
             currencyCode: text(existing.currencyCode, preferred.code),
             currencySymbol: text(existing.currencySymbol, preferred.symbol),
           }
-        : { ...emptyFeeForm, currencyCode: preferred.code, currencySymbol: preferred.symbol }
+        : {
+            ...emptyFeeForm,
+            currencyCode: preferred.code,
+            currencySymbol: preferred.symbol,
+          },
     );
     setDrawer("fee");
   }
@@ -659,9 +908,20 @@ export default function FeesPage() {
 
   function openPaymentDrawer(invoice?: AnyRow) {
     const invoiceId = invoice ? String(idOf(invoice)) : "";
-    const balance = invoice ? n((invoice as any).balance ?? invoice.balance ?? Math.max(0, n(invoice.total) - n(invoice.amountPaid))) : 0;
+    const balance = invoice
+      ? n(
+          (invoice as any).balance ??
+            invoice.balance ??
+            Math.max(0, n(invoice.total) - n(invoice.amountPaid)),
+        )
+      : 0;
     setMessage("");
-    setPaymentForm({ ...emptyPaymentForm, invoiceId, amount: balance ? String(balance) : "", date: today() });
+    setPaymentForm({
+      ...emptyPaymentForm,
+      invoiceId,
+      amount: balance ? String(balance) : "",
+      date: today(),
+    });
     setDrawer("payment");
   }
 
@@ -672,52 +932,100 @@ export default function FeesPage() {
       setMessage("Enter a fee item name and amount.");
       return;
     }
-    setFeeForm((current) => ({ ...current, items: [...current.items, { name, amount }], itemName: "", itemAmount: "" }));
+    setFeeForm((current) => ({
+      ...current,
+      items: [...current.items, { name, amount }],
+      itemName: "",
+      itemAmount: "",
+    }));
     setMessage("");
   }
 
   function removeFeeItem(index: number) {
-    setFeeForm((current) => ({ ...current, items: current.items.filter((_, itemIndex) => itemIndex !== index) }));
+    setFeeForm((current) => ({
+      ...current,
+      items: current.items.filter((_, itemIndex) => itemIndex !== index),
+    }));
   }
 
-  async function createInvoicesForFeeStructure(fee: AnyRow, feeStructureId: number, options?: { silent?: boolean }) {
+  async function createInvoicesForFeeStructure(
+    fee: AnyRow,
+    feeStructureId: string,
+    options?: { silent?: boolean },
+  ) {
     if (!accountId || !schoolId || !branchId || !feeStructureId) return 0;
 
     const items = Array.isArray(fee.items) ? fee.items : [];
-    const subtotal = items.reduce((sum: number, item: any) => sum + n(item.amount), 0);
+    const subtotal = items.reduce(
+      (sum: number, item: any) => sum + n(item.amount),
+      0,
+    );
     const total = Math.max(0, subtotal);
     const feeClassId = cleanId(fee.classId);
     const feeAcademicStructureId = cleanId(fee.academicStructureId);
     const feeAcademicPeriodId = cleanId(fee.academicPeriodId);
 
-    if (!items.length || total <= 0 || !feeAcademicStructureId || !feeAcademicPeriodId) return 0;
+    if (
+      !items.length ||
+      total <= 0 ||
+      !feeAcademicStructureId ||
+      !feeAcademicPeriodId
+    )
+      return 0;
 
     const isActiveStudent = (student?: AnyRow | null) =>
-      !!student && student.isDeleted !== true && !["withdrawn", "graduated", "transferred"].includes(String(student.status || "active").toLowerCase());
+      !!student &&
+      student.isDeleted !== true &&
+      !["withdrawn", "graduated", "transferred"].includes(
+        String(student.status || "active").toLowerCase(),
+      );
 
     const enrollmentMatches = (enrollment: AnyRow) => {
       if (!enrollment || enrollment.isDeleted === true) return false;
-      if (!BILLABLE_ENROLLMENT_STATUSES.has(String(enrollment.status || "active").toLowerCase())) return false;
-      if (feeClassId && Number(enrollment.classId || 0) !== Number(feeClassId)) return false;
-      if (feeAcademicStructureId && Number(enrollment.academicStructureId || 0) !== Number(feeAcademicStructureId)) return false;
-      if (feeAcademicPeriodId && Number(enrollment.academicPeriodId || 0) !== Number(feeAcademicPeriodId)) return false;
+      if (
+        !BILLABLE_ENROLLMENT_STATUSES.has(
+          String(enrollment.status || "active").toLowerCase(),
+        )
+      )
+        return false;
+      if (
+        feeClassId &&
+        !sameId(enrollment.classId, feeClassId)
+      )
+        return false;
+      if (
+        feeAcademicStructureId &&
+        !sameId(enrollment.academicStructureId, feeAcademicStructureId)
+      )
+        return false;
+      if (
+        feeAcademicPeriodId &&
+        !sameId(enrollment.academicPeriodId, feeAcademicPeriodId)
+      )
+        return false;
       return true;
     };
 
     const studentMatchesFallback = (student: AnyRow) => {
-      if (feeClassId && Number(student.currentClassId || student.classId || 0) !== Number(feeClassId)) return false;
+      if (
+        feeClassId &&
+        !sameId(student.currentClassId || student.classId, feeClassId)
+      )
+        return false;
       return true;
     };
 
     const matchingEnrollmentRows = studentEnrollments.filter(enrollmentMatches);
     const enrolledStudents = matchingEnrollmentRows
-      .map((enrollment) => studentById.get(Number(enrollment.studentId || 0)))
+      .map((enrollment) => studentById.get(cleanId(enrollment.studentId)))
       .filter(Boolean) as AnyRow[];
 
     // Fallback only protects old data where enrollment rows were not created yet.
-    const fallbackStudents = !matchingEnrollmentRows.length ? students.filter(studentMatchesFallback) : [];
+    const fallbackStudents = !matchingEnrollmentRows.length
+      ? students.filter(studentMatchesFallback)
+      : [];
 
-    const seen = new Set<number>();
+    const seen = new Set<string>();
     const targetStudents = [...enrolledStudents, ...fallbackStudents]
       .filter(isActiveStudent)
       .filter((student) => {
@@ -729,258 +1037,49 @@ export default function FeesPage() {
 
     if (!targetStudents.length) return 0;
 
-    const alreadyHasInvoice = (studentId: number) =>
+    const alreadyHasInvoice = (studentId: string) =>
       invoices.some((invoice) => {
-        const sameStudent = Number(invoice.studentId || 0) === Number(studentId);
-        const sameFee = Number(invoice.feeStructureId || 0) === Number(feeStructureId);
-        const samePeriod = Number(invoice.academicPeriodId || 0) === Number(feeAcademicPeriodId);
-        const stillActive = invoice.isDeleted !== true && !["cancelled", "void"].includes(String(invoice.status || "").toLowerCase());
+        const sameStudent =
+          sameId(invoice.studentId, studentId);
+        const sameFee =
+          sameId(invoice.feeStructureId, feeStructureId);
+        const samePeriod =
+          sameId(invoice.academicPeriodId, feeAcademicPeriodId);
+        const stillActive =
+          invoice.isDeleted !== true &&
+          !["cancelled", "void"].includes(
+            String(invoice.status || "").toLowerCase(),
+          );
         return sameStudent && sameFee && samePeriod && stillActive;
       });
 
-    const studentsToInvoice = targetStudents.filter((student) => !alreadyHasInvoice(cleanId(idOf(student))));
+    const studentsToInvoice = targetStudents.filter(
+      (student) => !alreadyHasInvoice(cleanId(idOf(student))),
+    );
 
     if (!studentsToInvoice.length) return 0;
 
     let createdCount = 0;
 
-    for (let studentIndex = 0; studentIndex < studentsToInvoice.length; studentIndex += 1) {
+    for (
+      let studentIndex = 0;
+      studentIndex < studentsToInvoice.length;
+      studentIndex += 1
+    ) {
       const student = studentsToInvoice[studentIndex];
       const studentId = cleanId(idOf(student));
-      const matchedEnrollment =
-        (enrollmentByStudentId.get(studentId) || []).find(enrollmentMatches);
+      const matchedEnrollment = (
+        enrollmentByStudentId.get(studentId) || []
+      ).find(enrollmentMatches);
 
-      const classId = cleanId(matchedEnrollment?.classId) || feeClassId || cleanId(student.currentClassId || student.classId);
+      const classId =
+        cleanId(matchedEnrollment?.classId) ||
+        feeClassId ||
+        cleanId(student.currentClassId || student.classId);
 
-      const createdInvoice = (await createLocal("studentFeeInvoices" as any, {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        studentId,
-        classId: classId || undefined,
-        feeStructureId,
-        academicStructureId: feeAcademicStructureId,
-        academicPeriodId: feeAcademicPeriodId,
-        enrollmentId: cleanId(idOf(matchedEnrollment)) || undefined,
-        invoiceNumber: `${generateInvoiceNumber()}-${studentIndex + 1}`,
-        subtotal,
-        discount: 0,
-        tax: 0,
-        total,
-        amountPaid: 0,
-        balance: total,
-        status: "issued",
-        issueDate: today(),
-        dueDate: dueIn(14),
-        note: "Auto-generated when Branch Admin saved the fee structure.",
-        currencyCode: fee.currencyCode || currency.code,
-        currencySymbol: fee.currencySymbol || currency.symbol,
-        active: true,
-        isDeleted: false,
-      } as AnyRow)) as AnyRow | undefined;
-
-      const invoiceId = cleanId(idOf(createdInvoice));
-      if (!invoiceId) throw new Error("Invoice was created but its local id could not be resolved.");
-
-      for (let index = 0; index < items.length; index += 1) {
-        const item = items[index];
-        await createLocal("studentFeeInvoiceItems" as any, {
-          accountId: String(accountId),
-          schoolId,
-          branchId,
-          invoiceId,
-          feeStructureId,
-          name: text(item.name, `Fee Item ${index + 1}`),
-          quantity: 1,
-          unitAmount: n(item.amount),
-          amount: n(item.amount),
-          required: true,
-          order: index + 1,
-          currencyCode: fee.currencyCode || currency.code,
-          currencySymbol: fee.currencySymbol || currency.symbol,
-          active: true,
-          isDeleted: false,
-        } as AnyRow);
-      }
-
-      createdCount += 1;
-    }
-
-    if (!options?.silent && createdCount) {
-      showToast("success", createdCount === 1 ? "Fee saved and 1 invoice was created." : `Fee saved and ${createdCount} invoices were created.`);
-    }
-
-    return createdCount;
-  }
-
-  async function saveFeeStructure() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before saving fees.");
-    if (!feeForm.academicStructureId || !feeForm.academicPeriodId) return setMessage("Select academic structure and period.");
-    if (!feeForm.items.length) return setMessage("Add at least one fee item.");
-
-    setSaving(true);
-    try {
-      const payload: AnyRow = {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        classId: feeForm.classId === "all" ? undefined : Number(feeForm.classId),
-        academicStructureId: Number(feeForm.academicStructureId),
-        academicPeriodId: Number(feeForm.academicPeriodId),
-        items: feeForm.items,
-        currencyCode: feeForm.currencyCode || currency.code,
-        currencySymbol: feeForm.currencySymbol || currency.symbol,
-        active: true,
-        isDeleted: false,
-      };
-
-      const savedFee = feeForm.id
-        ? ((await updateLocal("feeStructures" as any, feeForm.id, payload)) as AnyRow | undefined)
-        : ((await createLocal("feeStructures" as any, payload)) as AnyRow | undefined);
-
-      const feeStructureId = feeForm.id || cleanId(idOf(savedFee));
-      const invoiceCount = await createInvoicesForFeeStructure({ ...payload, id: feeStructureId }, feeStructureId, { silent: true });
-
-      setDrawer(null);
-      setActiveSection(invoiceCount ? "invoices" : "fees");
-      showToast(
-        "success",
-        invoiceCount
-          ? feeForm.id
-            ? `Fee structure updated. ${invoiceCount} new invoice(s) generated for students without invoices.`
-            : `Fee structure saved. ${invoiceCount} payable student invoice(s) generated.`
-          : feeForm.id
-            ? "Fee structure updated. No new matching student needed an invoice."
-            : "Fee structure saved. No enrolled student matched yet."
-      );
-      await load();
-    } catch (error: any) {
-      console.error("Failed to save fee structure:", error);
-      showToast("error", error?.message || "Failed to save fee structure.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function generateInvoice() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before generating invoices.");
-
-    const feeStructureId = cleanId(invoiceForm.feeStructureId);
-    const fee = feeStructures.find((row) => Number(idOf(row)) === feeStructureId);
-    if (!fee) return setMessage("Select a fee structure.");
-
-    const items = Array.isArray(fee.items) ? fee.items : [];
-    const subtotal = items.reduce((sum: number, item: any) => sum + n(item.amount), 0);
-    const discount = n(invoiceForm.discount);
-    const tax = n(invoiceForm.tax);
-    const total = Math.max(0, subtotal - discount + tax);
-
-    const feeClassId = cleanId(fee.classId);
-    const feeAcademicStructureId = cleanId(fee.academicStructureId);
-    const feeAcademicPeriodId = cleanId(fee.academicPeriodId);
-    const selectedClassId = cleanId(invoiceForm.classId) || feeClassId;
-    const target = invoiceForm.invoiceTarget || "single_student";
-
-    if (!items.length || total <= 0) return setMessage("Selected fee structure has no payable items.");
-    if (!feeAcademicStructureId || !feeAcademicPeriodId) return setMessage("Selected fee structure needs academic structure and period.");
-
-    const isActiveStudent = (student?: AnyRow | null) =>
-      !!student && student.isDeleted !== true && !["withdrawn", "graduated", "transferred"].includes(String(student.status || "active").toLowerCase());
-
-    const enrollmentMatches = (enrollment: AnyRow, classId?: number) => {
-      if (!enrollment || enrollment.isDeleted === true) return false;
-      if (!BILLABLE_ENROLLMENT_STATUSES.has(String(enrollment.status || "active").toLowerCase())) return false;
-      if (classId && Number(enrollment.classId || 0) !== Number(classId)) return false;
-      if (feeAcademicStructureId && Number(enrollment.academicStructureId || 0) !== Number(feeAcademicStructureId)) return false;
-      if (feeAcademicPeriodId && Number(enrollment.academicPeriodId || 0) !== Number(feeAcademicPeriodId)) return false;
-      return true;
-    };
-
-    const studentMatchesClassFallback = (student: AnyRow, classId?: number) => {
-      if (!classId) return true;
-      return Number(student.currentClassId || student.classId || 0) === Number(classId);
-    };
-
-    const uniqueStudents = (rows: AnyRow[]) => {
-      const seen = new Set<number>();
-      return rows.filter((student) => {
-        const studentId = cleanId(idOf(student));
-        if (!studentId || seen.has(studentId)) return false;
-        seen.add(studentId);
-        return true;
-      });
-    };
-
-    let targetStudents: AnyRow[] = [];
-
-    if (target === "single_student") {
-      const studentId = cleanId(invoiceForm.studentId);
-      if (!studentId) return setMessage("Select a student or change the target to class/all matching students.");
-
-      const student = students.find((row) => Number(idOf(row)) === Number(studentId));
-      if (!student) return setMessage("Selected student could not be found.");
-
-      const enrollments = enrollmentByStudentId.get(studentId) || [];
-      const hasMatchingEnrollment = enrollments.some((enrollment) => enrollmentMatches(enrollment, selectedClassId || feeClassId));
-      const hasClassFallback = studentMatchesClassFallback(student, selectedClassId || feeClassId);
-
-      if (!hasMatchingEnrollment && !hasClassFallback) {
-        return setMessage("Selected student is not enrolled in the fee structure class/term.");
-      }
-
-      targetStudents = [student];
-    }
-
-    if (target === "selected_class" || target === "matching_students") {
-      const targetClassId = target === "selected_class" ? selectedClassId : feeClassId;
-
-      if (target === "selected_class" && !targetClassId) return setMessage("Select a class before generating class invoices.");
-
-      const matchingEnrollmentRows = studentEnrollments.filter((enrollment) => enrollmentMatches(enrollment, targetClassId));
-      const enrolledStudents = matchingEnrollmentRows
-        .map((enrollment) => studentById.get(Number(enrollment.studentId || 0)))
-        .filter(Boolean) as AnyRow[];
-
-      const fallbackStudents = !matchingEnrollmentRows.length
-        ? students.filter((student) => studentMatchesClassFallback(student, targetClassId))
-        : [];
-
-      targetStudents = uniqueStudents([...enrolledStudents, ...fallbackStudents]);
-    }
-
-    targetStudents = uniqueStudents(targetStudents).filter(isActiveStudent);
-
-    if (!targetStudents.length) {
-      return setMessage("No active/promoted enrolled students match this fee structure class, academic structure and period.");
-    }
-
-    const alreadyHasInvoice = (studentId: number) =>
-      invoices.some((invoice) => {
-        const sameStudent = Number(invoice.studentId || 0) === Number(studentId);
-        const sameFee = Number(invoice.feeStructureId || 0) === Number(feeStructureId);
-        const samePeriod = Number(invoice.academicPeriodId || 0) === Number(feeAcademicPeriodId);
-        const stillActive = invoice.isDeleted !== true && !["cancelled", "void"].includes(String(invoice.status || "").toLowerCase());
-        return sameStudent && sameFee && samePeriod && stillActive;
-      });
-
-    const studentsToInvoice = targetStudents.filter((student) => !alreadyHasInvoice(cleanId(idOf(student))));
-
-    if (!studentsToInvoice.length) return setMessage("Matching enrolled students already have invoices for this fee structure and period.");
-
-    setSaving(true);
-    try {
-      let createdCount = 0;
-
-      for (let studentIndex = 0; studentIndex < studentsToInvoice.length; studentIndex += 1) {
-        const student = studentsToInvoice[studentIndex];
-        const studentId = cleanId(idOf(student));
-        const matchedEnrollment =
-          (enrollmentByStudentId.get(studentId) || []).find((enrollment) => enrollmentMatches(enrollment, selectedClassId || feeClassId)) ||
-          (enrollmentByStudentId.get(studentId) || []).find((enrollment) => enrollmentMatches(enrollment));
-
-        const classId = cleanId(matchedEnrollment?.classId) || selectedClassId || feeClassId || cleanId(student.currentClassId || student.classId);
-
-        const createdInvoice = (await createLocal("studentFeeInvoices" as any, {
+      const createdInvoice = (await createLocal(
+        "studentFeeInvoices" as any,
+        {
           accountId: String(accountId),
           schoolId,
           branchId,
@@ -992,27 +1091,33 @@ export default function FeesPage() {
           enrollmentId: cleanId(idOf(matchedEnrollment)) || undefined,
           invoiceNumber: `${generateInvoiceNumber()}-${studentIndex + 1}`,
           subtotal,
-          discount,
-          tax,
+          discount: 0,
+          tax: 0,
           total,
           amountPaid: 0,
           balance: total,
           status: "issued",
           issueDate: today(),
-          dueDate: invoiceForm.dueDate || dueIn(14),
-          note: invoiceForm.note,
+          dueDate: dueIn(14),
+          note: "Auto-generated when Branch Admin saved the fee structure.",
           currencyCode: fee.currencyCode || currency.code,
           currencySymbol: fee.currencySymbol || currency.symbol,
           active: true,
           isDeleted: false,
-        } as AnyRow)) as AnyRow | undefined;
+        } as AnyRow,
+      )) as AnyRow | undefined;
 
-        const invoiceId = cleanId(idOf(createdInvoice));
-        if (!invoiceId) throw new Error("Invoice was created but its local id could not be resolved.");
+      const invoiceId = cleanId(idOf(createdInvoice));
+      if (!invoiceId)
+        throw new Error(
+          "Invoice was created but its local id could not be resolved.",
+        );
 
-        for (let index = 0; index < items.length; index += 1) {
-          const item = items[index];
-          await createLocal("studentFeeInvoiceItems" as any, {
+      for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        await createLocal(
+          "studentFeeInvoiceItems" as any,
+          {
             accountId: String(accountId),
             schoolId,
             branchId,
@@ -1028,7 +1133,337 @@ export default function FeesPage() {
             currencySymbol: fee.currencySymbol || currency.symbol,
             active: true,
             isDeleted: false,
-          } as AnyRow);
+          } as AnyRow,
+        );
+      }
+
+      createdCount += 1;
+    }
+
+    if (!options?.silent && createdCount) {
+      showToast(
+        "success",
+        createdCount === 1
+          ? "Fee saved and 1 invoice was created."
+          : `Fee saved and ${createdCount} invoices were created.`,
+      );
+    }
+
+    return createdCount;
+  }
+
+  async function saveFeeStructure() {
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before saving fees.");
+    if (!feeForm.academicStructureId || !feeForm.academicPeriodId)
+      return setMessage("Select academic structure and period.");
+    if (!feeForm.items.length) return setMessage("Add at least one fee item.");
+
+    setSaving(true);
+    try {
+      const payload: AnyRow = {
+        accountId: String(accountId),
+        schoolId,
+        branchId,
+        classId:
+          feeForm.classId === "all" ? undefined : String(feeForm.classId),
+        academicStructureId: cleanId(feeForm.academicStructureId) || undefined,
+        academicPeriodId: cleanId(feeForm.academicPeriodId) || undefined,
+        items: feeForm.items,
+        currencyCode: feeForm.currencyCode || currency.code,
+        currencySymbol: feeForm.currencySymbol || currency.symbol,
+        active: true,
+        isDeleted: false,
+      };
+
+      const savedFee = feeForm.id
+        ? ((await updateLocal("feeStructures" as any, feeForm.id, payload)) as
+            | AnyRow
+            | undefined)
+        : ((await createLocal("feeStructures" as any, payload)) as
+            | AnyRow
+            | undefined);
+
+      const feeStructureId = feeForm.id || cleanId(idOf(savedFee));
+      const invoiceCount = await createInvoicesForFeeStructure(
+        { ...payload, id: feeStructureId },
+        feeStructureId,
+        { silent: true },
+      );
+
+      setDrawer(null);
+      setActiveSection(invoiceCount ? "invoices" : "fees");
+      showToast(
+        "success",
+        invoiceCount
+          ? feeForm.id
+            ? `Fee structure updated. ${invoiceCount} new invoice(s) generated for students without invoices.`
+            : `Fee structure saved. ${invoiceCount} payable student invoice(s) generated.`
+          : feeForm.id
+            ? "Fee structure updated. No new matching student needed an invoice."
+            : "Fee structure saved. No enrolled student matched yet.",
+      );
+      await load();
+    } catch (error: any) {
+      console.error("Failed to save fee structure:", error);
+      showToast("error", error?.message || "Failed to save fee structure.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function generateInvoice() {
+    if (!accountId || !schoolId || !branchId)
+      return setMessage(
+        "Select a school and branch before generating invoices.",
+      );
+
+    const feeStructureId = cleanId(invoiceForm.feeStructureId);
+    const fee = feeStructures.find(
+      (row) => sameId(idOf(row), feeStructureId),
+    );
+    if (!fee) return setMessage("Select a fee structure.");
+
+    const items = Array.isArray(fee.items) ? fee.items : [];
+    const subtotal = items.reduce(
+      (sum: number, item: any) => sum + n(item.amount),
+      0,
+    );
+    const discount = n(invoiceForm.discount);
+    const tax = n(invoiceForm.tax);
+    const total = Math.max(0, subtotal - discount + tax);
+
+    const feeClassId = cleanId(fee.classId);
+    const feeAcademicStructureId = cleanId(fee.academicStructureId);
+    const feeAcademicPeriodId = cleanId(fee.academicPeriodId);
+    const selectedClassId = cleanId(invoiceForm.classId) || feeClassId;
+    const target = invoiceForm.invoiceTarget || "single_student";
+
+    if (!items.length || total <= 0)
+      return setMessage("Selected fee structure has no payable items.");
+    if (!feeAcademicStructureId || !feeAcademicPeriodId)
+      return setMessage(
+        "Selected fee structure needs academic structure and period.",
+      );
+
+    const isActiveStudent = (student?: AnyRow | null) =>
+      !!student &&
+      student.isDeleted !== true &&
+      !["withdrawn", "graduated", "transferred"].includes(
+        String(student.status || "active").toLowerCase(),
+      );
+
+    const enrollmentMatches = (enrollment: AnyRow, classId?: string) => {
+      if (!enrollment || enrollment.isDeleted === true) return false;
+      if (
+        !BILLABLE_ENROLLMENT_STATUSES.has(
+          String(enrollment.status || "active").toLowerCase(),
+        )
+      )
+        return false;
+      if (classId && !sameId(enrollment.classId, classId)) return false;
+      if (
+        feeAcademicStructureId &&
+        !sameId(enrollment.academicStructureId, feeAcademicStructureId)
+      )
+        return false;
+      if (
+        feeAcademicPeriodId &&
+        !sameId(enrollment.academicPeriodId, feeAcademicPeriodId)
+      )
+        return false;
+      return true;
+    };
+
+    const studentMatchesClassFallback = (student: AnyRow, classId?: string) => {
+      if (!classId) return true;
+      return sameId(student.currentClassId || student.classId, classId);
+    };
+
+    const uniqueStudents = (rows: AnyRow[]) => {
+      const seen = new Set<string>();
+      return rows.filter((student) => {
+        const studentId = cleanId(idOf(student));
+        if (!studentId || seen.has(studentId)) return false;
+        seen.add(studentId);
+        return true;
+      });
+    };
+
+    let targetStudents: AnyRow[] = [];
+
+    if (target === "single_student") {
+      const studentId = cleanId(invoiceForm.studentId);
+      if (!studentId)
+        return setMessage(
+          "Select a student or change the target to class/all matching students.",
+        );
+
+      const student = students.find(
+        (row) => sameId(idOf(row), studentId),
+      );
+      if (!student) return setMessage("Selected student could not be found.");
+
+      const enrollments = enrollmentByStudentId.get(studentId) || [];
+      const hasMatchingEnrollment = enrollments.some((enrollment) =>
+        enrollmentMatches(enrollment, selectedClassId || feeClassId),
+      );
+      const hasClassFallback = studentMatchesClassFallback(
+        student,
+        selectedClassId || feeClassId,
+      );
+
+      if (!hasMatchingEnrollment && !hasClassFallback) {
+        return setMessage(
+          "Selected student is not enrolled in the fee structure class/term.",
+        );
+      }
+
+      targetStudents = [student];
+    }
+
+    if (target === "selected_class" || target === "matching_students") {
+      const targetClassId =
+        target === "selected_class" ? selectedClassId : feeClassId;
+
+      if (target === "selected_class" && !targetClassId)
+        return setMessage("Select a class before generating class invoices.");
+
+      const matchingEnrollmentRows = studentEnrollments.filter((enrollment) =>
+        enrollmentMatches(enrollment, targetClassId),
+      );
+      const enrolledStudents = matchingEnrollmentRows
+        .map((enrollment) => studentById.get(cleanId(enrollment.studentId)))
+        .filter(Boolean) as AnyRow[];
+
+      const fallbackStudents = !matchingEnrollmentRows.length
+        ? students.filter((student) =>
+            studentMatchesClassFallback(student, targetClassId),
+          )
+        : [];
+
+      targetStudents = uniqueStudents([
+        ...enrolledStudents,
+        ...fallbackStudents,
+      ]);
+    }
+
+    targetStudents = uniqueStudents(targetStudents).filter(isActiveStudent);
+
+    if (!targetStudents.length) {
+      return setMessage(
+        "No active/promoted enrolled students match this fee structure class, academic structure and period.",
+      );
+    }
+
+    const alreadyHasInvoice = (studentId: string) =>
+      invoices.some((invoice) => {
+        const sameStudent =
+          sameId(invoice.studentId, studentId);
+        const sameFee =
+          sameId(invoice.feeStructureId, feeStructureId);
+        const samePeriod =
+          sameId(invoice.academicPeriodId, feeAcademicPeriodId);
+        const stillActive =
+          invoice.isDeleted !== true &&
+          !["cancelled", "void"].includes(
+            String(invoice.status || "").toLowerCase(),
+          );
+        return sameStudent && sameFee && samePeriod && stillActive;
+      });
+
+    const studentsToInvoice = targetStudents.filter(
+      (student) => !alreadyHasInvoice(cleanId(idOf(student))),
+    );
+
+    if (!studentsToInvoice.length)
+      return setMessage(
+        "Matching enrolled students already have invoices for this fee structure and period.",
+      );
+
+    setSaving(true);
+    try {
+      let createdCount = 0;
+
+      for (
+        let studentIndex = 0;
+        studentIndex < studentsToInvoice.length;
+        studentIndex += 1
+      ) {
+        const student = studentsToInvoice[studentIndex];
+        const studentId = cleanId(idOf(student));
+        const matchedEnrollment =
+          (enrollmentByStudentId.get(studentId) || []).find((enrollment) =>
+            enrollmentMatches(enrollment, selectedClassId || feeClassId),
+          ) ||
+          (enrollmentByStudentId.get(studentId) || []).find((enrollment) =>
+            enrollmentMatches(enrollment),
+          );
+
+        const classId =
+          cleanId(matchedEnrollment?.classId) ||
+          selectedClassId ||
+          feeClassId ||
+          cleanId(student.currentClassId || student.classId);
+
+        const createdInvoice = (await createLocal(
+          "studentFeeInvoices" as any,
+          {
+            accountId: String(accountId),
+            schoolId,
+            branchId,
+            studentId,
+            classId: classId || undefined,
+            feeStructureId,
+            academicStructureId: feeAcademicStructureId,
+            academicPeriodId: feeAcademicPeriodId,
+            enrollmentId: cleanId(idOf(matchedEnrollment)) || undefined,
+            invoiceNumber: `${generateInvoiceNumber()}-${studentIndex + 1}`,
+            subtotal,
+            discount,
+            tax,
+            total,
+            amountPaid: 0,
+            balance: total,
+            status: "issued",
+            issueDate: today(),
+            dueDate: invoiceForm.dueDate || dueIn(14),
+            note: invoiceForm.note,
+            currencyCode: fee.currencyCode || currency.code,
+            currencySymbol: fee.currencySymbol || currency.symbol,
+            active: true,
+            isDeleted: false,
+          } as AnyRow,
+        )) as AnyRow | undefined;
+
+        const invoiceId = cleanId(idOf(createdInvoice));
+        if (!invoiceId)
+          throw new Error(
+            "Invoice was created but its local id could not be resolved.",
+          );
+
+        for (let index = 0; index < items.length; index += 1) {
+          const item = items[index];
+          await createLocal(
+            "studentFeeInvoiceItems" as any,
+            {
+              accountId: String(accountId),
+              schoolId,
+              branchId,
+              invoiceId,
+              feeStructureId,
+              name: text(item.name, `Fee Item ${index + 1}`),
+              quantity: 1,
+              unitAmount: n(item.amount),
+              amount: n(item.amount),
+              required: true,
+              order: index + 1,
+              currencyCode: fee.currencyCode || currency.code,
+              currencySymbol: fee.currencySymbol || currency.symbol,
+              active: true,
+              isDeleted: false,
+            } as AnyRow,
+          );
         }
 
         createdCount += 1;
@@ -1036,7 +1471,12 @@ export default function FeesPage() {
 
       setDrawer(null);
       setActiveSection("invoices");
-      showToast("success", createdCount === 1 ? "Student invoice generated from enrollment." : `${createdCount} enrollment-based student invoices generated.`);
+      showToast(
+        "success",
+        createdCount === 1
+          ? "Student invoice generated from enrollment."
+          : `${createdCount} enrollment-based student invoices generated.`,
+      );
       await load();
     } catch (error: any) {
       console.error("Failed to generate invoice:", error);
@@ -1047,9 +1487,15 @@ export default function FeesPage() {
   }
 
   async function recordPayment() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before recording payment.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before recording payment.");
     const invoiceId = cleanId(paymentForm.invoiceId);
-    const invoice = (invoiceRows.find((row) => Number(idOf(row)) === invoiceId) || invoices.find((row) => Number(idOf(row)) === invoiceId)) as InvoiceRow | AnyRow | undefined;
+    const invoice = (invoiceRows.find(
+      (row) => sameId(idOf(row), invoiceId),
+    ) ||
+      invoices.find(
+        (row) => sameId(idOf(row), invoiceId),
+      )) as InvoiceRow | AnyRow | undefined;
     const amount = n(paymentForm.amount);
 
     if (!invoice) return setMessage("Select a valid invoice.");
@@ -1063,35 +1509,41 @@ export default function FeesPage() {
 
     setSaving(true);
     try {
-      await createLocal("studentFeePayments" as any, {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        invoiceId,
-        studentId: cleanId(invoice.studentId),
-        amount,
-        method: paymentForm.method,
-        provider: paymentForm.provider || "manual",
-        status: "paid",
-        receiptNumber: paymentForm.receiptNumber || `RCPT-${Date.now().toString(36).toUpperCase().slice(-6)}`,
-        referenceNumber: paymentForm.referenceNumber,
-        payerName: paymentForm.payerName,
-        payerPhone: paymentForm.payerPhone,
-        payerEmail: paymentForm.payerEmail,
-        date: paymentForm.date || today(),
-        paidAt: paymentForm.date || today(),
-        note: paymentForm.note,
-        currencyCode: invoice.currencyCode || currency.code,
-        currencySymbol: invoice.currencySymbol || currency.symbol,
-        active: true,
-        isDeleted: false,
-      } as AnyRow);
+      await createLocal(
+        "studentFeePayments" as any,
+        {
+          accountId: String(accountId),
+          schoolId,
+          branchId,
+          invoiceId,
+          studentId: cleanId(invoice.studentId),
+          amount,
+          method: paymentForm.method,
+          provider: paymentForm.provider || "manual",
+          status: "paid",
+          receiptNumber:
+            paymentForm.receiptNumber ||
+            `RCPT-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+          referenceNumber: paymentForm.referenceNumber,
+          payerName: paymentForm.payerName,
+          payerPhone: paymentForm.payerPhone,
+          payerEmail: paymentForm.payerEmail,
+          date: paymentForm.date || today(),
+          paidAt: paymentForm.date || today(),
+          note: paymentForm.note,
+          currencyCode: invoice.currencyCode || currency.code,
+          currencySymbol: invoice.currencySymbol || currency.symbol,
+          active: true,
+          isDeleted: false,
+        } as AnyRow,
+      );
 
       await updateLocal("studentFeeInvoices" as any, invoiceId, {
         amountPaid: newPaid,
         balance,
         status: nextStatus,
-        paidAt: nextStatus === "paid" ? paymentForm.date || today() : invoice.paidAt,
+        paidAt:
+          nextStatus === "paid" ? paymentForm.date || today() : invoice.paidAt,
       } as AnyRow);
 
       setDrawer(null);
@@ -1108,12 +1560,16 @@ export default function FeesPage() {
   async function deleteInvoice(invoice: AnyRow) {
     const id = cleanId(idOf(invoice));
     if (!id) return;
-    if (!window.confirm(`Delete invoice ${invoice.invoiceNumber || "record"}?`)) return;
+    if (!window.confirm(`Delete invoice ${invoice.invoiceNumber || "record"}?`))
+      return;
     try {
       await softDeleteLocal("studentFeeInvoices" as any, id);
-      for (const item of invoiceItems.filter((row) => Number(row.invoiceId) === id)) {
+      for (const item of invoiceItems.filter(
+        (row) => String(row.invoiceId) === id,
+      )) {
         const itemId = cleanId(idOf(item));
-        if (itemId) await softDeleteLocal("studentFeeInvoiceItems" as any, itemId);
+        if (itemId)
+          await softDeleteLocal("studentFeeInvoiceItems" as any, itemId);
       }
       showToast("success", "Invoice deleted.");
       await load();
@@ -1125,7 +1581,12 @@ export default function FeesPage() {
   async function deleteFeeStructure(fee: AnyRow) {
     const id = cleanId(idOf(fee));
     if (!id) return;
-    if (!window.confirm("Delete this fee structure? Existing invoices will remain.")) return;
+    if (
+      !window.confirm(
+        "Delete this fee structure? Existing invoices will remain.",
+      )
+    )
+      return;
     try {
       await softDeleteLocal("feeStructures" as any, id);
       showToast("success", "Fee structure deleted.");
@@ -1136,83 +1597,242 @@ export default function FeesPage() {
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening fees..." text="Loading branch fee structures, invoices and payments." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening fees..."
+        text="Loading branch fee structures, invoices and payments."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing branch fees." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing branch fees."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Fees are branch-scoped. Choose an active school and branch before continuing." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Fees are branch-scoped. Choose an active school and branch before continuing."
+      />
+    );
   }
 
   return (
-    <main className="bf-page" style={{ "--bf-primary": primary } as React.CSSProperties}>
+    <main
+      className="bf-page"
+      style={{ "--bf-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`bf-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
       <section className="bf-search-card" aria-label="Fees search and actions">
-        <span className={`status-dot-mini ${summary.overdue ? "orange" : summary.invoices ? "green" : "gray"}`} title={`${summary.invoices} invoice(s)`} />
+        <span
+          className={`status-dot-mini ${summary.overdue ? "orange" : summary.invoices ? "green" : "gray"}`}
+          title={`${summary.invoices} invoice(s)`}
+        />
 
         <label className="bf-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={activeSection === "fees" ? "Search fee structures..." : activeSection === "payments" ? "Search payments..." : "Search invoices..."} aria-label="Search fees" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={
+              activeSection === "fees"
+                ? "Search fee structures..."
+                : activeSection === "payments"
+                  ? "Search payments..."
+                  : "Search invoices..."
+            }
+            aria-label="Search fees"
+          />
         </label>
 
-        <button type="button" className="bf-add-inline" onClick={() => activeSection === "fees" ? openFeeDrawer() : activeSection === "payments" ? openPaymentDrawer() : openInvoiceDrawer()} aria-label="Create finance record">+</button>
+        <button
+          type="button"
+          className="bf-add-inline"
+          onClick={() =>
+            activeSection === "fees"
+              ? openFeeDrawer()
+              : activeSection === "payments"
+                ? openPaymentDrawer()
+                : openInvoiceDrawer()
+          }
+          aria-label="Create finance record"
+        >
+          +
+        </button>
 
-        <button type="button" className={`bf-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`bf-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="bf-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="bf-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(status !== "all" || classFilter !== "all" || query.trim()) && (
         <section className="bf-filter-chips" aria-label="Active filters">
-          {status !== "all" && <button type="button" onClick={() => setStatus("all")}>Status: {status.replaceAll("_", " ")} ×</button>}
-          {classFilter !== "all" && <button type="button" onClick={() => setClassFilter("all")}>Class: {classMap.get(Number(classFilter)) || classFilter} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {status !== "all" && (
+            <button type="button" onClick={() => setStatus("all")}>
+              Status: {status.replaceAll("_", " ")} ×
+            </button>
+          )}
+          {classFilter !== "all" && (
+            <button type="button" onClick={() => setClassFilter("all")}>
+              Class: {classMap.get(cleanId(classFilter)) || classFilter} ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
       <section className="bf-section-tabs" aria-label="Finance sections">
-        <button type="button" className={activeSection === "fees" ? "active" : ""} onClick={() => setActiveSection("fees")}>💳 Fee Structures <b>{filteredFeeStructures.length}</b></button>
-        <button type="button" className={activeSection === "invoices" ? "active" : ""} onClick={() => setActiveSection("invoices")}>🧾 Invoices <b>{invoiceRows.length}</b></button>
-        <button type="button" className={activeSection === "payments" ? "active" : ""} onClick={() => setActiveSection("payments")}>💰 Payments <b>{filteredPayments.length}</b></button>
+        <button
+          type="button"
+          className={activeSection === "fees" ? "active" : ""}
+          onClick={() => setActiveSection("fees")}
+        >
+          💳 Fee Structures <b>{filteredFeeStructures.length}</b>
+        </button>
+        <button
+          type="button"
+          className={activeSection === "invoices" ? "active" : ""}
+          onClick={() => setActiveSection("invoices")}
+        >
+          🧾 Invoices <b>{invoiceRows.length}</b>
+        </button>
+        <button
+          type="button"
+          className={activeSection === "payments" ? "active" : ""}
+          onClick={() => setActiveSection("payments")}
+        >
+          💰 Payments <b>{filteredPayments.length}</b>
+        </button>
       </section>
 
-      {view === "analytics" && <AnalyticsView summary={summary} currency={currency.code} invoices={invoiceRows} feeStructures={feeStructures} payments={payments} />}
+      {view === "analytics" && (
+        <AnalyticsView
+          summary={summary}
+          currency={currency.code}
+          invoices={invoiceRows}
+          feeStructures={feeStructures}
+          payments={payments}
+        />
+      )}
 
-      {view === "table" && activeSection === "fees" && <FeeStructureTable rows={filteredFeeStructures} classMap={classMap} currency={currency.code} openInvoiceDrawer={openInvoiceDrawer} openFeeDrawer={openFeeDrawer} deleteFeeStructure={deleteFeeStructure} />}
+      {view === "table" && activeSection === "fees" && (
+        <FeeStructureTable
+          rows={filteredFeeStructures}
+          classMap={classMap}
+          currency={currency.code}
+          openInvoiceDrawer={openInvoiceDrawer}
+          openFeeDrawer={openFeeDrawer}
+          deleteFeeStructure={deleteFeeStructure}
+        />
+      )}
 
-      {view === "table" && activeSection === "invoices" && <TableView rows={invoiceRows} studentMap={studentMap} classMap={classMap} currency={currency.code} openPaymentDrawer={openPaymentDrawer} setSelectedInvoice={setSelectedInvoice} deleteInvoice={deleteInvoice} />}
+      {view === "table" && activeSection === "invoices" && (
+        <TableView
+          rows={invoiceRows}
+          studentMap={studentMap}
+          classMap={classMap}
+          currency={currency.code}
+          openPaymentDrawer={openPaymentDrawer}
+          setSelectedInvoice={setSelectedInvoice}
+          deleteInvoice={deleteInvoice}
+        />
+      )}
 
-      {view === "table" && activeSection === "payments" && <PaymentTable rows={filteredPayments} invoices={invoiceRows} studentMap={studentMap} currency={currency.code} />}
+      {view === "table" && activeSection === "payments" && (
+        <PaymentTable
+          rows={filteredPayments}
+          invoices={invoiceRows}
+          studentMap={studentMap}
+          currency={currency.code}
+        />
+      )}
 
       {view === "cards" && activeSection === "fees" && (
         <section className="bf-list finance-grid">
           {filteredFeeStructures.map((fee) => (
             <article key={String(idOf(fee))} className="fee-row">
               <span>💳</span>
-              <b>{fee.classId ? classMap.get(Number(fee.classId)) || "Class fees" : "All classes"}</b>
-              <small>{(fee.items || []).length} item(s) · {money((fee.items || []).reduce((sum: number, item: any) => sum + n(item.amount), 0), fee.currencyCode || currency.code)}</small>
+              <b>
+                {fee.classId
+                  ? classMap.get(cleanId(fee.classId)) || "Class fees"
+                  : "All classes"}
+              </b>
+              <small>
+                {(fee.items || []).length} item(s) ·{" "}
+                {money(
+                  (fee.items || []).reduce(
+                    (sum: number, item: any) => sum + n(item.amount),
+                    0,
+                  ),
+                  fee.currencyCode || currency.code,
+                )}
+              </small>
               <div>
-                <button type="button" onClick={() => openInvoiceDrawer(fee)}>Invoice</button>
-                <button type="button" onClick={() => openFeeDrawer(fee)}>Edit</button>
-                <button type="button" className="danger" onClick={() => deleteFeeStructure(fee)}>Delete</button>
+                <button type="button" onClick={() => openInvoiceDrawer(fee)}>
+                  Invoice
+                </button>
+                <button type="button" onClick={() => openFeeDrawer(fee)}>
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => deleteFeeStructure(fee)}
+                >
+                  Delete
+                </button>
               </div>
             </article>
           ))}
-          {!filteredFeeStructures.length && <Empty title="No fee structures found" text="Tap + to create the branch fee structure for a class, term or all classes." />}
+          {!filteredFeeStructures.length && (
+            <Empty
+              title="No fee structures found"
+              text="Tap + to create the branch fee structure for a class, term or all classes."
+            />
+          )}
         </section>
       )}
 
@@ -1222,46 +1842,168 @@ export default function FeesPage() {
             <InvoiceCard
               key={String(idOf(invoice))}
               invoice={invoice}
-              studentName={studentMap.get(Number(invoice.studentId)) || "Unknown student"}
-              className={classMap.get(Number(invoice.classId)) || "No class"}
+              studentName={
+                studentMap.get(cleanId(invoice.studentId)) || "Unknown student"
+              }
+              className={classMap.get(cleanId(invoice.classId)) || "No class"}
               currency={invoice.currencyCode || currency.code}
               openPaymentDrawer={openPaymentDrawer}
               setSelectedInvoice={setSelectedInvoice}
               deleteInvoice={deleteInvoice}
             />
           ))}
-          {!invoiceRows.length && <Empty title="No invoices found" text="Switch to Fee Structures, create fees, then generate student invoices." />}
+          {!invoiceRows.length && (
+            <Empty
+              title="No invoices found"
+              text="Switch to Fee Structures, create fees, then generate student invoices."
+            />
+          )}
         </section>
       )}
 
       {view === "cards" && activeSection === "payments" && (
         <section className="bf-list finance-grid">
           {filteredPayments.map((payment) => {
-            const invoice = invoiceRows.find((row) => Number(idOf(row)) === Number(payment.invoiceId || 0));
-            return <PaymentCard key={String(idOf(payment))} payment={payment} invoice={invoice} studentName={studentMap.get(Number(payment.studentId)) || "Unknown student"} currency={payment.currencyCode || currency.code} />;
+            const invoice = invoiceRows.find(
+              (row) => sameId(idOf(row), payment.invoiceId),
+            );
+            return (
+              <PaymentCard
+                key={String(idOf(payment))}
+                payment={payment}
+                invoice={invoice}
+                studentName={
+                  studentMap.get(cleanId(payment.studentId)) || "Unknown student"
+                }
+                currency={payment.currencyCode || currency.code}
+              />
+            );
           })}
-          {!filteredPayments.length && <Empty title="No payments found" text="Tap + to record a cash, momo, bank, card or manual fee payment." />}
+          {!filteredPayments.length && (
+            <Empty
+              title="No payments found"
+              text="Tap + to record a cash, momo, bank, card or manual fee payment."
+            />
+          )}
         </section>
       )}
 
-      {filterOpen && <FilterSheet status={status} setStatus={setStatus} classFilter={classFilter} setClassFilter={setClassFilter} classes={classes} onClose={() => setFilterOpen(false)} />}
+      {filterOpen && (
+        <FilterSheet
+          status={status}
+          setStatus={setStatus}
+          classFilter={classFilter}
+          setClassFilter={setClassFilter}
+          classes={classes}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
 
-      {moreOpen && <MoreSheet view={view} setView={(mode) => { setView(mode); setMoreOpen(false); }} summary={summary} onRefresh={async () => { setMoreOpen(false); await load(); }} onFee={() => { setMoreOpen(false); openFeeDrawer(); }} onPayment={() => { setMoreOpen(false); openPaymentDrawer(); }} onClose={() => setMoreOpen(false)} />}
+      {moreOpen && (
+        <MoreSheet
+          view={view}
+          setView={(mode) => {
+            setView(mode);
+            setMoreOpen(false);
+          }}
+          summary={summary}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onFee={() => {
+            setMoreOpen(false);
+            openFeeDrawer();
+          }}
+          onPayment={() => {
+            setMoreOpen(false);
+            openPaymentDrawer();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
 
-      {drawer === "fee" && <FeeDrawer form={feeForm} setForm={setFeeForm} classes={classes} academicStructures={academicStructures} academicPeriods={academicPeriods} message={message} saving={saving} addFeeItem={addFeeItem} removeFeeItem={removeFeeItem} save={saveFeeStructure} close={() => setDrawer(null)} />}
+      {drawer === "fee" && (
+        <FeeDrawer
+          form={feeForm}
+          setForm={setFeeForm}
+          classes={classes}
+          academicStructures={academicStructures}
+          academicPeriods={academicPeriods}
+          message={message}
+          saving={saving}
+          addFeeItem={addFeeItem}
+          removeFeeItem={removeFeeItem}
+          save={saveFeeStructure}
+          close={() => setDrawer(null)}
+        />
+      )}
 
-      {drawer === "invoice" && <InvoiceDrawer form={invoiceForm} setForm={setInvoiceForm} students={students} classes={classes} feeStructures={feeStructures} classMap={classMap} currency={currency.code} message={message} saving={saving} generate={generateInvoice} close={() => setDrawer(null)} />}
+      {drawer === "invoice" && (
+        <InvoiceDrawer
+          form={invoiceForm}
+          setForm={setInvoiceForm}
+          students={students}
+          classes={classes}
+          feeStructures={feeStructures}
+          classMap={classMap}
+          currency={currency.code}
+          message={message}
+          saving={saving}
+          generate={generateInvoice}
+          close={() => setDrawer(null)}
+        />
+      )}
 
-      {drawer === "payment" && <PaymentDrawer form={paymentForm} setForm={setPaymentForm} invoices={invoiceRows} studentMap={studentMap} currency={currency.code} message={message} saving={saving} record={recordPayment} close={() => setDrawer(null)} />}
+      {drawer === "payment" && (
+        <PaymentDrawer
+          form={paymentForm}
+          setForm={setPaymentForm}
+          invoices={invoiceRows}
+          studentMap={studentMap}
+          currency={currency.code}
+          message={message}
+          saving={saving}
+          record={recordPayment}
+          close={() => setDrawer(null)}
+        />
+      )}
 
-      {selectedInvoice && <InvoiceSheet invoice={selectedInvoice} studentName={studentMap.get(Number(selectedInvoice.studentId)) || "Unknown student"} className={classMap.get(Number(selectedInvoice.classId)) || "No class"} items={selectedInvoiceItems} payments={selectedInvoicePayments} currency={selectedInvoice.currencyCode || currency.code} openPaymentDrawer={openPaymentDrawer} close={() => setSelectedInvoice(null)} />}
+      {selectedInvoice && (
+        <InvoiceSheet
+          invoice={selectedInvoice}
+          studentName={
+            studentMap.get(cleanId(selectedInvoice.studentId)) ||
+            "Unknown student"
+          }
+          className={
+            classMap.get(cleanId(selectedInvoice.classId)) || "No class"
+          }
+          items={selectedInvoiceItems}
+          payments={selectedInvoicePayments}
+          currency={selectedInvoice.currencyCode || currency.code}
+          openPaymentDrawer={openPaymentDrawer}
+          close={() => setSelectedInvoice(null)}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="bf-page" style={{ "--bf-primary": primary } as React.CSSProperties}>
+    <main
+      className="bf-page"
+      style={{ "--bf-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="bf-state">
         <div className="bf-spinner" />
@@ -1272,256 +2014,1229 @@ function State({ primary, title, text: body }: { primary: string; title: string;
   );
 }
 
-function InvoiceCard({ invoice, studentName, className, currency, openPaymentDrawer, setSelectedInvoice, deleteInvoice }: { invoice: AnyRow; studentName: string; className: string; currency: string; openPaymentDrawer: (invoice: AnyRow) => void; setSelectedInvoice: (invoice: AnyRow) => void; deleteInvoice: (invoice: AnyRow) => void }) {
+function InvoiceCard({
+  invoice,
+  studentName,
+  className,
+  currency,
+  openPaymentDrawer,
+  setSelectedInvoice,
+  deleteInvoice,
+}: {
+  invoice: AnyRow;
+  studentName: string;
+  className: string;
+  currency: string;
+  openPaymentDrawer: (invoice: AnyRow) => void;
+  setSelectedInvoice: (invoice: AnyRow) => void;
+  deleteInvoice: (invoice: AnyRow) => void;
+}) {
   const status = invoice.computedStatus || invoice.status || "issued";
   return (
     <article className="invoice-row">
       <span className="invoice-avatar">🧾</span>
       <span className="invoice-main">
         <strong>{studentName}</strong>
-        <small>{invoice.invoiceNumber || "Invoice"} · {className}</small>
-        <em>{money(invoice.balance, currency)} balance · due {dateLabel(invoice.dueDate)}</em>
+        <small>
+          {invoice.invoiceNumber || "Invoice"} · {className}
+        </small>
+        <em>
+          {money(invoice.balance, currency)} balance · due{" "}
+          {dateLabel(invoice.dueDate)}
+        </em>
       </span>
       <span className="invoice-side">
-        <Chip tone={statusTone(status)}>{String(status).replaceAll("_", " ")}</Chip>
-        <button type="button" onClick={() => setSelectedInvoice(invoice)}>View</button>
-        <button type="button" onClick={() => openPaymentDrawer(invoice)}>Pay</button>
-        <button type="button" className="danger" onClick={() => deleteInvoice(invoice)}>⌫</button>
+        <Chip tone={statusTone(status)}>
+          {String(status).replaceAll("_", " ")}
+        </Chip>
+        <button type="button" onClick={() => setSelectedInvoice(invoice)}>
+          View
+        </button>
+        <button type="button" onClick={() => openPaymentDrawer(invoice)}>
+          Pay
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => deleteInvoice(invoice)}
+        >
+          ⌫
+        </button>
       </span>
     </article>
   );
 }
 
-function PaymentCard({ payment, invoice, studentName, currency }: { payment: AnyRow; invoice?: AnyRow; studentName: string; currency: string }) {
+function PaymentCard({
+  payment,
+  invoice,
+  studentName,
+  currency,
+}: {
+  payment: AnyRow;
+  invoice?: AnyRow;
+  studentName: string;
+  currency: string;
+}) {
   return (
     <article className="payment-row">
       <span className="invoice-avatar">💰</span>
       <span className="invoice-main">
         <strong>{studentName}</strong>
-        <small>{payment.receiptNumber || payment.referenceNumber || "Payment"} · {invoice?.invoiceNumber || "Manual record"}</small>
-        <em>{money(payment.amount, currency)} · {payment.method || "manual"} · {dateLabel(payment.paidAt || payment.date)}</em>
+        <small>
+          {payment.receiptNumber || payment.referenceNumber || "Payment"} ·{" "}
+          {invoice?.invoiceNumber || "Manual record"}
+        </small>
+        <em>
+          {money(payment.amount, currency)} · {payment.method || "manual"} ·{" "}
+          {dateLabel(payment.paidAt || payment.date)}
+        </em>
       </span>
       <span className="invoice-side">
-        <Chip tone={paymentTone(payment.status)}>{payment.status || "paid"}</Chip>
+        <Chip tone={paymentTone(payment.status)}>
+          {payment.status || "paid"}
+        </Chip>
       </span>
     </article>
   );
 }
 
-function FeeStructureTable({ rows, classMap, currency, openInvoiceDrawer, openFeeDrawer, deleteFeeStructure }: { rows: AnyRow[]; classMap: Map<number, string>; currency: string; openInvoiceDrawer: (fee?: AnyRow) => void; openFeeDrawer: (fee?: AnyRow) => void; deleteFeeStructure: (fee: AnyRow) => void }) {
+function FeeStructureTable({
+  rows,
+  classMap,
+  currency,
+  openInvoiceDrawer,
+  openFeeDrawer,
+  deleteFeeStructure,
+}: {
+  rows: AnyRow[];
+  classMap: Map<string, string>;
+  currency: string;
+  openInvoiceDrawer: (fee?: AnyRow) => void;
+  openFeeDrawer: (fee?: AnyRow) => void;
+  deleteFeeStructure: (fee: AnyRow) => void;
+}) {
   return (
     <section className="bf-table-card">
       <div className="bf-table-scroll">
         <table>
-          <thead><tr><th>Fee Structures ({rows.length})</th><th>Class</th><th>Items</th><th>Total</th><th>Period</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Fee Structures ({rows.length})</th>
+              <th>Class</th>
+              <th>Items</th>
+              <th>Total</th>
+              <th>Period</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((fee) => {
-              const total = (fee.items || []).reduce((sum: number, item: any) => sum + n(item.amount), 0);
+              const total = (fee.items || []).reduce(
+                (sum: number, item: any) => sum + n(item.amount),
+                0,
+              );
               return (
                 <tr key={String(idOf(fee))}>
-                  <td><strong>{fee.classId ? classMap.get(Number(fee.classId)) || "Class fees" : "All classes"}</strong><span>{dateLabel(fee.updatedAt || fee.createdAt)}</span></td>
-                  <td>{fee.classId ? classMap.get(Number(fee.classId)) || "Class" : "All classes"}</td>
+                  <td>
+                    <strong>
+                      {fee.classId
+                        ? classMap.get(cleanId(fee.classId)) || "Class fees"
+                        : "All classes"}
+                    </strong>
+                    <span>{dateLabel(fee.updatedAt || fee.createdAt)}</span>
+                  </td>
+                  <td>
+                    {fee.classId
+                      ? classMap.get(cleanId(fee.classId)) || "Class"
+                      : "All classes"}
+                  </td>
                   <td>{(fee.items || []).length}</td>
                   <td>{money(total, fee.currencyCode || currency)}</td>
                   <td>{fee.academicPeriodId || "Not set"}</td>
-                  <td><div className="bf-table-actions"><button type="button" onClick={() => openInvoiceDrawer(fee)}>Invoice</button><button type="button" onClick={() => openFeeDrawer(fee)}>Edit</button><button type="button" className="danger" onClick={() => deleteFeeStructure(fee)}>Delete</button></div></td>
+                  <td>
+                    <div className="bf-table-actions">
+                      <button
+                        type="button"
+                        onClick={() => openInvoiceDrawer(fee)}
+                      >
+                        Invoice
+                      </button>
+                      <button type="button" onClick={() => openFeeDrawer(fee)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => deleteFeeStructure(fee)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="bf-empty-table">No fee structure matches your filters.</div>}
+        {!rows.length && (
+          <div className="bf-empty-table">
+            No fee structure matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function PaymentTable({ rows, invoices, studentMap, currency }: { rows: AnyRow[]; invoices: AnyRow[]; studentMap: Map<number, string>; currency: string }) {
+function PaymentTable({
+  rows,
+  invoices,
+  studentMap,
+  currency,
+}: {
+  rows: AnyRow[];
+  invoices: AnyRow[];
+  studentMap: Map<string, string>;
+  currency: string;
+}) {
   return (
     <section className="bf-table-card">
       <div className="bf-table-scroll">
         <table>
-          <thead><tr><th>Payments ({rows.length})</th><th>Student</th><th>Invoice</th><th>Amount</th><th>Method</th><th>Status</th><th>Date</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Payments ({rows.length})</th>
+              <th>Student</th>
+              <th>Invoice</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((payment) => {
-              const invoice = invoices.find((row) => Number(idOf(row)) === Number(payment.invoiceId || 0));
+              const invoice = invoices.find(
+                (row) => sameId(idOf(row), payment.invoiceId),
+              );
               return (
                 <tr key={String(idOf(payment))}>
-                  <td><strong>{payment.receiptNumber || payment.referenceNumber || "Payment"}</strong><span>{payment.provider || "manual"}</span></td>
-                  <td>{studentMap.get(Number(payment.studentId)) || "Unknown student"}</td>
+                  <td>
+                    <strong>
+                      {payment.receiptNumber ||
+                        payment.referenceNumber ||
+                        "Payment"}
+                    </strong>
+                    <span>{payment.provider || "manual"}</span>
+                  </td>
+                  <td>
+                    {studentMap.get(cleanId(payment.studentId)) ||
+                      "Unknown student"}
+                  </td>
                   <td>{invoice?.invoiceNumber || "Manual record"}</td>
-                  <td>{money(payment.amount, payment.currencyCode || currency)}</td>
+                  <td>
+                    {money(payment.amount, payment.currencyCode || currency)}
+                  </td>
                   <td>{payment.method || "manual"}</td>
-                  <td><Chip tone={paymentTone(payment.status)}>{payment.status || "paid"}</Chip></td>
-                  <td>{dateLabel(payment.paidAt || payment.date || payment.createdAt)}</td>
+                  <td>
+                    <Chip tone={paymentTone(payment.status)}>
+                      {payment.status || "paid"}
+                    </Chip>
+                  </td>
+                  <td>
+                    {dateLabel(
+                      payment.paidAt || payment.date || payment.createdAt,
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="bf-empty-table">No payment matches your filters.</div>}
+        {!rows.length && (
+          <div className="bf-empty-table">No payment matches your filters.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function TableView({ rows, studentMap, classMap, currency, openPaymentDrawer, setSelectedInvoice, deleteInvoice }: { rows: AnyRow[]; studentMap: Map<number, string>; classMap: Map<number, string>; currency: string; openPaymentDrawer: (invoice: AnyRow) => void; setSelectedInvoice: (invoice: AnyRow) => void; deleteInvoice: (invoice: AnyRow) => void }) {
+function TableView({
+  rows,
+  studentMap,
+  classMap,
+  currency,
+  openPaymentDrawer,
+  setSelectedInvoice,
+  deleteInvoice,
+}: {
+  rows: AnyRow[];
+  studentMap: Map<string, string>;
+  classMap: Map<string, string>;
+  currency: string;
+  openPaymentDrawer: (invoice: AnyRow) => void;
+  setSelectedInvoice: (invoice: AnyRow) => void;
+  deleteInvoice: (invoice: AnyRow) => void;
+}) {
   return (
     <section className="bf-table-card">
       <div className="bf-table-scroll">
         <table>
-          <thead><tr><th>Invoices ({rows.length})</th><th>Student</th><th>Class</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th><th>Due</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Invoices ({rows.length})</th>
+              <th>Student</th>
+              <th>Class</th>
+              <th>Total</th>
+              <th>Paid</th>
+              <th>Balance</th>
+              <th>Status</th>
+              <th>Due</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((invoice) => {
-              const status = invoice.computedStatus || invoice.status || "issued";
+              const status =
+                invoice.computedStatus || invoice.status || "issued";
               return (
                 <tr key={String(idOf(invoice))}>
-                  <td><strong>{invoice.invoiceNumber || "Invoice"}</strong><span>{dateLabel(invoice.issueDate || invoice.createdAt)}</span></td>
-                  <td>{studentMap.get(Number(invoice.studentId)) || "Unknown student"}</td>
-                  <td>{classMap.get(Number(invoice.classId)) || "No class"}</td>
-                  <td>{money(invoice.total, invoice.currencyCode || currency)}</td>
-                  <td>{money(invoice.amountPaid, invoice.currencyCode || currency)}</td>
-                  <td>{money(invoice.balance, invoice.currencyCode || currency)}</td>
-                  <td><Chip tone={statusTone(status)}>{String(status).replaceAll("_", " ")}</Chip></td>
+                  <td>
+                    <strong>{invoice.invoiceNumber || "Invoice"}</strong>
+                    <span>
+                      {dateLabel(invoice.issueDate || invoice.createdAt)}
+                    </span>
+                  </td>
+                  <td>
+                    {studentMap.get(cleanId(invoice.studentId)) ||
+                      "Unknown student"}
+                  </td>
+                  <td>{classMap.get(cleanId(invoice.classId)) || "No class"}</td>
+                  <td>
+                    {money(invoice.total, invoice.currencyCode || currency)}
+                  </td>
+                  <td>
+                    {money(
+                      invoice.amountPaid,
+                      invoice.currencyCode || currency,
+                    )}
+                  </td>
+                  <td>
+                    {money(invoice.balance, invoice.currencyCode || currency)}
+                  </td>
+                  <td>
+                    <Chip tone={statusTone(status)}>
+                      {String(status).replaceAll("_", " ")}
+                    </Chip>
+                  </td>
                   <td>{dateLabel(invoice.dueDate)}</td>
-                  <td><div className="bf-table-actions"><button type="button" onClick={() => setSelectedInvoice(invoice)}>View</button><button type="button" onClick={() => openPaymentDrawer(invoice)}>Pay</button><button type="button" className="danger" onClick={() => deleteInvoice(invoice)}>Delete</button></div></td>
+                  <td>
+                    <div className="bf-table-actions">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoice(invoice)}
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openPaymentDrawer(invoice)}
+                      >
+                        Pay
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => deleteInvoice(invoice)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="bf-empty-table">No invoice matches your filters.</div>}
+        {!rows.length && (
+          <div className="bf-empty-table">No invoice matches your filters.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function FilterSheet({ status, setStatus, classFilter, setClassFilter, classes, onClose }: { status: StatusFilter; setStatus: (value: StatusFilter) => void; classFilter: string; setClassFilter: (value: string) => void; classes: AnyRow[]; onClose: () => void }) {
+function FilterSheet({
+  status,
+  setStatus,
+  classFilter,
+  setClassFilter,
+  classes,
+  onClose,
+}: {
+  status: StatusFilter;
+  setStatus: (value: StatusFilter) => void;
+  classFilter: string;
+  setClassFilter: (value: string) => void;
+  classes: AnyRow[];
+  onClose: () => void;
+}) {
   return (
     <div className="bf-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bf-sheet small">
-        <div className="bf-sheet-head"><div><h2>Filters</h2><p>Choose invoice status and class.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="bf-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Choose invoice status and class.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="bf-form compact">
-          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="issued">Issued</option><option value="part_paid">Part paid</option><option value="paid">Paid</option><option value="overdue">Overdue</option><option value="draft">Draft</option><option value="cancelled">Cancelled</option></select></label>
-          <label><span>Class</span><select value={classFilter} onChange={(event) => setClassFilter(event.target.value)}><option value="all">All classes</option>{classes.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
+          <label>
+            <span>Status</span>
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as StatusFilter)
+              }
+            >
+              <option value="all">All statuses</option>
+              <option value="issued">Issued</option>
+              <option value="part_paid">Part paid</option>
+              <option value="paid">Paid</option>
+              <option value="overdue">Overdue</option>
+              <option value="draft">Draft</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label>
+            <span>Class</span>
+            <select
+              value={classFilter}
+              onChange={(event) => setClassFilter(event.target.value)}
+            >
+              <option value="all">All classes</option>
+              {classes.map((item) => (
+                <option key={String(idOf(item))} value={String(idOf(item))}>
+                  {rowName(item)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <div className="bf-sheet-actions"><button type="button" onClick={() => { setStatus("all"); setClassFilter("all"); }}>Reset</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="bf-sheet-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setStatus("all");
+              setClassFilter("all");
+            }}
+          >
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, onRefresh, onFee, onPayment, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; onRefresh: () => void | Promise<void>; onFee: () => void; onPayment: () => void; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  onRefresh,
+  onFee,
+  onPayment,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  onRefresh: () => void | Promise<void>;
+  onFee: () => void;
+  onPayment: () => void;
+  onClose: () => void;
+}) {
   return (
     <div className="bf-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bf-sheet small">
-        <div className="bf-sheet-head"><div><h2>More</h2><p>Views and finance actions are kept here to save space.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="bf-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Views and finance actions are kept here to save space.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="bf-menu-list">
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>Cards view</b><small>{summary.invoices} invoice(s) shown</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table view</b><small>Dense invoice records</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{money(summary.balance)} balance · {summary.overdue} overdue</small></button>
-          <button type="button" onClick={onFee}><span>💳</span><b>New fee structure</b><small>Set branch fees for class and term</small></button>
-          <button type="button" onClick={onPayment}><span>💰</span><b>Record payment</b><small>Manual cash, momo, bank or card record</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch fees</small></button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>Cards view</b>
+            <small>{summary.invoices} invoice(s) shown</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense invoice records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>
+              {money(summary.balance)} balance · {summary.overdue} overdue
+            </small>
+          </button>
+          <button type="button" onClick={onFee}>
+            <span>💳</span>
+            <b>New fee structure</b>
+            <small>Set branch fees for class and term</small>
+          </button>
+          <button type="button" onClick={onPayment}>
+            <span>💰</span>
+            <b>Record payment</b>
+            <small>Manual cash, momo, bank or card record</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch fees</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function FeeDrawer({ form, setForm, classes, academicStructures, academicPeriods, message, saving, addFeeItem, removeFeeItem, save, close }: { form: FeeForm; setForm: React.Dispatch<React.SetStateAction<FeeForm>>; classes: AnyRow[]; academicStructures: AnyRow[]; academicPeriods: AnyRow[]; message: string; saving: boolean; addFeeItem: () => void; removeFeeItem: (index: number) => void; save: () => void | Promise<void>; close: () => void }) {
+function FeeDrawer({
+  form,
+  setForm,
+  classes,
+  academicStructures,
+  academicPeriods,
+  message,
+  saving,
+  addFeeItem,
+  removeFeeItem,
+  save,
+  close,
+}: {
+  form: FeeForm;
+  setForm: React.Dispatch<React.SetStateAction<FeeForm>>;
+  classes: AnyRow[];
+  academicStructures: AnyRow[];
+  academicPeriods: AnyRow[];
+  message: string;
+  saving: boolean;
+  addFeeItem: () => void;
+  removeFeeItem: (index: number) => void;
+  save: () => void | Promise<void>;
+  close: () => void;
+}) {
   const total = form.items.reduce((sum, item) => sum + n(item.amount), 0);
   return (
-    <div className="bf-drawer-layer" role="dialog" aria-modal="true"><button className="bf-drawer-overlay" type="button" onClick={close} /><aside className="bf-drawer">
-      <div className="bf-drawer-head"><div><p>{form.id ? "Edit Fee Structure" : "New Fee Structure"}</p><h2>Branch Fees</h2><span>{form.items.length} item(s) · {money(total, form.currencyCode)}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="bf-inline-error">{message}</section>}
-      <section className="bf-form-card"><div className="bf-form-grid">
-        <label><span>Class</span><select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value })}><option value="all">All classes</option>{classes.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Academic Structure</span><select value={form.academicStructureId} onChange={(event) => setForm({ ...form, academicStructureId: event.target.value })}><option value="">Select</option>{academicStructures.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Academic Period</span><select value={form.academicPeriodId} onChange={(event) => setForm({ ...form, academicPeriodId: event.target.value })}><option value="">Select</option>{academicPeriods.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Currency</span><input value={form.currencyCode} onChange={(event) => setForm({ ...form, currencyCode: event.target.value.toUpperCase() })} /></label>
-        <label><span>Item Name</span><input value={form.itemName} onChange={(event) => setForm({ ...form, itemName: event.target.value })} placeholder="Tuition, Feeding, PTA..." /></label>
-        <label><span>Amount</span><input type="number" value={form.itemAmount} onChange={(event) => setForm({ ...form, itemAmount: event.target.value })} placeholder="0" /></label>
-      </div><button type="button" className="bf-soft-wide" onClick={addFeeItem}>Add Fee Item</button>
-      <div className="bf-item-list">{form.items.map((item, index) => <article key={`${item.name}-${index}`}><b>{item.name}</b><span>{money(item.amount, form.currencyCode)}</span><button type="button" onClick={() => removeFeeItem(index)}>×</button></article>)}</div></section>
-      <div className="bf-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={save}>{saving ? "Saving..." : "Save Fees"}</button></div>
-    </aside></div>
+    <div className="bf-drawer-layer" role="dialog" aria-modal="true">
+      <button className="bf-drawer-overlay" type="button" onClick={close} />
+      <aside className="bf-drawer">
+        <div className="bf-drawer-head">
+          <div>
+            <p>{form.id ? "Edit Fee Structure" : "New Fee Structure"}</p>
+            <h2>Branch Fees</h2>
+            <span>
+              {form.items.length} item(s) · {money(total, form.currencyCode)}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="bf-inline-error">{message}</section>}
+        <section className="bf-form-card">
+          <div className="bf-form-grid">
+            <label>
+              <span>Class</span>
+              <select
+                value={form.classId}
+                onChange={(event) =>
+                  setForm({ ...form, classId: event.target.value })
+                }
+              >
+                <option value="all">All classes</option>
+                {classes.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Academic Structure</span>
+              <select
+                value={form.academicStructureId}
+                onChange={(event) =>
+                  setForm({ ...form, academicStructureId: event.target.value })
+                }
+              >
+                <option value="">Select</option>
+                {academicStructures.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Academic Period</span>
+              <select
+                value={form.academicPeriodId}
+                onChange={(event) =>
+                  setForm({ ...form, academicPeriodId: event.target.value })
+                }
+              >
+                <option value="">Select</option>
+                {academicPeriods.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Currency</span>
+              <input
+                value={form.currencyCode}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    currencyCode: event.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </label>
+            <label>
+              <span>Item Name</span>
+              <input
+                value={form.itemName}
+                onChange={(event) =>
+                  setForm({ ...form, itemName: event.target.value })
+                }
+                placeholder="Tuition, Feeding, PTA..."
+              />
+            </label>
+            <label>
+              <span>Amount</span>
+              <input
+                type="number"
+                value={form.itemAmount}
+                onChange={(event) =>
+                  setForm({ ...form, itemAmount: event.target.value })
+                }
+                placeholder="0"
+              />
+            </label>
+          </div>
+          <button type="button" className="bf-soft-wide" onClick={addFeeItem}>
+            Add Fee Item
+          </button>
+          <div className="bf-item-list">
+            {form.items.map((item, index) => (
+              <article key={`${item.name}-${index}`}>
+                <b>{item.name}</b>
+                <span>{money(item.amount, form.currencyCode)}</span>
+                <button type="button" onClick={() => removeFeeItem(index)}>
+                  ×
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+        <div className="bf-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={save}
+          >
+            {saving ? "Saving..." : "Save Fees"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function InvoiceDrawer({ form, setForm, students, classes, feeStructures, classMap, currency, message, saving, generate, close }: { form: InvoiceForm; setForm: React.Dispatch<React.SetStateAction<InvoiceForm>>; students: AnyRow[]; classes: AnyRow[]; feeStructures: AnyRow[]; classMap: Map<number, string>; currency: string; message: string; saving: boolean; generate: () => void | Promise<void>; close: () => void }) {
-  const selectedFee = feeStructures.find((row) => String(idOf(row)) === form.feeStructureId);
-  const total = selectedFee ? (selectedFee.items || []).reduce((sum: number, item: any) => sum + n(item.amount), 0) : 0;
+function InvoiceDrawer({
+  form,
+  setForm,
+  students,
+  classes,
+  feeStructures,
+  classMap,
+  currency,
+  message,
+  saving,
+  generate,
+  close,
+}: {
+  form: InvoiceForm;
+  setForm: React.Dispatch<React.SetStateAction<InvoiceForm>>;
+  students: AnyRow[];
+  classes: AnyRow[];
+  feeStructures: AnyRow[];
+  classMap: Map<string, string>;
+  currency: string;
+  message: string;
+  saving: boolean;
+  generate: () => void | Promise<void>;
+  close: () => void;
+}) {
+  const selectedFee = feeStructures.find(
+    (row) => String(idOf(row)) === form.feeStructureId,
+  );
+  const total = selectedFee
+    ? (selectedFee.items || []).reduce(
+        (sum: number, item: any) => sum + n(item.amount),
+        0,
+      )
+    : 0;
   const selectedClassId = cleanId(form.classId || selectedFee?.classId);
-  const filteredStudents = students.filter((student) => !selectedClassId || Number(student.currentClassId || student.classId || 0) === Number(selectedClassId));
-  const targetCount = form.invoiceTarget === "single_student" ? (form.studentId ? 1 : 0) : filteredStudents.length;
+  const filteredStudents = students.filter(
+    (student) =>
+      !selectedClassId ||
+      String((student.currentClassId || student.classId || 0) ?? "") ===
+        String(selectedClassId ?? ""),
+  );
+  const targetCount =
+    form.invoiceTarget === "single_student"
+      ? form.studentId
+        ? 1
+        : 0
+      : filteredStudents.length;
   return (
-    <div className="bf-drawer-layer" role="dialog" aria-modal="true"><button className="bf-drawer-overlay" type="button" onClick={close} /><aside className="bf-drawer">
-      <div className="bf-drawer-head"><div><p>Generate Invoice</p><h2>Student Fees</h2><span>{selectedFee ? money(total, selectedFee.currencyCode || currency) : "Select fee structure"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="bf-inline-error">{message}</section>}
-      <section className="bf-form-card"><div className="bf-form-grid">
-        <label><span>Invoice Target</span><select value={form.invoiceTarget} onChange={(event) => setForm({ ...form, invoiceTarget: event.target.value as InvoiceTarget, studentId: event.target.value === "single_student" ? form.studentId : "" })}><option value="single_student">One student</option><option value="selected_class">Selected class</option><option value="matching_students">All matching students</option></select></label>
-        <label><span>Class</span><select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value, studentId: "" })}><option value="">Use fee structure class</option>{classes.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Student</span><select value={form.studentId} disabled={form.invoiceTarget !== "single_student"} onChange={(event) => setForm({ ...form, studentId: event.target.value })}><option value="">{form.invoiceTarget === "single_student" ? "Select student" : `${targetCount} student(s) will be targeted`}</option>{filteredStudents.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Fee Structure</span><select value={form.feeStructureId} onChange={(event) => { const selected = feeStructures.find((item) => String(idOf(item)) === event.target.value); setForm({ ...form, feeStructureId: event.target.value, classId: selected?.classId ? String(selected.classId) : form.classId }); }}><option value="">Select fee structure</option>{feeStructures.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{item.classId ? classMap.get(Number(item.classId)) || "Class" : "All classes"} · {(item.items || []).length} item(s)</option>)}</select></label>
-        <label><span>Due Date</span><input type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /></label>
-        <label><span>Discount</span><input type="number" value={form.discount} onChange={(event) => setForm({ ...form, discount: event.target.value })} /></label>
-        <label><span>Tax</span><input type="number" value={form.tax} onChange={(event) => setForm({ ...form, tax: event.target.value })} /></label>
-        <label className="wide"><span>Note</span><textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Optional note for parent/student portal" /></label>
-      </div><p className="bf-hint">Choose one student, a whole class, or all students matching the fee structure. Parent/student portal reads the generated invoices.</p></section>
-      <div className="bf-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={generate}>{saving ? "Generating..." : form.invoiceTarget === "single_student" ? "Generate Invoice" : "Generate Invoices"}</button></div>
-    </aside></div>
+    <div className="bf-drawer-layer" role="dialog" aria-modal="true">
+      <button className="bf-drawer-overlay" type="button" onClick={close} />
+      <aside className="bf-drawer">
+        <div className="bf-drawer-head">
+          <div>
+            <p>Generate Invoice</p>
+            <h2>Student Fees</h2>
+            <span>
+              {selectedFee
+                ? money(total, selectedFee.currencyCode || currency)
+                : "Select fee structure"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="bf-inline-error">{message}</section>}
+        <section className="bf-form-card">
+          <div className="bf-form-grid">
+            <label>
+              <span>Invoice Target</span>
+              <select
+                value={form.invoiceTarget}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    invoiceTarget: event.target.value as InvoiceTarget,
+                    studentId:
+                      event.target.value === "single_student"
+                        ? form.studentId
+                        : "",
+                  })
+                }
+              >
+                <option value="single_student">One student</option>
+                <option value="selected_class">Selected class</option>
+                <option value="matching_students">All matching students</option>
+              </select>
+            </label>
+            <label>
+              <span>Class</span>
+              <select
+                value={form.classId}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    classId: event.target.value,
+                    studentId: "",
+                  })
+                }
+              >
+                <option value="">Use fee structure class</option>
+                {classes.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Student</span>
+              <select
+                value={form.studentId}
+                disabled={form.invoiceTarget !== "single_student"}
+                onChange={(event) =>
+                  setForm({ ...form, studentId: event.target.value })
+                }
+              >
+                <option value="">
+                  {form.invoiceTarget === "single_student"
+                    ? "Select student"
+                    : `${targetCount} student(s) will be targeted`}
+                </option>
+                {filteredStudents.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Fee Structure</span>
+              <select
+                value={form.feeStructureId}
+                onChange={(event) => {
+                  const selected = feeStructures.find(
+                    (item) => String(idOf(item)) === event.target.value,
+                  );
+                  setForm({
+                    ...form,
+                    feeStructureId: event.target.value,
+                    classId: selected?.classId
+                      ? String(selected.classId)
+                      : form.classId,
+                  });
+                }}
+              >
+                <option value="">Select fee structure</option>
+                {feeStructures.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {item.classId
+                      ? classMap.get(cleanId(item.classId)) || "Class"
+                      : "All classes"}{" "}
+                    · {(item.items || []).length} item(s)
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Due Date</span>
+              <input
+                type="date"
+                value={form.dueDate}
+                onChange={(event) =>
+                  setForm({ ...form, dueDate: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Discount</span>
+              <input
+                type="number"
+                value={form.discount}
+                onChange={(event) =>
+                  setForm({ ...form, discount: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Tax</span>
+              <input
+                type="number"
+                value={form.tax}
+                onChange={(event) =>
+                  setForm({ ...form, tax: event.target.value })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Note</span>
+              <textarea
+                value={form.note}
+                onChange={(event) =>
+                  setForm({ ...form, note: event.target.value })
+                }
+                placeholder="Optional note for parent/student portal"
+              />
+            </label>
+          </div>
+          <p className="bf-hint">
+            Choose one student, a whole class, or all students matching the fee
+            structure. Parent/student portal reads the generated invoices.
+          </p>
+        </section>
+        <div className="bf-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={generate}
+          >
+            {saving
+              ? "Generating..."
+              : form.invoiceTarget === "single_student"
+                ? "Generate Invoice"
+                : "Generate Invoices"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function PaymentDrawer({ form, setForm, invoices, studentMap, currency, message, saving, record, close }: { form: PaymentForm; setForm: React.Dispatch<React.SetStateAction<PaymentForm>>; invoices: AnyRow[]; studentMap: Map<number, string>; currency: string; message: string; saving: boolean; record: () => void | Promise<void>; close: () => void }) {
-  const selectedInvoice = invoices.find((row) => String(idOf(row)) === form.invoiceId);
+function PaymentDrawer({
+  form,
+  setForm,
+  invoices,
+  studentMap,
+  currency,
+  message,
+  saving,
+  record,
+  close,
+}: {
+  form: PaymentForm;
+  setForm: React.Dispatch<React.SetStateAction<PaymentForm>>;
+  invoices: AnyRow[];
+  studentMap: Map<string, string>;
+  currency: string;
+  message: string;
+  saving: boolean;
+  record: () => void | Promise<void>;
+  close: () => void;
+}) {
+  const selectedInvoice = invoices.find(
+    (row) => String(idOf(row)) === form.invoiceId,
+  );
   return (
-    <div className="bf-drawer-layer" role="dialog" aria-modal="true"><button className="bf-drawer-overlay" type="button" onClick={close} /><aside className="bf-drawer">
-      <div className="bf-drawer-head"><div><p>Record Payment</p><h2>Fee Payment</h2><span>{selectedInvoice ? `${studentMap.get(Number(selectedInvoice.studentId)) || "Student"} · ${money(selectedInvoice.balance, selectedInvoice.currencyCode || currency)} balance` : "Select invoice"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="bf-inline-error">{message}</section>}
-      <section className="bf-form-card"><div className="bf-form-grid">
-        <label className="wide"><span>Invoice</span><select value={form.invoiceId} onChange={(event) => setForm({ ...form, invoiceId: event.target.value })}><option value="">Select invoice</option>{invoices.filter((row) => n(row.balance) > 0).map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{item.invoiceNumber} · {studentMap.get(Number(item.studentId)) || "Student"} · {money(item.balance, item.currencyCode || currency)}</option>)}</select></label>
-        <label><span>Amount</span><input type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-        <label><span>Method</span><select value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value as PaymentForm["method"] })}><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option><option value="manual">Manual</option></select></label>
-        <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-        <label><span>Reference</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} /></label>
-        <label><span>Receipt</span><input value={form.receiptNumber} onChange={(event) => setForm({ ...form, receiptNumber: event.target.value })} /></label>
-        <label><span>Payer Name</span><input value={form.payerName} onChange={(event) => setForm({ ...form, payerName: event.target.value })} /></label>
-        <label><span>Payer Phone</span><input value={form.payerPhone} onChange={(event) => setForm({ ...form, payerPhone: event.target.value })} /></label>
-        <label className="wide"><span>Note</span><textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
-      </div></section>
-      <div className="bf-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={record}>{saving ? "Recording..." : "Record Payment"}</button></div>
-    </aside></div>
+    <div className="bf-drawer-layer" role="dialog" aria-modal="true">
+      <button className="bf-drawer-overlay" type="button" onClick={close} />
+      <aside className="bf-drawer">
+        <div className="bf-drawer-head">
+          <div>
+            <p>Record Payment</p>
+            <h2>Fee Payment</h2>
+            <span>
+              {selectedInvoice
+                ? `${studentMap.get(cleanId(selectedInvoice.studentId)) || "Student"} · ${money(selectedInvoice.balance, selectedInvoice.currencyCode || currency)} balance`
+                : "Select invoice"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="bf-inline-error">{message}</section>}
+        <section className="bf-form-card">
+          <div className="bf-form-grid">
+            <label className="wide">
+              <span>Invoice</span>
+              <select
+                value={form.invoiceId}
+                onChange={(event) =>
+                  setForm({ ...form, invoiceId: event.target.value })
+                }
+              >
+                <option value="">Select invoice</option>
+                {invoices
+                  .filter((row) => n(row.balance) > 0)
+                  .map((item) => (
+                    <option key={String(idOf(item))} value={String(idOf(item))}>
+                      {item.invoiceNumber} ·{" "}
+                      {studentMap.get(cleanId(item.studentId)) || "Student"} ·{" "}
+                      {money(item.balance, item.currencyCode || currency)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              <span>Amount</span>
+              <input
+                type="number"
+                value={form.amount}
+                onChange={(event) =>
+                  setForm({ ...form, amount: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Method</span>
+              <select
+                value={form.method}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    method: event.target.value as PaymentForm["method"],
+                  })
+                }
+              >
+                <option value="cash">Cash</option>
+                <option value="momo">Momo</option>
+                <option value="bank">Bank</option>
+                <option value="card">Card</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <label>
+              <span>Date</span>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(event) =>
+                  setForm({ ...form, date: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Reference</span>
+              <input
+                value={form.referenceNumber}
+                onChange={(event) =>
+                  setForm({ ...form, referenceNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Receipt</span>
+              <input
+                value={form.receiptNumber}
+                onChange={(event) =>
+                  setForm({ ...form, receiptNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Payer Name</span>
+              <input
+                value={form.payerName}
+                onChange={(event) =>
+                  setForm({ ...form, payerName: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Payer Phone</span>
+              <input
+                value={form.payerPhone}
+                onChange={(event) =>
+                  setForm({ ...form, payerPhone: event.target.value })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Note</span>
+              <textarea
+                value={form.note}
+                onChange={(event) =>
+                  setForm({ ...form, note: event.target.value })
+                }
+              />
+            </label>
+          </div>
+        </section>
+        <div className="bf-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={record}
+          >
+            {saving ? "Recording..." : "Record Payment"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function InvoiceSheet({ invoice, studentName, className, items, payments, currency, openPaymentDrawer, close }: { invoice: AnyRow; studentName: string; className: string; items: AnyRow[]; payments: AnyRow[]; currency: string; openPaymentDrawer: (invoice: AnyRow) => void; close: () => void }) {
+function InvoiceSheet({
+  invoice,
+  studentName,
+  className,
+  items,
+  payments,
+  currency,
+  openPaymentDrawer,
+  close,
+}: {
+  invoice: AnyRow;
+  studentName: string;
+  className: string;
+  items: AnyRow[];
+  payments: AnyRow[];
+  currency: string;
+  openPaymentDrawer: (invoice: AnyRow) => void;
+  close: () => void;
+}) {
   return (
-    <div className="bf-sheet-backdrop" role="dialog" aria-modal="true"><section className="bf-sheet">
-      <div className="bf-sheet-head"><div><h2>{invoice.invoiceNumber || "Invoice"}</h2><p>{studentName} · {className} · {money(invoice.balance, currency)} balance</p></div><button type="button" onClick={close}>✕</button></div>
-      <div className="bf-detail-grid"><article><span>Total</span><b>{money(invoice.total, currency)}</b></article><article><span>Paid</span><b>{money(invoice.amountPaid, currency)}</b></article><article><span>Balance</span><b>{money(invoice.balance, currency)}</b></article></div>
-      <div className="bf-item-list sheet"><h3>Items</h3>{items.map((item) => <article key={String(idOf(item))}><b>{item.name}</b><span>{money(item.amount, item.currencyCode || currency)}</span></article>)}{!items.length && <p>No invoice items found.</p>}</div>
-      <div className="bf-item-list sheet"><h3>Payments</h3>{payments.map((payment) => <article key={String(idOf(payment))}><b>{money(payment.amount, payment.currencyCode || currency)}</b><span>{payment.method} · {dateLabel(payment.paidAt || payment.date)}</span></article>)}{!payments.length && <p>No payment records yet.</p>}</div>
-      <div className="bf-sheet-actions"><button type="button" onClick={close}>Close</button><button type="button" className="primary" onClick={() => openPaymentDrawer(invoice)}>Record Payment</button></div>
-    </section></div>
+    <div className="bf-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="bf-sheet">
+        <div className="bf-sheet-head">
+          <div>
+            <h2>{invoice.invoiceNumber || "Invoice"}</h2>
+            <p>
+              {studentName} · {className} · {money(invoice.balance, currency)}{" "}
+              balance
+            </p>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        <div className="bf-detail-grid">
+          <article>
+            <span>Total</span>
+            <b>{money(invoice.total, currency)}</b>
+          </article>
+          <article>
+            <span>Paid</span>
+            <b>{money(invoice.amountPaid, currency)}</b>
+          </article>
+          <article>
+            <span>Balance</span>
+            <b>{money(invoice.balance, currency)}</b>
+          </article>
+        </div>
+        <div className="bf-item-list sheet">
+          <h3>Items</h3>
+          {items.map((item) => (
+            <article key={String(idOf(item))}>
+              <b>{item.name}</b>
+              <span>{money(item.amount, item.currencyCode || currency)}</span>
+            </article>
+          ))}
+          {!items.length && <p>No invoice items found.</p>}
+        </div>
+        <div className="bf-item-list sheet">
+          <h3>Payments</h3>
+          {payments.map((payment) => (
+            <article key={String(idOf(payment))}>
+              <b>{money(payment.amount, payment.currencyCode || currency)}</b>
+              <span>
+                {payment.method} · {dateLabel(payment.paidAt || payment.date)}
+              </span>
+            </article>
+          ))}
+          {!payments.length && <p>No payment records yet.</p>}
+        </div>
+        <div className="bf-sheet-actions">
+          <button type="button" onClick={close}>
+            Close
+          </button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => openPaymentDrawer(invoice)}
+          >
+            Record Payment
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function AnalyticsView({ summary, currency, invoices, feeStructures, payments }: { summary: AnyRow; currency: string; invoices: AnyRow[]; feeStructures: AnyRow[]; payments: AnyRow[] }) {
+function AnalyticsView({
+  summary,
+  currency,
+  invoices,
+  feeStructures,
+  payments,
+}: {
+  summary: AnyRow;
+  currency: string;
+  invoices: AnyRow[];
+  feeStructures: AnyRow[];
+  payments: AnyRow[];
+}) {
   const rows = [
     { label: "Paid", value: summary.paidInvoices },
     { label: "Part Paid", value: summary.partPaid },
     { label: "Overdue", value: summary.overdue },
-    { label: "Open", value: Math.max(0, summary.invoices - summary.paidInvoices - summary.partPaid - summary.overdue) },
+    {
+      label: "Open",
+      value: Math.max(
+        0,
+        summary.invoices -
+          summary.paidInvoices -
+          summary.partPaid -
+          summary.overdue,
+      ),
+    },
   ];
   return (
     <section className="bf-analysis-grid">
-      <article className="bf-analysis"><span>Total Invoiced</span><strong>{money(summary.total, currency)}</strong><p>{summary.invoices} invoice(s) currently shown.</p></article>
-      <article className="bf-analysis"><span>Collected</span><strong>{money(summary.paid, currency)}</strong><p>{payments.length} payment record(s) in this branch.</p></article>
-      <article className="bf-analysis"><span>Balance</span><strong>{money(summary.balance, currency)}</strong><p>{summary.overdue} overdue invoice(s).</p></article>
-      <article className="bf-analysis"><span>Fee Setup</span><strong>{feeStructures.length}</strong><p>Fee structure(s) available for invoice generation.</p></article>
-      <article className="bf-analysis wide"><span>Invoice Status</span><strong>{invoices.length}</strong><div className="bf-analysis-list">{rows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{row.value}</small></div><div className="bf-progress"><i style={{ width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.invoices)) * 100))}%` }} /></div></section>)}</div></article>
+      <article className="bf-analysis">
+        <span>Total Invoiced</span>
+        <strong>{money(summary.total, currency)}</strong>
+        <p>{summary.invoices} invoice(s) currently shown.</p>
+      </article>
+      <article className="bf-analysis">
+        <span>Collected</span>
+        <strong>{money(summary.paid, currency)}</strong>
+        <p>{payments.length} payment record(s) in this branch.</p>
+      </article>
+      <article className="bf-analysis">
+        <span>Balance</span>
+        <strong>{money(summary.balance, currency)}</strong>
+        <p>{summary.overdue} overdue invoice(s).</p>
+      </article>
+      <article className="bf-analysis">
+        <span>Fee Setup</span>
+        <strong>{feeStructures.length}</strong>
+        <p>Fee structure(s) available for invoice generation.</p>
+      </article>
+      <article className="bf-analysis wide">
+        <span>Invoice Status</span>
+        <strong>{invoices.length}</strong>
+        <div className="bf-analysis-list">
+          {rows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{row.value}</small>
+              </div>
+              <div className="bf-progress">
+                <i
+                  style={{
+                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.invoices)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }

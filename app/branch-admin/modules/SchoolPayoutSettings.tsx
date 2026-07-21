@@ -34,7 +34,11 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { createLocal, listActiveLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -42,7 +46,7 @@ type AnyRow = Record<string, any>;
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 
 type PayoutForm = {
-  id: number;
+  id: string;
   settlementMode: "direct_subaccount" | "platform_wallet";
   preferredMethod: "bank" | "momo";
   bankName: string;
@@ -60,7 +64,7 @@ type PayoutForm = {
 };
 
 const emptyForm: PayoutForm = {
-  id: 0,
+  id: "",
   settlementMode: "platform_wallet",
   preferredMethod: "bank",
   bankName: "",
@@ -83,8 +87,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -92,7 +96,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -118,19 +124,27 @@ function text(value: any, fallback = "") {
 }
 
 function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+  return row?.id ?? row?.payload?.id;
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  const normalized = String(value).trim();
+  return normalized && normalized !== "0" ? normalized : "";
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && String(row.schoolId ?? "") !== String(schoolId ?? ""))
+    return false;
+  if (branchId && String(row.branchId ?? "") !== String(branchId ?? ""))
+    return false;
   return true;
 }
 
@@ -141,21 +155,46 @@ function statusTone(status: string): Tone {
   return "gray";
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ps-chip ${tone}`}>{children}</span>;
 }
 
 function destinationLabel(form: PayoutForm) {
   if (form.preferredMethod === "bank") {
-    return [form.bankName, form.bankAccountName, form.bankAccountNumber].filter(Boolean).join(" · ") || "Bank payout not set";
+    return (
+      [form.bankName, form.bankAccountName, form.bankAccountNumber]
+        .filter(Boolean)
+        .join(" · ") || "Bank payout not set"
+    );
   }
 
-  return [form.momoNetwork?.toUpperCase(), form.momoName, form.momoNumber].filter(Boolean).join(" · ") || "Momo payout not set";
+  return (
+    [form.momoNetwork?.toUpperCase(), form.momoName, form.momoNumber]
+      .filter(Boolean)
+      .join(" · ") || "Momo payout not set"
+  );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ps-page" style={{ "--ps-primary": primary } as React.CSSProperties}>
+    <main
+      className="ps-page"
+      style={{ "--ps-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ps-state">
         <div className="ps-spinner" />
@@ -174,7 +213,8 @@ export default function SchoolPayoutSettingsPage() {
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -199,7 +239,7 @@ export default function SchoolPayoutSettingsPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -226,7 +266,7 @@ export default function SchoolPayoutSettingsPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const { loading, setLoading } = useBackgroundLoader();
@@ -250,8 +290,12 @@ export default function SchoolPayoutSettingsPage() {
     setLoading(true);
 
     try {
-      const settingRows = await listActiveLocal<AnyRow>("schoolPayoutSettings" as any).catch(() => []);
-      const scoped = settingRows.filter((row) => sameScope(row, accountId, schoolId, branchId));
+      const settingRows = await listActiveLocal<AnyRow>(
+        "schoolPayoutSettings" as any,
+      ).catch(() => []);
+      const scoped = settingRows.filter((row) =>
+        sameScope(row, accountId, schoolId, branchId),
+      );
       const current = scoped[0];
 
       setRows(scoped);
@@ -274,7 +318,7 @@ export default function SchoolPayoutSettingsPage() {
               active: current.active !== false,
               note: text(current.note),
             }
-          : emptyForm
+          : emptyForm,
       );
     } finally {
       setLoading(false);
@@ -312,11 +356,17 @@ export default function SchoolPayoutSettingsPage() {
   async function save() {
     if (!accountId || !schoolId || !branchId) return;
 
-    if (form.preferredMethod === "bank" && (!form.bankName || !form.bankAccountName || !form.bankAccountNumber)) {
+    if (
+      form.preferredMethod === "bank" &&
+      (!form.bankName || !form.bankAccountName || !form.bankAccountNumber)
+    ) {
       return setMessage("Enter bank name, account name and account number.");
     }
 
-    if (form.preferredMethod === "momo" && (!form.momoNetwork || !form.momoNumber || !form.momoName)) {
+    if (
+      form.preferredMethod === "momo" &&
+      (!form.momoNetwork || !form.momoNumber || !form.momoName)
+    ) {
       return setMessage("Enter momo network, momo name and momo number.");
     }
 
@@ -333,7 +383,8 @@ export default function SchoolPayoutSettingsPage() {
         isDeleted: false,
       } as AnyRow;
 
-      if (form.id) await updateLocal("schoolPayoutSettings" as any, form.id, payload);
+      if (form.id)
+        await updateLocal("schoolPayoutSettings" as any, form.id, payload);
       else await createLocal("schoolPayoutSettings" as any, payload);
 
       setMessage("");
@@ -346,50 +397,99 @@ export default function SchoolPayoutSettingsPage() {
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening payout settings..." text="Loading branch payout destination." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening payout settings..."
+        text="Loading branch payout destination."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting..." text="Sign in first." />;
+    return (
+      <State primary={primary} title="Redirecting..." text="Sign in first." />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Payout settings are branch-scoped." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Payout settings are branch-scoped."
+      />
+    );
   }
 
   return (
-    <main className="ps-page" style={{ "--ps-primary": primary } as React.CSSProperties}>
+    <main
+      className="ps-page"
+      style={{ "--ps-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       <section className="ps-search-card" aria-label="Payout settings actions">
-        <span className={`status-dot-mini ${status === "inactive" ? "gray" : "green"}`} />
+        <span
+          className={`status-dot-mini ${status === "inactive" ? "gray" : "green"}`}
+        />
 
         <label className="ps-search">
           <span>{form.preferredMethod === "bank" ? "🏦" : "📱"}</span>
-          <input value={`${preview} · ${status}`} readOnly aria-label="Current payout destination" />
+          <input
+            value={`${preview} · ${status}`}
+            readOnly
+            aria-label="Current payout destination"
+          />
         </label>
 
-        <button type="button" className="ps-add-inline" onClick={save} disabled={saving}>
+        <button
+          type="button"
+          className="ps-add-inline"
+          onClick={save}
+          disabled={saving}
+        >
           {saving ? "..." : "Save"}
         </button>
 
-        <button type="button" className="ps-filter-button" onClick={load} title="Refresh" aria-label="Refresh payout settings">
+        <button
+          type="button"
+          className="ps-filter-button"
+          onClick={load}
+          title="Refresh"
+          aria-label="Refresh payout settings"
+        >
           ↻
         </button>
 
-        <button type="button" className="ps-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ps-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
-      {message ? <section className="ps-inline-error">{message}</section> : null}
+      {message ? (
+        <section className="ps-inline-error">{message}</section>
+      ) : null}
 
       <section className="ps-form-card">
         <div className="ps-method-toggle">
-          <button type="button" className={form.preferredMethod === "bank" ? "active" : ""} onClick={() => setForm({ ...form, preferredMethod: "bank" })}>
+          <button
+            type="button"
+            className={form.preferredMethod === "bank" ? "active" : ""}
+            onClick={() => setForm({ ...form, preferredMethod: "bank" })}
+          >
             🏦 Bank
           </button>
-          <button type="button" className={form.preferredMethod === "momo" ? "active" : ""} onClick={() => setForm({ ...form, preferredMethod: "momo" })}>
+          <button
+            type="button"
+            className={form.preferredMethod === "momo" ? "active" : ""}
+            onClick={() => setForm({ ...form, preferredMethod: "momo" })}
+          >
             📱 Momo
           </button>
         </div>
@@ -399,24 +499,47 @@ export default function SchoolPayoutSettingsPage() {
             <>
               <label>
                 <span>Bank Name</span>
-                <input value={form.bankName} onChange={(event) => setForm({ ...form, bankName: event.target.value })} placeholder="e.g. GCB Bank" />
+                <input
+                  value={form.bankName}
+                  onChange={(event) =>
+                    setForm({ ...form, bankName: event.target.value })
+                  }
+                  placeholder="e.g. GCB Bank"
+                />
               </label>
 
               <label>
                 <span>Account Name</span>
-                <input value={form.bankAccountName} onChange={(event) => setForm({ ...form, bankAccountName: event.target.value })} placeholder="Account holder" />
+                <input
+                  value={form.bankAccountName}
+                  onChange={(event) =>
+                    setForm({ ...form, bankAccountName: event.target.value })
+                  }
+                  placeholder="Account holder"
+                />
               </label>
 
               <label>
                 <span>Account Number</span>
-                <input value={form.bankAccountNumber} onChange={(event) => setForm({ ...form, bankAccountNumber: event.target.value })} placeholder="Bank account number" />
+                <input
+                  value={form.bankAccountNumber}
+                  onChange={(event) =>
+                    setForm({ ...form, bankAccountNumber: event.target.value })
+                  }
+                  placeholder="Bank account number"
+                />
               </label>
             </>
           ) : (
             <>
               <label>
                 <span>Momo Network</span>
-                <select value={form.momoNetwork} onChange={(event) => setForm({ ...form, momoNetwork: event.target.value })}>
+                <select
+                  value={form.momoNetwork}
+                  onChange={(event) =>
+                    setForm({ ...form, momoNetwork: event.target.value })
+                  }
+                >
                   <option value="mtn">MTN</option>
                   <option value="telecel">Telecel</option>
                   <option value="airteltigo">AirtelTigo</option>
@@ -426,23 +549,39 @@ export default function SchoolPayoutSettingsPage() {
 
               <label>
                 <span>Momo Name</span>
-                <input value={form.momoName} onChange={(event) => setForm({ ...form, momoName: event.target.value })} placeholder="Registered momo name" />
+                <input
+                  value={form.momoName}
+                  onChange={(event) =>
+                    setForm({ ...form, momoName: event.target.value })
+                  }
+                  placeholder="Registered momo name"
+                />
               </label>
 
               <label>
                 <span>Momo Number</span>
-                <input value={form.momoNumber} onChange={(event) => setForm({ ...form, momoNumber: event.target.value })} placeholder="Momo number" />
+                <input
+                  value={form.momoNumber}
+                  onChange={(event) =>
+                    setForm({ ...form, momoNumber: event.target.value })
+                  }
+                  placeholder="Momo number"
+                />
               </label>
             </>
           )}
-
         </div>
 
         <div className="ps-actions">
           <button type="button" onClick={() => setMoreOpen(true)}>
             Advanced
           </button>
-          <button type="button" className="primary" disabled={saving} onClick={save}>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={save}
+          >
             {saving ? "Saving..." : "Save Payout Settings"}
           </button>
         </div>
@@ -485,27 +624,58 @@ function More({
             <h2>Advanced</h2>
             <p>Settlement, subaccount, status and contact details.</p>
           </div>
-          <button type="button" onClick={close}>✕</button>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
         </div>
 
         <section className="ps-mini-info">
-          <article><span>Status</span><b>{status}</b></article>
-          <article><span>Records</span><b>{rows.length}</b></article>
-          <article><span>Subaccount</span><b>{form.paystackSubaccountCode ? "Set" : "Not set"}</b></article>
+          <article>
+            <span>Status</span>
+            <b>{status}</b>
+          </article>
+          <article>
+            <span>Records</span>
+            <b>{rows.length}</b>
+          </article>
+          <article>
+            <span>Subaccount</span>
+            <b>{form.paystackSubaccountCode ? "Set" : "Not set"}</b>
+          </article>
         </section>
 
         <div className="ps-form-grid sheet">
           <label>
             <span>Settlement Mode</span>
-            <select value={form.settlementMode} onChange={(event) => setForm({ ...form, settlementMode: event.target.value as PayoutForm["settlementMode"] })}>
+            <select
+              value={form.settlementMode}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  settlementMode: event.target
+                    .value as PayoutForm["settlementMode"],
+                })
+              }
+            >
               <option value="platform_wallet">Platform wallet first</option>
-              <option value="direct_subaccount">Direct Paystack subaccount</option>
+              <option value="direct_subaccount">
+                Direct Paystack subaccount
+              </option>
             </select>
           </label>
 
           <label>
             <span>Settlement Schedule</span>
-            <select value={form.settlementSchedule} onChange={(event) => setForm({ ...form, settlementSchedule: event.target.value as PayoutForm["settlementSchedule"] })}>
+            <select
+              value={form.settlementSchedule}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  settlementSchedule: event.target
+                    .value as PayoutForm["settlementSchedule"],
+                })
+              }
+            >
               <option value="manual">Manual</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
@@ -515,22 +685,45 @@ function More({
 
           <label className="wide">
             <span>Paystack Subaccount Code</span>
-            <input value={form.paystackSubaccountCode} onChange={(event) => setForm({ ...form, paystackSubaccountCode: event.target.value })} placeholder="ACCT_xxx" />
+            <input
+              value={form.paystackSubaccountCode}
+              onChange={(event) =>
+                setForm({ ...form, paystackSubaccountCode: event.target.value })
+              }
+              placeholder="ACCT_xxx"
+            />
           </label>
 
           <label>
             <span>Contact Email</span>
-            <input value={form.contactEmail} onChange={(event) => setForm({ ...form, contactEmail: event.target.value })} placeholder="finance@email.com" />
+            <input
+              value={form.contactEmail}
+              onChange={(event) =>
+                setForm({ ...form, contactEmail: event.target.value })
+              }
+              placeholder="finance@email.com"
+            />
           </label>
 
           <label>
             <span>Contact Phone</span>
-            <input value={form.contactPhone} onChange={(event) => setForm({ ...form, contactPhone: event.target.value })} placeholder="024..." />
+            <input
+              value={form.contactPhone}
+              onChange={(event) =>
+                setForm({ ...form, contactPhone: event.target.value })
+              }
+              placeholder="024..."
+            />
           </label>
 
           <label>
             <span>Status</span>
-            <select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}>
+            <select
+              value={form.active ? "active" : "inactive"}
+              onChange={(event) =>
+                setForm({ ...form, active: event.target.value === "active" })
+              }
+            >
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
@@ -538,13 +731,29 @@ function More({
 
           <label className="wide">
             <span>Note</span>
-            <textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} placeholder="Optional note for payout review" />
+            <textarea
+              value={form.note}
+              onChange={(event) =>
+                setForm({ ...form, note: event.target.value })
+              }
+              placeholder="Optional note for payout review"
+            />
           </label>
         </div>
 
         <div className="ps-sheet-actions">
-          <button type="button" onClick={() => { refresh(); close(); }}>Refresh</button>
-          <button type="button" className="primary" onClick={close}>Done</button>
+          <button
+            type="button"
+            onClick={() => {
+              refresh();
+              close();
+            }}
+          >
+            Refresh
+          </button>
+          <button type="button" className="primary" onClick={close}>
+            Done
+          </button>
         </div>
       </section>
     </div>

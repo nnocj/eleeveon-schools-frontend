@@ -3,6 +3,11 @@
  * --------------------------------------------------------------------------
  * Pushes pending/error local-first rows for the active account only.
  *
+ * UUID transport contract:
+ * - Dexie entity `id` is sent as `localId`;
+ * - Prisma SyncRecord `id` is stored locally as `cloudId`;
+ * - a successful push never replaces the permanent Dexie entity UUID.
+ *
  * Phase 3 safety preserved:
  * - records from another account are never pushed under the active account;
  * - account-less rows are rejected instead of silently assigned;
@@ -104,7 +109,7 @@ type PushAccumulator = {
 };
 
 function hasRealMediaOwner(row: any) {
-  return Boolean(row?.ownerLocalId || row?.ownerCloudId);
+  return Boolean(row?.ownerId);
 }
 
 function isTemporaryUnattachedMediaAsset(tableName: string, row: any) {
@@ -324,7 +329,7 @@ async function applyPushResult(
   }
 
   if (!result.ok) {
-    if (result.conflict) accumulator.conflicts++;
+    if (result.conflictId) accumulator.conflicts++;
 
     const message =
       `${result.tableName} #${result.localId}: ` +
@@ -336,7 +341,12 @@ async function applyPushResult(
   }
 
   const patch: Record<string, any> = {
+    // Preserve the permanent Dexie entity UUID.
+    id: existing.id,
+
+    // Prisma SyncRecord UUID returned by the backend.
     cloudId: result.cloudId || existing.cloudId || undefined,
+
     accountId,
     version: result.version,
     updatedAt: Number(result.updatedAt || Date.now()),
@@ -367,9 +377,7 @@ async function sendPushBatch(
       body: { accountId, deviceId, records: batch },
     });
 
-    accumulator.conflicts += Number(response.conflicts?.length || 0);
-
-    for (const result of response.results || []) {
+        for (const result of response.results || []) {
       await applyPushResult(result, accountId, deviceId, accumulator);
     }
 
@@ -481,20 +489,13 @@ export async function collectPendingSyncRecords(options?: {
         await quarantineSyncRecord({
           source: "push",
           tableName,
-          localId:
-            Number.isFinite(Number(row.id))
-              ? Number(row.id)
-              : undefined,
+          entityId: typeof row.id === "string" && row.id.trim() ? row.id : undefined,
           reason: message,
           payload: row,
         });
-
-        if (
-          Number.isFinite(Number(row.id)) &&
-          Number(row.id) > 0
-        ) {
+        if (typeof row.id === "string" && row.id.trim()) {
           await table.update(
-            Number(row.id),
+            row.id,
             markSyncError(
               row,
               message,
@@ -510,10 +511,10 @@ export async function collectPendingSyncRecords(options?: {
         continue;
       }
 
-      const localId = Number(row.id);
-      if (!Number.isFinite(localId) || localId <= 0) {
+      const localId = typeof row.id === "string" ? row.id.trim() : "";
+      if (!localId) {
         const message =
-          `${tableName}: pending row has no valid local ID.`;
+          `${tableName}: pending row has no permanent ID.`;
 
         errors.push(message);
 
@@ -548,8 +549,16 @@ export async function collectPendingSyncRecords(options?: {
 
       const candidate: SyncPushRecord = {
         tableName,
+
+        // Permanent UUID of the Dexie entity.
         localId,
-        cloudId: row.cloudId || undefined,
+
+        // Prisma SyncRecord UUID from an earlier successful push, if present.
+        cloudId:
+          typeof row.cloudId === "string" && row.cloudId.trim()
+            ? row.cloudId.trim()
+            : undefined,
+
         accountId,
         deviceId: rowDeviceId,
         version,
@@ -560,7 +569,14 @@ export async function collectPendingSyncRecords(options?: {
 
       const integrity =
         validatePushRecord(
-          candidate,
+          {
+            ...candidate,
+
+            // Temporary compatibility aliases for an older syncIntegrity.ts.
+            // Remove these after that file is migrated to localId/cloudId.
+            entityId: candidate.localId,
+            id: candidate.cloudId,
+          } as any,
           accountId,
         );
 
@@ -577,8 +593,8 @@ export async function collectPendingSyncRecords(options?: {
           source: "push",
           accountId,
           tableName,
-          localId,
-          cloudId:
+          entityId: localId,
+          id:
             row.cloudId ||
             undefined,
           reason: message,

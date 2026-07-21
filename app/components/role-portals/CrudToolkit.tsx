@@ -64,15 +64,6 @@ type DexieProps = BaseProps & {
   mapBeforeSave?: (values: any, existing?: any) => any;
 };
 
-function getLocalNumber(keys: string[]) {
-  if (typeof window === "undefined") return undefined;
-  for (const key of keys) {
-    const value = localStorage.getItem(key);
-    if (value && !Number.isNaN(Number(value))) return Number(value);
-  }
-  return undefined;
-}
-
 function getLocalString(keys: string[]) {
   if (typeof window === "undefined") return undefined;
   for (const key of keys) {
@@ -85,8 +76,8 @@ function getLocalString(keys: string[]) {
 function getScopeDefaults() {
   return {
     accountId: getLocalString(["accountId", "eleeveonAccountId", "selectedAccountId"]) || "local-account",
-    schoolId: getLocalNumber(["schoolId", "activeSchoolId", "selectedSchoolId", "eleeveonSchoolId"]),
-    branchId: getLocalNumber(["branchId", "activeBranchId", "selectedBranchId", "eleeveonBranchId"]),
+    schoolId: getLocalString(["schoolId", "activeSchoolId", "selectedSchoolId", "eleeveonSchoolId"]),
+    branchId: getLocalString(["branchId", "activeBranchId", "selectedBranchId", "eleeveonBranchId"]),
     deviceId: getLocalString(["deviceId", "eleeveonDeviceId"]) || "web-device",
   };
 }
@@ -318,11 +309,11 @@ function RecordGrid({
           ? secondaryFields
           : fields.filter((f) => !f.hideInCard && f.key !== titleKey).slice(0, 5).map((f) => f.key);
         return (
-          <article key={String(item.id || item.cloudId || JSON.stringify(item))} style={styles.card}>
+          <article key={String(item.id || JSON.stringify(item))} style={styles.card}>
             <div style={styles.cardTop}>
               <div style={{ minWidth: 0 }}>
                 <h3 style={styles.cardTitle}>{formatValue(item[titleKey])}</h3>
-                <p style={styles.cardSub}>ID: {formatValue(item.id || item.cloudId)}</p>
+                <p style={styles.cardSub}>ID: {formatValue(item.id)}</p>
               </div>
               {badgeField ? <span style={styles.badge}>{formatValue(item[badgeField])}</span> : null}
             </div>
@@ -491,8 +482,8 @@ export function DexieCrudPage(props: Omit<DexieProps, "mode">) {
       let data = await collection.toArray();
       data = data.filter((item: any) => item?.isDeleted !== true);
       if (props.accountScoped !== false) data = data.filter((item: any) => !item.accountId || item.accountId === scope.accountId);
-      if (props.schoolScoped && scope.schoolId) data = data.filter((item: any) => Number(item.schoolId) === Number(scope.schoolId));
-      if (props.branchScoped && scope.branchId) data = data.filter((item: any) => Number(item.branchId) === Number(scope.branchId));
+      if (props.schoolScoped && scope.schoolId) data = data.filter((item: any) => String(item.schoolId) === String(scope.schoolId));
+      if (props.branchScoped && scope.branchId) data = data.filter((item: any) => String(item.branchId) === String(scope.branchId));
       data.sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
       setItems(data);
     } catch (err: any) {

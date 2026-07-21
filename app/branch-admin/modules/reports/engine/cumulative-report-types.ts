@@ -60,16 +60,9 @@ export type CumulativeSnapshotType =
   | "promotion"
   | "manual";
 
-export type CumulativeDecision =
-  | "promote"
-  | "repeat"
-  | "graduate";
+export type CumulativeDecision = "promote" | "repeat" | "graduate";
 
-export type CumulativeTrendDirection =
-  | "up"
-  | "down"
-  | "stable"
-  | "none";
+export type CumulativeTrendDirection = "up" | "down" | "stable" | "none";
 
 export type CumulativePrintMode =
   | "current-view"
@@ -96,21 +89,21 @@ export type CumulativeSubjectAggregationMode =
 // ======================================================
 
 export interface CumulativeReportFiltersState {
-  branchId?: number;
+  branchId?: string;
 
-  academicStructureId?: number;
-  academicPeriodId?: number;
+  academicStructureId?: string;
+  academicPeriodId?: string;
 
-  fromAcademicPeriodId?: number;
-  toAcademicPeriodId?: number;
+  fromAcademicPeriodId?: string;
+  toAcademicPeriodId?: string;
 
   academicYear?: string;
   fromAcademicYear?: string;
   toAcademicYear?: string;
 
-  classId?: number;
-  studentId?: number;
-  subjectId?: number;
+  classId?: string;
+  studentId?: string;
+  subjectId?: string;
 
   snapshotType: CumulativeSnapshotType;
   decision?: CumulativeDecision | "all";
@@ -156,8 +149,8 @@ export interface CumulativeReportEngineDataset {
 // ======================================================
 
 export interface NormalizedSnapshotSubjectResult {
-  subjectId?: number;
-  classSubjectId?: number;
+  subjectId?: string;
+  classSubjectId?: string;
 
   subjectName: string;
   subjectCode?: string;
@@ -177,15 +170,15 @@ export interface NormalizedSnapshotSubjectResult {
 }
 
 export interface NormalizedStudentReportSnapshot {
-  snapshotId: number;
+  snapshotId: string;
 
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  studentId: number;
-  classId: number;
-  academicStructureId: number;
-  academicPeriodId: number;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
 
   academicYear?: string;
   term?: string;
@@ -198,7 +191,7 @@ export interface NormalizedStudentReportSnapshot {
   gpa?: number;
 
   recommendation?: CumulativeDecision;
-  promotedToClassId?: number;
+  promotedToClassId?: string;
 
   attendance?: AttendanceSummary;
 
@@ -213,20 +206,20 @@ export interface NormalizedStudentReportSnapshot {
 // ======================================================
 
 export interface CumulativePeriodSummary {
-  academicStructureId?: number;
+  academicStructureId?: string;
   academicStructureName?: string;
 
-  academicPeriodId: number;
+  academicPeriodId: string;
   academicPeriodName: string;
   academicPeriodOrder?: number;
 
   academicYear?: string;
   term?: string;
 
-  classId: number;
+  classId: string;
   className: string;
 
-  snapshotId?: number;
+  snapshotId?: string;
   snapshotType?: StudentReportSnapshot["snapshotType"];
 
   total: number;
@@ -235,7 +228,7 @@ export interface CumulativePeriodSummary {
   position?: number;
 
   recommendation?: CumulativeDecision;
-  promotedToClassId?: number;
+  promotedToClassId?: string;
   promotedToClassName?: string;
 
   attendance?: AttendanceSummary;
@@ -271,31 +264,31 @@ export interface CumulativeAcademicYearSummary {
 export interface StudentProgressionStep {
   id: string;
 
-  studentId: number;
+  studentId: string;
 
-  fromClassId?: number;
+  fromClassId?: string;
   fromClassName?: string;
 
-  toClassId?: number;
+  toClassId?: string;
   toClassName?: string;
 
-  fromAcademicStructureId?: number;
+  fromAcademicStructureId?: string;
   fromAcademicStructureName?: string;
 
-  toAcademicStructureId?: number;
+  toAcademicStructureId?: string;
   toAcademicStructureName?: string;
 
-  fromAcademicPeriodId?: number;
+  fromAcademicPeriodId?: string;
   fromAcademicPeriodName?: string;
 
-  toAcademicPeriodId?: number;
+  toAcademicPeriodId?: string;
   toAcademicPeriodName?: string;
 
   average?: number;
   recommendation?: CumulativeDecision;
   finalDecision?: CumulativeDecision;
 
-  snapshotId?: number;
+  snapshotId?: string;
   note?: string;
 
   dateLabel?: string;
@@ -303,15 +296,15 @@ export interface StudentProgressionStep {
 }
 
 export interface StudentSubjectHistory {
-  subjectId?: number;
+  subjectId?: string;
   subjectName: string;
   subjectCode?: string;
 
   periods: {
     academicYear?: string;
-    academicPeriodId: number;
+    academicPeriodId: string;
     academicPeriodName: string;
-    classId: number;
+    classId: string;
     className: string;
     percentage: number;
     grade?: string;
@@ -329,13 +322,13 @@ export interface StudentSubjectHistory {
 }
 
 export interface StudentCumulativeTranscript {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   gender?: string;
   studentPhoto?: string;
 
-  currentClassId?: number;
+  currentClassId?: string;
   currentClassName?: string;
 
   parentName?: string;
@@ -369,12 +362,12 @@ export interface StudentCumulativeTranscript {
 // ======================================================
 
 export interface MultiPeriodSubjectRow {
-  subjectId?: number;
+  subjectId?: string;
   subjectName: string;
   subjectCode?: string;
 
   periodScores: {
-    academicPeriodId: number;
+    academicPeriodId: string;
     academicPeriodName: string;
     academicYear?: string;
     percentage: number;
@@ -396,13 +389,13 @@ export interface MultiPeriodSubjectRow {
 export interface StudentMultiPeriodReport {
   header: ReportHeaderData;
 
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   gender?: string;
   studentPhoto?: string;
 
-  classId?: number;
+  classId?: string;
   className?: string;
 
   periods: CumulativePeriodSummary[];
@@ -423,18 +416,18 @@ export interface StudentMultiPeriodReport {
 // ======================================================
 
 export interface AnnualBroadsheetSubjectColumn {
-  subjectId?: number;
+  subjectId?: string;
   subjectName: string;
   subjectCode?: string;
   shortName?: string;
 }
 
 export interface AnnualBroadsheetStudentSubjectCell {
-  subjectId?: number;
+  subjectId?: string;
   subjectName: string;
 
   periodScores: {
-    academicPeriodId: number;
+    academicPeriodId: string;
     academicPeriodName: string;
     percentage: number;
     grade?: string;
@@ -446,11 +439,11 @@ export interface AnnualBroadsheetStudentSubjectCell {
 }
 
 export interface AnnualBroadsheetStudentRow {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
 
-  classId?: number;
+  classId?: string;
   className?: string;
 
   subjects: AnnualBroadsheetStudentSubjectCell[];
@@ -469,14 +462,14 @@ export interface AnnualBroadsheetStudentRow {
 }
 
 export interface AnnualBroadsheet {
-  classId?: number;
+  classId?: string;
   className?: string;
 
   academicYear?: string;
-  academicStructureId?: number;
+  academicStructureId?: string;
   academicStructureName?: string;
 
-  periodIds: number[];
+  periodIds: string[];
   periodNames: string[];
 
   subjectColumns: AnnualBroadsheetSubjectColumn[];
@@ -500,16 +493,16 @@ export interface AnnualBroadsheet {
 // ======================================================
 
 export interface SubjectHistoryStudentRow {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
 
-  classId?: number;
+  classId?: string;
   className?: string;
 
   periods: {
     academicYear?: string;
-    academicPeriodId: number;
+    academicPeriodId: string;
     academicPeriodName: string;
     percentage: number;
     grade?: string;
@@ -524,11 +517,11 @@ export interface SubjectHistoryStudentRow {
 }
 
 export interface SubjectLongitudinalAnalytics {
-  subjectId?: number;
+  subjectId?: string;
   subjectName: string;
   subjectCode?: string;
 
-  classId?: number;
+  classId?: string;
   className?: string;
 
   academicYear?: string;
@@ -552,14 +545,14 @@ export interface SubjectLongitudinalAnalytics {
 // ======================================================
 
 export interface PromotionSummaryRow {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
 
-  fromClassId?: number;
+  fromClassId?: string;
   fromClassName?: string;
 
-  toClassId?: number;
+  toClassId?: string;
   toClassName?: string;
 
   average?: number;
@@ -567,7 +560,7 @@ export interface PromotionSummaryRow {
   recommendation?: CumulativeDecision;
   finalDecision: CumulativeDecision;
 
-  snapshotId?: number;
+  snapshotId?: string;
   note?: string;
 }
 

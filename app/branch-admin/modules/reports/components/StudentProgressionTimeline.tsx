@@ -89,17 +89,17 @@ export default function StudentProgressionTimeline({
 
   const promoted = useMemo(
     () => steps.filter((step) => step.finalDecision === "promote").length,
-    [steps]
+    [steps],
   );
 
   const repeated = useMemo(
     () => steps.filter((step) => step.finalDecision === "repeat").length,
-    [steps]
+    [steps],
   );
 
   const graduated = useMemo(
     () => steps.filter((step) => step.finalDecision === "graduate").length,
-    [steps]
+    [steps],
   );
 
   const toggleCard = (key: string) => {
@@ -202,10 +202,7 @@ export default function StudentProgressionTimeline({
         </div>
       </div>
 
-      <div
-        className="spt-print-timeline"
-        style={{ borderLeftColor: primary }}
-      >
+      <div className="spt-print-timeline" style={{ borderLeftColor: primary }}>
         {steps.map((step, index) => {
           const key = stepKey(step, index);
           const isOpen = openCards[key];
@@ -232,13 +229,18 @@ export default function StudentProgressionTimeline({
               <div className="spt-card-layout">
                 <div>
                   <div className="spt-title">
-                    {index + 1}. {step.fromClassName || "Class"} → {step.toClassName || decisionLabel(step.finalDecision)}
+                    {index + 1}. {step.fromClassName || "Class"} →{" "}
+                    {step.toClassName || decisionLabel(step.finalDecision)}
                   </div>
 
                   <div className="spt-period-line">
-                    {step.fromAcademicPeriodName || step.fromAcademicStructureName || "-"}
+                    {step.fromAcademicPeriodName ||
+                      step.fromAcademicStructureName ||
+                      "-"}
                     {" → "}
-                    {step.toAcademicPeriodName || step.toAcademicStructureName || "-"}
+                    {step.toAcademicPeriodName ||
+                      step.toAcademicStructureName ||
+                      "-"}
                   </div>
 
                   {step.note && (
@@ -262,11 +264,14 @@ export default function StudentProgressionTimeline({
               <div className="spt-mini-grid">
                 <div>
                   <strong>Average:</strong>{" "}
-                  {step.average != null ? `${formatNumber(step.average, 1)}%` : "-"}
+                  {step.average != null
+                    ? `${formatNumber(step.average, 1)}%`
+                    : "-"}
                 </div>
 
                 <div>
-                  <strong>Recommended:</strong> {decisionLabel(step.recommendation)}
+                  <strong>Recommended:</strong>{" "}
+                  {decisionLabel(step.recommendation)}
                 </div>
 
                 <div>
@@ -308,7 +313,9 @@ export default function StudentProgressionTimeline({
                 <td style={td}>{step.fromAcademicPeriodName || "-"}</td>
                 <td style={td}>{step.toAcademicPeriodName || "-"}</td>
                 <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
-                  {step.average != null ? `${formatNumber(step.average, 1)}%` : "-"}
+                  {step.average != null
+                    ? `${formatNumber(step.average, 1)}%`
+                    : "-"}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
                   {decisionLabel(step.recommendation)}
@@ -328,7 +335,10 @@ export default function StudentProgressionTimeline({
 
             {!steps.length && (
               <tr>
-                <td style={{ ...td, textAlign: "center", padding: 14 }} colSpan={8}>
+                <td
+                  style={{ ...td, textAlign: "center", padding: 14 }}
+                  colSpan={8}
+                >
                   No progression records found.
                 </td>
               </tr>
@@ -337,11 +347,10 @@ export default function StudentProgressionTimeline({
         </table>
       </div>
 
-      <div
-        className="spt-footer"
-        style={{ borderTopColor: primary }}
-      >
-        <span>Official progression timeline generated for {branding.schoolName}</span>
+      <div className="spt-footer" style={{ borderTopColor: primary }}>
+        <span>
+          Official progression timeline generated for {branding.schoolName}
+        </span>
         <span>Powered by Eleeveon School Management System</span>
       </div>
     </section>
@@ -368,15 +377,16 @@ export default function StudentProgressionTimeline({
           </span>
         </div>
 
-        <button type="button" onClick={() => setPreviewExpanded((prev) => !prev)}>
+        <button
+          type="button"
+          onClick={() => setPreviewExpanded((prev) => !prev)}
+        >
           {previewExpanded ? "Fit Preview" : "Expand"}
         </button>
       </div>
 
       <div className="spt-preview-scroll report-screen-scroll">
-        <div className="spt-preview-scale">
-          {reportPage}
-        </div>
+        <div className="spt-preview-scale">{reportPage}</div>
       </div>
     </div>
   );

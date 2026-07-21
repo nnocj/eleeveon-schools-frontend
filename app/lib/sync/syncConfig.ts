@@ -115,8 +115,21 @@ export function normalizeSyncStatus(value: unknown): SyncStatus {
 
 export type SyncPushRecord = {
   tableName: string;
-  localId: number;
+
+  /**
+   * Permanent UUID of the local-first Dexie entity.
+   *
+   * This is the same value as the entity row's `id`. The sync transport calls
+   * it `localId` so it remains distinct from Prisma SyncRecord.id.
+   */
+  localId: string;
+
+  /**
+   * Prisma SyncRecord UUID returned by the backend after the entity has synced.
+   * This must never replace the Dexie entity's permanent `id`.
+   */
   cloudId?: string | null;
+
   accountId: string;
   deviceId: string;
   version: number;
@@ -127,8 +140,17 @@ export type SyncPushRecord = {
 
 export type SyncPullRecord = {
   tableName: string;
-  localId?: number | null;
+
+  /**
+   * Permanent UUID of the local-first entity.
+   */
+  localId: string;
+
+  /**
+   * Prisma SyncRecord UUID.
+   */
   cloudId?: string | null;
+
   accountId: string;
   deviceId?: string | null;
   version: number;
@@ -139,7 +161,12 @@ export type SyncPullRecord = {
 
 export type CachePullRecord = {
   tableName: string;
-  id?: string | number | null;
+
+  /**
+   * Backend-owned cache rows keep their actual cloud entity UUID in `id`.
+   * These records do not use the local-first SyncRecord transport contract.
+   */
+  id?: string | null;
   cloudId?: string | null;
   accountId?: string | null;
   updatedAt?: number | string | null;
@@ -149,13 +176,13 @@ export type CachePullRecord = {
 
 export type PushResponseItem = {
   tableName: string;
-  localId: number;
+  localId: string;
   cloudId?: string | null;
   version: number;
   updatedAt: number;
   ok: boolean;
   error?: string;
-  conflict?: boolean;
+  conflictId?: string;
 };
 
 export type SyncPullCursor = {
@@ -179,8 +206,9 @@ export type PullResponse = {
 };
 
 export type PushResponse = {
+  ok: boolean;
   results: PushResponseItem[];
-  conflicts?: any[];
+  serverTime: number;
 };
 
 export type SyncResult = {

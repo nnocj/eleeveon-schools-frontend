@@ -63,7 +63,7 @@ type Props = {
    * the selected workspace session. This prevents this filter component
    * from becoming a second branch source of truth.
    */
-  lockedBranchId?: number;
+  lockedBranchId?: string;
   lockBranch?: boolean;
 
   primaryColor?: string;
@@ -90,7 +90,8 @@ export default function ReportFilters({
   lockBranch = false,
   primaryColor = "var(--primary-color)",
 }: Props) {
-  const effectiveBranchId = lockBranch && lockedBranchId ? lockedBranchId : filters.branchId;
+  const effectiveBranchId =
+    lockBranch && lockedBranchId ? lockedBranchId : filters.branchId;
 
   useEffect(() => {
     if (!lockBranch || !lockedBranchId) return;
@@ -115,18 +116,18 @@ export default function ReportFilters({
   // ======================================================
 
   const subjectMap = useMemo(
-    () => new Map(subjects.map(item => [item.id, item])),
-    [subjects]
+    () => new Map(subjects.map((item) => [item.id, item])),
+    [subjects],
   );
 
   const classMap = useMemo(
-    () => new Map(classes.map(item => [item.id, item])),
-    [classes]
+    () => new Map(classes.map((item) => [item.id, item])),
+    [classes],
   );
 
   const periodMap = useMemo(
-    () => new Map(academicPeriods.map(item => [item.id, item])),
-    [academicPeriods]
+    () => new Map(academicPeriods.map((item) => [item.id, item])),
+    [academicPeriods],
   );
 
   // ======================================================
@@ -135,9 +136,10 @@ export default function ReportFilters({
 
   const availableAcademicStructures = useMemo(() => {
     return academicStructures
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+        if (effectiveBranchId && item.branchId !== effectiveBranchId)
+          return false;
         return item.active !== false;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -145,9 +147,10 @@ export default function ReportFilters({
 
   const availableAcademicPeriods = useMemo(() => {
     return academicPeriods
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+        if (effectiveBranchId && item.branchId !== effectiveBranchId)
+          return false;
         if (
           filters.academicStructureId &&
           item.academicStructureId !== filters.academicStructureId
@@ -161,9 +164,10 @@ export default function ReportFilters({
 
   const availableClasses = useMemo(() => {
     return classes
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+        if (effectiveBranchId && item.branchId !== effectiveBranchId)
+          return false;
         return item.active !== false;
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -171,10 +175,11 @@ export default function ReportFilters({
 
   const availableClassSubjects = useMemo(() => {
     return classSubjects
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
         if (item.active === false) return false;
-        if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+        if (effectiveBranchId && item.branchId !== effectiveBranchId)
+          return false;
         if (filters.classId && item.classId !== filters.classId) return false;
         if (
           filters.academicStructureId &&
@@ -209,10 +214,11 @@ export default function ReportFilters({
 
     const enrollmentStudentIds = new Set(
       studentEnrollments
-        .filter(item => {
+        .filter((item) => {
           if (item.isDeleted) return false;
           if (item.status !== "active") return false;
-          if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+          if (effectiveBranchId && item.branchId !== effectiveBranchId)
+            return false;
           if (filters.classId && item.classId !== filters.classId) return false;
           if (
             filters.academicStructureId &&
@@ -220,18 +226,22 @@ export default function ReportFilters({
           ) {
             return false;
           }
-          if (filters.academicPeriodId && item.academicPeriodId !== filters.academicPeriodId) {
+          if (
+            filters.academicPeriodId &&
+            item.academicPeriodId !== filters.academicPeriodId
+          ) {
             return false;
           }
           return true;
         })
-        .map(item => item.studentId)
+        .map((item) => item.studentId),
     );
 
     return students
-      .filter(item => {
+      .filter((item) => {
         if (item.isDeleted) return false;
-        if (effectiveBranchId && item.branchId !== effectiveBranchId) return false;
+        if (effectiveBranchId && item.branchId !== effectiveBranchId)
+          return false;
         return !!item.id && enrollmentStudentIds.has(item.id);
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
@@ -249,16 +259,16 @@ export default function ReportFilters({
   // ======================================================
 
   const updateFilters = (patch: Partial<ReportFiltersState>) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       ...patch,
     }));
   };
 
-  const selectBranch = (branchId?: number) => {
+  const selectBranch = (branchId?: string) => {
     if (lockBranch) return;
 
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
       branchId,
       academicStructureId: undefined,
@@ -269,8 +279,8 @@ export default function ReportFilters({
     }));
   };
 
-  const selectAcademicStructure = (academicStructureId?: number) => {
-    setFilters(prev => ({
+  const selectAcademicStructure = (academicStructureId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       academicStructureId,
       academicPeriodId: undefined,
@@ -280,8 +290,8 @@ export default function ReportFilters({
     }));
   };
 
-  const selectAcademicPeriod = (academicPeriodId?: number) => {
-    setFilters(prev => ({
+  const selectAcademicPeriod = (academicPeriodId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       academicPeriodId,
       classId: undefined,
@@ -290,8 +300,8 @@ export default function ReportFilters({
     }));
   };
 
-  const selectClass = (classId?: number) => {
-    setFilters(prev => ({
+  const selectClass = (classId?: string) => {
+    setFilters((prev) => ({
       ...prev,
       classId,
       classSubjectId: undefined,
@@ -391,13 +401,15 @@ export default function ReportFilters({
         <select
           style={input}
           value={effectiveBranchId || ""}
-          onChange={e => selectBranch(Number(e.target.value) || undefined)}
+          onChange={(e) => selectBranch(Number(e.target.value) || undefined)}
           disabled={lockBranch}
         >
-          <option value="">{lockBranch ? "Locked Branch" : "Select Branch"}</option>
+          <option value="">
+            {lockBranch ? "Locked Branch" : "Select Branch"}
+          </option>
           {branches
-            .filter(item => !item.isDeleted && item.active !== false)
-            .map(branch => (
+            .filter((item) => !item.isDeleted && item.active !== false)
+            .map((branch) => (
               <option key={branch.id} value={branch.id}>
                 {branch.name}
               </option>
@@ -407,10 +419,12 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.academicStructureId || ""}
-          onChange={e => selectAcademicStructure(Number(e.target.value) || undefined)}
+          onChange={(e) =>
+            selectAcademicStructure(Number(e.target.value) || undefined)
+          }
         >
           <option value="">Academic Structure</option>
-          {availableAcademicStructures.map(item => (
+          {availableAcademicStructures.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
             </option>
@@ -420,10 +434,12 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.academicPeriodId || ""}
-          onChange={e => selectAcademicPeriod(Number(e.target.value) || undefined)}
+          onChange={(e) =>
+            selectAcademicPeriod(Number(e.target.value) || undefined)
+          }
         >
           <option value="">Academic Period</option>
-          {availableAcademicPeriods.map(period => (
+          {availableAcademicPeriods.map((period) => (
             <option key={period.id} value={period.id}>
               {period.name}
             </option>
@@ -433,10 +449,10 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.classId || ""}
-          onChange={e => selectClass(Number(e.target.value) || undefined)}
+          onChange={(e) => selectClass(Number(e.target.value) || undefined)}
         >
           <option value="">Class</option>
-          {availableClasses.map(item => (
+          {availableClasses.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name}
             </option>
@@ -446,19 +462,24 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.classSubjectId || ""}
-          onChange={e =>
-            updateFilters({ classSubjectId: Number(e.target.value) || undefined })
+          onChange={(e) =>
+            updateFilters({
+              classSubjectId: Number(e.target.value) || undefined,
+            })
           }
         >
           <option value="">Class Subject</option>
-          {availableClassSubjects.map(item => {
+          {availableClassSubjects.map((item) => {
             const classItem = classMap.get(item.classId);
             const subject = subjectMap.get(item.subjectId);
-            const period = item.academicPeriodId ? periodMap.get(item.academicPeriodId) : undefined;
+            const period = item.academicPeriodId
+              ? periodMap.get(item.academicPeriodId)
+              : undefined;
 
             return (
               <option key={item.id} value={item.id}>
-                {classItem?.name || "Class"} • {item.name || subject?.name || "Subject"}
+                {classItem?.name || "Class"} •{" "}
+                {item.name || subject?.name || "Subject"}
                 {period ? ` • ${period.name}` : ""}
               </option>
             );
@@ -468,10 +489,14 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.studentId || ""}
-          onChange={e => updateFilters({ studentId: Number(e.target.value) || undefined })}
+          onChange={(e) =>
+            updateFilters({
+              studentId: cleanId(e.target.value) || undefined,
+            })
+          }
         >
           <option value="">Student</option>
-          {availableStudents.map(student => (
+          {availableStudents.map((student) => (
             <option key={student.id} value={student.id}>
               {student.fullName}
               {student.admissionNumber ? ` (${student.admissionNumber})` : ""}
@@ -482,7 +507,9 @@ export default function ReportFilters({
         <select
           style={input}
           value={filters.sortMode}
-          onChange={e => updateFilters({ sortMode: e.target.value as ReportSortMode })}
+          onChange={(e) =>
+            updateFilters({ sortMode: e.target.value as ReportSortMode })
+          }
         >
           <option value="position">Sort by Position</option>
           <option value="alphabetical">Sort Alphabetically</option>

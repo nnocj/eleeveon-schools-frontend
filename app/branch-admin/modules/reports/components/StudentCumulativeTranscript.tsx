@@ -61,9 +61,7 @@ const ordinal = (value?: number) => {
   const mod100 = value % 100;
 
   return `${value}${
-    suffixes[(mod100 - 20) % 10] ||
-    suffixes[mod100] ||
-    suffixes[0]
+    suffixes[(mod100 - 20) % 10] || suffixes[mod100] || suffixes[0]
   }`;
 };
 
@@ -187,7 +185,8 @@ export default function StudentCumulativeTranscript({
           fontWeight: 700,
         }}
       >
-        Select a student with historical report snapshots to generate a cumulative academic transcript.
+        Select a student with historical report snapshots to generate a
+        cumulative academic transcript.
       </div>
     </section>
   );
@@ -313,7 +312,9 @@ export default function StudentCumulativeTranscript({
 
             <div style={infoBox}>
               <div style={label}>Guardian</div>
-              <div style={value}>{transcript.guardianName || transcript.parentName || "-"}</div>
+              <div style={value}>
+                {transcript.guardianName || transcript.parentName || "-"}
+              </div>
             </div>
           </div>
 
@@ -361,21 +362,39 @@ export default function StudentCumulativeTranscript({
             gap: 6,
           }}
         >
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
+          <div
+            style={{
+              border: "1px solid #222",
+              padding: 7,
+              textAlign: "center",
+            }}
+          >
             <div style={label}>Cumulative Total</div>
             <div style={{ ...value, fontSize: compact ? 13 : 15 }}>
               {formatNumber(transcript.cumulativeTotal, 1)}
             </div>
           </div>
 
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
+          <div
+            style={{
+              border: "1px solid #222",
+              padding: 7,
+              textAlign: "center",
+            }}
+          >
             <div style={label}>Cumulative Avg.</div>
             <div style={{ ...value, fontSize: compact ? 13 : 15 }}>
               {formatNumber(transcript.cumulativeAverage, 1)}%
             </div>
           </div>
 
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
+          <div
+            style={{
+              border: "1px solid #222",
+              padding: 7,
+              textAlign: "center",
+            }}
+          >
             <div style={label}>Cumulative GPA</div>
             <div style={{ ...value, fontSize: compact ? 13 : 15 }}>
               {transcript.cumulativeGPA != null
@@ -384,14 +403,26 @@ export default function StudentCumulativeTranscript({
             </div>
           </div>
 
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
+          <div
+            style={{
+              border: "1px solid #222",
+              padding: 7,
+              textAlign: "center",
+            }}
+          >
             <div style={label}>Highest Avg.</div>
             <div style={{ ...value, fontSize: compact ? 13 : 15 }}>
               {formatNumber(transcript.highestAverage, 1)}%
             </div>
           </div>
 
-          <div style={{ border: "1px solid #222", padding: 7, textAlign: "center" }}>
+          <div
+            style={{
+              border: "1px solid #222",
+              padding: 7,
+              textAlign: "center",
+            }}
+          >
             <div style={label}>Trend</div>
             <div style={{ ...value, fontSize: compact ? 13 : 15 }}>
               {trendLabel(transcript.overallTrend)}
@@ -420,7 +451,9 @@ export default function StudentCumulativeTranscript({
 
             <tbody>
               {transcript.periods.map((period, index) => (
-                <tr key={`${period.academicPeriodId}-${period.snapshotId || index}`}>
+                <tr
+                  key={`${period.academicPeriodId}-${period.snapshotId || index}`}
+                >
                   <td style={{ ...td, textAlign: "center" }}>{index + 1}</td>
                   <td style={td}>{period.academicStructureName || "-"}</td>
                   <td style={td}>{period.academicPeriodName}</td>
@@ -489,7 +522,9 @@ export default function StudentCumulativeTranscript({
                     {formatNumber(subject.lowest, 1)}%
                   </td>
                   <td style={{ ...td, textAlign: "center" }}>
-                    {subject.latest != null ? `${formatNumber(subject.latest, 1)}%` : "-"}
+                    {subject.latest != null
+                      ? `${formatNumber(subject.latest, 1)}%`
+                      : "-"}
                   </td>
                   <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
                     {trendLabel(subject.trend)}
@@ -518,24 +553,28 @@ export default function StudentCumulativeTranscript({
             </thead>
 
             <tbody>
-              {transcript.progression.map((step: StudentProgressionStep, index) => (
-                <tr key={step.id}>
-                  <td style={{ ...td, textAlign: "center" }}>{index + 1}</td>
-                  <td style={td}>{step.fromClassName || "-"}</td>
-                  <td style={td}>{step.toClassName || "-"}</td>
-                  <td style={td}>{step.fromAcademicPeriodName || "-"}</td>
-                  <td style={td}>{step.toAcademicPeriodName || "-"}</td>
-                  <td style={{ ...td, textAlign: "center" }}>
-                    {step.average != null ? `${formatNumber(step.average, 1)}%` : "-"}
-                  </td>
-                  <td style={{ ...td, textAlign: "center" }}>
-                    {decisionLabel(step.recommendation)}
-                  </td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
-                    {decisionLabel(step.finalDecision)}
-                  </td>
-                </tr>
-              ))}
+              {transcript.progression.map(
+                (step: StudentProgressionStep, index) => (
+                  <tr key={step.id}>
+                    <td style={{ ...td, textAlign: "center" }}>{index + 1}</td>
+                    <td style={td}>{step.fromClassName || "-"}</td>
+                    <td style={td}>{step.toClassName || "-"}</td>
+                    <td style={td}>{step.fromAcademicPeriodName || "-"}</td>
+                    <td style={td}>{step.toAcademicPeriodName || "-"}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {step.average != null
+                        ? `${formatNumber(step.average, 1)}%`
+                        : "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {decisionLabel(step.recommendation)}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
+                      {decisionLabel(step.finalDecision)}
+                    </td>
+                  </tr>
+                ),
+              )}
             </tbody>
           </table>
         </div>
@@ -623,7 +662,9 @@ export default function StudentCumulativeTranscript({
             color: "#555",
           }}
         >
-          <span>Official cumulative academic transcript for {branding.schoolName}</span>
+          <span>
+            Official cumulative academic transcript for {branding.schoolName}
+          </span>
           <span>Powered by Eleeveon School Management System</span>
         </div>
       </div>
@@ -647,7 +688,8 @@ export default function StudentCumulativeTranscript({
         <div>
           <strong>{transcript.studentName}</strong>
           <span>
-            {transcript.totalPeriods} periods · {transcript.totalSubjects} subjects
+            {transcript.totalPeriods} periods · {transcript.totalSubjects}{" "}
+            subjects
           </span>
         </div>
 
@@ -657,9 +699,7 @@ export default function StudentCumulativeTranscript({
       </div>
 
       <div className="sct-preview-scroll report-screen-scroll">
-        <div className="sct-preview-scale">
-          {reportPage}
-        </div>
+        <div className="sct-preview-scale">{reportPage}</div>
       </div>
     </div>
   );

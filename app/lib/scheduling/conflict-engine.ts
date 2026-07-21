@@ -22,11 +22,11 @@ import { createScheduleConflictRecord } from "./schedule-factory";
 
 export type SessionConflictInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   candidate: ScheduleSession;
   existingSessions: ScheduleSession[];
-  excludeSessionId?: number;
+  excludeSessionId?: string;
 };
 
 export function detectSessionConflicts(
@@ -39,7 +39,7 @@ export function detectSessionConflicts(
     if (existing.isDeleted || existing.active === false) continue;
     if (!sessionsOverlap(input.candidate, existing)) continue;
 
-    if (sessionMatchesTeacher(existing, input.candidate.teacherLocalId)) {
+    if (sessionMatchesTeacher(existing, input.candidate.teacherId)) {
       conflicts.push(
         createScheduleConflictRecord({
           accountId: input.accountId,
@@ -51,7 +51,7 @@ export function detectSessionConflicts(
           description: "The same teacher has another session at this time.",
           sessionIdA: input.candidate.id ?? null,
           sessionIdB: existing.id ?? null,
-          teacherLocalId: input.candidate.teacherLocalId ?? null,
+          teacherId: input.candidate.teacherId ?? null,
           dayOfWeek: input.candidate.dayOfWeek,
           startMinute: Math.max(input.candidate.startMinute, existing.startMinute),
           endMinute: Math.min(input.candidate.endMinute, existing.endMinute),
@@ -105,11 +105,11 @@ export function detectSessionConflicts(
 
 export type CalendarConflictInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   candidate: CalendarEvent;
   existingEvents: CalendarEvent[];
-  excludeEventId?: number;
+  excludeEventId?: string;
 };
 
 export function detectCalendarConflicts(
@@ -123,9 +123,9 @@ export function detectCalendarConflicts(
     if (!eventsOverlap(input.candidate, existing)) continue;
 
     if (
-      input.candidate.teacherLocalId &&
-      existing.teacherLocalId &&
-      Number(input.candidate.teacherLocalId) === Number(existing.teacherLocalId)
+      input.candidate.teacherId &&
+      existing.teacherId &&
+      String(input.candidate.teacherId) === String(existing.teacherId)
     ) {
       conflicts.push(
         createScheduleConflictRecord({
@@ -138,7 +138,7 @@ export function detectCalendarConflicts(
           description: "The same teacher has another event at this time.",
           eventIdA: input.candidate.id ?? null,
           eventIdB: existing.id ?? null,
-          teacherLocalId: input.candidate.teacherLocalId ?? null,
+          teacherId: input.candidate.teacherId ?? null,
           conflictStartAt: Math.max(input.candidate.startAt, existing.startAt),
           conflictEndAt: Math.min(input.candidate.endAt, existing.endAt),
         })
@@ -148,7 +148,7 @@ export function detectCalendarConflicts(
     if (
       input.candidate.classId &&
       existing.classId &&
-      Number(input.candidate.classId) === Number(existing.classId)
+      String(input.candidate.classId) === String(existing.classId)
     ) {
       conflicts.push(
         createScheduleConflictRecord({
@@ -184,7 +184,7 @@ export function mergeDuplicateConflicts(conflicts: ScheduleConflict[]) {
       conflict.sessionIdA,
       conflict.sessionIdB,
       conflict.resourceId,
-      conflict.teacherLocalId,
+      conflict.teacherId,
       conflict.classId,
       conflict.dayOfWeek,
       conflict.startMinute,

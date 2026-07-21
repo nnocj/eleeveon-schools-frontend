@@ -20,7 +20,7 @@
  * - cards, table and analytics follow the same ba-* pattern
  * - createLocal/updateLocal/softDeleteLocal/listActiveLocal preserved
  * - class photos/banners use mediaAssets instead of storing Base64 in class records
- * - reloads resolve images by ownerTable + ownerLocalId + fieldKey to prevent media bleed
+ * - reloads resolve images by ownerTable + ownerId + fieldKey to prevent media bleed
  * - edit saves attach only newly uploaded media so old/corrupted media IDs are not reattached
  * - class teacher is saved through classTeachers, not directly on the Class row
  */
@@ -62,9 +62,6 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -77,8 +74,8 @@ type CameraField = "photo" | "bannerImage";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -90,11 +87,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -105,7 +102,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -130,13 +129,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -147,16 +146,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -168,9 +171,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -178,35 +185,34 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 type FormState = {
-  id?: number;
+  id?: string;
   organizationId: string;
   classTeacherId: string;
   name: string;
   code: string;
   level: string;
   photo: string;
-  photoMediaId?: number;
-  newPhotoMediaId?: number;
+  photoMediaId?: string;
+  newPhotoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
-  newBannerImageMediaId?: number;
+  bannerImageMediaId?: string;
+  newBannerImageMediaId?: string;
   capacity: string;
   active: boolean;
 };
 
 type ClassView = {
-  id: number;
+  id: string;
   row: Class;
   photoUrl?: string;
   bannerImageUrl?: string;
   organizationName: string;
-  classTeacherId?: number;
+  classTeacherId?: string;
   classTeacherName: string;
   classTeacherLink?: ClassTeacher;
   studentCount: number;
@@ -233,10 +239,9 @@ const emptyForm: FormState = {
   active: true,
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -285,7 +290,7 @@ const CLASS_MEDIA_OWNER_TABLE = MediaOwners.CLASSES;
 const CLASS_MEDIA_ENTITY_LABEL = "Class";
 const createClassMediaSessionKey = () =>
   createMediaSessionKey(CLASS_MEDIA_OWNER_TABLE);
-const mediaKey = (classId: number, field: "photo" | "bannerImage") =>
+const mediaKey = (classId: string, field: "photo" | "bannerImage") =>
   `${CLASS_MEDIA_OWNER_TABLE}:${classId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
@@ -351,7 +356,17 @@ function Empty({
 }
 
 export default function ClassesPage() {
-  const dataRevision = useBranchTableRevision(["classes", "organizations", "teachers", "students", "studentEnrollments", "classSubjects", "classTeachers", "mediaAssets", "mediaBlobs"]);
+  const dataRevision = useBranchTableRevision([
+    "classes",
+    "organizations",
+    "teachers",
+    "students",
+    "studentEnrollments",
+    "classSubjects",
+    "classTeachers",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -410,7 +425,8 @@ export default function ClassesPage() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("photo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
   const [toast, setToast] = useState<{
@@ -530,8 +546,8 @@ export default function ClassesPage() {
           const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: CLASS_MEDIA_OWNER_TABLE,
-            ownerLocalId: classId,
-            ownerCloudId: classRow.cloudId || undefined,
+            ownerId: classId,
+
             fieldKey: MediaFieldKeys.PHOTO,
             fallbackAssetId: classRow.photoMediaId,
           });
@@ -540,8 +556,8 @@ export default function ClassesPage() {
           const bannerUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: CLASS_MEDIA_OWNER_TABLE,
-            ownerLocalId: classId,
-            ownerCloudId: classRow.cloudId || undefined,
+            ownerId: classId,
+
             fieldKey: "bannerImage",
             fallbackAssetId: classRow.bannerImageMediaId,
           });
@@ -579,13 +595,13 @@ export default function ClassesPage() {
         tableSafe("classes")?.toArray?.() || [],
         listActiveLocal("organizations", {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
         } as any),
         listActiveLocal("students", {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
         } as any),
         tableSafe("studentEnrollments")?.toArray?.() || [],
         tableSafe("classSubjects")?.toArray?.() || [],
@@ -610,8 +626,12 @@ export default function ClassesPage() {
 
       setTeachers(
         (teacherRows as Teacher[])
-          .filter((row: any) => sameTenant(row as TenantRow) && isActiveRow(row))
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))),
+          .filter(
+            (row: any) => sameTenant(row as TenantRow) && isActiveRow(row),
+          )
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
 
       setStudents(
@@ -712,19 +732,19 @@ export default function ClassesPage() {
   }, [cameraOpen, cameraFacing]);
 
   const organizationMap = useMemo(() => {
-    const map = new Map<number, Organization>();
+    const map = new Map<string, Organization>();
     organizations.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [organizations]);
 
   const teacherMap = useMemo(() => {
-    const map = new Map<number, Teacher>();
+    const map = new Map<string, Teacher>();
     teachers.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [teachers]);
 
   const classTeacherMap = useMemo(() => {
-    const map = new Map<number, ClassTeacher>();
+    const map = new Map<string, ClassTeacher>();
     classTeachers.forEach((row: any) => {
       if (!isActiveRow(row)) return;
       const classId = idOf(row.classId);
@@ -735,7 +755,7 @@ export default function ClassesPage() {
   }, [classTeachers]);
 
   const activeEnrollmentCounts = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     enrollments.forEach((enrollment: any) => {
       if (enrollment.status !== "active") return;
       const classId = idOf(enrollment.classId);
@@ -746,7 +766,7 @@ export default function ClassesPage() {
   }, [enrollments]);
 
   const fallbackCurrentClassCounts = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     students.forEach((student: any) => {
       const classId = idOf(student.currentClassId);
       if (!classId) return;
@@ -756,7 +776,7 @@ export default function ClassesPage() {
   }, [students]);
 
   const classSubjectCounts = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     classSubjects.forEach((classSubject: any) => {
       if (classSubject.active === false) return;
       const classId = idOf(classSubject.classId);
@@ -779,7 +799,9 @@ export default function ClassesPage() {
       const subjectCount = classSubjectCounts.get(id) || 0;
       const capacity = Number(row.capacity || 0);
       const classTeacherLink = classTeacherMap.get(id);
-      const classTeacher = classTeacherLink ? (teacherMap.get(idOf((classTeacherLink as any).teacherId)) as any) : undefined;
+      const classTeacher = classTeacherLink
+        ? (teacherMap.get(idOf((classTeacherLink as any).teacherId)) as any)
+        : undefined;
       const capacityUsed = capacity
         ? Math.min(100, Math.round((studentCount / capacity) * 100))
         : 0;
@@ -788,10 +810,12 @@ export default function ClassesPage() {
         id,
         row,
         photoUrl:
-          resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] ||
+          resolvedMediaById[id]?.photo ||
+          mediaPreviewUrls[mediaKey(id, "photo")] ||
           safeRecordMediaValue(row.photo),
         bannerImageUrl:
-          resolvedMediaById[id]?.bannerImage || mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
+          resolvedMediaById[id]?.bannerImage ||
+          mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
           safeRecordMediaValue(row.bannerImage),
         organizationName: organization?.name || "No organization",
         classTeacherId: classTeacher ? idOf(classTeacher.id) : undefined,
@@ -914,10 +938,7 @@ export default function ClassesPage() {
   const updateForm = (patch: Partial<FormState>) =>
     setForm((current) => ({ ...current, ...patch }));
 
-  const handleImageUpload = async (
-    field: CameraField,
-    file?: File,
-  ) => {
+  const handleImageUpload = async (field: CameraField, file?: File) => {
     if (!file) return;
 
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -931,10 +952,10 @@ export default function ClassesPage() {
 
       const result = await saveImageAsset(file, {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: CLASS_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey,
         fieldKey: isPhoto ? MediaFieldKeys.PHOTO : "bannerImage",
         variant: isPhoto ? "avatar" : "cover",
@@ -983,7 +1004,9 @@ export default function ClassesPage() {
     setForm({
       id: idOf(item.id),
       organizationId: item.organizationId ? String(item.organizationId) : "",
-      classTeacherId: classTeacherMap.get(idOf(item.id))?.teacherId ? String((classTeacherMap.get(idOf(item.id)) as any).teacherId) : "",
+      classTeacherId: classTeacherMap.get(idOf(item.id))?.teacherId
+        ? String((classTeacherMap.get(idOf(item.id)) as any).teacherId)
+        : "",
       name: item.name || "",
       code: item.code || "",
       level: item.level || "",
@@ -991,14 +1014,14 @@ export default function ClassesPage() {
         mediaPreviewUrls[mediaKey(idOf(item.id), "photo")] ||
         safeRecordMediaValue(item.photo) ||
         "",
-      photoMediaId: item.photoMediaId ? Number(item.photoMediaId) : undefined,
+      photoMediaId: item.photoMediaId ? String(item.photoMediaId) : undefined,
       newPhotoMediaId: undefined,
       bannerImage:
         mediaPreviewUrls[mediaKey(idOf(item.id), "bannerImage")] ||
         safeRecordMediaValue(item.bannerImage) ||
         "",
       bannerImageMediaId: item.bannerImageMediaId
-        ? Number(item.bannerImageMediaId)
+        ? String(item.bannerImageMediaId)
         : undefined,
       newBannerImageMediaId: undefined,
       capacity: item.capacity == null ? "" : String(item.capacity),
@@ -1056,10 +1079,10 @@ export default function ClassesPage() {
 
       const payload: Partial<Class> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         organizationId: form.organizationId
-          ? Number(form.organizationId)
+          ? String(form.organizationId)
           : undefined,
         name: form.name.trim(),
         code: form.code.trim() || undefined,
@@ -1076,10 +1099,10 @@ export default function ClassesPage() {
 
       const savedClass =
         form.id && existing
-          ? await updateLocal("classes", Number(form.id), payload)
+          ? await updateLocal("classes", String(form.id), payload)
           : await createLocal("classes", payload as unknown as Class);
 
-      const savedClassId = Number(
+      const savedClassId = idOf(
         typeof savedClass === "number"
           ? savedClass
           : (savedClass as any)?.id || form.id || 0,
@@ -1089,8 +1112,8 @@ export default function ClassesPage() {
         await commitMediaAssetsToOwner({
           accountId,
           ownerTable: CLASS_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedClassId,
-          ownerCloudId: (savedClass as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedClassId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.newPhotoMediaId, fieldKey: MediaFieldKeys.PHOTO },
@@ -1109,17 +1132,21 @@ export default function ClassesPage() {
           existingLinks
             .filter((link: any) => !sameId(link.teacherId, selectedTeacherId))
             .map((link: any) =>
-              link.id ? softDeleteLocal("classTeachers", Number(link.id)) : Promise.resolve(),
+              link.id
+                ? softDeleteLocal("classTeachers", String(link.id))
+                : Promise.resolve(),
             ),
         );
 
         if (selectedTeacherId) {
-          const matchingLink = existingLinks.find((link: any) => sameId(link.teacherId, selectedTeacherId));
+          const matchingLink = existingLinks.find((link: any) =>
+            sameId(link.teacherId, selectedTeacherId),
+          );
           if (matchingLink?.id) {
-            await updateLocal("classTeachers", Number(matchingLink.id), {
+            await updateLocal("classTeachers", String(matchingLink.id), {
               accountId,
-              schoolId: Number(schoolId),
-              branchId: Number(branchId),
+              schoolId: schoolId,
+              branchId: branchId,
               classId: savedClassId,
               teacherId: selectedTeacherId,
               active: true,
@@ -1128,8 +1155,8 @@ export default function ClassesPage() {
           } else {
             await createLocal("classTeachers", {
               accountId,
-              schoolId: Number(schoolId),
-              branchId: Number(branchId),
+              schoolId: schoolId,
+              branchId: branchId,
               classId: savedClassId,
               teacherId: selectedTeacherId,
               active: true,
@@ -1163,38 +1190,21 @@ export default function ClassesPage() {
 
     if (!window.confirm(warning)) return;
 
-
     await Promise.all(
-
-
       ["photo", "bannerImage"].map((fieldKey) =>
-
-
         softDeleteOwnerFieldAssets({
-
-
           accountId: String(accountId),
-
 
           ownerTable: "classes",
 
-
-          ownerLocalId: Number(id),
-
+          ownerId: idOf(id) || undefined,
 
           fieldKey,
-
-
         }),
-
-
       ),
-
-
     );
 
-
-    await softDeleteLocal("classes", Number(id));
+    await softDeleteLocal("classes", String(id));
     setSelectedItem(null);
     showToast("success", "Class deleted.");
     await load();
@@ -1248,7 +1258,10 @@ export default function ClassesPage() {
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Classes belong to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
+          <p>
+            Classes belong to the selected branch-admin workspace. Use Select
+            Role again if the wrong branch is active.
+          </p>
           <button
             type="button"
             className="ba-state-button"
@@ -1523,8 +1536,8 @@ function ClassListItem({
           {row.code ? ` · ${row.code}` : ""}
         </small>
         <em>
-          {item.classTeacherName} · {item.studentCount} student{item.studentCount === 1 ? "" : "s"} ·{" "}
-          {item.subjectCount} subject
+          {item.classTeacherName} · {item.studentCount} student
+          {item.studentCount === 1 ? "" : "s"} · {item.subjectCount} subject
           {item.subjectCount === 1 ? "" : "s"}
           {item.capacity
             ? ` · ${item.studentCount}/${item.capacity} capacity`
@@ -1733,8 +1746,8 @@ function ActionSheet({
           <div>
             <h2>{row.name || "Class"}</h2>
             <p>
-              {item.organizationName} ·{" "}
-              {item.classTeacherName} · {item.overCapacity ? "Over capacity" : statusLabel(item.active)}
+              {item.organizationName} · {item.classTeacherName} ·{" "}
+              {item.overCapacity ? "Over capacity" : statusLabel(item.active)}
             </p>
           </div>
           <button
@@ -2044,7 +2057,11 @@ function ClassModal({
                     hidden
                   />
                 </label>
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("photo")}
+                >
                   Take Photo
                 </button>
               </div>
@@ -2075,7 +2092,11 @@ function ClassModal({
                     hidden
                   />
                 </label>
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("bannerImage")}>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("bannerImage")}
+                >
                   Take Photo
                 </button>
               </div>
@@ -2128,15 +2149,25 @@ function CameraCaptureModal({
   close: () => void;
   entityLabel: string;
 }) {
-  const title = field === "photo" ? `Take ${entityLabel} Photo` : `Take ${entityLabel} Banner Photo`;
+  const title =
+    field === "photo"
+      ? `Take ${entityLabel} Photo`
+      : `Take ${entityLabel} Banner Photo`;
 
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
-            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+            <p>
+              Use the live camera preview, then capture. The image will still be
+              compressed and saved as a media asset.
+            </p>
           </div>
           <button type="button" onClick={close} aria-label="Close camera">
             ✕
@@ -2145,22 +2176,36 @@ function CameraCaptureModal({
 
         <div className="ba-camera-preview">
           <video ref={videoRef} autoPlay muted playsInline />
-          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
         </div>
 
         <div className="ba-camera-actions">
           <button
             type="button"
             className="ba-camera-secondary"
-            onClick={() => setFacing(facing === "environment" ? "user" : "environment")}
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
             disabled={starting || capturing}
           >
             Switch Camera
           </button>
-          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
             Cancel
           </button>
-          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
             {capturing ? "Capturing..." : "Capture Photo"}
           </button>
         </div>

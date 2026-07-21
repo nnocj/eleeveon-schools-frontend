@@ -83,8 +83,8 @@ export type RealtimeStatusSnapshot = {
 
 type ConnectOptions = {
   accountId: string;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 };
 
 type EventListener = (

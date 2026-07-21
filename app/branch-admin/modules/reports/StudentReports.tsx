@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -110,48 +109,59 @@ import {
 
 import { useDataRevision } from "../../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
-const TemplateAwareStudentReportCard = StudentReportCard as React.ComponentType<any>;
+const TemplateAwareStudentReportCard =
+  StudentReportCard as React.ComponentType<any>;
+
+type EntityId = string | number;
 
 type TenantRow = {
-  accountId?: string;
-  schoolId?: number;
-  branchId?: number;
+  accountId?: EntityId;
+  schoolId?: EntityId;
+  branchId?: EntityId;
   isDeleted?: boolean;
 };
 
 type SchoolRow = {
-  accountId?: string;
-  id?: number;
+  accountId?: EntityId;
+  id?: EntityId;
   isDeleted?: boolean;
 };
 
 type BranchRow = {
-  accountId?: string;
-  schoolId?: number;
-  id?: number;
+  accountId?: EntityId;
+  schoolId?: EntityId;
+  id?: EntityId;
   isDeleted?: boolean;
 };
 
-function firstExistingId<T extends { id?: number }>(rows: T[]) {
-  return rows.find((row) => typeof row.id === "number")?.id;
+function firstExistingId<T extends { id?: EntityId }>(rows: T[]): string | undefined {
+  const id = rows.map((row) => idOf(row.id)).find(Boolean);
+  return id || undefined;
 }
-
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 const STUDENT_REPORT_PRINT_ZONE_ID = "student-report-print-zone";
 
-const REPORT_MEDIA_OWNER_STUDENTS = String((MediaOwners as any).STUDENTS || "students");
-const REPORT_MEDIA_OWNER_SCHOOLS = String((MediaOwners as any).SCHOOLS || "schools");
-const REPORT_MEDIA_OWNER_BRANCHES = String((MediaOwners as any).BRANCHES || "branches");
+const REPORT_MEDIA_OWNER_STUDENTS = String(
+  (MediaOwners as any).STUDENTS || "students",
+);
+const REPORT_MEDIA_OWNER_SCHOOLS = String(
+  (MediaOwners as any).SCHOOLS || "schools",
+);
+const REPORT_MEDIA_OWNER_BRANCHES = String(
+  (MediaOwners as any).BRANCHES || "branches",
+);
 const REPORT_MEDIA_OWNER_SETTINGS = String(
   (MediaOwners as any).SCHOOL_BRANCH_SETTINGS ||
     (MediaOwners as any).SCHOOL_BRANCHES_SETTINGS ||
-    "schoolBranchSettings"
+    "schoolBranchSettings",
 );
 
 const REPORT_FIELD_PHOTO = String((MediaFieldKeys as any).PHOTO || "photo");
 const REPORT_FIELD_LOGO = String((MediaFieldKeys as any).LOGO || "logo");
-const REPORT_FIELD_BANNER = String((MediaFieldKeys as any).BANNER || "bannerImage");
+const REPORT_FIELD_BANNER = String(
+  (MediaFieldKeys as any).BANNER || "bannerImage",
+);
 const REPORT_FIELD_REPORT_BACKGROUND = "reportCardBackgroundImage";
 const REPORT_FIELD_REPORT_WATERMARK = "reportCardWatermark";
 const REPORT_FIELD_REPORT_SIGNATURE = "reportCardSignatureImage";
@@ -168,12 +178,17 @@ function safeRecordMediaValue(value?: string | null) {
   return media;
 }
 
-function fallbackMediaValue(row: any, stringField: string, mediaIdField?: string) {
+function fallbackMediaValue(
+  row: any,
+  stringField: string,
+  mediaIdField?: string,
+) {
   if (!row) return "";
 
   // If the new mediaId field exists but is empty/null/0, treat that as an intentional removal.
   // This prevents old legacy string fields from reviving deleted media on reports.
-  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField])) return "";
+  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField]))
+    return "";
 
   return safeRecordMediaValue(row[stringField]);
 }
@@ -182,28 +197,44 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
   openedAt?: number;
 };
 
-function idOf(value: unknown) {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function idOf(value: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  const normalized = String(value).trim();
+  if (
+    !normalized ||
+    normalized === "0" ||
+    normalized === "undefined" ||
+    normalized === "null"
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function cleanId(value: unknown): string {
+  return idOf(value);
 }
 
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -228,13 +259,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
-    const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    const id = idOf(value);
+    if (id) return id;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -245,7 +276,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -254,7 +289,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -266,7 +301,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -276,15 +315,17 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
-
-function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: number) {
-  if (!id) return "Not selected";
-  return rows.find((row) => row.id === id)?.name || "Not found";
+function labelOf<T extends { id?: EntityId; name?: string }>(
+  rows: T[],
+  id?: EntityId,
+) {
+  const selectedId = idOf(id);
+  if (!selectedId) return "Not selected";
+  return rows.find((row) => idOf(row.id) === selectedId)?.name || "Not found";
 }
 
 export default function StudentReports() {
@@ -292,11 +333,7 @@ export default function StudentReports() {
 
   const router = useRouter();
 
-  const {
-    accountId,
-    loading: accountLoading,
-    authenticated,
-  } = useAccount();
+  const { accountId, loading: accountLoading, authenticated } = useAccount();
 
   const { settings, loading: settingsLoading } = useSettings();
 
@@ -333,19 +370,20 @@ export default function StudentReports() {
    * The settings context may return appearance-only settings, so academic IDs
    * must be normalized before they are used in ReportFiltersState.
    */
-  const currentAcademicStructureId: number | undefined =
+  const currentAcademicStructureId: string | undefined =
     idOf(settings?.currentAcademicStructureId) || undefined;
 
-  const currentAcademicPeriodId: number | undefined =
+  const currentAcademicPeriodId: string | undefined =
     idOf(settings?.currentAcademicPeriodId) || undefined;
 
-  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
+  const { loading: pageLoading, setLoading: setPageLoading } =
+    useBackgroundLoader();
   const [mode, setMode] = useState<ReportMode>("student-report");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [filters, setFilters] = useState<ReportFiltersState>({
-    branchId: branchId || 0,
+    branchId: branchId || undefined,
     academicStructureId: currentAcademicStructureId,
     academicPeriodId: currentAcademicPeriodId,
     classId: undefined,
@@ -356,8 +394,12 @@ export default function StudentReports() {
 
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [schoolBranchSettings, setSchoolBranchSettings] = useState<SchoolBranchSetting[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [schoolBranchSettings, setSchoolBranchSettings] = useState<
+    SchoolBranchSetting[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -366,21 +408,36 @@ export default function StudentReports() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [studentEnrollments, setStudentEnrollments] = useState<StudentEnrollment[]>([]);
+  const [studentEnrollments, setStudentEnrollments] = useState<
+    StudentEnrollment[]
+  >([]);
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
-  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<AssessmentApplicability[]>([]);
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
-  const [assessmentStructureItems, setAssessmentStructureItems] = useState<AssessmentStructureItem[]>([]);
-  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>([]);
+  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
+  const [assessmentStructureItems, setAssessmentStructureItems] = useState<
+    AssessmentStructureItem[]
+  >([]);
+  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>(
+    [],
+  );
   const [gradingSystems, setGradingSystems] = useState<GradingSystem[]>([]);
   const [gradeRules, setGradeRules] = useState<GradeRule[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [computedResults, setComputedResults] = useState<ComputedResult[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
-  const [reportCardTemplates, setReportCardTemplates] = useState<ReportCardTemplateLike[]>([]);
-  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<ReportCardTemplateSettingsLike[]>([]);
-  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] = useState<ReportCardTemplateAssignmentLike[]>([]);
+  const [reportCardTemplates, setReportCardTemplates] = useState<
+    ReportCardTemplateLike[]
+  >([]);
+  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<
+    ReportCardTemplateSettingsLike[]
+  >([]);
+  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] =
+    useState<ReportCardTemplateAssignmentLike[]>([]);
   const [reportMediaUrls, setReportMediaUrls] = useState<string[]>([]);
 
   useEffect(() => {
@@ -392,7 +449,15 @@ export default function StudentReports() {
     }
 
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -434,32 +499,34 @@ export default function StudentReports() {
 
   const resolveReportMediaUrl = async ({
     ownerTable,
-    ownerLocalId,
-    ownerCloudId,
+    ownerId,
     fieldKey,
     fallbackMediaId,
     nextUrls,
   }: {
     ownerTable: string;
-    ownerLocalId?: number | string | null;
-    ownerCloudId?: string | null;
+    ownerId?: string | null;
     fieldKey: string;
-    fallbackMediaId?: number | string | null;
+    fallbackMediaId?: EntityId | null;
     nextUrls: string[];
   }) => {
-    const localId = idOf(ownerLocalId);
+    const ownerIdValue = cleanId(ownerId);
 
-    if (localId) {
+    if (ownerIdValue) {
       const ownedAsset = await getOwnerFieldMediaAsset({
         accountId: accountId || undefined,
         ownerTable,
-        ownerLocalId: localId,
-        ownerCloudId: ownerCloudId || undefined,
+        ownerId: ownerIdValue,
+
         fieldKey,
       });
 
-      if (ownedAsset?.id && !(ownedAsset as any).isDeleted && (ownedAsset as any).active !== false) {
-        const url = await getMediaObjectUrl(Number(ownedAsset.id));
+      if (
+        ownedAsset?.id &&
+        !(ownedAsset as any).isDeleted &&
+        (ownedAsset as any).active !== false
+      ) {
+        const url = await getMediaObjectUrl(String(ownedAsset.id));
         if (url) {
           nextUrls.push(url);
           return url;
@@ -478,7 +545,8 @@ export default function StudentReports() {
       (!accountId || fallbackAsset.accountId === accountId) &&
       fallbackAsset.ownerTable === ownerTable &&
       fallbackAsset.fieldKey === fieldKey &&
-      (!localId || String(fallbackAsset.ownerLocalId || "") === String(localId));
+      (!ownerIdValue ||
+        String(fallbackAsset.ownerId || "") === String(ownerIdValue));
 
     if (!belongsToOwner) return "";
 
@@ -556,31 +624,34 @@ export default function StudentReports() {
       ]);
 
       const sameSchool = (row: SchoolRow) =>
-        row.accountId === accountId &&
-        row.id === schoolId &&
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.id) === schoolId &&
         !row.isDeleted;
 
       const sameBranch = (row: BranchRow) =>
-        row.accountId === accountId &&
-        row.schoolId === schoolId &&
-        row.id === branchId &&
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.schoolId) === schoolId &&
+        idOf(row.id) === branchId &&
         !row.isDeleted;
 
       const sameTenant = (row: TenantRow) =>
-        row.accountId === accountId &&
-        row.schoolId === schoolId &&
-        row.branchId === branchId &&
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.schoolId) === schoolId &&
+        idOf(row.branchId) === branchId &&
         !row.isDeleted;
 
       const currentSchool =
         schoolRows.find(sameSchool) ||
-        (activeSchool?.accountId === accountId && activeSchool?.id === schoolId ? activeSchool : undefined);
+        (idOf(activeSchool?.accountId) === idOf(accountId) &&
+        idOf(activeSchool?.id) === schoolId
+          ? activeSchool
+          : undefined);
 
       const currentBranch =
         branchRows.find(sameBranch) ||
-        (activeBranch?.accountId === accountId &&
-        activeBranch?.schoolId === schoolId &&
-        activeBranch?.id === branchId
+        (idOf(activeBranch?.accountId) === idOf(accountId) &&
+        idOf(activeBranch?.schoolId) === schoolId &&
+        idOf(activeBranch?.id) === branchId
           ? activeBranch
           : undefined);
 
@@ -589,12 +660,22 @@ export default function StudentReports() {
       const scopedSettings = schoolBranchSettingRows.filter(sameTenant);
       const currentSetting = scopedSettings[0];
 
-      const scopedReportCardTemplates = (reportCardTemplateRows as ReportCardTemplateLike[])
+      const scopedReportCardTemplates = (
+        reportCardTemplateRows as ReportCardTemplateLike[]
+      )
         .filter((row: any) => {
           if (row.isDeleted || row.active === false) return false;
           if (row.accountId && row.accountId !== accountId) return false;
-          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-          if (row.branchId && Number(row.branchId) !== branchId) return false;
+          if (
+            row.schoolId &&
+            String(row.schoolId ?? "") !== String(schoolId ?? "")
+          )
+            return false;
+          if (
+            row.branchId &&
+            String(row.branchId ?? "") !== String(branchId ?? "")
+          )
+            return false;
           return true;
         })
         .sort((a: any, b: any) => {
@@ -603,23 +684,41 @@ export default function StudentReports() {
           return String(a.name || "").localeCompare(String(b.name || ""));
         });
 
-      const scopedReportCardTemplateSettings = (reportCardTemplateSettingRows as ReportCardTemplateSettingsLike[])
-        .filter((row: any) => {
-          if (row.isDeleted || row.active === false) return false;
-          if (row.accountId && row.accountId !== accountId) return false;
-          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-          if (row.branchId && Number(row.branchId) !== branchId) return false;
-          return true;
-        });
+      const scopedReportCardTemplateSettings = (
+        reportCardTemplateSettingRows as ReportCardTemplateSettingsLike[]
+      ).filter((row: any) => {
+        if (row.isDeleted || row.active === false) return false;
+        if (row.accountId && row.accountId !== accountId) return false;
+        if (
+          row.schoolId &&
+          String(row.schoolId ?? "") !== String(schoolId ?? "")
+        )
+          return false;
+        if (
+          row.branchId &&
+          String(row.branchId ?? "") !== String(branchId ?? "")
+        )
+          return false;
+        return true;
+      });
 
-      const scopedReportCardTemplateAssignments = (reportCardTemplateAssignmentRows as ReportCardTemplateAssignmentLike[])
-        .filter((row: any) => {
-          if (row.isDeleted || row.active === false) return false;
-          if (row.accountId && row.accountId !== accountId) return false;
-          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-          if (row.branchId && Number(row.branchId) !== branchId) return false;
-          return true;
-        });
+      const scopedReportCardTemplateAssignments = (
+        reportCardTemplateAssignmentRows as ReportCardTemplateAssignmentLike[]
+      ).filter((row: any) => {
+        if (row.isDeleted || row.active === false) return false;
+        if (row.accountId && row.accountId !== accountId) return false;
+        if (
+          row.schoolId &&
+          String(row.schoolId ?? "") !== String(schoolId ?? "")
+        )
+          return false;
+        if (
+          row.branchId &&
+          String(row.branchId ?? "") !== String(branchId ?? "")
+        )
+          return false;
+        return true;
+      });
 
       const nextMediaUrls: string[] = [];
 
@@ -629,8 +728,8 @@ export default function StudentReports() {
             logo:
               (await resolveReportMediaUrl({
                 ownerTable: REPORT_MEDIA_OWNER_SCHOOLS,
-                ownerLocalId: currentSchool.id,
-                ownerCloudId: (currentSchool as any).cloudId,
+                ownerId: currentSchool.id,
+
                 fieldKey: REPORT_FIELD_LOGO,
                 fallbackMediaId: (currentSchool as any).logoMediaId,
                 nextUrls: nextMediaUrls,
@@ -644,8 +743,8 @@ export default function StudentReports() {
             logo:
               (await resolveReportMediaUrl({
                 ownerTable: REPORT_MEDIA_OWNER_BRANCHES,
-                ownerLocalId: currentBranch.id,
-                ownerCloudId: (currentBranch as any).cloudId,
+                ownerId: currentBranch.id,
+
                 fieldKey: REPORT_FIELD_LOGO,
                 fallbackMediaId: (currentBranch as any).logoMediaId,
                 nextUrls: nextMediaUrls,
@@ -659,8 +758,8 @@ export default function StudentReports() {
           logo:
             (await resolveReportMediaUrl({
               ownerTable: REPORT_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: REPORT_FIELD_LOGO,
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
@@ -668,31 +767,46 @@ export default function StudentReports() {
           reportCardBackgroundImage:
             (await resolveReportMediaUrl({
               ownerTable: REPORT_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: REPORT_FIELD_REPORT_BACKGROUND,
               fallbackMediaId: row.reportCardBackgroundImageMediaId,
               nextUrls: nextMediaUrls,
-            })) || fallbackMediaValue(row, "reportCardBackgroundImage", "reportCardBackgroundImageMediaId"),
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardBackgroundImage",
+              "reportCardBackgroundImageMediaId",
+            ),
           reportCardWatermark:
             (await resolveReportMediaUrl({
               ownerTable: REPORT_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: REPORT_FIELD_REPORT_WATERMARK,
               fallbackMediaId: row.reportCardWatermarkMediaId,
               nextUrls: nextMediaUrls,
-            })) || fallbackMediaValue(row, "reportCardWatermark", "reportCardWatermarkMediaId"),
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardWatermark",
+              "reportCardWatermarkMediaId",
+            ),
           reportCardSignatureImage:
             (await resolveReportMediaUrl({
               ownerTable: REPORT_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: REPORT_FIELD_REPORT_SIGNATURE,
               fallbackMediaId: row.reportCardSignatureImageMediaId,
               nextUrls: nextMediaUrls,
-            })) || fallbackMediaValue(row, "reportCardSignatureImage", "reportCardSignatureImageMediaId"),
-        }))
+            })) ||
+            fallbackMediaValue(
+              row,
+              "reportCardSignatureImage",
+              "reportCardSignatureImageMediaId",
+            ),
+        })),
       );
 
       const scopedStudentsWithMedia = await Promise.all(
@@ -701,17 +815,21 @@ export default function StudentReports() {
           photo:
             (await resolveReportMediaUrl({
               ownerTable: REPORT_MEDIA_OWNER_STUDENTS,
-              ownerLocalId: student.id,
-              ownerCloudId: student.cloudId,
+              ownerId: student.id,
+
               fieldKey: REPORT_FIELD_PHOTO,
               fallbackMediaId: student.photoMediaId,
               nextUrls: nextMediaUrls,
             })) || fallbackMediaValue(student, "photo", "photoMediaId"),
-        }))
+        })),
       );
 
-      const branchPeriodIds = new Set(scopedAcademicPeriods.map((row) => row.id).filter(Boolean) as number[]);
-      const branchReportCardIds = new Set(scopedReportCards.map((row) => row.id).filter(Boolean) as number[]);
+      const branchPeriodIds = new Set<string>(
+        scopedAcademicPeriods.map((row) => idOf(row.id)).filter(Boolean),
+      );
+      const branchReportCardIds = new Set<string>(
+        scopedReportCards.map((row) => idOf(row.id)).filter(Boolean),
+      );
 
       reportMediaUrls.forEach((url) => {
         if (!nextMediaUrls.includes(url)) revokeMediaObjectUrl(url);
@@ -726,18 +844,40 @@ export default function StudentReports() {
       setStudents(scopedStudentsWithMedia as Student[]);
       setParents(parentRows.filter(sameTenant));
       setTeachers(teacherRows.filter(sameTenant));
-      setClasses(classRows.filter((row) => sameTenant(row) && row.active !== false));
-      setSubjects(subjectRows.filter((row) => sameTenant(row) && row.active !== false));
-      setClassSubjects(classSubjectRows.filter((row) => sameTenant(row) && row.active !== false));
+      setClasses(
+        classRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setSubjects(
+        subjectRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setClassSubjects(
+        classSubjectRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
       setStudentParents(studentParentRows.filter(sameTenant));
       setStudentEnrollments(enrollmentRows.filter(sameTenant));
       setClassTeachers(classTeacherRows.filter(sameTenant));
-      setAssessmentApplicabilities(applicabilityRows.filter((row) => sameTenant(row) && row.active !== false));
-      setAssessmentStructures(structureRows.filter((row) => sameTenant(row) && row.active !== false));
-      setAssessmentStructureItems(structureItemRows.filter((row) => sameTenant(row) && row.active !== false));
+      setAssessmentApplicabilities(
+        applicabilityRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
+      setAssessmentStructures(
+        structureRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setAssessmentStructureItems(
+        structureItemRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
       setAssessmentEntries(entryRows.filter(sameTenant));
-      setGradingSystems(gradingRows.filter((row) => sameTenant(row) && row.active !== false));
-      setGradeRules(ruleRows.filter((row) => sameTenant(row) && row.active !== false));
+      setGradingSystems(
+        gradingRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setGradeRules(
+        ruleRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
       setAttendance(attendanceRows.filter(sameTenant));
       setComputedResults(computedRows.filter(sameTenant));
       setReportCards(scopedReportCards);
@@ -745,10 +885,18 @@ export default function StudentReports() {
       setReportCardItems(
         reportCardItemRows.filter((row) => {
           if (!sameTenant(row)) return false;
-          if (row.reportCardId && !branchReportCardIds.has(row.reportCardId)) return false;
-          if (row.academicPeriodId && !branchPeriodIds.has(row.academicPeriodId)) return false;
+          if (
+            row.reportCardId &&
+            !branchReportCardIds.has(idOf(row.reportCardId))
+          )
+            return false;
+          if (
+            row.academicPeriodId &&
+            !branchPeriodIds.has(idOf(row.academicPeriodId))
+          )
+            return false;
           return true;
-        })
+        }),
       );
       setReportCardTemplates(scopedReportCardTemplates);
       setReportCardTemplateSettings(scopedReportCardTemplateSettings);
@@ -764,13 +912,11 @@ export default function StudentReports() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [authenticated, accountId, schoolId, branchId, dataRevision]);
 
   useEffect(() => {
     setFilters((prev) => {
-      const nextBranchId = branchId || 0;
+      const nextBranchId = branchId || undefined;
       const branchChanged = prev.branchId !== nextBranchId;
 
       return {
@@ -791,51 +937,99 @@ export default function StudentReports() {
 
   useEffect(() => {
     if (!filters.academicStructureId) {
-      const fallbackId = currentAcademicStructureId || firstExistingId(academicStructures);
-      if (fallbackId) setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
+      const fallbackId =
+        currentAcademicStructureId || firstExistingId(academicStructures);
+      if (fallbackId)
+        setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
     }
-  }, [filters.academicStructureId, currentAcademicStructureId, academicStructures]);
+  }, [
+    filters.academicStructureId,
+    currentAcademicStructureId,
+    academicStructures,
+  ]);
 
   useEffect(() => {
     if (!filters.academicPeriodId) {
-      const fallbackId = currentAcademicPeriodId || firstExistingId(academicPeriods);
-      if (fallbackId) setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
+      const fallbackId =
+        currentAcademicPeriodId || firstExistingId(academicPeriods);
+      if (fallbackId)
+        setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
     }
   }, [filters.academicPeriodId, currentAcademicPeriodId, academicPeriods]);
 
   const lockedBranches = useMemo(() => {
-    return activeBranch && activeBranch.id === branchId ? [activeBranch] : branches;
+    return activeBranch && idOf(activeBranch.id) === branchId
+      ? [activeBranch]
+      : branches;
   }, [activeBranch, branchId, branches]);
 
   const filteredClasses = useMemo(() => {
-    const allowedClassIds = new Set<number>();
+    const allowedClassIds = new Set<string>();
 
     studentEnrollments.forEach((row) => {
       if (row.status !== "active") return;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
-      if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
-      allowedClassIds.add(row.classId);
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return;
+      allowedClassIds.add(idOf(row.classId));
     });
 
     classSubjects.forEach((row) => {
       if (row.active === false) return;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
-      if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
-      allowedClassIds.add(row.classId);
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return;
+      allowedClassIds.add(idOf(row.classId));
     });
 
-    if (!filters.academicStructureId && !filters.academicPeriodId) return classes;
-    return classes.filter((row) => row.id && allowedClassIds.has(row.id));
-  }, [classes, studentEnrollments, classSubjects, filters.academicStructureId, filters.academicPeriodId]);
+    if (!filters.academicStructureId && !filters.academicPeriodId)
+      return classes;
+    return classes.filter((row) => !!idOf(row.id) && allowedClassIds.has(idOf(row.id)));
+  }, [
+    classes,
+    studentEnrollments,
+    classSubjects,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const filteredClassSubjects = useMemo(() => {
     return classSubjects.filter((row) => {
       if (filters.classId && row.classId !== filters.classId) return false;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
-      if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return false;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return false;
       return true;
     });
-  }, [classSubjects, filters.classId, filters.academicStructureId, filters.academicPeriodId]);
+  }, [
+    classSubjects,
+    filters.classId,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const filteredStudents = useMemo(() => {
     if (!filters.classId && !filters.academicPeriodId) return students;
@@ -845,15 +1039,30 @@ export default function StudentReports() {
         .filter((row) => {
           if (row.status !== "active") return false;
           if (filters.classId && row.classId !== filters.classId) return false;
-          if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
-          if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
+          if (
+            filters.academicStructureId &&
+            row.academicStructureId !== filters.academicStructureId
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            row.academicPeriodId !== filters.academicPeriodId
+          )
+            return false;
           return true;
         })
-        .map((row) => row.studentId)
+        .map((row) => idOf(row.studentId))
+        .filter(Boolean),
     );
 
-    return students.filter((row) => row.id && allowedStudentIds.has(row.id));
-  }, [students, studentEnrollments, filters.classId, filters.academicStructureId, filters.academicPeriodId]);
+    return students.filter((row) => !!idOf(row.id) && allowedStudentIds.has(idOf(row.id)));
+  }, [
+    students,
+    studentEnrollments,
+    filters.classId,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const dataset: ReportEngineDataset = useMemo(
     () => ({
@@ -907,32 +1116,44 @@ export default function StudentReports() {
       computedResults,
       reportCards,
       reportCardItems,
-    ]
+    ],
   );
 
-  const output = useMemo(() => buildReportEngineOutput(dataset, filters), [dataset, filters]);
+  const output = useMemo(
+    () => buildReportEngineOutput(dataset, filters),
+    [dataset, filters],
+  );
 
-  const hasCoreSetup = Boolean(academicStructures.length && academicPeriods.length && classes.length && students.length);
+  const hasCoreSetup = Boolean(
+    academicStructures.length &&
+      academicPeriods.length &&
+      classes.length &&
+      students.length,
+  );
 
   const reportBranch = useMemo(() => {
     return (
-      branches.find((branch: any) => branch.id === branchId) ||
-      lockedBranches.find((branch: any) => branch.id === branchId) ||
+      branches.find((branch: any) => idOf(branch.id) === branchId) ||
+      lockedBranches.find((branch: any) => idOf(branch.id) === branchId) ||
       activeBranch ||
       branches[0] ||
       lockedBranches[0]
     );
   }, [activeBranch, branchId, branches, lockedBranches]);
 
-
   const activeContextName = `${activeSchool?.name || schools[0]?.name || "Selected School"} · ${
-    reportBranch?.name || activeBranch?.name || branches[0]?.name || "Assigned Branch"
+    reportBranch?.name ||
+    activeBranch?.name ||
+    branches[0]?.name ||
+    "Assigned Branch"
   }`;
 
   const selectedClassName = labelOf(classes, filters.classId);
   const selectedPeriodName = labelOf(academicPeriods, filters.academicPeriodId);
-  const selectedStructureName = labelOf(academicStructures, filters.academicStructureId);
-
+  const selectedStructureName = labelOf(
+    academicStructures,
+    filters.academicStructureId,
+  );
 
   const searchTerm = search.trim().toLowerCase();
 
@@ -942,14 +1163,18 @@ export default function StudentReports() {
     return filteredStudents.filter((student: any) =>
       `${student.fullName || student.name || ""} ${student.admissionNumber || ""} ${student.gender || ""}`
         .toLowerCase()
-        .includes(searchTerm)
+        .includes(searchTerm),
     );
   }, [filteredStudents, searchTerm]);
 
   const visibleClasses = useMemo(() => {
     if (!searchTerm) return filteredClasses;
 
-    return filteredClasses.filter((item: any) => `${item.name || ""} ${item.code || ""}`.toLowerCase().includes(searchTerm));
+    return filteredClasses.filter((item: any) =>
+      `${item.name || ""} ${item.code || ""}`
+        .toLowerCase()
+        .includes(searchTerm),
+    );
   }, [filteredClasses, searchTerm]);
 
   const activeFilterCount = useMemo(() => {
@@ -959,20 +1184,42 @@ export default function StudentReports() {
       filters.classId,
       filters.classSubjectId,
       filters.studentId,
-      filters.sortMode && filters.sortMode !== "position" ? filters.sortMode : undefined,
+      filters.sortMode && filters.sortMode !== "position"
+        ? filters.sortMode
+        : undefined,
       mode !== "student-report" ? mode : undefined,
     ].filter(Boolean).length;
-  }, [filters.academicStructureId, filters.academicPeriodId, filters.classId, filters.classSubjectId, filters.studentId, filters.sortMode, mode]);
+  }, [
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    filters.classId,
+    filters.classSubjectId,
+    filters.studentId,
+    filters.sortMode,
+    mode,
+  ]);
 
   const selectedStudentName = labelOf(students, filters.studentId);
   const selectedClassSubjectName = labelOf(
-    filteredClassSubjects.map((row: any) => ({ id: row.id, name: subjectName(row, subjects) })),
-    filters.classSubjectId
+    filteredClassSubjects.map((row: any) => ({
+      id: row.id,
+      name: subjectName(row, subjects),
+    })),
+    filters.classSubjectId,
   );
 
-  const reportCardsToShow = mode === "class-reports" ? output.classReports.length : output.studentReport ? 1 : 0;
+  const reportCardsToShow =
+    mode === "class-reports"
+      ? output.classReports.length
+      : output.studentReport
+        ? 1
+        : 0;
   const warningCount = output.warnings.length;
-  const canPrint = hasCoreSetup && (mode === "class-reports" ? output.classReports.length > 0 : Boolean(output.studentReport));
+  const canPrint =
+    hasCoreSetup &&
+    (mode === "class-reports"
+      ? output.classReports.length > 0
+      : Boolean(output.studentReport));
 
   const triggerReportPrint = () => {
     if (!canPrint) return;
@@ -987,15 +1234,18 @@ export default function StudentReports() {
 
   const activeReportTemplateAssignment = useMemo(() => {
     return (
-      reportCardTemplateAssignments.find((row: any) =>
-        row.active !== false &&
-        row.isDefault === true &&
-        (!row.scopeType || row.scopeType === "branch") &&
-        (!row.scopeId || Number(row.scopeId) === branchId)
+      reportCardTemplateAssignments.find(
+        (row: any) =>
+          row.active !== false &&
+          row.isDefault === true &&
+          (!row.scopeType || row.scopeType === "branch") &&
+          (!row.scopeId ||
+            String(row.scopeId ?? "") === String(branchId ?? "")),
       ) ||
-      reportCardTemplateAssignments.find((row: any) =>
-        row.active !== false &&
-        (!row.scopeType || row.scopeType === "branch")
+      reportCardTemplateAssignments.find(
+        (row: any) =>
+          row.active !== false &&
+          (!row.scopeType || row.scopeType === "branch"),
       ) ||
       reportCardTemplateAssignments.find((row: any) => row.active !== false) ||
       null
@@ -1006,45 +1256,71 @@ export default function StudentReports() {
     const assignedTemplateId = idOf(activeReportTemplateAssignment?.templateId);
 
     return (
-      reportCardTemplates.find((row: any) => assignedTemplateId && idOf(row.id) === assignedTemplateId) ||
+      reportCardTemplates.find(
+        (row: any) => assignedTemplateId && idOf(row.id) === assignedTemplateId,
+      ) ||
       reportCardTemplates.find((row: any) => row.isDefault) ||
-      reportCardTemplates.find((row: any) => String(row.code || "") === "classic_formal") ||
+      reportCardTemplates.find(
+        (row: any) => String(row.code || "") === "classic_formal",
+      ) ||
       reportCardTemplates[0] ||
       normalizeStudentReportTemplateDefinition(null)
     );
   }, [activeReportTemplateAssignment, reportCardTemplates]);
 
   const activeReportTemplateSettingsRow = useMemo(() => {
-    const assignedSettingsId = idOf(activeReportTemplateAssignment?.templateSettingsId);
+    const assignedSettingsId = idOf(
+      activeReportTemplateAssignment?.templateSettingsId,
+    );
     const activeTemplateId = idOf(activeReportTemplate?.id);
 
     return (
-      reportCardTemplateSettings.find((row: any) => assignedSettingsId && idOf(row.id) === assignedSettingsId) ||
-      reportCardTemplateSettings.find((row: any) => activeTemplateId && idOf(row.templateId) === activeTemplateId) ||
+      reportCardTemplateSettings.find(
+        (row: any) => assignedSettingsId && idOf(row.id) === assignedSettingsId,
+      ) ||
+      reportCardTemplateSettings.find(
+        (row: any) =>
+          activeTemplateId && idOf(row.templateId) === activeTemplateId,
+      ) ||
       reportCardTemplateSettings.find((row: any) => row.active !== false) ||
       null
     );
-  }, [activeReportTemplateAssignment, activeReportTemplate, reportCardTemplateSettings]);
+  }, [
+    activeReportTemplateAssignment,
+    activeReportTemplate,
+    reportCardTemplateSettings,
+  ]);
 
-  const activeReportTemplateSettings = useMemo<StudentReportTemplateSettings>(() => {
-    return mergeStudentReportTemplateSettings(
-      {
-        ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
-        ...(activeReportTemplateSettingsRow || {}),
-      },
-      activeReportTemplate || null,
-      activeReportTemplateAssignment || null
-    );
-  }, [activeReportTemplate, activeReportTemplateAssignment, activeReportTemplateSettingsRow]);
+  const activeReportTemplateSettings =
+    useMemo<StudentReportTemplateSettings>(() => {
+      return mergeStudentReportTemplateSettings(
+        {
+          ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
+          ...(activeReportTemplateSettingsRow || {}),
+        },
+        activeReportTemplate || null,
+        activeReportTemplateAssignment || null,
+      );
+    }, [
+      activeReportTemplate,
+      activeReportTemplateAssignment,
+      activeReportTemplateSettingsRow,
+    ]);
 
   function studentForReport(reportDataset: Record<string, any> | undefined) {
-    const reportStudentId = idOf(reportDataset?.report?.studentId || reportDataset?.studentId);
+    const reportStudentId = idOf(
+      reportDataset?.report?.studentId || reportDataset?.studentId,
+    );
     if (!reportStudentId) return undefined;
 
-    return students.find((student: any) => idOf(student.id) === reportStudentId);
+    return students.find(
+      (student: any) => idOf(student.id) === reportStudentId,
+    );
   }
 
-  function studentPhotoForReport(reportDataset: Record<string, any> | undefined) {
+  function studentPhotoForReport(
+    reportDataset: Record<string, any> | undefined,
+  ) {
     const matchedStudent = studentForReport(reportDataset) as any;
 
     return (
@@ -1056,42 +1332,29 @@ export default function StudentReports() {
     );
   }
 
+  function withBranchContext<T extends Record<string, any>>(
+    reportDataset: T | undefined,
+    branch?: Branch,
+  ): T | undefined {
+    if (!reportDataset) return reportDataset;
 
+    const branchName =
+      (branch as any)?.name ||
+      (branch as any)?.branchName ||
+      (branch as any)?.campusName ||
+      reportDataset.branchName ||
+      reportDataset.branchLabel ||
+      reportDataset.branch?.name ||
+      "";
 
-function withBranchContext<T extends Record<string, any>>(
-  reportDataset: T | undefined,
-  branch?: Branch,
-): T | undefined {
-  if (!reportDataset) return reportDataset;
+    const matchedStudent = studentForReport(reportDataset) as any;
+    const matchedStudentPhoto = studentPhotoForReport(reportDataset);
 
-  const branchName =
-    (branch as any)?.name ||
-    (branch as any)?.branchName ||
-    (branch as any)?.campusName ||
-    reportDataset.branchName ||
-    reportDataset.branchLabel ||
-    reportDataset.branch?.name ||
-    "";
-
-  const matchedStudent = studentForReport(reportDataset) as any;
-  const matchedStudentPhoto = studentPhotoForReport(reportDataset);
-
-  return {
-    ...reportDataset,
-    student: matchedStudent || (reportDataset as any).student,
-    branch,
-    branchId: (branch as any)?.id || reportDataset.branchId,
-    branchName,
-    branchLabel: branchName,
-    template: activeReportTemplate,
-    templateSettings: activeReportTemplateSettings,
-    reportCardTemplate: activeReportTemplate,
-    reportCardTemplateSettings: activeReportTemplateSettings,
-    reportCardTemplateAssignment: activeReportTemplateAssignment,
-    header: {
-      ...(reportDataset as any).header,
+    return {
+      ...reportDataset,
+      student: matchedStudent || (reportDataset as any).student,
       branch,
-      branchId: (branch as any)?.id || (reportDataset as any).header?.branchId,
+      branchId: (branch as any)?.id || reportDataset.branchId,
       branchName,
       branchLabel: branchName,
       template: activeReportTemplate,
@@ -1099,49 +1362,68 @@ function withBranchContext<T extends Record<string, any>>(
       reportCardTemplate: activeReportTemplate,
       reportCardTemplateSettings: activeReportTemplateSettings,
       reportCardTemplateAssignment: activeReportTemplateAssignment,
-      branding: {
-        ...((reportDataset as any).header?.branding || {}),
-        primaryColor:
-          ((reportDataset as any).header?.branding || {}).primaryColor ||
-          "var(--ba-primary, var(--primary-color, #2563eb))",
-        branchName:
-          ((reportDataset as any).header?.branding || {}).branchName ||
-          branchName,
-        logo:
-          ((reportDataset as any).header?.branding || {}).logo ||
-          (reportDataset as any).header?.schoolBranchSetting?.logo ||
-          (reportDataset as any).header?.branch?.logo ||
-          (reportDataset as any).header?.school?.logo,
-        reportCardBackgroundImage:
-          ((reportDataset as any).header?.branding || {}).reportCardBackgroundImage ||
-          (reportDataset as any).header?.schoolBranchSetting?.reportCardBackgroundImage,
-        reportCardWatermark:
-          ((reportDataset as any).header?.branding || {}).reportCardWatermark ||
-          (reportDataset as any).header?.schoolBranchSetting?.reportCardWatermark,
-        reportCardSignatureImage:
-          ((reportDataset as any).header?.branding || {}).reportCardSignatureImage ||
-          (reportDataset as any).header?.schoolBranchSetting?.reportCardSignatureImage,
+      header: {
+        ...(reportDataset as any).header,
+        branch,
+        branchId:
+          (branch as any)?.id || (reportDataset as any).header?.branchId,
+        branchName,
+        branchLabel: branchName,
+        template: activeReportTemplate,
+        templateSettings: activeReportTemplateSettings,
+        reportCardTemplate: activeReportTemplate,
+        reportCardTemplateSettings: activeReportTemplateSettings,
+        reportCardTemplateAssignment: activeReportTemplateAssignment,
+        branding: {
+          ...((reportDataset as any).header?.branding || {}),
+          primaryColor:
+            ((reportDataset as any).header?.branding || {}).primaryColor ||
+            "var(--ba-primary, var(--primary-color, #2563eb))",
+          branchName:
+            ((reportDataset as any).header?.branding || {}).branchName ||
+            branchName,
+          logo:
+            ((reportDataset as any).header?.branding || {}).logo ||
+            (reportDataset as any).header?.schoolBranchSetting?.logo ||
+            (reportDataset as any).header?.branch?.logo ||
+            (reportDataset as any).header?.school?.logo,
+          reportCardBackgroundImage:
+            ((reportDataset as any).header?.branding || {})
+              .reportCardBackgroundImage ||
+            (reportDataset as any).header?.schoolBranchSetting
+              ?.reportCardBackgroundImage,
+          reportCardWatermark:
+            ((reportDataset as any).header?.branding || {})
+              .reportCardWatermark ||
+            (reportDataset as any).header?.schoolBranchSetting
+              ?.reportCardWatermark,
+          reportCardSignatureImage:
+            ((reportDataset as any).header?.branding || {})
+              .reportCardSignatureImage ||
+            (reportDataset as any).header?.schoolBranchSetting
+              ?.reportCardSignatureImage,
+        },
       },
-    },
-    report: {
-      ...(reportDataset as any).report,
-      studentPhoto: matchedStudentPhoto || (reportDataset as any).report?.studentPhoto,
-      resolvedStudentPhotoUrl: matchedStudentPhoto || (reportDataset as any).report?.resolvedStudentPhotoUrl,
-      branch,
-      branchId: (branch as any)?.id || (reportDataset as any).report?.branchId,
-      branchName,
-      branchLabel: branchName,
-      template: activeReportTemplate,
-      templateSettings: activeReportTemplateSettings,
-      reportCardTemplate: activeReportTemplate,
-      reportCardTemplateSettings: activeReportTemplateSettings,
-      reportCardTemplateAssignment: activeReportTemplateAssignment,
-    },
-  };
-}
-
-
-
+      report: {
+        ...(reportDataset as any).report,
+        studentPhoto:
+          matchedStudentPhoto || (reportDataset as any).report?.studentPhoto,
+        resolvedStudentPhotoUrl:
+          matchedStudentPhoto ||
+          (reportDataset as any).report?.resolvedStudentPhotoUrl,
+        branch,
+        branchId:
+          (branch as any)?.id || (reportDataset as any).report?.branchId,
+        branchName,
+        branchLabel: branchName,
+        template: activeReportTemplate,
+        templateSettings: activeReportTemplateSettings,
+        reportCardTemplate: activeReportTemplate,
+        reportCardTemplateSettings: activeReportTemplateSettings,
+        reportCardTemplateAssignment: activeReportTemplateAssignment,
+      },
+    };
+  }
 
   const renderActiveReport = () => {
     if (!hasCoreSetup) {
@@ -1159,7 +1441,9 @@ function withBranchContext<T extends Record<string, any>>(
         output.classReports.map((reportDataset, index) => (
           <TemplateAwareStudentReportCard
             key={reportDataset.report?.studentId || index}
-            dataset={withBranchContext(reportDataset as any, reportBranch) as any}
+            dataset={
+              withBranchContext(reportDataset as any, reportBranch) as any
+            }
             template={activeReportTemplate}
             settings={activeReportTemplateSettings}
             compact
@@ -1177,7 +1461,9 @@ function withBranchContext<T extends Record<string, any>>(
 
     return (
       <TemplateAwareStudentReportCard
-        dataset={withBranchContext(output.studentReport as any, reportBranch) as any}
+        dataset={
+          withBranchContext(output.studentReport as any, reportBranch) as any
+        }
         template={activeReportTemplate}
         settings={activeReportTemplateSettings}
         pageBreakAfter={false}
@@ -1196,17 +1482,38 @@ function withBranchContext<T extends Record<string, any>>(
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before opening student reports." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before opening student reports."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary, "--primary-color": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={
+          {
+            "--ba-primary": primary,
+            "--primary-color": primary,
+          } as React.CSSProperties
+        }
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Branch workspace required</h2>
-          <p>Student reports are generated inside the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/select-role")}>
+          <p>
+            Student reports are generated inside the selected branch-admin
+            workspace. Use Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/select-role")}
+          >
             Go to Select Role
           </button>
         </section>
@@ -1215,10 +1522,21 @@ function withBranchContext<T extends Record<string, any>>(
   }
 
   return (
-    <main className="ba-page student-reports-page" style={{ "--ba-primary": primary, "--primary-color": primary } as React.CSSProperties}>
+    <main
+      className="ba-page student-reports-page"
+      style={
+        {
+          "--ba-primary": primary,
+          "--primary-color": primary,
+        } as React.CSSProperties
+      }
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card report-no-print" aria-label="Student report search and actions">
+      <section
+        className="ba-search-card report-no-print"
+        aria-label="Student report search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -1251,33 +1569,76 @@ function withBranchContext<T extends Record<string, any>>(
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        
-
-
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips report-no-print" aria-label="Active report filters">
+        <section
+          className="ba-filter-chips report-no-print"
+          aria-label="Active report filters"
+        >
           {filters.academicStructureId && (
-            <button type="button" onClick={() => setFilters((prev) => ({ ...prev, academicStructureId: undefined, academicPeriodId: undefined, classId: undefined, classSubjectId: undefined, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  academicStructureId: undefined,
+                  academicPeriodId: undefined,
+                  classId: undefined,
+                  classSubjectId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
               Structure: {selectedStructureName} ×
             </button>
           )}
           {filters.academicPeriodId && (
-            <button type="button" onClick={() => setFilters((prev) => ({ ...prev, academicPeriodId: undefined, classId: undefined, classSubjectId: undefined, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  academicPeriodId: undefined,
+                  classId: undefined,
+                  classSubjectId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
               Period: {selectedPeriodName} ×
             </button>
           )}
           {filters.classId && (
-            <button type="button" onClick={() => setFilters((prev) => ({ ...prev, classId: undefined, classSubjectId: undefined, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  classId: undefined,
+                  classSubjectId: undefined,
+                  studentId: undefined,
+                }))
+              }
+            >
               Class: {selectedClassName} ×
             </button>
           )}
           {filters.studentId && (
-            <button type="button" onClick={() => setFilters((prev) => ({ ...prev, studentId: undefined }))}>
+            <button
+              type="button"
+              onClick={() =>
+                setFilters((prev) => ({ ...prev, studentId: undefined }))
+              }
+            >
               Student: {selectedStudentName} ×
             </button>
           )}
@@ -1290,7 +1651,6 @@ function withBranchContext<T extends Record<string, any>>(
       )}
 
       <section className="ba-print-card">
-
         <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
           {renderActiveReport()}
         </div>
@@ -1324,15 +1684,29 @@ function withBranchContext<T extends Record<string, any>>(
           onClose={() => setMoreOpen(false)}
         />
       )}
-
-      
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary, "--primary-color": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={
+        {
+          "--ba-primary": primary,
+          "--primary-color": primary,
+        } as React.CSSProperties
+      }
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1343,7 +1717,15 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -1354,8 +1736,14 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 function subjectName(row: ClassSubject, subjects: Subject[]) {
-  const subject = subjects.find((item: any) => item.id === (row as any).subjectId) as any;
-  return (row as any).name || subject?.name || `Subject ${(row as any).subjectId || ""}`;
+  const subject = subjects.find(
+    (item: any) => item.id === (row as any).subjectId,
+  ) as any;
+  return (
+    (row as any).name ||
+    subject?.name ||
+    `Subject ${(row as any).subjectId || ""}`
+  );
 }
 
 function SliderIcon() {
@@ -1395,12 +1783,19 @@ function FilterSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose the report scope. Branch stays locked to the assigned branch.</p>
+            <p>
+              Choose the report scope. Branch stays locked to the assigned
+              branch.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1410,7 +1805,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Report Mode</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value as ReportMode)}>
+            <select
+              value={mode}
+              onChange={(event) => setMode(event.target.value as ReportMode)}
+            >
               <option value="student-report">Single Student Report</option>
               <option value="class-reports">Class Batch Reports</option>
             </select>
@@ -1423,7 +1821,8 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  academicStructureId: Number(event.target.value) || undefined,
+                  academicStructureId:
+                    cleanId(event.target.value) || undefined,
                   academicPeriodId: undefined,
                   classId: undefined,
                   classSubjectId: undefined,
@@ -1433,7 +1832,9 @@ function FilterSheet({
             >
               <option value="">Select structure</option>
               {academicStructures.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1445,7 +1846,8 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  academicPeriodId: Number(event.target.value) || undefined,
+                  academicPeriodId:
+                    cleanId(event.target.value) || undefined,
                   classId: undefined,
                   classSubjectId: undefined,
                   studentId: undefined,
@@ -1454,7 +1856,9 @@ function FilterSheet({
             >
               <option value="">Select period</option>
               {academicPeriods.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1466,7 +1870,8 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  classId: Number(event.target.value) || undefined,
+                  classId:
+                    cleanId(event.target.value) || undefined,
                   classSubjectId: undefined,
                   studentId: undefined,
                 }))
@@ -1474,7 +1879,9 @@ function FilterSheet({
             >
               <option value="">Select class</option>
               {filteredClasses.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1483,11 +1890,18 @@ function FilterSheet({
             <span>Class Subject</span>
             <select
               value={filters.classSubjectId || ""}
-              onChange={(event) => setFilters((prev) => ({ ...prev, classSubjectId: Number(event.target.value) || undefined }))}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  classSubjectId: cleanId(event.target.value) || undefined,
+                }))
+              }
             >
               <option value="">All subjects</option>
               {filteredClassSubjects.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name || `Subject ${item.subjectId || ""}`}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name || `Subject ${item.subjectId || ""}`}
+                </option>
               ))}
             </select>
           </label>
@@ -1495,10 +1909,21 @@ function FilterSheet({
           {mode === "student-report" && (
             <label>
               <span>Student</span>
-              <select value={filters.studentId || ""} onChange={(event) => setFilters((prev) => ({ ...prev, studentId: Number(event.target.value) || undefined }))}>
+              <select
+                value={filters.studentId || ""}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    studentId:
+                      cleanId(event.target.value) || undefined,
+                  }))
+                }
+              >
                 <option value="">Select student</option>
                 {filteredStudents.map((item: any) => (
-                  <option key={item.id} value={item.id}>{item.fullName || item.name}</option>
+                  <option key={item.id} value={item.id}>
+                    {item.fullName || item.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -1506,7 +1931,15 @@ function FilterSheet({
 
           <label>
             <span>Sort Mode</span>
-            <select value={filters.sortMode || "position"} onChange={(event) => setFilters((prev) => ({ ...prev, sortMode: event.target.value as any }))}>
+            <select
+              value={filters.sortMode || "position"}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  sortMode: event.target.value as any,
+                }))
+              }
+            >
               <option value="position">Position</option>
               <option value="name">Name</option>
               <option value="score">Score</option>
@@ -1550,7 +1983,11 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>

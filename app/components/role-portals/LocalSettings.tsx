@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * app/components/role-portals/LocalSettings.tsx
  * ---------------------------------------------------------
@@ -20,6 +18,7 @@
  * - Helper functions are re-exported from localPortalAppearance.
  * - Same localStorage key pattern.
  * - Same appearance modes: light, dark, system.
+ * - Numeric and string tenant IDs are normalized safely for localStorage keys.
  * - Same local font-size comfort controls.
  * - Same compact/comfortable density control.
  * - Same reduced-motion control.
@@ -66,6 +65,7 @@ import {
   resolveLocalFontSize,
   resolveSharedFontSize,
   saveLocalPortalSettings,
+  type LocalAppearanceId,
   type LocalAppearanceMode,
   type LocalDensity,
   type LocalFontSize,
@@ -86,6 +86,7 @@ export {
 };
 
 export type {
+  LocalAppearanceId,
   LocalAppearanceMode,
   LocalDensity,
   LocalFontSize,
@@ -95,9 +96,9 @@ export type {
 type Props = {
   portalName?: string;
   roleKey?: string;
-  accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  accountId?: LocalAppearanceId;
+  schoolId?: LocalAppearanceId;
+  branchId?: LocalAppearanceId;
 
   /**
    * Shared branding colour. It is used by this settings UI only and is never

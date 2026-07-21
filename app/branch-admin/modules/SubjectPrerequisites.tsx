@@ -43,7 +43,12 @@ import {
   type SubjectPrerequisite,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -55,15 +60,15 @@ type TypeFilter = "all" | RuleType;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type PrerequisiteForm = {
-  id?: number;
+  id?: string;
   curriculumSubjectId: string;
   prerequisiteSubjectId: string;
   minimumGrade: string;
@@ -74,11 +79,11 @@ type PrerequisiteForm = {
 };
 
 type CurriculumSubjectOption = {
-  id: number;
+  id: string;
   row: CurriculumSubject;
-  curriculumId: number;
-  subjectId: number;
-  pathwayId: number;
+  curriculumId: string;
+  subjectId: string;
+  pathwayId: string;
   label: string;
   shortLabel: string;
   curriculumName: string;
@@ -88,7 +93,7 @@ type CurriculumSubjectOption = {
 };
 
 type PrerequisiteViewRow = {
-  id: number;
+  id: string;
   row: SubjectPrerequisite;
   owner?: CurriculumSubjectOption;
   prerequisite?: CurriculumSubjectOption;
@@ -108,11 +113,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -131,16 +136,17 @@ const emptyForm = (): PrerequisiteForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -164,12 +170,12 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -180,7 +186,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -189,7 +199,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -201,7 +211,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -211,12 +225,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -231,14 +248,20 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return String(value);
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return String(value);
   }
 };
 
 const numberText = (value: any) =>
-  new Intl.NumberFormat("en-GH", { maximumFractionDigits: 2 }).format(Number(value || 0));
+  new Intl.NumberFormat("en-GH", { maximumFractionDigits: 2 }).format(
+    Number(value || 0),
+  );
 
 function typeLabel(type?: string) {
   if (type === "corequisite") return "Corequisite";
@@ -274,14 +297,30 @@ function groupedCounts<T>(rows: T[], labeler: (row: T) => string) {
     const label = labeler(row) || "Unknown";
     map.set(label, (map.get(label) || 0) + 1);
   });
-  return [...map.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  return [...map.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -295,9 +334,19 @@ export default function SubjectPrerequisites() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -330,22 +379,37 @@ export default function SubjectPrerequisites() {
   const [groupFilter, setGroupFilter] = useState("all");
 
   const [rules, setRules] = useState<SubjectPrerequisite[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedRule, setSelectedRule] = useState<PrerequisiteViewRow | null>(null);
+  const [selectedRule, setSelectedRule] = useState<PrerequisiteViewRow | null>(
+    null,
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<PrerequisiteForm>(emptyForm());
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -355,7 +419,11 @@ export default function SubjectPrerequisites() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -375,29 +443,75 @@ export default function SubjectPrerequisites() {
 
     try {
       setLoading(true);
-      const [ruleRows, curriculumSubjectRows, curriculumRows, subjectRows, pathwayRows] = await Promise.all([
+      const [
+        ruleRows,
+        curriculumSubjectRows,
+        curriculumRows,
+        subjectRows,
+        pathwayRows,
+      ] = await Promise.all([
         tableSafe("subjectPrerequisites")?.toArray?.() || [],
-        listActiveLocal("curriculumSubjects", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("curriculums", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("subjects", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("curriculumPathways", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("curriculumSubjects", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("curriculums", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("subjects", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("curriculumPathways", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
       ]);
 
       setRules(
         (ruleRows as SubjectPrerequisite[])
           .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => Number(a.curriculumSubjectId || 0) - Number(b.curriculumSubjectId || 0) || String(a.type || "").localeCompare(String(b.type || "")))
+          .sort(
+            (a: any, b: any) =>
+              String(a.curriculumSubjectId || "").localeCompare(
+                String(b.curriculumSubjectId || ""),
+              ) || String(a.type || "").localeCompare(String(b.type || "")),
+          ),
       );
 
       setCurriculumSubjects(
-        (curriculumSubjectRows as CurriculumSubject[]).sort((a: any, b: any) => {
-          const byCurriculum = Number(a.curriculumId || 0) - Number(b.curriculumId || 0);
-          return byCurriculum || Number(a.orderIndex || 0) - Number(b.orderIndex || 0);
-        })
+        (curriculumSubjectRows as CurriculumSubject[]).sort(
+          (a: any, b: any) => {
+            const byCurriculum = String(a.curriculumId || "").localeCompare(
+              String(b.curriculumId || ""),
+            );
+            return (
+              byCurriculum ||
+              Number(a.orderIndex || 0) - Number(b.orderIndex || 0)
+            );
+          },
+        ),
       );
-      setCurriculums((curriculumRows as Curriculum[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setSubjects((subjectRows as Subject[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setPathways((pathwayRows as CurriculumPathway[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
+      setCurriculums(
+        (curriculumRows as Curriculum[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setSubjects(
+        (subjectRows as Subject[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setPathways(
+        (pathwayRows as CurriculumPathway[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load subject prerequisites:", error);
       clearData();
@@ -411,42 +525,63 @@ export default function SubjectPrerequisites() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const curriculumMap = useMemo(() => new Map(curriculums.map((row: any) => [idOf(row.id), row])), [curriculums]);
-  const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((row: any) => [idOf(row.id), row])), [pathways]);
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((row: any) => [idOf(row.id), row])),
+    [curriculums],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((row: any) => [idOf(row.id), row])),
+    [subjects],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((row: any) => [idOf(row.id), row])),
+    [pathways],
+  );
 
   const curriculumSubjectOptions = useMemo<CurriculumSubjectOption[]>(() => {
-    return curriculumSubjects.map((row: any) => {
-      const id = idOf(row.id);
-      if (!id) return undefined;
-      const curriculum = curriculumMap.get(idOf(row.curriculumId)) as any;
-      const subject = subjectMap.get(idOf(row.subjectId)) as any;
-      const pathway = pathwayMap.get(idOf(row.pathwayId)) as any;
-      const curriculumName = curriculum?.name || "Unknown curriculum";
-      const subjectName = subject?.name || "Unknown subject";
-      const subjectCode = subject?.code || "";
-      const pathwayName = pathway?.name || "No pathway";
-      return {
-        id,
-        row,
-        curriculumId: idOf(row.curriculumId),
-        subjectId: idOf(row.subjectId),
-        pathwayId: idOf(row.pathwayId),
-        curriculumName,
-        subjectName,
-        subjectCode,
-        pathwayName,
-        shortLabel: `${subjectName}${subjectCode ? ` (${subjectCode})` : ""}`,
-        label: `${curriculumName} · ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} · ${pathwayName}`,
-      };
-    }).filter(Boolean) as CurriculumSubjectOption[];
+    return curriculumSubjects
+      .map((row: any) => {
+        const id = idOf(row.id);
+        if (!id) return undefined;
+        const curriculum = curriculumMap.get(idOf(row.curriculumId)) as any;
+        const subject = subjectMap.get(idOf(row.subjectId)) as any;
+        const pathway = pathwayMap.get(idOf(row.pathwayId)) as any;
+        const curriculumName = curriculum?.name || "Unknown curriculum";
+        const subjectName = subject?.name || "Unknown subject";
+        const subjectCode = subject?.code || "";
+        const pathwayName = pathway?.name || "No pathway";
+        return {
+          id,
+          row,
+          curriculumId: idOf(row.curriculumId),
+          subjectId: idOf(row.subjectId),
+          pathwayId: idOf(row.pathwayId),
+          curriculumName,
+          subjectName,
+          subjectCode,
+          pathwayName,
+          shortLabel: `${subjectName}${subjectCode ? ` (${subjectCode})` : ""}`,
+          label: `${curriculumName} · ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} · ${pathwayName}`,
+        };
+      })
+      .filter(Boolean) as CurriculumSubjectOption[];
   }, [curriculumSubjects, curriculumMap, pathwayMap, subjectMap]);
 
-  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjectOptions.map((row) => [row.id, row])), [curriculumSubjectOptions]);
+  const curriculumSubjectMap = useMemo(
+    () => new Map(curriculumSubjectOptions.map((row) => [row.id, row])),
+    [curriculumSubjectOptions],
+  );
 
   const selectedOwnerOption = useMemo(() => {
     const ownerId = idOf(form.curriculumSubjectId);
@@ -455,24 +590,43 @@ export default function SubjectPrerequisites() {
 
   const prerequisiteOptions = useMemo(() => {
     if (!selectedOwnerOption) return curriculumSubjectOptions;
-    return curriculumSubjectOptions.filter((option) => !sameId(option.id, selectedOwnerOption.id) && sameId(option.curriculumId, selectedOwnerOption.curriculumId));
+    return curriculumSubjectOptions.filter(
+      (option) =>
+        !sameId(option.id, selectedOwnerOption.id) &&
+        sameId(option.curriculumId, selectedOwnerOption.curriculumId),
+    );
   }, [curriculumSubjectOptions, selectedOwnerOption]);
 
-  const groupCodes = useMemo(() => Array.from(new Set(rules.map((row: any) => String(row.groupCode || "").trim()).filter(Boolean))).sort(), [rules]);
+  const groupCodes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          rules
+            .map((row: any) => String(row.groupCode || "").trim())
+            .filter(Boolean),
+        ),
+      ).sort(),
+    [rules],
+  );
 
   const viewRows = useMemo<PrerequisiteViewRow[]>(() => {
     return rules.map((row: any) => {
       const id = idOf(row.id);
       const owner = curriculumSubjectMap.get(idOf(row.curriculumSubjectId));
-      const prerequisite = curriculumSubjectMap.get(idOf(row.prerequisiteSubjectId));
+      const prerequisite = curriculumSubjectMap.get(
+        idOf(row.prerequisiteSubjectId),
+      );
       const type = (row.type || "prerequisite") as RuleType;
       return {
         id,
         row,
         owner,
         prerequisite,
-        ownerLabel: owner?.shortLabel || `Curriculum Subject #${row.curriculumSubjectId}`,
-        prerequisiteLabel: prerequisite?.shortLabel || `Curriculum Subject #${row.prerequisiteSubjectId}`,
+        ownerLabel:
+          owner?.shortLabel || `Curriculum Subject #${row.curriculumSubjectId}`,
+        prerequisiteLabel:
+          prerequisite?.shortLabel ||
+          `Curriculum Subject #${row.prerequisiteSubjectId}`,
         curriculumName: owner?.curriculumName || "Unknown curriculum",
         pathwayName: owner?.pathwayName || "No pathway",
         type,
@@ -488,28 +642,79 @@ export default function SubjectPrerequisites() {
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return viewRows.filter((rule) => {
-      const haystack = [rule.ownerLabel, rule.prerequisiteLabel, rule.curriculumName, rule.pathwayName, rule.typeLabel, rule.minimumGrade, rule.minimumScore, rule.groupCode].join(" ").toLowerCase();
+      const haystack = [
+        rule.ownerLabel,
+        rule.prerequisiteLabel,
+        rule.curriculumName,
+        rule.pathwayName,
+        rule.typeLabel,
+        rule.minimumGrade,
+        rule.minimumScore,
+        rule.groupCode,
+      ]
+        .join(" ")
+        .toLowerCase();
       const searchOk = !term || haystack.includes(term);
-      const statusOk = statusFilter === "all" || (statusFilter === "active" ? rule.active : !rule.active);
+      const statusOk =
+        statusFilter === "all" ||
+        (statusFilter === "active" ? rule.active : !rule.active);
       const typeOk = typeFilter === "all" || rule.type === typeFilter;
-      const curriculumOk = curriculumFilter === "all" || sameId(rule.owner?.curriculumId, curriculumFilter);
+      const curriculumOk =
+        curriculumFilter === "all" ||
+        sameId(rule.owner?.curriculumId, curriculumFilter);
       const groupOk = groupFilter === "all" || rule.groupCode === groupFilter;
       return searchOk && statusOk && typeOk && curriculumOk && groupOk;
     });
-  }, [curriculumFilter, groupFilter, search, statusFilter, typeFilter, viewRows]);
+  }, [
+    curriculumFilter,
+    groupFilter,
+    search,
+    statusFilter,
+    typeFilter,
+    viewRows,
+  ]);
 
   const activeRules = viewRows.filter((rule) => rule.active);
   const archivedRules = viewRows.length - activeRules.length;
-  const prerequisiteRules = viewRows.filter((rule) => rule.type === "prerequisite").length;
-  const corequisiteRules = viewRows.filter((rule) => rule.type === "corequisite").length;
-  const recommendedRules = viewRows.filter((rule) => rule.type === "recommended").length;
+  const prerequisiteRules = viewRows.filter(
+    (rule) => rule.type === "prerequisite",
+  ).length;
+  const corequisiteRules = viewRows.filter(
+    (rule) => rule.type === "corequisite",
+  ).length;
+  const recommendedRules = viewRows.filter(
+    (rule) => rule.type === "recommended",
+  ).length;
   const groupedRules = viewRows.filter((rule) => !!rule.groupCode).length;
 
-  const activeFilterCount = useMemo(() => [curriculumFilter, typeFilter, statusFilter, groupFilter].filter((value) => value !== "all").length, [curriculumFilter, groupFilter, statusFilter, typeFilter]);
-  const countsByCurriculum = useMemo(() => groupedCounts(viewRows, (row) => row.curriculumName), [viewRows]);
-  const countsByType = useMemo(() => groupedCounts(viewRows, (row) => row.typeLabel), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")), [viewRows]);
-  const countsByGroup = useMemo(() => groupedCounts(viewRows.filter((row) => !!row.groupCode), (row) => row.groupCode), [viewRows]);
+  const activeFilterCount = useMemo(
+    () =>
+      [curriculumFilter, typeFilter, statusFilter, groupFilter].filter(
+        (value) => value !== "all",
+      ).length,
+    [curriculumFilter, groupFilter, statusFilter, typeFilter],
+  );
+  const countsByCurriculum = useMemo(
+    () => groupedCounts(viewRows, (row) => row.curriculumName),
+    [viewRows],
+  );
+  const countsByType = useMemo(
+    () => groupedCounts(viewRows, (row) => row.typeLabel),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
+    [viewRows],
+  );
+  const countsByGroup = useMemo(
+    () =>
+      groupedCounts(
+        viewRows.filter((row) => !!row.groupCode),
+        (row) => row.groupCode,
+      ),
+    [viewRows],
+  );
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -526,13 +731,18 @@ export default function SubjectPrerequisites() {
     setGroupFilter("all");
   };
 
-  const updateForm = (patch: Partial<PrerequisiteForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<PrerequisiteForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const openCreate = () => {
     if (!requireTenant()) return;
     const firstOption = curriculumSubjectOptions[0];
     setSelectedRule(null);
-    setForm({ ...emptyForm(), curriculumSubjectId: firstOption ? String(firstOption.id) : "", prerequisiteSubjectId: "" });
+    setForm({
+      ...emptyForm(),
+      curriculumSubjectId: firstOption ? String(firstOption.id) : "",
+      prerequisiteSubjectId: "",
+    });
     setModalOpen(true);
   };
 
@@ -553,24 +763,36 @@ export default function SubjectPrerequisites() {
   };
 
   const validate = () => {
-    if (!form.curriculumSubjectId) return "Select the subject being controlled.";
-    if (!form.prerequisiteSubjectId) return "Select the required or related subject.";
+    if (!form.curriculumSubjectId)
+      return "Select the subject being controlled.";
+    if (!form.prerequisiteSubjectId)
+      return "Select the required or related subject.";
     const ownerId = idOf(form.curriculumSubjectId);
     const requiredId = idOf(form.prerequisiteSubjectId);
     if (!ownerId || !requiredId) return "Select valid curriculum subjects.";
     if (ownerId === requiredId) return "A subject cannot require itself.";
     const owner = curriculumSubjectMap.get(ownerId);
     const required = curriculumSubjectMap.get(requiredId);
-    if (!owner) return "The controlled subject is not available in this branch.";
-    if (!required) return "The required subject is not available in this branch.";
-    if (!sameId(owner.curriculumId, required.curriculumId)) return "Subject prerequisite rules must stay inside the same curriculum.";
+    if (!owner)
+      return "The controlled subject is not available in this branch.";
+    if (!required)
+      return "The required subject is not available in this branch.";
+    if (!sameId(owner.curriculumId, required.curriculumId))
+      return "Subject prerequisite rules must stay inside the same curriculum.";
     if (form.minimumScore.trim()) {
       const parsed = Number(form.minimumScore);
-      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return "Minimum score must be between 0 and 100.";
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100)
+        return "Minimum score must be between 0 and 100.";
     }
     const duplicate = rules.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
-      return sameId(row.curriculumSubjectId, ownerId) && sameId(row.prerequisiteSubjectId, requiredId) && safeLower(row.type || "prerequisite") === safeLower(form.type || "prerequisite") && !row.isDeleted;
+      return (
+        sameId(row.curriculumSubjectId, ownerId) &&
+        sameId(row.prerequisiteSubjectId, requiredId) &&
+        safeLower(row.type || "prerequisite") ===
+          safeLower(form.type || "prerequisite") &&
+        !row.isDeleted
+      );
     });
     if (duplicate) return "This subject relationship already exists.";
     return "";
@@ -586,24 +808,39 @@ export default function SubjectPrerequisites() {
     }
     try {
       setSaving(true);
-      const existing = form.id ? rules.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rules.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<SubjectPrerequisite> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         curriculumSubjectId: idOf(form.curriculumSubjectId),
         prerequisiteSubjectId: idOf(form.prerequisiteSubjectId),
         minimumGrade: form.minimumGrade.trim() || undefined,
-        minimumScore: form.minimumScore.trim() === "" ? undefined : Number(form.minimumScore),
+        minimumScore:
+          form.minimumScore.trim() === ""
+            ? undefined
+            : Number(form.minimumScore),
         type: form.type || "prerequisite",
         groupCode: form.groupCode.trim() || undefined,
         active: form.active,
         isDeleted: false,
       } as Partial<SubjectPrerequisite>;
-      if (form.id && existing) await updateLocal("subjectPrerequisites", Number(form.id), payload);
-      else await createLocal("subjectPrerequisites", payload as SubjectPrerequisite);
+      if (form.id && existing)
+        await updateLocal("subjectPrerequisites", String(form.id), payload);
+      else
+        await createLocal(
+          "subjectPrerequisites",
+          payload as SubjectPrerequisite,
+        );
       setModalOpen(false);
-      showToast("success", form.id ? "Subject prerequisite updated." : "Subject prerequisite created.");
+      showToast(
+        "success",
+        form.id
+          ? "Subject prerequisite updated."
+          : "Subject prerequisite created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save subject prerequisite:", error);
@@ -614,7 +851,9 @@ export default function SubjectPrerequisites() {
   };
 
   const archive = async (row: PrerequisiteViewRow) => {
-    const confirmed = window.confirm(`Archive this ${row.typeLabel.toLowerCase()} rule?\n\n${row.ownerLabel} → ${row.prerequisiteLabel}`);
+    const confirmed = window.confirm(
+      `Archive this ${row.typeLabel.toLowerCase()} rule?\n\n${row.ownerLabel} → ${row.prerequisiteLabel}`,
+    );
     if (!confirmed) return;
     await softDeleteLocal("subjectPrerequisites", row.id);
     setSelectedRule(null);
@@ -627,8 +866,8 @@ export default function SubjectPrerequisites() {
     try {
       await createLocal("subjectPrerequisites", {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         curriculumSubjectId: idOf(row.row.curriculumSubjectId),
         prerequisiteSubjectId: idOf(row.row.prerequisiteSubjectId),
         minimumGrade: row.row.minimumGrade,
@@ -648,99 +887,870 @@ export default function SubjectPrerequisites() {
   };
 
   const toggleActive = async (row: PrerequisiteViewRow) => {
-    await updateLocal("subjectPrerequisites", row.id, { active: !row.active, isDeleted: false } as Partial<SubjectPrerequisite>);
+    await updateLocal("subjectPrerequisites", row.id, {
+      active: !row.active,
+      isDeleted: false,
+    } as Partial<SubjectPrerequisite>);
     setSelectedRule(null);
     showToast("success", row.active ? "Rule deactivated." : "Rule activated.");
     await load();
   };
 
-  if (loading || accountLoading || settingsLoading || contextLoading) return <State primary={primary} title="Opening Subject Prerequisites..." text="Checking curriculums, curriculum subjects, pathways and prerequisite rules." />;
-  if (!authenticated || !accountId) return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing subject prerequisites." />;
+  if (loading || accountLoading || settingsLoading || contextLoading)
+    return (
+      <State
+        primary={primary}
+        title="Opening Subject Prerequisites..."
+        text="Checking curriculums, curriculum subjects, pathways and prerequisite rules."
+      />
+    );
+  if (!authenticated || !accountId)
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing subject prerequisites."
+      />
+    );
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Subject prerequisite rules belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {toast && <section className={`ba-toast ${toast.tone}`}>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button></section>}
-
-      <section className="ba-search-card" aria-label="Subject prerequisite search and actions">
-        <label className="ba-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search subject prerequisites..." aria-label="Search subject prerequisites" /></label>
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add subject prerequisite">+</button>
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters"><SliderIcon />{activeFilterCount ? <b>{activeFilterCount}</b> : null}</button>
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
-      </section>
-
-      {!curriculumSubjectOptions.length && <section className="ba-warning">Add curriculum subjects first. Prerequisite rules must connect subjects that already exist inside a curriculum.</section>}
-
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {curriculumFilter !== "all" && <button type="button" onClick={() => setCurriculumFilter("all")}>Curriculum: {(curriculumMap.get(idOf(curriculumFilter)) as any)?.name || curriculumFilter} ×</button>}
-          {typeFilter !== "all" && <button type="button" onClick={() => setTypeFilter("all")}>Type: {typeLabel(typeFilter)} ×</button>}
-          {statusFilter !== "all" && <button type="button" onClick={() => setStatusFilter("all")}>Status: {statusFilter === "active" ? "Active" : "Inactive"} ×</button>}
-          {groupFilter !== "all" && <button type="button" onClick={() => setGroupFilter("all")}>Group: {groupFilter} ×</button>}
+      {toast && (
+        <section className={`ba-toast ${toast.tone}`}>
+          {toast.message}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      {viewMode === "summary" && <section className="ba-analysis-grid"><AnalysisCard title="Rules by Curriculum" rows={countsByCurriculum} total={viewRows.length} /><AnalysisCard title="Rules by Type" rows={countsByType} total={viewRows.length} /><AnalysisCard title="Rules by Status" rows={countsByStatus} total={viewRows.length} /><AnalysisCard title="Grouped Rules" rows={countsByGroup} total={groupedRules} /><article className="ba-analysis ba-current-filter"><span>Current Filter</span><strong>{filteredRows.length}</strong><p>{activeRules.length} active · {archivedRules} inactive · {prerequisiteRules} prerequisites · {corequisiteRules} corequisites · {recommendedRules} recommended.</p></article></section>}
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} duplicateRule={duplicateRule} archive={archive} toggleActive={toggleActive} />}
-      {viewMode === "cards" && <section className="ba-list prerequisite-list">{filteredRows.map((rule) => <RuleListRow key={String(rule.id)} rule={rule} onOpen={() => setSelectedRule(rule)} />)}{!filteredRows.length && <Empty icon="🔗" title="No prerequisite rules found" text="Create rules that connect subjects as prerequisites, corequisites or recommended preparation." />}</section>}
+      <section
+        className="ba-search-card"
+        aria-label="Subject prerequisite search and actions"
+      >
+        <label className="ba-search">
+          <span>⌕</span>
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search subject prerequisites..."
+            aria-label="Search subject prerequisites"
+          />
+        </label>
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add subject prerequisite"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
+          <SliderIcon />
+          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
+        </button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
+      </section>
 
-      {filterOpen && <FilterSheet curriculums={curriculums} groupCodes={groupCodes} curriculumFilter={curriculumFilter} typeFilter={typeFilter} statusFilter={statusFilter} groupFilter={groupFilter} setCurriculumFilter={setCurriculumFilter} setTypeFilter={setTypeFilter} setStatusFilter={setStatusFilter} setGroupFilter={setGroupFilter} clearFilters={clearFilters} onClose={() => setFilterOpen(false)} />}
-      {moreOpen && <MoreSheet viewMode={viewMode} setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
-      {selectedRule && <ActionSheet rule={selectedRule} openEdit={openEdit} duplicateRule={duplicateRule} archive={archive} toggleActive={toggleActive} onClose={() => setSelectedRule(null)} />}
-      {modalOpen && <RuleModal form={form} saving={saving} curriculumSubjectOptions={curriculumSubjectOptions} prerequisiteOptions={prerequisiteOptions} selectedOwnerOption={selectedOwnerOption} updateForm={updateForm} setModalOpen={setModalOpen} save={save} />}
+      {!curriculumSubjectOptions.length && (
+        <section className="ba-warning">
+          Add curriculum subjects first. Prerequisite rules must connect
+          subjects that already exist inside a curriculum.
+        </section>
+      )}
+
+      {activeFilterCount > 0 && (
+        <section className="ba-filter-chips" aria-label="Active filters">
+          {curriculumFilter !== "all" && (
+            <button type="button" onClick={() => setCurriculumFilter("all")}>
+              Curriculum:{" "}
+              {(curriculumMap.get(idOf(curriculumFilter)) as any)?.name ||
+                curriculumFilter}{" "}
+              ×
+            </button>
+          )}
+          {typeFilter !== "all" && (
+            <button type="button" onClick={() => setTypeFilter("all")}>
+              Type: {typeLabel(typeFilter)} ×
+            </button>
+          )}
+          {statusFilter !== "all" && (
+            <button type="button" onClick={() => setStatusFilter("all")}>
+              Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
+            </button>
+          )}
+          {groupFilter !== "all" && (
+            <button type="button" onClick={() => setGroupFilter("all")}>
+              Group: {groupFilter} ×
+            </button>
+          )}
+        </section>
+      )}
+
+      {viewMode === "summary" && (
+        <section className="ba-analysis-grid">
+          <AnalysisCard
+            title="Rules by Curriculum"
+            rows={countsByCurriculum}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Rules by Type"
+            rows={countsByType}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Rules by Status"
+            rows={countsByStatus}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Grouped Rules"
+            rows={countsByGroup}
+            total={groupedRules}
+          />
+          <article className="ba-analysis ba-current-filter">
+            <span>Current Filter</span>
+            <strong>{filteredRows.length}</strong>
+            <p>
+              {activeRules.length} active · {archivedRules} inactive ·{" "}
+              {prerequisiteRules} prerequisites · {corequisiteRules}{" "}
+              corequisites · {recommendedRules} recommended.
+            </p>
+          </article>
+        </section>
+      )}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          duplicateRule={duplicateRule}
+          archive={archive}
+          toggleActive={toggleActive}
+        />
+      )}
+      {viewMode === "cards" && (
+        <section className="ba-list prerequisite-list">
+          {filteredRows.map((rule) => (
+            <RuleListRow
+              key={String(rule.id)}
+              rule={rule}
+              onOpen={() => setSelectedRule(rule)}
+            />
+          ))}
+          {!filteredRows.length && (
+            <Empty
+              icon="🔗"
+              title="No prerequisite rules found"
+              text="Create rules that connect subjects as prerequisites, corequisites or recommended preparation."
+            />
+          )}
+        </section>
+      )}
+
+      {filterOpen && (
+        <FilterSheet
+          curriculums={curriculums}
+          groupCodes={groupCodes}
+          curriculumFilter={curriculumFilter}
+          typeFilter={typeFilter}
+          statusFilter={statusFilter}
+          groupFilter={groupFilter}
+          setCurriculumFilter={setCurriculumFilter}
+          setTypeFilter={setTypeFilter}
+          setStatusFilter={setStatusFilter}
+          setGroupFilter={setGroupFilter}
+          clearFilters={clearFilters}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
+      {moreOpen && (
+        <MoreSheet
+          viewMode={viewMode}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
+      {selectedRule && (
+        <ActionSheet
+          rule={selectedRule}
+          openEdit={openEdit}
+          duplicateRule={duplicateRule}
+          archive={archive}
+          toggleActive={toggleActive}
+          onClose={() => setSelectedRule(null)}
+        />
+      )}
+      {modalOpen && (
+        <RuleModal
+          form={form}
+          saving={saving}
+          curriculumSubjectOptions={curriculumSubjectOptions}
+          prerequisiteOptions={prerequisiteOptions}
+          selectedOwnerOption={selectedOwnerOption}
+          updateForm={updateForm}
+          setModalOpen={setModalOpen}
+          save={save}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
-  return <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}><style>{css}</style><section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section></main>;
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
+  return (
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
+      <style>{css}</style>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
+    </main>
+  );
 }
 
-function RuleListRow({ rule, onOpen }: { rule: PrerequisiteViewRow; onOpen: () => void }) {
-  return <button type="button" className="student-row prerequisite-row" onClick={onOpen}><span className={`prerequisite-icon ${rule.type}`}>{typeIcon(rule.type)}</span><span className="student-main"><strong>{rule.ownerLabel}</strong><small>{rule.typeLabel}: {rule.prerequisiteLabel}</small><em>{rule.curriculumName} · {rule.pathwayName} · {ruleShortText(rule)}</em></span><span className="student-side"><span className={`status-dot-mini ${rule.active ? "green" : "gray"}`} title={rule.active ? "Active" : "Inactive"} aria-label={rule.active ? "Active" : "Inactive"} /><i>⋯</i></span></button>;
+function RuleListRow({
+  rule,
+  onOpen,
+}: {
+  rule: PrerequisiteViewRow;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="student-row prerequisite-row"
+      onClick={onOpen}
+    >
+      <span className={`prerequisite-icon ${rule.type}`}>
+        {typeIcon(rule.type)}
+      </span>
+      <span className="student-main">
+        <strong>{rule.ownerLabel}</strong>
+        <small>
+          {rule.typeLabel}: {rule.prerequisiteLabel}
+        </small>
+        <em>
+          {rule.curriculumName} · {rule.pathwayName} · {ruleShortText(rule)}
+        </em>
+      </span>
+      <span className="student-side">
+        <span
+          className={`status-dot-mini ${rule.active ? "green" : "gray"}`}
+          title={rule.active ? "Active" : "Inactive"}
+          aria-label={rule.active ? "Active" : "Inactive"}
+        />
+        <i>⋯</i>
+      </span>
+    </button>
+  );
 }
 
 function SliderIcon() {
-  return <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9" /><path d="M17 7h3" /><circle cx="15" cy="7" r="2" /><path d="M4 17h3" /><path d="M11 17h9" /><circle cx="9" cy="17" r="2" /></svg>;
+  return (
+    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9" />
+      <path d="M17 7h3" />
+      <circle cx="15" cy="7" r="2" />
+      <path d="M4 17h3" />
+      <path d="M11 17h9" />
+      <circle cx="9" cy="17" r="2" />
+    </svg>
+  );
 }
 
-function FilterSheet(props: { curriculums: Curriculum[]; groupCodes: string[]; curriculumFilter: string; typeFilter: TypeFilter; statusFilter: StatusFilter; groupFilter: string; setCurriculumFilter: (value: string) => void; setTypeFilter: (value: TypeFilter) => void; setStatusFilter: (value: StatusFilter) => void; setGroupFilter: (value: string) => void; clearFilters: () => void; onClose: () => void; }) {
-  return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet"><div className="ba-sheet-head"><div><h2>Filters</h2><p>Filter subject prerequisite rules by curriculum, type, status and group.</p></div><button type="button" onClick={props.onClose} aria-label="Close filters">✕</button></div><div className="ba-form compact"><label><span>Curriculum</span><select value={props.curriculumFilter} onChange={(event) => props.setCurriculumFilter(event.target.value)}><option value="all">All curriculums</option>{props.curriculums.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label><label><span>Rule Type</span><select value={props.typeFilter} onChange={(event) => props.setTypeFilter(event.target.value as TypeFilter)}><option value="all">All rule types</option><option value="prerequisite">Prerequisite</option><option value="corequisite">Corequisite</option><option value="recommended">Recommended</option></select></label><label><span>Status</span><select value={props.statusFilter} onChange={(event) => props.setStatusFilter(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="active">Active only</option><option value="inactive">Inactive / Archived</option></select></label><label><span>Group Code</span><select value={props.groupFilter} onChange={(event) => props.setGroupFilter(event.target.value)}><option value="all">All groups</option>{props.groupCodes.map((code) => <option key={code} value={code}>{code}</option>)}</select></label></div><div className="ba-sheet-actions"><button type="button" onClick={props.clearFilters}>Clear</button><button type="button" className="primary" onClick={props.onClose}>Apply</button></div></section></div>;
+function FilterSheet(props: {
+  curriculums: Curriculum[];
+  groupCodes: string[];
+  curriculumFilter: string;
+  typeFilter: TypeFilter;
+  statusFilter: StatusFilter;
+  groupFilter: string;
+  setCurriculumFilter: (value: string) => void;
+  setTypeFilter: (value: TypeFilter) => void;
+  setStatusFilter: (value: StatusFilter) => void;
+  setGroupFilter: (value: string) => void;
+  clearFilters: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>
+              Filter subject prerequisite rules by curriculum, type, status and
+              group.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            aria-label="Close filters"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="ba-form compact">
+          <label>
+            <span>Curriculum</span>
+            <select
+              value={props.curriculumFilter}
+              onChange={(event) =>
+                props.setCurriculumFilter(event.target.value)
+              }
+            >
+              <option value="all">All curriculums</option>
+              {props.curriculums.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Rule Type</span>
+            <select
+              value={props.typeFilter}
+              onChange={(event) =>
+                props.setTypeFilter(event.target.value as TypeFilter)
+              }
+            >
+              <option value="all">All rule types</option>
+              <option value="prerequisite">Prerequisite</option>
+              <option value="corequisite">Corequisite</option>
+              <option value="recommended">Recommended</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={props.statusFilter}
+              onChange={(event) =>
+                props.setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active only</option>
+              <option value="inactive">Inactive / Archived</option>
+            </select>
+          </label>
+          <label>
+            <span>Group Code</span>
+            <select
+              value={props.groupFilter}
+              onChange={(event) => props.setGroupFilter(event.target.value)}
+            >
+              <option value="all">All groups</option>
+              {props.groupCodes.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={props.clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={props.onClose}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onRefresh: () => void | Promise<void>; onClose: () => void; }) {
-  return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small"><div className="ba-sheet-head"><div><h2>More</h2><p>Advanced views are here so the main page stays simple.</p></div><button type="button" onClick={onClose} aria-label="Close menu">✕</button></div><div className="ba-menu-list"><button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>List view</b><small>Compact prerequisite rule cards</small></button><button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Dense records for laptop work</small></button><button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Curriculum, type, status and group summaries</small></button><button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch rules</small></button></div></section></div>;
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet small">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Advanced views are here so the main page stays simple.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
+        </div>
+        <div className="ba-menu-list">
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact prerequisite rule cards</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense records for laptop work</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Curriculum, type, status and group summaries</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch rules</small>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function ActionSheet({ rule, openEdit, duplicateRule, archive, toggleActive, onClose }: { rule: PrerequisiteViewRow; openEdit: (row: PrerequisiteViewRow | SubjectPrerequisite) => void; duplicateRule: (row: PrerequisiteViewRow) => void | Promise<void>; archive: (row: PrerequisiteViewRow) => void | Promise<void>; toggleActive: (row: PrerequisiteViewRow) => void | Promise<void>; onClose: () => void; }) {
-  return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small"><div className="ba-sheet-profile"><div><h2>{rule.ownerLabel}</h2><p>{rule.typeLabel}: {rule.prerequisiteLabel}</p></div><button type="button" onClick={onClose} aria-label="Close rule actions">✕</button></div><div className="student-detail-strip"><span><b>Type</b>{rule.typeLabel}</span><span><b>Grade</b>{rule.minimumGrade || "—"}</span><span><b>Score</b>{rule.minimumScore || "—"}</span></div><div className="ba-menu-list"><button type="button" onClick={() => openEdit(rule)}><span>✎</span><b>Edit rule</b><small>Update subject relationship, type and conditions</small></button><button type="button" onClick={() => toggleActive(rule)}><span>{rule.active ? "⏸" : "▶"}</span><b>{rule.active ? "Deactivate" : "Activate"}</b><small>{rule.active ? "Keep rule but stop applying it" : "Make rule available again"}</small></button><button type="button" onClick={() => duplicateRule(rule)}><span>⧉</span><b>Duplicate rule</b><small>Create an inactive copy for adjustment</small></button><button type="button" className="danger" onClick={() => archive(rule)}><span>⌫</span><b>Archive</b><small>Soft delete this prerequisite rule locally</small></button></div></section></div>;
+function ActionSheet({
+  rule,
+  openEdit,
+  duplicateRule,
+  archive,
+  toggleActive,
+  onClose,
+}: {
+  rule: PrerequisiteViewRow;
+  openEdit: (row: PrerequisiteViewRow | SubjectPrerequisite) => void;
+  duplicateRule: (row: PrerequisiteViewRow) => void | Promise<void>;
+  archive: (row: PrerequisiteViewRow) => void | Promise<void>;
+  toggleActive: (row: PrerequisiteViewRow) => void | Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet small">
+        <div className="ba-sheet-profile">
+          <div>
+            <h2>{rule.ownerLabel}</h2>
+            <p>
+              {rule.typeLabel}: {rule.prerequisiteLabel}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close rule actions"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="student-detail-strip">
+          <span>
+            <b>Type</b>
+            {rule.typeLabel}
+          </span>
+          <span>
+            <b>Grade</b>
+            {rule.minimumGrade || "—"}
+          </span>
+          <span>
+            <b>Score</b>
+            {rule.minimumScore || "—"}
+          </span>
+        </div>
+        <div className="ba-menu-list">
+          <button type="button" onClick={() => openEdit(rule)}>
+            <span>✎</span>
+            <b>Edit rule</b>
+            <small>Update subject relationship, type and conditions</small>
+          </button>
+          <button type="button" onClick={() => toggleActive(rule)}>
+            <span>{rule.active ? "⏸" : "▶"}</span>
+            <b>{rule.active ? "Deactivate" : "Activate"}</b>
+            <small>
+              {rule.active
+                ? "Keep rule but stop applying it"
+                : "Make rule available again"}
+            </small>
+          </button>
+          <button type="button" onClick={() => duplicateRule(rule)}>
+            <span>⧉</span>
+            <b>Duplicate rule</b>
+            <small>Create an inactive copy for adjustment</small>
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(rule)}
+          >
+            <span>⌫</span>
+            <b>Archive</b>
+            <small>Soft delete this prerequisite rule locally</small>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function TableView({ rows, openEdit, duplicateRule, archive, toggleActive }: { rows: PrerequisiteViewRow[]; openEdit: (row: PrerequisiteViewRow | SubjectPrerequisite) => void; duplicateRule: (row: PrerequisiteViewRow) => void | Promise<void>; archive: (row: PrerequisiteViewRow) => void | Promise<void>; toggleActive: (row: PrerequisiteViewRow) => void | Promise<void>; }) {
-  return <section className="ba-table-card"><div className="ba-table-scroll"><table><thead><tr><th>Rules ({rows.length})</th><th>Requires / Related</th><th>Curriculum</th><th>Pathway</th><th>Type</th><th>Minimum</th><th>Group</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>{rows.map((rule) => { const row: any = rule.row; return <tr key={String(rule.id)}><td><strong>{rule.ownerLabel}</strong><span>Controlled subject</span></td><td>{rule.prerequisiteLabel}<span>Required / related subject</span></td><td>{rule.curriculumName}</td><td>{rule.pathwayName}</td><td><Chip tone={typeTone(rule.type)}>{rule.typeLabel}</Chip></td><td>{rule.minimumGrade || rule.minimumScore ? <span>{rule.minimumGrade || "—"} · {rule.minimumScore || "—"}</span> : "—"}</td><td>{rule.groupCode || "—"}</td><td><Chip tone={rule.active ? "green" : "gray"}>{rule.active ? "Active" : "Inactive"}</Chip></td><td>{timeText(row.updatedAt || row.createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={() => openEdit(rule)}>Edit</button><button type="button" onClick={() => toggleActive(rule)}>{rule.active ? "Deactivate" : "Activate"}</button><button type="button" onClick={() => duplicateRule(rule)}>Duplicate</button><button type="button" className="ba-delete" onClick={() => archive(rule)}>Archive</button></div></td></tr>; })}</tbody></table>{!rows.length && <div className="ba-empty-table">No subject prerequisite rule matches your filters.</div>}</div></section>;
+function TableView({
+  rows,
+  openEdit,
+  duplicateRule,
+  archive,
+  toggleActive,
+}: {
+  rows: PrerequisiteViewRow[];
+  openEdit: (row: PrerequisiteViewRow | SubjectPrerequisite) => void;
+  duplicateRule: (row: PrerequisiteViewRow) => void | Promise<void>;
+  archive: (row: PrerequisiteViewRow) => void | Promise<void>;
+  toggleActive: (row: PrerequisiteViewRow) => void | Promise<void>;
+}) {
+  return (
+    <section className="ba-table-card">
+      <div className="ba-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Rules ({rows.length})</th>
+              <th>Requires / Related</th>
+              <th>Curriculum</th>
+              <th>Pathway</th>
+              <th>Type</th>
+              <th>Minimum</th>
+              <th>Group</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((rule) => {
+              const row: any = rule.row;
+              return (
+                <tr key={String(rule.id)}>
+                  <td>
+                    <strong>{rule.ownerLabel}</strong>
+                    <span>Controlled subject</span>
+                  </td>
+                  <td>
+                    {rule.prerequisiteLabel}
+                    <span>Required / related subject</span>
+                  </td>
+                  <td>{rule.curriculumName}</td>
+                  <td>{rule.pathwayName}</td>
+                  <td>
+                    <Chip tone={typeTone(rule.type)}>{rule.typeLabel}</Chip>
+                  </td>
+                  <td>
+                    {rule.minimumGrade || rule.minimumScore ? (
+                      <span>
+                        {rule.minimumGrade || "—"} · {rule.minimumScore || "—"}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td>{rule.groupCode || "—"}</td>
+                  <td>
+                    <Chip tone={rule.active ? "green" : "gray"}>
+                      {rule.active ? "Active" : "Inactive"}
+                    </Chip>
+                  </td>
+                  <td>{timeText(row.updatedAt || row.createdAt)}</td>
+                  <td>
+                    <div className="ba-table-actions">
+                      <button type="button" onClick={() => openEdit(rule)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => toggleActive(rule)}>
+                        {rule.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button type="button" onClick={() => duplicateRule(rule)}>
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archive(rule)}
+                      >
+                        Archive
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No subject prerequisite rule matches your filters.
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
-function RuleModal(props: { form: PrerequisiteForm; saving: boolean; curriculumSubjectOptions: CurriculumSubjectOption[]; prerequisiteOptions: CurriculumSubjectOption[]; selectedOwnerOption?: CurriculumSubjectOption; updateForm: (patch: Partial<PrerequisiteForm>) => void; setModalOpen: (open: boolean) => void; save: (event?: React.FormEvent) => void | Promise<void>; }) {
+function RuleModal(props: {
+  form: PrerequisiteForm;
+  saving: boolean;
+  curriculumSubjectOptions: CurriculumSubjectOption[];
+  prerequisiteOptions: CurriculumSubjectOption[];
+  selectedOwnerOption?: CurriculumSubjectOption;
+  updateForm: (patch: Partial<PrerequisiteForm>) => void;
+  setModalOpen: (open: boolean) => void;
+  save: (event?: React.FormEvent) => void | Promise<void>;
+}) {
   const selectedType = props.form.type || "prerequisite";
-  return <div className="ba-modal-backdrop" role="dialog" aria-modal="true"><section className="ba-modal"><div className="ba-sheet-head"><div><h2>{props.form.id ? "Edit Subject Rule" : "Add Subject Rule"}</h2><p>Define prerequisite, corequisite or recommended subject relationships.</p></div><button type="button" onClick={() => props.setModalOpen(false)} aria-label="Close form">✕</button></div><form className="ba-form compact" onSubmit={props.save}><label><span>Subject being controlled</span><select value={props.form.curriculumSubjectId} onChange={(event) => props.updateForm({ curriculumSubjectId: event.target.value, prerequisiteSubjectId: "" })} required><option value="">Select curriculum subject</option>{props.curriculumSubjectOptions.map((option) => <option key={String(option.id)} value={String(option.id)}>{option.label}</option>)}</select></label><label><span>Required / related subject</span><select value={props.form.prerequisiteSubjectId} onChange={(event) => props.updateForm({ prerequisiteSubjectId: event.target.value })} required><option value="">Select required subject</option>{props.prerequisiteOptions.map((option) => <option key={String(option.id)} value={String(option.id)}>{option.label}</option>)}</select></label><label><span>Rule type</span><select value={selectedType} onChange={(event) => props.updateForm({ type: event.target.value as RuleType })}><option value="prerequisite">Prerequisite</option><option value="corequisite">Corequisite</option><option value="recommended">Recommended</option></select></label><label><span>Group code</span><input value={props.form.groupCode} onChange={(event) => props.updateForm({ groupCode: event.target.value })} placeholder="Optional e.g. ALT-A" /></label><label><span>Minimum grade</span><input value={props.form.minimumGrade} onChange={(event) => props.updateForm({ minimumGrade: event.target.value })} placeholder="e.g. C6, B3, Pass" /></label><label><span>Minimum score</span><input type="number" value={props.form.minimumScore} onChange={(event) => props.updateForm({ minimumScore: event.target.value })} placeholder="e.g. 50" min="0" max="100" /></label>{props.selectedOwnerOption && <section className="ba-form-note"><strong>Curriculum locked:</strong> related subjects are limited to {props.selectedOwnerOption.curriculumName}.</section>}<label className="ba-check"><input type="checkbox" checked={props.form.active} onChange={(event) => props.updateForm({ active: event.target.checked })} /><span>Active rule</span></label><div className="ba-modal-actions"><button type="button" onClick={() => props.setModalOpen(false)}>Cancel</button><button type="submit" className="primary" disabled={props.saving}>{props.saving ? "Saving..." : props.form.id ? "Save Changes" : "Create Rule"}</button></div></form></section></div>;
+  return (
+    <div className="ba-modal-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-modal">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>{props.form.id ? "Edit Subject Rule" : "Add Subject Rule"}</h2>
+            <p>
+              Define prerequisite, corequisite or recommended subject
+              relationships.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => props.setModalOpen(false)}
+            aria-label="Close form"
+          >
+            ✕
+          </button>
+        </div>
+        <form className="ba-form compact" onSubmit={props.save}>
+          <label>
+            <span>Subject being controlled</span>
+            <select
+              value={props.form.curriculumSubjectId}
+              onChange={(event) =>
+                props.updateForm({
+                  curriculumSubjectId: event.target.value,
+                  prerequisiteSubjectId: "",
+                })
+              }
+              required
+            >
+              <option value="">Select curriculum subject</option>
+              {props.curriculumSubjectOptions.map((option) => (
+                <option key={String(option.id)} value={String(option.id)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Required / related subject</span>
+            <select
+              value={props.form.prerequisiteSubjectId}
+              onChange={(event) =>
+                props.updateForm({ prerequisiteSubjectId: event.target.value })
+              }
+              required
+            >
+              <option value="">Select required subject</option>
+              {props.prerequisiteOptions.map((option) => (
+                <option key={String(option.id)} value={String(option.id)}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Rule type</span>
+            <select
+              value={selectedType}
+              onChange={(event) =>
+                props.updateForm({ type: event.target.value as RuleType })
+              }
+            >
+              <option value="prerequisite">Prerequisite</option>
+              <option value="corequisite">Corequisite</option>
+              <option value="recommended">Recommended</option>
+            </select>
+          </label>
+          <label>
+            <span>Group code</span>
+            <input
+              value={props.form.groupCode}
+              onChange={(event) =>
+                props.updateForm({ groupCode: event.target.value })
+              }
+              placeholder="Optional e.g. ALT-A"
+            />
+          </label>
+          <label>
+            <span>Minimum grade</span>
+            <input
+              value={props.form.minimumGrade}
+              onChange={(event) =>
+                props.updateForm({ minimumGrade: event.target.value })
+              }
+              placeholder="e.g. C6, B3, Pass"
+            />
+          </label>
+          <label>
+            <span>Minimum score</span>
+            <input
+              type="number"
+              value={props.form.minimumScore}
+              onChange={(event) =>
+                props.updateForm({ minimumScore: event.target.value })
+              }
+              placeholder="e.g. 50"
+              min="0"
+              max="100"
+            />
+          </label>
+          {props.selectedOwnerOption && (
+            <section className="ba-form-note">
+              <strong>Curriculum locked:</strong> related subjects are limited
+              to {props.selectedOwnerOption.curriculumName}.
+            </section>
+          )}
+          <label className="ba-check">
+            <input
+              type="checkbox"
+              checked={props.form.active}
+              onChange={(event) =>
+                props.updateForm({ active: event.target.checked })
+              }
+            />
+            <span>Active rule</span>
+          </label>
+          <div className="ba-modal-actions">
+            <button type="button" onClick={() => props.setModalOpen(false)}>
+              Cancel
+            </button>
+            <button type="submit" className="primary" disabled={props.saving}>
+              {props.saving
+                ? "Saving..."
+                : props.form.id
+                  ? "Save Changes"
+                  : "Create Rule"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; count: number }[]; total: number }) {
-  return <article className="ba-analysis"><span>{title}</span><strong>{numberText(total)}</strong><div className="ba-analysis-bars">{rows.slice(0, 6).map((row) => { const percent = total ? Math.round((row.count / total) * 100) : 0; return <div key={row.label} className="ba-analysis-row"><p><b>{row.label}</b><em>{row.count}</em></p><div className="ba-bar"><i style={{ width: `${percent}%` }} /></div></div>; })}{!rows.length && <p className="ba-analysis-empty">No data yet.</p>}</div></article>;
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; count: number }[];
+  total: number;
+}) {
+  return (
+    <article className="ba-analysis">
+      <span>{title}</span>
+      <strong>{numberText(total)}</strong>
+      <div className="ba-analysis-bars">
+        {rows.slice(0, 6).map((row) => {
+          const percent = total ? Math.round((row.count / total) * 100) : 0;
+          return (
+            <div key={row.label} className="ba-analysis-row">
+              <p>
+                <b>{row.label}</b>
+                <em>{row.count}</em>
+              </p>
+              <div className="ba-bar">
+                <i style={{ width: `${percent}%` }} />
+              </div>
+            </div>
+          );
+        })}
+        {!rows.length && <p className="ba-analysis-empty">No data yet.</p>}
+      </div>
+    </article>
+  );
 }
 
 const css = `

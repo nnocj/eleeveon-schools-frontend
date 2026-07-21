@@ -7,20 +7,46 @@
  */
 
 import type React from "react";
-import type { CumulativeBookTemplateTone, CumulativeReportBookDataset, CumulativeReportBookSettings } from "./cumulative-book-types";
-import { friendlyReportDate, firstText, formatNumber, ordinal } from "../shared/ReportTemplateUtils";
+import type {
+  CumulativeBookTemplateTone,
+  CumulativeReportBookDataset,
+  CumulativeReportBookSettings,
+} from "./cumulative-book-types";
+import {
+  friendlyReportDate,
+  firstText,
+  formatNumber,
+  ordinal,
+} from "../shared/ReportTemplateUtils";
 
 export { friendlyReportDate, firstText, formatNumber, ordinal };
 
-export function resolveBookBranding(dataset?: CumulativeReportBookDataset | null) {
+export function resolveBookBranding(
+  dataset?: CumulativeReportBookDataset | null,
+) {
   const headerBranding = (dataset as any)?.header?.branding || {};
   const header = (dataset as any)?.header || {};
   const branding = ((dataset as any)?.branding || {}) as any;
 
   return {
-    schoolName: firstText(branding.schoolName, headerBranding.schoolName, header.schoolName, header.school?.name, "School Name"),
-    branchName: firstText(branding.branchName, headerBranding.branchName, header.branchName, header.branch?.name),
-    motto: firstText(branding.motto, headerBranding.motto, header.school?.motto),
+    schoolName: firstText(
+      branding.schoolName,
+      headerBranding.schoolName,
+      header.schoolName,
+      header.school?.name,
+      "School Name",
+    ),
+    branchName: firstText(
+      branding.branchName,
+      headerBranding.branchName,
+      header.branchName,
+      header.branch?.name,
+    ),
+    motto: firstText(
+      branding.motto,
+      headerBranding.motto,
+      header.school?.motto,
+    ),
     logo: firstText(
       branding.logo,
       branding.resolvedLogoUrl,
@@ -33,14 +59,40 @@ export function resolveBookBranding(dataset?: CumulativeReportBookDataset | null
       header.school?.logo,
       header.school?.resolvedLogoUrl,
       header.branch?.logo,
-      header.branch?.resolvedLogoUrl
+      header.branch?.resolvedLogoUrl,
     ),
-    address: firstText(branding.address, headerBranding.address, header.school?.address),
-    phone: firstText(branding.phone, headerBranding.phone, header.school?.phone),
-    email: firstText(branding.email, headerBranding.email, header.school?.email),
-    website: firstText(branding.website, headerBranding.website, header.school?.website),
-    primaryColor: firstText(branding.primaryColor, headerBranding.primaryColor, header.primaryColor, "#1d4ed8"),
-    fontFamily: firstText(branding.fontFamily, headerBranding.fontFamily, header.fontFamily, "Arial, sans-serif"),
+    address: firstText(
+      branding.address,
+      headerBranding.address,
+      header.school?.address,
+    ),
+    phone: firstText(
+      branding.phone,
+      headerBranding.phone,
+      header.school?.phone,
+    ),
+    email: firstText(
+      branding.email,
+      headerBranding.email,
+      header.school?.email,
+    ),
+    website: firstText(
+      branding.website,
+      headerBranding.website,
+      header.school?.website,
+    ),
+    primaryColor: firstText(
+      branding.primaryColor,
+      headerBranding.primaryColor,
+      header.primaryColor,
+      "#1d4ed8",
+    ),
+    fontFamily: firstText(
+      branding.fontFamily,
+      headerBranding.fontFamily,
+      header.fontFamily,
+      "Arial, sans-serif",
+    ),
     reportCardBackgroundImage: firstText(
       branding.reportCardBackgroundImage,
       branding.resolvedReportCardBackgroundImage,
@@ -49,7 +101,7 @@ export function resolveBookBranding(dataset?: CumulativeReportBookDataset | null
       header.reportCardBackgroundImage,
       header.resolvedReportCardBackgroundImage,
       header.schoolBranchSetting?.reportCardBackgroundImage,
-      header.schoolBranchSetting?.resolvedReportCardBackgroundImage
+      header.schoolBranchSetting?.resolvedReportCardBackgroundImage,
     ),
     reportCardWatermark: firstText(
       branding.reportCardWatermark,
@@ -68,7 +120,7 @@ export function resolveBookBranding(dataset?: CumulativeReportBookDataset | null
       header.resolvedLogoUrl,
       header.schoolBranchSetting?.logo,
       header.school?.logo,
-      header.branch?.logo
+      header.branch?.logo,
     ),
     reportCardSignatureImage: firstText(
       branding.reportCardSignatureImage,
@@ -78,24 +130,43 @@ export function resolveBookBranding(dataset?: CumulativeReportBookDataset | null
       header.reportCardSignatureImage,
       header.resolvedReportCardSignatureImage,
       header.schoolBranchSetting?.reportCardSignatureImage,
-      header.schoolBranchSetting?.resolvedReportCardSignatureImage
+      header.schoolBranchSetting?.resolvedReportCardSignatureImage,
     ),
   };
 }
 
-export function resolveBookStudent(dataset?: CumulativeReportBookDataset | null) {
+export function resolveBookStudent(
+  dataset?: CumulativeReportBookDataset | null,
+) {
   const firstPeriodDataset = dataset?.periods?.[0]?.dataset as any;
   const firstReport = firstPeriodDataset?.report || {};
   const firstStudent = firstPeriodDataset?.student || {};
   const firstStudentInfo = firstPeriodDataset?.studentInfo || {};
-  const student = ((dataset as any)?.student || (dataset as any)?.studentInfo || {}) as any;
+  const student = ((dataset as any)?.student ||
+    (dataset as any)?.studentInfo ||
+    {}) as any;
 
   return {
     id: student.id || firstStudent.id || firstReport.studentId,
-    fullName: firstText(student.fullName, student.name, firstStudent.fullName, firstStudent.name, firstReport.studentName, "Student Name"),
-    admissionNumber: firstText(student.admissionNumber, firstStudent.admissionNumber, firstReport.admissionNumber),
+    fullName: firstText(
+      student.fullName,
+      student.name,
+      firstStudent.fullName,
+      firstStudent.name,
+      firstReport.studentName,
+      "Student Name",
+    ),
+    admissionNumber: firstText(
+      student.admissionNumber,
+      firstStudent.admissionNumber,
+      firstReport.admissionNumber,
+    ),
     gender: firstText(student.gender, firstStudent.gender, firstReport.gender),
-    className: firstText(student.className, student.currentClassName, firstReport.className),
+    className: firstText(
+      student.className,
+      student.currentClassName,
+      firstReport.className,
+    ),
     photo: firstText(
       student.photo,
       student.studentPhoto,
@@ -110,7 +181,7 @@ export function resolveBookStudent(dataset?: CumulativeReportBookDataset | null)
       firstStudent.resolvedPhotoUrl,
       firstStudent.resolvedStudentPhotoUrl,
       firstReport.studentPhoto,
-      firstReport.photo
+      firstReport.photo,
     ),
     dateOfBirth: firstText(student.dateOfBirth, firstStudent.dateOfBirth),
     parentName: firstText(student.parentName, firstStudent.parentName),
@@ -128,39 +199,54 @@ export function templateCodeOf(template?: any, settings?: any) {
     template?.templateKey,
     settings?.templateCode,
     settings?.layoutKey,
-    "classic_formal"
+    "classic_formal",
   );
 }
 
-export function templateTone(template?: any, settings?: any): CumulativeBookTemplateTone {
+export function templateTone(
+  template?: any,
+  settings?: any,
+): CumulativeBookTemplateTone {
   const code = templateCodeOf(template, settings).toLowerCase();
 
   if (code.includes("modern")) return "modern";
-  if (code.includes("bordered") || code.includes("traditional")) return "traditional";
+  if (code.includes("bordered") || code.includes("traditional"))
+    return "traditional";
   if (code.includes("letterhead") || code.includes("premium")) return "premium";
   if (code.includes("side")) return "sideProfile";
   if (code.includes("cambridge")) return "cambridge";
   if (code === "ib" || code.includes("international")) return "ib";
   if (code.includes("kindergarten")) return "kindergarten";
   if (code.includes("montessori")) return "montessori";
-  if (code.includes("university") || code.includes("transcript")) return "transcript";
+  if (code.includes("university") || code.includes("transcript"))
+    return "transcript";
   if (code.includes("compact")) return "compact";
 
   return "classic";
 }
 
-export function computeBookSummary(dataset?: CumulativeReportBookDataset | null) {
+export function computeBookSummary(
+  dataset?: CumulativeReportBookDataset | null,
+) {
   const periods = dataset?.periods || [];
   const averages = periods
-    .map((period) => Number(period.average ?? (period.dataset as any)?.report?.average))
+    .map((period) =>
+      Number(period.average ?? (period.dataset as any)?.report?.average),
+    )
     .filter((value) => Number.isFinite(value));
 
   const positions = periods
-    .map((period) => Number(period.position ?? (period.dataset as any)?.report?.overallPosition))
+    .map((period) =>
+      Number(
+        period.position ?? (period.dataset as any)?.report?.overallPosition,
+      ),
+    )
     .filter((value) => Number.isFinite(value) && value > 0);
 
   const gpas = periods
-    .map((period) => Number(period.gpa ?? (period.dataset as any)?.report?.overallGPA))
+    .map((period) =>
+      Number(period.gpa ?? (period.dataset as any)?.report?.overallGPA),
+    )
     .filter((value) => Number.isFinite(value));
 
   const firstAverage = averages.length ? averages[0] : null;
@@ -203,13 +289,19 @@ export function periodName(period?: any) {
     period?.term,
     period?.dataset?.header?.academicPeriod?.name,
     period?.dataset?.header?.academicPeriodName,
-    "Academic Period"
+    "Academic Period",
   );
 }
 
 export function periodDateRange(period?: any) {
-  const start = firstText(period?.formattedStartDate, friendlyReportDate(period?.startDate));
-  const end = firstText(period?.formattedEndDate, friendlyReportDate(period?.endDate));
+  const start = firstText(
+    period?.formattedStartDate,
+    friendlyReportDate(period?.startDate),
+  );
+  const end = firstText(
+    period?.formattedEndDate,
+    friendlyReportDate(period?.endDate),
+  );
   if (start && end) return `${start} – ${end}`;
   return start || end || "";
 }
@@ -262,7 +354,10 @@ export function bookPageStyle(args: {
   };
 }
 
-export function sectionTitleStyle(primary: string, tone?: CumulativeBookTemplateTone): React.CSSProperties {
+export function sectionTitleStyle(
+  primary: string,
+  tone?: CumulativeBookTemplateTone,
+): React.CSSProperties {
   if (tone === "transcript") {
     return {
       margin: "0 0 8px",
@@ -289,7 +384,11 @@ export function sectionTitleStyle(primary: string, tone?: CumulativeBookTemplate
 export function getContrastTextColor(hex: string) {
   let col = (hex || "#ffffff").replace("#", "");
   if (col.startsWith("rgb")) return "#fff";
-  if (col.length === 3) col = col.split("").map((c) => c + c).join("");
+  if (col.length === 3)
+    col = col
+      .split("")
+      .map((c) => c + c)
+      .join("");
 
   const num = parseInt(col, 16);
   const r = (num >> 16) & 255;
@@ -299,7 +398,10 @@ export function getContrastTextColor(hex: string) {
   return brightness > 140 ? "#111827" : "#fff";
 }
 
-export function generatedBookDate(dataset?: CumulativeReportBookDataset | null, settings?: CumulativeReportBookSettings | null) {
+export function generatedBookDate(
+  dataset?: CumulativeReportBookDataset | null,
+  settings?: CumulativeReportBookSettings | null,
+) {
   if (settings?.showGeneratedDate === false) return "";
   return friendlyReportDate(dataset?.generatedAt || new Date());
 }

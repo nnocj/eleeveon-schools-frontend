@@ -50,7 +50,12 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -63,17 +68,37 @@ type PayrollItemRow = AnyRow & {
   balance: number;
   computedStatus: string;
 };
-type ViewMode = "profiles" | "profilesTable" | "runs" | "payments" | "paymentsTable" | "receipts" | "table" | "analytics";
+type ViewMode =
+  | "profiles"
+  | "profilesTable"
+  | "runs"
+  | "payments"
+  | "paymentsTable"
+  | "receipts"
+  | "table"
+  | "analytics";
 type ToastTone = "success" | "error" | "info";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
-type PayType = "monthly" | "weekly" | "daily" | "hourly" | "contract" | "commission";
+type PayType =
+  | "monthly"
+  | "weekly"
+  | "daily"
+  | "hourly"
+  | "contract"
+  | "commission";
 type PayMethod = "cash" | "momo" | "bank" | "card" | "manual";
-type RunStatus = "draft" | "review" | "approved" | "processing" | "paid" | "cancelled";
+type RunStatus =
+  | "draft"
+  | "review"
+  | "approved"
+  | "processing"
+  | "paid"
+  | "cancelled";
 type ItemStatus = "pending" | "approved" | "paid" | "failed" | "cancelled";
 type StatusFilter = "all" | RunStatus | ItemStatus | "active" | "inactive";
 
 type ProfileForm = {
-  id: number;
+  id: string;
   teacherId: string;
   fullName: string;
   role: string;
@@ -94,7 +119,7 @@ type ProfileForm = {
 };
 
 type RunForm = {
-  id: number;
+  id: string;
   title: string;
   periodStart: string;
   periodEnd: string;
@@ -114,7 +139,7 @@ type PaymentForm = {
 };
 
 const emptyProfileForm: ProfileForm = {
-  id: 0,
+  id: "",
   teacherId: "",
   fullName: "",
   role: "teacher",
@@ -135,7 +160,7 @@ const emptyProfileForm: ProfileForm = {
 };
 
 const emptyRunForm: RunForm = {
-  id: 0,
+  id: "",
   title: "",
   periodStart: new Date().toISOString().slice(0, 10),
   periodEnd: new Date().toISOString().slice(0, 10),
@@ -160,8 +185,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -169,7 +194,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -199,25 +226,35 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+function cleanId(value: any): string {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function idOf(row?: AnyRow | null): string {
+  return cleanId(row?.id ?? row?.payload?.id);
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && String(row.schoolId ?? "") !== String(schoolId ?? ""))
+    return false;
+  if (branchId && String(row.branchId ?? "") !== String(branchId ?? ""))
+    return false;
   return true;
 }
 
 function rowName(row?: AnyRow | null) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function dateLabel(value?: number | string | null) {
@@ -225,7 +262,11 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -234,7 +275,11 @@ function dateLabel(value?: number | string | null) {
 function money(value: any, currency = "GHS") {
   const amount = n(value);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "GHS", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GHS",
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
     return `${currency || "GHS"} ${amount.toLocaleString()}`;
   }
@@ -259,10 +304,19 @@ function methodTone(method?: string): Tone {
 }
 
 function monthTitle() {
-  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date());
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`pr-chip ${tone}`}>{children}</span>;
 }
 
@@ -296,7 +350,8 @@ export default function PayrollPage() {
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -321,7 +376,7 @@ export default function PayrollPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -348,7 +403,7 @@ export default function PayrollPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const { loading, setLoading } = useBackgroundLoader();
@@ -364,7 +419,10 @@ export default function PayrollPage() {
   const [runDrawer, setRunDrawer] = useState(false);
   const [paymentDrawer, setPaymentDrawer] = useState(false);
   const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const [teachers, setTeachers] = useState<AnyRow[]>([]);
   const [currencySettings, setCurrencySettings] = useState<AnyRow[]>([]);
@@ -374,7 +432,10 @@ export default function PayrollPage() {
   const [payments, setPayments] = useState<AnyRow[]>([]);
 
   const [profileForm, setProfileForm] = useState<ProfileForm>(emptyProfileForm);
-  const [runForm, setRunForm] = useState<RunForm>({ ...emptyRunForm, title: monthTitle() });
+  const [runForm, setRunForm] = useState<RunForm>({
+    ...emptyRunForm,
+    title: monthTitle(),
+  });
   const [paymentForm, setPaymentForm] = useState<PaymentForm>(emptyPaymentForm);
 
   useEffect(() => {
@@ -384,7 +445,11 @@ export default function PayrollPage() {
 
   function showToast(tone: ToastTone, message: string) {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   }
 
   async function load() {
@@ -396,7 +461,14 @@ export default function PayrollPage() {
     setLoading(true);
 
     try {
-      const [teacherRows, currencyRows, profileRows, runRows, itemRows, paymentRows] = await Promise.all([
+      const [
+        teacherRows,
+        currencyRows,
+        profileRows,
+        runRows,
+        itemRows,
+        paymentRows,
+      ] = await Promise.all([
         listActiveLocal<AnyRow>("teachers" as any),
         listActiveLocal<AnyRow>("schoolCurrencySettings" as any),
         listActiveLocal<AnyRow>("staffPayrollProfiles" as any),
@@ -405,12 +477,32 @@ export default function PayrollPage() {
         listActiveLocal<AnyRow>("staffPaymentRecords" as any),
       ]);
 
-      setTeachers(teacherRows.filter((row) => sameScope(row, accountId, schoolId, branchId)).sort((a, b) => rowName(a).localeCompare(rowName(b))));
-      setCurrencySettings(currencyRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setProfiles(profileRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setRuns(runRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setItems(itemRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setPayments(paymentRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
+      setTeachers(
+        teacherRows
+          .filter((row) => sameScope(row, accountId, schoolId, branchId))
+          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
+      );
+      setCurrencySettings(
+        currencyRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setProfiles(
+        profileRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setRuns(
+        runRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setItems(
+        itemRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setPayments(
+        paymentRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load payroll:", error);
       showToast("error", "Failed to load payroll.");
@@ -440,17 +532,34 @@ export default function PayrollPage() {
   ]);
 
   const currency = useMemo(() => {
-    const preferred = currencySettings.find((row) => row.defaultForPayroll || row.active !== false) || currencySettings[0];
+    const preferred =
+      currencySettings.find(
+        (row) => row.defaultForPayroll || row.active !== false,
+      ) || currencySettings[0];
     return {
-      code: text(preferred?.currencyCode || profiles[0]?.currencyCode || items[0]?.currencyCode, "GHS"),
+      code: text(
+        preferred?.currencyCode ||
+          profiles[0]?.currencyCode ||
+          items[0]?.currencyCode,
+        "GHS",
+      ),
       symbol: text(preferred?.currencySymbol, "₵"),
       name: text(preferred?.currencyName, "Ghana Cedi"),
     };
   }, [currencySettings, items, profiles]);
 
-  const teacherMap = useMemo(() => new Map(teachers.map((item) => [Number(idOf(item)), rowName(item)])), [teachers]);
-  const profileMap = useMemo(() => new Map(profiles.map((item) => [Number(idOf(item)), item])), [profiles]);
-  const runMap = useMemo(() => new Map(runs.map((item) => [Number(idOf(item)), item])), [runs]);
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((item) => [idOf(item), rowName(item)])),
+    [teachers],
+  );
+  const profileMap = useMemo(
+    () => new Map(profiles.map((item) => [idOf(item), item])),
+    [profiles],
+  );
+  const runMap = useMemo(
+    () => new Map(runs.map((item) => [idOf(item), item])),
+    [runs],
+  );
 
   const filteredProfiles = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -460,10 +569,24 @@ export default function PayrollPage() {
         if (statusFilter === "inactive") return row.active === false;
         return true;
       })
-      .filter((row) => methodFilter === "all" || String(row.preferredPaymentMethod || "") === methodFilter)
+      .filter(
+        (row) =>
+          methodFilter === "all" ||
+          String(row.preferredPaymentMethod || "") === methodFilter,
+      )
       .filter((row) => {
         if (!q) return true;
-        return [row.fullName, row.role, row.payType, row.momoNumber, row.bankAccountNumber, row.preferredPaymentMethod].join(" ").toLowerCase().includes(q);
+        return [
+          row.fullName,
+          row.role,
+          row.payType,
+          row.momoNumber,
+          row.bankAccountNumber,
+          row.preferredPaymentMethod,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
       .sort((a, b) => rowName(a).localeCompare(rowName(b)));
   }, [methodFilter, profiles, query, statusFilter]);
@@ -471,12 +594,24 @@ export default function PayrollPage() {
   const filteredRuns = useMemo(() => {
     const q = query.toLowerCase().trim();
     return runs
-      .filter((row) => statusFilter === "all" || ["active", "inactive"].includes(statusFilter) || String(row.status || "draft") === statusFilter)
+      .filter(
+        (row) =>
+          statusFilter === "all" ||
+          ["active", "inactive"].includes(statusFilter) ||
+          String(row.status || "draft") === statusFilter,
+      )
       .filter((row) => {
         if (!q) return true;
-        return [row.title, row.status, row.note].join(" ").toLowerCase().includes(q);
+        return [row.title, row.status, row.note]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
-      .sort((a, b) => n(b.payDate || b.periodEnd || b.updatedAt || b.createdAt) - n(a.payDate || a.periodEnd || a.updatedAt || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.payDate || b.periodEnd || b.updatedAt || b.createdAt) -
+          n(a.payDate || a.periodEnd || a.updatedAt || a.createdAt),
+      );
   }, [query, runs, statusFilter]);
 
   const payrollItemRows = useMemo<PayrollItemRow[]>(() => {
@@ -484,44 +619,132 @@ export default function PayrollPage() {
     return items
       .map((item) => {
         const paid = payments
-          .filter((payment) => Number(payment.payrollItemId || 0) === Number(idOf(item)))
-          .filter((payment) => ["paid", "success", "succeeded"].includes(String(payment.status || "paid").toLowerCase()))
+          .filter(
+            (payment) =>
+              cleanId(payment.payrollItemId) === idOf(item),
+          )
+          .filter((payment) =>
+            ["paid", "success", "succeeded"].includes(
+              String(payment.status || "paid").toLowerCase(),
+            ),
+          )
           .reduce((sum, payment) => sum + n(payment.amount), 0);
-        const grossPay = n(item.grossPay || item.baseSalary) + n(item.allowance);
-        const netPay = n(item.netPay || Math.max(0, grossPay - n(item.deduction)));
+        const grossPay =
+          n(item.grossPay || item.baseSalary) + n(item.allowance);
+        const netPay = n(
+          item.netPay || Math.max(0, grossPay - n(item.deduction)),
+        );
         const balance = Math.max(0, netPay - paid);
-        const computedStatus = balance <= 0 && netPay > 0 ? "paid" : paid > 0 ? "approved" : item.status || "pending";
-        return { ...(item as AnyRow), paid, grossPay, netPay, balance, computedStatus } as PayrollItemRow;
+        const computedStatus =
+          balance <= 0 && netPay > 0
+            ? "paid"
+            : paid > 0
+              ? "approved"
+              : item.status || "pending";
+        return {
+          ...(item as AnyRow),
+          paid,
+          grossPay,
+          netPay,
+          balance,
+          computedStatus,
+        } as PayrollItemRow;
       })
-      .filter((item) => statusFilter === "all" || ["active", "inactive"].includes(statusFilter) || String(item.computedStatus || item.status) === statusFilter)
-      .filter((item) => methodFilter === "all" || String(item.paymentMethod || item.preferredPaymentMethod || "") === methodFilter)
+      .filter(
+        (item) =>
+          statusFilter === "all" ||
+          ["active", "inactive"].includes(statusFilter) ||
+          String(item.computedStatus || item.status) === statusFilter,
+      )
+      .filter(
+        (item) =>
+          methodFilter === "all" ||
+          String(item.paymentMethod || item.preferredPaymentMethod || "") ===
+            methodFilter,
+      )
       .filter((item) => {
         if (!q) return true;
-        const profile = profileMap.get(Number(item.staffPayrollProfileId || item.profileId));
-        const run = runMap.get(Number(item.payrollRunId));
-        return [item.fullName, profile?.fullName, run?.title, item.status, item.note].join(" ").toLowerCase().includes(q);
+        const profile = profileMap.get(
+          cleanId(item.staffPayrollProfileId || item.profileId),
+        );
+        const run = runMap.get(cleanId(item.payrollRunId));
+        return [
+          item.fullName,
+          profile?.fullName,
+          run?.title,
+          item.status,
+          item.note,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
-      .sort((a, b) => n(b.updatedAt || b.createdAt) - n(a.updatedAt || a.createdAt));
+      .sort(
+        (a, b) => n(b.updatedAt || b.createdAt) - n(a.updatedAt || a.createdAt),
+      );
   }, [items, methodFilter, payments, profileMap, query, runMap, statusFilter]);
 
   const filteredPayments = useMemo(() => {
     const q = query.toLowerCase().trim();
     return payments
-      .filter((row) => methodFilter === "all" || String(row.method || row.paymentMethod || "") === methodFilter)
-      .filter((row) => statusFilter === "all" || ["active", "inactive"].includes(statusFilter) || String(row.status || "paid") === statusFilter)
+      .filter(
+        (row) =>
+          methodFilter === "all" ||
+          String(row.method || row.paymentMethod || "") === methodFilter,
+      )
+      .filter(
+        (row) =>
+          statusFilter === "all" ||
+          ["active", "inactive"].includes(statusFilter) ||
+          String(row.status || "paid") === statusFilter,
+      )
       .filter((row) => {
         if (!q) return true;
-        return [row.fullName, row.recipientName, row.referenceNumber, row.receiptNumber, row.method, row.note].join(" ").toLowerCase().includes(q);
+        return [
+          row.fullName,
+          row.recipientName,
+          row.referenceNumber,
+          row.receiptNumber,
+          row.method,
+          row.note,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
-      .sort((a, b) => n(b.paidAt || b.date || b.createdAt) - n(a.paidAt || a.date || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.paidAt || b.date || b.createdAt) -
+          n(a.paidAt || a.date || a.createdAt),
+      );
   }, [methodFilter, payments, query, statusFilter]);
 
   const summary = useMemo(() => {
-    const activeProfiles = profiles.filter((row) => row.active !== false).length;
-    const monthlyCost = profiles.filter((row) => row.active !== false).reduce((sum, row) => sum + Math.max(0, n(row.baseSalary) + n(row.allowanceDefault) - n(row.deductionDefault)), 0);
-    const runTotal = payrollItemRows.reduce((sum, row) => sum + n(row.netPay), 0);
+    const activeProfiles = profiles.filter(
+      (row) => row.active !== false,
+    ).length;
+    const monthlyCost = profiles
+      .filter((row) => row.active !== false)
+      .reduce(
+        (sum, row) =>
+          sum +
+          Math.max(
+            0,
+            n(row.baseSalary) +
+              n(row.allowanceDefault) -
+              n(row.deductionDefault),
+          ),
+        0,
+      );
+    const runTotal = payrollItemRows.reduce(
+      (sum, row) => sum + n(row.netPay),
+      0,
+    );
     const paid = payrollItemRows.reduce((sum, row) => sum + n(row.paid), 0);
-    const balance = payrollItemRows.reduce((sum, row) => sum + n(row.balance), 0);
+    const balance = payrollItemRows.reduce(
+      (sum, row) => sum + n(row.balance),
+      0,
+    );
     return {
       profiles: profiles.length,
       activeProfiles,
@@ -532,12 +755,20 @@ export default function PayrollPage() {
       runTotal,
       paid,
       balance,
-      pendingItems: payrollItemRows.filter((row) => String(row.computedStatus || row.status) !== "paid").length,
-      paidItems: payrollItemRows.filter((row) => String(row.computedStatus || row.status) === "paid").length,
+      pendingItems: payrollItemRows.filter(
+        (row) => String(row.computedStatus || row.status) !== "paid",
+      ).length,
+      paidItems: payrollItemRows.filter(
+        (row) => String(row.computedStatus || row.status) === "paid",
+      ).length,
     };
   }, [payments.length, payrollItemRows, profiles, runs.length]);
 
-  const activeFilterCount = useMemo(() => [statusFilter !== "all", methodFilter !== "all"].filter(Boolean).length, [methodFilter, statusFilter]);
+  const activeFilterCount = useMemo(
+    () =>
+      [statusFilter !== "all", methodFilter !== "all"].filter(Boolean).length,
+    [methodFilter, statusFilter],
+  );
 
   function openProfileDrawer(existing?: AnyRow) {
     const preferred = currency;
@@ -553,7 +784,8 @@ export default function PayrollPage() {
             baseSalary: String(existing.baseSalary || ""),
             allowanceDefault: String(existing.allowanceDefault || 0),
             deductionDefault: String(existing.deductionDefault || 0),
-            preferredPaymentMethod: (existing.preferredPaymentMethod || "momo") as PayMethod,
+            preferredPaymentMethod: (existing.preferredPaymentMethod ||
+              "momo") as PayMethod,
             bankName: text(existing.bankName),
             bankAccountName: text(existing.bankAccountName),
             bankAccountNumber: text(existing.bankAccountNumber),
@@ -564,7 +796,11 @@ export default function PayrollPage() {
             currencySymbol: text(existing.currencySymbol, preferred.symbol),
             active: existing.active !== false,
           }
-        : { ...emptyProfileForm, currencyCode: preferred.code, currencySymbol: preferred.symbol }
+        : {
+            ...emptyProfileForm,
+            currencyCode: preferred.code,
+            currencySymbol: preferred.symbol,
+          },
     );
     setProfileDrawer(true);
   }
@@ -576,12 +812,21 @@ export default function PayrollPage() {
         ? {
             id: cleanId(idOf(existing)),
             title: text(existing.title, monthTitle()),
-            periodStart: text(existing.periodStart, new Date().toISOString().slice(0, 10)),
-            periodEnd: text(existing.periodEnd, new Date().toISOString().slice(0, 10)),
-            payDate: text(existing.payDate, new Date().toISOString().slice(0, 10)),
+            periodStart: text(
+              existing.periodStart,
+              new Date().toISOString().slice(0, 10),
+            ),
+            periodEnd: text(
+              existing.periodEnd,
+              new Date().toISOString().slice(0, 10),
+            ),
+            payDate: text(
+              existing.payDate,
+              new Date().toISOString().slice(0, 10),
+            ),
             note: text(existing.note),
           }
-        : { ...emptyRunForm, title: monthTitle() }
+        : { ...emptyRunForm, title: monthTitle() },
     );
     setRunDrawer(true);
   }
@@ -590,16 +835,26 @@ export default function PayrollPage() {
     setMessage("");
     const itemId = item ? String(idOf(item)) : "";
     const amount = item ? n((item as any).balance ?? item.netPay) : 0;
-    setPaymentForm({ ...emptyPaymentForm, payrollItemId: itemId, amount: amount ? String(amount) : "" });
+    setPaymentForm({
+      ...emptyPaymentForm,
+      payrollItemId: itemId,
+      amount: amount ? String(amount) : "",
+    });
     setPaymentDrawer(true);
   }
 
   async function saveProfile() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before saving payroll.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before saving payroll.");
     const teacherId = cleanId(profileForm.teacherId);
-    const teacher = teachers.find((row) => Number(idOf(row)) === teacherId);
-    const fullName = text(profileForm.fullName || teacher?.fullName || rowName(teacher));
-    if (!fullName || fullName === "Unnamed") return setMessage("Select a teacher or enter staff name.");
+    const teacher = teachers.find(
+      (row) => String(idOf(row) ?? "") === String(teacherId ?? ""),
+    );
+    const fullName = text(
+      profileForm.fullName || teacher?.fullName || rowName(teacher),
+    );
+    if (!fullName || fullName === "Unnamed")
+      return setMessage("Select a teacher or enter staff name.");
     if (n(profileForm.baseSalary) <= 0) return setMessage("Enter base salary.");
 
     setSaving(true);
@@ -627,10 +882,18 @@ export default function PayrollPage() {
         active: profileForm.active,
         isDeleted: false,
       };
-      if (profileForm.id) await updateLocal("staffPayrollProfiles" as any, profileForm.id, payload);
+      if (profileForm.id)
+        await updateLocal(
+          "staffPayrollProfiles" as any,
+          profileForm.id,
+          payload,
+        );
       else await createLocal("staffPayrollProfiles" as any, payload);
       setProfileDrawer(false);
-      showToast("success", profileForm.id ? "Payroll profile updated." : "Payroll profile saved.");
+      showToast(
+        "success",
+        profileForm.id ? "Payroll profile updated." : "Payroll profile saved.",
+      );
       await load();
     } catch (error: any) {
       showToast("error", error?.message || "Failed to save payroll profile.");
@@ -640,64 +903,83 @@ export default function PayrollPage() {
   }
 
   async function generateRun() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before creating payroll run.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage(
+        "Select a school and branch before creating payroll run.",
+      );
     const activeProfiles = profiles.filter((row) => row.active !== false);
-    if (!activeProfiles.length) return setMessage("Create active payroll profiles first.");
+    if (!activeProfiles.length)
+      return setMessage("Create active payroll profiles first.");
 
     setSaving(true);
     try {
-      const totalGross = activeProfiles.reduce((sum, row) => sum + n(row.baseSalary) + n(row.allowanceDefault), 0);
-      const totalDeductions = activeProfiles.reduce((sum, row) => sum + n(row.deductionDefault), 0);
+      const totalGross = activeProfiles.reduce(
+        (sum, row) => sum + n(row.baseSalary) + n(row.allowanceDefault),
+        0,
+      );
+      const totalDeductions = activeProfiles.reduce(
+        (sum, row) => sum + n(row.deductionDefault),
+        0,
+      );
       const totalNet = Math.max(0, totalGross - totalDeductions);
-      const createdRun = (await createLocal("payrollRuns" as any, {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        title: runForm.title || monthTitle(),
-        periodStart: runForm.periodStart,
-        periodEnd: runForm.periodEnd,
-        payDate: runForm.payDate,
-        status: "draft",
-        totalGross,
-        totalDeductions,
-        totalNet,
-        note: runForm.note,
-        currencyCode: currency.code,
-        currencySymbol: currency.symbol,
-        active: true,
-        isDeleted: false,
-      } as AnyRow)) as AnyRow | undefined;
+      const createdRun = (await createLocal(
+        "payrollRuns" as any,
+        {
+          accountId: String(accountId),
+          schoolId,
+          branchId,
+          title: runForm.title || monthTitle(),
+          periodStart: runForm.periodStart,
+          periodEnd: runForm.periodEnd,
+          payDate: runForm.payDate,
+          status: "draft",
+          totalGross,
+          totalDeductions,
+          totalNet,
+          note: runForm.note,
+          currencyCode: currency.code,
+          currencySymbol: currency.symbol,
+          active: true,
+          isDeleted: false,
+        } as AnyRow,
+      )) as AnyRow | undefined;
 
       const payrollRunId = cleanId(idOf(createdRun));
-      if (!payrollRunId) throw new Error("Payroll run was created but its local id could not be resolved.");
+      if (!payrollRunId)
+        throw new Error(
+          "Payroll run was created but its local id could not be resolved.",
+        );
 
       for (const profile of activeProfiles) {
         const grossPay = n(profile.baseSalary) + n(profile.allowanceDefault);
         const deduction = n(profile.deductionDefault);
         const netPay = Math.max(0, grossPay - deduction);
-        await createLocal("payrollItems" as any, {
-          accountId: String(accountId),
-          schoolId,
-          branchId,
-          payrollRunId,
-          staffPayrollProfileId: cleanId(idOf(profile)),
-          teacherId: cleanId(profile.teacherId),
-          fullName: profile.fullName,
-          role: profile.role,
-          baseSalary: n(profile.baseSalary),
-          allowance: n(profile.allowanceDefault),
-          deduction,
-          grossPay,
-          netPay,
-          amountPaid: 0,
-          balance: netPay,
-          status: "pending",
-          paymentMethod: profile.preferredPaymentMethod || "momo",
-          currencyCode: profile.currencyCode || currency.code,
-          currencySymbol: profile.currencySymbol || currency.symbol,
-          active: true,
-          isDeleted: false,
-        } as AnyRow);
+        await createLocal(
+          "payrollItems" as any,
+          {
+            accountId: String(accountId),
+            schoolId,
+            branchId,
+            payrollRunId,
+            staffPayrollProfileId: cleanId(idOf(profile)),
+            teacherId: cleanId(profile.teacherId),
+            fullName: profile.fullName,
+            role: profile.role,
+            baseSalary: n(profile.baseSalary),
+            allowance: n(profile.allowanceDefault),
+            deduction,
+            grossPay,
+            netPay,
+            amountPaid: 0,
+            balance: netPay,
+            status: "pending",
+            paymentMethod: profile.preferredPaymentMethod || "momo",
+            currencyCode: profile.currencyCode || currency.code,
+            currencySymbol: profile.currencySymbol || currency.symbol,
+            active: true,
+            isDeleted: false,
+          } as AnyRow,
+        );
       }
 
       setRunDrawer(false);
@@ -711,11 +993,16 @@ export default function PayrollPage() {
   }
 
   async function recordPayment() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before recording payment.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before recording payment.");
     const payrollItemId = cleanId(paymentForm.payrollItemId);
     const item: AnyRow | undefined =
-      (payrollItemRows.find((row) => Number(idOf(row)) === payrollItemId) as AnyRow | undefined) ??
-      (items.find((row) => Number(idOf(row)) === payrollItemId) as AnyRow | undefined);
+      (payrollItemRows.find(
+        (row) => String(idOf(row) ?? "") === String(payrollItemId ?? ""),
+      ) as AnyRow | undefined) ??
+      (items.find(
+        (row) => String(idOf(row) ?? "") === String(payrollItemId ?? ""),
+      ) as AnyRow | undefined);
     const amount = n(paymentForm.amount);
     if (!item) return setMessage("Select a payroll item.");
     if (amount <= 0) return setMessage("Enter payment amount.");
@@ -728,28 +1015,35 @@ export default function PayrollPage() {
 
     setSaving(true);
     try {
-      await createLocal("staffPaymentRecords" as any, {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        payrollItemId,
-        payrollRunId: cleanId(item.payrollRunId),
-        staffPayrollProfileId: cleanId(item.staffPayrollProfileId || item.profileId),
-        teacherId: cleanId(item.teacherId),
-        fullName: item.fullName,
-        amount,
-        method: paymentForm.method,
-        provider: paymentForm.provider || "manual",
-        status: "paid",
-        referenceNumber: paymentForm.referenceNumber,
-        receiptNumber: paymentForm.receiptNumber || `SAL-${Date.now().toString(36).toUpperCase().slice(-6)}`,
-        paidAt: paymentForm.paidAt || new Date().toISOString().slice(0, 10),
-        note: paymentForm.note,
-        currencyCode: item.currencyCode || currency.code,
-        currencySymbol: item.currencySymbol || currency.symbol,
-        active: true,
-        isDeleted: false,
-      } as AnyRow);
+      await createLocal(
+        "staffPaymentRecords" as any,
+        {
+          accountId: String(accountId),
+          schoolId,
+          branchId,
+          payrollItemId,
+          payrollRunId: cleanId(item.payrollRunId),
+          staffPayrollProfileId: cleanId(
+            item.staffPayrollProfileId || item.profileId,
+          ),
+          teacherId: cleanId(item.teacherId),
+          fullName: item.fullName,
+          amount,
+          method: paymentForm.method,
+          provider: paymentForm.provider || "manual",
+          status: "paid",
+          referenceNumber: paymentForm.referenceNumber,
+          receiptNumber:
+            paymentForm.receiptNumber ||
+            `SAL-${Date.now().toString(36).toUpperCase().slice(-6)}`,
+          paidAt: paymentForm.paidAt || new Date().toISOString().slice(0, 10),
+          note: paymentForm.note,
+          currencyCode: item.currencyCode || currency.code,
+          currencySymbol: item.currencySymbol || currency.symbol,
+          active: true,
+          isDeleted: false,
+        } as AnyRow,
+      );
 
       await updateLocal("payrollItems" as any, payrollItemId, {
         amountPaid: newPaid,
@@ -771,7 +1065,10 @@ export default function PayrollPage() {
   async function deleteProfile(row: AnyRow) {
     const id = cleanId(idOf(row));
     if (!id) return;
-    if (!window.confirm(`Delete payroll profile for ${row.fullName || "staff"}?`)) return;
+    if (
+      !window.confirm(`Delete payroll profile for ${row.fullName || "staff"}?`)
+    )
+      return;
     try {
       await softDeleteLocal("staffPayrollProfiles" as any, id);
       showToast("success", "Payroll profile deleted.");
@@ -784,10 +1081,17 @@ export default function PayrollPage() {
   async function deleteRun(row: AnyRow) {
     const id = cleanId(idOf(row));
     if (!id) return;
-    if (!window.confirm(`Delete payroll run ${row.title || "record"}? Payroll items will also be archived.`)) return;
+    if (
+      !window.confirm(
+        `Delete payroll run ${row.title || "record"}? Payroll items will also be archived.`,
+      )
+    )
+      return;
     try {
       await softDeleteLocal("payrollRuns" as any, id);
-      for (const item of items.filter((entry) => Number(entry.payrollRunId) === id)) {
+      for (const item of items.filter(
+        (entry) => cleanId(entry.payrollRunId) === id,
+      )) {
         const itemId = cleanId(idOf(item));
         if (itemId) await softDeleteLocal("payrollItems" as any, itemId);
       }
@@ -799,105 +1103,309 @@ export default function PayrollPage() {
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening payroll..." text="Loading branch teachers, payroll profiles, runs and payments." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening payroll..."
+        text="Loading branch teachers, payroll profiles, runs and payments."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing branch payroll." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing branch payroll."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Payroll is branch-scoped. Choose an active school and branch before continuing." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Payroll is branch-scoped. Choose an active school and branch before continuing."
+      />
+    );
   }
 
   return (
-    <main className="pr-page" style={{ "--pr-primary": primary } as React.CSSProperties}>
+    <main
+      className="pr-page"
+      style={{ "--pr-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`pr-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="pr-search-card" aria-label="Payroll search and actions">
-        <span className={`status-dot-mini ${summary.balance ? "orange" : summary.profiles ? "green" : "gray"}`} title={`${summary.profiles} profile(s)`} />
+      <section
+        className="pr-search-card"
+        aria-label="Payroll search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.balance ? "orange" : summary.profiles ? "green" : "gray"}`}
+          title={`${summary.profiles} profile(s)`}
+        />
 
         <label className="pr-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search payroll..." aria-label="Search payroll" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search payroll..."
+            aria-label="Search payroll"
+          />
         </label>
 
-        <button type="button" className="pr-add-inline" onClick={() => openProfileDrawer()} aria-label="Add payroll profile">+</button>
+        <button
+          type="button"
+          className="pr-add-inline"
+          onClick={() => openProfileDrawer()}
+          aria-label="Add payroll profile"
+        >
+          +
+        </button>
 
-        <button type="button" className={`pr-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`pr-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="pr-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="pr-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(statusFilter !== "all" || methodFilter !== "all" || query.trim()) && (
         <section className="pr-filter-chips" aria-label="Active filters">
-          {statusFilter !== "all" && <button type="button" onClick={() => setStatusFilter("all")}>Status: {statusFilter.replaceAll("_", " ")} ×</button>}
-          {methodFilter !== "all" && <button type="button" onClick={() => setMethodFilter("all")}>Method: {methodFilter} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {statusFilter !== "all" && (
+            <button type="button" onClick={() => setStatusFilter("all")}>
+              Status: {statusFilter.replaceAll("_", " ")} ×
+            </button>
+          )}
+          {methodFilter !== "all" && (
+            <button type="button" onClick={() => setMethodFilter("all")}>
+              Method: {methodFilter} ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
-      {view === "analytics" && <AnalyticsView summary={summary} currency={currency.code} />}
+      {view === "analytics" && (
+        <AnalyticsView summary={summary} currency={currency.code} />
+      )}
 
-      {view === "profilesTable" && <ProfilesTableView rows={filteredProfiles} currency={currency.code} openDrawer={openProfileDrawer} deleteProfile={deleteProfile} />}
+      {view === "profilesTable" && (
+        <ProfilesTableView
+          rows={filteredProfiles}
+          currency={currency.code}
+          openDrawer={openProfileDrawer}
+          deleteProfile={deleteProfile}
+        />
+      )}
 
-      {view === "table" && <TableView rows={payrollItemRows} currency={currency.code} openPaymentDrawer={openPaymentDrawer} />}
+      {view === "table" && (
+        <TableView
+          rows={payrollItemRows}
+          currency={currency.code}
+          openPaymentDrawer={openPaymentDrawer}
+        />
+      )}
 
       {view === "profiles" && (
         <section className="pr-list">
           {filteredProfiles.map((row) => (
-            <ProfileCard key={String(idOf(row))} row={row} currency={row.currencyCode || currency.code} openDrawer={openProfileDrawer} deleteProfile={deleteProfile} />
+            <ProfileCard
+              key={String(idOf(row))}
+              row={row}
+              currency={row.currencyCode || currency.code}
+              openDrawer={openProfileDrawer}
+              deleteProfile={deleteProfile}
+            />
           ))}
-          {!filteredProfiles.length && <Empty title="No payroll profiles" text="Tap + to place teachers or staff on branch payroll." />}
+          {!filteredProfiles.length && (
+            <Empty
+              title="No payroll profiles"
+              text="Tap + to place teachers or staff on branch payroll."
+            />
+          )}
         </section>
       )}
 
       {view === "runs" && (
         <section className="pr-list">
           {filteredRuns.map((row) => (
-            <RunCard key={String(idOf(row))} row={row} items={items.filter((item) => Number(item.payrollRunId) === Number(idOf(row)))} currency={row.currencyCode || currency.code} openDrawer={openRunDrawer} deleteRun={deleteRun} />
+            <RunCard
+              key={String(idOf(row))}
+              row={row}
+              items={items.filter(
+                (item) => cleanId(item.payrollRunId) === idOf(row),
+              )}
+              currency={row.currencyCode || currency.code}
+              openDrawer={openRunDrawer}
+              deleteRun={deleteRun}
+            />
           ))}
-          {!filteredRuns.length && <Empty title="No payroll runs" text="Open More and generate a payroll run from active payroll profiles." />}
+          {!filteredRuns.length && (
+            <Empty
+              title="No payroll runs"
+              text="Open More and generate a payroll run from active payroll profiles."
+            />
+          )}
         </section>
       )}
 
       {view === "payments" && (
         <section className="pr-list">
-          {filteredPayments.map((row) => <PaymentCard key={String(idOf(row))} row={row} currency={row.currencyCode || currency.code} />)}
-          {!filteredPayments.length && <Empty title="No staff payments" text="Record salary payments from payroll items after generating a run." />}
+          {filteredPayments.map((row) => (
+            <PaymentCard
+              key={String(idOf(row))}
+              row={row}
+              currency={row.currencyCode || currency.code}
+            />
+          ))}
+          {!filteredPayments.length && (
+            <Empty
+              title="No staff payments"
+              text="Record salary payments from payroll items after generating a run."
+            />
+          )}
         </section>
       )}
 
-      {view === "paymentsTable" && <PaymentsTableView rows={filteredPayments} currency={currency.code} />}
+      {view === "paymentsTable" && (
+        <PaymentsTableView rows={filteredPayments} currency={currency.code} />
+      )}
 
-      {view === "receipts" && <ReceiptsTableView rows={filteredPayments} currency={currency.code} />}
+      {view === "receipts" && (
+        <ReceiptsTableView rows={filteredPayments} currency={currency.code} />
+      )}
 
-      {filterOpen && <FilterSheet statusFilter={statusFilter} setStatusFilter={setStatusFilter} methodFilter={methodFilter} setMethodFilter={setMethodFilter} onClose={() => setFilterOpen(false)} />}
+      {filterOpen && (
+        <FilterSheet
+          statusFilter={statusFilter}
+          setStatusFilter={setStatusFilter}
+          methodFilter={methodFilter}
+          setMethodFilter={setMethodFilter}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
 
-      {moreOpen && <MoreSheet view={view} setView={(mode) => { setView(mode); setMoreOpen(false); }} summary={summary} currency={currency.code} onProfile={() => { setMoreOpen(false); openProfileDrawer(); }} onRun={() => { setMoreOpen(false); openRunDrawer(); }} onPayment={() => { setMoreOpen(false); openPaymentDrawer(); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
+      {moreOpen && (
+        <MoreSheet
+          view={view}
+          setView={(mode) => {
+            setView(mode);
+            setMoreOpen(false);
+          }}
+          summary={summary}
+          currency={currency.code}
+          onProfile={() => {
+            setMoreOpen(false);
+            openProfileDrawer();
+          }}
+          onRun={() => {
+            setMoreOpen(false);
+            openRunDrawer();
+          }}
+          onPayment={() => {
+            setMoreOpen(false);
+            openPaymentDrawer();
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
 
-      {profileDrawer && <ProfileDrawer form={profileForm} setForm={setProfileForm} teachers={teachers} teacherMap={teacherMap} message={message} saving={saving} save={saveProfile} close={() => setProfileDrawer(false)} />}
+      {profileDrawer && (
+        <ProfileDrawer
+          form={profileForm}
+          setForm={setProfileForm}
+          teachers={teachers}
+          teacherMap={teacherMap}
+          message={message}
+          saving={saving}
+          save={saveProfile}
+          close={() => setProfileDrawer(false)}
+        />
+      )}
 
-      {runDrawer && <RunDrawer form={runForm} setForm={setRunForm} summary={summary} currency={currency.code} message={message} saving={saving} generate={generateRun} close={() => setRunDrawer(false)} />}
+      {runDrawer && (
+        <RunDrawer
+          form={runForm}
+          setForm={setRunForm}
+          summary={summary}
+          currency={currency.code}
+          message={message}
+          saving={saving}
+          generate={generateRun}
+          close={() => setRunDrawer(false)}
+        />
+      )}
 
-      {paymentDrawer && <PaymentDrawer form={paymentForm} setForm={setPaymentForm} items={payrollItemRows} currency={currency.code} message={message} saving={saving} record={recordPayment} close={() => setPaymentDrawer(false)} />}
+      {paymentDrawer && (
+        <PaymentDrawer
+          form={paymentForm}
+          setForm={setPaymentForm}
+          items={payrollItemRows}
+          currency={currency.code}
+          message={message}
+          saving={saving}
+          record={recordPayment}
+          close={() => setPaymentDrawer(false)}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="pr-page" style={{ "--pr-primary": primary } as React.CSSProperties}>
+    <main
+      className="pr-page"
+      style={{ "--pr-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="pr-state">
         <div className="pr-spinner" />
@@ -908,40 +1416,89 @@ function State({ primary, title, text: body }: { primary: string; title: string;
   );
 }
 
-function ProfileCard({ row, currency, openDrawer, deleteProfile }: { row: AnyRow; currency: string; openDrawer: (row: AnyRow) => void; deleteProfile: (row: AnyRow) => void }) {
-  const net = Math.max(0, n(row.baseSalary) + n(row.allowanceDefault) - n(row.deductionDefault));
+function ProfileCard({
+  row,
+  currency,
+  openDrawer,
+  deleteProfile,
+}: {
+  row: AnyRow;
+  currency: string;
+  openDrawer: (row: AnyRow) => void;
+  deleteProfile: (row: AnyRow) => void;
+}) {
+  const net = Math.max(
+    0,
+    n(row.baseSalary) + n(row.allowanceDefault) - n(row.deductionDefault),
+  );
   return (
     <article className="pay-row">
       <span className="pay-avatar">👨‍🏫</span>
       <span className="pay-main">
         <strong>{row.fullName || "Staff"}</strong>
-        <small>{row.role || "teacher"} · {row.payType || "monthly"}</small>
-        <em>{row.preferredPaymentMethod || "momo"} · {row.momoNumber || row.bankAccountNumber || "No payout details"}</em>
+        <small>
+          {row.role || "teacher"} · {row.payType || "monthly"}
+        </small>
+        <em>
+          {row.preferredPaymentMethod || "momo"} ·{" "}
+          {row.momoNumber || row.bankAccountNumber || "No payout details"}
+        </em>
       </span>
       <span className="pay-side">
-        <Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "inactive" : money(net, currency)}</Chip>
-        <button type="button" onClick={() => openDrawer(row)}>Edit</button>
-        <button type="button" className="danger" onClick={() => deleteProfile(row)}>⌫</button>
+        <Chip tone={row.active === false ? "red" : "green"}>
+          {row.active === false ? "inactive" : money(net, currency)}
+        </Chip>
+        <button type="button" onClick={() => openDrawer(row)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => deleteProfile(row)}
+        >
+          ⌫
+        </button>
       </span>
     </article>
   );
 }
 
-function RunCard({ row, items, currency, openDrawer, deleteRun }: { row: AnyRow; items: AnyRow[]; currency: string; openDrawer: (row: AnyRow) => void; deleteRun: (row: AnyRow) => void }) {
-  const total = n(row.totalNet) || items.reduce((sum, item) => sum + n(item.netPay), 0);
+function RunCard({
+  row,
+  items,
+  currency,
+  openDrawer,
+  deleteRun,
+}: {
+  row: AnyRow;
+  items: AnyRow[];
+  currency: string;
+  openDrawer: (row: AnyRow) => void;
+  deleteRun: (row: AnyRow) => void;
+}) {
+  const total =
+    n(row.totalNet) || items.reduce((sum, item) => sum + n(item.netPay), 0);
   return (
     <article className="pay-row">
       <span className="pay-avatar">🧾</span>
       <span className="pay-main">
         <strong>{row.title || "Payroll Run"}</strong>
-        <small>{dateLabel(row.periodStart)} - {dateLabel(row.periodEnd)}</small>
-        <em>{items.length} staff item(s) · pay date {dateLabel(row.payDate)}</em>
+        <small>
+          {dateLabel(row.periodStart)} - {dateLabel(row.periodEnd)}
+        </small>
+        <em>
+          {items.length} staff item(s) · pay date {dateLabel(row.payDate)}
+        </em>
       </span>
       <span className="pay-side">
         <Chip tone={statusTone(row.status)}>{row.status || "draft"}</Chip>
         <Chip tone="purple">{money(total, currency)}</Chip>
-        <button type="button" onClick={() => openDrawer(row)}>Edit</button>
-        <button type="button" className="danger" onClick={() => deleteRun(row)}>⌫</button>
+        <button type="button" onClick={() => openDrawer(row)}>
+          Edit
+        </button>
+        <button type="button" className="danger" onClick={() => deleteRun(row)}>
+          ⌫
+        </button>
       </span>
     </article>
   );
@@ -953,18 +1510,30 @@ function PaymentCard({ row, currency }: { row: AnyRow; currency: string }) {
       <span className="pay-avatar">💰</span>
       <span className="pay-main">
         <strong>{row.fullName || row.recipientName || "Staff Payment"}</strong>
-        <small>{money(row.amount, currency)} · {dateLabel(row.paidAt || row.date)}</small>
-        <em>{row.method || "momo"} · {row.referenceNumber || row.receiptNumber || "No reference"}</em>
+        <small>
+          {money(row.amount, currency)} · {dateLabel(row.paidAt || row.date)}
+        </small>
+        <em>
+          {row.method || "momo"} ·{" "}
+          {row.referenceNumber || row.receiptNumber || "No reference"}
+        </em>
       </span>
       <span className="pay-side">
-        <Chip tone={statusTone(row.status || "paid")}>{row.status || "paid"}</Chip>
+        <Chip tone={statusTone(row.status || "paid")}>
+          {row.status || "paid"}
+        </Chip>
       </span>
     </article>
   );
 }
 
-
-function PaymentsTableView({ rows, currency }: { rows: AnyRow[]; currency: string }) {
+function PaymentsTableView({
+  rows,
+  currency,
+}: {
+  rows: AnyRow[];
+  currency: string;
+}) {
   return (
     <section className="pr-table-card">
       <div className="pr-table-scroll">
@@ -985,26 +1554,52 @@ function PaymentsTableView({ rows, currency }: { rows: AnyRow[]; currency: strin
           <tbody>
             {rows.map((row) => (
               <tr key={String(idOf(row))}>
-                <td><strong>{row.fullName || row.recipientName || "Staff Payment"}</strong><span>Item #{row.payrollItemId || "—"} · Run #{row.payrollRunId || "—"}</span></td>
+                <td>
+                  <strong>
+                    {row.fullName || row.recipientName || "Staff Payment"}
+                  </strong>
+                  <span>
+                    Item #{row.payrollItemId || "—"} · Run #
+                    {row.payrollRunId || "—"}
+                  </span>
+                </td>
                 <td>{money(row.amount, row.currencyCode || currency)}</td>
-                <td><Chip tone={methodTone(row.method || row.paymentMethod)}>{row.method || row.paymentMethod || "manual"}</Chip></td>
+                <td>
+                  <Chip tone={methodTone(row.method || row.paymentMethod)}>
+                    {row.method || row.paymentMethod || "manual"}
+                  </Chip>
+                </td>
                 <td>{row.provider || "manual"}</td>
                 <td>{row.referenceNumber || "—"}</td>
                 <td>{row.receiptNumber || "—"}</td>
                 <td>{dateLabel(row.paidAt || row.date || row.createdAt)}</td>
-                <td><Chip tone={statusTone(row.status || "paid")}>{row.status || "paid"}</Chip></td>
+                <td>
+                  <Chip tone={statusTone(row.status || "paid")}>
+                    {row.status || "paid"}
+                  </Chip>
+                </td>
                 <td>{row.note || "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!rows.length && <div className="pr-empty-table">No salary payment matches your filters.</div>}
+        {!rows.length && (
+          <div className="pr-empty-table">
+            No salary payment matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function ReceiptsTableView({ rows, currency }: { rows: AnyRow[]; currency: string }) {
+function ReceiptsTableView({
+  rows,
+  currency,
+}: {
+  rows: AnyRow[];
+  currency: string;
+}) {
   return (
     <section className="pr-table-card">
       <div className="pr-table-scroll">
@@ -1023,29 +1618,54 @@ function ReceiptsTableView({ rows, currency }: { rows: AnyRow[]; currency: strin
           </thead>
           <tbody>
             {rows.map((row) => {
-              const receipt = row.receiptNumber || `PAY-${String(idOf(row) || "").padStart(4, "0")}`;
+              const receipt =
+                row.receiptNumber ||
+                `PAY-${String(idOf(row) || "").padStart(4, "0")}`;
               return (
                 <tr key={String(idOf(row))}>
-                  <td><strong>{receipt}</strong><span>Payroll receipt</span></td>
+                  <td>
+                    <strong>{receipt}</strong>
+                    <span>Payroll receipt</span>
+                  </td>
                   <td>{row.fullName || row.recipientName || "Staff"}</td>
                   <td>{money(row.amount, row.currencyCode || currency)}</td>
-                  <td><Chip tone={methodTone(row.method || row.paymentMethod)}>{row.method || row.paymentMethod || "manual"}</Chip></td>
+                  <td>
+                    <Chip tone={methodTone(row.method || row.paymentMethod)}>
+                      {row.method || row.paymentMethod || "manual"}
+                    </Chip>
+                  </td>
                   <td>{row.referenceNumber || "—"}</td>
                   <td>{dateLabel(row.paidAt || row.date || row.createdAt)}</td>
-                  <td><Chip tone={statusTone(row.status || "paid")}>{row.status || "paid"}</Chip></td>
+                  <td>
+                    <Chip tone={statusTone(row.status || "paid")}>
+                      {row.status || "paid"}
+                    </Chip>
+                  </td>
                   <td>{row.note || "Salary payment recorded locally."}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="pr-empty-table">No receipt records yet.</div>}
+        {!rows.length && (
+          <div className="pr-empty-table">No receipt records yet.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function ProfilesTableView({ rows, currency, openDrawer, deleteProfile }: { rows: AnyRow[]; currency: string; openDrawer: (row: AnyRow) => void; deleteProfile: (row: AnyRow) => void }) {
+function ProfilesTableView({
+  rows,
+  currency,
+  openDrawer,
+  deleteProfile,
+}: {
+  rows: AnyRow[];
+  currency: string;
+  openDrawer: (row: AnyRow) => void;
+  deleteProfile: (row: AnyRow) => void;
+}) {
   return (
     <section className="pr-table-card">
       <div className="pr-table-scroll">
@@ -1067,182 +1687,934 @@ function ProfilesTableView({ rows, currency, openDrawer, deleteProfile }: { rows
           </thead>
           <tbody>
             {rows.map((row) => {
-              const net = Math.max(0, n(row.baseSalary) + n(row.allowanceDefault) - n(row.deductionDefault));
+              const net = Math.max(
+                0,
+                n(row.baseSalary) +
+                  n(row.allowanceDefault) -
+                  n(row.deductionDefault),
+              );
               const payout =
                 row.preferredPaymentMethod === "bank"
-                  ? [row.bankName, row.bankAccountNumber].filter(Boolean).join(" · ")
+                  ? [row.bankName, row.bankAccountNumber]
+                      .filter(Boolean)
+                      .join(" · ")
                   : row.preferredPaymentMethod === "momo"
-                    ? [row.momoNetwork, row.momoNumber].filter(Boolean).join(" · ")
+                    ? [row.momoNetwork, row.momoNumber]
+                        .filter(Boolean)
+                        .join(" · ")
                     : row.preferredPaymentMethod || "manual";
 
               return (
                 <tr key={String(idOf(row))}>
-                  <td><strong>{row.fullName || "Staff"}</strong><span>{row.teacherId ? `Teacher ID ${row.teacherId}` : "Manual payroll profile"}</span></td>
+                  <td>
+                    <strong>{row.fullName || "Staff"}</strong>
+                    <span>
+                      {row.teacherId
+                        ? `Teacher ID ${row.teacherId}`
+                        : "Manual payroll profile"}
+                    </span>
+                  </td>
                   <td>{row.role || "teacher"}</td>
                   <td>{row.payType || "monthly"}</td>
                   <td>{money(row.baseSalary, row.currencyCode || currency)}</td>
-                  <td>{money(row.allowanceDefault, row.currencyCode || currency)}</td>
-                  <td>{money(row.deductionDefault, row.currencyCode || currency)}</td>
+                  <td>
+                    {money(row.allowanceDefault, row.currencyCode || currency)}
+                  </td>
+                  <td>
+                    {money(row.deductionDefault, row.currencyCode || currency)}
+                  </td>
                   <td>{money(net, row.currencyCode || currency)}</td>
-                  <td><Chip tone={methodTone(row.preferredPaymentMethod)}>{row.preferredPaymentMethod || "manual"}</Chip></td>
+                  <td>
+                    <Chip tone={methodTone(row.preferredPaymentMethod)}>
+                      {row.preferredPaymentMethod || "manual"}
+                    </Chip>
+                  </td>
                   <td>{payout || "Not set"}</td>
-                  <td><Chip tone={row.active === false ? "red" : "green"}>{row.active === false ? "inactive" : "active"}</Chip></td>
-                  <td><div className="pr-table-actions"><button type="button" onClick={() => openDrawer(row)}>Edit</button><button type="button" className="danger" onClick={() => deleteProfile(row)}>Delete</button></div></td>
+                  <td>
+                    <Chip tone={row.active === false ? "red" : "green"}>
+                      {row.active === false ? "inactive" : "active"}
+                    </Chip>
+                  </td>
+                  <td>
+                    <div className="pr-table-actions">
+                      <button type="button" onClick={() => openDrawer(row)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => deleteProfile(row)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="pr-empty-table">No payroll profile matches your filters.</div>}
+        {!rows.length && (
+          <div className="pr-empty-table">
+            No payroll profile matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function TableView({ rows, currency, openPaymentDrawer }: { rows: AnyRow[]; currency: string; openPaymentDrawer: (item: AnyRow) => void }) {
+function TableView({
+  rows,
+  currency,
+  openPaymentDrawer,
+}: {
+  rows: AnyRow[];
+  currency: string;
+  openPaymentDrawer: (item: AnyRow) => void;
+}) {
   return (
     <section className="pr-table-card">
       <div className="pr-table-scroll">
         <table>
-          <thead><tr><th>Payroll Items ({rows.length})</th><th>Run</th><th>Gross</th><th>Deductions</th><th>Net</th><th>Paid</th><th>Balance</th><th>Status</th><th>Action</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Payroll Items ({rows.length})</th>
+              <th>Run</th>
+              <th>Gross</th>
+              <th>Deductions</th>
+              <th>Net</th>
+              <th>Paid</th>
+              <th>Balance</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={String(idOf(row))}>
-                <td><strong>{row.fullName || "Staff"}</strong><span>{row.role || "staff"}</span></td>
+                <td>
+                  <strong>{row.fullName || "Staff"}</strong>
+                  <span>{row.role || "staff"}</span>
+                </td>
                 <td>{row.payrollRunId || "Run"}</td>
                 <td>{money(row.grossPay, row.currencyCode || currency)}</td>
                 <td>{money(row.deduction, row.currencyCode || currency)}</td>
                 <td>{money(row.netPay, row.currencyCode || currency)}</td>
                 <td>{money(row.paid, row.currencyCode || currency)}</td>
                 <td>{money(row.balance, row.currencyCode || currency)}</td>
-                <td><Chip tone={statusTone(row.computedStatus || row.status)}>{row.computedStatus || row.status || "pending"}</Chip></td>
-                <td><div className="pr-table-actions">{n(row.balance) > 0 ? <button type="button" onClick={() => openPaymentDrawer(row)}>Pay</button> : <button type="button" disabled>Paid</button>}</div></td>
+                <td>
+                  <Chip tone={statusTone(row.computedStatus || row.status)}>
+                    {row.computedStatus || row.status || "pending"}
+                  </Chip>
+                </td>
+                <td>
+                  <div className="pr-table-actions">
+                    {n(row.balance) > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => openPaymentDrawer(row)}
+                      >
+                        Pay
+                      </button>
+                    ) : (
+                      <button type="button" disabled>
+                        Paid
+                      </button>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!rows.length && <div className="pr-empty-table">No payroll item matches your filters.</div>}
+        {!rows.length && (
+          <div className="pr-empty-table">
+            No payroll item matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function FilterSheet({ statusFilter, setStatusFilter, methodFilter, setMethodFilter, onClose }: { statusFilter: StatusFilter; setStatusFilter: (value: StatusFilter) => void; methodFilter: "all" | PayMethod; setMethodFilter: (value: "all" | PayMethod) => void; onClose: () => void }) {
+function FilterSheet({
+  statusFilter,
+  setStatusFilter,
+  methodFilter,
+  setMethodFilter,
+  onClose,
+}: {
+  statusFilter: StatusFilter;
+  setStatusFilter: (value: StatusFilter) => void;
+  methodFilter: "all" | PayMethod;
+  setMethodFilter: (value: "all" | PayMethod) => void;
+  onClose: () => void;
+}) {
   return (
     <div className="pr-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="pr-sheet small">
-        <div className="pr-sheet-head"><div><h2>Filters</h2><p>Choose payroll status and payment method.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="pr-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Choose payroll status and payment method.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="pr-form compact">
-          <label><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}><option value="all">All statuses</option><option value="active">Active Profiles</option><option value="inactive">Inactive Profiles</option><option value="draft">Draft</option><option value="review">Review</option><option value="approved">Approved</option><option value="pending">Pending</option><option value="paid">Paid</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option></select></label>
-          <label><span>Payment Method</span><select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value as "all" | PayMethod)}><option value="all">All methods</option><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option><option value="manual">Manual</option></select></label>
+          <label>
+            <span>Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
+              <option value="all">All statuses</option>
+              <option value="active">Active Profiles</option>
+              <option value="inactive">Inactive Profiles</option>
+              <option value="draft">Draft</option>
+              <option value="review">Review</option>
+              <option value="approved">Approved</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="failed">Failed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label>
+            <span>Payment Method</span>
+            <select
+              value={methodFilter}
+              onChange={(event) =>
+                setMethodFilter(event.target.value as "all" | PayMethod)
+              }
+            >
+              <option value="all">All methods</option>
+              <option value="cash">Cash</option>
+              <option value="momo">Momo</option>
+              <option value="bank">Bank</option>
+              <option value="card">Card</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
         </div>
-        <div className="pr-sheet-actions"><button type="button" onClick={() => { setStatusFilter("all"); setMethodFilter("all"); }}>Reset</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="pr-sheet-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter("all");
+              setMethodFilter("all");
+            }}
+          >
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, currency, onProfile, onRun, onPayment, onRefresh, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; currency: string; onProfile: () => void; onRun: () => void; onPayment: () => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  currency,
+  onProfile,
+  onRun,
+  onPayment,
+  onRefresh,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  currency: string;
+  onProfile: () => void;
+  onRun: () => void;
+  onPayment: () => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="pr-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="pr-sheet small">
-        <div className="pr-sheet-head"><div><h2>More</h2><p>Views and payroll actions are kept here to save space.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="pr-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Views and payroll actions are kept here to save space.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="pr-menu-list">
-          <button type="button" className={view === "profiles" ? "active" : ""} onClick={() => setView("profiles")}><span>👨‍🏫</span><b>Profiles</b><small>{summary.activeProfiles} active payroll profile(s)</small></button>
-          <button type="button" className={view === "profilesTable" ? "active" : ""} onClick={() => setView("profilesTable")}><span>☷</span><b>Profiles table</b><small>Dense salary and payout profile records</small></button>
-          <button type="button" className={view === "runs" ? "active" : ""} onClick={() => setView("runs")}><span>🧾</span><b>Runs</b><small>{summary.runs} payroll run(s)</small></button>
-          <button type="button" className={view === "payments" ? "active" : ""} onClick={() => setView("payments")}><span>💰</span><b>Payments</b><small>{summary.payments} staff payment card(s)</small></button>
-          <button type="button" className={view === "paymentsTable" ? "active" : ""} onClick={() => setView("paymentsTable")}><span>☷</span><b>Payments table</b><small>Dense salary payment records</small></button>
-          <button type="button" className={view === "receipts" ? "active" : ""} onClick={() => setView("receipts")}><span>🧾</span><b>Receipts</b><small>Receipt numbers and payment references</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Payroll items table</b><small>Dense run item and payment balances</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{money(summary.monthlyCost, currency)} monthly profile cost</small></button>
-          <button type="button" onClick={onProfile}><span>＋</span><b>New payroll profile</b><small>Add teacher/staff to payroll</small></button>
-          <button type="button" onClick={onRun}><span>⚙️</span><b>Generate payroll run</b><small>Create items from active profiles</small></button>
-          <button type="button" onClick={onPayment}><span>💳</span><b>Record payment</b><small>Pay pending payroll item</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local payroll data</small></button>
+          <button
+            type="button"
+            className={view === "profiles" ? "active" : ""}
+            onClick={() => setView("profiles")}
+          >
+            <span>👨‍🏫</span>
+            <b>Profiles</b>
+            <small>{summary.activeProfiles} active payroll profile(s)</small>
+          </button>
+          <button
+            type="button"
+            className={view === "profilesTable" ? "active" : ""}
+            onClick={() => setView("profilesTable")}
+          >
+            <span>☷</span>
+            <b>Profiles table</b>
+            <small>Dense salary and payout profile records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "runs" ? "active" : ""}
+            onClick={() => setView("runs")}
+          >
+            <span>🧾</span>
+            <b>Runs</b>
+            <small>{summary.runs} payroll run(s)</small>
+          </button>
+          <button
+            type="button"
+            className={view === "payments" ? "active" : ""}
+            onClick={() => setView("payments")}
+          >
+            <span>💰</span>
+            <b>Payments</b>
+            <small>{summary.payments} staff payment card(s)</small>
+          </button>
+          <button
+            type="button"
+            className={view === "paymentsTable" ? "active" : ""}
+            onClick={() => setView("paymentsTable")}
+          >
+            <span>☷</span>
+            <b>Payments table</b>
+            <small>Dense salary payment records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "receipts" ? "active" : ""}
+            onClick={() => setView("receipts")}
+          >
+            <span>🧾</span>
+            <b>Receipts</b>
+            <small>Receipt numbers and payment references</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Payroll items table</b>
+            <small>Dense run item and payment balances</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>
+              {money(summary.monthlyCost, currency)} monthly profile cost
+            </small>
+          </button>
+          <button type="button" onClick={onProfile}>
+            <span>＋</span>
+            <b>New payroll profile</b>
+            <small>Add teacher/staff to payroll</small>
+          </button>
+          <button type="button" onClick={onRun}>
+            <span>⚙️</span>
+            <b>Generate payroll run</b>
+            <small>Create items from active profiles</small>
+          </button>
+          <button type="button" onClick={onPayment}>
+            <span>💳</span>
+            <b>Record payment</b>
+            <small>Pay pending payroll item</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local payroll data</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function ProfileDrawer({ form, setForm, teachers, teacherMap, message, saving, save, close }: { form: ProfileForm; setForm: React.Dispatch<React.SetStateAction<ProfileForm>>; teachers: AnyRow[]; teacherMap: Map<number, string>; message: string; saving: boolean; save: () => void | Promise<void>; close: () => void }) {
+function ProfileDrawer({
+  form,
+  setForm,
+  teachers,
+  teacherMap,
+  message,
+  saving,
+  save,
+  close,
+}: {
+  form: ProfileForm;
+  setForm: React.Dispatch<React.SetStateAction<ProfileForm>>;
+  teachers: AnyRow[];
+  teacherMap: Map<string, string>;
+  message: string;
+  saving: boolean;
+  save: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <div className="pr-drawer-layer" role="dialog" aria-modal="true"><button className="pr-drawer-overlay" type="button" onClick={close} /><aside className="pr-drawer">
-      <div className="pr-drawer-head"><div><p>{form.id ? "Edit Payroll Profile" : "New Payroll Profile"}</p><h2>Teacher Payroll</h2><span>{form.baseSalary ? money(Math.max(0, n(form.baseSalary) + n(form.allowanceDefault) - n(form.deductionDefault)), form.currencyCode) : "Set salary and payout details"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="pr-inline-error">{message}</section>}
-      <section className="pr-form-card"><div className="pr-form-grid">
-        <label><span>Teacher</span><select value={form.teacherId} onChange={(event) => { const teacher = teachers.find((row) => String(idOf(row)) === event.target.value); setForm({ ...form, teacherId: event.target.value, fullName: teacher ? rowName(teacher) : form.fullName, role: teacher?.role || form.role }); }}><option value="">Manual / Staff not linked</option>{teachers.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{teacherMap.get(Number(idOf(item)))}</option>)}</select></label>
-        <label><span>Full Name</span><input value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></label>
-        <label><span>Role</span><input value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} /></label>
-        <label><span>Pay Type</span><select value={form.payType} onChange={(event) => setForm({ ...form, payType: event.target.value as PayType })}><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="daily">Daily</option><option value="hourly">Hourly</option><option value="contract">Contract</option><option value="commission">Commission</option></select></label>
-        <label><span>Base Salary</span><input type="number" value={form.baseSalary} onChange={(event) => setForm({ ...form, baseSalary: event.target.value })} /></label>
-        <label><span>Allowance</span><input type="number" value={form.allowanceDefault} onChange={(event) => setForm({ ...form, allowanceDefault: event.target.value })} /></label>
-        <label><span>Deduction</span><input type="number" value={form.deductionDefault} onChange={(event) => setForm({ ...form, deductionDefault: event.target.value })} /></label>
-        <label><span>Preferred Method</span><select value={form.preferredPaymentMethod} onChange={(event) => setForm({ ...form, preferredPaymentMethod: event.target.value as PayMethod })}><option value="momo">Momo</option><option value="bank">Bank</option><option value="cash">Cash</option><option value="card">Card</option><option value="manual">Manual</option></select></label>
-        <label><span>Momo Network</span><input value={form.momoNetwork} onChange={(event) => setForm({ ...form, momoNetwork: event.target.value })} /></label>
-        <label><span>Momo Number</span><input value={form.momoNumber} onChange={(event) => setForm({ ...form, momoNumber: event.target.value })} /></label>
-        <label><span>Momo Name</span><input value={form.momoName} onChange={(event) => setForm({ ...form, momoName: event.target.value })} /></label>
-        <label><span>Bank Name</span><input value={form.bankName} onChange={(event) => setForm({ ...form, bankName: event.target.value })} /></label>
-        <label><span>Bank Account Name</span><input value={form.bankAccountName} onChange={(event) => setForm({ ...form, bankAccountName: event.target.value })} /></label>
-        <label><span>Bank Account Number</span><input value={form.bankAccountNumber} onChange={(event) => setForm({ ...form, bankAccountNumber: event.target.value })} /></label>
-        <label><span>Currency</span><input value={form.currencyCode} onChange={(event) => setForm({ ...form, currencyCode: event.target.value.toUpperCase() })} /></label>
-        <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-      </div></section>
-      <div className="pr-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={save}>{saving ? "Saving..." : "Save Profile"}</button></div>
-    </aside></div>
+    <div className="pr-drawer-layer" role="dialog" aria-modal="true">
+      <button className="pr-drawer-overlay" type="button" onClick={close} />
+      <aside className="pr-drawer">
+        <div className="pr-drawer-head">
+          <div>
+            <p>{form.id ? "Edit Payroll Profile" : "New Payroll Profile"}</p>
+            <h2>Teacher Payroll</h2>
+            <span>
+              {form.baseSalary
+                ? money(
+                    Math.max(
+                      0,
+                      n(form.baseSalary) +
+                        n(form.allowanceDefault) -
+                        n(form.deductionDefault),
+                    ),
+                    form.currencyCode,
+                  )
+                : "Set salary and payout details"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="pr-inline-error">{message}</section>}
+        <section className="pr-form-card">
+          <div className="pr-form-grid">
+            <label>
+              <span>Teacher</span>
+              <select
+                value={form.teacherId}
+                onChange={(event) => {
+                  const teacher = teachers.find(
+                    (row) => String(idOf(row)) === event.target.value,
+                  );
+                  setForm({
+                    ...form,
+                    teacherId: event.target.value,
+                    fullName: teacher ? rowName(teacher) : form.fullName,
+                    role: teacher?.role || form.role,
+                  });
+                }}
+              >
+                <option value="">Manual / Staff not linked</option>
+                {teachers.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {teacherMap.get(idOf(item))}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Full Name</span>
+              <input
+                value={form.fullName}
+                onChange={(event) =>
+                  setForm({ ...form, fullName: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Role</span>
+              <input
+                value={form.role}
+                onChange={(event) =>
+                  setForm({ ...form, role: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Pay Type</span>
+              <select
+                value={form.payType}
+                onChange={(event) =>
+                  setForm({ ...form, payType: event.target.value as PayType })
+                }
+              >
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+                <option value="hourly">Hourly</option>
+                <option value="contract">Contract</option>
+                <option value="commission">Commission</option>
+              </select>
+            </label>
+            <label>
+              <span>Base Salary</span>
+              <input
+                type="number"
+                value={form.baseSalary}
+                onChange={(event) =>
+                  setForm({ ...form, baseSalary: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Allowance</span>
+              <input
+                type="number"
+                value={form.allowanceDefault}
+                onChange={(event) =>
+                  setForm({ ...form, allowanceDefault: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Deduction</span>
+              <input
+                type="number"
+                value={form.deductionDefault}
+                onChange={(event) =>
+                  setForm({ ...form, deductionDefault: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Preferred Method</span>
+              <select
+                value={form.preferredPaymentMethod}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    preferredPaymentMethod: event.target.value as PayMethod,
+                  })
+                }
+              >
+                <option value="momo">Momo</option>
+                <option value="bank">Bank</option>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <label>
+              <span>Momo Network</span>
+              <input
+                value={form.momoNetwork}
+                onChange={(event) =>
+                  setForm({ ...form, momoNetwork: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Momo Number</span>
+              <input
+                value={form.momoNumber}
+                onChange={(event) =>
+                  setForm({ ...form, momoNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Momo Name</span>
+              <input
+                value={form.momoName}
+                onChange={(event) =>
+                  setForm({ ...form, momoName: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Bank Name</span>
+              <input
+                value={form.bankName}
+                onChange={(event) =>
+                  setForm({ ...form, bankName: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Bank Account Name</span>
+              <input
+                value={form.bankAccountName}
+                onChange={(event) =>
+                  setForm({ ...form, bankAccountName: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Bank Account Number</span>
+              <input
+                value={form.bankAccountNumber}
+                onChange={(event) =>
+                  setForm({ ...form, bankAccountNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Currency</span>
+              <input
+                value={form.currencyCode}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    currencyCode: event.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  setForm({ ...form, active: event.target.value === "active" })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
+          </div>
+        </section>
+        <div className="pr-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={save}
+          >
+            {saving ? "Saving..." : "Save Profile"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function RunDrawer({ form, setForm, summary, currency, message, saving, generate, close }: { form: RunForm; setForm: React.Dispatch<React.SetStateAction<RunForm>>; summary: AnyRow; currency: string; message: string; saving: boolean; generate: () => void | Promise<void>; close: () => void }) {
+function RunDrawer({
+  form,
+  setForm,
+  summary,
+  currency,
+  message,
+  saving,
+  generate,
+  close,
+}: {
+  form: RunForm;
+  setForm: React.Dispatch<React.SetStateAction<RunForm>>;
+  summary: AnyRow;
+  currency: string;
+  message: string;
+  saving: boolean;
+  generate: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <div className="pr-drawer-layer" role="dialog" aria-modal="true"><button className="pr-drawer-overlay" type="button" onClick={close} /><aside className="pr-drawer">
-      <div className="pr-drawer-head"><div><p>Generate Payroll Run</p><h2>Payroll Run</h2><span>{summary.activeProfiles} active profile(s) · {money(summary.monthlyCost, currency)} estimated</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="pr-inline-error">{message}</section>}
-      <section className="pr-form-card"><div className="pr-form-grid">
-        <label className="wide"><span>Title</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
-        <label><span>Period Start</span><input type="date" value={form.periodStart} onChange={(event) => setForm({ ...form, periodStart: event.target.value })} /></label>
-        <label><span>Period End</span><input type="date" value={form.periodEnd} onChange={(event) => setForm({ ...form, periodEnd: event.target.value })} /></label>
-        <label><span>Pay Date</span><input type="date" value={form.payDate} onChange={(event) => setForm({ ...form, payDate: event.target.value })} /></label>
-        <label className="wide"><span>Note</span><textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
-      </div><p className="pr-hint">This creates one payroll item for each active payroll profile. You can then record payments against the items.</p></section>
-      <div className="pr-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={generate}>{saving ? "Generating..." : "Generate Run"}</button></div>
-    </aside></div>
+    <div className="pr-drawer-layer" role="dialog" aria-modal="true">
+      <button className="pr-drawer-overlay" type="button" onClick={close} />
+      <aside className="pr-drawer">
+        <div className="pr-drawer-head">
+          <div>
+            <p>Generate Payroll Run</p>
+            <h2>Payroll Run</h2>
+            <span>
+              {summary.activeProfiles} active profile(s) ·{" "}
+              {money(summary.monthlyCost, currency)} estimated
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="pr-inline-error">{message}</section>}
+        <section className="pr-form-card">
+          <div className="pr-form-grid">
+            <label className="wide">
+              <span>Title</span>
+              <input
+                value={form.title}
+                onChange={(event) =>
+                  setForm({ ...form, title: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Period Start</span>
+              <input
+                type="date"
+                value={form.periodStart}
+                onChange={(event) =>
+                  setForm({ ...form, periodStart: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Period End</span>
+              <input
+                type="date"
+                value={form.periodEnd}
+                onChange={(event) =>
+                  setForm({ ...form, periodEnd: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Pay Date</span>
+              <input
+                type="date"
+                value={form.payDate}
+                onChange={(event) =>
+                  setForm({ ...form, payDate: event.target.value })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Note</span>
+              <textarea
+                value={form.note}
+                onChange={(event) =>
+                  setForm({ ...form, note: event.target.value })
+                }
+              />
+            </label>
+          </div>
+          <p className="pr-hint">
+            This creates one payroll item for each active payroll profile. You
+            can then record payments against the items.
+          </p>
+        </section>
+        <div className="pr-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={generate}
+          >
+            {saving ? "Generating..." : "Generate Run"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function PaymentDrawer({ form, setForm, items, currency, message, saving, record, close }: { form: PaymentForm; setForm: React.Dispatch<React.SetStateAction<PaymentForm>>; items: AnyRow[]; currency: string; message: string; saving: boolean; record: () => void | Promise<void>; close: () => void }) {
-  const selected = items.find((row) => String(idOf(row)) === form.payrollItemId);
+function PaymentDrawer({
+  form,
+  setForm,
+  items,
+  currency,
+  message,
+  saving,
+  record,
+  close,
+}: {
+  form: PaymentForm;
+  setForm: React.Dispatch<React.SetStateAction<PaymentForm>>;
+  items: AnyRow[];
+  currency: string;
+  message: string;
+  saving: boolean;
+  record: () => void | Promise<void>;
+  close: () => void;
+}) {
+  const selected = items.find(
+    (row) => String(idOf(row)) === form.payrollItemId,
+  );
   return (
-    <div className="pr-drawer-layer" role="dialog" aria-modal="true"><button className="pr-drawer-overlay" type="button" onClick={close} /><aside className="pr-drawer">
-      <div className="pr-drawer-head"><div><p>Record Staff Payment</p><h2>Salary Payment</h2><span>{selected ? `${selected.fullName} · ${money(selected.balance, selected.currencyCode || currency)} balance` : "Select payroll item"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="pr-inline-error">{message}</section>}
-      <section className="pr-form-card"><div className="pr-form-grid">
-        <label className="wide"><span>Payroll Item</span><select value={form.payrollItemId} onChange={(event) => setForm({ ...form, payrollItemId: event.target.value })}><option value="">Select item</option>{items.filter((row) => n(row.balance) > 0).map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{item.fullName} · {money(item.balance, item.currencyCode || currency)}</option>)}</select></label>
-        <label><span>Amount</span><input type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-        <label><span>Method</span><select value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value as PayMethod })}><option value="momo">Momo</option><option value="bank">Bank</option><option value="cash">Cash</option><option value="card">Card</option><option value="manual">Manual</option></select></label>
-        <label><span>Date Paid</span><input type="date" value={form.paidAt} onChange={(event) => setForm({ ...form, paidAt: event.target.value })} /></label>
-        <label><span>Reference</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} /></label>
-        <label><span>Receipt</span><input value={form.receiptNumber} onChange={(event) => setForm({ ...form, receiptNumber: event.target.value })} /></label>
-        <label className="wide"><span>Note</span><textarea value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })} /></label>
-      </div></section>
-      <div className="pr-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={record}>{saving ? "Recording..." : "Record Payment"}</button></div>
-    </aside></div>
+    <div className="pr-drawer-layer" role="dialog" aria-modal="true">
+      <button className="pr-drawer-overlay" type="button" onClick={close} />
+      <aside className="pr-drawer">
+        <div className="pr-drawer-head">
+          <div>
+            <p>Record Staff Payment</p>
+            <h2>Salary Payment</h2>
+            <span>
+              {selected
+                ? `${selected.fullName} · ${money(selected.balance, selected.currencyCode || currency)} balance`
+                : "Select payroll item"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="pr-inline-error">{message}</section>}
+        <section className="pr-form-card">
+          <div className="pr-form-grid">
+            <label className="wide">
+              <span>Payroll Item</span>
+              <select
+                value={form.payrollItemId}
+                onChange={(event) =>
+                  setForm({ ...form, payrollItemId: event.target.value })
+                }
+              >
+                <option value="">Select item</option>
+                {items
+                  .filter((row) => n(row.balance) > 0)
+                  .map((item) => (
+                    <option key={String(idOf(item))} value={String(idOf(item))}>
+                      {item.fullName} ·{" "}
+                      {money(item.balance, item.currencyCode || currency)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              <span>Amount</span>
+              <input
+                type="number"
+                value={form.amount}
+                onChange={(event) =>
+                  setForm({ ...form, amount: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Method</span>
+              <select
+                value={form.method}
+                onChange={(event) =>
+                  setForm({ ...form, method: event.target.value as PayMethod })
+                }
+              >
+                <option value="momo">Momo</option>
+                <option value="bank">Bank</option>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="manual">Manual</option>
+              </select>
+            </label>
+            <label>
+              <span>Date Paid</span>
+              <input
+                type="date"
+                value={form.paidAt}
+                onChange={(event) =>
+                  setForm({ ...form, paidAt: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Reference</span>
+              <input
+                value={form.referenceNumber}
+                onChange={(event) =>
+                  setForm({ ...form, referenceNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Receipt</span>
+              <input
+                value={form.receiptNumber}
+                onChange={(event) =>
+                  setForm({ ...form, receiptNumber: event.target.value })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Note</span>
+              <textarea
+                value={form.note}
+                onChange={(event) =>
+                  setForm({ ...form, note: event.target.value })
+                }
+              />
+            </label>
+          </div>
+        </section>
+        <div className="pr-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={record}
+          >
+            {saving ? "Recording..." : "Record Payment"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function AnalyticsView({ summary, currency }: { summary: AnyRow; currency: string }) {
+function AnalyticsView({
+  summary,
+  currency,
+}: {
+  summary: AnyRow;
+  currency: string;
+}) {
   const rows = [
     { label: "Paid Items", value: summary.paidItems },
     { label: "Pending Items", value: summary.pendingItems },
   ];
   return (
     <section className="pr-analysis-grid">
-      <article className="pr-analysis"><span>Active Payroll</span><strong>{summary.activeProfiles}</strong><p>{summary.profiles} staff payroll profile(s).</p></article>
-      <article className="pr-analysis"><span>Estimated Monthly Cost</span><strong>{money(summary.monthlyCost, currency)}</strong><p>Based on active payroll profiles.</p></article>
-      <article className="pr-analysis"><span>Generated Payroll</span><strong>{money(summary.runTotal, currency)}</strong><p>{summary.items} payroll item(s) currently shown.</p></article>
-      <article className="pr-analysis"><span>Outstanding</span><strong>{money(summary.balance, currency)}</strong><p>{summary.pendingItems} unpaid or partially settled item(s).</p></article>
-      <article className="pr-analysis wide"><span>Payment Completion</span><strong>{summary.items}</strong><div className="pr-analysis-list">{rows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{row.value}</small></div><div className="pr-progress"><i style={{ width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.items)) * 100))}%` }} /></div></section>)}</div></article>
+      <article className="pr-analysis">
+        <span>Active Payroll</span>
+        <strong>{summary.activeProfiles}</strong>
+        <p>{summary.profiles} staff payroll profile(s).</p>
+      </article>
+      <article className="pr-analysis">
+        <span>Estimated Monthly Cost</span>
+        <strong>{money(summary.monthlyCost, currency)}</strong>
+        <p>Based on active payroll profiles.</p>
+      </article>
+      <article className="pr-analysis">
+        <span>Generated Payroll</span>
+        <strong>{money(summary.runTotal, currency)}</strong>
+        <p>{summary.items} payroll item(s) currently shown.</p>
+      </article>
+      <article className="pr-analysis">
+        <span>Outstanding</span>
+        <strong>{money(summary.balance, currency)}</strong>
+        <p>{summary.pendingItems} unpaid or partially settled item(s).</p>
+      </article>
+      <article className="pr-analysis wide">
+        <span>Payment Completion</span>
+        <strong>{summary.items}</strong>
+        <div className="pr-analysis-list">
+          {rows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{row.value}</small>
+              </div>
+              <div className="pr-progress">
+                <i
+                  style={{
+                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.items)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }

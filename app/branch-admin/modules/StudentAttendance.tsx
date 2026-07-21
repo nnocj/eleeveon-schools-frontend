@@ -66,7 +66,11 @@ import {
   type StudentEnrollment,
 } from "../../lib/db/db";
 
-import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -74,12 +78,12 @@ type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type AttendanceStatus = "present" | "absent" | "late";
 type AttendanceFilter = "all" | AttendanceStatus | "unmarked";
-type AttendanceMap = Record<number, AttendanceStatus>;
+type AttendanceMap = Record<string, AttendanceStatus>;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -91,11 +95,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -106,7 +110,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -131,13 +137,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -148,7 +154,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -157,7 +167,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -169,7 +179,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -179,10 +193,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 type StudentRow = {
   student: Student;
@@ -193,10 +206,9 @@ type StudentRow = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -206,11 +218,14 @@ const isActiveRow = (row: any) => {
   const status = String(row?.status || "").toLowerCase();
   if (row?.isDeleted) return false;
   if (row?.active === false) return false;
-  if (["inactive", "deleted", "archived", "suspended"].includes(status)) return false;
+  if (["inactive", "deleted", "archived", "suspended"].includes(status))
+    return false;
   return true;
 };
 
-function statusTone(status?: AttendanceStatus): "green" | "red" | "orange" | "gray" {
+function statusTone(
+  status?: AttendanceStatus,
+): "green" | "red" | "orange" | "gray" {
   if (status === "present") return "green";
   if (status === "absent") return "red";
   if (status === "late") return "orange";
@@ -222,11 +237,25 @@ function statusLabel(status?: AttendanceStatus) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -236,7 +265,15 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
   );
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
@@ -246,7 +283,10 @@ function Avatar({ name, photo, primary }: { name: string; photo?: string; primar
           : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
       }}
     >
-      {!photo && String(name || "S").slice(0, 1).toUpperCase()}
+      {!photo &&
+        String(name || "S")
+          .slice(0, 1)
+          .toUpperCase()}
     </div>
   );
 }
@@ -271,7 +311,13 @@ export default function StudentAttendance() {
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -299,29 +345,51 @@ export default function StudentAttendance() {
 
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
   const [attendanceRows, setAttendanceRows] = useState<Attendance[]>([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
-  const [academicStructureId, setAcademicStructureId] = useState<string>(settings?.currentAcademicStructureId ? String(settings.currentAcademicStructureId) : "");
-  const [academicPeriodId, setAcademicPeriodId] = useState<string>(settings?.currentAcademicPeriodId ? String(settings.currentAcademicPeriodId) : "");
+  const [academicStructureId, setAcademicStructureId] = useState<string>(
+    settings?.currentAcademicStructureId
+      ? String(settings.currentAcademicStructureId)
+      : "",
+  );
+  const [academicPeriodId, setAcademicPeriodId] = useState<string>(
+    settings?.currentAcademicPeriodId
+      ? String(settings.currentAcademicPeriodId)
+      : "",
+  );
   const [classId, setClassId] = useState("");
   const [date, setDate] = useState(todayISO());
   const [search, setSearch] = useState("");
-  const [attendanceFilter, setAttendanceFilter] = useState<AttendanceFilter>("all");
+  const [attendanceFilter, setAttendanceFilter] =
+    useState<AttendanceFilter>("all");
   const [statusMap, setStatusMap] = useState<AttendanceMap>({});
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/account");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -331,7 +399,11 @@ export default function StudentAttendance() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -352,7 +424,14 @@ export default function StudentAttendance() {
 
     try {
       setLoading(true);
-      const [studentRows, classRows, structureRows, periodRows, enrollmentRows, attendanceData] = await Promise.all([
+      const [
+        studentRows,
+        classRows,
+        structureRows,
+        periodRows,
+        enrollmentRows,
+        attendanceData,
+      ] = await Promise.all([
         tableSafe("students")?.toArray?.() || [],
         tableSafe("classes")?.toArray?.() || [],
         tableSafe("academicStructures")?.toArray?.() || [],
@@ -363,26 +442,47 @@ export default function StudentAttendance() {
 
       setStudents(
         (studentRows as Student[])
-          .filter((row: any) => sameTenant(row as TenantRow) && row.status !== "withdrawn" && row.status !== "graduated")
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")))
+          .filter(
+            (row: any) =>
+              sameTenant(row as TenantRow) &&
+              row.status !== "withdrawn" &&
+              row.status !== "graduated",
+          )
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
       setClasses(
         (classRows as Class[])
           .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
       setAcademicStructures(
         (structureRows as AcademicStructure[])
           .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
       setPeriods(
         (periodRows as AcademicPeriod[])
           .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
-          .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))
+          .sort(
+            (a: any, b: any) => Number(a.order || 0) - Number(b.order || 0),
+          ),
       );
-      setEnrollments((enrollmentRows as StudentEnrollment[]).filter((row) => sameTenant(row as TenantRow)));
-      setAttendanceRows((attendanceData as Attendance[]).filter((row) => sameTenant(row as TenantRow)));
+      setEnrollments(
+        (enrollmentRows as StudentEnrollment[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setAttendanceRows(
+        (attendanceData as Attendance[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load student attendance:", error);
       clearData();
@@ -396,32 +496,65 @@ export default function StudentAttendance() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
   useEffect(() => {
-    if (!academicStructureId && settings?.currentAcademicStructureId) setAcademicStructureId(String(settings.currentAcademicStructureId));
-    if (!academicPeriodId && settings?.currentAcademicPeriodId) setAcademicPeriodId(String(settings.currentAcademicPeriodId));
-  }, [academicPeriodId, academicStructureId, settings?.currentAcademicPeriodId, settings?.currentAcademicStructureId]);
+    if (!academicStructureId && settings?.currentAcademicStructureId)
+      setAcademicStructureId(String(settings.currentAcademicStructureId));
+    if (!academicPeriodId && settings?.currentAcademicPeriodId)
+      setAcademicPeriodId(String(settings.currentAcademicPeriodId));
+  }, [
+    academicPeriodId,
+    academicStructureId,
+    settings?.currentAcademicPeriodId,
+    settings?.currentAcademicStructureId,
+  ]);
 
-  const studentMap = useMemo(() => new Map(students.map((row: any) => [idOf(row.id), row])), [students]);
-  const classMap = useMemo(() => new Map(classes.map((row: any) => [idOf(row.id), row])), [classes]);
-  const structureMap = useMemo(() => new Map(academicStructures.map((row: any) => [idOf(row.id), row])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(periods.map((row: any) => [idOf(row.id), row])), [periods]);
+  const studentMap = useMemo(
+    () => new Map(students.map((row: any) => [idOf(row.id), row])),
+    [students],
+  );
+  const classMap = useMemo(
+    () => new Map(classes.map((row: any) => [idOf(row.id), row])),
+    [classes],
+  );
+  const structureMap = useMemo(
+    () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(periods.map((row: any) => [idOf(row.id), row])),
+    [periods],
+  );
 
   const filteredPeriods = useMemo(() => {
     if (!academicStructureId) return periods;
-    return periods.filter((row: any) => sameId(row.academicStructureId, academicStructureId));
+    return periods.filter((row: any) =>
+      sameId(row.academicStructureId, academicStructureId),
+    );
   }, [academicStructureId, periods]);
 
   const availableClassIds = useMemo(() => {
-    const ids = new Set<number>();
+    const ids = new Set<string>();
     enrollments.forEach((row: any) => {
       if (row.status !== "active") return;
-      if (academicStructureId && !sameId(row.academicStructureId, academicStructureId)) return;
-      if (academicPeriodId && !sameId(row.academicPeriodId, academicPeriodId)) return;
-      if (row.classId) ids.add(Number(row.classId));
+      if (
+        academicStructureId &&
+        !sameId(row.academicStructureId, academicStructureId)
+      )
+        return;
+      if (academicPeriodId && !sameId(row.academicPeriodId, academicPeriodId))
+        return;
+      if (row.classId) ids.add(String(row.classId));
     });
     return ids;
   }, [academicPeriodId, academicStructureId, enrollments]);
@@ -430,15 +563,20 @@ export default function StudentAttendance() {
     // Golden-standard behavior: keep all active branch classes selectable.
     // Enrollment rows are still preferred for loading students, but hiding classes
     // without enrollment makes attendance feel broken in fresh branches.
-    const enrolled = classes.filter((row: any) => row.id && availableClassIds.has(Number(row.id)));
-    const remaining = classes.filter((row: any) => !row.id || !availableClassIds.has(Number(row.id)));
+    const enrolled = classes.filter(
+      (row: any) => row.id && availableClassIds.has(String(row.id)),
+    );
+    const remaining = classes.filter(
+      (row: any) => !row.id || !availableClassIds.has(String(row.id)),
+    );
     return [...enrolled, ...remaining];
   }, [availableClassIds, classes]);
 
   const attendanceKeyMap = useMemo(() => {
-    const map = new Map<number, Attendance>();
+    const map = new Map<string, Attendance>();
     attendanceRows.forEach((row: any) => {
-      if (!classId || !academicStructureId || !academicPeriodId || !date) return;
+      if (!classId || !academicStructureId || !academicPeriodId || !date)
+        return;
       if (!sameId(row.classId, classId)) return;
       if (!sameId(row.academicStructureId, academicStructureId)) return;
       if (!sameId(row.academicPeriodId, academicPeriodId)) return;
@@ -451,18 +589,21 @@ export default function StudentAttendance() {
   const studentRows = useMemo<StudentRow[]>(() => {
     if (!classId || !academicStructureId || !academicPeriodId) return [];
 
-    const seen = new Set<number>();
+    const seen = new Set<string>();
 
     const fromEnrollments = enrollments
-      .filter((row: any) =>
-        sameId(row.classId, classId) &&
-        sameId(row.academicStructureId, academicStructureId) &&
-        sameId(row.academicPeriodId, academicPeriodId) &&
-        row.status === "active" &&
-        !row.isDeleted
+      .filter(
+        (row: any) =>
+          sameId(row.classId, classId) &&
+          sameId(row.academicStructureId, academicStructureId) &&
+          sameId(row.academicPeriodId, academicPeriodId) &&
+          row.status === "active" &&
+          !row.isDeleted,
       )
       .map((enrollment: any) => {
-        const student = studentMap.get(idOf(enrollment.studentId)) as Student | undefined;
+        const student = studentMap.get(idOf(enrollment.studentId)) as
+          | Student
+          | undefined;
         if (!student) return undefined;
         const sid = idOf((student as any).id);
         if (!sid) return undefined;
@@ -482,7 +623,16 @@ export default function StudentAttendance() {
         if (!sid || seen.has(sid)) return false;
         if (!sameId(student.currentClassId, classId)) return false;
         if (student.isDeleted || student.active === false) return false;
-        if (["withdrawn", "graduated", "deleted", "archived", "inactive"].includes(String(student.status || "").toLowerCase())) return false;
+        if (
+          [
+            "withdrawn",
+            "graduated",
+            "deleted",
+            "archived",
+            "inactive",
+          ].includes(String(student.status || "").toLowerCase())
+        )
+          return false;
         return true;
       })
       .map((student: any) => {
@@ -495,9 +645,19 @@ export default function StudentAttendance() {
       });
 
     return [...fromEnrollments, ...fromCurrentClass].sort((a, b) =>
-      String((a.student as any).fullName || "").localeCompare(String((b.student as any).fullName || ""))
+      String((a.student as any).fullName || "").localeCompare(
+        String((b.student as any).fullName || ""),
+      ),
     );
-  }, [academicPeriodId, academicStructureId, attendanceKeyMap, classId, enrollments, studentMap, students]);
+  }, [
+    academicPeriodId,
+    academicStructureId,
+    attendanceKeyMap,
+    classId,
+    enrollments,
+    studentMap,
+    students,
+  ]);
 
   useEffect(() => {
     if (!classId || !academicStructureId || !academicPeriodId || !date) {
@@ -506,10 +666,18 @@ export default function StudentAttendance() {
     }
     const next: AttendanceMap = {};
     attendanceRows
-      .filter((row: any) => sameId(row.classId, classId) && sameId(row.academicStructureId, academicStructureId) && sameId(row.academicPeriodId, academicPeriodId) && row.date === date && !row.isDeleted)
+      .filter(
+        (row: any) =>
+          sameId(row.classId, classId) &&
+          sameId(row.academicStructureId, academicStructureId) &&
+          sameId(row.academicPeriodId, academicPeriodId) &&
+          row.date === date &&
+          !row.isDeleted,
+      )
       .forEach((row: any) => {
         const studentId = idOf(row.studentId);
-        if (studentId && ["present", "absent", "late"].includes(row.status)) next[studentId] = row.status as AttendanceStatus;
+        if (studentId && ["present", "absent", "late"].includes(row.status))
+          next[studentId] = row.status as AttendanceStatus;
       });
     setStatusMap(next);
   }, [academicPeriodId, academicStructureId, attendanceRows, classId, date]);
@@ -521,17 +689,29 @@ export default function StudentAttendance() {
       const sid = idOf(studentAny.id);
       const status = statusMap[sid];
       if (attendanceFilter === "unmarked" && status) return false;
-      if (["present", "absent", "late"].includes(attendanceFilter) && status !== attendanceFilter) return false;
+      if (
+        ["present", "absent", "late"].includes(attendanceFilter) &&
+        status !== attendanceFilter
+      )
+        return false;
       if (!query) return true;
-      return `${studentAny.fullName} ${studentAny.admissionNumber || ""} ${studentAny.gender || ""}`.toLowerCase().includes(query);
+      return `${studentAny.fullName} ${studentAny.admissionNumber || ""} ${studentAny.gender || ""}`
+        .toLowerCase()
+        .includes(query);
     });
   }, [attendanceFilter, search, statusMap, studentRows]);
 
   const summary = useMemo(() => {
     const total = filteredStudents.length;
-    const present = filteredStudents.filter(({ student }) => statusMap[idOf((student as any).id)] === "present").length;
-    const absent = filteredStudents.filter(({ student }) => statusMap[idOf((student as any).id)] === "absent").length;
-    const late = filteredStudents.filter(({ student }) => statusMap[idOf((student as any).id)] === "late").length;
+    const present = filteredStudents.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "present",
+    ).length;
+    const absent = filteredStudents.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "absent",
+    ).length;
+    const late = filteredStudents.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "late",
+    ).length;
     const marked = present + absent + late;
     const unmarked = Math.max(0, total - marked);
     const completion = total ? Math.round((marked / total) * 100) : 0;
@@ -540,9 +720,15 @@ export default function StudentAttendance() {
 
   const fullSummary = useMemo(() => {
     const total = studentRows.length;
-    const present = studentRows.filter(({ student }) => statusMap[idOf((student as any).id)] === "present").length;
-    const absent = studentRows.filter(({ student }) => statusMap[idOf((student as any).id)] === "absent").length;
-    const late = studentRows.filter(({ student }) => statusMap[idOf((student as any).id)] === "late").length;
+    const present = studentRows.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "present",
+    ).length;
+    const absent = studentRows.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "absent",
+    ).length;
+    const late = studentRows.filter(
+      ({ student }) => statusMap[idOf((student as any).id)] === "late",
+    ).length;
     const marked = present + absent + late;
     const completion = total ? Math.round((marked / total) * 100) : 0;
     const attendanceRate = total ? Math.round((present / total) * 100) : 0;
@@ -554,21 +740,43 @@ export default function StudentAttendance() {
       { label: "Present", value: fullSummary.present },
       { label: "Absent", value: fullSummary.absent },
       { label: "Late", value: fullSummary.late },
-      { label: "Unmarked", value: Math.max(0, fullSummary.total - fullSummary.marked) },
+      {
+        label: "Unmarked",
+        value: Math.max(0, fullSummary.total - fullSummary.marked),
+      },
     ],
-    [fullSummary]
+    [fullSummary],
   );
 
   const activeFilterCount = useMemo(() => {
-    return [academicStructureId, academicPeriodId, classId, date, attendanceFilter !== "all" ? attendanceFilter : ""].filter(Boolean).length;
+    return [
+      academicStructureId,
+      academicPeriodId,
+      classId,
+      date,
+      attendanceFilter !== "all" ? attendanceFilter : "",
+    ].filter(Boolean).length;
   }, [academicPeriodId, academicStructureId, attendanceFilter, classId, date]);
 
-  const selectedClassName = classId ? ((classMap.get(idOf(classId)) as any)?.name || "Selected Class") : "Select a class";
-  const selectedStructureName = academicStructureId ? ((structureMap.get(idOf(academicStructureId)) as any)?.name || "Selected Structure") : "No structure";
-  const selectedPeriodName = academicPeriodId ? ((periodMap.get(idOf(academicPeriodId)) as any)?.name || "Selected Period") : "No period";
+  const selectedClassName = classId
+    ? (classMap.get(idOf(classId)) as any)?.name || "Selected Class"
+    : "Select a class";
+  const selectedStructureName = academicStructureId
+    ? (structureMap.get(idOf(academicStructureId)) as any)?.name ||
+      "Selected Structure"
+    : "No structure";
+  const selectedPeriodName = academicPeriodId
+    ? (periodMap.get(idOf(academicPeriodId)) as any)?.name || "Selected Period"
+    : "No period";
 
-  const setStudentStatus = (studentId: number, status: AttendanceStatus) => setStatusMap((prev) => ({ ...prev, [studentId]: status }));
-  const clearStudentStatus = (studentId: number) => setStatusMap((prev) => { const next = { ...prev }; delete next[studentId]; return next; });
+  const setStudentStatus = (studentId: string, status: AttendanceStatus) =>
+    setStatusMap((prev) => ({ ...prev, [studentId]: status }));
+  const clearStudentStatus = (studentId: string) =>
+    setStatusMap((prev) => {
+      const next = { ...prev };
+      delete next[studentId];
+      return next;
+    });
 
   const markAll = (status: AttendanceStatus) => {
     const next: AttendanceMap = {};
@@ -598,11 +806,13 @@ export default function StudentAttendance() {
   };
 
   const saveAttendance = async () => {
-    if (!authenticated || !accountId) return showToast("error", "Sign in first.");
+    if (!authenticated || !accountId)
+      return showToast("error", "Sign in first.");
     if (!schoolId) return showToast("error", "Select school first.");
     if (!branchId) return showToast("error", "Select branch first.");
     if (!classId) return showToast("error", "Select class.");
-    if (!academicStructureId) return showToast("error", "Select academic structure.");
+    if (!academicStructureId)
+      return showToast("error", "Select academic structure.");
     if (!academicPeriodId) return showToast("error", "Select academic period.");
     if (!date) return showToast("error", "Select date.");
 
@@ -615,26 +825,31 @@ export default function StudentAttendance() {
         const existing = attendanceKeyMap.get(sid);
 
         if ((existing as any)?.id && !status) {
-          await softDeleteLocal("attendance", Number((existing as any).id));
+          await softDeleteLocal("attendance", idOf((existing as any).id));
           continue;
         }
         if (!status) continue;
 
         const payload: Partial<Attendance> = {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           studentId: sid,
-          classId: Number(classId),
-          academicStructureId: Number(academicStructureId),
-          academicPeriodId: Number(academicPeriodId),
+          classId: classId,
+          academicStructureId: academicStructureId,
+          academicPeriodId: academicPeriodId,
           date,
           status,
           isDeleted: false,
           active: true,
         } as Partial<Attendance>;
 
-        if ((existing as any)?.id) await updateLocal("attendance", Number((existing as any).id), payload);
+        if ((existing as any)?.id)
+          await updateLocal(
+            "attendance",
+            idOf((existing as any).id),
+            payload,
+          );
         else await createLocal("attendance", payload as unknown as Attendance);
       }
       await load();
@@ -648,78 +863,204 @@ export default function StudentAttendance() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Student Attendance..." text="Checking account, branch, academic context, enrollments, and attendance records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Student Attendance..."
+        text="Checking account, branch, academic context, enrollments, and attendance records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before recording attendance." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before recording attendance."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Student attendance belongs to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <p>
+            Student attendance belongs to the selected branch-admin workspace.
+            Use Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Student attendance search and actions">
-        <span className={`status-dot-mini ${fullSummary.completion === 100 && fullSummary.total > 0 ? "green" : fullSummary.marked ? "orange" : "gray"}`} title={`${fullSummary.marked}/${fullSummary.total} marked`} />
+      <section
+        className="ba-search-card"
+        aria-label="Student attendance search and actions"
+      >
+        <span
+          className={`status-dot-mini ${fullSummary.completion === 100 && fullSummary.total > 0 ? "green" : fullSummary.marked ? "orange" : "gray"}`}
+          title={`${fullSummary.marked}/${fullSummary.total} marked`}
+        />
 
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search attendance..." aria-label="Search attendance" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search attendance..."
+            aria-label="Search attendance"
+          />
         </label>
 
-        <button type="button" className="ba-save-inline" onClick={saveAttendance} disabled={saving} aria-label="Save attendance">
+        <button
+          type="button"
+          className="ba-save-inline"
+          onClick={saveAttendance}
+          disabled={saving}
+          aria-label="Save attendance"
+        >
           {saving ? "..." : "Save"}
         </button>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(classId || academicStructureId || academicPeriodId || date) && (
         <section className="ba-filter-chips" aria-label="Attendance context">
-          {classId && <button type="button" onClick={() => setClassId("")}>Class: {selectedClassName} ×</button>}
-          {academicStructureId && <button type="button" onClick={() => { setAcademicStructureId(""); setAcademicPeriodId(""); setClassId(""); }}>Structure: {selectedStructureName} ×</button>}
-          {academicPeriodId && <button type="button" onClick={() => { setAcademicPeriodId(""); setClassId(""); }}>Period: {selectedPeriodName} ×</button>}
-          {date && <button type="button" onClick={() => setDate(todayISO())}>Date: {date} ×</button>}
-          {attendanceFilter !== "all" && <button type="button" onClick={() => setAttendanceFilter("all")}>Status: {statusLabel(attendanceFilter as AttendanceStatus)} ×</button>}
+          {classId && (
+            <button type="button" onClick={() => setClassId("")}>
+              Class: {selectedClassName} ×
+            </button>
+          )}
+          {academicStructureId && (
+            <button
+              type="button"
+              onClick={() => {
+                setAcademicStructureId("");
+                setAcademicPeriodId("");
+                setClassId("");
+              }}
+            >
+              Structure: {selectedStructureName} ×
+            </button>
+          )}
+          {academicPeriodId && (
+            <button
+              type="button"
+              onClick={() => {
+                setAcademicPeriodId("");
+                setClassId("");
+              }}
+            >
+              Period: {selectedPeriodName} ×
+            </button>
+          )}
+          {date && (
+            <button type="button" onClick={() => setDate(todayISO())}>
+              Date: {date} ×
+            </button>
+          )}
+          {attendanceFilter !== "all" && (
+            <button type="button" onClick={() => setAttendanceFilter("all")}>
+              Status: {statusLabel(attendanceFilter as AttendanceStatus)} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid attendance-analysis-grid">
-          <AnalysisCard title="Attendance Breakdown" rows={countsByStatus} total={Math.max(1, fullSummary.total)} />
-          <article className="ba-analysis"><span>Attendance Rate</span><strong>{fullSummary.attendanceRate}%</strong><p>Present students divided by all enrolled students for this register.</p></article>
-          <article className="ba-analysis"><span>Completion</span><strong>{fullSummary.completion}%</strong><p>{fullSummary.marked}/{fullSummary.total} student(s) marked for {selectedClassName}.</p></article>
-          <article className="ba-analysis"><span>Selected Register</span><strong>{summary.total}</strong><p>{selectedClassName} · {selectedStructureName} · {selectedPeriodName}</p></article>
+          <AnalysisCard
+            title="Attendance Breakdown"
+            rows={countsByStatus}
+            total={Math.max(1, fullSummary.total)}
+          />
+          <article className="ba-analysis">
+            <span>Attendance Rate</span>
+            <strong>{fullSummary.attendanceRate}%</strong>
+            <p>
+              Present students divided by all enrolled students for this
+              register.
+            </p>
+          </article>
+          <article className="ba-analysis">
+            <span>Completion</span>
+            <strong>{fullSummary.completion}%</strong>
+            <p>
+              {fullSummary.marked}/{fullSummary.total} student(s) marked for{" "}
+              {selectedClassName}.
+            </p>
+          </article>
+          <article className="ba-analysis">
+            <span>Selected Register</span>
+            <strong>{summary.total}</strong>
+            <p>
+              {selectedClassName} · {selectedStructureName} ·{" "}
+              {selectedPeriodName}
+            </p>
+          </article>
         </section>
       )}
 
       {viewMode === "table" && (
-        <TableView rows={filteredStudents} statusMap={statusMap} setStudentStatus={setStudentStatus} clearStudentStatus={clearStudentStatus} />
+        <TableView
+          rows={filteredStudents}
+          statusMap={statusMap}
+          setStudentStatus={setStudentStatus}
+          clearStudentStatus={clearStudentStatus}
+        />
       )}
 
       {viewMode === "cards" && (
@@ -743,7 +1084,15 @@ export default function StudentAttendance() {
           })}
 
           {!filteredStudents.length && (
-            <Empty icon="📅" title="No students loaded" text={classId ? "No students match the current filter." : "Open filters and select academic structure, period, and class. The register uses enrollments first, then current-class fallback."} />
+            <Empty
+              icon="📅"
+              title="No students loaded"
+              text={
+                classId
+                  ? "No students match the current filter."
+                  : "Open filters and select academic structure, period, and class. The register uses enrollments first, then current-class fallback."
+              }
+            />
           )}
         </section>
       )}
@@ -758,8 +1107,15 @@ export default function StudentAttendance() {
           academicStructures={academicStructures}
           filteredPeriods={filteredPeriods}
           availableClasses={availableClasses}
-          setAcademicStructureId={(value) => { setAcademicStructureId(value); setAcademicPeriodId(""); setClassId(""); }}
-          setAcademicPeriodId={(value) => { setAcademicPeriodId(value); setClassId(""); }}
+          setAcademicStructureId={(value) => {
+            setAcademicStructureId(value);
+            setAcademicPeriodId("");
+            setClassId("");
+          }}
+          setAcademicPeriodId={(value) => {
+            setAcademicPeriodId(value);
+            setClassId("");
+          }}
           setClassId={setClassId}
           setDate={setDate}
           setAttendanceFilter={setAttendanceFilter}
@@ -774,10 +1130,16 @@ export default function StudentAttendance() {
           summary={summary}
           fullSummary={fullSummary}
           selectedClassName={selectedClassName}
-          setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
           markAll={markAll}
           clearShown={clearShown}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       )}
@@ -785,11 +1147,26 @@ export default function StudentAttendance() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
-      <section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
     </main>
   );
 }
@@ -808,28 +1185,66 @@ function AttendanceListItem({
   date: string;
   primary: string;
   current?: AttendanceStatus;
-  setStudentStatus: (studentId: number, status: AttendanceStatus) => void;
-  clearStudentStatus: (studentId: number) => void;
+  setStudentStatus: (studentId: string, status: AttendanceStatus) => void;
+  clearStudentStatus: (studentId: string) => void;
 }) {
   const studentAny: any = student;
   const sid = idOf(studentAny.id);
 
   return (
     <article className="attendance-row">
-      <Avatar name={studentAny.fullName} photo={studentAny.photo} primary={primary} />
+      <Avatar
+        name={studentAny.fullName}
+        photo={studentAny.photo}
+        primary={primary}
+      />
 
       <span className="attendance-main">
         <strong>{studentAny.fullName || "Unnamed student"}</strong>
         <small>{studentAny.admissionNumber || "No admission number"}</small>
-        <em>{selectedClassName}{date ? ` · ${date}` : ""}</em>
+        <em>
+          {selectedClassName}
+          {date ? ` · ${date}` : ""}
+        </em>
       </span>
 
-      <span className="attendance-status-actions" aria-label="Attendance status actions">
-        <button type="button" className={`present ${current === "present" ? "active" : ""}`} onClick={() => setStudentStatus(sid, "present")}>P</button>
-        <button type="button" className={`absent ${current === "absent" ? "active" : ""}`} onClick={() => setStudentStatus(sid, "absent")}>A</button>
-        <button type="button" className={`late ${current === "late" ? "active" : ""}`} onClick={() => setStudentStatus(sid, "late")}>L</button>
-        <button type="button" className="clear" onClick={() => clearStudentStatus(sid)}>×</button>
-        <span className={`status-dot-mini ${statusTone(current)}`} title={statusLabel(current)} aria-label={statusLabel(current)} />
+      <span
+        className="attendance-status-actions"
+        aria-label="Attendance status actions"
+      >
+        <button
+          type="button"
+          className={`present ${current === "present" ? "active" : ""}`}
+          onClick={() => setStudentStatus(sid, "present")}
+        >
+          P
+        </button>
+        <button
+          type="button"
+          className={`absent ${current === "absent" ? "active" : ""}`}
+          onClick={() => setStudentStatus(sid, "absent")}
+        >
+          A
+        </button>
+        <button
+          type="button"
+          className={`late ${current === "late" ? "active" : ""}`}
+          onClick={() => setStudentStatus(sid, "late")}
+        >
+          L
+        </button>
+        <button
+          type="button"
+          className="clear"
+          onClick={() => clearStudentStatus(sid)}
+        >
+          ×
+        </button>
+        <span
+          className={`status-dot-mini ${statusTone(current)}`}
+          title={statusLabel(current)}
+          aria-label={statusLabel(current)}
+        />
       </span>
     </article>
   );
@@ -872,19 +1287,92 @@ function FilterSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
-          <div><h2>Attendance Filters</h2><p>Select the register context and optional status filter.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <div>
+            <h2>Attendance Filters</h2>
+            <p>Select the register context and optional status filter.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
-          <label><span>Academic Structure</span><select value={academicStructureId} onChange={(event) => setAcademicStructureId(event.target.value)}><option value="">Select academic structure</option>{academicStructures.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}{row.level ? ` · ${row.level}` : ""}</option>)}</select></label>
-          <label><span>Academic Period</span><select value={academicPeriodId} onChange={(event) => setAcademicPeriodId(event.target.value)}><option value="">Select academic period</option>{filteredPeriods.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Class</span><select value={classId} onChange={(event) => setClassId(event.target.value)}><option value="">Select class</option>{availableClasses.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-          <label><span>Status</span><select value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value as AttendanceFilter)}><option value="all">All students</option><option value="present">Present</option><option value="absent">Absent</option><option value="late">Late</option><option value="unmarked">Unmarked</option></select></label>
+          <label>
+            <span>Academic Structure</span>
+            <select
+              value={academicStructureId}
+              onChange={(event) => setAcademicStructureId(event.target.value)}
+            >
+              <option value="">Select academic structure</option>
+              {academicStructures.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                  {row.level ? ` · ${row.level}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Academic Period</span>
+            <select
+              value={academicPeriodId}
+              onChange={(event) => setAcademicPeriodId(event.target.value)}
+            >
+              <option value="">Select academic period</option>
+              {filteredPeriods.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Class</span>
+            <select
+              value={classId}
+              onChange={(event) => setClassId(event.target.value)}
+            >
+              <option value="">Select class</option>
+              {availableClasses.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Date</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={attendanceFilter}
+              onChange={(event) =>
+                setAttendanceFilter(event.target.value as AttendanceFilter)
+              }
+            >
+              <option value="all">All students</option>
+              <option value="present">Present</option>
+              <option value="absent">Absent</option>
+              <option value="late">Late</option>
+              <option value="unmarked">Unmarked</option>
+            </select>
+          </label>
         </div>
 
-        <div className="ba-sheet-actions"><button type="button" onClick={clearFilters}>Clear Search/Status</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={clearFilters}>
+            Clear Search/Status
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -902,8 +1390,24 @@ function MoreSheet({
   onClose,
 }: {
   viewMode: ViewMode;
-  summary: { total: number; marked: number; present: number; absent: number; late: number; unmarked: number; completion: number };
-  fullSummary: { total: number; present: number; absent: number; late: number; marked: number; completion: number; attendanceRate: number };
+  summary: {
+    total: number;
+    marked: number;
+    present: number;
+    absent: number;
+    late: number;
+    unmarked: number;
+    completion: number;
+  };
+  fullSummary: {
+    total: number;
+    present: number;
+    absent: number;
+    late: number;
+    marked: number;
+    completion: number;
+    attendanceRate: number;
+  };
   selectedClassName: string;
   setViewMode: (mode: ViewMode) => void;
   markAll: (status: AttendanceStatus) => void;
@@ -915,19 +1419,71 @@ function MoreSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
-          <div><h2>More</h2><p>{summary.marked}/{summary.total} shown marked · {fullSummary.completion}% register completion.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <div>
+            <h2>More</h2>
+            <p>
+              {summary.marked}/{summary.total} shown marked ·{" "}
+              {fullSummary.completion}% register completion.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>List view</b><small>Compact attendance rows</small></button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Dense register for laptop work</small></button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Breakdown, rate and completion</small></button>
-          <button type="button" onClick={() => markAll("present")}><span>✓</span><b>Mark shown present</b><small>{selectedClassName}</small></button>
-          <button type="button" onClick={() => markAll("absent")}><span>×</span><b>Mark shown absent</b><small>{summary.total} shown student(s)</small></button>
-          <button type="button" onClick={() => markAll("late")}><span>◷</span><b>Mark shown late</b><small>{summary.total} shown student(s)</small></button>
-          <button type="button" className="danger" onClick={clearShown}><span>⌫</span><b>Clear shown</b><small>Remove local marks before saving</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch attendance</small></button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact attendance rows</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense register for laptop work</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Breakdown, rate and completion</small>
+          </button>
+          <button type="button" onClick={() => markAll("present")}>
+            <span>✓</span>
+            <b>Mark shown present</b>
+            <small>{selectedClassName}</small>
+          </button>
+          <button type="button" onClick={() => markAll("absent")}>
+            <span>×</span>
+            <b>Mark shown absent</b>
+            <small>{summary.total} shown student(s)</small>
+          </button>
+          <button type="button" onClick={() => markAll("late")}>
+            <span>◷</span>
+            <b>Mark shown late</b>
+            <small>{summary.total} shown student(s)</small>
+          </button>
+          <button type="button" className="danger" onClick={clearShown}>
+            <span>⌫</span>
+            <b>Clear shown</b>
+            <small>Remove local marks before saving</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch attendance</small>
+          </button>
         </div>
       </section>
     </div>
@@ -942,14 +1498,24 @@ function TableView({
 }: {
   rows: StudentRow[];
   statusMap: AttendanceMap;
-  setStudentStatus: (studentId: number, status: AttendanceStatus) => void;
-  clearStudentStatus: (studentId: number) => void;
+  setStudentStatus: (studentId: string, status: AttendanceStatus) => void;
+  clearStudentStatus: (studentId: string) => void;
 }) {
   return (
     <section className="ba-table-card">
       <div className="ba-table-scroll">
         <table>
-          <thead><tr><th>Students ({rows.length})</th><th>Admission No.</th><th>Gender</th><th>Enrollment</th><th>Existing Row</th><th>Status</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Students ({rows.length})</th>
+              <th>Admission No.</th>
+              <th>Gender</th>
+              <th>Enrollment</th>
+              <th>Existing Row</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map(({ student, enrollment, existingAttendance, source }) => {
               const studentAny: any = student;
@@ -957,28 +1523,87 @@ function TableView({
               const current = statusMap[sid];
               return (
                 <tr key={String(sid)}>
-                  <td><strong>{studentAny.fullName}</strong><span>{studentAny.address || "No address"}</span></td>
+                  <td>
+                    <strong>{studentAny.fullName}</strong>
+                    <span>{studentAny.address || "No address"}</span>
+                  </td>
                   <td>{studentAny.admissionNumber || "—"}</td>
                   <td>{studentAny.gender || "—"}</td>
                   <td>
-                    <strong>{enrollment ? String((enrollment as any).status || "active") : "current class"}</strong>
-                    <span>{enrollment ? `Enrollment #${(enrollment as any).id || "—"}` : source === "currentClass" ? "Current class fallback" : "—"}</span>
+                    <strong>
+                      {enrollment
+                        ? String((enrollment as any).status || "active")
+                        : "current class"}
+                    </strong>
+                    <span>
+                      {enrollment
+                        ? `Enrollment #${(enrollment as any).id || "—"}`
+                        : source === "currentClass"
+                          ? "Current class fallback"
+                          : "—"}
+                    </span>
                   </td>
-                  <td>{(existingAttendance as any)?.id ? "Saved before" : "New"}</td>
-                  <td><Chip tone={statusTone(current)}>{statusLabel(current)}</Chip></td>
-                  <td><div className="ba-table-actions"><button type="button" onClick={() => setStudentStatus(sid, "present")}>Present</button><button type="button" onClick={() => setStudentStatus(sid, "absent")}>Absent</button><button type="button" onClick={() => setStudentStatus(sid, "late")}>Late</button><button type="button" className="ba-delete" onClick={() => clearStudentStatus(sid)}>Clear</button></div></td>
+                  <td>
+                    {(existingAttendance as any)?.id ? "Saved before" : "New"}
+                  </td>
+                  <td>
+                    <Chip tone={statusTone(current)}>
+                      {statusLabel(current)}
+                    </Chip>
+                  </td>
+                  <td>
+                    <div className="ba-table-actions">
+                      <button
+                        type="button"
+                        onClick={() => setStudentStatus(sid, "present")}
+                      >
+                        Present
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentStatus(sid, "absent")}
+                      >
+                        Absent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStudentStatus(sid, "late")}
+                      >
+                        Late
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => clearStudentStatus(sid)}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No students match this register/filter.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No students match this register/filter.
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -986,7 +1611,19 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
       <div className="ba-analysis-list">
         {rows.map((row) => {
           const share = total ? Math.round((row.value / total) * 100) : 0;
-          return <section key={row.label}><div><b>{row.label}</b><small>{row.value} · {share}%</small></div><div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div></section>;
+          return (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
+            </section>
+          );
         })}
       </div>
     </article>

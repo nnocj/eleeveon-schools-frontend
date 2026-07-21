@@ -33,22 +33,23 @@ export default function MontessoriHeader({
 }: ReportTemplateHeaderProps) {
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -56,9 +57,13 @@ export default function MontessoriHeader({
     branding.phone ? `Tel: ${branding.phone}` : "",
     branding.email,
     branding.website,
-  ].filter(Boolean).join("  •  ");
+  ]
+    .filter(Boolean)
+    .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
   const logoSize = compact ? 38 : 44;
 
   const metaItems = [
@@ -120,10 +125,31 @@ export default function MontessoriHeader({
           }}
         >
           {branding.logo ? (
-            <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }} />
+            <img
+              src={branding.logo}
+              alt="School logo"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                padding: 4,
+                boxSizing: "border-box",
+              }}
+            />
           ) : (
-            <span style={{ fontSize: compact ? 6.4 : 7, fontWeight: 900, color: "#6f6a5f", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
-              School<br />Logo
+            <span
+              style={{
+                fontSize: compact ? 6.4 : 7,
+                fontWeight: 900,
+                color: "#6f6a5f",
+                textAlign: "center",
+                lineHeight: 1.05,
+                textTransform: "uppercase",
+              }}
+            >
+              School
+              <br />
+              Logo
             </span>
           )}
         </div>
@@ -154,7 +180,9 @@ export default function MontessoriHeader({
                 overflowWrap: "anywhere",
               }}
             >
-              {[branding.motto, contactLine, branchLine].filter(Boolean).join("  •  ")}
+              {[branding.motto, contactLine, branchLine]
+                .filter(Boolean)
+                .join("  •  ")}
             </div>
           )}
         </div>
@@ -176,19 +204,55 @@ export default function MontessoriHeader({
           }}
         >
           {title}
-          <div style={{ marginTop: 2, fontSize: compact ? 6.4 : 7, color: "#6f6a5f", fontWeight: 760 }}>
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: compact ? 6.4 : 7,
+              color: "#6f6a5f",
+              fontWeight: 760,
+            }}
+          >
             calm early-years learning record
           </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", background: "#ffffff" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          background: "#ffffff",
+        }}
+      >
         {metaItems.map((item, index) => (
-          <div key={item.label} style={{ minWidth: 0, padding: compact ? "5px 8px" : "6px 9px", borderLeft: index === 0 ? "0" : "1px solid #e7ddc8" }}>
-            <div style={{ fontSize: compact ? 6.3 : 6.9, fontWeight: 920, textTransform: "uppercase", letterSpacing: 0.24, color: "#6f6a5f" }}>
+          <div
+            key={item.label}
+            style={{
+              minWidth: 0,
+              padding: compact ? "5px 8px" : "6px 9px",
+              borderLeft: index === 0 ? "0" : "1px solid #e7ddc8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: compact ? 6.3 : 6.9,
+                fontWeight: 920,
+                textTransform: "uppercase",
+                letterSpacing: 0.24,
+                color: "#6f6a5f",
+              }}
+            >
               {item.label}
             </div>
-            <div style={{ marginTop: 1, fontSize: compact ? 7.7 : 8.5, fontWeight: 860, color: "#243126", overflowWrap: "anywhere" }}>
+            <div
+              style={{
+                marginTop: 1,
+                fontSize: compact ? 7.7 : 8.5,
+                fontWeight: 860,
+                color: "#243126",
+                overflowWrap: "anywhere",
+              }}
+            >
               {item.value}
             </div>
           </div>

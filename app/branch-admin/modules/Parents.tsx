@@ -72,9 +72,6 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -86,12 +83,12 @@ type ToastTone = "success" | "error" | "info";
 type Relationship = "father" | "mother" | "guardian";
 type StudentParentRelationship = "father" | "mother" | "guardian" | "other";
 type CameraField = "photo" | "coverPhoto";
-type UploadedMediaIds = Partial<Record<CameraField, number>>;
+type UploadedMediaIds = Partial<Record<CameraField, string>>;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -103,11 +100,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -145,13 +142,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -206,13 +203,13 @@ function selectedWorkspaceBranchId(args: {
 }
 
 type FormState = {
-  id?: number;
+  id?: string;
   fullName: string;
   phone: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   email: string;
   address: string;
   occupation: string;
@@ -228,7 +225,7 @@ type LinkFormState = {
 };
 
 type ParentView = {
-  id: number;
+  id: string;
   row: Parent;
   photoUrl?: string;
   coverPhotoUrl?: string;
@@ -262,11 +259,12 @@ const emptyLinkForm: LinkFormState = {
 const PARENT_MEDIA_OWNER_TABLE = MediaOwners.PARENTS;
 const PARENT_MEDIA_ENTITY_LABEL = "Parent";
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
+
+const cleanId = (value: any): string => idOf(value);
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
 const safeLower = (value: any) =>
@@ -274,7 +272,7 @@ const safeLower = (value: any) =>
     .toLowerCase()
     .trim();
 const tableSafe = (name: string) => (db as any)[name];
-const mediaKey = (parentId: number, field: CameraField) =>
+const mediaKey = (parentId: string, field: CameraField) =>
   `${PARENT_MEDIA_OWNER_TABLE}:${parentId}:${field}`;
 
 const isActiveStudent = (row: any) =>
@@ -377,7 +375,13 @@ function Empty({
 }
 
 export default function ParentsPage() {
-  const dataRevision = useBranchTableRevision(["parents", "students", "studentParents", "mediaAssets", "mediaBlobs"]);
+  const dataRevision = useBranchTableRevision([
+    "parents",
+    "students",
+    "studentParents",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -544,8 +548,8 @@ export default function ParentsPage() {
           const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: PARENT_MEDIA_OWNER_TABLE,
-            ownerLocalId: parentId,
-            ownerCloudId: parent.cloudId || undefined,
+            ownerId: parentId,
+
             fieldKey: MediaFieldKeys.PHOTO,
             fallbackAssetId: parent.photoMediaId,
           });
@@ -554,8 +558,8 @@ export default function ParentsPage() {
           const coverPhotoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: PARENT_MEDIA_OWNER_TABLE,
-            ownerLocalId: parentId,
-            ownerCloudId: parent.cloudId || undefined,
+            ownerId: parentId,
+
             fieldKey: MediaFieldKeys.COVER_PHOTO,
             fallbackAssetId: parent.coverPhotoMediaId,
           });
@@ -587,8 +591,8 @@ export default function ParentsPage() {
         tableSafe("parents")?.toArray?.() || [],
         listActiveLocal("students", {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
         } as any),
         tableSafe("studentParents")?.toArray?.() || [],
       ]);
@@ -702,10 +706,10 @@ export default function ParentsPage() {
     try {
       const result = await saveImageAsset(file, {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: PARENT_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
         fieldKey:
           field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
@@ -713,11 +717,11 @@ export default function ParentsPage() {
         replaceExisting: true,
       });
 
-      uploadedMediaIdsRef.current[field] = Number(result.assetId);
+      uploadedMediaIdsRef.current[field] = String(result.assetId);
 
       updateForm({
         [field]: result.previewUrl,
-        [`${field}MediaId`]: result.assetId,
+        [`${field}MediaId`]: String(result.assetId),
       } as Partial<FormState>);
 
       showToast(
@@ -759,13 +763,13 @@ export default function ParentsPage() {
   };
 
   const studentMap = useMemo(() => {
-    const map = new Map<number, Student>();
+    const map = new Map<string, Student>();
     students.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [students]);
 
   const relationByParent = useMemo(() => {
-    const map = new Map<number, StudentParent[]>();
+    const map = new Map<string, StudentParent[]>();
 
     studentParents.forEach((row: any) => {
       const parentId = idOf(row.parentId);
@@ -779,7 +783,7 @@ export default function ParentsPage() {
   }, [studentParents]);
 
   const relationByStudent = useMemo(() => {
-    const map = new Map<number, StudentParent[]>();
+    const map = new Map<string, StudentParent[]>();
 
     studentParents.forEach((row: any) => {
       const studentId = idOf(row.studentId);
@@ -804,10 +808,12 @@ export default function ParentsPage() {
         id,
         row,
         photoUrl:
-          resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] ||
+          resolvedMediaById[id]?.photo ||
+          mediaPreviewUrls[mediaKey(id, "photo")] ||
           safeRecordMediaValue(row.photo),
         coverPhotoUrl:
-          resolvedMediaById[id]?.coverPhoto || mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
+          resolvedMediaById[id]?.coverPhoto ||
+          mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
           safeRecordMediaValue(row.coverPhoto),
         linkedStudents,
         relations,
@@ -956,14 +962,14 @@ export default function ParentsPage() {
         safeRecordMediaValue(parent.photo) ||
         "",
       photoMediaId: parent.photoMediaId
-        ? Number(parent.photoMediaId)
+        ? String(parent.photoMediaId)
         : undefined,
       coverPhoto:
         mediaPreviewUrls[mediaKey(idOf(parent.id), "coverPhoto")] ||
         safeRecordMediaValue(parent.coverPhoto) ||
         "",
       coverPhotoMediaId: parent.coverPhotoMediaId
-        ? Number(parent.coverPhotoMediaId)
+        ? String(parent.coverPhotoMediaId)
         : undefined,
       email: parent.email || "",
       address: parent.address || "",
@@ -1027,8 +1033,8 @@ export default function ParentsPage() {
 
       const payload: Partial<Parent> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         fullName: form.fullName.trim(),
         phone: form.phone.trim(),
         photo: safeRecordMediaValue(form.photo),
@@ -1046,25 +1052,31 @@ export default function ParentsPage() {
 
       const savedParent =
         form.id && existing
-          ? await updateLocal("parents", Number(form.id), payload)
+          ? await updateLocal("parents", String(form.id), payload)
           : await createLocal("parents", payload as unknown as Parent);
 
-      const savedParentId = Number(
-        typeof savedParent === "number"
+      const savedParentId = idOf(
+        typeof savedParent === "string" || typeof savedParent === "number"
           ? savedParent
-          : (savedParent as any)?.id || form.id || 0,
+          : (savedParent as any)?.id || form.id,
       );
 
       if (savedParentId) {
         await commitMediaAssetsToOwner({
           accountId,
           ownerTable: PARENT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedParentId,
-          ownerCloudId: (savedParent as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedParentId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
-            { assetId: uploadedMediaIdsRef.current.photo, fieldKey: MediaFieldKeys.PHOTO },
-            { assetId: uploadedMediaIdsRef.current.coverPhoto, fieldKey: MediaFieldKeys.COVER_PHOTO },
+            {
+              assetId: uploadedMediaIdsRef.current.photo,
+              fieldKey: MediaFieldKeys.PHOTO,
+            },
+            {
+              assetId: uploadedMediaIdsRef.current.coverPhoto,
+              fieldKey: MediaFieldKeys.COVER_PHOTO,
+            },
           ],
         });
       }
@@ -1136,7 +1148,7 @@ export default function ParentsPage() {
         await Promise.all(
           existingPrimaryLinks.map((row: any) =>
             row.id
-              ? updateLocal("studentParents", Number(row.id), {
+              ? updateLocal("studentParents", String(row.id), {
                   isPrimary: false,
                 } as Partial<StudentParent>)
               : Promise.resolve(),
@@ -1146,10 +1158,10 @@ export default function ParentsPage() {
 
       await createLocal("studentParents", {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        parentId: Number(linkForm.parentId),
-        studentId: Number(linkForm.studentId),
+        schoolId: schoolId,
+        branchId: branchId,
+        parentId: cleanId(linkForm.parentId) || undefined,
+        studentId: cleanId(linkForm.studentId) || undefined,
         relationship: linkForm.relationship,
         isPrimary: !!linkForm.isPrimary,
         active: true,
@@ -1167,11 +1179,11 @@ export default function ParentsPage() {
     }
   };
 
-  const unlink = async (relationId?: number) => {
+  const unlink = async (relationId?: string) => {
     if (!relationId) return;
     if (!window.confirm("Remove this parent-student link?")) return;
 
-    await softDeleteLocal("studentParents", Number(relationId));
+    await softDeleteLocal("studentParents", String(relationId));
     setSelectedItem(null);
     showToast("success", "Parent-student link removed.");
     await load();
@@ -1188,38 +1200,21 @@ export default function ParentsPage() {
 
     if (!window.confirm(warning)) return;
 
-
     await Promise.all(
-
-
       ["photo", "coverPhoto"].map((fieldKey) =>
-
-
         softDeleteOwnerFieldAssets({
-
-
           accountId: String(accountId),
-
 
           ownerTable: "parents",
 
-
-          ownerLocalId: Number(id),
-
+          ownerId: id || undefined,
 
           fieldKey,
-
-
         }),
-
-
       ),
-
-
     );
 
-
-    await softDeleteLocal("parents", Number(id));
+    await softDeleteLocal("parents", String(id));
     setSelectedItem(null);
     showToast("success", "Parent deleted.");
     await load();
@@ -1742,7 +1737,7 @@ function ActionSheet({
   item: ParentView;
   openEdit: (row: Parent) => void;
   openLinkModal: (parent?: Parent, student?: Student) => void;
-  unlink: (relationId?: number) => void;
+  unlink: (relationId?: string) => void;
   remove: (item: ParentView) => void;
   onClose: () => void;
 }) {

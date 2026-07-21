@@ -25,9 +25,7 @@ import type {
   BroadsheetTemplateRegistryItem,
 } from "./broadsheet-template-types";
 
-import {
-  DEFAULT_BROADSHEET_TEMPLATE_CODE,
-} from "./broadsheet-template-types";
+import { DEFAULT_BROADSHEET_TEMPLATE_CODE } from "./broadsheet-template-types";
 
 import { normalizeBroadsheetKey } from "./broadsheet-template-utils";
 
@@ -40,133 +38,134 @@ export * from "./broadsheet-template-utils";
 
 const ALL_KINDS: BroadsheetKind[] = ["subject", "class", "annual"];
 
-export const BROADSHEET_TEMPLATE_DEFINITIONS: BroadsheetTemplateRegistryItem[] = [
-  {
-    code: "broadsheet_classic",
-    layoutKey: "broadsheet_classic",
-    name: "Classic Broadsheet",
-    description:
-      "Formal bordered academic table with strong print readability.",
-    tone: "classic",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "compact",
-    aliases: ["classic", "default", "formal", "traditional"],
-    fileName: "ClassicBroadsheetTemplate.tsx",
-    isDefault: true,
-    active: true,
-    component: ClassicBroadsheetTemplate,
-  },
-  {
-    code: "broadsheet_modern",
-    layoutKey: "broadsheet_modern",
-    name: "Modern Broadsheet",
-    description:
-      "Clean contemporary layout with soft summary cards and refined tables.",
-    tone: "modern",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "comfortable",
-    aliases: ["modern", "clean", "modern_clean"],
-    fileName: "ModernBroadsheetTemplate.tsx",
-    active: true,
-    component: ModernBroadsheetTemplate,
-  },
-  {
-    code: "broadsheet_compact",
-    layoutKey: "broadsheet_compact",
-    name: "Compact Broadsheet",
-    description:
-      "Dense paper-efficient layout for large classes and many subjects.",
-    tone: "compact",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "compact",
-    aliases: ["compact", "print", "space_saving", "dense"],
-    fileName: "CompactBroadsheetTemplate.tsx",
-    active: true,
-    component: CompactBroadsheetTemplate,
-  },
-  {
-    code: "broadsheet_executive",
-    layoutKey: "broadsheet_executive",
-    name: "Executive Broadsheet",
-    description:
-      "Premium leadership-focused presentation with prominent academic summaries.",
-    tone: "executive",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "comfortable",
-    aliases: ["executive", "premium", "leadership", "management"],
-    fileName: "ExecutiveBroadsheetTemplate.tsx",
-    active: true,
-    component: ExecutiveBroadsheetTemplate,
-  },
-  {
-    code: "broadsheet_minimal",
-    layoutKey: "broadsheet_minimal",
-    name: "Minimal Broadsheet",
-    description:
-      "Low-ink understated design with only essential lines and fields.",
-    tone: "minimal",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "compact",
-    aliases: ["minimal", "simple", "low_ink", "plain"],
-    fileName: "MinimalBroadsheetTemplate.tsx",
-    active: true,
-  },
-  {
-    code: "broadsheet_cambridge",
-    layoutKey: "broadsheet_cambridge",
-    name: "Cambridge Broadsheet",
-    description:
-      "International examination-board inspired structure for clear candidate results.",
-    tone: "cambridge",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "compact",
-    aliases: ["cambridge", "international", "candidate", "exam_board"],
-    fileName: "CambridgeBroadsheetTemplate.tsx",
-    active: true,
-  },
-  {
-    code: "broadsheet_university",
-    layoutKey: "broadsheet_university",
-    name: "University Broadsheet",
-    description:
-      "Registrar-style academic record suitable for tertiary and credit-based programmes.",
-    tone: "university",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "compact",
-    aliases: ["university", "tertiary", "registrar", "credits"],
-    fileName: "UniversityBroadsheetTemplate.tsx",
-    active: true,
-  },
-  {
-    code: "broadsheet_analytics",
-    layoutKey: "broadsheet_analytics",
-    name: "Analytics Broadsheet",
-    description:
-      "Insight-led design emphasizing performance, trends and decision statistics.",
-    tone: "analytics",
-    supportedKinds: ALL_KINDS,
-    orientation: "landscape",
-    paperSize: "A4",
-    density: "comfortable",
-    aliases: ["analytics", "insights", "trends", "dashboard"],
-    fileName: "AnalyticsBroadsheetTemplate.tsx",
-    active: true,
-  },
-];
+export const BROADSHEET_TEMPLATE_DEFINITIONS: BroadsheetTemplateRegistryItem[] =
+  [
+    {
+      code: "broadsheet_classic",
+      layoutKey: "broadsheet_classic",
+      name: "Classic Broadsheet",
+      description:
+        "Formal bordered academic table with strong print readability.",
+      tone: "classic",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "compact",
+      aliases: ["classic", "default", "formal", "traditional"],
+      fileName: "ClassicBroadsheetTemplate.tsx",
+      isDefault: true,
+      active: true,
+      component: ClassicBroadsheetTemplate,
+    },
+    {
+      code: "broadsheet_modern",
+      layoutKey: "broadsheet_modern",
+      name: "Modern Broadsheet",
+      description:
+        "Clean contemporary layout with soft summary cards and refined tables.",
+      tone: "modern",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "comfortable",
+      aliases: ["modern", "clean", "modern_clean"],
+      fileName: "ModernBroadsheetTemplate.tsx",
+      active: true,
+      component: ModernBroadsheetTemplate,
+    },
+    {
+      code: "broadsheet_compact",
+      layoutKey: "broadsheet_compact",
+      name: "Compact Broadsheet",
+      description:
+        "Dense paper-efficient layout for large classes and many subjects.",
+      tone: "compact",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "compact",
+      aliases: ["compact", "print", "space_saving", "dense"],
+      fileName: "CompactBroadsheetTemplate.tsx",
+      active: true,
+      component: CompactBroadsheetTemplate,
+    },
+    {
+      code: "broadsheet_executive",
+      layoutKey: "broadsheet_executive",
+      name: "Executive Broadsheet",
+      description:
+        "Premium leadership-focused presentation with prominent academic summaries.",
+      tone: "executive",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "comfortable",
+      aliases: ["executive", "premium", "leadership", "management"],
+      fileName: "ExecutiveBroadsheetTemplate.tsx",
+      active: true,
+      component: ExecutiveBroadsheetTemplate,
+    },
+    {
+      code: "broadsheet_minimal",
+      layoutKey: "broadsheet_minimal",
+      name: "Minimal Broadsheet",
+      description:
+        "Low-ink understated design with only essential lines and fields.",
+      tone: "minimal",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "compact",
+      aliases: ["minimal", "simple", "low_ink", "plain"],
+      fileName: "MinimalBroadsheetTemplate.tsx",
+      active: true,
+    },
+    {
+      code: "broadsheet_cambridge",
+      layoutKey: "broadsheet_cambridge",
+      name: "Cambridge Broadsheet",
+      description:
+        "International examination-board inspired structure for clear candidate results.",
+      tone: "cambridge",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "compact",
+      aliases: ["cambridge", "international", "candidate", "exam_board"],
+      fileName: "CambridgeBroadsheetTemplate.tsx",
+      active: true,
+    },
+    {
+      code: "broadsheet_university",
+      layoutKey: "broadsheet_university",
+      name: "University Broadsheet",
+      description:
+        "Registrar-style academic record suitable for tertiary and credit-based programmes.",
+      tone: "university",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "compact",
+      aliases: ["university", "tertiary", "registrar", "credits"],
+      fileName: "UniversityBroadsheetTemplate.tsx",
+      active: true,
+    },
+    {
+      code: "broadsheet_analytics",
+      layoutKey: "broadsheet_analytics",
+      name: "Analytics Broadsheet",
+      description:
+        "Insight-led design emphasizing performance, trends and decision statistics.",
+      tone: "analytics",
+      supportedKinds: ALL_KINDS,
+      orientation: "landscape",
+      paperSize: "A4",
+      density: "comfortable",
+      aliases: ["analytics", "insights", "trends", "dashboard"],
+      fileName: "AnalyticsBroadsheetTemplate.tsx",
+      active: true,
+    },
+  ];
 
 // ======================================================
 // COMPONENT REGISTRATION
@@ -189,7 +188,10 @@ export function registerBroadsheetTemplateComponent(
 ) {
   const definition = getBroadsheetTemplateDefinition(codeOrLayoutKey);
   componentRegistry.set(normalizeBroadsheetKey(definition.code), component);
-  componentRegistry.set(normalizeBroadsheetKey(definition.layoutKey), component);
+  componentRegistry.set(
+    normalizeBroadsheetKey(definition.layoutKey),
+    component,
+  );
   for (const alias of definition.aliases || []) {
     componentRegistry.set(normalizeBroadsheetKey(alias), component);
   }
@@ -200,7 +202,11 @@ export function unregisterBroadsheetTemplateComponent(
   codeOrLayoutKey: BroadsheetTemplateCode,
 ) {
   const definition = getBroadsheetTemplateDefinition(codeOrLayoutKey);
-  const keys = [definition.code, definition.layoutKey, ...(definition.aliases || [])];
+  const keys = [
+    definition.code,
+    definition.layoutKey,
+    ...(definition.aliases || []),
+  ];
   for (const key of keys) componentRegistry.delete(normalizeBroadsheetKey(key));
 }
 

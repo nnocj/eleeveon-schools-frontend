@@ -73,13 +73,9 @@ export type StudentReportTemplateLayoutKey =
   | "university_transcript"
   | string;
 
-export type StudentReportTemplateOrientation =
-  | "portrait"
-  | "landscape";
+export type StudentReportTemplateOrientation = "portrait" | "landscape";
 
-export type StudentReportTemplatePaperSize =
-  | "A4"
-  | "Letter";
+export type StudentReportTemplatePaperSize = "A4" | "Letter";
 
 export type StudentReportTemplateDensity =
   | "compact"
@@ -102,12 +98,11 @@ export type ReportTemplateScopeType =
   | string;
 
 export interface ReportCardTemplateLike {
-  id?: number;
-  cloudId?: string;
+  id?: string;
 
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 
   name?: string;
   code?: StudentReportTemplateCode;
@@ -127,13 +122,12 @@ export interface ReportCardTemplateLike {
 }
 
 export interface ReportCardTemplateSettingsLike {
-  id?: number;
-  cloudId?: string;
+  id?: string;
 
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  templateId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  templateId?: string | null;
 
   orientation?: StudentReportTemplateOrientation;
   paperSize?: StudentReportTemplatePaperSize;
@@ -183,22 +177,21 @@ export interface ReportCardTemplateSettingsLike {
 }
 
 export interface ReportCardTemplateAssignmentLike {
-  id?: number;
-  cloudId?: string;
+  id?: string;
 
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 
-  templateId?: number | string | null;
-  templateSettingsId?: number | string | null;
+  templateId?: string | null;
+  templateSettingsId?: string | null;
 
   scopeType?: ReportTemplateScopeType | null;
-  scopeId?: number | string | null;
+  scopeId?: string | null;
 
-  academicStructureId?: number | string | null;
-  academicPeriodId?: number | string | null;
-  classId?: number | string | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
+  classId?: string | null;
   level?: string | null;
 
   isDefault?: boolean;
@@ -213,7 +206,7 @@ export interface ReportCardTemplateAssignmentLike {
 // ======================================================
 
 export interface StudentReportTemplateDefinition {
-  id?: number;
+  id?: string;
   code: StudentReportTemplateCode;
   name: string;
   layoutKey: StudentReportTemplateLayoutKey;
@@ -271,9 +264,9 @@ export interface StudentReportLabelSettings {
 export interface StudentReportTemplateSettings
   extends StudentReportVisibilitySettings,
     StudentReportLabelSettings {
-  templateId?: number;
-  templateSettingsId?: number;
-  assignmentId?: number;
+  templateId?: string;
+  templateSettingsId?: string;
+  assignmentId?: string;
 
   templateCode: StudentReportTemplateCode;
   layoutKey: StudentReportTemplateLayoutKey;
@@ -300,12 +293,13 @@ export interface StudentReportTemplateBaseProps {
   mobilePreview?: boolean;
 }
 
-export interface StudentReportTemplateProps extends StudentReportTemplateBaseProps {
+export interface StudentReportTemplateProps
+  extends StudentReportTemplateBaseProps {
   resolvedSettings: StudentReportTemplateSettings;
 }
 
 export type StudentReportTemplateComponent = (
-  props: StudentReportTemplateBaseProps
+  props: StudentReportTemplateBaseProps,
 ) => React.ReactElement;
 
 // ======================================================
@@ -362,7 +356,7 @@ export interface ReportTemplateBrandingData {
 }
 
 export interface ReportTemplateStudentInfo {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   gender?: string;
@@ -374,8 +368,8 @@ export interface ReportTemplateStudentInfo {
 }
 
 export interface ReportTemplateNextPeriodInfo {
-  id?: number;
-  academicStructureId?: number;
+  id?: string;
+  academicStructureId?: string;
   name?: string;
   type?: string;
   startDate?: string;
@@ -386,8 +380,8 @@ export interface ReportTemplateNextPeriodInfo {
 }
 
 export interface ReportTemplateCurrentPeriodInfo {
-  id?: number;
-  academicStructureId?: number;
+  id?: string;
+  academicStructureId?: string;
   name?: string;
   type?: string;
   startDate?: string;
@@ -439,172 +433,201 @@ export interface NormalizedStudentReportTemplateData {
 export const DEFAULT_STUDENT_REPORT_TEMPLATE_CODE: StudentReportTemplateCode =
   "classic_formal";
 
-export const DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS: StudentReportTemplateSettings = {
-  templateCode: "classic_formal",
-  layoutKey: "classic_formal",
-  templateName: "Classic Formal",
-
-  orientation: "portrait",
-  paperSize: "A4",
-  density: "compact",
-
-  showSubjectPosition: true,
-  showClassPosition: true,
-  showNumberOnRoll: false,
-
-  showAttendance: true,
-  showAttendancePercent: true,
-
-  showStudentPhoto: true,
-  showTeacherNames: true,
-
-  showCurrentAcademicPeriodEnd: true,
-  showNextAcademicPeriod: true,
-  showPromotionStatus: false,
-
-  showGPA: true,
-  showAverage: true,
-  showTotal: true,
-  showGrade: true,
-
-  showSubjectRemarks: true,
-
-  showWatermark: true,
-  showParentSignature: true,
-  showGeneratedDate: false,
-
-  classTeacherLabel: "Class Teacher",
-  headTeacherLabel: "Headteacher / Principal",
-  parentLabel: "Parent / Guardian",
-  principalLabel: "Principal",
-
-  currentAcademicPeriodEndLabel: "This Academic Period Ends",
-  nextAcademicPeriodLabel: "Next Academic Period Begins",
-  numberOnRollLabel: "Number On Roll",
-  classPositionLabel: "Class Position",
-  subjectPositionLabel: "Position",
-  generatedDateLabel: "Generated On",
-
-  active: true,
-};
-
-export const DEFAULT_STUDENT_REPORT_TEMPLATE_DEFINITIONS: StudentReportTemplateDefinition[] = [
+export const DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS: StudentReportTemplateSettings =
   {
-    code: "classic_formal",
-    name: "Classic Formal",
+    templateCode: "classic_formal",
     layoutKey: "classic_formal",
-    description: "Formal Ghana/private-school report style with strong official structure.",
+    templateName: "Classic Formal",
+
     orientation: "portrait",
     paperSize: "A4",
     density: "compact",
-    isDefault: true,
+
+    showSubjectPosition: true,
+    showClassPosition: true,
+    showNumberOnRoll: false,
+
+    showAttendance: true,
+    showAttendancePercent: true,
+
+    showStudentPhoto: true,
+    showTeacherNames: true,
+
+    showCurrentAcademicPeriodEnd: true,
+    showNextAcademicPeriod: true,
+    showPromotionStatus: false,
+
+    showGPA: true,
+    showAverage: true,
+    showTotal: true,
+    showGrade: true,
+
+    showSubjectRemarks: true,
+
+    showWatermark: true,
+    showParentSignature: true,
+    showGeneratedDate: false,
+
+    classTeacherLabel: "Class Teacher",
+    headTeacherLabel: "Headteacher / Principal",
+    parentLabel: "Parent / Guardian",
+    principalLabel: "Principal",
+
+    currentAcademicPeriodEndLabel: "This Academic Period Ends",
+    nextAcademicPeriodLabel: "Next Academic Period Begins",
+    numberOnRollLabel: "Number On Roll",
+    classPositionLabel: "Class Position",
+    subjectPositionLabel: "Position",
+    generatedDateLabel: "Generated On",
+
     active: true,
-  },
-  {
-    code: "modern_clean",
-    name: "Modern Clean",
-    layoutKey: "modern_clean",
-    description: "Premium clean layout with softer spacing and modern arrangement.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "compact_print",
-    name: "Compact Print",
-    layoutKey: "compact_print",
-    description: "Space-saving layout for efficient printing while keeping report quality.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "compact",
-    active: true,
-  },
-  {
-    code: "bordered_traditional",
-    name: "Bordered Traditional",
-    layoutKey: "bordered_traditional",
-    description: "Boxed and table-heavy traditional school report arrangement.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "compact",
-    active: true,
-  },
-  {
-    code: "letterhead_premium",
-    name: "Letterhead Premium",
-    layoutKey: "letterhead_premium",
-    description: "Institutional letterhead-style report with elegant branding emphasis.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "side_profile",
-    name: "Side Profile",
-    layoutKey: "side_profile",
-    description: "Modern report layout with student identity/profile emphasis.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "cambridge",
-    name: "Cambridge",
-    layoutKey: "cambridge",
-    description: "International-style academic report arrangement inspired by Cambridge-style school reporting.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "ib",
-    name: "IB",
-    layoutKey: "ib",
-    description: "International Baccalaureate-style report arrangement with clean academic structure.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "kindergarten",
-    name: "Kindergarten",
-    layoutKey: "kindergarten",
-    description: "Early-years report card style while still receiving the same Eleeveon report dataset.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "comfortable",
-    active: true,
-  },
-  {
-    code: "montessori",
-    name: "Montessori",
-    layoutKey: "montessori",
-    description: "Montessori-inspired report design focused on calm presentation and development-friendly structure.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "spacious",
-    active: true,
-  },
-  {
-    code: "university_transcript",
-    name: "University Transcript",
-    layoutKey: "university_transcript",
-    description: "Transcript-style academic report layout for higher academic or cumulative presentation.",
-    orientation: "portrait",
-    paperSize: "A4",
-    density: "compact",
-    active: true,
-  },
-];
+  };
+
+export const DEFAULT_STUDENT_REPORT_TEMPLATE_DEFINITIONS: StudentReportTemplateDefinition[] =
+  [
+    {
+      code: "classic_formal",
+      name: "Classic Formal",
+      layoutKey: "classic_formal",
+      description:
+        "Formal Ghana/private-school report style with strong official structure.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "compact",
+      isDefault: true,
+      active: true,
+    },
+    {
+      code: "modern_clean",
+      name: "Modern Clean",
+      layoutKey: "modern_clean",
+      description:
+        "Premium clean layout with softer spacing and modern arrangement.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "compact_print",
+      name: "Compact Print",
+      layoutKey: "compact_print",
+      description:
+        "Space-saving layout for efficient printing while keeping report quality.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "compact",
+      active: true,
+    },
+    {
+      code: "bordered_traditional",
+      name: "Bordered Traditional",
+      layoutKey: "bordered_traditional",
+      description:
+        "Boxed and table-heavy traditional school report arrangement.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "compact",
+      active: true,
+    },
+    {
+      code: "letterhead_premium",
+      name: "Letterhead Premium",
+      layoutKey: "letterhead_premium",
+      description:
+        "Institutional letterhead-style report with elegant branding emphasis.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "side_profile",
+      name: "Side Profile",
+      layoutKey: "side_profile",
+      description:
+        "Modern report layout with student identity/profile emphasis.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "cambridge",
+      name: "Cambridge",
+      layoutKey: "cambridge",
+      description:
+        "International-style academic report arrangement inspired by Cambridge-style school reporting.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "ib",
+      name: "IB",
+      layoutKey: "ib",
+      description:
+        "International Baccalaureate-style report arrangement with clean academic structure.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "kindergarten",
+      name: "Kindergarten",
+      layoutKey: "kindergarten",
+      description:
+        "Early-years report card style while still receiving the same Eleeveon report dataset.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "comfortable",
+      active: true,
+    },
+    {
+      code: "montessori",
+      name: "Montessori",
+      layoutKey: "montessori",
+      description:
+        "Montessori-inspired report design focused on calm presentation and development-friendly structure.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "spacious",
+      active: true,
+    },
+    {
+      code: "university_transcript",
+      name: "University Transcript",
+      layoutKey: "university_transcript",
+      description:
+        "Transcript-style academic report layout for higher academic or cumulative presentation.",
+      orientation: "portrait",
+      paperSize: "A4",
+      density: "compact",
+      active: true,
+    },
+  ];
 
 // ======================================================
 // HELPERS
 // ======================================================
+
+function normalizeEntityId(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  const normalized = String(value).trim();
+  if (
+    !normalized ||
+    normalized === "0" ||
+    normalized === "undefined" ||
+    normalized === "null"
+  ) {
+    return undefined;
+  }
+
+  return normalized;
+}
 
 export function normalizeTemplateKey(value?: string | null) {
   return String(value || "")
@@ -615,9 +638,15 @@ export function normalizeTemplateKey(value?: string | null) {
 }
 
 export function mergeStudentReportTemplateSettings(
-  settings?: Partial<StudentReportTemplateSettings> | ReportCardTemplateSettingsLike | null,
-  template?: Partial<StudentReportTemplateDefinition> | ReportCardTemplateLike | null,
-  assignment?: ReportCardTemplateAssignmentLike | null
+  settings?:
+    | Partial<StudentReportTemplateSettings>
+    | ReportCardTemplateSettingsLike
+    | null,
+  template?:
+    | Partial<StudentReportTemplateDefinition>
+    | ReportCardTemplateLike
+    | null,
+  assignment?: ReportCardTemplateAssignmentLike | null,
 ): StudentReportTemplateSettings {
   const merged: StudentReportTemplateSettings = {
     ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
@@ -637,7 +666,8 @@ export function mergeStudentReportTemplateSettings(
     templateCode ||
     "classic_formal";
 
-  const templateDefinition = getStudentReportTemplateDefinitionByCode(templateCode);
+  const templateDefinition =
+    getStudentReportTemplateDefinitionByCode(templateCode);
 
   const templateName =
     (template as any)?.name ||
@@ -648,35 +678,54 @@ export function mergeStudentReportTemplateSettings(
 
   return {
     ...merged,
-    templateId: Number((template as any)?.id || (settings as any)?.templateId || merged.templateId || 0) || undefined,
-    templateSettingsId:
-      Number((settings as any)?.id || (settings as any)?.templateSettingsId || merged.templateSettingsId || 0) || undefined,
-    assignmentId:
-      Number((assignment as any)?.id || merged.assignmentId || 0) || undefined,
+    templateId: normalizeEntityId(
+      (template as any)?.id ||
+        (settings as any)?.templateId ||
+        merged.templateId,
+    ),
+    templateSettingsId: normalizeEntityId(
+      (settings as any)?.id ||
+        (settings as any)?.templateSettingsId ||
+        merged.templateSettingsId,
+    ),
+    assignmentId: normalizeEntityId(
+      (assignment as any)?.id || merged.assignmentId,
+    ),
 
     templateCode,
     layoutKey,
     templateName,
 
-    orientation:
-      ((settings as any)?.orientation || (template as any)?.orientation || merged.orientation || templateDefinition.orientation || "portrait") as StudentReportTemplateOrientation,
-    paperSize:
-      ((settings as any)?.paperSize || (template as any)?.paperSize || merged.paperSize || templateDefinition.paperSize || "A4") as StudentReportTemplatePaperSize,
-    density:
-      ((settings as any)?.density || (template as any)?.density || merged.density || templateDefinition.density || "compact") as StudentReportTemplateDensity,
+    orientation: ((settings as any)?.orientation ||
+      (template as any)?.orientation ||
+      merged.orientation ||
+      templateDefinition.orientation ||
+      "portrait") as StudentReportTemplateOrientation,
+    paperSize: ((settings as any)?.paperSize ||
+      (template as any)?.paperSize ||
+      merged.paperSize ||
+      templateDefinition.paperSize ||
+      "A4") as StudentReportTemplatePaperSize,
+    density: ((settings as any)?.density ||
+      (template as any)?.density ||
+      merged.density ||
+      templateDefinition.density ||
+      "compact") as StudentReportTemplateDensity,
 
-    active: (settings as any)?.active !== false && (template as any)?.active !== false,
+    active:
+      (settings as any)?.active !== false &&
+      (template as any)?.active !== false,
   };
 }
 
 export function normalizeStudentReportTemplateDefinition(
-  template?: ReportCardTemplateLike | null
+  template?: ReportCardTemplateLike | null,
 ): StudentReportTemplateDefinition {
   const code = template?.code || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE;
   const fallback = getStudentReportTemplateDefinitionByCode(code);
 
   return {
-    id: Number(template?.id || 0) || undefined,
+    id: template?.id ? String(template.id) : undefined,
     code,
     name: template?.name || fallback.name,
     layoutKey: template?.layoutKey || fallback.layoutKey,
@@ -690,15 +739,17 @@ export function normalizeStudentReportTemplateDefinition(
 }
 
 export function getStudentReportTemplateDefinitionByCode(
-  code?: StudentReportTemplateCode | null
+  code?: StudentReportTemplateCode | null,
 ): StudentReportTemplateDefinition {
-  const normalized = normalizeTemplateKey(code || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE);
+  const normalized = normalizeTemplateKey(
+    code || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE,
+  );
 
   return (
     DEFAULT_STUDENT_REPORT_TEMPLATE_DEFINITIONS.find(
-      item =>
+      (item) =>
         normalizeTemplateKey(item.code) === normalized ||
-        normalizeTemplateKey(item.layoutKey) === normalized
+        normalizeTemplateKey(item.layoutKey) === normalized,
     ) || DEFAULT_STUDENT_REPORT_TEMPLATE_DEFINITIONS[0]
   );
 }

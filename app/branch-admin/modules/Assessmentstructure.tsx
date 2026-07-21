@@ -47,7 +47,12 @@ import {
   type Organization,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
@@ -58,9 +63,6 @@ import {
   commitMediaAssetsToOwner,
   createMediaSessionKey,
   saveImageAsset,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
@@ -71,30 +73,30 @@ type ModalMode = "structure" | "item";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type StructureForm = {
-  id?: number;
+  id?: string;
   organizationId: string;
   academicStructureId: string;
   name: string;
   description: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   totalScore: string;
   active: boolean;
   locked: boolean;
 };
 
 type ItemForm = {
-  id?: number;
+  id?: string;
   assessmentStructureId: string;
   name: string;
   weight: string;
@@ -105,7 +107,7 @@ type ItemForm = {
 };
 
 type AssessmentStructureView = {
-  id: number;
+  id: string;
   row: AssessmentStructure;
   academicStructureName: string;
   organizationName: string;
@@ -120,7 +122,8 @@ type AssessmentStructureView = {
   items: AssessmentStructureItem[];
 };
 
-const ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE = MediaOwners.ASSESSMENT_STRUCTURES;
+const ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE =
+  MediaOwners.ASSESSMENT_STRUCTURES;
 
 const emptyStructureForm = (): StructureForm => ({
   organizationId: "",
@@ -146,10 +149,9 @@ const emptyItemForm = (): ItemForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -158,11 +160,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -173,7 +175,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -198,13 +202,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -215,16 +219,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -236,9 +244,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -246,13 +258,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -267,9 +281,11 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return String(value);
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(
-      new Date(time)
-    );
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return String(value);
   }
@@ -291,7 +307,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -302,8 +326,17 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function Assessmentstructure() {
-  const dataRevision = useBranchTableRevision(["assessmentStructures", "assessmentStructureItems", "academicStructures", "organizations", "mediaAssets", "mediaBlobs"]);
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE));
+  const dataRevision = useBranchTableRevision([
+    "assessmentStructures",
+    "assessmentStructureItems",
+    "academicStructures",
+    "organizations",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE),
+  );
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -340,25 +373,40 @@ export default function Assessmentstructure() {
     ],
   });
   const [items, setItems] = useState<AssessmentStructureItem[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [entries, setEntries] = useState<AssessmentEntry[]>([]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<AssessmentStructureView | null>(null);
+  const [selectedItem, setSelectedItem] =
+    useState<AssessmentStructureView | null>(null);
 
   const [modalMode, setModalMode] = useState<ModalMode>("structure");
   const [modalOpen, setModalOpen] = useState(false);
-  const [structureForm, setStructureForm] = useState<StructureForm>(emptyStructureForm());
+  const [structureForm, setStructureForm] =
+    useState<StructureForm>(emptyStructureForm());
   const [itemForm, setItemForm] = useState<ItemForm>(emptyItemForm());
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -368,7 +416,11 @@ export default function Assessmentstructure() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -389,39 +441,61 @@ export default function Assessmentstructure() {
     try {
       setLoading(true);
 
-      const [structureRows, itemRows, academicStructureRows, organizationRows, entryRows] = await Promise.all([
+      const [
+        structureRows,
+        itemRows,
+        academicStructureRows,
+        organizationRows,
+        entryRows,
+      ] = await Promise.all([
         tableSafe("assessmentStructures")?.toArray?.() || [],
         tableSafe("assessmentStructureItems")?.toArray?.() || [],
-        listActiveLocal("academicStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("academicStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("assessmentEntries")?.toArray?.() || [],
       ]);
 
       setStructures(
         (structureRows as AssessmentStructure[])
           .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
 
       setItems(
         (itemRows as AssessmentStructureItem[])
           .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))
+          .sort(
+            (a: any, b: any) => Number(a.order || 0) - Number(b.order || 0),
+          ),
       );
 
       setAcademicStructures(
         (academicStructureRows as AcademicStructure[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setOrganizations(
         (organizationRows as Organization[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
-      setEntries((entryRows as AssessmentEntry[]).filter((row) => sameTenant(row as TenantRow)));
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load assessment setup:", error);
       clearData();
@@ -435,22 +509,29 @@ export default function Assessmentstructure() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
   const academicStructureMap = useMemo(
     () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
-    [academicStructures]
+    [academicStructures],
   );
 
   const organizationMap = useMemo(
     () => new Map(organizations.map((row: any) => [idOf(row.id), row])),
-    [organizations]
+    [organizations],
   );
 
   const itemsByStructure = useMemo(() => {
-    const map = new Map<number, AssessmentStructureItem[]>();
+    const map = new Map<string, AssessmentStructureItem[]>();
     items.forEach((item: any) => {
       const id = idOf(item.assessmentStructureId);
       if (!id) return;
@@ -461,7 +542,7 @@ export default function Assessmentstructure() {
   }, [items]);
 
   const entryCountByStructure = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     entries.forEach((entry: any) => {
       const id = idOf(entry.assessmentStructureId);
       if (!id) return;
@@ -471,7 +552,7 @@ export default function Assessmentstructure() {
   }, [entries]);
 
   const weightByStructure = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     items.forEach((item: any) => {
       if (!isActiveRow(item)) return;
       const id = idOf(item.assessmentStructureId);
@@ -486,14 +567,17 @@ export default function Assessmentstructure() {
       const id = idOf(row.id);
       const structureItems = itemsByStructure.get(id) || [];
       const activeItems = structureItems.filter(isActiveRow);
-      const academicStructure = academicStructureMap.get(idOf(row.academicStructureId)) as any;
+      const academicStructure = academicStructureMap.get(
+        idOf(row.academicStructureId),
+      ) as any;
       const organization = organizationMap.get(idOf(row.organizationId)) as any;
       const weight = weightByStructure.get(id) || 0;
 
       return {
         id,
         row,
-        academicStructureName: academicStructure?.name || "No academic structure",
+        academicStructureName:
+          academicStructure?.name || "No academic structure",
         organizationName: organization?.name || "No organization",
         itemCount: structureItems.length,
         activeItemCount: activeItems.length,
@@ -506,21 +590,30 @@ export default function Assessmentstructure() {
         items: structureItems,
       };
     });
-  }, [academicStructureMap, entryCountByStructure, itemsByStructure, organizationMap, structures, weightByStructure]);
+  }, [
+    academicStructureMap,
+    entryCountByStructure,
+    itemsByStructure,
+    organizationMap,
+    structures,
+    weightByStructure,
+  ]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return viewRows.filter((item) => {
       const row: any = item.row;
-      const haystack = `${row.name || ""} ${row.description || ""} ${item.academicStructureName} ${item.organizationName}`
-        .toLowerCase();
+      const haystack =
+        `${row.name || ""} ${row.description || ""} ${item.academicStructureName} ${item.organizationName}`.toLowerCase();
 
       const searchOk = !term || haystack.includes(term);
       const statusOk =
         statusFilter === "all" ||
         (statusFilter === "active" ? item.active : !item.active);
-      const structureOk = structureFilter === "all" || sameId(row.academicStructureId, structureFilter);
+      const structureOk =
+        structureFilter === "all" ||
+        sameId(row.academicStructureId, structureFilter);
 
       return searchOk && statusOk && structureOk;
     });
@@ -529,23 +622,26 @@ export default function Assessmentstructure() {
   const completeStructures = viewRows.filter((row) => row.ready).length;
   const incompleteStructures = viewRows.length - completeStructures;
   const activeFilterCount = useMemo(
-    () => [structureFilter, statusFilter].filter((value) => value !== "all").length,
-    [structureFilter, statusFilter]
+    () =>
+      [structureFilter, statusFilter].filter((value) => value !== "all").length,
+    [structureFilter, statusFilter],
   );
 
   const countsByAcademicStructure = useMemo(
     () => groupedCounts(viewRows, (row) => row.academicStructureName),
-    [viewRows]
+    [viewRows],
   );
 
   const countsByStatus = useMemo(
-    () => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
-    [viewRows]
+    () =>
+      groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
+    [viewRows],
   );
 
   const countsByReadiness = useMemo(
-    () => groupedCounts(viewRows, (row) => (row.ready ? "Ready" : "Needs weights")),
-    [viewRows]
+    () =>
+      groupedCounts(viewRows, (row) => (row.ready ? "Ready" : "Needs weights")),
+    [viewRows],
   );
 
   const requireTenant = () => {
@@ -562,7 +658,9 @@ export default function Assessmentstructure() {
   };
 
   const openCreateStructure = () => {
-    mediaSessionKeyRef.current = createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE);
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
+    );
     if (!requireTenant()) return;
 
     setSelectedItem(null);
@@ -581,14 +679,25 @@ export default function Assessmentstructure() {
     setModalMode("structure");
     setStructureForm({
       id: idOf(structure.id),
-      organizationId: structure.organizationId ? String(structure.organizationId) : "",
-      academicStructureId: structure.academicStructureId ? String(structure.academicStructureId) : "",
+      organizationId: structure.organizationId
+        ? String(structure.organizationId)
+        : "",
+      academicStructureId: structure.academicStructureId
+        ? String(structure.academicStructureId)
+        : "",
       name: structure.name || "",
       description: structure.description || "",
       photo: mediaById[idOf(structure.id)]?.photo || structure.photo || "",
-      photoMediaId: structure.photoMediaId ? Number(structure.photoMediaId) : undefined,
-      bannerImage: mediaById[idOf(structure.id)]?.bannerImage || structure.bannerImage || "",
-      bannerImageMediaId: structure.bannerImageMediaId ? Number(structure.bannerImageMediaId) : undefined,
+      photoMediaId: structure.photoMediaId
+        ? String(structure.photoMediaId)
+        : undefined,
+      bannerImage:
+        mediaById[idOf(structure.id)]?.bannerImage ||
+        structure.bannerImage ||
+        "",
+      bannerImageMediaId: structure.bannerImageMediaId
+        ? String(structure.bannerImageMediaId)
+        : undefined,
       totalScore: String(structure.totalScore || 100),
       active: isActiveRow(structure),
       locked: !!structure.locked,
@@ -596,10 +705,11 @@ export default function Assessmentstructure() {
     setModalOpen(true);
   };
 
-  const openCreateItem = (structureId?: number) => {
+  const openCreateItem = (structureId?: string) => {
     if (!requireTenant()) return;
 
-    const targetStructureId = structureId || (selectedItem ? selectedItem.id : 0);
+    const targetStructureId =
+      structureId || (selectedItem ? selectedItem.id : "");
 
     setSelectedItem(null);
     setModalMode("item");
@@ -618,7 +728,9 @@ export default function Assessmentstructure() {
     setModalMode("item");
     setItemForm({
       id: idOf(item.id),
-      assessmentStructureId: item.assessmentStructureId ? String(item.assessmentStructureId) : "",
+      assessmentStructureId: item.assessmentStructureId
+        ? String(item.assessmentStructureId)
+        : "",
       name: item.name || "",
       weight: String(item.weight || 0),
       maxScore: String(item.maxScore || 100),
@@ -629,7 +741,7 @@ export default function Assessmentstructure() {
     setModalOpen(true);
   };
 
-  const nextOrderForStructure = (structureId: number) => {
+  const nextOrderForStructure = (structureId: string) => {
     const orders = items
       .filter((row: any) => sameId(row.assessmentStructureId, structureId))
       .map((row: any) => Number(row.order || 0));
@@ -637,9 +749,11 @@ export default function Assessmentstructure() {
   };
 
   const validateStructure = () => {
-    if (!structureForm.name.trim()) return "Assessment structure name is required.";
+    if (!structureForm.name.trim())
+      return "Assessment structure name is required.";
     if (!structureForm.academicStructureId) return "Select academic structure.";
-    if (Number(structureForm.totalScore || 0) <= 0) return "Total score must be greater than 0.";
+    if (Number(structureForm.totalScore || 0) <= 0)
+      return "Total score must be greater than 0.";
 
     const duplicate = structures.find((row: any) => {
       if (structureForm.id && sameId(row.id, structureForm.id)) return false;
@@ -650,7 +764,8 @@ export default function Assessmentstructure() {
       );
     });
 
-    if (duplicate) return "This assessment structure already exists under the selected academic structure.";
+    if (duplicate)
+      return "This assessment structure already exists under the selected academic structure.";
     return "";
   };
 
@@ -661,8 +776,10 @@ export default function Assessmentstructure() {
     const weight = Number(itemForm.weight || 0);
     const maxScore = Number(itemForm.maxScore || 0);
 
-    if (!Number.isFinite(weight) || weight < 0 || weight > 100) return "Weight must be between 0 and 100.";
-    if (!Number.isFinite(maxScore) || maxScore <= 0) return "Max score must be greater than 0.";
+    if (!Number.isFinite(weight) || weight < 0 || weight > 100)
+      return "Weight must be between 0 and 100.";
+    if (!Number.isFinite(maxScore) || maxScore <= 0)
+      return "Max score must be greater than 0.";
     if (Number(itemForm.order || 1) < 1) return "Order must be at least 1.";
 
     const structureId = idOf(itemForm.assessmentStructureId);
@@ -685,7 +802,8 @@ export default function Assessmentstructure() {
       );
     });
 
-    if (duplicate) return "This assessment item already exists under the selected structure.";
+    if (duplicate)
+      return "This assessment item already exists under the selected structure.";
     return "";
   };
 
@@ -707,9 +825,11 @@ export default function Assessmentstructure() {
 
       const payload: Partial<AssessmentStructure> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        organizationId: structureForm.organizationId ? idOf(structureForm.organizationId) : undefined,
+        schoolId: schoolId,
+        branchId: branchId,
+        organizationId: structureForm.organizationId
+          ? idOf(structureForm.organizationId)
+          : undefined,
         academicStructureId: idOf(structureForm.academicStructureId),
         name: structureForm.name.trim(),
         description: structureForm.description.trim() || undefined,
@@ -725,26 +845,40 @@ export default function Assessmentstructure() {
 
       const savedStructure =
         structureForm.id && existing
-          ? await updateLocal("assessmentStructures", Number(structureForm.id), payload)
-          : await createLocal("assessmentStructures", payload as AssessmentStructure);
+          ? await updateLocal(
+              "assessmentStructures",
+              String(structureForm.id),
+              payload,
+            )
+          : await createLocal(
+              "assessmentStructures",
+              payload as AssessmentStructure,
+            );
 
-      const savedStructureId = Number((savedStructure as any)?.id || structureForm.id || 0);
+      const savedStructureId = idOf(
+        (savedStructure as any)?.id || structureForm.id || "",
+      );
 
       if (savedStructureId) {
         await commitMediaAssetsToOwner({
           accountId: String(accountId),
           ownerTable: ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedStructureId,
-          ownerCloudId: (savedStructure as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedStructureId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: structureForm.photoMediaId, fieldKey: "photo" },
-            { assetId: structureForm.bannerImageMediaId, fieldKey: "bannerImage" },
+            {
+              assetId: structureForm.bannerImageMediaId,
+              fieldKey: "bannerImage",
+            },
           ],
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
       showToast("success", "Assessment structure saved.");
       await load();
@@ -768,12 +902,14 @@ export default function Assessmentstructure() {
     try {
       setSaving(true);
 
-      const existing = itemForm.id ? items.find((row: any) => sameId(row.id, itemForm.id)) : undefined;
+      const existing = itemForm.id
+        ? items.find((row: any) => sameId(row.id, itemForm.id))
+        : undefined;
 
       const payload: Partial<AssessmentStructureItem> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         assessmentStructureId: idOf(itemForm.assessmentStructureId),
         name: itemForm.name.trim(),
         weight: Number(itemForm.weight || 0),
@@ -785,9 +921,16 @@ export default function Assessmentstructure() {
       } as Partial<AssessmentStructureItem>;
 
       if (itemForm.id && existing) {
-        await updateLocal("assessmentStructureItems", Number(itemForm.id), payload);
+        await updateLocal(
+          "assessmentStructureItems",
+          String(itemForm.id),
+          payload,
+        );
       } else {
-        await createLocal("assessmentStructureItems", payload as AssessmentStructureItem);
+        await createLocal(
+          "assessmentStructureItems",
+          payload as AssessmentStructureItem,
+        );
       }
 
       setModalOpen(false);
@@ -814,41 +957,24 @@ export default function Assessmentstructure() {
     const confirmed = window.confirm(
       entryCount
         ? `"${row.name}" has ${entryCount} score record(s). Archive anyway?`
-        : `Archive "${row.name}"?`
+        : `Archive "${row.name}"?`,
     );
 
     if (!confirmed) return;
 
-
     await Promise.all(
-
-
       ["photo", "bannerImage"].map((fieldKey) =>
-
-
         softDeleteOwnerFieldAssets({
-
-
           accountId: String(accountId),
-
 
           ownerTable: "assessmentStructures",
 
-
-          ownerLocalId: Number(item.id),
-
+          ownerId: idOf(item.id) || undefined,
 
           fieldKey,
-
-
         }),
-
-
       ),
-
-
     );
-
 
     await softDeleteLocal("assessmentStructures", item.id);
     setSelectedItem(null);
@@ -865,16 +991,19 @@ export default function Assessmentstructure() {
     await load();
   };
 
-  const uploadStructureImage = async (target: "photo" | "bannerImage", file?: File) => {
+  const uploadStructureImage = async (
+    target: "photo" | "bannerImage",
+    file?: File,
+  ) => {
     if (!file || !accountId || !schoolId || !branchId) return;
 
     try {
       const result = await saveImageAsset(file, {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: ASSESSMENT_STRUCTURE_MEDIA_OWNER_TABLE,
-        ownerLocalId: structureForm.id || undefined,
+        ownerId: structureForm.id || undefined,
         ownerTempKey: structureForm.id ? undefined : mediaSessionKeyRef.current,
         fieldKey: target,
         variant: target === "photo" ? "avatar" : "cover",
@@ -884,10 +1013,14 @@ export default function Assessmentstructure() {
       setStructureForm((current) => ({
         ...current,
         [target]: result.previewUrl,
-        [target === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [target === "photo" ? "photoMediaId" : "bannerImageMediaId"]:
+          result.assetId,
       }));
 
-      showToast("info", `${target === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+      showToast(
+        "info",
+        `${target === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`,
+      );
     } catch (error: any) {
       showToast("error", error?.message || "Failed to process image.");
     }
@@ -904,17 +1037,30 @@ export default function Assessmentstructure() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing assessment setup." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing assessment setup."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Assessment setup belongs to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -923,19 +1069,29 @@ export default function Assessmentstructure() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Assessment setup search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Assessment setup search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -946,7 +1102,12 @@ export default function Assessmentstructure() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreateStructure} aria-label="Add assessment structure">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreateStructure}
+          aria-label="Add assessment structure"
+        >
           +
         </button>
 
@@ -961,14 +1122,21 @@ export default function Assessmentstructure() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {!academicStructures.length && (
         <section className="ba-warning">
-          Create an academic structure first. Assessment structures must belong to an academic structure such as Primary, JHS, SHS, or a custom academic grouping.
+          Create an academic structure first. Assessment structures must belong
+          to an academic structure such as Primary, JHS, SHS, or a custom
+          academic grouping.
         </section>
       )}
 
@@ -976,7 +1144,10 @@ export default function Assessmentstructure() {
         <section className="ba-filter-chips" aria-label="Active filters">
           {structureFilter !== "all" && (
             <button type="button" onClick={() => setStructureFilter("all")}>
-              Academic: {(academicStructureMap.get(idOf(structureFilter)) as any)?.name || structureFilter} ×
+              Academic:{" "}
+              {(academicStructureMap.get(idOf(structureFilter)) as any)?.name ||
+                structureFilter}{" "}
+              ×
             </button>
           )}
           {statusFilter !== "all" && (
@@ -989,14 +1160,27 @@ export default function Assessmentstructure() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="By Academic Structure" rows={countsByAcademicStructure} total={viewRows.length} />
-          <AnalysisCard title="By Status" rows={countsByStatus} total={viewRows.length} />
-          <AnalysisCard title="By Readiness" rows={countsByReadiness} total={viewRows.length} />
+          <AnalysisCard
+            title="By Academic Structure"
+            rows={countsByAcademicStructure}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="By Status"
+            rows={countsByStatus}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="By Readiness"
+            rows={countsByReadiness}
+            total={viewRows.length}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{filteredRows.length}</strong>
             <p>
-              {completeStructures} complete · {incompleteStructures} incomplete · {items.length} item(s) · {entries.length} score record(s).
+              {completeStructures} complete · {incompleteStructures} incomplete
+              · {items.length} item(s) · {entries.length} score record(s).
             </p>
           </article>
         </section>
@@ -1014,7 +1198,15 @@ export default function Assessmentstructure() {
       {viewMode === "cards" && (
         <section className="ba-list assessment-list">
           {filteredRows.map((item) => (
-            <AssessmentListItem key={String(item.id)} item={item} photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)} onOpen={() => setSelectedItem(item)} />
+            <AssessmentListItem
+              key={String(item.id)}
+              item={item}
+              photo={
+                mediaById[item.id]?.photo ||
+                safeRecordMediaValue((item.row as any).photo)
+              }
+              onOpen={() => setSelectedItem(item)}
+            />
           ))}
 
           {!filteredRows.length && (
@@ -1090,9 +1282,20 @@ export default function Assessmentstructure() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1103,11 +1306,23 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function AssessmentListItem({ item, photo, onOpen }: { item: AssessmentStructureView; photo?: string; onOpen: () => void }) {
+function AssessmentListItem({
+  item,
+  photo,
+  onOpen,
+}: {
+  item: AssessmentStructureView;
+  photo?: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
 
   return (
-    <button type="button" className="student-row assessment-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row assessment-row"
+      onClick={onOpen}
+    >
       <span
         className="assessment-icon"
         style={{
@@ -1121,10 +1336,13 @@ function AssessmentListItem({ item, photo, onOpen }: { item: AssessmentStructure
         <strong>{row.name || "Unnamed assessment structure"}</strong>
         <small>
           {item.academicStructureName}
-          {item.organizationName !== "No organization" ? ` · ${item.organizationName}` : ""}
+          {item.organizationName !== "No organization"
+            ? ` · ${item.organizationName}`
+            : ""}
         </small>
         <em>
-          {item.activeItemCount} active item(s) · {item.weight}% weight · {item.entryCount} entries
+          {item.activeItemCount} active item(s) · {item.weight}% weight ·{" "}
+          {item.entryCount} entries
         </em>
       </span>
 
@@ -1176,7 +1394,9 @@ function FilterSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Filter assessment structures by academic structure and status.</p>
+            <p>
+              Filter assessment structures by academic structure and status.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1186,7 +1406,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Academic Structure</span>
-            <select value={structureFilter} onChange={(event) => setStructureFilter(event.target.value)}>
+            <select
+              value={structureFilter}
+              onChange={(event) => setStructureFilter(event.target.value)}
+            >
               <option value="all">All academic structures</option>
               {academicStructures.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1198,7 +1421,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / Archived</option>
@@ -1246,19 +1474,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact assessment setup cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Structure, status and readiness summaries</small>
@@ -1292,7 +1532,7 @@ function ActionSheet({
 }: {
   item: AssessmentStructureView;
   openEditStructure: (row: AssessmentStructure) => void;
-  openCreateItem: (structureId?: number) => void;
+  openCreateItem: (structureId?: string) => void;
   openEditItem: (row: AssessmentStructureItem) => void;
   archiveItem: (row: AssessmentStructureItem) => void | Promise<void>;
   archiveStructure: (item: AssessmentStructureView) => void | Promise<void>;
@@ -1307,10 +1547,15 @@ function ActionSheet({
           <div>
             <h2>{row.name || "Assessment structure"}</h2>
             <p>
-              {item.academicStructureName} · {item.ready ? "Ready" : "Needs weights"}
+              {item.academicStructureName} ·{" "}
+              {item.ready ? "Ready" : "Needs weights"}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close assessment actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close assessment actions"
+          >
             ✕
           </button>
         </div>
@@ -1333,11 +1578,16 @@ function ActionSheet({
         {!!item.items.length && (
           <div className="assessment-items-list">
             {item.items.map((structureItem: any) => (
-              <button key={String(structureItem.id)} type="button" onClick={() => openEditItem(structureItem)}>
+              <button
+                key={String(structureItem.id)}
+                type="button"
+                onClick={() => openEditItem(structureItem)}
+              >
                 <span>
                   <b>{structureItem.name}</b>
                   <small>
-                    {structureItem.weight}% · max {structureItem.maxScore} · order {structureItem.order || 1}
+                    {structureItem.weight}% · max {structureItem.maxScore} ·
+                    order {structureItem.order || 1}
                   </small>
                 </span>
                 <i>✎</i>
@@ -1350,24 +1600,37 @@ function ActionSheet({
           <button type="button" onClick={() => openEditStructure(item.row)}>
             <span>✎</span>
             <b>Edit structure</b>
-            <small>Update name, academic structure, score, lock and photos</small>
+            <small>
+              Update name, academic structure, score, lock and photos
+            </small>
           </button>
 
           <button type="button" onClick={() => openCreateItem(item.id)}>
             <span>＋</span>
             <b>Add item</b>
-            <small>Add class score, exam, project, practical or another component</small>
+            <small>
+              Add class score, exam, project, practical or another component
+            </small>
           </button>
 
           {item.items.map((structureItem: any) => (
-            <button key={`archive-${structureItem.id}`} type="button" className="danger" onClick={() => archiveItem(structureItem)}>
+            <button
+              key={`archive-${structureItem.id}`}
+              type="button"
+              className="danger"
+              onClick={() => archiveItem(structureItem)}
+            >
               <span>⌫</span>
               <b>Archive {structureItem.name}</b>
               <small>Soft delete this item locally</small>
             </button>
           ))}
 
-          <button type="button" className="danger" onClick={() => archiveStructure(item)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archiveStructure(item)}
+          >
             <span>⌫</span>
             <b>Archive structure</b>
             <small>Soft delete this assessment structure locally</small>
@@ -1386,7 +1649,7 @@ function TableView({
 }: {
   rows: AssessmentStructureView[];
   openEditStructure: (row: AssessmentStructure) => void;
-  openCreateItem: (structureId?: number) => void;
+  openCreateItem: (structureId?: string) => void;
   archiveStructure: (item: AssessmentStructureView) => void | Promise<void>;
 }) {
   return (
@@ -1428,20 +1691,32 @@ function TableView({
                   <td>{item.entryCount}</td>
                   <td>
                     <div className="ba-chip-row">
-                      <Chip tone={item.active ? "green" : "gray"}>{item.active ? "Active" : "Inactive"}</Chip>
+                      <Chip tone={item.active ? "green" : "gray"}>
+                        {item.active ? "Active" : "Inactive"}
+                      </Chip>
                       {item.locked && <Chip tone="purple">Locked</Chip>}
                     </div>
                   </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
-                      <button type="button" onClick={() => openEditStructure(item.row)}>
+                      <button
+                        type="button"
+                        onClick={() => openEditStructure(item.row)}
+                      >
                         Edit
                       </button>
-                      <button type="button" onClick={() => openCreateItem(item.id)}>
+                      <button
+                        type="button"
+                        onClick={() => openCreateItem(item.id)}
+                      >
                         Add Item
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => archiveStructure(item)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archiveStructure(item)}
+                      >
                         Archive
                       </button>
                     </div>
@@ -1452,7 +1727,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No assessment structure matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No assessment structure matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1481,7 +1760,10 @@ function AssessmentModal({
   structures: AssessmentStructure[];
   setStructureForm: React.Dispatch<React.SetStateAction<StructureForm>>;
   setItemForm: React.Dispatch<React.SetStateAction<ItemForm>>;
-  uploadStructureImage: (target: "photo" | "bannerImage", file?: File) => void | Promise<void>;
+  uploadStructureImage: (
+    target: "photo" | "bannerImage",
+    file?: File,
+  ) => void | Promise<void>;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
 }) {
@@ -1505,7 +1787,11 @@ function AssessmentModal({
                 : "Define a weighted component under a structure."}
             </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close assessment form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close assessment form"
+          >
             ✕
           </button>
         </div>
@@ -1519,7 +1805,12 @@ function AssessmentModal({
                   <span>Name</span>
                   <input
                     value={structureForm.name}
-                    onChange={(event) => setStructureForm((current) => ({ ...current, name: event.target.value }))}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({
+                        ...current,
+                        name: event.target.value,
+                      }))
+                    }
                     placeholder="Class Score + Exam"
                   />
                 </label>
@@ -1529,7 +1820,10 @@ function AssessmentModal({
                   <select
                     value={structureForm.academicStructureId}
                     onChange={(event) =>
-                      setStructureForm((current) => ({ ...current, academicStructureId: event.target.value }))
+                      setStructureForm((current) => ({
+                        ...current,
+                        academicStructureId: event.target.value,
+                      }))
                     }
                   >
                     <option value="">Select academic structure</option>
@@ -1545,7 +1839,12 @@ function AssessmentModal({
                   <span>Organization</span>
                   <select
                     value={structureForm.organizationId}
-                    onChange={(event) => setStructureForm((current) => ({ ...current, organizationId: event.target.value }))}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({
+                        ...current,
+                        organizationId: event.target.value,
+                      }))
+                    }
                   >
                     <option value="">No organization</option>
                     {organizations.map((row: any) => (
@@ -1562,7 +1861,12 @@ function AssessmentModal({
                     type="number"
                     min={1}
                     value={structureForm.totalScore}
-                    onChange={(event) => setStructureForm((current) => ({ ...current, totalScore: event.target.value }))}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({
+                        ...current,
+                        totalScore: event.target.value,
+                      }))
+                    }
                   />
                 </label>
 
@@ -1571,7 +1875,10 @@ function AssessmentModal({
                   <select
                     value={structureForm.active ? "active" : "inactive"}
                     onChange={(event) =>
-                      setStructureForm((current) => ({ ...current, active: event.target.value === "active" }))
+                      setStructureForm((current) => ({
+                        ...current,
+                        active: event.target.value === "active",
+                      }))
                     }
                   >
                     <option value="active">Active</option>
@@ -1584,7 +1891,10 @@ function AssessmentModal({
                   <select
                     value={structureForm.locked ? "locked" : "open"}
                     onChange={(event) =>
-                      setStructureForm((current) => ({ ...current, locked: event.target.value === "locked" }))
+                      setStructureForm((current) => ({
+                        ...current,
+                        locked: event.target.value === "locked",
+                      }))
                     }
                   >
                     <option value="open">Open</option>
@@ -1596,7 +1906,12 @@ function AssessmentModal({
                   <span>Description</span>
                   <textarea
                     value={structureForm.description}
-                    onChange={(event) => setStructureForm((current) => ({ ...current, description: event.target.value }))}
+                    onChange={(event) =>
+                      setStructureForm((current) => ({
+                        ...current,
+                        description: event.target.value,
+                      }))
+                    }
                     placeholder="Describe this assessment model."
                   />
                 </label>
@@ -1613,11 +1928,19 @@ function AssessmentModal({
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={(event) => uploadStructureImage("photo", event.target.files?.[0])}
+                      onChange={(event) =>
+                        uploadStructureImage("photo", event.target.files?.[0])
+                      }
                       hidden
                     />
                   </label>
-                  {structureForm.photo && <img src={structureForm.photo} alt="Assessment structure preview" className="ba-preview-photo" />}
+                  {structureForm.photo && (
+                    <img
+                      src={structureForm.photo}
+                      alt="Assessment structure preview"
+                      className="ba-preview-photo"
+                    />
+                  )}
                 </label>
 
                 <label>
@@ -1627,12 +1950,21 @@ function AssessmentModal({
                     <input
                       type="file"
                       accept="image/*"
-                      onChange={(event) => uploadStructureImage("bannerImage", event.target.files?.[0])}
+                      onChange={(event) =>
+                        uploadStructureImage(
+                          "bannerImage",
+                          event.target.files?.[0],
+                        )
+                      }
                       hidden
                     />
                   </label>
                   {structureForm.bannerImage && (
-                    <img src={structureForm.bannerImage} alt="Assessment structure banner preview" className="ba-preview-banner" />
+                    <img
+                      src={structureForm.bannerImage}
+                      alt="Assessment structure banner preview"
+                      className="ba-preview-banner"
+                    />
                   )}
                 </label>
               </div>
@@ -1646,7 +1978,12 @@ function AssessmentModal({
                 <span>Assessment Structure</span>
                 <select
                   value={itemForm.assessmentStructureId}
-                  onChange={(event) => setItemForm((current) => ({ ...current, assessmentStructureId: event.target.value }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      assessmentStructureId: event.target.value,
+                    }))
+                  }
                 >
                   <option value="">Select structure</option>
                   {structures.map((row: any) => (
@@ -1661,7 +1998,12 @@ function AssessmentModal({
                 <span>Item Name</span>
                 <input
                   value={itemForm.name}
-                  onChange={(event) => setItemForm((current) => ({ ...current, name: event.target.value }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
                   placeholder="Classwork, Homework, Exam..."
                 />
               </label>
@@ -1673,7 +2015,12 @@ function AssessmentModal({
                   min={0}
                   max={100}
                   value={itemForm.weight}
-                  onChange={(event) => setItemForm((current) => ({ ...current, weight: event.target.value }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      weight: event.target.value,
+                    }))
+                  }
                 />
               </label>
 
@@ -1683,7 +2030,12 @@ function AssessmentModal({
                   type="number"
                   min={1}
                   value={itemForm.maxScore}
-                  onChange={(event) => setItemForm((current) => ({ ...current, maxScore: event.target.value }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      maxScore: event.target.value,
+                    }))
+                  }
                 />
               </label>
 
@@ -1693,7 +2045,12 @@ function AssessmentModal({
                   type="number"
                   min={1}
                   value={itemForm.order}
-                  onChange={(event) => setItemForm((current) => ({ ...current, order: event.target.value }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      order: event.target.value,
+                    }))
+                  }
                 />
               </label>
 
@@ -1701,7 +2058,12 @@ function AssessmentModal({
                 <span>Compulsory</span>
                 <select
                   value={itemForm.compulsory ? "yes" : "no"}
-                  onChange={(event) => setItemForm((current) => ({ ...current, compulsory: event.target.value === "yes" }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      compulsory: event.target.value === "yes",
+                    }))
+                  }
                 >
                   <option value="yes">Yes</option>
                   <option value="no">No</option>
@@ -1712,7 +2074,12 @@ function AssessmentModal({
                 <span>Status</span>
                 <select
                   value={itemForm.active ? "active" : "inactive"}
-                  onChange={(event) => setItemForm((current) => ({ ...current, active: event.target.value === "active" }))}
+                  onChange={(event) =>
+                    setItemForm((current) => ({
+                      ...current,
+                      active: event.target.value === "active",
+                    }))
+                  }
                 >
                   <option value="active">Active</option>
                   <option value="inactive">Inactive</option>
@@ -1727,7 +2094,11 @@ function AssessmentModal({
             Cancel
           </button>
           <button type="submit" disabled={saving}>
-            {saving ? "Saving..." : modalMode === "structure" ? "Save Structure" : "Save Item"}
+            {saving
+              ? "Saving..."
+              : modalMode === "structure"
+                ? "Save Structure"
+                : "Save Item"}
           </button>
         </div>
       </form>
@@ -1735,7 +2106,10 @@ function AssessmentModal({
   );
 }
 
-function groupedCounts(rows: AssessmentStructureView[], keyFn: (item: AssessmentStructureView) => string) {
+function groupedCounts(
+  rows: AssessmentStructureView[],
+  keyFn: (item: AssessmentStructureView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1746,7 +2120,15 @@ function groupedCounts(rows: AssessmentStructureView[], keyFn: (item: Assessment
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -2220,10 +2602,10 @@ const css = `
 
 
 
-`;const safeRecordMediaValue = (value?: string) => {
+`;
+const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "").trim();
-  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  if (!media || media.startsWith("blob:") || media.startsWith("data:"))
+    return undefined;
   return media;
 };
-
-

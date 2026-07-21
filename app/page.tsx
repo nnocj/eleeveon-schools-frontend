@@ -35,6 +35,7 @@ export default function HomePage() {
   } = useAccount();
 
   const { settings } = useSettings();
+  const appearanceSettings = settings as Record<string, any> | null;
 
   const {
     activeSchool,
@@ -132,7 +133,7 @@ export default function HomePage() {
 
   const schoolName =
     activeSchool?.name ||
-    settings?.schoolName ||
+    appearanceSettings?.schoolName ||
     "Eleeveon School Management";
 
   const branchName = activeBranch?.name || "No active branch selected";
@@ -140,12 +141,12 @@ export default function HomePage() {
   const logo =
     (activeSchool as any)?.logo ||
     (activeBranch as any)?.logo ||
-    settings?.logo ||
+    appearanceSettings?.logo ||
     "";
 
   const heroImage =
-    settings?.dashboardHeroImage ||
-    settings?.dashboardBannerImage ||
+    appearanceSettings?.dashboardHeroImage ||
+    appearanceSettings?.dashboardBannerImage ||
     (activeSchool as any)?.bannerImage ||
     (activeBranch as any)?.bannerImage ||
     "";
@@ -191,7 +192,7 @@ export default function HomePage() {
   const page: React.CSSProperties = {
     minHeight: "100vh",
     background:
-      settings?.theme === "dark"
+      appearanceSettings?.theme === "dark"
         ? "var(--bg)"
         : "linear-gradient(135deg, #f7f8fb 0%, #eef3ff 55%, #ffffff 100%)",
     color: "var(--text)",

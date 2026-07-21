@@ -127,12 +127,12 @@ export function setStoredActiveMembership(
   // ======================================================
 
   if (
-    membership.teacherLocalId !== undefined &&
-    membership.teacherLocalId !== null
+    membership.teacherId !== undefined &&
+    membership.teacherId !== null
   ) {
     localStorage.setItem(
       ACTIVE_TEACHER_ID_KEY,
-      String(membership.teacherLocalId)
+      String(membership.teacherId)
     );
   } else {
     localStorage.removeItem(ACTIVE_TEACHER_ID_KEY);
@@ -143,12 +143,12 @@ export function setStoredActiveMembership(
   // ======================================================
 
   if (
-    membership.studentLocalId !== undefined &&
-    membership.studentLocalId !== null
+    membership.studentId !== undefined &&
+    membership.studentId !== null
   ) {
     localStorage.setItem(
       ACTIVE_STUDENT_ID_KEY,
-      String(membership.studentLocalId)
+      String(membership.studentId)
     );
   } else {
     localStorage.removeItem(ACTIVE_STUDENT_ID_KEY);
@@ -159,12 +159,12 @@ export function setStoredActiveMembership(
   // ======================================================
 
   if (
-    membership.parentLocalId !== undefined &&
-    membership.parentLocalId !== null
+    membership.parentId !== undefined &&
+    membership.parentId !== null
   ) {
     localStorage.setItem(
       ACTIVE_PARENT_ID_KEY,
-      String(membership.parentLocalId)
+      String(membership.parentId)
     );
   } else {
     localStorage.removeItem(ACTIVE_PARENT_ID_KEY);

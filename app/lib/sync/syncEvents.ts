@@ -178,9 +178,9 @@ export function publishManualDataRefresh(input: {
  */
 export function publishBranchSettingsSaved(input: {
   accountId: string;
-  schoolId: number;
-  branchId: number;
-  localId?: number | null;
+  schoolId: string;
+  branchId: string;
+  entityId?: string | null;
 }) {
   const changedTables = [
     "schoolBranchSettings",
@@ -195,7 +195,7 @@ export function publishBranchSettingsSaved(input: {
       reason: "branch-settings-saved",
       schoolId: input.schoolId,
       branchId: input.branchId,
-      localId: input.localId,
+      entityId: input.entityId,
       scheduleSync: true,
     },
   });
@@ -209,7 +209,7 @@ export function publishBranchSettingsSaved(input: {
             accountId: input.accountId,
             schoolId: input.schoolId,
             branchId: input.branchId,
-            localId: input.localId || null,
+            entityId: input.entityId || null,
             changedTables: [
               "schoolBranchSettings",
             ],

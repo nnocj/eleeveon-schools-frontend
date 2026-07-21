@@ -39,8 +39,18 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, type AssessmentApplicability, type GradeRule, type GradingSystem } from "../../lib/db/db";
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  db,
+  type AssessmentApplicability,
+  type GradeRule,
+  type GradingSystem,
+} from "../../lib/db/db";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -50,15 +60,15 @@ type ToastTone = "success" | "error" | "info";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type RuleForm = {
-  id?: number;
+  id?: string;
   gradingSystemId: string;
   grade: string;
   minScore: string;
@@ -69,9 +79,9 @@ type RuleForm = {
 };
 
 type RuleViewRow = {
-  id: number;
+  id: string;
   row: GradeRule;
-  gradingSystemId: number;
+  gradingSystemId: string;
   gradingSystemName: string;
   grade: string;
   minScore: number;
@@ -102,10 +112,9 @@ const emptyForm = (): RuleForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -114,11 +123,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -129,7 +138,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -154,13 +165,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -171,7 +182,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -180,7 +195,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -192,7 +207,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -202,13 +221,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -239,7 +260,12 @@ const numberText = (value: any) =>
     maximumFractionDigits: 2,
   }).format(Number(value || 0));
 
-const rangesOverlap = (aMin: number, aMax: number, bMin: number, bMax: number) => aMin <= bMax && bMin <= aMax;
+const rangesOverlap = (
+  aMin: number,
+  aMax: number,
+  bMin: number,
+  bMax: number,
+) => aMin <= bMax && bMin <= aMax;
 
 function Chip({
   children,
@@ -251,7 +277,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -265,9 +299,19 @@ export default function GradeRules() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -300,7 +344,9 @@ export default function GradeRules() {
 
   const [systems, setSystems] = useState<GradingSystem[]>([]);
   const [rules, setRules] = useState<GradeRule[]>([]);
-  const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -309,13 +355,24 @@ export default function GradeRules() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<RuleForm>(emptyForm());
 
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -325,7 +382,11 @@ export default function GradeRules() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -345,15 +406,19 @@ export default function GradeRules() {
       setLoading(true);
 
       const [systemRows, ruleRows, applicabilityRows] = await Promise.all([
-        listActiveLocal("gradingSystems", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("gradingSystems", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("gradeRules")?.toArray?.() || [],
         tableSafe("assessmentApplicabilities")?.toArray?.() || [],
       ]);
 
       setSystems(
         (systemRows as GradingSystem[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setRules(
@@ -363,11 +428,15 @@ export default function GradeRules() {
             (a: any, b: any) =>
               Number(a.gradingSystemId || 0) - Number(b.gradingSystemId || 0) ||
               Number(a.order || 0) - Number(b.order || 0) ||
-              Number(b.minScore || 0) - Number(a.minScore || 0)
-          )
+              Number(b.minScore || 0) - Number(a.minScore || 0),
+          ),
       );
 
-      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter((row) => sameTenant(row as TenantRow)));
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load grade rules:", error);
       clearData();
@@ -381,14 +450,24 @@ export default function GradeRules() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const systemMap = useMemo(() => new Map(systems.map((row: any) => [idOf(row.id), row])), [systems]);
+  const systemMap = useMemo(
+    () => new Map(systems.map((row: any) => [idOf(row.id), row])),
+    [systems],
+  );
 
   const rulesBySystem = useMemo(() => {
-    const map = new Map<number, GradeRule[]>();
+    const map = new Map<string, GradeRule[]>();
 
     rules.forEach((rule: any) => {
       const id = idOf(rule.gradingSystemId);
@@ -401,7 +480,7 @@ export default function GradeRules() {
   }, [rules]);
 
   const activeRulesBySystem = useMemo(() => {
-    const map = new Map<number, GradeRule[]>();
+    const map = new Map<string, GradeRule[]>();
 
     rules.filter(isActiveRow).forEach((rule: any) => {
       const id = idOf(rule.gradingSystemId);
@@ -414,7 +493,7 @@ export default function GradeRules() {
   }, [rules]);
 
   const usageCountBySystem = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     applicabilities.forEach((row: any) => {
       const id = idOf(row.gradingSystemId);
@@ -426,7 +505,7 @@ export default function GradeRules() {
   }, [applicabilities]);
 
   const systemCoverage = useMemo(() => {
-    const map = new Map<number, SystemCoverage>();
+    const map = new Map<string, SystemCoverage>();
 
     systems.forEach((system: any) => {
       const systemId = idOf(system.id);
@@ -436,7 +515,14 @@ export default function GradeRules() {
       let overlaps = 0;
       active.forEach((a: any, index) => {
         active.slice(index + 1).forEach((b: any) => {
-          if (rangesOverlap(Number(a.minScore || 0), Number(a.maxScore || 0), Number(b.minScore || 0), Number(b.maxScore || 0))) {
+          if (
+            rangesOverlap(
+              Number(a.minScore || 0),
+              Number(a.maxScore || 0),
+              Number(b.minScore || 0),
+              Number(b.maxScore || 0),
+            )
+          ) {
             overlaps += 1;
           }
         });
@@ -461,7 +547,11 @@ export default function GradeRules() {
       const system = systemMap.get(gradingSystemId) as any;
       const coverage = systemCoverage.get(gradingSystemId);
       const systemComplete =
-        !!coverage && coverage.activeRules >= 2 && coverage.hasLow && coverage.hasHigh && coverage.overlaps === 0;
+        !!coverage &&
+        coverage.activeRules >= 2 &&
+        coverage.hasLow &&
+        coverage.hasHigh &&
+        coverage.overlaps === 0;
 
       return {
         id,
@@ -500,33 +590,56 @@ export default function GradeRules() {
       const statusOk =
         statusFilter === "all" ||
         (statusFilter === "active" ? rule.active : !rule.active);
-      const systemOk = systemFilter === "all" || sameId(rule.gradingSystemId, systemFilter);
+      const systemOk =
+        systemFilter === "all" || sameId(rule.gradingSystemId, systemFilter);
 
       return searchOk && statusOk && systemOk;
     });
   }, [search, statusFilter, systemFilter, viewRows]);
 
-  const selectedSystem = systemFilter !== "all" ? (systemMap.get(idOf(systemFilter)) as any) : undefined;
-  const selectedCoverage = selectedSystem ? systemCoverage.get(idOf(selectedSystem.id)) : undefined;
+  const selectedSystem =
+    systemFilter !== "all"
+      ? (systemMap.get(idOf(systemFilter)) as any)
+      : undefined;
+  const selectedCoverage = selectedSystem
+    ? systemCoverage.get(idOf(selectedSystem.id))
+    : undefined;
 
   const completeSystems = Array.from(systemCoverage.values()).filter(
-    (coverage) => coverage.activeRules >= 2 && coverage.hasLow && coverage.hasHigh && coverage.overlaps === 0
+    (coverage) =>
+      coverage.activeRules >= 2 &&
+      coverage.hasLow &&
+      coverage.hasHigh &&
+      coverage.overlaps === 0,
   ).length;
 
-  const systemsWithOverlaps = Array.from(systemCoverage.values()).filter((coverage) => coverage.overlaps > 0).length;
+  const systemsWithOverlaps = Array.from(systemCoverage.values()).filter(
+    (coverage) => coverage.overlaps > 0,
+  ).length;
   const activeCount = viewRows.filter((row) => row.active).length;
   const archivedCount = viewRows.length - activeCount;
 
   const activeFilterCount = useMemo(
-    () => [systemFilter, statusFilter].filter((value) => value !== "all").length,
-    [statusFilter, systemFilter]
+    () =>
+      [systemFilter, statusFilter].filter((value) => value !== "all").length,
+    [statusFilter, systemFilter],
   );
 
-  const countsBySystem = useMemo(() => groupedCounts(viewRows, (row) => row.gradingSystemName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")), [viewRows]);
+  const countsBySystem = useMemo(
+    () => groupedCounts(viewRows, (row) => row.gradingSystemName),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
+    [viewRows],
+  );
   const countsByCoverage = useMemo(
-    () => groupedCounts(viewRows, (row) => (row.systemComplete ? "Complete system" : "Needs review")),
-    [viewRows]
+    () =>
+      groupedCounts(viewRows, (row) =>
+        row.systemComplete ? "Complete system" : "Needs review",
+      ),
+    [viewRows],
   );
 
   const requireTenant = () => {
@@ -542,15 +655,20 @@ export default function GradeRules() {
     setStatusFilter("all");
   };
 
-  const updateForm = (patch: Partial<RuleForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<RuleForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const nextOrderForSystem = (gradingSystemId: number) => (rulesBySystem.get(gradingSystemId)?.length || 0) + 1;
+  const nextOrderForSystem = (gradingSystemId: string) =>
+    (rulesBySystem.get(gradingSystemId)?.length || 0) + 1;
 
-  const openCreate = (gradingSystemId?: number) => {
+  const openCreate = (gradingSystemId?: string) => {
     if (!requireTenant()) return;
 
     const targetSystemId =
-      gradingSystemId || (systemFilter !== "all" ? idOf(systemFilter) : idOf((systems[0] as any)?.id));
+      gradingSystemId ||
+      (systemFilter !== "all"
+        ? idOf(systemFilter)
+        : idOf((systems[0] as any)?.id));
 
     setSelectedItem(null);
     setForm({
@@ -587,10 +705,13 @@ export default function GradeRules() {
     const max = Number(form.maxScore);
     const order = Number(form.order || 0);
 
-    if (!Number.isFinite(min) || min < 0 || min > 100) return "Minimum score must be between 0 and 100.";
-    if (!Number.isFinite(max) || max < 0 || max > 100) return "Maximum score must be between 0 and 100.";
+    if (!Number.isFinite(min) || min < 0 || min > 100)
+      return "Minimum score must be between 0 and 100.";
+    if (!Number.isFinite(max) || max < 0 || max > 100)
+      return "Maximum score must be between 0 and 100.";
     if (min > max) return "Minimum score cannot be greater than maximum score.";
-    if (!Number.isFinite(order) || order <= 0) return "Order must be greater than 0.";
+    if (!Number.isFinite(order) || order <= 0)
+      return "Order must be greater than 0.";
 
     const duplicate = rules.find((rule: any) => {
       if (form.id && sameId(rule.id, form.id)) return false;
@@ -601,16 +722,27 @@ export default function GradeRules() {
       );
     });
 
-    if (duplicate) return "This grade already exists under the selected grading system.";
+    if (duplicate)
+      return "This grade already exists under the selected grading system.";
 
     if (form.active) {
       const overlap = rules
-        .filter((rule: any) => sameId(rule.gradingSystemId, form.gradingSystemId))
+        .filter((rule: any) =>
+          sameId(rule.gradingSystemId, form.gradingSystemId),
+        )
         .filter((rule: any) => !form.id || !sameId(rule.id, form.id))
         .filter(isActiveRow)
-        .find((rule: any) => rangesOverlap(min, max, Number(rule.minScore || 0), Number(rule.maxScore || 0)));
+        .find((rule: any) =>
+          rangesOverlap(
+            min,
+            max,
+            Number(rule.minScore || 0),
+            Number(rule.maxScore || 0),
+          ),
+        );
 
-      if (overlap) return `This score range overlaps with ${overlap.grade} (${overlap.minScore}-${overlap.maxScore}).`;
+      if (overlap)
+        return `This score range overlaps with ${overlap.grade} (${overlap.minScore}-${overlap.maxScore}).`;
     }
 
     return "";
@@ -630,12 +762,14 @@ export default function GradeRules() {
     try {
       setSaving(true);
 
-      const existing = form.id ? rules.find((rule: any) => sameId(rule.id, form.id)) : undefined;
+      const existing = form.id
+        ? rules.find((rule: any) => sameId(rule.id, form.id))
+        : undefined;
 
       const payload: Partial<GradeRule> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         gradingSystemId: idOf(form.gradingSystemId),
         grade: form.grade.trim(),
         minScore: Number(form.minScore || 0),
@@ -647,13 +781,16 @@ export default function GradeRules() {
       } as Partial<GradeRule>;
 
       if (form.id && existing) {
-        await updateLocal("gradeRules", Number(form.id), payload);
+        await updateLocal("gradeRules", String(form.id), payload);
       } else {
         await createLocal("gradeRules", payload as unknown as GradeRule);
       }
 
       setModalOpen(false);
-      showToast("success", form.id ? "Grade rule updated." : "Grade rule created.");
+      showToast(
+        "success",
+        form.id ? "Grade rule updated." : "Grade rule created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save grade rule:", error);
@@ -667,7 +804,7 @@ export default function GradeRules() {
     const confirmed = window.confirm(
       row.systemUsage
         ? `This grading system is used by ${row.systemUsage} applicability record(s). Archive this rule anyway?`
-        : `Archive grade rule "${row.grade}"?`
+        : `Archive grade rule "${row.grade}"?`,
     );
 
     if (!confirmed) return;
@@ -682,10 +819,17 @@ export default function GradeRules() {
     if (!requireTenant()) return;
 
     const systemName = (system as any).name || "this grading system";
-    if (!window.confirm(`Create a common 5-rule set under "${systemName}"?`)) return;
+    if (!window.confirm(`Create a common 5-rule set under "${systemName}"?`))
+      return;
 
     const seed = [
-      { grade: "A", minScore: 80, maxScore: 100, remark: "Excellent", order: 1 },
+      {
+        grade: "A",
+        minScore: 80,
+        maxScore: 100,
+        remark: "Excellent",
+        order: 1,
+      },
       { grade: "B", minScore: 70, maxScore: 79, remark: "Very Good", order: 2 },
       { grade: "C", minScore: 60, maxScore: 69, remark: "Good", order: 3 },
       { grade: "D", minScore: 50, maxScore: 59, remark: "Pass", order: 4 },
@@ -695,15 +839,17 @@ export default function GradeRules() {
     try {
       for (const rule of seed) {
         const exists = rules.find(
-          (existing: any) => sameId(existing.gradingSystemId, (system as any).id) && safeLower(existing.grade) === safeLower(rule.grade)
+          (existing: any) =>
+            sameId(existing.gradingSystemId, (system as any).id) &&
+            safeLower(existing.grade) === safeLower(rule.grade),
         );
 
         if (exists) continue;
 
         await createLocal("gradeRules", {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           gradingSystemId: idOf((system as any).id),
           ...rule,
           active: true,
@@ -721,21 +867,40 @@ export default function GradeRules() {
   };
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
-    return <State primary={primary} title="Opening Grade Rules..." text="Preparing score ranges and grade remarks." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Grade Rules..."
+        text="Preparing score ranges and grade remarks."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing grade rules." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing grade rules."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Grade rules are managed under the active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -744,19 +909,29 @@ export default function GradeRules() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Grade rules search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Grade rules search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -770,7 +945,9 @@ export default function GradeRules() {
         <button
           type="button"
           className="ba-add-inline"
-          onClick={() => openCreate(systemFilter !== "all" ? idOf(systemFilter) : undefined)}
+          onClick={() =>
+            openCreate(systemFilter !== "all" ? idOf(systemFilter) : undefined)
+          }
           aria-label="Add grade rule"
         >
           +
@@ -787,18 +964,26 @@ export default function GradeRules() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {!systems.length && (
-        <section className="ba-warning">Create a grading system first before adding grade rules.</section>
+        <section className="ba-warning">
+          Create a grading system first before adding grade rules.
+        </section>
       )}
 
       {systemsWithOverlaps > 0 && (
         <section className="ba-warning">
-          Some grading systems have overlapping active score ranges. Edit the rules to prevent wrong grading.
+          Some grading systems have overlapping active score ranges. Edit the
+          rules to prevent wrong grading.
         </section>
       )}
 
@@ -806,7 +991,9 @@ export default function GradeRules() {
         <section className="ba-filter-chips" aria-label="Active filters">
           {systemFilter !== "all" && (
             <button type="button" onClick={() => setSystemFilter("all")}>
-              System: {(systemMap.get(idOf(systemFilter)) as any)?.name || systemFilter} ×
+              System:{" "}
+              {(systemMap.get(idOf(systemFilter)) as any)?.name || systemFilter}{" "}
+              ×
             </button>
           )}
           {statusFilter !== "all" && (
@@ -823,7 +1010,9 @@ export default function GradeRules() {
             <span>Selected grading system</span>
             <strong>{selectedSystem.name}</strong>
             <p>
-              {selectedCoverage?.activeRules || 0} active rule(s) · {usageCountBySystem.get(idOf(selectedSystem.id)) || 0} applicability usage
+              {selectedCoverage?.activeRules || 0} active rule(s) ·{" "}
+              {usageCountBySystem.get(idOf(selectedSystem.id)) || 0}{" "}
+              applicability usage
             </p>
           </div>
           <Chip tone={(selectedCoverage?.overlaps || 0) > 0 ? "red" : "green"}>
@@ -834,34 +1023,66 @@ export default function GradeRules() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Rules by System" rows={countsBySystem} total={viewRows.length} />
-          <AnalysisCard title="Rules by Status" rows={countsByStatus} total={viewRows.length} />
-          <AnalysisCard title="System Coverage" rows={countsByCoverage} total={viewRows.length} />
+          <AnalysisCard
+            title="Rules by System"
+            rows={countsBySystem}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Rules by Status"
+            rows={countsByStatus}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="System Coverage"
+            rows={countsByCoverage}
+            total={viewRows.length}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{filteredRows.length}</strong>
             <p>
-              {activeCount} active · {archivedCount} archived · {completeSystems} complete systems · {systemsWithOverlaps} with overlaps.
+              {activeCount} active · {archivedCount} archived ·{" "}
+              {completeSystems} complete systems · {systemsWithOverlaps} with
+              overlaps.
             </p>
           </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} archive={archive} />}
+      {viewMode === "table" && (
+        <TableView rows={filteredRows} openEdit={openEdit} archive={archive} />
+      )}
 
       {viewMode === "cards" && (
         <section className="ba-list grade-rule-list">
           {filteredRows.map((rule) => (
-            <RuleListRow key={String(rule.id)} item={rule} onOpen={() => setSelectedItem(rule)} />
+            <RuleListRow
+              key={String(rule.id)}
+              item={rule}
+              onOpen={() => setSelectedItem(rule)}
+            />
           ))}
 
           {!!systems.length && (
-            <button type="button" className="student-row seed-row" onClick={() => seedBasicRules((systems[0] as any))}>
+            <button
+              type="button"
+              className="student-row seed-row"
+              onClick={() => seedBasicRules(systems[0] as any)}
+            >
               <span className="rule-icon seed">⚡</span>
               <span className="student-main">
                 <strong>Quick seed rules</strong>
-                <small>Create a basic A-F rule set under a grading system.</small>
-                <em>Tap to seed {String((systems[0] as any)?.name || "the first grading system")}.</em>
+                <small>
+                  Create a basic A-F rule set under a grading system.
+                </small>
+                <em>
+                  Tap to seed{" "}
+                  {String(
+                    (systems[0] as any)?.name || "the first grading system",
+                  )}
+                  .
+                </em>
               </span>
               <span className="student-side">
                 <span className="status-dot-mini purple" />
@@ -939,9 +1160,20 @@ export default function GradeRules() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -952,26 +1184,50 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function RuleListRow({ item, onOpen }: { item: RuleViewRow; onOpen: () => void }) {
+function RuleListRow({
+  item,
+  onOpen,
+}: {
+  item: RuleViewRow;
+  onOpen: () => void;
+}) {
   return (
-    <button type="button" className="student-row grade-rule-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row grade-rule-row"
+      onClick={onOpen}
+    >
       <span className="rule-icon">📏</span>
 
       <span className="student-main">
         <strong>{item.grade}</strong>
         <small>
-          {item.gradingSystemName} · {numberText(item.minScore)}-{numberText(item.maxScore)}
+          {item.gradingSystemName} · {numberText(item.minScore)}-
+          {numberText(item.maxScore)}
         </small>
         <em>
-          {item.remark || "No remark"} · order {item.order} · {item.systemComplete ? "system complete" : "needs review"}
+          {item.remark || "No remark"} · order {item.order} ·{" "}
+          {item.systemComplete ? "system complete" : "needs review"}
         </em>
       </span>
 
       <span className="student-side">
         <span
           className={`status-dot-mini ${item.systemOverlapCount > 0 ? "red" : item.systemComplete ? "green" : "orange"}`}
-          title={item.systemOverlapCount > 0 ? "Overlap detected" : item.systemComplete ? "System complete" : "Needs review"}
-          aria-label={item.systemOverlapCount > 0 ? "Overlap detected" : item.systemComplete ? "System complete" : "Needs review"}
+          title={
+            item.systemOverlapCount > 0
+              ? "Overlap detected"
+              : item.systemComplete
+                ? "System complete"
+                : "Needs review"
+          }
+          aria-label={
+            item.systemOverlapCount > 0
+              ? "Overlap detected"
+              : item.systemComplete
+                ? "System complete"
+                : "Needs review"
+          }
         />
         <i>⋯</i>
       </span>
@@ -1003,7 +1259,7 @@ function FilterSheet({
   onClose,
 }: {
   systems: GradingSystem[];
-  systemCoverage: Map<number, SystemCoverage>;
+  systemCoverage: Map<string, SystemCoverage>;
   systemFilter: string;
   statusFilter: StatusFilter;
   setSystemFilter: (value: string) => void;
@@ -1027,11 +1283,15 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Grading System</span>
-            <select value={systemFilter} onChange={(event) => setSystemFilter(event.target.value)}>
+            <select
+              value={systemFilter}
+              onChange={(event) => setSystemFilter(event.target.value)}
+            >
               <option value="all">All grading systems</option>
               {systems.map((system: any) => (
                 <option key={String(system.id)} value={String(system.id)}>
-                  {system.name} ({systemCoverage.get(idOf(system.id))?.activeRules || 0} rules)
+                  {system.name} (
+                  {systemCoverage.get(idOf(system.id))?.activeRules || 0} rules)
                 </option>
               ))}
             </select>
@@ -1039,7 +1299,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / Archived</option>
@@ -1089,19 +1354,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact grade rule cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Coverage and overlap summaries</small>
@@ -1138,7 +1415,7 @@ function ActionSheet({
   openEdit: (row: RuleViewRow | GradeRule) => void;
   archive: (row: RuleViewRow) => void | Promise<void>;
   seedBasicRules: (system: GradingSystem) => void | Promise<void>;
-  systemMap: Map<number, GradingSystem>;
+  systemMap: Map<string, GradingSystem>;
   onClose: () => void;
 }) {
   const system = systemMap.get(item.gradingSystemId);
@@ -1150,10 +1427,15 @@ function ActionSheet({
           <div>
             <h2>{item.grade}</h2>
             <p>
-              {item.gradingSystemName} · {numberText(item.minScore)}-{numberText(item.maxScore)}
+              {item.gradingSystemName} · {numberText(item.minScore)}-
+              {numberText(item.maxScore)}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close grade rule actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close grade rule actions"
+          >
             ✕
           </button>
         </div>
@@ -1188,7 +1470,11 @@ function ActionSheet({
             </button>
           )}
 
-          <button type="button" className="danger" onClick={() => archive(item)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(item)}
+          >
             <span>⌫</span>
             <b>Archive</b>
             <small>Soft delete this grade rule locally</small>
@@ -1243,12 +1529,26 @@ function TableView({
                   <td>{rule.remark || "—"}</td>
                   <td>{rule.order || "—"}</td>
                   <td>
-                    <Chip tone={rule.systemOverlapCount > 0 ? "red" : rule.systemComplete ? "green" : "orange"}>
-                      {rule.systemOverlapCount > 0 ? "Overlaps" : rule.systemComplete ? "Complete" : "Needs review"}
+                    <Chip
+                      tone={
+                        rule.systemOverlapCount > 0
+                          ? "red"
+                          : rule.systemComplete
+                            ? "green"
+                            : "orange"
+                      }
+                    >
+                      {rule.systemOverlapCount > 0
+                        ? "Overlaps"
+                        : rule.systemComplete
+                          ? "Complete"
+                          : "Needs review"}
                     </Chip>
                   </td>
                   <td>
-                    <Chip tone={rule.active ? "green" : "gray"}>{rule.active ? "Active" : "Inactive"}</Chip>
+                    <Chip tone={rule.active ? "green" : "gray"}>
+                      {rule.active ? "Active" : "Inactive"}
+                    </Chip>
                   </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
@@ -1256,7 +1556,11 @@ function TableView({
                       <button type="button" onClick={() => openEdit(rule)}>
                         Edit
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => archive(rule)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archive(rule)}
+                      >
                         Archive
                       </button>
                     </div>
@@ -1267,7 +1571,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No grade rule matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No grade rule matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1285,7 +1593,7 @@ function RuleModal({
   form: RuleForm;
   saving: boolean;
   systems: GradingSystem[];
-  rulesBySystem: Map<number, GradeRule[]>;
+  rulesBySystem: Map<string, GradeRule[]>;
   updateForm: (patch: Partial<RuleForm>) => void;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
@@ -1296,9 +1604,16 @@ function RuleModal({
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Grade Rule" : "New Grade Rule"}</h2>
-            <p>Define score range, grade and remark under one grading system. Ranges must not overlap.</p>
+            <p>
+              Define score range, grade and remark under one grading system.
+              Ranges must not overlap.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close grade rule form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close grade rule form"
+          >
             ✕
           </button>
         </div>
@@ -1314,7 +1629,9 @@ function RuleModal({
                   const id = idOf(event.target.value);
                   updateForm({
                     gradingSystemId: event.target.value,
-                    order: form.id ? form.order : String((rulesBySystem.get(id)?.length || 0) + 1),
+                    order: form.id
+                      ? form.order
+                      : String((rulesBySystem.get(id)?.length || 0) + 1),
                   });
                 }}
               >
@@ -1344,7 +1661,9 @@ function RuleModal({
                 max="100"
                 step="0.01"
                 value={form.minScore}
-                onChange={(event) => updateForm({ minScore: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ minScore: event.target.value })
+                }
               />
             </label>
 
@@ -1356,7 +1675,9 @@ function RuleModal({
                 max="100"
                 step="0.01"
                 value={form.maxScore}
-                onChange={(event) => updateForm({ maxScore: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ maxScore: event.target.value })
+                }
               />
             </label>
 
@@ -1372,7 +1693,12 @@ function RuleModal({
 
             <label>
               <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(event) => updateForm({ active: event.target.value === "active" })}>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -1390,7 +1716,8 @@ function RuleModal({
         </section>
 
         <section className="ba-note">
-          <strong>Rule:</strong> Active score ranges inside the same grading system must not overlap.
+          <strong>Rule:</strong> Active score ranges inside the same grading
+          system must not overlap.
         </section>
 
         <div className="ba-modal-actions">
@@ -1406,7 +1733,10 @@ function RuleModal({
   );
 }
 
-function groupedCounts(rows: RuleViewRow[], keyFn: (item: RuleViewRow) => string) {
+function groupedCounts(
+  rows: RuleViewRow[],
+  keyFn: (item: RuleViewRow) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1418,7 +1748,15 @@ function groupedCounts(rows: RuleViewRow[], keyFn: (item: RuleViewRow) => string
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

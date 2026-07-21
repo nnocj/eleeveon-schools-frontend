@@ -45,11 +45,11 @@ export function getSchedulingDeviceId() {
 
 export type CreateCalendarEventInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   scopeType: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 
   title: string;
   description?: string;
@@ -65,26 +65,26 @@ export type CreateCalendarEventInput = {
   location?: string;
   onlineMeetingUrl?: string;
 
-  classId?: number | null;
-  subjectId?: number | null;
-  classSubjectId?: number | null;
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
-  academicStructureId?: number | null;
-  academicPeriodId?: number | null;
+  classId?: string | null;
+  subjectId?: string | null;
+  classSubjectId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
 
   recurrenceRule?: string;
   recurrenceEndAt?: number | null;
-  parentEventId?: number | null;
+  parentEventId?: string | null;
 
-  announcementId?: number | null;
-  messageThreadId?: number | null;
+  announcementId?: string | null;
+  messageThreadId?: string | null;
 
   color?: string;
   priority?: "low" | "normal" | "high" | "urgent";
 
-  createdByUserId?: number | string | null;
+  createdByUserId?: string | null;
   createdByRole?: string;
 };
 
@@ -93,7 +93,10 @@ export function createCalendarEventRecord(
 ): CalendarEvent {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -119,9 +122,9 @@ export function createCalendarEventRecord(
     classId: input.classId ?? null,
     subjectId: input.subjectId ?? null,
     classSubjectId: input.classSubjectId ?? null,
-    teacherLocalId: input.teacherLocalId ?? null,
-    studentLocalId: input.studentLocalId ?? null,
-    parentLocalId: input.parentLocalId ?? null,
+    teacherId: input.teacherId ?? null,
+    studentId: input.studentId ?? null,
+    parentId: input.parentId ?? null,
     academicStructureId: input.academicStructureId ?? null,
     academicPeriodId: input.academicPeriodId ?? null,
 
@@ -143,20 +146,22 @@ export function createCalendarEventRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateCalendarParticipantInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
+  eventId: string;
   participantType: CalendarParticipantType;
-  participantId?: number | null;
-  userLocalId?: number | null;
+  participantId?: string | null;
+  userId?: string | null;
 
   role?: string;
   displayName?: string;
@@ -176,7 +181,10 @@ export function createCalendarParticipantRecord(
 ): CalendarEventParticipant {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -184,7 +192,7 @@ export function createCalendarParticipantRecord(
     eventId: input.eventId,
     participantType: input.participantType,
     participantId: input.participantId ?? null,
-    userLocalId: input.userLocalId ?? null,
+    userId: input.userId ?? null,
 
     role: input.role,
     displayName: input.displayName?.trim(),
@@ -203,18 +211,20 @@ export function createCalendarParticipantRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateCalendarReminderInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
-  participantId?: number | null;
+  eventId: string;
+  participantId?: string | null;
 
   channel: CalendarReminderChannel;
   minutesBefore: number;
@@ -226,7 +236,10 @@ export function createCalendarReminderRecord(
 ): CalendarEventReminder {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -244,20 +257,22 @@ export function createCalendarReminderRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateCalendarResponseInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  eventId: number;
-  participantId?: number | null;
+  eventId: string;
+  participantId?: string | null;
 
-  userLocalId?: number | null;
+  userId?: string | null;
   participantType?: CalendarParticipantType;
 
   responseStatus: CalendarResponseStatus;
@@ -269,7 +284,10 @@ export function createCalendarResponseRecord(
 ): CalendarEventResponse {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -277,7 +295,7 @@ export function createCalendarResponseRecord(
     eventId: input.eventId,
     participantId: input.participantId ?? null,
 
-    userLocalId: input.userLocalId ?? null,
+    userId: input.userId ?? null,
     participantType: input.participantType,
 
     responseStatus: input.responseStatus,
@@ -288,7 +306,9 @@ export function createCalendarResponseRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }

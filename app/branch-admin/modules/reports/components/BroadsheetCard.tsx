@@ -101,9 +101,12 @@ function kindLabel(kind: BroadsheetKind) {
 
 function hasDatasetRows(kind: BroadsheetKind, dataset: any) {
   if (!dataset) return false;
-  if (kind === "subject") return Array.isArray(dataset.students) && dataset.students.length > 0;
-  if (kind === "class") return Array.isArray(dataset.students) && dataset.students.length > 0;
-  if (kind === "annual") return Array.isArray(dataset.students) && dataset.students.length > 0;
+  if (kind === "subject")
+    return Array.isArray(dataset.students) && dataset.students.length > 0;
+  if (kind === "class")
+    return Array.isArray(dataset.students) && dataset.students.length > 0;
+  if (kind === "annual")
+    return Array.isArray(dataset.students) && dataset.students.length > 0;
   return false;
 }
 
@@ -155,10 +158,7 @@ export default function BroadsheetCard<K extends BroadsheetKind>({
     [selectedCode],
   );
 
-  const branding = useMemo(
-    () => resolveBroadsheetBranding(header),
-    [header],
-  );
+  const branding = useMemo(() => resolveBroadsheetBranding(header), [header]);
 
   const summary = useMemo(
     () => computeBroadsheetSummary(kind, dataset as any),
@@ -238,7 +238,10 @@ export default function BroadsheetCard<K extends BroadsheetKind>({
 
       const rect = frame.getBoundingClientRect();
       const availableWidth = Math.max(160, rect.width - SAFE_GAP);
-      const availableHeight = Math.max(180, window.innerHeight - rect.top - SAFE_GAP);
+      const availableHeight = Math.max(
+        180,
+        window.innerHeight - rect.top - SAFE_GAP,
+      );
 
       const widthScale = availableWidth / A4_LANDSCAPE_WIDTH_PX;
       const heightScale = availableHeight / A4_LANDSCAPE_HEIGHT_PX;
@@ -310,15 +313,22 @@ export default function BroadsheetCard<K extends BroadsheetKind>({
 
       <div className="bs-viewer-toolbar report-no-print">
         <div className="bs-viewer-toolbar-copy">
-          <strong>{resolvedSettings.broadsheetTitleLabel || kindLabel(kind)}</strong>
+          <strong>
+            {resolvedSettings.broadsheetTitleLabel || kindLabel(kind)}
+          </strong>
           <span>
             {branding.schoolName}
             {branding.branchName ? ` · ${branding.branchName}` : ""}
-            {SelectedTemplate ? ` · ${definition.name}` : ` · ${definition.name} fallback`}
+            {SelectedTemplate
+              ? ` · ${definition.name}`
+              : ` · ${definition.name} fallback`}
           </span>
         </div>
 
-        <div className="bs-viewer-controls" aria-label="Broadsheet zoom controls">
+        <div
+          className="bs-viewer-controls"
+          aria-label="Broadsheet zoom controls"
+        >
           <button
             type="button"
             className="bs-viewer-icon-button"
@@ -400,7 +410,9 @@ export default function BroadsheetCard<K extends BroadsheetKind>({
       <div
         ref={previewFrameRef}
         className="bs-viewer-scroll report-screen-scroll"
-        style={{ "--broadsheet-preview-scale": previewScale } as React.CSSProperties}
+        style={
+          { "--broadsheet-preview-scale": previewScale } as React.CSSProperties
+        }
       >
         <div className="bs-viewer-center">
           <div className="bs-viewer-scale">{templatePage}</div>
@@ -517,9 +529,9 @@ function BroadsheetFallbackPage({
       <div className="bs-fallback-notice">
         <strong>{templateDefinition.name}</strong>
         <span>
-          The dataset is ready, but this visual template has not been registered yet.
-          The router has safely fallen back instead of failing. Register the Classic
-          template in Phase 4 and it will render here automatically.
+          The dataset is ready, but this visual template has not been registered
+          yet. The router has safely fallen back instead of failing. Register
+          the Classic template in Phase 4 and it will render here automatically.
         </span>
       </div>
     </section>

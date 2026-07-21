@@ -47,7 +47,12 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -75,7 +80,7 @@ type MethodFilter = "all" | "cash" | "momo" | "bank" | "card";
 type CategoryFilter = "all" | ExpenseCategory;
 
 type ExpenseForm = {
-  id: number;
+  id: string;
   title: string;
   description: string;
   amount: string;
@@ -92,7 +97,7 @@ type ExpenseForm = {
 };
 
 const emptyExpenseForm: ExpenseForm = {
-  id: 0,
+  id: "",
   title: "",
   description: "",
   amount: "",
@@ -114,8 +119,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -123,7 +128,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -144,7 +151,11 @@ function readOpenWorkspaceSession() {
   return safeJsonRead<OpenWorkspaceSession>(OPEN_WORKSPACE_KEY);
 }
 
-const CATEGORY_OPTIONS: { value: ExpenseCategory; label: string; icon: string }[] = [
+const CATEGORY_OPTIONS: {
+  value: ExpenseCategory;
+  label: string;
+  icon: string;
+}[] = [
   { value: "utilities", label: "Utilities", icon: "💡" },
   { value: "salary", label: "Salary", icon: "🧾" },
   { value: "transport", label: "Transport", icon: "🚌" },
@@ -169,29 +180,61 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+function idOf(value?: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "object") {
+    const row = value as AnyRow;
+    return String(
+      row?.id ??
+        row?.localId ??
+        row?.cloudId ??
+        row?.payload?.id ??
+        row?.payload?.localId ??
+        "",
+    ).trim();
+  }
+
+  return String(value).trim();
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  return idOf(value);
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameId(left: unknown, right: unknown): boolean {
+  const a = cleanId(left);
+  const b = cleanId(right);
+  return Boolean(a && b && a === b);
+}
+
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && !sameId(row.schoolId, schoolId))
+    return false;
+  if (branchId && !sameId(row.branchId, branchId))
+    return false;
   return true;
 }
 
 function rowName(row?: AnyRow | null) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function categoryInfo(value?: string) {
-  return CATEGORY_OPTIONS.find((item) => item.value === value) || CATEGORY_OPTIONS[CATEGORY_OPTIONS.length - 1];
+  return (
+    CATEGORY_OPTIONS.find((item) => item.value === value) ||
+    CATEGORY_OPTIONS[CATEGORY_OPTIONS.length - 1]
+  );
 }
 
 function dateLabel(value?: number | string | null) {
@@ -199,7 +242,11 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -208,7 +255,11 @@ function dateLabel(value?: number | string | null) {
 function money(value: any, currency = "GHS") {
   const amount = n(value);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "GHS", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GHS",
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
     return `${currency || "GHS"} ${amount.toLocaleString()}`;
   }
@@ -223,7 +274,13 @@ function methodTone(method?: string): Tone {
   return "gray";
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ex-chip ${tone}`}>{children}</span>;
 }
 
@@ -257,7 +314,8 @@ export default function ExpensesPage() {
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -282,7 +340,7 @@ export default function ExpensesPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -309,7 +367,7 @@ export default function ExpensesPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const { loading, setLoading } = useBackgroundLoader();
@@ -324,7 +382,10 @@ export default function ExpensesPage() {
   const [moreOpen, setMoreOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const [organizations, setOrganizations] = useState<AnyRow[]>([]);
   const [currencySettings, setCurrencySettings] = useState<AnyRow[]>([]);
@@ -338,7 +399,11 @@ export default function ExpensesPage() {
 
   function showToast(tone: ToastTone, message: string) {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   }
 
   async function load() {
@@ -356,9 +421,21 @@ export default function ExpensesPage() {
         listActiveLocal<AnyRow>("expenses" as any),
       ]);
 
-      setOrganizations(organizationRows.filter((row) => sameScope(row, accountId, schoolId, branchId)).sort((a, b) => rowName(a).localeCompare(rowName(b))));
-      setCurrencySettings(currencyRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setExpenses(expenseRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
+      setOrganizations(
+        organizationRows
+          .filter((row) => sameScope(row, accountId, schoolId, branchId))
+          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
+      );
+      setCurrencySettings(
+        currencyRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setExpenses(
+        expenseRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load branch expenses:", error);
       showToast("error", "Failed to load expenses.");
@@ -388,7 +465,10 @@ export default function ExpensesPage() {
   ]);
 
   const currency = useMemo(() => {
-    const preferred = currencySettings.find((row) => row.defaultForIncomeExpense || row.active !== false) || currencySettings[0];
+    const preferred =
+      currencySettings.find(
+        (row) => row.defaultForIncomeExpense || row.active !== false,
+      ) || currencySettings[0];
     return {
       code: text(preferred?.currencyCode || expenses[0]?.currencyCode, "GHS"),
       symbol: text(preferred?.currencySymbol, "₵"),
@@ -396,15 +476,29 @@ export default function ExpensesPage() {
     };
   }, [currencySettings, expenses]);
 
-  const organizationMap = useMemo(() => new Map(organizations.map((item) => [Number(idOf(item)), rowName(item)])), [organizations]);
+  const organizationMap = useMemo(
+    () =>
+      new Map<string, string>(organizations.map((item) => [idOf(item), rowName(item)])),
+    [organizations],
+  );
 
   const filteredExpenses = useMemo(() => {
     const q = query.toLowerCase().trim();
 
     return expenses
-      .filter((row) => category === "all" || String(row.expenseSourceType || "other") === category)
-      .filter((row) => method === "all" || String(row.paymentMethod || "") === method)
-      .filter((row) => organizationFilter === "all" || String(row.organizationId || "") === organizationFilter)
+      .filter(
+        (row) =>
+          category === "all" ||
+          String(row.expenseSourceType || "other") === category,
+      )
+      .filter(
+        (row) => method === "all" || String(row.paymentMethod || "") === method,
+      )
+      .filter(
+        (row) =>
+          organizationFilter === "all" ||
+          sameId(row.organizationId, organizationFilter),
+      )
       .filter((row) => {
         if (!q) return true;
         return [
@@ -417,22 +511,34 @@ export default function ExpensesPage() {
           row.receiptNumber,
           row.expenseSourceType,
           row.paymentMethod,
-          organizationMap.get(Number(row.organizationId)),
+          organizationMap.get(cleanId(row.organizationId)),
         ]
           .join(" ")
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => n(b.date || b.updatedAt || b.createdAt) - n(a.date || a.updatedAt || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.date || b.updatedAt || b.createdAt) -
+          n(a.date || a.updatedAt || a.createdAt),
+      );
   }, [category, expenses, method, organizationFilter, organizationMap, query]);
 
   const summary = useMemo(() => {
     const total = filteredExpenses.reduce((sum, row) => sum + n(row.amount), 0);
     const allTotal = expenses.reduce((sum, row) => sum + n(row.amount), 0);
-    const cash = filteredExpenses.filter((row) => String(row.paymentMethod) === "cash").reduce((sum, row) => sum + n(row.amount), 0);
-    const momo = filteredExpenses.filter((row) => String(row.paymentMethod) === "momo").reduce((sum, row) => sum + n(row.amount), 0);
-    const bank = filteredExpenses.filter((row) => String(row.paymentMethod) === "bank").reduce((sum, row) => sum + n(row.amount), 0);
-    const card = filteredExpenses.filter((row) => String(row.paymentMethod) === "card").reduce((sum, row) => sum + n(row.amount), 0);
+    const cash = filteredExpenses
+      .filter((row) => String(row.paymentMethod) === "cash")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const momo = filteredExpenses
+      .filter((row) => String(row.paymentMethod) === "momo")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const bank = filteredExpenses
+      .filter((row) => String(row.paymentMethod) === "bank")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const card = filteredExpenses
+      .filter((row) => String(row.paymentMethod) === "card")
+      .reduce((sum, row) => sum + n(row.amount), 0);
 
     return {
       shown: filteredExpenses.length,
@@ -445,15 +551,26 @@ export default function ExpensesPage() {
       card,
       categories: CATEGORY_OPTIONS.map((item) => ({
         ...item,
-        count: filteredExpenses.filter((row) => String(row.expenseSourceType || "other") === item.value).length,
-        amount: filteredExpenses.filter((row) => String(row.expenseSourceType || "other") === item.value).reduce((sum, row) => sum + n(row.amount), 0),
+        count: filteredExpenses.filter(
+          (row) => String(row.expenseSourceType || "other") === item.value,
+        ).length,
+        amount: filteredExpenses
+          .filter(
+            (row) => String(row.expenseSourceType || "other") === item.value,
+          )
+          .reduce((sum, row) => sum + n(row.amount), 0),
       })),
     };
   }, [expenses, filteredExpenses]);
 
   const activeFilterCount = useMemo(
-    () => [category !== "all", method !== "all", organizationFilter !== "all"].filter(Boolean).length,
-    [category, method, organizationFilter]
+    () =>
+      [
+        category !== "all",
+        method !== "all",
+        organizationFilter !== "all",
+      ].filter(Boolean).length,
+    [category, method, organizationFilter],
   );
 
   function openDrawer(existing?: AnyRow) {
@@ -462,14 +579,18 @@ export default function ExpensesPage() {
     setForm(
       existing
         ? {
-            id: cleanId(idOf(existing)),
+            id: idOf(existing),
             title: text(existing.title),
             description: text(existing.description),
             amount: String(existing.amount || ""),
-            paymentMethod: (existing.paymentMethod || "cash") as ExpenseForm["paymentMethod"],
-            expenseSourceType: (existing.expenseSourceType || "other") as ExpenseCategory,
+            paymentMethod: (existing.paymentMethod ||
+              "cash") as ExpenseForm["paymentMethod"],
+            expenseSourceType: (existing.expenseSourceType ||
+              "other") as ExpenseCategory,
             date: text(existing.date, new Date().toISOString().slice(0, 10)),
-            organizationId: existing.organizationId ? String(existing.organizationId) : "",
+            organizationId: existing.organizationId
+              ? String(existing.organizationId)
+              : "",
             paidTo: text(existing.paidTo),
             approvedBy: text(existing.approvedBy),
             receiptNumber: text(existing.receiptNumber),
@@ -477,13 +598,18 @@ export default function ExpensesPage() {
             currencyCode: text(existing.currencyCode, preferred.code),
             currencySymbol: text(existing.currencySymbol, preferred.symbol),
           }
-        : { ...emptyExpenseForm, currencyCode: preferred.code, currencySymbol: preferred.symbol }
+        : {
+            ...emptyExpenseForm,
+            currencyCode: preferred.code,
+            currencySymbol: preferred.symbol,
+          },
     );
     setDrawerOpen(true);
   }
 
   async function saveExpense() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before saving expenses.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before saving expenses.");
     if (!form.title.trim()) return setMessage("Enter an expense title.");
     if (n(form.amount) <= 0) return setMessage("Enter a valid expense amount.");
 
@@ -540,58 +666,148 @@ export default function ExpensesPage() {
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening expenses..." text="Loading branch expenses and finance records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening expenses..."
+        text="Loading branch expenses and finance records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing branch expenses." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing branch expenses."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Expenses are branch-scoped. Choose an active school and branch before continuing." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Expenses are branch-scoped. Choose an active school and branch before continuing."
+      />
+    );
   }
 
   return (
-    <main className="ex-page" style={{ "--ex-primary": primary } as React.CSSProperties}>
+    <main
+      className="ex-page"
+      style={{ "--ex-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ex-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="ex-search-card" aria-label="Expenses search and actions">
-        <span className={`status-dot-mini ${summary.shown ? "red" : "gray"}`} title={`${summary.shown} expense(s)`} />
+      <section
+        className="ex-search-card"
+        aria-label="Expenses search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.shown ? "red" : "gray"}`}
+          title={`${summary.shown} expense(s)`}
+        />
 
         <label className="ex-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search expenses..." aria-label="Search expenses" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search expenses..."
+            aria-label="Search expenses"
+          />
         </label>
 
-        <button type="button" className="ex-add-inline" onClick={() => openDrawer()} aria-label="Add expense">+</button>
+        <button
+          type="button"
+          className="ex-add-inline"
+          onClick={() => openDrawer()}
+          aria-label="Add expense"
+        >
+          +
+        </button>
 
-        <button type="button" className={`ex-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ex-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ex-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ex-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
-      {(category !== "all" || method !== "all" || organizationFilter !== "all" || query.trim()) && (
+      {(category !== "all" ||
+        method !== "all" ||
+        organizationFilter !== "all" ||
+        query.trim()) && (
         <section className="ex-filter-chips" aria-label="Active filters">
-          {category !== "all" && <button type="button" onClick={() => setCategory("all")}>Category: {categoryInfo(category).label} ×</button>}
-          {method !== "all" && <button type="button" onClick={() => setMethod("all")}>Method: {method} ×</button>}
-          {organizationFilter !== "all" && <button type="button" onClick={() => setOrganizationFilter("all")}>Organization: {organizationMap.get(Number(organizationFilter)) || organizationFilter} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {category !== "all" && (
+            <button type="button" onClick={() => setCategory("all")}>
+              Category: {categoryInfo(category).label} ×
+            </button>
+          )}
+          {method !== "all" && (
+            <button type="button" onClick={() => setMethod("all")}>
+              Method: {method} ×
+            </button>
+          )}
+          {organizationFilter !== "all" && (
+            <button type="button" onClick={() => setOrganizationFilter("all")}>
+              Organization:{" "}
+              {organizationMap.get(organizationFilter) ||
+                organizationFilter}{" "}
+              ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
-      {view === "analytics" && <AnalyticsView summary={summary} currency={currency.code} />}
+      {view === "analytics" && (
+        <AnalyticsView summary={summary} currency={currency.code} />
+      )}
 
-      {view === "table" && <TableView rows={filteredExpenses} organizationMap={organizationMap} currency={currency.code} openDrawer={openDrawer} deleteExpense={deleteExpense} />}
+      {view === "table" && (
+        <TableView
+          rows={filteredExpenses}
+          organizationMap={organizationMap}
+          currency={currency.code}
+          openDrawer={openDrawer}
+          deleteExpense={deleteExpense}
+        />
+      )}
 
       {view === "cards" && (
         <section className="ex-list">
@@ -599,14 +815,22 @@ export default function ExpensesPage() {
             <ExpenseCard
               key={String(idOf(row))}
               row={row}
-              organizationName={organizationMap.get(Number(row.organizationId)) || "General branch"}
+              organizationName={
+                organizationMap.get(cleanId(row.organizationId)) ||
+                "General branch"
+              }
               currency={row.currencyCode || currency.code}
               openDrawer={openDrawer}
               deleteExpense={deleteExpense}
             />
           ))}
 
-          {!filteredExpenses.length && <Empty title="No expenses found" text="Tap + to record branch expenses such as utilities, feeding, transport, maintenance and procurement." />}
+          {!filteredExpenses.length && (
+            <Empty
+              title="No expenses found"
+              text="Tap + to record branch expenses such as utilities, feeding, transport, maintenance and procurement."
+            />
+          )}
         </section>
       )}
 
@@ -659,9 +883,20 @@ export default function ExpensesPage() {
   );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ex-page" style={{ "--ex-primary": primary } as React.CSSProperties}>
+    <main
+      className="ex-page"
+      style={{ "--ex-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ex-state">
         <div className="ex-spinner" />
@@ -672,7 +907,19 @@ function State({ primary, title, text: body }: { primary: string; title: string;
   );
 }
 
-function ExpenseCard({ row, organizationName, currency, openDrawer, deleteExpense }: { row: AnyRow; organizationName: string; currency: string; openDrawer: (row: AnyRow) => void; deleteExpense: (row: AnyRow) => void }) {
+function ExpenseCard({
+  row,
+  organizationName,
+  currency,
+  openDrawer,
+  deleteExpense,
+}: {
+  row: AnyRow;
+  organizationName: string;
+  currency: string;
+  openDrawer: (row: AnyRow) => void;
+  deleteExpense: (row: AnyRow) => void;
+}) {
   const category = categoryInfo(row.expenseSourceType || "other");
 
   return (
@@ -680,20 +927,47 @@ function ExpenseCard({ row, organizationName, currency, openDrawer, deleteExpens
       <span className="expense-avatar">{category.icon}</span>
       <span className="expense-main">
         <strong>{row.title || "Expense"}</strong>
-        <small>{organizationName} · {dateLabel(row.date || row.createdAt)}</small>
-        <em>{text(row.paidTo, "No paid-to name")} · {text(row.referenceNumber || row.receiptNumber, "No reference")}</em>
+        <small>
+          {organizationName} · {dateLabel(row.date || row.createdAt)}
+        </small>
+        <em>
+          {text(row.paidTo, "No paid-to name")} ·{" "}
+          {text(row.referenceNumber || row.receiptNumber, "No reference")}
+        </em>
       </span>
       <span className="expense-side">
         <Chip tone="red">{money(row.amount, currency)}</Chip>
-        <Chip tone={methodTone(row.paymentMethod)}>{row.paymentMethod || "cash"}</Chip>
-        <button type="button" onClick={() => openDrawer(row)}>Edit</button>
-        <button type="button" className="danger" onClick={() => deleteExpense(row)}>⌫</button>
+        <Chip tone={methodTone(row.paymentMethod)}>
+          {row.paymentMethod || "cash"}
+        </Chip>
+        <button type="button" onClick={() => openDrawer(row)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => deleteExpense(row)}
+        >
+          ⌫
+        </button>
       </span>
     </article>
   );
 }
 
-function TableView({ rows, organizationMap, currency, openDrawer, deleteExpense }: { rows: AnyRow[]; organizationMap: Map<number, string>; currency: string; openDrawer: (row: AnyRow) => void; deleteExpense: (row: AnyRow) => void }) {
+function TableView({
+  rows,
+  organizationMap,
+  currency,
+  openDrawer,
+  deleteExpense,
+}: {
+  rows: AnyRow[];
+  organizationMap: Map<string, string>;
+  currency: string;
+  openDrawer: (row: AnyRow) => void;
+  deleteExpense: (row: AnyRow) => void;
+}) {
   return (
     <section className="ex-table-card">
       <div className="ex-table-scroll">
@@ -716,101 +990,517 @@ function TableView({ rows, organizationMap, currency, openDrawer, deleteExpense 
               const category = categoryInfo(row.expenseSourceType || "other");
               return (
                 <tr key={String(idOf(row))}>
-                  <td><strong>{row.title || "Expense"}</strong><span>{row.description || "No description"}</span></td>
-                  <td>{category.icon} {category.label}</td>
-                  <td>{organizationMap.get(Number(row.organizationId)) || "General branch"}</td>
+                  <td>
+                    <strong>{row.title || "Expense"}</strong>
+                    <span>{row.description || "No description"}</span>
+                  </td>
+                  <td>
+                    {category.icon} {category.label}
+                  </td>
+                  <td>
+                    {organizationMap.get(cleanId(row.organizationId)) ||
+                      "General branch"}
+                  </td>
                   <td>{money(row.amount, row.currencyCode || currency)}</td>
-                  <td><Chip tone={methodTone(row.paymentMethod)}>{row.paymentMethod || "cash"}</Chip></td>
+                  <td>
+                    <Chip tone={methodTone(row.paymentMethod)}>
+                      {row.paymentMethod || "cash"}
+                    </Chip>
+                  </td>
                   <td>{row.paidTo || "Not set"}</td>
                   <td>{dateLabel(row.date || row.createdAt)}</td>
-                  <td>{row.referenceNumber || row.receiptNumber || "Not set"}</td>
-                  <td><div className="ex-table-actions"><button type="button" onClick={() => openDrawer(row)}>Edit</button><button type="button" className="danger" onClick={() => deleteExpense(row)}>Delete</button></div></td>
+                  <td>
+                    {row.referenceNumber || row.receiptNumber || "Not set"}
+                  </td>
+                  <td>
+                    <div className="ex-table-actions">
+                      <button type="button" onClick={() => openDrawer(row)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => deleteExpense(row)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ex-empty-table">No expense matches your filters.</div>}
+        {!rows.length && (
+          <div className="ex-empty-table">No expense matches your filters.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function FilterSheet({ category, setCategory, method, setMethod, organizationFilter, setOrganizationFilter, organizations, onClose }: { category: CategoryFilter; setCategory: (value: CategoryFilter) => void; method: MethodFilter; setMethod: (value: MethodFilter) => void; organizationFilter: string; setOrganizationFilter: (value: string) => void; organizations: AnyRow[]; onClose: () => void }) {
+function FilterSheet({
+  category,
+  setCategory,
+  method,
+  setMethod,
+  organizationFilter,
+  setOrganizationFilter,
+  organizations,
+  onClose,
+}: {
+  category: CategoryFilter;
+  setCategory: (value: CategoryFilter) => void;
+  method: MethodFilter;
+  setMethod: (value: MethodFilter) => void;
+  organizationFilter: string;
+  setOrganizationFilter: (value: string) => void;
+  organizations: AnyRow[];
+  onClose: () => void;
+}) {
   return (
     <div className="ex-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ex-sheet small">
-        <div className="ex-sheet-head"><div><h2>Filters</h2><p>Choose category, payment method and organization.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="ex-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Choose category, payment method and organization.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="ex-form compact">
-          <label><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value as CategoryFilter)}><option value="all">All categories</option>{CATEGORY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-          <label><span>Payment Method</span><select value={method} onChange={(event) => setMethod(event.target.value as MethodFilter)}><option value="all">All methods</option><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option></select></label>
-          <label><span>Organization</span><select value={organizationFilter} onChange={(event) => setOrganizationFilter(event.target.value)}><option value="all">All organizations</option>{organizations.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
+          <label>
+            <span>Category</span>
+            <select
+              value={category}
+              onChange={(event) =>
+                setCategory(event.target.value as CategoryFilter)
+              }
+            >
+              <option value="all">All categories</option>
+              {CATEGORY_OPTIONS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Payment Method</span>
+            <select
+              value={method}
+              onChange={(event) =>
+                setMethod(event.target.value as MethodFilter)
+              }
+            >
+              <option value="all">All methods</option>
+              <option value="cash">Cash</option>
+              <option value="momo">Momo</option>
+              <option value="bank">Bank</option>
+              <option value="card">Card</option>
+            </select>
+          </label>
+          <label>
+            <span>Organization</span>
+            <select
+              value={organizationFilter}
+              onChange={(event) => setOrganizationFilter(event.target.value)}
+            >
+              <option value="all">All organizations</option>
+              {organizations.map((item) => (
+                <option key={String(idOf(item))} value={String(idOf(item))}>
+                  {rowName(item)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <div className="ex-sheet-actions"><button type="button" onClick={() => { setCategory("all"); setMethod("all"); setOrganizationFilter("all"); }}>Reset</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="ex-sheet-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setCategory("all");
+              setMethod("all");
+              setOrganizationFilter("all");
+            }}
+          >
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, currency, onRefresh, onAdd, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; currency: string; onRefresh: () => void | Promise<void>; onAdd: () => void; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  currency,
+  onRefresh,
+  onAdd,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  currency: string;
+  onRefresh: () => void | Promise<void>;
+  onAdd: () => void;
+  onClose: () => void;
+}) {
   return (
     <div className="ex-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ex-sheet small">
-        <div className="ex-sheet-head"><div><h2>More</h2><p>Views and finance actions are kept here to save space.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="ex-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Views and finance actions are kept here to save space.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="ex-menu-list">
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>Cards view</b><small>{summary.shown} expense(s) shown</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table view</b><small>Dense expense records</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{money(summary.total, currency)} total shown</small></button>
-          <button type="button" onClick={onAdd}><span>📉</span><b>New expense</b><small>Record branch spending</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch expenses</small></button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>Cards view</b>
+            <small>{summary.shown} expense(s) shown</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense expense records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>{money(summary.total, currency)} total shown</small>
+          </button>
+          <button type="button" onClick={onAdd}>
+            <span>📉</span>
+            <b>New expense</b>
+            <small>Record branch spending</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch expenses</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function ExpenseDrawer({ form, setForm, organizations, message, saving, save, close }: { form: ExpenseForm; setForm: React.Dispatch<React.SetStateAction<ExpenseForm>>; organizations: AnyRow[]; message: string; saving: boolean; save: () => void | Promise<void>; close: () => void }) {
+function ExpenseDrawer({
+  form,
+  setForm,
+  organizations,
+  message,
+  saving,
+  save,
+  close,
+}: {
+  form: ExpenseForm;
+  setForm: React.Dispatch<React.SetStateAction<ExpenseForm>>;
+  organizations: AnyRow[];
+  message: string;
+  saving: boolean;
+  save: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <div className="ex-drawer-layer" role="dialog" aria-modal="true"><button className="ex-drawer-overlay" type="button" onClick={close} /><aside className="ex-drawer">
-      <div className="ex-drawer-head"><div><p>{form.id ? "Edit Expense" : "New Expense"}</p><h2>Branch Expense</h2><span>{form.amount ? money(form.amount, form.currencyCode) : "Record spending"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="ex-inline-error">{message}</section>}
-      <section className="ex-form-card"><div className="ex-form-grid">
-        <label><span>Title</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Electricity bill, chalk purchase..." /></label>
-        <label><span>Amount</span><input type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} /></label>
-        <label><span>Category</span><select value={form.expenseSourceType} onChange={(event) => setForm({ ...form, expenseSourceType: event.target.value as ExpenseCategory })}>{CATEGORY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-        <label><span>Payment Method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value as ExpenseForm["paymentMethod"] })}><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option></select></label>
-        <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-        <label><span>Organization</span><select value={form.organizationId} onChange={(event) => setForm({ ...form, organizationId: event.target.value })}><option value="">General branch</option>{organizations.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Paid To / Vendor</span><input value={form.paidTo} onChange={(event) => setForm({ ...form, paidTo: event.target.value })} placeholder="Vendor or recipient name" /></label>
-        <label><span>Approved By</span><input value={form.approvedBy} onChange={(event) => setForm({ ...form, approvedBy: event.target.value })} placeholder="Approver name" /></label>
-        <label><span>Reference Number</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} /></label>
-        <label><span>Receipt Number</span><input value={form.receiptNumber} onChange={(event) => setForm({ ...form, receiptNumber: event.target.value })} /></label>
-        <label><span>Currency</span><input value={form.currencyCode} onChange={(event) => setForm({ ...form, currencyCode: event.target.value.toUpperCase() })} /></label>
-        <label className="wide"><span>Description</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional notes for audit and reporting" /></label>
-      </div></section>
-      <div className="ex-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={save}>{saving ? "Saving..." : "Save Expense"}</button></div>
-    </aside></div>
+    <div className="ex-drawer-layer" role="dialog" aria-modal="true">
+      <button className="ex-drawer-overlay" type="button" onClick={close} />
+      <aside className="ex-drawer">
+        <div className="ex-drawer-head">
+          <div>
+            <p>{form.id ? "Edit Expense" : "New Expense"}</p>
+            <h2>Branch Expense</h2>
+            <span>
+              {form.amount
+                ? money(form.amount, form.currencyCode)
+                : "Record spending"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="ex-inline-error">{message}</section>}
+        <section className="ex-form-card">
+          <div className="ex-form-grid">
+            <label>
+              <span>Title</span>
+              <input
+                value={form.title}
+                onChange={(event) =>
+                  setForm({ ...form, title: event.target.value })
+                }
+                placeholder="Electricity bill, chalk purchase..."
+              />
+            </label>
+            <label>
+              <span>Amount</span>
+              <input
+                type="number"
+                value={form.amount}
+                onChange={(event) =>
+                  setForm({ ...form, amount: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Category</span>
+              <select
+                value={form.expenseSourceType}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    expenseSourceType: event.target.value as ExpenseCategory,
+                  })
+                }
+              >
+                {CATEGORY_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Payment Method</span>
+              <select
+                value={form.paymentMethod}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    paymentMethod: event.target
+                      .value as ExpenseForm["paymentMethod"],
+                  })
+                }
+              >
+                <option value="cash">Cash</option>
+                <option value="momo">Momo</option>
+                <option value="bank">Bank</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <label>
+              <span>Date</span>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(event) =>
+                  setForm({ ...form, date: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Organization</span>
+              <select
+                value={form.organizationId}
+                onChange={(event) =>
+                  setForm({ ...form, organizationId: event.target.value })
+                }
+              >
+                <option value="">General branch</option>
+                {organizations.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Paid To / Vendor</span>
+              <input
+                value={form.paidTo}
+                onChange={(event) =>
+                  setForm({ ...form, paidTo: event.target.value })
+                }
+                placeholder="Vendor or recipient name"
+              />
+            </label>
+            <label>
+              <span>Approved By</span>
+              <input
+                value={form.approvedBy}
+                onChange={(event) =>
+                  setForm({ ...form, approvedBy: event.target.value })
+                }
+                placeholder="Approver name"
+              />
+            </label>
+            <label>
+              <span>Reference Number</span>
+              <input
+                value={form.referenceNumber}
+                onChange={(event) =>
+                  setForm({ ...form, referenceNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Receipt Number</span>
+              <input
+                value={form.receiptNumber}
+                onChange={(event) =>
+                  setForm({ ...form, receiptNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Currency</span>
+              <input
+                value={form.currencyCode}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    currencyCode: event.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Description</span>
+              <textarea
+                value={form.description}
+                onChange={(event) =>
+                  setForm({ ...form, description: event.target.value })
+                }
+                placeholder="Optional notes for audit and reporting"
+              />
+            </label>
+          </div>
+        </section>
+        <div className="ex-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={save}
+          >
+            {saving ? "Saving..." : "Save Expense"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function AnalyticsView({ summary, currency }: { summary: AnyRow; currency: string }) {
+function AnalyticsView({
+  summary,
+  currency,
+}: {
+  summary: AnyRow;
+  currency: string;
+}) {
   const methodRows = [
     { label: "Cash", value: summary.cash },
     { label: "Momo", value: summary.momo },
     { label: "Bank", value: summary.bank },
     { label: "Card", value: summary.card },
   ];
-  const maxCategory = Math.max(1, ...summary.categories.map((item: any) => n(item.amount)));
+  const maxCategory = Math.max(
+    1,
+    ...summary.categories.map((item: any) => n(item.amount)),
+  );
 
   return (
     <section className="ex-analysis-grid">
-      <article className="ex-analysis"><span>Total Expenses</span><strong>{money(summary.total, currency)}</strong><p>{summary.shown} expense record(s) currently shown.</p></article>
-      <article className="ex-analysis"><span>All Records</span><strong>{summary.all}</strong><p>{money(summary.allTotal, currency)} across all branch expenses.</p></article>
-      <article className="ex-analysis"><span>Cash</span><strong>{money(summary.cash, currency)}</strong><p>Cash expense amount currently shown.</p></article>
-      <article className="ex-analysis"><span>Momo / Bank / Card</span><strong>{money(summary.momo + summary.bank + summary.card, currency)}</strong><p>Digital and bank payment methods.</p></article>
+      <article className="ex-analysis">
+        <span>Total Expenses</span>
+        <strong>{money(summary.total, currency)}</strong>
+        <p>{summary.shown} expense record(s) currently shown.</p>
+      </article>
+      <article className="ex-analysis">
+        <span>All Records</span>
+        <strong>{summary.all}</strong>
+        <p>{money(summary.allTotal, currency)} across all branch expenses.</p>
+      </article>
+      <article className="ex-analysis">
+        <span>Cash</span>
+        <strong>{money(summary.cash, currency)}</strong>
+        <p>Cash expense amount currently shown.</p>
+      </article>
+      <article className="ex-analysis">
+        <span>Momo / Bank / Card</span>
+        <strong>
+          {money(summary.momo + summary.bank + summary.card, currency)}
+        </strong>
+        <p>Digital and bank payment methods.</p>
+      </article>
 
-      <article className="ex-analysis wide"><span>Payment Method</span><strong>{money(summary.total, currency)}</strong><div className="ex-analysis-list">{methodRows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{money(row.value, currency)}</small></div><div className="ex-progress"><i style={{ width: `${Math.max(5, Math.round((n(row.value) / Math.max(1, n(summary.total))) * 100))}%` }} /></div></section>)}</div></article>
-      <article className="ex-analysis wide"><span>Categories</span><strong>{summary.categories.filter((item: any) => item.count).length}</strong><div className="ex-analysis-list">{summary.categories.filter((item: any) => item.count).map((row: any) => <section key={row.value}><div><b>{row.icon} {row.label}</b><small>{money(row.amount, currency)}</small></div><div className="ex-progress"><i style={{ width: `${Math.max(5, Math.round((n(row.amount) / maxCategory) * 100))}%` }} /></div></section>)}</div></article>
+      <article className="ex-analysis wide">
+        <span>Payment Method</span>
+        <strong>{money(summary.total, currency)}</strong>
+        <div className="ex-analysis-list">
+          {methodRows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{money(row.value, currency)}</small>
+              </div>
+              <div className="ex-progress">
+                <i
+                  style={{
+                    width: `${Math.max(5, Math.round((n(row.value) / Math.max(1, n(summary.total))) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
+      <article className="ex-analysis wide">
+        <span>Categories</span>
+        <strong>
+          {summary.categories.filter((item: any) => item.count).length}
+        </strong>
+        <div className="ex-analysis-list">
+          {summary.categories
+            .filter((item: any) => item.count)
+            .map((row: any) => (
+              <section key={row.value}>
+                <div>
+                  <b>
+                    {row.icon} {row.label}
+                  </b>
+                  <small>{money(row.amount, currency)}</small>
+                </div>
+                <div className="ex-progress">
+                  <i
+                    style={{
+                      width: `${Math.max(5, Math.round((n(row.amount) / maxCategory) * 100))}%`,
+                    }}
+                  />
+                </div>
+              </section>
+            ))}
+        </div>
+      </article>
     </section>
   );
 }

@@ -23,8 +23,8 @@ import { SyncTableName } from "./syncTables";
 
 export type ScopeFilter = {
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   [key: string]: any;
 };
 
@@ -33,9 +33,7 @@ export function matchesScope(row: any, scope?: ScopeFilter) {
 
   return Object.entries(scope).every(([key, value]) => {
     if (value === undefined || value === null || value === "") return true;
-    return Number.isFinite(Number(value)) && Number.isFinite(Number(row?.[key]))
-      ? Number(row?.[key]) === Number(value)
-      : row?.[key] === value;
+    return String(row?.[key] ?? "") === String(value);
   });
 }
 
@@ -44,7 +42,7 @@ export async function listRecords<T = any>(tableName: SyncTableName, scope?: Sco
   return rows.filter((row: any) => matchesScope(row, scope)) as T[];
 }
 
-export async function getRecord<T = any>(tableName: SyncTableName, id: number) {
+export async function getRecord<T = any>(tableName: SyncTableName, id: string) {
   const table = getSyncTable(tableName);
   const record = await table.get(id);
   return record && isActiveRecord(record) ? (record as T) : null;
@@ -54,15 +52,15 @@ export async function createRecord<T extends SyncableRecord>(tableName: SyncTabl
   return createLocal<T>(tableName, data);
 }
 
-export async function updateRecord<T extends SyncableRecord>(tableName: SyncTableName, id: number, patch: Partial<T>) {
+export async function updateRecord<T extends SyncableRecord>(tableName: SyncTableName, id: string, patch: Partial<T>) {
   return updateLocal<T>(tableName, id, patch);
 }
 
-export async function deleteRecord(tableName: SyncTableName, id: number) {
+export async function deleteRecord(tableName: SyncTableName, id: string) {
   return softDeleteLocal(tableName, id);
 }
 
-export async function restoreRecord(tableName: SyncTableName, id: number) {
+export async function restoreRecord(tableName: SyncTableName, id: string) {
   return restoreLocal(tableName, id);
 }
 

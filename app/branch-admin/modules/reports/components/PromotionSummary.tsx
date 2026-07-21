@@ -122,7 +122,8 @@ export default function PromotionSummary({
       />
 
       <div className="ps-empty-box">
-        Select a class, period, academic year or decision filter to generate promotion intelligence.
+        Select a class, period, academic year or decision filter to generate
+        promotion intelligence.
       </div>
     </section>
   );
@@ -169,7 +170,8 @@ export default function PromotionSummary({
         </div>
 
         <div className="ps-summary-cell">
-          <strong>Promotion Rate:</strong> {formatNumber(summary.promotionRate, 1)}%
+          <strong>Promotion Rate:</strong>{" "}
+          {formatNumber(summary.promotionRate, 1)}%
         </div>
 
         <div className="ps-summary-cell">
@@ -254,7 +256,9 @@ export default function PromotionSummary({
                 </td>
 
                 <td style={{ ...td, textAlign: "center", fontWeight: 800 }}>
-                  {row.average != null ? `${formatNumber(row.average, 1)}%` : "-"}
+                  {row.average != null
+                    ? `${formatNumber(row.average, 1)}%`
+                    : "-"}
                 </td>
 
                 <td style={{ ...td, textAlign: "center" }}>
@@ -296,11 +300,10 @@ export default function PromotionSummary({
 
       {/* FOOTER */}
 
-      <div
-        className="ps-footer"
-        style={{ borderTopColor: primary }}
-      >
-        <span>Official promotion summary generated for {branding.schoolName}</span>
+      <div className="ps-footer" style={{ borderTopColor: primary }}>
+        <span>
+          Official promotion summary generated for {branding.schoolName}
+        </span>
         <span>Powered by Eleeveon School Management System</span>
       </div>
     </section>
@@ -323,7 +326,8 @@ export default function PromotionSummary({
         <div>
           <strong>Promotion Summary</strong>
           <span>
-            {summary.totalStudents} students · {summary.promoteCount} promoted · {summary.repeatCount} repeated
+            {summary.totalStudents} students · {summary.promoteCount} promoted ·{" "}
+            {summary.repeatCount} repeated
           </span>
         </div>
 
@@ -333,9 +337,7 @@ export default function PromotionSummary({
       </div>
 
       <div className="ps-preview-scroll report-screen-scroll">
-        <div className="ps-preview-scale">
-          {reportPage}
-        </div>
+        <div className="ps-preview-scale">{reportPage}</div>
       </div>
     </div>
   );

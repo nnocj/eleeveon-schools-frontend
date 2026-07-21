@@ -46,18 +46,27 @@ export type WorkspaceBootstrapMembership = {
   id?: string | number | null;
   role?: string | null;
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   [key: string]: unknown;
 };
 
 export type WorkspaceBootstrapRecord = {
   tableName: string;
-  localId?: number;
+
+  /** Permanent Dexie entity UUID. */
+  localId?: string;
+
+  /** Prisma SyncRecord UUID. */
   cloudId?: string;
+
+  /** Temporary compatibility aliases. */
+  entityId?: string;
+  id?: string;
+
   accountId: string;
   deviceId?: string;
   version: number;
@@ -71,11 +80,11 @@ export type WorkspaceBootstrapResponse = {
   accountId: string;
   membershipId?: string;
   role: string;
-  schoolId?: number | null;
-  branchId?: number | null;
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   workspace?: {
     appearanceScope?: "platform" | "account" | "school" | "branch";
     school?: Record<string, any> | null;
@@ -93,7 +102,6 @@ export type WorkspaceBootstrapResponse = {
   cacheRecords?: Array<{
     tableName: string;
     id?: string;
-    cloudId?: string;
     accountId?: string;
     updatedAt?: number | string;
     isDeleted?: boolean;
@@ -164,8 +172,8 @@ const WORKSPACE_BOOTSTRAP_SCHEMA_VERSION = 2;
 
 export type ScopedWorkspaceSettingsCache = {
   accountId: string;
-  schoolId: number | null;
-  branchId: number | null;
+  schoolId: string | null;
+  branchId: string | null;
   role: string;
   appearanceScope: "platform" | "account" | "school" | "branch";
   settings: Record<string, any> | null;
@@ -183,6 +191,11 @@ function cleanString(
     String(value ?? "").trim();
 
   return result || undefined;
+}
+
+function cleanOptionalId(value: unknown): string | null {
+  const id = String(value ?? "").trim();
+  return id || null;
 }
 
 function positiveNumber(
@@ -230,13 +243,13 @@ function membershipId(
         membership.branchId,
       ) || "root",
       positiveNumber(
-        membership.teacherLocalId,
+        membership.teacherId,
       ) ||
         positiveNumber(
-          membership.studentLocalId,
+          membership.studentId,
         ) ||
         positiveNumber(
-          membership.parentLocalId,
+          membership.parentId,
         ) ||
         "profile",
     ].join(":")
@@ -252,12 +265,8 @@ function storageKey(
     MARKER_PREFIX,
     accountId,
     membershipId(membership),
-    positiveNumber(
-      membership.schoolId,
-    ) || "school-none",
-    positiveNumber(
-      membership.branchId,
-    ) || "branch-none",
+    cleanOptionalId(membership.schoolId) || "school-none",
+    cleanOptionalId(membership.branchId) || "branch-none",
   ].join(":");
 }
 
@@ -269,12 +278,8 @@ export function getScopedWorkspaceSettingsKey(
   return [
     SETTINGS_CACHE_PREFIX,
     accountId,
-    positiveNumber(
-      membership.schoolId,
-    ) || "school-none",
-    positiveNumber(
-      membership.branchId,
-    ) || "branch-none",
+    cleanOptionalId(membership.schoolId) || "school-none",
+    cleanOptionalId(membership.branchId) || "branch-none",
   ].join(":");
 }
 
@@ -335,17 +340,17 @@ function writeJson(
   } catch {}
 }
 
-async function findByCloudId(
+async function findById(
   table: any,
-  cloudId?: string,
+  id?: string,
 ) {
-  if (!cloudId) return null;
+  if (!id) return null;
 
   try {
     const indexed =
       await table
-        .where("cloudId")
-        .equals(cloudId)
+        .where("id")
+        .equals(id)
         .first();
 
     if (indexed) {
@@ -360,8 +365,8 @@ async function findByCloudId(
     rows.find(
       (row: any) =>
         String(
-          row.cloudId || "",
-        ) === cloudId,
+          row.id || "",
+        ) === id,
     ) || null
   );
 }
@@ -372,20 +377,57 @@ async function findExistingRecord(
   record:
     WorkspaceBootstrapRecord,
 ) {
+  const permanentId =
+    cleanString(
+      record.localId ||
+        record.entityId ||
+        record.payload?.id ||
+        record.id,
+    );
+
+  const directMatch =
+    await findById(
+      table,
+      permanentId,
+    );
+
+  if (directMatch) {
+    return directMatch;
+  }
+
   const cloudId =
     cleanString(
       record.cloudId ||
         record.payload?.cloudId,
     );
 
-  const cloudMatch =
-    await findByCloudId(
-      table,
-      cloudId,
-    );
+  if (cloudId) {
+    try {
+      const indexed =
+        await table
+          .where("cloudId")
+          .equals(cloudId)
+          .first();
 
-  if (cloudMatch) {
-    return cloudMatch;
+      if (indexed) {
+        return indexed;
+      }
+    } catch {}
+
+    const rows =
+      await table.toArray();
+
+    const cloudMatch =
+      rows.find(
+        (row: any) =>
+          String(
+            row.cloudId || "",
+          ) === cloudId,
+      );
+
+    if (cloudMatch) {
+      return cloudMatch;
+    }
   }
 
   if (
@@ -433,49 +475,13 @@ async function findExistingRecord(
     }
   }
 
-  const localId =
-    positiveNumber(
-      record.localId,
-    );
-
-  const deviceId =
-    cleanString(
-      record.deviceId ||
-        record.payload
-          ?.deviceId,
-    );
-
-  if (
-    localId &&
-    deviceId
-  ) {
-    const candidate =
-      await table
-        .get(localId)
-        .catch(
-          () => null,
-        );
-
-    if (
-      candidate &&
-      candidate.accountId ===
-        record.accountId &&
-      String(
-        candidate.deviceId ||
-          "",
-      ) === deviceId
-    ) {
-      return candidate;
-    }
-  }
-
   return null;
 }
 
 function cleanIncomingPayload(
   record:
     WorkspaceBootstrapRecord,
-  existingId?: number,
+  permanentId: string,
 ) {
   const payload = {
     ...(record.payload ||
@@ -498,14 +504,8 @@ function cleanIncomingPayload(
     delete payload[key];
   }
 
-  if (
-    existingId !== undefined
-  ) {
-    payload.id =
-      existingId;
-  } else {
-    delete payload.id;
-  }
+  payload.id =
+    permanentId;
 
   return payload;
 }
@@ -532,20 +532,33 @@ async function applyLocalFirstRecord(
       record,
     );
 
-  const existingId =
-    positiveNumber(
-      existing?.id,
+  const permanentId =
+    cleanString(
+      existing?.id ||
+        record.localId ||
+        record.entityId ||
+        record.payload?.id ||
+        record.id,
     );
+
+  if (!permanentId) {
+    throw new Error(
+      `Workspace bootstrap record for "${record.tableName}" has no permanent localId.`,
+    );
+  }
 
   const incoming = {
     ...cleanIncomingPayload(
       record,
-      existingId,
+      permanentId,
     ),
     cloudId:
-      record.cloudId ||
-      record.payload
-        ?.cloudId,
+      cleanString(
+        record.cloudId ||
+          record.payload
+            ?.cloudId,
+      ) ??
+      undefined,
     accountId,
     deviceId:
       record.deviceId ||
@@ -578,20 +591,21 @@ async function applyLocalFirstRecord(
       undefined,
   };
 
-  if (existingId) {
-    const currentVersion =
-      Number(
-        existing?.version ||
-          0,
-      );
+  const currentVersion =
+    Number(
+      existing?.version ||
+        0,
+    );
 
-    const currentUpdatedAt =
-      Number(
-        existing?.updatedAt ||
-          0,
-      );
+  const currentUpdatedAt =
+    Number(
+      existing?.updatedAt ||
+        0,
+    );
 
-    if (
+  if (
+    existing &&
+    (
       currentVersion >
         incoming.version ||
       (
@@ -600,26 +614,15 @@ async function applyLocalFirstRecord(
         currentUpdatedAt >
           incoming.updatedAt
       )
-    ) {
-      return false;
-    }
-
-    await table.update(
-      existingId,
-      {
-        ...incoming,
-        id: existingId,
-      },
-    );
-
-    return true;
+    )
+  ) {
+    return false;
   }
 
-  delete (incoming as any).id;
-
-  await table.add(
-    incoming,
-  );
+  await table.put({
+    ...incoming,
+    id: permanentId,
+  });
 
   return true;
 }
@@ -654,8 +657,8 @@ async function applyCacheRecord(
   const id =
     record.id ||
     payload.id ||
-    record.cloudId ||
-    payload.cloudId ||
+    record.id ||
+    payload.id ||
     (
       record.tableName ===
       "accounts"
@@ -715,14 +718,10 @@ async function actualWorkspaceReady(
   }
 
   const schoolId =
-    positiveNumber(
-      membership.schoolId,
-    );
+    cleanOptionalId(membership.schoolId);
 
   const branchId =
-    positiveNumber(
-      membership.branchId,
-    );
+    cleanOptionalId(membership.branchId);
 
   if (!schoolId) {
     return false;
@@ -734,7 +733,7 @@ async function actualWorkspaceReady(
       (row: any) =>
         row.accountId === accountId &&
         !row.isDeleted &&
-        Number(row.id || row.localId) === schoolId,
+        String(row.id || row.entityId || "") === schoolId,
     );
   }
 
@@ -770,13 +769,8 @@ async function actualWorkspaceReady(
         row.accountId ===
           accountId &&
         !row.isDeleted &&
-        Number(
-          row.id ||
-            row.localId,
-        ) === branchId &&
-        Number(
-          row.schoolId,
-        ) === schoolId,
+        String(row.id || row.entityId || "") === branchId &&
+        String(row.schoolId || "") === schoolId,
     );
 
   const settingsExist =
@@ -785,12 +779,8 @@ async function actualWorkspaceReady(
         row.accountId ===
           accountId &&
         !row.isDeleted &&
-        Number(
-          row.schoolId,
-        ) === schoolId &&
-        Number(
-          row.branchId,
-        ) === branchId,
+        String(row.schoolId || "") === schoolId &&
+        String(row.branchId || "") === branchId,
     );
 
   return (
@@ -806,8 +796,8 @@ async function readCommittedWorkspaceSummary(
 ) {
   const role = normalizeRole(membership.role);
   const appearanceScope = appearanceScopeForRole(role);
-  const schoolId = positiveNumber(membership.schoolId);
-  const branchId = positiveNumber(membership.branchId);
+  const schoolId = cleanOptionalId(membership.schoolId);
+  const branchId = cleanOptionalId(membership.branchId);
 
   const [schools, branches, settingsRows] = await Promise.all([
     (db as any).schools?.toArray?.() || [],
@@ -820,7 +810,7 @@ async function readCommittedWorkspaceSummary(
         (row: any) =>
           row.accountId === accountId &&
           !row.isDeleted &&
-          Number(row.id || row.localId) === schoolId,
+          String(row.id || row.entityId || "") === schoolId,
       ) || null
     : null;
 
@@ -829,8 +819,8 @@ async function readCommittedWorkspaceSummary(
         (row: any) =>
           row.accountId === accountId &&
           !row.isDeleted &&
-          Number(row.id || row.localId) === branchId &&
-          (!schoolId || Number(row.schoolId) === schoolId),
+          String(row.id || row.entityId || "") === branchId &&
+          (!schoolId || String(row.schoolId || "") === schoolId),
       ) || null
     : null;
 
@@ -841,8 +831,8 @@ async function readCommittedWorkspaceSummary(
             (row: any) =>
               row.accountId === accountId &&
               !row.isDeleted &&
-              Number(row.schoolId) === schoolId &&
-              Number(row.branchId) === branchId,
+              String(row.schoolId || "") === schoolId &&
+              String(row.branchId || "") === branchId,
           )
           .sort(
             (left: any, right: any) =>
@@ -1047,17 +1037,17 @@ export async function bootstrapSelectedWorkspace(
             positiveNumber(
               membership.branchId,
             ),
-          teacherLocalId:
+          teacherId:
             positiveNumber(
-              membership.teacherLocalId,
+              membership.teacherId,
             ),
-          studentLocalId:
+          studentId:
             positiveNumber(
-              membership.studentLocalId,
+              membership.studentId,
             ),
-          parentLocalId:
+          parentId:
             positiveNumber(
-              membership.parentLocalId,
+              membership.parentId,
             ),
         },
       },
@@ -1242,12 +1232,12 @@ export async function bootstrapSelectedWorkspace(
           tableName:
             malformed.record
               ?.tableName,
-          localId:
+          entityId:
             malformed.record
-              ?.localId,
-          cloudId:
+              ?.entityId,
+          id:
             malformed.record
-              ?.cloudId,
+              ?.id,
           reason:
             malformed.reason ||
             "The backend quarantined a malformed workspace record.",
@@ -1280,10 +1270,10 @@ export async function bootstrapSelectedWorkspace(
             accountId,
             tableName:
               record.tableName,
-            localId:
-              record.localId,
-            cloudId:
-              record.cloudId,
+            entityId:
+              record.entityId,
+            id:
+              record.id,
             reason:
               integrityReason(
                 integrity.issues,
@@ -1388,9 +1378,9 @@ export async function bootstrapSelectedWorkspace(
   const cacheEnvelope: ScopedWorkspaceSettingsCache = {
     accountId,
     schoolId:
-      positiveNumber(membership.schoolId) || null,
+      cleanOptionalId(membership.schoolId) || null,
     branchId:
-      positiveNumber(membership.branchId) || null,
+      cleanOptionalId(membership.branchId) || null,
     role,
     appearanceScope:
       committedSummary.appearanceScope,

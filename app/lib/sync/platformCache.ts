@@ -30,7 +30,7 @@ export type PlatformCacheResult = {
 function normalizeCachePayload(record: CachePullRecord) {
   const payload = { ...(record.payload || {}) } as any;
 
-  const id = record.id || payload.id || record.cloudId || payload.cloudId;
+  const id = record.id || payload.id || record.id || payload.id;
   if (id !== undefined && id !== null) payload.id = String(id);
 
   if (record.accountId && !payload.accountId) payload.accountId = record.accountId;

@@ -129,59 +129,49 @@ function roleTone(role: string): RoleTone {
   return "gray";
 }
 
-function toPositiveNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function toPermanentId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = String(value).trim();
+  return parsed || null;
 }
 
-function firstPositiveNumber(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string | null {
   for (const value of values) {
-    const parsed = toPositiveNumber(value);
+    const parsed = toPermanentId(value);
     if (parsed) return parsed;
   }
   return null;
 }
 
 function normalizeSelectedMembership(membership: UserMembership): UserMembership {
-  const schoolId = firstPositiveNumber(
+  const schoolId = firstPermanentId(
     membership.schoolId,
     membership.school?.id,
     membership.activeSchoolId,
-    membership.contextSchoolId
+    membership.contextSchoolId,
   );
 
-  const branchId = firstPositiveNumber(
+  const branchId = firstPermanentId(
     membership.branchId,
     membership.schoolBranchId,
     membership.branch?.id,
     membership.activeBranchId,
-    membership.contextBranchId
+    membership.contextBranchId,
   );
 
-  const teacherLocalId = firstPositiveNumber(
-    membership.teacherLocalId,
-    membership.localTeacherId,
+  const teacherId = firstPermanentId(
     membership.teacherId,
     membership.teacher?.id,
-    membership.staffLocalId
   );
 
-  const studentLocalId = firstPositiveNumber(
-    membership.studentLocalId,
-    membership.localStudentId,
+  const studentId = firstPermanentId(
     membership.studentId,
     membership.student?.id,
-    membership.learnerLocalId,
-    membership.pupilLocalId
   );
 
-  const parentLocalId = firstPositiveNumber(
-    membership.parentLocalId,
-    membership.localParentId,
+  const parentId = firstPermanentId(
     membership.parentId,
     membership.parent?.id,
-    membership.guardianLocalId
   );
 
   return {
@@ -189,17 +179,17 @@ function normalizeSelectedMembership(membership: UserMembership): UserMembership
     schoolId,
     branchId,
     schoolBranchId: branchId,
-    teacherLocalId,
-    studentLocalId,
-    parentLocalId,
+    teacherId,
+    studentId,
+    parentId,
     active: membership.active !== false,
   };
 }
 
 function membershipHasRequiredProfileId(membership: UserMembership) {
-  if (membership.role === "student") return Boolean(membership.studentLocalId);
-  if (membership.role === "teacher") return Boolean(membership.teacherLocalId);
-  if (membership.role === "parent") return Boolean(membership.parentLocalId);
+  if (membership.role === "student") return Boolean(membership.studentId);
+  if (membership.role === "teacher") return Boolean(membership.teacherId);
+  if (membership.role === "parent") return Boolean(membership.parentId);
   return true;
 }
 
@@ -207,22 +197,24 @@ function membershipKey(membership: UserMembership, fallback = "membership") {
   return String(
     membership.id ??
       `${membership.role}-${membership.schoolId ?? "account"}-${membership.branchId ?? "root"}-${
-        membership.teacherLocalId ?? membership.studentLocalId ?? membership.parentLocalId ?? fallback
-      }`
+        membership.teacherId ?? membership.studentId ?? membership.parentId ?? fallback
+      }`,
   );
 }
 
 function roleScope(membership: UserMembership) {
   if (!membership.schoolId && !membership.branchId) return "Account level";
-  if (membership.schoolId && membership.branchId) return `School ${membership.schoolId} · Branch ${membership.branchId}`;
+  if (membership.schoolId && membership.branchId) {
+    return `School ${membership.schoolId} · Branch ${membership.branchId}`;
+  }
   if (membership.schoolId) return `School ${membership.schoolId}`;
   return `Branch ${membership.branchId || "workspace"}`;
 }
 
 function roleDetail(membership: UserMembership) {
-  if (membership.teacherLocalId) return `Teacher profile ${membership.teacherLocalId}`;
-  if (membership.studentLocalId) return `Student profile ${membership.studentLocalId}`;
-  if (membership.parentLocalId) return `Parent profile ${membership.parentLocalId}`;
+  if (membership.teacherId) return `Teacher profile ${membership.teacherId}`;
+  if (membership.studentId) return `Student profile ${membership.studentId}`;
+  if (membership.parentId) return `Parent profile ${membership.parentId}`;
   return "Workspace access";
 }
 
@@ -257,8 +249,8 @@ function createBrandingRefreshKey({
 }: {
   membershipId: string;
   role?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 }) {
   return [
     role || "role",
@@ -277,11 +269,11 @@ function writeOpenedWorkspaceSession(membership: UserMembership) {
   safeSet("activeMembershipId", id);
   safeSet("activeRole", normalized.role || "");
 
-  const schoolId = toPositiveNumber(normalized.schoolId);
-  const branchId = toPositiveNumber(normalized.branchId);
-  const teacherId = toPositiveNumber(normalized.teacherLocalId);
-  const studentId = toPositiveNumber(normalized.studentLocalId);
-  const parentId = toPositiveNumber(normalized.parentLocalId);
+  const schoolId = toPermanentId(normalized.schoolId);
+  const branchId = toPermanentId(normalized.branchId);
+  const teacherId = toPermanentId(normalized.teacherId);
+  const studentId = toPermanentId(normalized.studentId);
+  const parentId = toPermanentId(normalized.parentId);
   const brandingRefreshKey = createBrandingRefreshKey({
     membershipId: id,
     role: normalized.role,
@@ -291,11 +283,11 @@ function writeOpenedWorkspaceSession(membership: UserMembership) {
 
   safeSet(BRANDING_REFRESH_KEY, brandingRefreshKey);
 
-  if (schoolId) safeSet("activeSchoolId", String(schoolId)); else safeRemove("activeSchoolId");
-  if (branchId) safeSet("activeBranchId", String(branchId)); else safeRemove("activeBranchId");
-  if (teacherId) safeSet("activeTeacherId", String(teacherId)); else safeRemove("activeTeacherId");
-  if (studentId) safeSet("activeStudentId", String(studentId)); else safeRemove("activeStudentId");
-  if (parentId) safeSet("activeParentId", String(parentId)); else safeRemove("activeParentId");
+  if (schoolId) safeSet("activeSchoolId", schoolId); else safeRemove("activeSchoolId");
+  if (branchId) safeSet("activeBranchId", branchId); else safeRemove("activeBranchId");
+  if (teacherId) safeSet("activeTeacherId", teacherId); else safeRemove("activeTeacherId");
+  if (studentId) safeSet("activeStudentId", studentId); else safeRemove("activeStudentId");
+  if (parentId) safeSet("activeParentId", parentId); else safeRemove("activeParentId");
 
   safeSet(
     OPEN_WORKSPACE_KEY,
@@ -305,12 +297,12 @@ function writeOpenedWorkspaceSession(membership: UserMembership) {
       role: normalized.role,
       schoolId,
       branchId,
-      teacherLocalId: teacherId,
-      studentLocalId: studentId,
-      parentLocalId: parentId,
+      teacherId,
+      studentId,
+      parentId,
       brandingRefreshKey,
       openedAt: Date.now(),
-    })
+    }),
   );
 
   return normalized;

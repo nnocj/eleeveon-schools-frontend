@@ -21,7 +21,7 @@
  * - Active membership is still cleared only on logout/auth failure.
  * - Account id is still stored for sync.
  * - Membership aliases are preserved exactly as provided so select-role and
- *   RolePortalShell can normalize studentLocalId/teacherLocalId/parentLocalId.
+ *   RolePortalShell can normalize studentId/teacherId/parentId.
  */
 
 import React, {
@@ -234,9 +234,9 @@ function membershipIdentity(membership: UserMembership) {
       `${membership.role}-${membership.schoolId ?? "account"}-${
         membership.branchId ?? membership.schoolBranchId ?? "root"
       }-${
-        membership.teacherLocalId ??
-        membership.studentLocalId ??
-        membership.parentLocalId ??
+        membership.teacherId ??
+        membership.studentId ??
+        membership.parentId ??
         "profile"
       }`
   );

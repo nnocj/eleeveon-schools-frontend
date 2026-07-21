@@ -14,7 +14,7 @@
  *   -> normalized historical reports
  *   -> student transcript
  *   -> multi-period report
- *   -> annual broadsheet 
+ *   -> annual broadsheet
  *   -> subject history
  *   -> promotion summary
  *   -> progression timeline
@@ -82,14 +82,14 @@ export function round(value: number, decimals = 2): number {
 }
 
 export function average(values: number[]): number {
-  const valid = values.filter(value => Number.isFinite(value));
+  const valid = values.filter((value) => Number.isFinite(value));
   if (!valid.length) return 0;
 
   return valid.reduce((sum, item) => sum + item, 0) / valid.length;
 }
 
 export function isActive<T extends { isDeleted?: boolean; active?: boolean }>(
-  row: T
+  row: T,
 ): boolean {
   return !row.isDeleted && row.active !== false;
 }
@@ -102,6 +102,34 @@ export function firstText(...values: unknown[]): string {
   }
 
   return "";
+}
+
+export function safeString(value: unknown): string {
+  if (value == null) return "";
+  return String(value);
+}
+
+export function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (value == null) continue;
+    const stringValue = String(value).trim();
+    if (stringValue) return stringValue;
+  }
+
+  return undefined;
+}
+
+export function uniqueStrings(
+  values: Array<string | undefined | null>,
+): string[] {
+  return Array.from(
+    new Set(
+      values.filter(
+        (value): value is string =>
+          typeof value === "string" && value.trim().length > 0,
+      ),
+    ),
+  );
 }
 
 export function firstNumber(...values: unknown[]): number | undefined {
@@ -121,13 +149,13 @@ export function uniqueNumbers(values: Array<number | undefined>): number[] {
     new Set(
       values.filter((value): value is number => {
         return typeof value === "number" && Number.isFinite(value);
-      })
-    )
+      }),
+    ),
   );
 }
 
 export function normalizeDecision(
-  value: unknown
+  value: unknown,
 ): CumulativeDecision | undefined {
   if (value === "promote" || value === "repeat" || value === "graduate") {
     return value;
@@ -137,7 +165,7 @@ export function normalizeDecision(
 }
 
 export function computeTrend(values: number[]): CumulativeTrendDirection {
-  const valid = values.filter(value => Number.isFinite(value));
+  const valid = values.filter((value) => Number.isFinite(value));
 
   if (valid.length < 2) return "none";
 
@@ -150,26 +178,28 @@ export function computeTrend(values: number[]): CumulativeTrendDirection {
 }
 
 export function sortByStudentName<T extends { studentName: string }>(
-  rows: T[]
+  rows: T[],
 ): T[] {
   return [...rows].sort((a, b) => a.studentName.localeCompare(b.studentName));
 }
 
 export function sortByAdmissionNumber<T extends { admissionNumber?: string }>(
-  rows: T[]
+  rows: T[],
 ): T[] {
   return [...rows].sort((a, b) =>
-    (a.admissionNumber || "").localeCompare(b.admissionNumber || "")
+    (a.admissionNumber || "").localeCompare(b.admissionNumber || ""),
   );
 }
 
 export function sortByAverage<T extends { average?: number }>(rows: T[]): T[] {
-  return [...rows].sort((a, b) => safeNumber(b.average) - safeNumber(a.average));
+  return [...rows].sort(
+    (a, b) => safeNumber(b.average) - safeNumber(a.average),
+  );
 }
 
-export function sortByPosition<T extends { position?: number; average?: number }>(
-  rows: T[]
-): T[] {
+export function sortByPosition<
+  T extends { position?: number; average?: number },
+>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     const positionA = a.position || 999999;
     const positionB = b.position || 999999;
@@ -180,12 +210,14 @@ export function sortByPosition<T extends { position?: number; average?: number }
   });
 }
 
-export function applySortMode<T extends {
-  studentName: string;
-  admissionNumber?: string;
-  average?: number;
-  position?: number;
-}>(rows: T[], sortMode: ReportSortMode): T[] {
+export function applySortMode<
+  T extends {
+    studentName: string;
+    admissionNumber?: string;
+    average?: number;
+    position?: number;
+  },
+>(rows: T[], sortMode: ReportSortMode): T[] {
   switch (sortMode) {
     case "alphabetical":
       return sortByStudentName(rows);
@@ -208,49 +240,54 @@ export function applySortMode<T extends {
 
 export function buildCumulativeLookups(dataset: CumulativeReportEngineDataset) {
   return {
-    schoolMap: new Map(dataset.schools.map(item => [item.id, item])),
-    branchMap: new Map(dataset.branches.map(item => [item.id, item])),
+    schoolMap: new Map(dataset.schools.map((item) => [item.id, item])),
+    branchMap: new Map(dataset.branches.map((item) => [item.id, item])),
 
     schoolBranchSettingMap: new Map(
-      dataset.schoolBranchSettings.map(item => [item.branchId, item])
+      dataset.schoolBranchSettings.map((item) => [item.branchId, item]),
     ),
 
     academicStructureMap: new Map(
-      dataset.academicStructures.map(item => [item.id, item])
+      dataset.academicStructures.map((item) => [item.id, item]),
     ),
 
     academicPeriodMap: new Map(
-      dataset.academicPeriods.map(item => [item.id, item])
+      dataset.academicPeriods.map((item) => [item.id, item]),
     ),
 
-    studentMap: new Map(dataset.students.map(item => [item.id, item])),
-    classMap: new Map(dataset.classes.map(item => [item.id, item])),
-    subjectMap: new Map(dataset.subjects.map(item => [item.id, item])),
-    teacherMap: new Map(dataset.teachers.map(item => [item.id, item])),
-    parentMap: new Map(dataset.parents.map(item => [item.id, item])),
+    studentMap: new Map(dataset.students.map((item) => [item.id, item])),
+    classMap: new Map(dataset.classes.map((item) => [item.id, item])),
+    subjectMap: new Map(dataset.subjects.map((item) => [item.id, item])),
+    teacherMap: new Map(dataset.teachers.map((item) => [item.id, item])),
+    parentMap: new Map(dataset.parents.map((item) => [item.id, item])),
   };
 }
 
-
-function isUsableRow<T extends { isDeleted?: boolean; active?: boolean }>(row?: T): row is T {
+function isUsableRow<T extends { isDeleted?: boolean; active?: boolean }>(
+  row?: T,
+): row is T {
   return Boolean(row && !row.isDeleted && row.active !== false);
 }
 
 function periodOrderOf(
   dataset: CumulativeReportEngineDataset,
-  academicPeriodId?: number
+  academicPeriodId?: string,
 ): number {
   if (!academicPeriodId) return 0;
-  const period = dataset.academicPeriods.find(item => item.id === academicPeriodId);
-  return safeNumber(period?.order || academicPeriodId);
+  const period = dataset.academicPeriods.find(
+    (item) => item.id === academicPeriodId,
+  );
+  return safeNumber(period?.order);
 }
 
 function sortSnapshotsByAcademicContext(
   dataset: CumulativeReportEngineDataset,
-  snapshots: StudentReportSnapshot[]
+  snapshots: StudentReportSnapshot[],
 ): StudentReportSnapshot[] {
   return [...snapshots].sort((a, b) => {
-    const yearCompare = (a.academicYear || "").localeCompare(b.academicYear || "");
+    const yearCompare = (a.academicYear || "").localeCompare(
+      b.academicYear || "",
+    );
     if (yearCompare !== 0) return yearCompare;
 
     const periodCompare =
@@ -259,23 +296,34 @@ function sortSnapshotsByAcademicContext(
 
     if (periodCompare !== 0) return periodCompare;
 
-    return safeNumber(a.id) - safeNumber(b.id);
+    return safeString(a.id).localeCompare(safeString(b.id));
   });
 }
 
 function getHeaderCandidateSnapshots(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): StudentReportSnapshot[] {
-  return dataset.studentReportSnapshots.filter(snapshot => {
+  return dataset.studentReportSnapshots.filter((snapshot) => {
     if (!filters.includeDeletedSnapshots && snapshot.isDeleted) return false;
 
-    if (filters.branchId && snapshot.branchId !== filters.branchId) return false;
-    if (filters.academicStructureId && snapshot.academicStructureId !== filters.academicStructureId) return false;
-    if (filters.academicPeriodId && snapshot.academicPeriodId !== filters.academicPeriodId) return false;
+    if (filters.branchId && snapshot.branchId !== filters.branchId)
+      return false;
+    if (
+      filters.academicStructureId &&
+      snapshot.academicStructureId !== filters.academicStructureId
+    )
+      return false;
+    if (
+      filters.academicPeriodId &&
+      snapshot.academicPeriodId !== filters.academicPeriodId
+    )
+      return false;
     if (filters.classId && snapshot.classId !== filters.classId) return false;
-    if (filters.studentId && snapshot.studentId !== filters.studentId) return false;
-    if (filters.academicYear && snapshot.academicYear !== filters.academicYear) return false;
+    if (filters.studentId && snapshot.studentId !== filters.studentId)
+      return false;
+    if (filters.academicYear && snapshot.academicYear !== filters.academicYear)
+      return false;
 
     return true;
   });
@@ -283,18 +331,17 @@ function getHeaderCandidateSnapshots(
 
 function getLatestHeaderSnapshot(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): StudentReportSnapshot | undefined {
   const candidates = getHeaderCandidateSnapshots(dataset, filters);
   return sortSnapshotsByAcademicContext(dataset, candidates).at(-1);
 }
 
-function firstActiveById<T extends { id?: number; isDeleted?: boolean; active?: boolean }>(
-  rows: T[],
-  id?: number
-): T | undefined {
+function firstActiveById<
+  T extends { id?: string; isDeleted?: boolean; active?: boolean },
+>(rows: T[], id?: string): T | undefined {
   if (!id) return undefined;
-  return rows.find(item => item.id === id && isUsableRow(item));
+  return rows.find((item) => item.id === id && isUsableRow(item));
 }
 
 // ======================================================
@@ -303,101 +350,117 @@ function firstActiveById<T extends { id?: number; isDeleted?: boolean; active?: 
 
 export function buildCumulativeReportHeader(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): ReportHeaderData {
   const latestSnapshot = getLatestHeaderSnapshot(dataset, filters);
 
-  const latestPromotion = dataset.studentPromotions.find(promotion => {
+  const latestPromotion = dataset.studentPromotions.find((promotion) => {
     if (promotion.isDeleted) return false;
-    if (filters.branchId && promotion.branchId !== filters.branchId) return false;
-    if (filters.studentId && promotion.studentId !== filters.studentId) return false;
+    if (filters.branchId && promotion.branchId !== filters.branchId)
+      return false;
+    if (filters.studentId && promotion.studentId !== filters.studentId)
+      return false;
     return true;
   });
 
-  const resolvedBranchId = firstNumber(
+  const resolvedBranchId = firstString(
     filters.branchId,
     latestSnapshot?.branchId,
     latestPromotion?.branchId,
-    dataset.branches.length === 1 ? dataset.branches[0]?.id : undefined
+    dataset.branches.length === 1 ? dataset.branches[0]?.id : undefined,
   );
 
   const branch =
     firstActiveById(dataset.branches, resolvedBranchId) ||
-    dataset.branches.find(item => isUsableRow(item));
+    dataset.branches.find((item) => isUsableRow(item));
 
-  const resolvedSchoolId = firstNumber(
+  const resolvedSchoolId = firstString(
     branch?.schoolId,
     latestSnapshot?.schoolId,
-    dataset.schools.length === 1 ? dataset.schools[0]?.id : undefined
+    dataset.schools.length === 1 ? dataset.schools[0]?.id : undefined,
   );
 
   const school =
     firstActiveById(dataset.schools, resolvedSchoolId) ||
-    dataset.schools.find(item => isUsableRow(item));
+    dataset.schools.find((item) => isUsableRow(item));
 
-  const resolvedAcademicStructureId = firstNumber(
+  const resolvedAcademicStructureId = firstString(
     filters.academicStructureId,
     latestSnapshot?.academicStructureId,
     latestPromotion?.toAcademicStructureId,
-    latestPromotion?.fromAcademicStructureId
+    latestPromotion?.fromAcademicStructureId,
   );
 
   const academicStructure =
     firstActiveById(dataset.academicStructures, resolvedAcademicStructureId) ||
-    dataset.academicStructures.find(item => {
+    dataset.academicStructures.find((item) => {
       if (!isUsableRow(item)) return false;
-      if (branch?.id && item.branchId && item.branchId !== branch.id) return false;
+      if (branch?.id && item.branchId && item.branchId !== branch.id)
+        return false;
       return true;
     });
 
-  const resolvedAcademicPeriodId = firstNumber(
+  const resolvedAcademicPeriodId = firstString(
     filters.academicPeriodId,
     latestSnapshot?.academicPeriodId,
     latestPromotion?.toAcademicPeriodId,
-    latestPromotion?.fromAcademicPeriodId
+    latestPromotion?.fromAcademicPeriodId,
   );
 
   const academicPeriod =
     firstActiveById(dataset.academicPeriods, resolvedAcademicPeriodId) ||
-    dataset.academicPeriods.find(item => {
+    dataset.academicPeriods.find((item) => {
       if (!isUsableRow(item)) return false;
-      if (branch?.id && item.branchId && item.branchId !== branch.id) return false;
-      if (academicStructure?.id && item.academicStructureId !== academicStructure.id) return false;
+      if (branch?.id && item.branchId && item.branchId !== branch.id)
+        return false;
+      if (
+        academicStructure?.id &&
+        item.academicStructureId !== academicStructure.id
+      )
+        return false;
       return true;
     });
 
-  const resolvedClassId = firstNumber(
+  const resolvedClassId = firstString(
     filters.classId,
     latestSnapshot?.classId,
     latestPromotion?.toClassId,
-    latestPromotion?.fromClassId
+    latestPromotion?.fromClassId,
   );
 
   const classData =
     firstActiveById(dataset.classes, resolvedClassId) ||
-    dataset.classes.find(item => {
+    dataset.classes.find((item) => {
       if (!isUsableRow(item)) return false;
-      if (branch?.id && item.branchId && item.branchId !== branch.id) return false;
+      if (branch?.id && item.branchId && item.branchId !== branch.id)
+        return false;
       return true;
     });
 
   const schoolBranchSetting =
-    dataset.schoolBranchSettings.find(item => branch?.id && item.branchId === branch.id && !item.isDeleted) ||
-    dataset.schoolBranchSettings.find(item => resolvedBranchId && item.branchId === resolvedBranchId && !item.isDeleted) ||
+    dataset.schoolBranchSettings.find(
+      (item) => branch?.id && item.branchId === branch.id && !item.isDeleted,
+    ) ||
+    dataset.schoolBranchSettings.find(
+      (item) =>
+        resolvedBranchId &&
+        item.branchId === resolvedBranchId &&
+        !item.isDeleted,
+    ) ||
     (dataset.schoolBranchSettings.length === 1
-      ? dataset.schoolBranchSettings.find(item => !item.isDeleted)
+      ? dataset.schoolBranchSettings.find((item) => !item.isDeleted)
       : undefined);
 
   const branding = {
     schoolName: school?.name || branch?.name || "School Name",
     motto: school?.motto,
     logo: schoolBranchSetting?.logo || branch?.logo || school?.logo,
-    address: branch?.address || school?.address,
+    address: branch?.address ?? school?.address ?? undefined,
     phone: branch?.phone || school?.phone,
     email: branch?.email || school?.email,
     website: school?.website,
     branchName: branch?.name,
-    branchAddress: branch?.address,
+    branchAddress: branch?.address ?? undefined,
     primaryColor: schoolBranchSetting?.primaryColor || "var(--primary-color)",
     fontFamily: schoolBranchSetting?.fontFamily,
     reportCardBackgroundImage: schoolBranchSetting?.reportCardBackgroundImage,
@@ -453,10 +516,11 @@ function getSnapshotSubjectResults(snapshot: StudentReportSnapshot): any[] {
 }
 
 function getSnapshotAttendance(
-  snapshot: StudentReportSnapshot
+  snapshot: StudentReportSnapshot,
 ): AttendanceSummary | undefined {
   const report = getSnapshotReport(snapshot);
-  const attendance = report.attendance || getSnapshotReportData(snapshot).attendance;
+  const attendance =
+    report.attendance || getSnapshotReportData(snapshot).attendance;
 
   if (!attendance) return undefined;
 
@@ -474,7 +538,7 @@ function getSnapshotAttendance(
 // ======================================================
 
 export function normalizeSnapshotSubjectResult(
-  subject: any
+  subject: any,
 ): NormalizedSnapshotSubjectResult {
   const percentage =
     firstNumber(
@@ -482,19 +546,19 @@ export function normalizeSnapshotSubjectResult(
       subject.average,
       subject.totalPercentage,
       subject.score,
-      subject.weightedTotal
+      subject.weightedTotal,
     ) || 0;
 
   return {
-    subjectId: firstNumber(subject.subjectId),
-    classSubjectId: firstNumber(subject.classSubjectId),
+    subjectId: firstString(subject.subjectId),
+    classSubjectId: firstString(subject.classSubjectId),
 
     subjectName:
       firstText(
         subject.subjectName,
         subject.name,
         subject.title,
-        subject.shortName
+        subject.shortName,
       ) || "Subject",
 
     subjectCode: firstText(subject.subjectCode, subject.code),
@@ -515,7 +579,7 @@ export function normalizeSnapshotSubjectResult(
 }
 
 export function normalizeStudentReportSnapshot(
-  snapshot: StudentReportSnapshot
+  snapshot: StudentReportSnapshot,
 ): NormalizedStudentReportSnapshot {
   const report = getSnapshotReport(snapshot);
 
@@ -523,14 +587,15 @@ export function normalizeStudentReportSnapshot(
     firstNumber(snapshot.total, report.total, report.cumulativeTotal) || 0;
 
   const averageScore =
-    firstNumber(snapshot.average, report.average, report.cumulativeAverage) || 0;
+    firstNumber(snapshot.average, report.average, report.cumulativeAverage) ||
+    0;
 
-  const subjectResults = getSnapshotSubjectResults(snapshot).map(subject =>
-    normalizeSnapshotSubjectResult(subject)
+  const subjectResults = getSnapshotSubjectResults(snapshot).map((subject) =>
+    normalizeSnapshotSubjectResult(subject),
   );
 
   return {
-    snapshotId: snapshot.id || 0,
+    snapshotId: safeString(snapshot.id),
 
     schoolId: snapshot.schoolId,
     branchId: snapshot.branchId,
@@ -547,7 +612,11 @@ export function normalizeStudentReportSnapshot(
 
     total: round(total, 2),
     average: round(averageScore, 2),
-    position: firstNumber(snapshot.position, report.overallPosition, report.position),
+    position: firstNumber(
+      snapshot.position,
+      report.overallPosition,
+      report.position,
+    ),
     gpa: firstNumber(report.overallGPA, report.gpa),
 
     recommendation: normalizeDecision(snapshot.recommendation),
@@ -568,13 +637,14 @@ export function normalizeStudentReportSnapshot(
 
 export function getFilteredSnapshots(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): StudentReportSnapshot[] {
   return dataset.studentReportSnapshots
-    .filter(snapshot => {
+    .filter((snapshot) => {
       if (!filters.includeDeletedSnapshots && snapshot.isDeleted) return false;
 
-      if (filters.branchId && snapshot.branchId !== filters.branchId) return false;
+      if (filters.branchId && snapshot.branchId !== filters.branchId)
+        return false;
 
       if (
         filters.academicStructureId &&
@@ -591,7 +661,8 @@ export function getFilteredSnapshots(
       }
 
       if (filters.classId && snapshot.classId !== filters.classId) return false;
-      if (filters.studentId && snapshot.studentId !== filters.studentId) return false;
+      if (filters.studentId && snapshot.studentId !== filters.studentId)
+        return false;
 
       if (
         filters.snapshotType !== "all" &&
@@ -621,7 +692,10 @@ export function getFilteredSnapshots(
         return false;
       }
 
-      if (filters.academicYear && snapshot.academicYear !== filters.academicYear) {
+      if (
+        filters.academicYear &&
+        snapshot.academicYear !== filters.academicYear
+      ) {
         return false;
       }
 
@@ -648,24 +722,28 @@ export function getFilteredSnapshots(
       return true;
     })
     .sort((a, b) => {
-      const yearCompare = (a.academicYear || "").localeCompare(b.academicYear || "");
+      const yearCompare = (a.academicYear || "").localeCompare(
+        b.academicYear || "",
+      );
       if (yearCompare !== 0) return yearCompare;
 
-      return a.academicPeriodId - b.academicPeriodId;
+      return safeString(a.academicPeriodId).localeCompare(safeString(b.academicPeriodId));
     });
 }
 
 export function getFilteredPromotions(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): StudentPromotion[] {
   if (!filters.includePromotionRecords) return [];
 
-  return dataset.studentPromotions.filter(promotion => {
+  return dataset.studentPromotions.filter((promotion) => {
     if (promotion.isDeleted) return false;
 
-    if (filters.branchId && promotion.branchId !== filters.branchId) return false;
-    if (filters.studentId && promotion.studentId !== filters.studentId) return false;
+    if (filters.branchId && promotion.branchId !== filters.branchId)
+      return false;
+    if (filters.studentId && promotion.studentId !== filters.studentId)
+      return false;
 
     if (
       filters.classId &&
@@ -705,15 +783,17 @@ export function getFilteredPromotions(
 
 export function buildPeriodSummary(
   dataset: CumulativeReportEngineDataset,
-  snapshot: NormalizedStudentReportSnapshot
+  snapshot: NormalizedStudentReportSnapshot,
 ): CumulativePeriodSummary {
   const lookups = buildCumulativeLookups(dataset);
 
   const academicStructure = lookups.academicStructureMap.get(
-    snapshot.academicStructureId
+    snapshot.academicStructureId,
   );
 
-  const academicPeriod = lookups.academicPeriodMap.get(snapshot.academicPeriodId);
+  const academicPeriod = lookups.academicPeriodMap.get(
+    snapshot.academicPeriodId,
+  );
   const classData = lookups.classMap.get(snapshot.classId);
   const promotedToClass = snapshot.promotedToClassId
     ? lookups.classMap.get(snapshot.promotedToClassId)
@@ -724,7 +804,8 @@ export function buildPeriodSummary(
     academicStructureName: academicStructure?.name,
 
     academicPeriodId: snapshot.academicPeriodId,
-    academicPeriodName: academicPeriod?.name || snapshot.term || "Academic Period",
+    academicPeriodName:
+      academicPeriod?.name || snapshot.term || "Academic Period",
     academicPeriodOrder: academicPeriod?.order,
 
     academicYear: snapshot.academicYear,
@@ -752,11 +833,11 @@ export function buildPeriodSummary(
 }
 
 export function groupPeriodsByAcademicYear(
-  periods: CumulativePeriodSummary[]
+  periods: CumulativePeriodSummary[],
 ): CumulativeAcademicYearSummary[] {
   const map = new Map<string, CumulativePeriodSummary[]>();
 
-  periods.forEach(period => {
+  periods.forEach((period) => {
     const year = period.academicYear || "Unspecified Year";
 
     if (!map.has(year)) {
@@ -768,12 +849,14 @@ export function groupPeriodsByAcademicYear(
 
   return Array.from(map.entries()).map(([academicYear, yearPeriods]) => {
     const sortedPeriods = [...yearPeriods].sort((a, b) => {
-      return safeNumber(a.academicPeriodOrder) - safeNumber(b.academicPeriodOrder);
+      return (
+        safeNumber(a.academicPeriodOrder) - safeNumber(b.academicPeriodOrder)
+      );
     });
 
-    const averages = sortedPeriods.map(period => period.average);
+    const averages = sortedPeriods.map((period) => period.average);
     const gpas = sortedPeriods
-      .map(period => period.gpa)
+      .map((period) => period.gpa)
       .filter((value): value is number => value != null);
 
     const latest = sortedPeriods[sortedPeriods.length - 1];
@@ -783,13 +866,16 @@ export function groupPeriodsByAcademicYear(
       periods: sortedPeriods,
 
       totalPeriods: sortedPeriods.length,
-      totalSubjects: uniqueNumbers(
-        sortedPeriods.flatMap(period =>
-          period.subjectResults.map(subject => subject.subjectId)
-        )
+      totalSubjects: uniqueStrings(
+        sortedPeriods.flatMap((period) =>
+          period.subjectResults.map((subject) => subject.subjectId),
+        ),
       ).length,
 
-      total: round(sortedPeriods.reduce((sum, period) => sum + period.total, 0), 2),
+      total: round(
+        sortedPeriods.reduce((sum, period) => sum + period.total, 0),
+        2,
+      ),
       average: round(average(averages), 2),
       gpa: gpas.length ? round(average(gpas), 2) : undefined,
 
@@ -815,12 +901,12 @@ function subjectKey(subject: NormalizedSnapshotSubjectResult): string {
 }
 
 export function buildStudentSubjectHistories(
-  periods: CumulativePeriodSummary[]
+  periods: CumulativePeriodSummary[],
 ): StudentSubjectHistory[] {
   const map = new Map<string, StudentSubjectHistory>();
 
-  periods.forEach(period => {
-    period.subjectResults.forEach(subject => {
+  periods.forEach((period) => {
+    period.subjectResults.forEach((subject) => {
       const key = subjectKey(subject);
 
       if (!map.has(key)) {
@@ -853,8 +939,8 @@ export function buildStudentSubjectHistories(
   });
 
   return Array.from(map.values())
-    .map(history => {
-      const scores = history.periods.map(period => period.percentage);
+    .map((history) => {
+      const scores = history.periods.map((period) => period.percentage);
 
       return {
         ...history,
@@ -874,8 +960,8 @@ export function buildStudentSubjectHistories(
 
 export function buildStudentProgression(
   dataset: CumulativeReportEngineDataset,
-  studentId: number,
-  filters: CumulativeReportFiltersState
+  studentId: string,
+  filters: CumulativeReportFiltersState,
 ): StudentProgressionStep[] {
   const lookups = buildCumulativeLookups(dataset);
 
@@ -883,14 +969,14 @@ export function buildStudentProgression(
     ...filters,
     studentId,
   })
-    .map(promotion => {
+    .map((promotion) => {
       const fromClass = lookups.classMap.get(promotion.fromClassId);
       const toClass = promotion.toClassId
         ? lookups.classMap.get(promotion.toClassId)
         : undefined;
 
       const fromStructure = lookups.academicStructureMap.get(
-        promotion.fromAcademicStructureId
+        promotion.fromAcademicStructureId,
       );
 
       const toStructure = promotion.toAcademicStructureId
@@ -898,7 +984,7 @@ export function buildStudentProgression(
         : undefined;
 
       const fromPeriod = lookups.academicPeriodMap.get(
-        promotion.fromAcademicPeriodId
+        promotion.fromAcademicPeriodId,
       );
 
       const toPeriod = promotion.toAcademicPeriodId
@@ -940,7 +1026,9 @@ export function buildStudentProgression(
       };
     })
     .sort((a, b) => {
-      return safeNumber(a.fromAcademicPeriodId) - safeNumber(b.fromAcademicPeriodId);
+      return safeString(a.fromAcademicPeriodId).localeCompare(
+        safeString(b.fromAcademicPeriodId),
+      );
     });
 }
 
@@ -951,23 +1039,25 @@ export function buildStudentProgression(
 function getStudentPrimaryParentName(
   student: Student | undefined,
   parents: Parent[],
-  studentParents: StudentParent[]
+  studentParents: StudentParent[],
 ): string | undefined {
   if (!student?.id) return student?.parentName;
 
   const primaryLink =
     studentParents.find(
-      link =>
+      (link) =>
         !link.isDeleted &&
         link.studentId === student.id &&
-        link.isPrimary === true
+        link.isPrimary === true,
     ) ||
     studentParents.find(
-      link => !link.isDeleted && link.studentId === student.id
+      (link) => !link.isDeleted && link.studentId === student.id,
     );
 
   const parent = primaryLink
-    ? parents.find(item => item.id === primaryLink.parentId && !item.isDeleted)
+    ? parents.find(
+        (item) => item.id === primaryLink.parentId && !item.isDeleted,
+      )
     : undefined;
 
   return parent?.fullName || student.parentName;
@@ -976,7 +1066,7 @@ function getStudentPrimaryParentName(
 export function buildStudentTranscript(
   dataset: CumulativeReportEngineDataset,
   filters: CumulativeReportFiltersState,
-  studentId: number
+  studentId: string,
 ): StudentCumulativeTranscript | undefined {
   const lookups = buildCumulativeLookups(dataset);
   const student = lookups.studentMap.get(studentId);
@@ -986,28 +1076,30 @@ export function buildStudentTranscript(
   const snapshots = getFilteredSnapshots(dataset, {
     ...filters,
     studentId,
-  }).map(snapshot => normalizeStudentReportSnapshot(snapshot));
+  }).map((snapshot) => normalizeStudentReportSnapshot(snapshot));
 
-  const periods = snapshots.map(snapshot => buildPeriodSummary(dataset, snapshot));
+  const periods = snapshots.map((snapshot) =>
+    buildPeriodSummary(dataset, snapshot),
+  );
 
   const academicYears = groupPeriodsByAcademicYear(periods);
   const subjectHistories = buildStudentSubjectHistories(periods);
   const progression = buildStudentProgression(dataset, studentId, filters);
 
-  const averages = periods.map(period => period.average);
+  const averages = periods.map((period) => period.average);
   const gpas = periods
-    .map(period => period.gpa)
+    .map((period) => period.gpa)
     .filter((value): value is number => value != null);
 
   const latest = periods[periods.length - 1];
   const currentClass = student.currentClassId
     ? lookups.classMap.get(student.currentClassId)
     : latest?.classId
-    ? lookups.classMap.get(latest.classId)
-    : undefined;
+      ? lookups.classMap.get(latest.classId)
+      : undefined;
 
   return {
-    studentId: student.id || 0,
+    studentId: safeString(student.id),
     studentName: student.fullName,
     admissionNumber: student.admissionNumber,
     gender: student.gender,
@@ -1019,12 +1111,12 @@ export function buildStudentTranscript(
     parentName: getStudentPrimaryParentName(
       student,
       dataset.parents,
-      dataset.studentParents
+      dataset.studentParents,
     ),
     guardianName: getStudentPrimaryParentName(
       student,
       dataset.parents,
-      dataset.studentParents
+      dataset.studentParents,
     ),
 
     periods,
@@ -1035,7 +1127,10 @@ export function buildStudentTranscript(
     totalPeriods: periods.length,
     totalSubjects: subjectHistories.length,
 
-    cumulativeTotal: round(periods.reduce((sum, period) => sum + period.total, 0), 2),
+    cumulativeTotal: round(
+      periods.reduce((sum, period) => sum + period.total, 0),
+      2,
+    ),
     cumulativeAverage: round(average(averages), 2),
     cumulativeGPA: gpas.length ? round(average(gpas), 2) : undefined,
 
@@ -1055,12 +1150,12 @@ export function buildStudentTranscript(
 // ======================================================
 
 export function buildMultiPeriodSubjectRows(
-  periods: CumulativePeriodSummary[]
+  periods: CumulativePeriodSummary[],
 ): MultiPeriodSubjectRow[] {
   const histories = buildStudentSubjectHistories(periods);
 
-  return histories.map(history => {
-    const scores = history.periods.map(period => period.percentage);
+  return histories.map((history) => {
+    const scores = history.periods.map((period) => period.percentage);
     const latestPeriod = history.periods[history.periods.length - 1];
 
     return {
@@ -1068,7 +1163,7 @@ export function buildMultiPeriodSubjectRows(
       subjectName: history.subjectName,
       subjectCode: history.subjectCode,
 
-      periodScores: history.periods.map(period => ({
+      periodScores: history.periods.map((period) => ({
         academicPeriodId: period.academicPeriodId,
         academicPeriodName: period.academicPeriodName,
         academicYear: period.academicYear,
@@ -1093,11 +1188,15 @@ export function buildMultiPeriodSubjectRows(
 export function buildStudentMultiPeriodReport(
   dataset: CumulativeReportEngineDataset,
   filters: CumulativeReportFiltersState,
-  header: ReportHeaderData
+  header: ReportHeaderData,
 ): StudentMultiPeriodReport | undefined {
   if (!filters.studentId) return undefined;
 
-  const transcript = buildStudentTranscript(dataset, filters, filters.studentId);
+  const transcript = buildStudentTranscript(
+    dataset,
+    filters,
+    filters.studentId,
+  );
 
   if (!transcript) return undefined;
 
@@ -1134,7 +1233,7 @@ export function buildStudentMultiPeriodReport(
 // ======================================================
 
 export function applyAnnualBroadsheetPositions(
-  rows: AnnualBroadsheetStudentRow[]
+  rows: AnnualBroadsheetStudentRow[],
 ): void {
   const sorted = [...rows].sort((a, b) => b.average - a.average);
 
@@ -1150,18 +1249,18 @@ export function applyAnnualBroadsheetPositions(
 }
 
 function aggregateStudentSubjectsForBroadsheet(
-  periods: CumulativePeriodSummary[]
+  periods: CumulativePeriodSummary[],
 ): AnnualBroadsheetStudentSubjectCell[] {
   const histories = buildStudentSubjectHistories(periods);
 
-  return histories.map(history => {
+  return histories.map((history) => {
     const latest = history.periods[history.periods.length - 1];
 
     return {
       subjectId: history.subjectId,
       subjectName: history.subjectName,
 
-      periodScores: history.periods.map(period => ({
+      periodScores: history.periods.map((period) => ({
         academicPeriodId: period.academicPeriodId,
         academicPeriodName: period.academicPeriodName,
         percentage: period.percentage,
@@ -1177,30 +1276,32 @@ function aggregateStudentSubjectsForBroadsheet(
 
 export function buildAnnualBroadsheet(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): AnnualBroadsheet | undefined {
   const lookups = buildCumulativeLookups(dataset);
 
-  const snapshots = getFilteredSnapshots(dataset, filters).map(snapshot =>
-    normalizeStudentReportSnapshot(snapshot)
+  const snapshots = getFilteredSnapshots(dataset, filters).map((snapshot) =>
+    normalizeStudentReportSnapshot(snapshot),
   );
 
-  const studentIds = uniqueNumbers(snapshots.map(snapshot => snapshot.studentId));
+  const studentIds = uniqueStrings(
+    snapshots.map((snapshot) => snapshot.studentId),
+  );
 
   const rows: AnnualBroadsheetStudentRow[] = studentIds
-    .map(studentId => {
+    .map((studentId) => {
       const student = lookups.studentMap.get(studentId);
       const studentSnapshots = snapshots.filter(
-        snapshot => snapshot.studentId === studentId
+        (snapshot) => snapshot.studentId === studentId,
       );
 
-      const periods = studentSnapshots.map(snapshot =>
-        buildPeriodSummary(dataset, snapshot)
+      const periods = studentSnapshots.map((snapshot) =>
+        buildPeriodSummary(dataset, snapshot),
       );
 
-      const averages = periods.map(period => period.average);
+      const averages = periods.map((period) => period.average);
       const gpas = periods
-        .map(period => period.gpa)
+        .map((period) => period.gpa)
         .filter((value): value is number => value != null);
 
       const latest = periods[periods.length - 1];
@@ -1224,7 +1325,10 @@ export function buildAnnualBroadsheet(
 
         subjects: aggregateStudentSubjectsForBroadsheet(periods),
 
-        total: round(periods.reduce((sum, period) => sum + period.total, 0), 2),
+        total: round(
+          periods.reduce((sum, period) => sum + period.total, 0),
+          2,
+        ),
         average: round(average(averages), 2),
         gpa: gpas.length ? round(average(gpas), 2) : undefined,
 
@@ -1237,7 +1341,7 @@ export function buildAnnualBroadsheet(
         finalDecision: promotion?.finalDecision,
       };
     })
-    .filter(row => {
+    .filter((row) => {
       if (filters.classId && row.classId !== filters.classId) return false;
       return true;
     });
@@ -1245,20 +1349,20 @@ export function buildAnnualBroadsheet(
   applyAnnualBroadsheetPositions(rows);
 
   const sortedRows = applySortMode(rows, filters.sortMode);
-  const averages = sortedRows.map(row => row.average);
+  const averages = sortedRows.map((row) => row.average);
 
   const subjectMap = new Map<
     string,
     {
-      subjectId?: number;
+      subjectId?: string;
       subjectName: string;
       subjectCode?: string;
       shortName?: string;
     }
   >();
 
-  sortedRows.forEach(row => {
-    row.subjects.forEach(subject => {
+  sortedRows.forEach((row) => {
+    row.subjects.forEach((subject) => {
       const key = subject.subjectId
         ? `subject-${subject.subjectId}`
         : `name-${subject.subjectName.toLowerCase()}`;
@@ -1273,7 +1377,8 @@ export function buildAnnualBroadsheet(
           subjectName: subject.subjectName,
           subjectCode: subjectRecord?.code,
           shortName:
-            subjectRecord?.code || subject.subjectName.slice(0, 4).toUpperCase(),
+            subjectRecord?.code ||
+            subject.subjectName.slice(0, 4).toUpperCase(),
         });
       }
     });
@@ -1295,37 +1400,43 @@ export function buildAnnualBroadsheet(
     academicStructureId: filters.academicStructureId,
     academicStructureName: academicStructure?.name,
 
-    periodIds: uniqueNumbers(snapshots.map(snapshot => snapshot.academicPeriodId)),
+    periodIds: uniqueStrings(
+      snapshots.map((snapshot) => snapshot.academicPeriodId),
+    ),
     periodNames: Array.from(
       new Set(
-        snapshots.map(snapshot => {
+        snapshots.map((snapshot) => {
           return (
             lookups.academicPeriodMap.get(snapshot.academicPeriodId)?.name ||
             snapshot.term ||
             "Period"
           );
-        })
-      )
+        }),
+      ),
     ),
 
     subjectColumns: Array.from(subjectMap.values()).sort((a, b) =>
-      a.subjectName.localeCompare(b.subjectName)
+      a.subjectName.localeCompare(b.subjectName),
     ),
 
     students: sortedRows,
 
     totalStudents: sortedRows.length,
     totalSubjects: subjectMap.size,
-    totalPeriods: uniqueNumbers(snapshots.map(snapshot => snapshot.academicPeriodId))
-      .length,
+    totalPeriods: uniqueStrings(
+      snapshots.map((snapshot) => snapshot.academicPeriodId),
+    ).length,
 
     highestAverage: round(averages.length ? Math.max(...averages) : 0, 2),
     lowestAverage: round(averages.length ? Math.min(...averages) : 0, 2),
     classAverage: round(average(averages), 2),
 
-    promotionCount: sortedRows.filter(row => row.finalDecision === "promote").length,
-    repeatCount: sortedRows.filter(row => row.finalDecision === "repeat").length,
-    graduateCount: sortedRows.filter(row => row.finalDecision === "graduate").length,
+    promotionCount: sortedRows.filter((row) => row.finalDecision === "promote")
+      .length,
+    repeatCount: sortedRows.filter((row) => row.finalDecision === "repeat")
+      .length,
+    graduateCount: sortedRows.filter((row) => row.finalDecision === "graduate")
+      .length,
   };
 }
 
@@ -1335,71 +1446,73 @@ export function buildAnnualBroadsheet(
 
 export function buildSubjectLongitudinalAnalytics(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): SubjectLongitudinalAnalytics | undefined {
   if (!filters.subjectId) return undefined;
 
   const lookups = buildCumulativeLookups(dataset);
   const subject = lookups.subjectMap.get(filters.subjectId);
-  const snapshots = getFilteredSnapshots(dataset, filters).map(snapshot =>
-    normalizeStudentReportSnapshot(snapshot)
+  const snapshots = getFilteredSnapshots(dataset, filters).map((snapshot) =>
+    normalizeStudentReportSnapshot(snapshot),
   );
 
   const studentRows: SubjectHistoryStudentRow[] = [];
 
-  uniqueNumbers(snapshots.map(snapshot => snapshot.studentId)).forEach(studentId => {
-    const student = lookups.studentMap.get(studentId);
+  uniqueStrings(snapshots.map((snapshot) => snapshot.studentId)).forEach(
+    (studentId) => {
+      const student = lookups.studentMap.get(studentId);
 
-    const periods: SubjectHistoryStudentRow["periods"] = [];
+      const periods: SubjectHistoryStudentRow["periods"] = [];
 
-    snapshots
-      .filter(snapshot => snapshot.studentId === studentId)
-      .forEach(snapshot => {
-        const period = buildPeriodSummary(dataset, snapshot);
+      snapshots
+        .filter((snapshot) => snapshot.studentId === studentId)
+        .forEach((snapshot) => {
+          const period = buildPeriodSummary(dataset, snapshot);
 
-        const subjectResult = period.subjectResults.find(result => {
-          return result.subjectId === filters.subjectId;
+          const subjectResult = period.subjectResults.find((result) => {
+            return result.subjectId === filters.subjectId;
+          });
+
+          if (!subjectResult) return;
+
+          periods.push({
+            academicYear: period.academicYear,
+            academicPeriodId: period.academicPeriodId,
+            academicPeriodName: period.academicPeriodName,
+            percentage: subjectResult.percentage,
+            grade: subjectResult.grade,
+            position: subjectResult.position,
+          });
         });
 
-        if (!subjectResult) return;
+      if (!periods.length) return;
 
-        periods.push({
-          academicYear: period.academicYear,
-          academicPeriodId: period.academicPeriodId,
-          academicPeriodName: period.academicPeriodName,
-          percentage: subjectResult.percentage,
-          grade: subjectResult.grade,
-          position: subjectResult.position,
-        });
+      const scores = periods.map((period) => period.percentage);
+      const latestPeriod = periods[periods.length - 1];
+
+      studentRows.push({
+        studentId,
+        studentName: student?.fullName || "Unknown Student",
+        admissionNumber: student?.admissionNumber,
+
+        classId: student?.currentClassId,
+        className: student?.currentClassId
+          ? lookups.classMap.get(student.currentClassId)?.name
+          : undefined,
+
+        periods,
+
+        average: round(average(scores), 2),
+        highest: round(scores.length ? Math.max(...scores) : 0, 2),
+        lowest: round(scores.length ? Math.min(...scores) : 0, 2),
+        latest: latestPeriod?.percentage,
+        trend: computeTrend(scores),
       });
-
-    if (!periods.length) return;
-
-    const scores = periods.map(period => period.percentage);
-    const latestPeriod = periods[periods.length - 1];
-
-    studentRows.push({
-      studentId,
-      studentName: student?.fullName || "Unknown Student",
-      admissionNumber: student?.admissionNumber,
-
-      classId: student?.currentClassId,
-      className: student?.currentClassId
-        ? lookups.classMap.get(student.currentClassId)?.name
-        : undefined,
-
-      periods,
-
-      average: round(average(scores), 2),
-      highest: round(scores.length ? Math.max(...scores) : 0, 2),
-      lowest: round(scores.length ? Math.min(...scores) : 0, 2),
-      latest: latestPeriod?.percentage,
-      trend: computeTrend(scores),
-    });
-  });
+    },
+  );
 
   const sortedRows = applySortMode(studentRows, filters.sortMode);
-  const averages = sortedRows.map(row => row.average);
+  const averages = sortedRows.map((row) => row.average);
 
   const classData = filters.classId
     ? lookups.classMap.get(filters.classId)
@@ -1418,17 +1531,19 @@ export function buildSubjectLongitudinalAnalytics(
     students: sortedRows,
 
     totalStudents: sortedRows.length,
-    totalPeriods: uniqueNumbers(
-      sortedRows.flatMap(row => row.periods.map(period => period.academicPeriodId))
+    totalPeriods: uniqueStrings(
+      sortedRows.flatMap((row) =>
+        row.periods.map((period) => period.academicPeriodId),
+      ),
     ).length,
 
     highestAverage: round(averages.length ? Math.max(...averages) : 0, 2),
     lowestAverage: round(averages.length ? Math.min(...averages) : 0, 2),
     subjectAverage: round(average(averages), 2),
 
-    improvingCount: sortedRows.filter(row => row.trend === "up").length,
-    decliningCount: sortedRows.filter(row => row.trend === "down").length,
-    stableCount: sortedRows.filter(row => row.trend === "stable").length,
+    improvingCount: sortedRows.filter((row) => row.trend === "up").length,
+    decliningCount: sortedRows.filter((row) => row.trend === "down").length,
+    stableCount: sortedRows.filter((row) => row.trend === "stable").length,
   };
 }
 
@@ -1438,48 +1553,56 @@ export function buildSubjectLongitudinalAnalytics(
 
 export function buildPromotionSummary(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): PromotionSummary {
   const lookups = buildCumulativeLookups(dataset);
 
-  const rows: PromotionSummaryRow[] = getFilteredPromotions(dataset, filters)
-    .map(promotion => {
-      const student = lookups.studentMap.get(promotion.studentId);
-      const fromClass = lookups.classMap.get(promotion.fromClassId);
-      const toClass = promotion.toClassId
-        ? lookups.classMap.get(promotion.toClassId)
-        : undefined;
+  const rows: PromotionSummaryRow[] = getFilteredPromotions(
+    dataset,
+    filters,
+  ).map((promotion) => {
+    const student = lookups.studentMap.get(promotion.studentId);
+    const fromClass = lookups.classMap.get(promotion.fromClassId);
+    const toClass = promotion.toClassId
+      ? lookups.classMap.get(promotion.toClassId)
+      : undefined;
 
-      return {
-        studentId: promotion.studentId,
-        studentName: student?.fullName || "Unknown Student",
-        admissionNumber: student?.admissionNumber,
+    return {
+      studentId: promotion.studentId,
+      studentName: student?.fullName || "Unknown Student",
+      admissionNumber: student?.admissionNumber,
 
-        fromClassId: promotion.fromClassId,
-        fromClassName: fromClass?.name,
+      fromClassId: promotion.fromClassId,
+      fromClassName: fromClass?.name,
 
-        toClassId: promotion.toClassId,
-        toClassName: toClass?.name,
+      toClassId: promotion.toClassId,
+      toClassName: toClass?.name,
 
-        average: promotion.average,
+      average: promotion.average,
 
-        recommendation: promotion.recommendation,
-        finalDecision: promotion.finalDecision,
+      recommendation: promotion.recommendation,
+      finalDecision: promotion.finalDecision,
 
-        snapshotId: promotion.snapshotId,
-        note: promotion.note,
-      };
-    });
+      snapshotId: promotion.snapshotId,
+      note: promotion.note,
+    };
+  });
 
   const sortedRows = applySortMode(rows, filters.sortMode);
 
   const averages = sortedRows
-    .map(row => row.average)
+    .map((row) => row.average)
     .filter((value): value is number => value != null);
 
-  const promoteCount = sortedRows.filter(row => row.finalDecision === "promote").length;
-  const repeatCount = sortedRows.filter(row => row.finalDecision === "repeat").length;
-  const graduateCount = sortedRows.filter(row => row.finalDecision === "graduate").length;
+  const promoteCount = sortedRows.filter(
+    (row) => row.finalDecision === "promote",
+  ).length;
+  const repeatCount = sortedRows.filter(
+    (row) => row.finalDecision === "repeat",
+  ).length;
+  const graduateCount = sortedRows.filter(
+    (row) => row.finalDecision === "graduate",
+  ).length;
 
   return {
     rows: sortedRows,
@@ -1517,9 +1640,9 @@ export function buildCumulativeAnalytics(
     subjectHistory?: SubjectLongitudinalAnalytics;
     promotionSummary?: PromotionSummary;
   },
-  snapshots: NormalizedStudentReportSnapshot[]
+  snapshots: NormalizedStudentReportSnapshot[],
 ): CumulativeAnalyticsData {
-  const snapshotAverages = snapshots.map(snapshot => snapshot.average);
+  const snapshotAverages = snapshots.map((snapshot) => snapshot.average);
 
   const promotionSummary = output.promotionSummary;
 
@@ -1532,25 +1655,30 @@ export function buildCumulativeAnalytics(
     output.annualBroadsheet?.totalPeriods ||
     output.studentTranscript?.totalPeriods ||
     output.subjectHistory?.totalPeriods ||
-    uniqueNumbers(snapshots.map(snapshot => snapshot.academicPeriodId)).length;
+    uniqueStrings(snapshots.map((snapshot) => snapshot.academicPeriodId))
+      .length;
 
   const totalSubjects =
     output.annualBroadsheet?.totalSubjects ||
     output.studentTranscript?.totalSubjects ||
-    uniqueNumbers(
-      snapshots.flatMap(snapshot =>
-        snapshot.subjectResults.map(subject => subject.subjectId)
-      )
+    uniqueStrings(
+      snapshots.flatMap((snapshot) =>
+        snapshot.subjectResults.map((subject) => subject.subjectId),
+      ),
     ).length;
 
   const promotionCount =
-    promotionSummary?.promoteCount || output.annualBroadsheet?.promotionCount || 0;
+    promotionSummary?.promoteCount ||
+    output.annualBroadsheet?.promotionCount ||
+    0;
 
   const repeatCount =
     promotionSummary?.repeatCount || output.annualBroadsheet?.repeatCount || 0;
 
   const graduateCount =
-    promotionSummary?.graduateCount || output.annualBroadsheet?.graduateCount || 0;
+    promotionSummary?.graduateCount ||
+    output.annualBroadsheet?.graduateCount ||
+    0;
 
   const decisionTotal = promotionCount + repeatCount + graduateCount;
 
@@ -1582,26 +1710,34 @@ export function buildCumulativeAnalytics(
     repeatCount,
     graduateCount,
 
-    promotionRate: decisionTotal ? round((promotionCount / decisionTotal) * 100, 1) : 0,
-    repeatRate: decisionTotal ? round((repeatCount / decisionTotal) * 100, 1) : 0,
-    graduationRate: decisionTotal ? round((graduateCount / decisionTotal) * 100, 1) : 0,
+    promotionRate: decisionTotal
+      ? round((promotionCount / decisionTotal) * 100, 1)
+      : 0,
+    repeatRate: decisionTotal
+      ? round((repeatCount / decisionTotal) * 100, 1)
+      : 0,
+    graduationRate: decisionTotal
+      ? round((graduateCount / decisionTotal) * 100, 1)
+      : 0,
 
     improvingCount:
       output.subjectHistory?.improvingCount ||
-      output.studentTranscript?.subjectHistories.filter(item => item.trend === "up")
-        .length ||
+      output.studentTranscript?.subjectHistories.filter(
+        (item) => item.trend === "up",
+      ).length ||
       0,
 
     decliningCount:
       output.subjectHistory?.decliningCount ||
-      output.studentTranscript?.subjectHistories.filter(item => item.trend === "down")
-        .length ||
+      output.studentTranscript?.subjectHistories.filter(
+        (item) => item.trend === "down",
+      ).length ||
       0,
 
     stableCount:
       output.subjectHistory?.stableCount ||
       output.studentTranscript?.subjectHistories.filter(
-        item => item.trend === "stable"
+        (item) => item.trend === "stable",
       ).length ||
       0,
   };
@@ -1614,7 +1750,7 @@ export function buildCumulativeAnalytics(
 export function buildCumulativeWarnings(
   dataset: CumulativeReportEngineDataset,
   filters: CumulativeReportFiltersState,
-  snapshots: NormalizedStudentReportSnapshot[]
+  snapshots: NormalizedStudentReportSnapshot[],
 ): string[] {
   const warnings: string[] = [];
 
@@ -1623,7 +1759,9 @@ export function buildCumulativeWarnings(
   }
 
   if (!snapshots.length) {
-    warnings.push("No student report snapshots were found for the selected filters.");
+    warnings.push(
+      "No student report snapshots were found for the selected filters.",
+    );
   }
 
   if (filters.mode === "student-transcript" && !filters.studentId) {
@@ -1635,20 +1773,24 @@ export function buildCumulativeWarnings(
   }
 
   if (filters.mode === "annual-broadsheet" && !filters.classId) {
-    warnings.push("Select a class to generate an annual cumulative broadsheet.");
+    warnings.push(
+      "Select a class to generate an annual cumulative broadsheet.",
+    );
   }
 
   if (filters.mode === "subject-history" && !filters.subjectId) {
-    warnings.push("Select a subject to generate longitudinal subject analytics.");
+    warnings.push(
+      "Select a subject to generate longitudinal subject analytics.",
+    );
   }
 
   const snapshotsWithoutSubjects = snapshots.filter(
-    snapshot => !snapshot.subjectResults.length
+    (snapshot) => !snapshot.subjectResults.length,
   );
 
   if (snapshotsWithoutSubjects.length) {
     warnings.push(
-      `${snapshotsWithoutSubjects.length} snapshot(s) do not contain subject result details.`
+      `${snapshotsWithoutSubjects.length} snapshot(s) do not contain subject result details.`,
     );
   }
 
@@ -1666,7 +1808,6 @@ export function buildCumulativeWarnings(
   return warnings;
 }
 
-
 // ======================================================
 // CUMULATIVE TRANSCRIPT TEMPLATE DATASET
 // ======================================================
@@ -1681,7 +1822,7 @@ export type CumulativeTranscriptTemplateDataset = {
   transcript?: StudentCumulativeTranscript;
   generatedAt: string;
   student?: {
-    studentId: number;
+    studentId: string;
     studentName: string;
     admissionNumber?: string;
     gender?: string;
@@ -1711,7 +1852,9 @@ export function buildCumulativeTranscriptTemplateDataset(args: {
   transcript?: StudentCumulativeTranscript;
   generatedAt?: string | number | Date;
 }): CumulativeTranscriptTemplateDataset {
-  const generatedDate = args.generatedAt ? new Date(args.generatedAt) : new Date();
+  const generatedDate = args.generatedAt
+    ? new Date(args.generatedAt)
+    : new Date();
   const generatedAt = Number.isNaN(generatedDate.getTime())
     ? new Date().toISOString()
     : generatedDate.toISOString();
@@ -1759,12 +1902,12 @@ export function buildCumulativeTranscriptTemplateDataset(args: {
 
 export function buildCumulativeReportEngineOutput(
   dataset: CumulativeReportEngineDataset,
-  filters: CumulativeReportFiltersState
+  filters: CumulativeReportFiltersState,
 ): CumulativeReportEngineOutput {
   const header = buildCumulativeReportHeader(dataset, filters);
 
-  const normalizedSnapshots = getFilteredSnapshots(dataset, filters).map(snapshot =>
-    normalizeStudentReportSnapshot(snapshot)
+  const normalizedSnapshots = getFilteredSnapshots(dataset, filters).map(
+    (snapshot) => normalizeStudentReportSnapshot(snapshot),
   );
 
   const studentTranscript =
@@ -1807,10 +1950,14 @@ export function buildCumulativeReportEngineOutput(
       subjectHistory,
       promotionSummary,
     },
-    normalizedSnapshots
+    normalizedSnapshots,
   );
 
-  const warnings = buildCumulativeWarnings(dataset, filters, normalizedSnapshots);
+  const warnings = buildCumulativeWarnings(
+    dataset,
+    filters,
+    normalizedSnapshots,
+  );
 
   const cumulativeTranscriptDataset = buildCumulativeTranscriptTemplateDataset({
     header,

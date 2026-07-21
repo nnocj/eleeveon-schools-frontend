@@ -39,7 +39,6 @@
 
 import React, { useEffect, useRef } from "react";
 
-
 import RolePortalShell, {
   type RoleNavSection,
 } from "../components/role-portals/RolePortalShell";
@@ -72,7 +71,6 @@ import StudentEnrollments from "./modules/StudentEnrollments";
 // These can be replaced with real imports when their files are ready.
 // import Classsubjects from "./modules/Classsubjects";
 // import Studentenrollments from "./modules/Studentenrollments";
-
 
 // ======================================================
 // DAILY OPERATIONS
@@ -167,8 +165,8 @@ const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
 type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   role?: string | null;
 };
 
@@ -176,7 +174,9 @@ function safeRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -294,10 +294,6 @@ function PlaceholderModule({
   );
 }
 
-
-
-
-
 // ======================================================
 // LOCAL SETTINGS WRAPPER
 // ======================================================
@@ -306,20 +302,24 @@ function BranchAdminLocalSettingsPage() {
   const { accountId } = useAccount();
   const { settings } = useSettings();
 
-  const {
-    activeSchoolId,
-    activeBranchId,
-    activeSchool,
-    activeBranch,
-  } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
 
   return (
     <LocalSettings
       portalName="Branch Admin Portal"
       roleKey="branch-admin"
       accountId={accountId}
-      schoolId={selectedWorkspaceSchoolId({ activeSchoolId, activeSchool, settings })}
-      branchId={selectedWorkspaceBranchId({ activeBranchId, activeBranch, settings })}
+      schoolId={selectedWorkspaceSchoolId({
+        activeSchoolId,
+        activeSchool,
+        settings,
+      })}
+      branchId={selectedWorkspaceBranchId({
+        activeBranchId,
+        activeBranch,
+        settings,
+      })}
       primaryColor={settings?.primaryColor || "var(--primary-color, #2563eb)"}
       branchFontSize={(settings as any)?.fontSize}
       inline={true}
@@ -334,7 +334,6 @@ function BranchAdminLocalSettingsPage() {
 function BranchAdminDashboardPage(props: RouteProps) {
   return <BranchAdminDashboard {...props} navSections={NAV_SECTIONS} />;
 }
-
 
 // ======================================================
 // NAVIGATION
@@ -352,13 +351,12 @@ export const NAV_SECTIONS: RoleNavSection[] = [
       },
     ],
   },
-   {
+  {
     title: " Setup",
     defaultOpen: false,
     items: [
       {
-
-        key:"organizations",
+        key: "organizations",
         label: "Organizations",
         icon: "🏢",
       },
@@ -383,7 +381,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "🗺️",
       },
       {
-
         key: "subjects",
         label: "Subjects",
         icon: "📖",
@@ -399,18 +396,17 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "🏫",
       },
       {
-
-        key:"classSubjects",
-        label:"ClassSubjects",
-        icon:"📖",
+        key: "classSubjects",
+        label: "ClassSubjects",
+        icon: "📖",
       },
       {
         key: "subjectPrerequisites",
         label: "Subject Prerequisites",
-        icon: "🔗"
+        icon: "🔗",
       },
-      
-       {
+
+      {
         key: "assessmentStructure",
         label: "Assessment Structure",
         icon: "🏗️",
@@ -420,8 +416,8 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         label: "Assessment Items",
         icon: "📋",
       },
-      
-       {
+
+      {
         key: "gradingSystems",
         label: "Grading Systems",
         icon: "🎓",
@@ -435,7 +431,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "assessmentApplicability",
         label: "Assessment Applicability",
         icon: "✅",
-      }, 
+      },
       {
         key: "courseOutline",
         label: "Course Outline",
@@ -452,7 +448,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "assessmentEntries",
         label: "Assessment Entries",
         icon: "📝",
-
       },
       {
         key: "studentReports",
@@ -483,13 +478,12 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "studentProgressTimeline",
         label: "Student Progress Timeline",
         icon: "⏳",
-
       },
       {
         key: "academicProgress",
         label: "Academic Progress",
         icon: "📈",
-      }
+      },
     ],
   },
 
@@ -544,7 +538,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         label: "Teacher Attendance",
         icon: "🕒",
       },
-      
     ],
   },
   {
@@ -560,18 +553,15 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         key: "messages",
         label: "Messages",
         icon: "💬",
-      }
+      },
     ],
-
   },
 
   {
-
     title: "Calendar & Timetable",
     defaultOpen: false,
     items: [
       {
-
         key: "calendar",
         label: "Calendar",
         icon: "📆",
@@ -597,14 +587,13 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "📝",
       },
       {
-        key:"resourceTimetable",
+        key: "resourceTimetable",
         label: "Resource Timetable",
         icon: "📅",
-      }
+      },
     ],
   },
 
-  
   {
     title: "Finance",
     defaultOpen: false,
@@ -635,7 +624,6 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         icon: "💸",
       },
       {
-
         key: "schoolPayoutSettings",
         label: "Payout Settings",
         icon: "⚙️",
@@ -692,8 +680,6 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   // Daily Work
   studentAttendance: Studentattendance,
   teacherAttendance: Teacherattendance,
-  
- 
 
   //communication
   announcements: Announcements,
@@ -706,10 +692,8 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   teacherTimetable: TeacherTimetable,
   examTimetable: ExamTimetable,
 
-
   subjects: Subjects,
   organizations: Organizations,
-
 
   // Academic / Curriculum Setup
   academicStructures: Academicstructures,
@@ -757,16 +741,9 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
 // ======================================================
 
 export default function BranchAdminPage() {
-  const {
-    authenticated,
-    accountId,
-    loading: accountLoading,
-  } = useAccount();
+  const { authenticated, accountId, loading: accountLoading } = useAccount();
 
-  const {
-    activeSchoolId,
-    activeBranchId,
-  } = useActiveBranch();
+  const { activeSchoolId, activeBranchId } = useActiveBranch();
 
   const lastRoleEntrySyncKeyRef = useRef<string | null>(null);
 
@@ -788,11 +765,7 @@ export default function BranchAdminPage() {
       return;
     }
 
-    const syncKey = [
-      accountId,
-      activeSchoolId,
-      activeBranchId,
-    ].join(":");
+    const syncKey = [accountId, activeSchoolId, activeBranchId].join(":");
 
     if (lastRoleEntrySyncKeyRef.current === syncKey) {
       return;
@@ -804,10 +777,7 @@ export default function BranchAdminPage() {
       includePlatformCache: true,
       trigger: "role-selection",
     }).catch((error) => {
-      console.error(
-        "[branch-admin] role-entry sync failed",
-        error,
-      );
+      console.error("[branch-admin] role-entry sync failed", error);
     });
   }, [
     accountLoading,

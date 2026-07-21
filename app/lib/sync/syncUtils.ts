@@ -12,27 +12,44 @@
  *   SyncRecord payloads.
  * - stripLocalOnlyFields removes temporary Blob/File/object-url/base64 helper
  *   fields so only small metadata is sent to sync.
- * - pulled mediaAssets are matched by cloudId/owner identity/ownerTempKey,
- *   never by local numeric id alone, preventing image bleed across records.
- * - pulled normal records now also avoid unsafe payload.id/localId matching.
- *   CloudId is the only safe cross-device identity for normal synced rows.
+ * - pulled mediaAssets are matched by permanent localId, owner identity or
+ *   ownerTempKey, preventing image bleed across records;
+ * - pulled normal records match by permanent localId first and cloudId only as
+ *   a secondary sync-envelope identity;
+ * - UUID strings are never coerced to numbers.
  */
 
 import { db } from "../db/db";
-import { assertAccountId, getAccountId, getDeviceId, normalizeSyncStatus, SYNC_STATUS_VALUE } from "./syncConfig";
+import {
+  assertAccountId,
+  getAccountId,
+  getDeviceId,
+  normalizeSyncStatus,
+  SYNC_STATUS_VALUE,
+} from "./syncConfig";
 import { isSyncTable, SyncTableName } from "./syncTables";
 import { scheduleLocalWriteSync } from "./syncScheduler";
 import { publishLocalWrite } from "./syncEvents";
 
 export type SyncableRecord = Record<string, any> & {
-  id?: number;
+  /**
+   * Permanent UUID of the local-first entity.
+   */
+  id?: string;
+
+  /**
+   * Prisma SyncRecord UUID.
+   */
   cloudId?: string | null;
+
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   createdAt?: number;
   updatedAt?: number;
   version?: number;
+  createdByDeviceId?: string;
+  updatedByDeviceId?: string;
   deviceId?: string;
   synced?: string | number;
   isDeleted?: boolean;
@@ -70,10 +87,12 @@ export function prepareSyncData<T extends SyncableRecord>(data: T, existing?: Pa
     accountId,
     schoolId: data.schoolId ?? existing?.schoolId,
     branchId: data.branchId ?? existing?.branchId,
-    cloudId: data.cloudId ?? existing?.cloudId,
+    id: data.id ?? existing?.id ?? (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`),
     createdAt: existing?.createdAt || data.createdAt || nowTimestamp(),
     updatedAt: nowTimestamp(),
     version: Number(existing?.version || data.version || 0) + 1,
+    createdByDeviceId: existing?.createdByDeviceId || data.createdByDeviceId || getDeviceId(),
+    updatedByDeviceId: getDeviceId(),
     deviceId: getDeviceId(),
     synced: SYNC_STATUS_VALUE.PENDING,
     isDeleted: data.isDeleted ?? existing?.isDeleted ?? false,
@@ -85,6 +104,8 @@ export function prepareSoftDelete<T extends SyncableRecord>(existing: T): T {
     ...existing,
     updatedAt: nowTimestamp(),
     version: Number(existing.version || 0) + 1,
+    createdByDeviceId: existing.createdByDeviceId || getDeviceId(),
+    updatedByDeviceId: getDeviceId(),
     deviceId: getDeviceId(),
     synced: SYNC_STATUS_VALUE.PENDING,
     isDeleted: true,
@@ -231,23 +252,33 @@ function sameString(a: any, b: any) {
   return String(a ?? "") === String(b ?? "");
 }
 
-function sameNumber(a: any, b: any) {
-  return Number(a || 0) === Number(b || 0);
+function sameId(a: any, b: any) {
+  const left = String(a ?? "").trim();
+  const right = String(b ?? "").trim();
+
+  return Boolean(left && right && left === right);
 }
 
-async function findByCloudId(table: any, cloudId?: string | null) {
-  if (!cloudId) return null;
+async function findById(
+  table: any,
+  id?: string | null,
+) {
+  const cleanId = String(id ?? "").trim();
+  if (!cleanId) return null;
 
-  const byCloudId = await table
-    .where("cloudId")
-    .equals(cloudId)
+  const byId = await table
+    .where("id")
+    .equals(cleanId)
     .first()
     .catch(async () => {
       const rows = await table.toArray();
-      return rows.find((row: any) => row.cloudId === cloudId);
+      return rows.find(
+        (row: any) =>
+          sameId(row.id, cleanId),
+      );
     });
 
-  return byCloudId || null;
+  return byId || null;
 }
 
 async function findMediaAssetByOwnerIdentity(table: any, payload: any) {
@@ -258,8 +289,8 @@ async function findMediaAssetByOwnerIdentity(table: any, payload: any) {
 
   const baseMatch = (row: any) => {
     if (payload.accountId && row.accountId !== payload.accountId) return false;
-    if (hasValue(payload.schoolId) && !sameNumber(row.schoolId, payload.schoolId)) return false;
-    if (hasValue(payload.branchId) && !sameNumber(row.branchId, payload.branchId)) return false;
+    if (hasValue(payload.schoolId) && String(row.schoolId ?? "") !== String(payload.schoolId ?? "")) return false;
+    if (hasValue(payload.branchId) && String(row.branchId ?? "") !== String(payload.branchId ?? "")) return false;
     if (row.ownerTable !== payload.ownerTable) return false;
     if (row.fieldKey !== payload.fieldKey) return false;
     return true;
@@ -272,53 +303,164 @@ async function findMediaAssetByOwnerIdentity(table: any, payload: any) {
     if (byTempKey) return byTempKey;
   }
 
-  // Persisted records can match by cloud owner first, then local owner.
-  if (hasValue(payload.ownerCloudId)) {
-    const byOwnerCloudId = activeRows.find((row: any) => baseMatch(row) && sameString(row.ownerCloudId, payload.ownerCloudId));
-    if (byOwnerCloudId) return byOwnerCloudId;
+  // Persisted media first match the permanent owner UUID.
+  const ownerLocalId =
+    payload.ownerLocalId ??
+    payload.ownerId;
+
+  if (hasValue(ownerLocalId)) {
+    const byOwnerLocalId = activeRows.find(
+      (row: any) =>
+        baseMatch(row) &&
+        sameId(
+          row.ownerLocalId ??
+            row.ownerId,
+          ownerLocalId,
+        ),
+    );
+
+    if (byOwnerLocalId) {
+      return byOwnerLocalId;
+    }
   }
 
-  if (hasValue(payload.ownerLocalId)) {
-    const byOwnerLocalId = activeRows.find((row: any) => baseMatch(row) && sameNumber(row.ownerLocalId, payload.ownerLocalId));
-    if (byOwnerLocalId) return byOwnerLocalId;
+  // A cloud owner UUID is a secondary identity only.
+  if (hasValue(payload.ownerCloudId)) {
+    const byOwnerCloudId = activeRows.find(
+      (row: any) =>
+        baseMatch(row) &&
+        sameId(
+          row.ownerCloudId,
+          payload.ownerCloudId,
+        ),
+    );
+
+    if (byOwnerCloudId) {
+      return byOwnerCloudId;
+    }
   }
 
   return null;
 }
+
+export type ExistingLocalRecordLookup = {
+  tableName?: string | null;
+
+  /**
+   * Current UUID-native transport fields.
+   */
+  localId?: string | null;
+  cloudId?: string | null;
+
+  /**
+   * Temporary compatibility aliases for callers not yet migrated.
+   */
+  entityId?: string | null;
+  id?: string | null;
+
+  payload?: any;
+};
 
 export async function findExistingLocalRecord(
   table: any,
-  record: { tableName?: string | null; cloudId?: string | null; localId?: number | null; payload?: any }
+  record: ExistingLocalRecordLookup,
 ) {
-  // Cloud IDs are globally stable. Always trust them before local Dexie IDs.
-  // This is critical for multi-device sync because local numeric Dexie ids
-  // can collide across browsers/devices.
-  const byCloudId = await findByCloudId(table, record.cloudId || record.payload?.cloudId);
-  if (byCloudId) return byCloudId;
+  const payload =
+    record.payload || {};
 
-  // mediaAssets also have safe owner identity matching. This prevents image
-  // bleed when media records are pulled from another device.
-  if (record.tableName === "mediaAssets" || record.payload?.ownerTable) {
-    const byOwnerIdentity = await findMediaAssetByOwnerIdentity(table, record.payload || {});
-    if (byOwnerIdentity) return byOwnerIdentity;
-    return null;
+  const localId =
+    String(
+      record.localId ??
+        record.entityId ??
+        payload.id ??
+        "",
+    ).trim();
+
+  /**
+   * The permanent local-first UUID is the primary cross-device entity
+   * identity. Because every device stores the same entity UUID in `id`, this
+   * lookup is safe and deterministic.
+   */
+  const byLocalId =
+    await findById(
+      table,
+      localId,
+    );
+
+  if (byLocalId) {
+    return byLocalId;
   }
 
-  // IMPORTANT:
-  // Do NOT match normal pulled records by payload.id or record.localId alone.
-  // Those are local Dexie ids, not global identities. If device A has student #2
-  // and device B already has a different local row #2, matching by numeric id
-  // merges two different people into one record. That is exactly how one student
-  // can disappear locally while enrollments still show two.
+  /**
+   * Older local rows may already have stored the Prisma SyncRecord UUID in
+   * `cloudId`. Use that only as a secondary envelope identity.
+   */
+  const cloudId =
+    String(
+      record.cloudId ??
+        record.id ??
+        payload.cloudId ??
+        "",
+    ).trim();
+
+  if (cloudId) {
+    const rows =
+      await table.toArray();
+
+    const byCloudId =
+      rows.find(
+        (row: any) =>
+          sameId(
+            row.cloudId,
+            cloudId,
+          ),
+      ) || null;
+
+    if (byCloudId) {
+      return byCloudId;
+    }
+  }
+
+  // mediaAssets also have safe owner identity matching.
+  if (
+    record.tableName === "mediaAssets" ||
+    payload.ownerTable
+  ) {
+    return findMediaAssetByOwnerIdentity(
+      table,
+      payload,
+    );
+  }
+
   return null;
 }
 
-export async function createLocal<T extends SyncableRecord>(tableName: SyncTableName | string, data: T) {
+export async function createLocal<T extends SyncableRecord>(
+  tableName: SyncTableName | string,
+  data: T,
+) {
   assertAccountId();
+
   const table = getSyncTable(tableName);
   const prepared = prepareSyncData(data);
-  delete (prepared as any).id;
-  const id = await table.add(prepared);
+
+  /**
+   * All current local-first tables use `id` as their stable primary key.
+   * prepareSyncData() guarantees that a string UUID exists, so it must not be
+   * deleted before table.add(). Removing it causes IndexedDB DataError:
+   * "Evaluating the object store's key path did not yield a value."
+   */
+  const id = String(prepared.id || "").trim();
+
+  if (!id) {
+    throw new Error(
+      `Cannot create ${String(tableName)} record without a stable id.`,
+    );
+  }
+
+  prepared.id = id;
+
+  await table.add(prepared);
 
   publishLocalWrite({
     accountId: prepared.accountId,
@@ -332,7 +474,7 @@ export async function createLocal<T extends SyncableRecord>(tableName: SyncTable
   return table.get(id);
 }
 
-export async function updateLocal<T extends SyncableRecord>(tableName: SyncTableName | string, id: number, patch: Partial<T>) {
+export async function updateLocal<T extends SyncableRecord>(tableName: SyncTableName | string, id: string, patch: Partial<T>) {
   assertAccountId();
   const table = getSyncTable(tableName);
   const existing = await table.get(id);
@@ -353,7 +495,7 @@ export async function updateLocal<T extends SyncableRecord>(tableName: SyncTable
   return table.get(id);
 }
 
-export async function softDeleteLocal(tableName: SyncTableName | string, id: number) {
+export async function softDeleteLocal(tableName: SyncTableName | string, id: string) {
   assertAccountId();
   const table = getSyncTable(tableName);
   const existing = await table.get(id);
@@ -374,7 +516,7 @@ export async function softDeleteLocal(tableName: SyncTableName | string, id: num
   return table.get(id);
 }
 
-export async function restoreLocal(tableName: SyncTableName | string, id: number) {
+export async function restoreLocal(tableName: SyncTableName | string, id: string) {
   return updateLocal(tableName, id, { isDeleted: false, active: true } as any);
 }
 

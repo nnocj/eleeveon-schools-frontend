@@ -82,35 +82,54 @@ export const STUDENT_REPORT_TEMPLATE_CODES = [
 export type KnownStudentReportTemplateCode =
   (typeof STUDENT_REPORT_TEMPLATE_CODES)[number];
 
-export const INTERNATIONAL_TEMPLATE_CODES = [
-  "cambridge",
-  "ib",
-] as const;
+export const INTERNATIONAL_TEMPLATE_CODES = ["cambridge", "ib"] as const;
 
 export const EARLY_YEARS_TEMPLATE_CODES = [
   "kindergarten",
   "montessori",
 ] as const;
 
-export const TRANSCRIPT_TEMPLATE_CODES = [
-  "university_transcript",
-] as const;
+export const TRANSCRIPT_TEMPLATE_CODES = ["university_transcript"] as const;
 
 // ======================================================
 // BASIC FORMATTERS
 // ======================================================
+
+export function safeEntityId(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  const normalized = String(value).trim();
+  if (
+    !normalized ||
+    normalized === "0" ||
+    normalized === "undefined" ||
+    normalized === "null"
+  ) {
+    return undefined;
+  }
+
+  return normalized;
+}
 
 export function safeNumber(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function formatNumber(value?: number | null, decimals = 1, fallback = "-") {
+export function formatNumber(
+  value?: number | null,
+  decimals = 1,
+  fallback = "-",
+) {
   if (value == null || Number.isNaN(Number(value))) return fallback;
   return Number(value).toFixed(decimals);
 }
 
-export function formatPercent(value?: number | null, decimals = 1, fallback = "-") {
+export function formatPercent(
+  value?: number | null,
+  decimals = 1,
+  fallback = "-",
+) {
   if (value == null || Number.isNaN(Number(value))) return fallback;
   return `${Number(value).toFixed(decimals)}%`;
 }
@@ -141,13 +160,16 @@ export function toISODate(value?: string | number | Date | null): string {
     return value;
   }
 
-  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  const time =
+    value instanceof Date ? value.getTime() : new Date(value).getTime();
   if (!Number.isFinite(time)) return "";
 
   return new Date(time).toISOString().slice(0, 10);
 }
 
-export function friendlyReportDate(value?: string | number | Date | null): string {
+export function friendlyReportDate(
+  value?: string | number | Date | null,
+): string {
   const iso = toISODate(value);
   if (!iso) return "";
 
@@ -168,7 +190,7 @@ export function friendlyReportDate(value?: string | number | Date | null): strin
 
 export function generatedDateText(
   generatedAt?: string | number | Date | null,
-  settings?: Partial<StudentReportTemplateSettings>
+  settings?: Partial<StudentReportTemplateSettings>,
 ) {
   const resolvedSettings = {
     ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
@@ -180,20 +202,16 @@ export function generatedDateText(
   const date = friendlyReportDate(generatedAt);
   if (!date) return "";
 
-  const label =
-    resolvedSettings.generatedDateLabel || "Report Generated";
+  const label = resolvedSettings.generatedDateLabel || "Report Generated";
 
   return `${label}: ${date}`;
 }
 
 export function formatGeneratedDate(
   dataset?: StudentReportCardDataset,
-  settings?: Partial<StudentReportTemplateSettings>
+  settings?: Partial<StudentReportTemplateSettings>,
 ) {
-  return generatedDateText(
-    (dataset as any)?.generatedAt,
-    settings
-  );
+  return generatedDateText((dataset as any)?.generatedAt, settings);
 }
 // ======================================================
 // TEMPLATE RESOLUTION HELPERS
@@ -205,7 +223,7 @@ export function getTemplateCode(
     | StudentReportTemplateLayoutKey
     | Partial<StudentReportTemplateSettings>
     | ReportCardTemplateLike
-    | null
+    | null,
 ): StudentReportTemplateCode {
   if (!value) return DEFAULT_STUDENT_REPORT_TEMPLATE_CODE;
 
@@ -218,7 +236,7 @@ export function getTemplateCode(
       (value as any).templateCode ||
         (value as any).code ||
         (value as any).layoutKey ||
-        DEFAULT_STUDENT_REPORT_TEMPLATE_CODE
+        DEFAULT_STUDENT_REPORT_TEMPLATE_CODE,
     ) || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE
   );
 }
@@ -229,7 +247,7 @@ export function getTemplateLayoutKey(
     | StudentReportTemplateLayoutKey
     | Partial<StudentReportTemplateSettings>
     | ReportCardTemplateLike
-    | null
+    | null,
 ): StudentReportTemplateLayoutKey {
   if (!value) return DEFAULT_STUDENT_REPORT_TEMPLATE_CODE;
 
@@ -253,14 +271,14 @@ export function getTemplateDefinition(
     | StudentReportTemplateLayoutKey
     | Partial<StudentReportTemplateSettings>
     | ReportCardTemplateLike
-    | null
+    | null,
 ) {
   return getStudentReportTemplateDefinitionByCode(getTemplateCode(value));
 }
 
 export function isTemplateCode(
   value: unknown,
-  code: KnownStudentReportTemplateCode
+  code: KnownStudentReportTemplateCode,
 ) {
   return normalizeTemplateKey(String(value || "")) === code;
 }
@@ -330,7 +348,7 @@ export function getHeaderVariant(
     | StudentReportTemplateLayoutKey
     | Partial<StudentReportTemplateSettings>
     | ReportCardTemplateLike
-    | null
+    | null,
 ) {
   return getTemplateLayoutKey(value);
 }
@@ -374,7 +392,9 @@ export function shouldUseNarrativeRemarks(value?: unknown) {
 // ======================================================
 
 export function getContrastTextColor(hex?: string | null) {
-  let col = String(hex || "#ffffff").replace("#", "").trim();
+  let col = String(hex || "#ffffff")
+    .replace("#", "")
+    .trim();
 
   if (col.startsWith("rgb")) return "#fff";
 
@@ -398,7 +418,7 @@ export function getContrastTextColor(hex?: string | null) {
 
 export function resolvePrimaryColor(
   header?: ReportHeaderData,
-  fallback = "var(--primary-color)"
+  fallback = "var(--primary-color)",
 ) {
   const dynamicHeader = header as any;
   return (
@@ -411,7 +431,7 @@ export function resolvePrimaryColor(
 
 export function reportPageSize(
   size?: StudentReportTemplatePaperSize,
-  orientation: "portrait" | "landscape" = "portrait"
+  orientation: "portrait" | "landscape" = "portrait",
 ) {
   const paper = size || "A4";
 
@@ -462,7 +482,10 @@ export function densitySpacing(density?: StudentReportTemplateDensity) {
 
 export function normalizeReportTemplateSettings(args?: {
   template?: ReportCardTemplateLike | null;
-  settings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+  settings?:
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
   assignment?: ReportCardTemplateAssignmentLike | null;
   fallback?: Partial<StudentReportTemplateSettings> | null;
 }): StudentReportTemplateSettings {
@@ -473,13 +496,16 @@ export function normalizeReportTemplateSettings(args?: {
       ...(args?.settings || {}),
     },
     args?.template || null,
-    args?.assignment || null
+    args?.assignment || null,
   );
 }
 
 export function resolveTemplateSettings(args?: {
   template?: ReportCardTemplateLike | null;
-  settings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+  settings?:
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
   assignment?: ReportCardTemplateAssignmentLike | null;
   fallback?: Partial<StudentReportTemplateSettings> | null;
 }): StudentReportTemplateSettings {
@@ -488,7 +514,7 @@ export function resolveTemplateSettings(args?: {
 
 export function shouldShow(
   settings: Partial<StudentReportTemplateSettings> | undefined,
-  key: keyof StudentReportTemplateSettings
+  key: keyof StudentReportTemplateSettings,
 ): boolean {
   const merged = {
     ...DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
@@ -524,7 +550,9 @@ export function visibleCount(settings: StudentReportTemplateSettings) {
 // DATA NORMALIZATION
 // ======================================================
 
-export function resolveBranding(header?: ReportHeaderData): ReportTemplateBrandingData {
+export function resolveBranding(
+  header?: ReportHeaderData,
+): ReportTemplateBrandingData {
   const dynamicHeader = header as any;
   const branding = dynamicHeader?.branding || {};
 
@@ -534,10 +562,7 @@ export function resolveBranding(header?: ReportHeaderData): ReportTemplateBrandi
       dynamicHeader?.school?.name ||
       dynamicHeader?.branch?.name ||
       "School Name",
-    motto:
-      branding.motto ||
-      dynamicHeader?.school?.motto ||
-      "",
+    motto: branding.motto || dynamicHeader?.school?.motto || "",
     logo:
       branding.resolvedLogoUrl ||
       branding.logo ||
@@ -560,10 +585,7 @@ export function resolveBranding(header?: ReportHeaderData): ReportTemplateBrandi
       dynamicHeader?.branch?.email ||
       dynamicHeader?.school?.email ||
       "",
-    website:
-      branding.website ||
-      dynamicHeader?.school?.website ||
-      "",
+    website: branding.website || dynamicHeader?.school?.website || "",
     branchName:
       branding.branchName ||
       dynamicHeader?.branch?.name ||
@@ -601,38 +623,46 @@ export function resolveBranding(header?: ReportHeaderData): ReportTemplateBrandi
 }
 
 export function resolveReportBranding(
-  dataset?: StudentReportCardDataset
+  dataset?: StudentReportCardDataset,
 ): ReportTemplateBrandingData {
   return resolveBranding(dataset?.header);
 }
 
 export function resolveStudentInfo(
-  dataset?: StudentReportCardDataset
+  dataset?: StudentReportCardDataset,
 ): ReportTemplateStudentInfo {
   const report = dataset?.report as any;
   const student = dataset?.student as any;
   const dynamicData = dataset as any;
 
   return {
-    studentId: safeNumber(report?.studentId || student?.id),
-    studentName: firstText(report?.studentName, student?.fullName, "Student Name"),
-    admissionNumber: firstText(report?.admissionNumber, student?.admissionNumber),
+    studentId: String(report?.studentId || student?.id || ""),
+    studentName: firstText(
+      report?.studentName,
+      student?.fullName,
+      "Student Name",
+    ),
+    admissionNumber: firstText(
+      report?.admissionNumber,
+      student?.admissionNumber,
+    ),
     gender: firstText(report?.gender, student?.gender),
     studentPhoto: firstText(
       report?.resolvedStudentPhotoUrl,
       report?.studentPhoto,
       student?.resolvedStudentPhotoUrl,
-      student?.photo
+      student?.photo,
     ),
     className: firstText(report?.className, dynamicData?.className, "Class"),
     numberOnRoll: resolveNumberOnRollFromDataset(dataset),
     overallPosition: safeNumber(report?.overallPosition, 0) || undefined,
-    promoted: typeof report?.promoted === "boolean" ? report.promoted : undefined,
+    promoted:
+      typeof report?.promoted === "boolean" ? report.promoted : undefined,
   };
 }
 
 export function resolveSummary(
-  report?: ComputedStudentReport | any
+  report?: ComputedStudentReport | any,
 ): ReportTemplateSummaryInfo {
   return {
     total: report?.total,
@@ -644,7 +674,7 @@ export function resolveSummary(
 }
 
 export function resolveCurrentAcademicPeriodEnd(
-  dataset?: StudentReportCardDataset
+  dataset?: StudentReportCardDataset,
 ): ReportTemplateCurrentPeriodInfo | undefined {
   const dynamicData = dataset as any;
   const dynamicReport = dataset?.report as any;
@@ -659,11 +689,12 @@ export function resolveCurrentAcademicPeriodEnd(
   if (!current) return undefined;
 
   const endDate = toISODate(current.endDate);
-  const formattedEndDate = current.formattedEndDate || friendlyReportDate(endDate);
+  const formattedEndDate =
+    current.formattedEndDate || friendlyReportDate(endDate);
 
   return {
-    id: safeNumber(current.id, 0) || undefined,
-    academicStructureId: safeNumber(current.academicStructureId, 0) || undefined,
+    id: safeEntityId(current.id),
+    academicStructureId: safeEntityId(current.academicStructureId),
     name: current.name,
     type: current.type,
     startDate: toISODate(current.startDate),
@@ -672,12 +703,14 @@ export function resolveCurrentAcademicPeriodEnd(
     formattedEndDate,
     label:
       current.label ||
-      (formattedEndDate ? `This Academic Period Ends: ${formattedEndDate}` : ""),
+      (formattedEndDate
+        ? `This Academic Period Ends: ${formattedEndDate}`
+        : ""),
   };
 }
 
 export function resolveNextAcademicPeriod(
-  dataset?: StudentReportCardDataset
+  dataset?: StudentReportCardDataset,
 ): ReportTemplateNextPeriodInfo | undefined {
   const dynamicData = dataset as any;
   const dynamicReport = dataset?.report as any;
@@ -691,11 +724,12 @@ export function resolveNextAcademicPeriod(
   if (!next) return undefined;
 
   const startDate = toISODate(next.startDate);
-  const formattedStartDate = next.formattedStartDate || friendlyReportDate(startDate);
+  const formattedStartDate =
+    next.formattedStartDate || friendlyReportDate(startDate);
 
   return {
-    id: safeNumber(next.id, 0) || undefined,
-    academicStructureId: safeNumber(next.academicStructureId, 0) || undefined,
+    id: safeEntityId(next.id),
+    academicStructureId: safeEntityId(next.academicStructureId),
     name: next.name,
     type: next.type,
     startDate,
@@ -704,13 +738,15 @@ export function resolveNextAcademicPeriod(
     formattedStartDate,
     label:
       next.label ||
-      (formattedStartDate ? `Next Academic Period Begins: ${formattedStartDate}` : ""),
+      (formattedStartDate
+        ? `Next Academic Period Begins: ${formattedStartDate}`
+        : ""),
   };
 }
 
 export function formatNextAcademicPeriod(
   datasetOrNext?: StudentReportCardDataset | ReportTemplateNextPeriodInfo,
-  settings?: Partial<StudentReportTemplateSettings>
+  settings?: Partial<StudentReportTemplateSettings>,
 ) {
   const next =
     (datasetOrNext as StudentReportCardDataset)?.report ||
@@ -727,7 +763,7 @@ export function formatNextAcademicPeriod(
 }
 
 export function resolveSignatures(
-  dataset?: StudentReportCardDataset
+  dataset?: StudentReportCardDataset,
 ): ReportTemplateSignatureInfo {
   const dynamicData = dataset as any;
   const dynamicReport = dataset?.report as any;
@@ -743,7 +779,7 @@ export function resolveSignatures(
     dynamicData?.classTeacher?.name,
     dynamicHeader?.classTeacherName,
     dynamicHeader?.classTeacher?.fullName,
-    dynamicHeader?.classTeacher?.name
+    dynamicHeader?.classTeacher?.name,
   );
 
   const headTeacherName = firstText(
@@ -764,7 +800,7 @@ export function resolveSignatures(
     dynamicHeader?.headTeacher?.fullName,
     dynamicHeader?.headTeacher?.name,
     dynamicHeader?.principal?.fullName,
-    dynamicHeader?.principal?.name
+    dynamicHeader?.principal?.name,
   );
 
   const parentName = firstText(
@@ -781,13 +817,16 @@ export function resolveSignatures(
     dynamicData?.guardian?.fullName,
     dynamicData?.guardian?.name,
     dynamicData?.student?.parentName,
-    dynamicData?.student?.guardianName
+    dynamicData?.student?.guardianName,
   );
 
   return {
     classTeacherName,
     headTeacherName,
-    principalName: firstText(dynamicReport?.principalName, dynamicData?.principalName),
+    principalName: firstText(
+      dynamicReport?.principalName,
+      dynamicData?.principalName,
+    ),
     parentName,
     guardianName: parentName,
     officialSignatureImage: branding.reportCardSignatureImage,
@@ -797,7 +836,10 @@ export function resolveSignatures(
 export function normalizeStudentReportTemplateData(args: {
   dataset?: StudentReportCardDataset;
   template?: ReportCardTemplateLike | null;
-  settings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+  settings?:
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
   assignment?: ReportCardTemplateAssignmentLike | null;
 }): NormalizedStudentReportTemplateData | undefined {
   const { dataset } = args;
@@ -806,7 +848,9 @@ export function normalizeStudentReportTemplateData(args: {
     return undefined;
   }
 
-  const templateDefinition = normalizeStudentReportTemplateDefinition(args.template || null);
+  const templateDefinition = normalizeStudentReportTemplateDefinition(
+    args.template || null,
+  );
   const settings = resolveTemplateSettings({
     template: args.template || templateDefinition,
     settings: args.settings || null,
@@ -814,7 +858,8 @@ export function normalizeStudentReportTemplateData(args: {
   });
 
   const report = dataset.report as ComputedStudentReport;
-  const subjectResults = (report.subjectResults || []) as StudentSubjectResult[];
+  const subjectResults = (report.subjectResults ||
+    []) as StudentSubjectResult[];
 
   return {
     header: dataset.header,
@@ -839,9 +884,13 @@ export function normalizeStudentReportTemplateData(args: {
 
 export function getVisibleSubjectResultCells(
   subject: StudentSubjectResult,
-  settings: StudentReportTemplateSettings
+  settings: StudentReportTemplateSettings,
 ) {
-  const cells: { key: string; label: string; value: string | number | undefined }[] = [
+  const cells: {
+    key: string;
+    label: string;
+    value: string | number | undefined;
+  }[] = [
     {
       key: "weightedTotal",
       label: "Weighted",
@@ -883,7 +932,7 @@ export function getVisibleSubjectResultCells(
 
 export function subjectTeacherLine(
   subject: StudentSubjectResult,
-  settings: StudentReportTemplateSettings
+  settings: StudentReportTemplateSettings,
 ) {
   if (!settings.showTeacherNames) return "";
   return subject.teacherName || "";
@@ -895,9 +944,10 @@ export function subjectTeacherLine(
 
 export function currentAcademicPeriodEndText(
   currentAcademicPeriod: ReportTemplateCurrentPeriodInfo | undefined,
-  settings: StudentReportTemplateSettings
+  settings: StudentReportTemplateSettings,
 ) {
-  if (!(settings as any).showCurrentAcademicPeriodEnd || !currentAcademicPeriod) return "";
+  if (!(settings as any).showCurrentAcademicPeriodEnd || !currentAcademicPeriod)
+    return "";
 
   const label =
     (settings as any).currentAcademicPeriodEndLabel ||
@@ -914,12 +964,14 @@ export function currentAcademicPeriodEndText(
 
 export function formatCurrentAcademicPeriodEnd(
   datasetOrCurrent?: StudentReportCardDataset | ReportTemplateCurrentPeriodInfo,
-  settings?: Partial<StudentReportTemplateSettings>
+  settings?: Partial<StudentReportTemplateSettings>,
 ) {
   const current =
     (datasetOrCurrent as StudentReportCardDataset)?.report ||
     (datasetOrCurrent as StudentReportCardDataset)?.header
-      ? resolveCurrentAcademicPeriodEnd(datasetOrCurrent as StudentReportCardDataset)
+      ? resolveCurrentAcademicPeriodEnd(
+          datasetOrCurrent as StudentReportCardDataset,
+        )
       : (datasetOrCurrent as ReportTemplateCurrentPeriodInfo | undefined);
 
   const resolvedSettings = {
@@ -936,11 +988,12 @@ export function formatCurrentAcademicPeriodEnd(
 
 export function nextAcademicPeriodText(
   nextAcademicPeriod: ReportTemplateNextPeriodInfo | undefined,
-  settings: StudentReportTemplateSettings
+  settings: StudentReportTemplateSettings,
 ) {
   if (!settings.showNextAcademicPeriod || !nextAcademicPeriod) return "";
 
-  const label = settings.nextAcademicPeriodLabel || "Next Academic Period Begins";
+  const label =
+    settings.nextAcademicPeriodLabel || "Next Academic Period Begins";
   const date =
     nextAcademicPeriod.formattedStartDate ||
     friendlyReportDate(nextAcademicPeriod.startDate);
@@ -961,8 +1014,13 @@ export function createReportPageStyle(args: {
   compact?: boolean;
   pageBreakAfter?: boolean;
 }): React.CSSProperties {
-  const spacing = densitySpacing(args.compact ? "compact" : args.settings.density);
-  const size = reportPageSize(args.settings.paperSize, args.settings.orientation);
+  const spacing = densitySpacing(
+    args.compact ? "compact" : args.settings.density,
+  );
+  const size = reportPageSize(
+    args.settings.paperSize,
+    args.settings.orientation,
+  );
 
   return {
     ...size,
@@ -984,7 +1042,9 @@ export function createReportTableStyles(args: {
   primaryColor?: string;
   compact?: boolean;
 }) {
-  const spacing = densitySpacing(args.compact ? "compact" : args.settings.density);
+  const spacing = densitySpacing(
+    args.compact ? "compact" : args.settings.density,
+  );
   const primary = args.primaryColor || "var(--primary-color)";
   const contrast = getContrastTextColor(primary);
 
@@ -1029,12 +1089,12 @@ export function createReportTableStyles(args: {
 // ======================================================
 
 export function reportTemplateEmptyMessage(dataset?: StudentReportCardDataset) {
-  if (!dataset) return "Select a student, class and academic period to generate a report card.";
+  if (!dataset)
+    return "Select a student, class and academic period to generate a report card.";
   if (!dataset.header) return "Report header data is missing.";
   if (!dataset.report) return "Student report data is missing.";
   return "Report data is not ready.";
 }
-
 
 // ======================================================
 // 3) reports/shared/ReportTemplateUtils.ts

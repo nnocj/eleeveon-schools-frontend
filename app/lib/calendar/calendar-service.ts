@@ -52,7 +52,7 @@ export async function createCalendarEvent(input: {
 
   const event = {
     ...eventRecord,
-    id: Number(eventId),
+    id: String(eventId),
   };
 
   for (const participant of input.participants || []) {
@@ -62,7 +62,7 @@ export async function createCalendarEvent(input: {
         accountId: input.event.accountId,
         schoolId: input.event.schoolId,
         branchId: input.event.branchId,
-        eventId: Number(eventId),
+        eventId: String(eventId),
       })
     );
   }
@@ -76,7 +76,7 @@ export async function createCalendarEvent(input: {
         accountId: input.event.accountId,
         schoolId: input.event.schoolId,
         branchId: input.event.branchId,
-        eventId: Number(eventId),
+        eventId: String(eventId),
         scheduledAt,
       })
     );
@@ -87,8 +87,8 @@ export async function createCalendarEvent(input: {
 
 export async function listCalendarEvents(input: {
   accountId: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   startAt?: number;
   endAt?: number;
   includeDeleted?: boolean;
@@ -100,8 +100,8 @@ export async function listCalendarEvents(input: {
 
   rows = rows.filter((event) => {
     if (!input.includeDeleted && event.isDeleted) return false;
-    if (input.schoolId && Number(event.schoolId) !== Number(input.schoolId)) return false;
-    if (input.branchId && Number(event.branchId) !== Number(input.branchId)) return false;
+    if (input.schoolId && String(event.schoolId) !== String(input.schoolId)) return false;
+    if (input.branchId && String(event.branchId) !== String(input.branchId)) return false;
 
     if (input.startAt !== undefined && input.endAt !== undefined) {
       return eventsOverlap(event, {
@@ -116,7 +116,7 @@ export async function listCalendarEvents(input: {
   return rows.sort((a, b) => a.startAt - b.startAt);
 }
 
-export async function getCalendarEventBundle(eventId: number) {
+export async function getCalendarEventBundle(eventId: string) {
   const [event, participants, reminders, responses] = await Promise.all([
     db.calendarEvents.get(eventId),
     db.calendarEventParticipants.where("eventId").equals(eventId).toArray(),
@@ -133,7 +133,7 @@ export async function getCalendarEventBundle(eventId: number) {
 }
 
 export async function updateCalendarEvent(
-  eventId: number,
+  eventId: string,
   patch: Partial<CalendarEvent>
 ) {
   const existing = await db.calendarEvents.get(eventId);
@@ -159,7 +159,7 @@ export async function updateCalendarEvent(
   return db.calendarEvents.get(eventId);
 }
 
-export async function cancelCalendarEvent(eventId: number, reason?: string) {
+export async function cancelCalendarEvent(eventId: string, reason?: string) {
   return updateCalendarEvent(eventId, {
     status: "cancelled",
     description: reason,
@@ -167,7 +167,7 @@ export async function cancelCalendarEvent(eventId: number, reason?: string) {
   });
 }
 
-export async function softDeleteCalendarEvent(eventId: number) {
+export async function softDeleteCalendarEvent(eventId: string) {
   const existing = await db.calendarEvents.get(eventId);
 
   if (!existing) {
@@ -185,11 +185,11 @@ export async function softDeleteCalendarEvent(eventId: number) {
 
 export async function respondToCalendarEvent(input: {
   accountId: string;
-  schoolId: number;
-  branchId: number;
-  eventId: number;
-  participantId?: number | null;
-  userLocalId?: number | null;
+  schoolId: string;
+  branchId: string;
+  eventId: string;
+  participantId?: string | null;
+  userId?: string | null;
   responseStatus: CalendarResponseStatus;
   note?: string;
 }) {
@@ -238,7 +238,7 @@ export async function listPendingCalendarReminders(input: {
     .sort((a, b) => Number(a.scheduledAt || 0) - Number(b.scheduledAt || 0));
 }
 
-export async function markCalendarReminderSent(reminderId: number) {
+export async function markCalendarReminderSent(reminderId: string) {
   const reminder = await db.calendarEventReminders.get(reminderId);
 
   if (!reminder) {
@@ -256,10 +256,10 @@ export async function markCalendarReminderSent(reminderId: number) {
 
 export async function detectCalendarEventOverlaps(input: {
   accountId: string;
-  schoolId: number;
-  branchId?: number;
-  candidate: Pick<CalendarEvent, "startAt" | "endAt" | "teacherLocalId" | "classId">;
-  excludeEventId?: number;
+  schoolId: string;
+  branchId?: string;
+  candidate: Pick<CalendarEvent, "startAt" | "endAt" | "teacherId" | "classId">;
+  excludeEventId?: string;
 }) {
   const events = await listCalendarEvents({
     accountId: input.accountId,
@@ -275,14 +275,14 @@ export async function detectCalendarEventOverlaps(input: {
     if (!eventsOverlap(event, input.candidate as CalendarEvent)) return false;
 
     const sameTeacher =
-      input.candidate.teacherLocalId &&
-      event.teacherLocalId &&
-      Number(input.candidate.teacherLocalId) === Number(event.teacherLocalId);
+      input.candidate.teacherId &&
+      event.teacherId &&
+      String(input.candidate.teacherId) === String(event.teacherId);
 
     const sameClass =
       input.candidate.classId &&
       event.classId &&
-      Number(input.candidate.classId) === Number(event.classId);
+      String(input.candidate.classId) === String(event.classId);
 
     return Boolean(sameTeacher || sameClass);
   });

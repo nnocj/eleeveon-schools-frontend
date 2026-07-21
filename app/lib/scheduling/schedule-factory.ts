@@ -27,28 +27,28 @@ function now() {
 
 export type CreateScheduleTimetableInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   name: string;
   description?: string;
 
   timetableType: ScheduleTimetableType;
   scopeType: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 
-  academicStructureId?: number | null;
-  academicPeriodId?: number | null;
+  academicStructureId?: string | null;
+  academicPeriodId?: string | null;
 
-  classId?: number | null;
-  teacherLocalId?: number | null;
+  classId?: string | null;
+  teacherId?: string | null;
 
   effectiveFrom?: number | null;
   effectiveTo?: number | null;
 
   isDefault?: boolean;
 
-  createdByUserId?: number | string | null;
+  createdByUserId?: string | null;
   createdByRole?: string;
 };
 
@@ -57,7 +57,10 @@ export function createScheduleTimetableRecord(
 ): ScheduleTimetable {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -73,7 +76,7 @@ export function createScheduleTimetableRecord(
     academicPeriodId: input.academicPeriodId ?? null,
 
     classId: input.classId ?? null,
-    teacherLocalId: input.teacherLocalId ?? null,
+    teacherId: input.teacherId ?? null,
 
     effectiveFrom: input.effectiveFrom ?? null,
     effectiveTo: input.effectiveTo ?? null,
@@ -89,17 +92,19 @@ export function createScheduleTimetableRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateScheduleSessionInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
-  timetableId: number;
+  timetableId: string;
 
   sessionType: ScheduleSessionType;
   dayOfWeek: ScheduleDayOfWeek;
@@ -109,12 +114,12 @@ export type CreateScheduleSessionInput = {
   title?: string;
   description?: string;
 
-  classId?: number | null;
-  subjectId?: number | null;
-  classSubjectId?: number | null;
-  teacherLocalId?: number | null;
+  classId?: string | null;
+  subjectId?: string | null;
+  classSubjectId?: string | null;
+  teacherId?: string | null;
 
-  resourceId?: number | null;
+  resourceId?: string | null;
   roomName?: string;
   location?: string;
 
@@ -129,7 +134,10 @@ export function createScheduleSessionRecord(
 ): ScheduleSession {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -148,7 +156,7 @@ export function createScheduleSessionRecord(
     classId: input.classId ?? null,
     subjectId: input.subjectId ?? null,
     classSubjectId: input.classSubjectId ?? null,
-    teacherLocalId: input.teacherLocalId ?? null,
+    teacherId: input.teacherId ?? null,
 
     resourceId: input.resourceId ?? null,
     roomName: input.roomName?.trim(),
@@ -164,15 +172,17 @@ export function createScheduleSessionRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateScheduleResourceInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   name: string;
   resourceType: ScheduleResourceType;
@@ -182,7 +192,7 @@ export type CreateScheduleResourceInput = {
   location?: string;
 
   scopeType?: ScheduleScopeType;
-  scopeId?: number | null;
+  scopeId?: string | null;
 };
 
 export function createScheduleResourceRecord(
@@ -190,7 +200,10 @@ export function createScheduleResourceRecord(
 ): ScheduleResource {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -210,15 +223,17 @@ export function createScheduleResourceRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }
 
 export type CreateScheduleConflictInput = {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 
   conflictType: ScheduleConflictType;
   severity: ScheduleConflictSeverity;
@@ -226,17 +241,17 @@ export type CreateScheduleConflictInput = {
   title: string;
   description?: string;
 
-  eventIdA?: number | null;
-  eventIdB?: number | null;
+  eventIdA?: string | null;
+  eventIdB?: string | null;
 
-  sessionIdA?: number | null;
-  sessionIdB?: number | null;
+  sessionIdA?: string | null;
+  sessionIdB?: string | null;
 
-  resourceId?: number | null;
+  resourceId?: string | null;
 
-  teacherLocalId?: number | null;
-  classId?: number | null;
-  studentLocalId?: number | null;
+  teacherId?: string | null;
+  classId?: string | null;
+  studentId?: string | null;
 
   conflictStartAt?: number | null;
   conflictEndAt?: number | null;
@@ -251,7 +266,10 @@ export function createScheduleConflictRecord(
 ): ScheduleConflict {
   const timestamp = now();
 
+  const deviceId = getSchedulingDeviceId();
+
   return {
+    id: crypto.randomUUID(),
     accountId: input.accountId,
     schoolId: input.schoolId,
     branchId: input.branchId,
@@ -271,9 +289,9 @@ export function createScheduleConflictRecord(
 
     resourceId: input.resourceId ?? null,
 
-    teacherLocalId: input.teacherLocalId ?? null,
+    teacherId: input.teacherId ?? null,
     classId: input.classId ?? null,
-    studentLocalId: input.studentLocalId ?? null,
+    studentId: input.studentId ?? null,
 
     conflictStartAt: input.conflictStartAt ?? null,
     conflictEndAt: input.conflictEndAt ?? null,
@@ -288,7 +306,9 @@ export function createScheduleConflictRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     version: 1,
-    deviceId: getSchedulingDeviceId(),
+    deviceId,
+    createdByDeviceId: deviceId,
+    updatedByDeviceId: deviceId,
     synced: SYNC_STATUS_VALUE.PENDING,
   };
 }

@@ -22,7 +22,15 @@ type AnyRow = Record<string, any>;
 
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
 const DAY_LABELS: Record<string, string> = {
   monday: "Monday",
   tuesday: "Tuesday",
@@ -39,7 +47,7 @@ function n(value: any) {
 }
 
 function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId;
+  return row?.id;
 }
 
 function cleanId(value: any) {
@@ -48,11 +56,20 @@ function cleanId(value: any) {
 }
 
 function rowName(row?: AnyRow) {
-  return String(row?.fullName || row?.name || row?.title || row?.label || row?.email || "Unnamed").trim();
+  return String(
+    row?.fullName ||
+      row?.name ||
+      row?.title ||
+      row?.label ||
+      row?.email ||
+      "Unnamed",
+  ).trim();
 }
 
 function normalizeDay(value: any) {
-  const raw = String(value || "monday").toLowerCase().trim();
+  const raw = String(value || "monday")
+    .toLowerCase()
+    .trim();
   return DAYS.includes(raw) ? raw : "monday";
 }
 
@@ -65,7 +82,9 @@ function startMinute(row: AnyRow) {
 }
 
 function endMinute(row: AnyRow) {
-  return n(row?.endMinute ?? row?.end ?? row?.endTimeMinute) || startMinute(row) + 60;
+  return (
+    n(row?.endMinute ?? row?.end ?? row?.endTimeMinute) || startMinute(row) + 60
+  );
 }
 
 function minuteToTime(value: any) {
@@ -80,20 +99,39 @@ function formatMinuteRange(start: number, end: number) {
 }
 
 function sessionTeacherId(session: AnyRow) {
-  return cleanId(session.teacherLocalId ?? session.teacherId ?? session.staffId);
+  return cleanId(session.teacherId ?? session.teacherId ?? session.staffId);
 }
 
 function sessionTitle(row: AnyRow) {
-  return String(row?.title || row?.sessionType || row?.type || row?.subjectName || "Timetable session").trim();
+  return String(
+    row?.title ||
+      row?.sessionType ||
+      row?.type ||
+      row?.subjectName ||
+      "Timetable session",
+  ).trim();
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function freeBlocks(booked: { start: number; end: number }[], dayStart = 7 * 60, dayEnd = 17 * 60) {
+function freeBlocks(
+  booked: { start: number; end: number }[],
+  dayStart = 7 * 60,
+  dayEnd = 17 * 60,
+) {
   const sorted = [...booked]
-    .map((item) => ({ start: Math.max(dayStart, item.start), end: Math.min(dayEnd, item.end) }))
+    .map((item) => ({
+      start: Math.max(dayStart, item.start),
+      end: Math.min(dayEnd, item.end),
+    }))
     .filter((item) => item.end > item.start)
     .sort((a, b) => a.start - b.start);
 
@@ -127,9 +165,16 @@ export function TeacherAvailability({
       .map((teacher) => {
         const teacherId = cleanId(idOf(teacher));
         const teacherSessions = sessions
-          .filter((session) => sessionTeacherId(session) === teacherId && sessionDay(session) === day)
+          .filter(
+            (session) =>
+              sessionTeacherId(session) === teacherId &&
+              sessionDay(session) === day,
+          )
           .sort((a, b) => startMinute(a) - startMinute(b));
-        const booked = teacherSessions.map((session) => ({ start: startMinute(session), end: endMinute(session) }));
+        const booked = teacherSessions.map((session) => ({
+          start: startMinute(session),
+          end: endMinute(session),
+        }));
         const free = freeBlocks(booked);
 
         return {
@@ -139,7 +184,10 @@ export function TeacherAvailability({
           free,
         };
       })
-      .sort((a, b) => a.sessions.length - b.sessions.length || a.name.localeCompare(b.name));
+      .sort(
+        (a, b) =>
+          a.sessions.length - b.sessions.length || a.name.localeCompare(b.name),
+      );
   }, [selectedDay, sessions, teachers]);
 
   return (
@@ -147,9 +195,15 @@ export function TeacherAvailability({
       <div className="ba-head">
         <div>
           <p>Teacher Availability</p>
-          <h3>{DAY_LABELS[normalizeDay(selectedDay)]} free and booked blocks</h3>
+          <h3>
+            {DAY_LABELS[normalizeDay(selectedDay)]} free and booked blocks
+          </h3>
         </div>
-        <select className="ba-inline-select" value={selectedDay} onChange={(event) => setSelectedDay(event.target.value)}>
+        <select
+          className="ba-inline-select"
+          value={selectedDay}
+          onChange={(event) => setSelectedDay(event.target.value)}
+        >
           {DAYS.map((day) => (
             <option key={day} value={day}>
               {DAY_LABELS[day]}
@@ -167,8 +221,18 @@ export function TeacherAvailability({
                 <h3>{row.name}</h3>
                 <p>{row.sessions.length} booked session(s)</p>
                 <div className="ba-chip-row">
-                  {row.free.length ? <Chip tone="green">Available blocks: {row.free.length}</Chip> : <Chip tone="orange">Fully booked</Chip>}
-                  {row.sessions.length ? <Chip tone="blue">Booked</Chip> : <Chip>No sessions</Chip>}
+                  {row.free.length ? (
+                    <Chip tone="green">
+                      Available blocks: {row.free.length}
+                    </Chip>
+                  ) : (
+                    <Chip tone="orange">Fully booked</Chip>
+                  )}
+                  {row.sessions.length ? (
+                    <Chip tone="blue">Booked</Chip>
+                  ) : (
+                    <Chip>No sessions</Chip>
+                  )}
                 </div>
               </div>
             </div>
@@ -178,11 +242,16 @@ export function TeacherAvailability({
                 <strong>Available</strong>
                 <div className="ba-chip-row">
                   {row.free.map((block) => (
-                    <Chip key={`${row.id}-${block.start}-${block.end}`} tone="green">
+                    <Chip
+                      key={`${row.id}-${block.start}-${block.end}`}
+                      tone="green"
+                    >
                       {formatMinuteRange(block.start, block.end)}
                     </Chip>
                   ))}
-                  {!row.free.length ? <Chip tone="gray">No free block</Chip> : null}
+                  {!row.free.length ? (
+                    <Chip tone="gray">No free block</Chip>
+                  ) : null}
                 </div>
               </section>
 
@@ -190,11 +259,22 @@ export function TeacherAvailability({
                 <strong>Booked</strong>
                 <div className="ba-chip-row">
                   {row.sessions.map((session) => (
-                    <Chip key={String(idOf(session) || `${row.id}-${startMinute(session)}`)} tone="blue">
-                      {formatMinuteRange(startMinute(session), endMinute(session))} · {sessionTitle(session)}
+                    <Chip
+                      key={String(
+                        idOf(session) || `${row.id}-${startMinute(session)}`,
+                      )}
+                      tone="blue"
+                    >
+                      {formatMinuteRange(
+                        startMinute(session),
+                        endMinute(session),
+                      )}{" "}
+                      · {sessionTitle(session)}
                     </Chip>
                   ))}
-                  {!row.sessions.length ? <Chip tone="gray">No booking</Chip> : null}
+                  {!row.sessions.length ? (
+                    <Chip tone="gray">No booking</Chip>
+                  ) : null}
                 </div>
               </section>
             </div>

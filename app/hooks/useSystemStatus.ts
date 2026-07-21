@@ -44,6 +44,8 @@ import {
   type AppVersionMetadata,
 } from "../lib/pwa/appVersion";
 
+import { SyncStatus } from "../lib/constants/syncStatus";
+
 export type SystemStatusSnapshot = {
   online: boolean;
   realtimeStatus: string;
@@ -60,7 +62,7 @@ export type SystemStatusSnapshot = {
   updateAvailable: boolean;
   currentAccountId?: string | null;
   currentAccountName?: string | null;
-  currentBranchId?: number | null;
+  currentBranchId?: string | null;
   currentBranchName?: string | null;
   currentSchoolName?: string | null;
   lastSyncError?: string | null;
@@ -444,9 +446,9 @@ export function useSystemStatus() {
                     ) &&
                     (
                       row.synced ===
-                        "error" ||
+                        SyncStatus.FAILED ||
                       row.syncStatus ===
-                        "error" ||
+                        SyncStatus.FAILED ||
                       Boolean(
                         row.syncError,
                       )
@@ -461,9 +463,9 @@ export function useSystemStatus() {
                   row.id,
                   {
                     synced:
-                      "pending",
+                      SyncStatus.PENDING,
                     syncStatus:
-                      "pending",
+                      SyncStatus.PENDING,
                     syncError:
                       undefined,
                     updatedAt:

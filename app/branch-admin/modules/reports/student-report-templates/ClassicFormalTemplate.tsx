@@ -22,7 +22,13 @@
  * It only renders data produced by reports/engine/report-engine.ts.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   ReportAssessmentColumn,
@@ -89,19 +95,23 @@ export default function ClassicFormalTemplate({
 
   const ZOOM_STEP = 1.01;
 
-  const applyZoomStep = useCallback((direction: "in" | "out") => {
-    /*
-     * If currently fitted, start from the fitted scale.
-     * Then change only 1% relative to that fitted/current size.
-     */
-    setZoomScale((prev) => {
-      const baseScale = expanded ? prev : fitScale;
-      const nextScale = direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
-      return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
-    });
+  const applyZoomStep = useCallback(
+    (direction: "in" | "out") => {
+      /*
+       * If currently fitted, start from the fitted scale.
+       * Then change only 1% relative to that fitted/current size.
+       */
+      setZoomScale((prev) => {
+        const baseScale = expanded ? prev : fitScale;
+        const nextScale =
+          direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
+        return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
+      });
 
-    setExpanded(true);
-  }, [expanded, fitScale]);
+      setExpanded(true);
+    },
+    [expanded, fitScale],
+  );
 
   const stopZoomHold = useCallback(() => {
     if (holdTimerRef.current != null) {
@@ -115,16 +125,19 @@ export default function ClassicFormalTemplate({
     }
   }, []);
 
-  const startZoomHold = useCallback((direction: "in" | "out") => {
-    stopZoomHold();
-    applyZoomStep(direction);
+  const startZoomHold = useCallback(
+    (direction: "in" | "out") => {
+      stopZoomHold();
+      applyZoomStep(direction);
 
-    holdTimerRef.current = window.setTimeout(() => {
-      holdIntervalRef.current = window.setInterval(() => {
-        applyZoomStep(direction);
-      }, 55);
-    }, 260);
-  }, [applyZoomStep, stopZoomHold]);
+      holdTimerRef.current = window.setTimeout(() => {
+        holdIntervalRef.current = window.setInterval(() => {
+          applyZoomStep(direction);
+        }, 55);
+      }, 260);
+    },
+    [applyZoomStep, stopZoomHold],
+  );
 
   const zoomOut = () => {
     applyZoomStep("out");
@@ -175,7 +188,10 @@ export default function ClassicFormalTemplate({
        * - zoom mode lets the user magnify or reduce manually
        */
       const availableWidth = Math.max(120, rect.width - SAFE_GAP);
-      const availableHeight = Math.max(180, window.innerHeight - rect.top - SAFE_GAP);
+      const availableHeight = Math.max(
+        180,
+        window.innerHeight - rect.top - SAFE_GAP,
+      );
 
       const widthScale = availableWidth / A4_WIDTH_PX;
       const heightScale = availableHeight / A4_HEIGHT_PX;
@@ -208,8 +224,6 @@ export default function ClassicFormalTemplate({
     };
   }, [stopZoomHold]);
 
-
-
   const resolvedSettings: StudentReportTemplateSettings =
     mergeStudentReportTemplateSettings(
       {
@@ -221,7 +235,7 @@ export default function ClassicFormalTemplate({
         density: settings?.density || (compact ? "compact" : "comfortable"),
       },
       template || null,
-      null
+      null,
     );
 
   const normalized = normalizeStudentReportTemplateData({
@@ -235,7 +249,7 @@ export default function ClassicFormalTemplate({
   const student = dataset?.student;
 
   const assessmentColumns = useMemo<ReportAssessmentColumn[]>(() => {
-    const map = new Map<number, ReportAssessmentColumn>();
+    const map = new Map<string, ReportAssessmentColumn>();
 
     report?.subjectResults?.forEach((subject) => {
       subject.breakdown?.forEach((item) => {
@@ -275,10 +289,7 @@ export default function ClassicFormalTemplate({
   const fontFamily = branding.fontFamily || "Arial, sans-serif";
 
   const reportBackgroundImage = branding.reportCardBackgroundImage || "";
-  const reportWatermark =
-    branding.reportCardWatermark ||
-    branding.logo ||
-    "";
+  const reportWatermark = branding.reportCardWatermark || branding.logo || "";
 
   const reportSignatureImage =
     signatures.officialSignatureImage ||
@@ -395,7 +406,9 @@ export default function ClassicFormalTemplate({
       key: "attendancePercent",
       label: "Attendance %",
       value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show: resolvedSettings.showAttendance && resolvedSettings.showAttendancePercent,
+      show:
+        resolvedSettings.showAttendance &&
+        resolvedSettings.showAttendancePercent,
     },
   ].filter((item) => item.show);
 
@@ -421,17 +434,23 @@ export default function ClassicFormalTemplate({
     {
       key: "gpa",
       label: "GPA",
-      value: report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-",
+      value:
+        report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-",
       show: resolvedSettings.showGPA,
     },
   ].filter((item) => item.show);
 
-  const currentPeriodEndLine = currentAcademicPeriodEndText(currentAcademicPeriod, resolvedSettings);
-  const nextPeriodLine = nextAcademicPeriodText(nextAcademicPeriod, resolvedSettings);
-  const generatedDateValue =
-    (resolvedSettings as any).showGeneratedDate
-      ? friendlyReportDate((dataset as any)?.generatedAt)
-      : "";
+  const currentPeriodEndLine = currentAcademicPeriodEndText(
+    currentAcademicPeriod,
+    resolvedSettings,
+  );
+  const nextPeriodLine = nextAcademicPeriodText(
+    nextAcademicPeriod,
+    resolvedSettings,
+  );
+  const generatedDateValue = (resolvedSettings as any).showGeneratedDate
+    ? friendlyReportDate((dataset as any)?.generatedAt)
+    : "";
 
   const subjectTableColumnCount =
     1 +
@@ -501,7 +520,9 @@ export default function ClassicFormalTemplate({
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: resolvedSettings.showStudentPhoto ? "1fr 78px" : "1fr",
+            gridTemplateColumns: resolvedSettings.showStudentPhoto
+              ? "1fr 78px"
+              : "1fr",
             gap: 8,
             marginTop: 8,
           }}
@@ -555,7 +576,9 @@ export default function ClassicFormalTemplate({
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
-                <span style={{ fontSize: 9, fontWeight: 900, color: "#666" }}>PHOTO</span>
+                <span style={{ fontSize: 9, fontWeight: 900, color: "#666" }}>
+                  PHOTO
+                </span>
               )}
             </div>
           )}
@@ -567,7 +590,12 @@ export default function ClassicFormalTemplate({
               <tr>
                 <th
                   data-report-color-block="true"
-                  style={{ ...tableStyles.th, textAlign: "left", minWidth: 95, borderColor: "#111" }}
+                  style={{
+                    ...tableStyles.th,
+                    textAlign: "left",
+                    minWidth: 95,
+                    borderColor: "#111",
+                  }}
                 >
                   Subject
                 </th>
@@ -585,15 +613,33 @@ export default function ClassicFormalTemplate({
                   </th>
                 ))}
 
-                <th data-report-color-block="true" style={{ ...tableStyles.th, borderColor: "#111" }}>Weighted</th>
-                <th data-report-color-block="true" style={{ ...tableStyles.th, borderColor: "#111" }}>%</th>
+                <th
+                  data-report-color-block="true"
+                  style={{ ...tableStyles.th, borderColor: "#111" }}
+                >
+                  Weighted
+                </th>
+                <th
+                  data-report-color-block="true"
+                  style={{ ...tableStyles.th, borderColor: "#111" }}
+                >
+                  %
+                </th>
 
                 {resolvedSettings.showGrade && (
-                  <th data-report-color-block="true" style={{ ...tableStyles.th, borderColor: "#111" }}>Grade</th>
+                  <th
+                    data-report-color-block="true"
+                    style={{ ...tableStyles.th, borderColor: "#111" }}
+                  >
+                    Grade
+                  </th>
                 )}
 
                 {resolvedSettings.showSubjectPosition && (
-                  <th data-report-color-block="true" style={{ ...tableStyles.th, borderColor: "#111" }}>
+                  <th
+                    data-report-color-block="true"
+                    style={{ ...tableStyles.th, borderColor: "#111" }}
+                  >
                     {resolvedSettings.subjectPositionLabel || "Pos."}
                   </th>
                 )}
@@ -601,7 +647,11 @@ export default function ClassicFormalTemplate({
                 {resolvedSettings.showSubjectRemarks && (
                   <th
                     data-report-color-block="true"
-                    style={{ ...tableStyles.th, minWidth: 85, borderColor: "#111" }}
+                    style={{
+                      ...tableStyles.th,
+                      minWidth: 85,
+                      borderColor: "#111",
+                    }}
                   >
                     Remark
                   </th>
@@ -612,59 +662,103 @@ export default function ClassicFormalTemplate({
             <tbody>
               {report.subjectResults.map((subject) => (
                 <tr key={subject.classSubjectId}>
-                  <td style={{ ...tableStyles.td, fontWeight: 850, borderColor: "#9a9a9a" }}>
+                  <td
+                    style={{
+                      ...tableStyles.td,
+                      fontWeight: 850,
+                      borderColor: "#9a9a9a",
+                    }}
+                  >
                     {subject.subjectName}
-                    {resolvedSettings.showTeacherNames && subject.teacherName && (
-                      <div
-                        style={{
-                          marginTop: 2,
-                          fontSize: 8,
-                          opacity: 0.78,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {subject.teacherName}
-                      </div>
-                    )}
+                    {resolvedSettings.showTeacherNames &&
+                      subject.teacherName && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            fontSize: 8,
+                            opacity: 0.78,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {subject.teacherName}
+                        </div>
+                      )}
                   </td>
 
                   {assessmentColumns.map((column) => {
                     const item = subject.breakdown.find(
-                      (row) => row.assessmentStructureItemId === column.assessmentStructureItemId
+                      (row) =>
+                        row.assessmentStructureItemId ===
+                        column.assessmentStructureItemId,
                     );
 
                     return (
                       <td
                         key={column.assessmentStructureItemId}
-                        style={{ ...tableStyles.td, textAlign: "center", borderColor: "#9a9a9a" }}
+                        style={{
+                          ...tableStyles.td,
+                          textAlign: "center",
+                          borderColor: "#9a9a9a",
+                        }}
                       >
-                        {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
+                        {item
+                          ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}`
+                          : "-"}
                       </td>
                     );
                   })}
 
-                  <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 850, borderColor: "#9a9a9a" }}>
+                  <td
+                    style={{
+                      ...tableStyles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                      borderColor: "#9a9a9a",
+                    }}
+                  >
                     {formatNumber(subject.weightedTotal, 1)}
                   </td>
 
-                  <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 850, borderColor: "#9a9a9a" }}>
+                  <td
+                    style={{
+                      ...tableStyles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                      borderColor: "#9a9a9a",
+                    }}
+                  >
                     {formatPercent(subject.percentage, 1, "-")}
                   </td>
 
                   {resolvedSettings.showGrade && (
-                    <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 950, borderColor: "#9a9a9a" }}>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        textAlign: "center",
+                        fontWeight: 950,
+                        borderColor: "#9a9a9a",
+                      }}
+                    >
                       {subject.grade}
                     </td>
                   )}
 
                   {resolvedSettings.showSubjectPosition && (
-                    <td style={{ ...tableStyles.td, textAlign: "center", borderColor: "#9a9a9a" }}>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        textAlign: "center",
+                        borderColor: "#9a9a9a",
+                      }}
+                    >
                       {ordinal(subject.subjectPosition)}
                     </td>
                   )}
 
                   {resolvedSettings.showSubjectRemarks && (
-                    <td style={{ ...tableStyles.td, borderColor: "#9a9a9a" }}>{subject.remark}</td>
+                    <td style={{ ...tableStyles.td, borderColor: "#9a9a9a" }}>
+                      {subject.remark}
+                    </td>
                   )}
                 </tr>
               ))}
@@ -672,7 +766,11 @@ export default function ClassicFormalTemplate({
               {!report.subjectResults.length && (
                 <tr>
                   <td
-                    style={{ ...tableStyles.td, textAlign: "center", padding: 16 }}
+                    style={{
+                      ...tableStyles.td,
+                      textAlign: "center",
+                      padding: 16,
+                    }}
                     colSpan={subjectTableColumnCount}
                   >
                     No subject results available for this selected period.
@@ -704,7 +802,13 @@ export default function ClassicFormalTemplate({
                 }}
               >
                 <div style={label}>{card.label}</div>
-                <div style={{ ...value, fontSize: compact ? 14 : 15.5, fontWeight: 950 }}>
+                <div
+                  style={{
+                    ...value,
+                    fontSize: compact ? 14 : 15.5,
+                    fontWeight: 950,
+                  }}
+                >
                   {card.value}
                 </div>
               </div>
@@ -720,15 +824,33 @@ export default function ClassicFormalTemplate({
             gap: 7,
           }}
         >
-          <div style={{ border: "1px solid #111", borderRadius: 8, minHeight: 50, padding: 7 }}>
-            <div style={label}>{resolvedSettings.classTeacherLabel}'s Remark</div>
+          <div
+            style={{
+              border: "1px solid #111",
+              borderRadius: 8,
+              minHeight: 50,
+              padding: 7,
+            }}
+          >
+            <div style={label}>
+              {resolvedSettings.classTeacherLabel}'s Remark
+            </div>
             <div style={{ marginTop: 5, fontSize: 10.5, lineHeight: 1.3 }}>
               {report.classTeacherRemark || ""}
             </div>
           </div>
 
-          <div style={{ border: "1px solid #111", borderRadius: 8, minHeight: 50, padding: 7 }}>
-            <div style={label}>{resolvedSettings.headTeacherLabel}'s Remark</div>
+          <div
+            style={{
+              border: "1px solid #111",
+              borderRadius: 8,
+              minHeight: 50,
+              padding: 7,
+            }}
+          >
+            <div style={label}>
+              {resolvedSettings.headTeacherLabel}'s Remark
+            </div>
             <div style={{ marginTop: 5, fontSize: 10.5, lineHeight: 1.3 }}>
               {report.headTeacherRemark || ""}
             </div>
@@ -741,9 +863,17 @@ export default function ClassicFormalTemplate({
               marginTop: 8,
               display: "grid",
               gridTemplateColumns:
-                [currentPeriodEndLine, nextPeriodLine, generatedDateValue].filter(Boolean).length >= 3
+                [
+                  currentPeriodEndLine,
+                  nextPeriodLine,
+                  generatedDateValue,
+                ].filter(Boolean).length >= 3
                   ? "repeat(3, minmax(0, 1fr))"
-                  : [currentPeriodEndLine, nextPeriodLine, generatedDateValue].filter(Boolean).length === 2
+                  : [
+                        currentPeriodEndLine,
+                        nextPeriodLine,
+                        generatedDateValue,
+                      ].filter(Boolean).length === 2
                     ? "repeat(2, minmax(0, 1fr))"
                     : "1fr",
               gap: 7,
@@ -766,7 +896,9 @@ export default function ClassicFormalTemplate({
                 <div>
                   <div style={label}>Current Academic Period</div>
                   <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
-                    {currentAcademicPeriod?.name || header.academicPeriod?.name || "Current Period"}
+                    {currentAcademicPeriod?.name ||
+                      header.academicPeriod?.name ||
+                      "Current Period"}
                   </div>
                 </div>
 
@@ -827,7 +959,8 @@ export default function ClassicFormalTemplate({
               >
                 <div>
                   <div style={label}>
-                    {(resolvedSettings as any).generatedDateLabel || "Generated"}
+                    {(resolvedSettings as any).generatedDateLabel ||
+                      "Generated"}
                   </div>
                   <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
                     Report Card
@@ -857,7 +990,9 @@ export default function ClassicFormalTemplate({
           }}
         >
           <div style={{ textAlign: "center" }}>
-            <div style={signatureNameStyle}>{signatures.classTeacherName || ""}</div>
+            <div style={signatureNameStyle}>
+              {signatures.classTeacherName || ""}
+            </div>
             <div
               style={{
                 borderTop: "1px solid #111",
@@ -928,7 +1063,9 @@ export default function ClassicFormalTemplate({
             color: "#555",
           }}
         >
-          <span>Official academic report generated for {branding.schoolName}</span>
+          <span>
+            Official academic report generated for {branding.schoolName}
+          </span>
           <span>Powered by Eleeveon School Management System</span>
         </div>
       </div>
@@ -945,7 +1082,8 @@ export default function ClassicFormalTemplate({
         <div>
           <strong>{report.studentName}</strong>
           <span>
-            {report.className} · {header.academicPeriod?.name || "Academic Period"}
+            {report.className} ·{" "}
+            {header.academicPeriod?.name || "Academic Period"}
           </span>
         </div>
 
@@ -989,7 +1127,7 @@ export default function ClassicFormalTemplate({
 
             {zoomMenuOpen && (
               <div className="src-zoom-menu" role="menu">
-                {[ 30, 40, 50, 60, 70, 80, 90, 100].map((percent) => (
+                {[30, 40, 50, 60, 70, 80, 90, 100].map((percent) => (
                   <button
                     key={percent}
                     type="button"
@@ -1023,7 +1161,9 @@ export default function ClassicFormalTemplate({
       <div
         ref={previewFrameRef}
         className="src-preview-scroll report-screen-scroll"
-        style={{ "--report-preview-scale": previewScale } as React.CSSProperties}
+        style={
+          { "--report-preview-scale": previewScale } as React.CSSProperties
+        }
       >
         <div className="src-preview-center">
           <div className="src-preview-scale">{reportPage}</div>

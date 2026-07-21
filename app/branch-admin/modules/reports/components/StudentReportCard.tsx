@@ -62,7 +62,10 @@ export type StudentReportCardProps = {
   /**
    * Optional selected template settings row from Dexie/reportCardTemplateSettings.
    */
-  templateSettings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+  templateSettings?:
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
 
   /**
    * Optional assignment row from Dexie/reportCardTemplateAssignments.
@@ -92,52 +95,52 @@ export type StudentReportCardProps = {
 function resolveDynamicTemplate(dataset?: StudentReportCardDataset) {
   const dynamicDataset = dataset as any;
 
-  return (
-    dynamicDataset?.template ||
+  return (dynamicDataset?.template ||
     dynamicDataset?.reportTemplate ||
     dynamicDataset?.reportCardTemplate ||
     dynamicDataset?.selectedTemplate ||
     dynamicDataset?.header?.template ||
     dynamicDataset?.header?.reportTemplate ||
     dynamicDataset?.header?.reportCardTemplate ||
-    null
-  ) as ReportCardTemplateLike | null;
+    null) as ReportCardTemplateLike | null;
 }
 
 function resolveDynamicTemplateSettings(dataset?: StudentReportCardDataset) {
   const dynamicDataset = dataset as any;
 
-  return (
-    dynamicDataset?.templateSettings ||
+  return (dynamicDataset?.templateSettings ||
     dynamicDataset?.reportTemplateSettings ||
     dynamicDataset?.reportCardTemplateSettings ||
     dynamicDataset?.selectedTemplateSettings ||
     dynamicDataset?.header?.templateSettings ||
     dynamicDataset?.header?.reportTemplateSettings ||
     dynamicDataset?.header?.reportCardTemplateSettings ||
-    null
-  ) as ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+    null) as
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
 }
 
 function resolveDynamicTemplateAssignment(dataset?: StudentReportCardDataset) {
   const dynamicDataset = dataset as any;
 
-  return (
-    dynamicDataset?.templateAssignment ||
+  return (dynamicDataset?.templateAssignment ||
     dynamicDataset?.reportTemplateAssignment ||
     dynamicDataset?.reportCardTemplateAssignment ||
     dynamicDataset?.selectedTemplateAssignment ||
     dynamicDataset?.header?.templateAssignment ||
     dynamicDataset?.header?.reportTemplateAssignment ||
     dynamicDataset?.header?.reportCardTemplateAssignment ||
-    null
-  ) as ReportCardTemplateAssignmentLike | null;
+    null) as ReportCardTemplateAssignmentLike | null;
 }
 
 function resolveTemplateCode(args: {
   dataset?: StudentReportCardDataset;
   template?: ReportCardTemplateLike | StudentReportTemplateDefinition | null;
-  settings?: ReportCardTemplateSettingsLike | Partial<StudentReportTemplateSettings> | null;
+  settings?:
+    | ReportCardTemplateSettingsLike
+    | Partial<StudentReportTemplateSettings>
+    | null;
 }) {
   const dynamicDataset = args.dataset as any;
 
@@ -180,20 +183,12 @@ export default function StudentReportCard({
     const dynamicAssignment = resolveDynamicTemplateAssignment(dataset);
 
     const selectedTemplate =
-      (template as ReportCardTemplateLike | null) ||
-      dynamicTemplate ||
-      null;
+      (template as ReportCardTemplateLike | null) || dynamicTemplate || null;
 
     const selectedSettings =
-      settings ||
-      templateSettings ||
-      dynamicSettings ||
-      null;
+      settings || templateSettings || dynamicSettings || null;
 
-    const selectedAssignment =
-      templateAssignment ||
-      dynamicAssignment ||
-      null;
+    const selectedAssignment = templateAssignment || dynamicAssignment || null;
 
     const templateCode = resolveTemplateCode({
       dataset,
@@ -201,7 +196,8 @@ export default function StudentReportCard({
       settings: selectedSettings,
     });
 
-    const definitionFromRegistry = getStudentReportTemplateDefinition(templateCode);
+    const definitionFromRegistry =
+      getStudentReportTemplateDefinition(templateCode);
 
     const normalizedTemplate = selectedTemplate
       ? normalizeStudentReportTemplateDefinition(selectedTemplate)
@@ -210,11 +206,11 @@ export default function StudentReportCard({
     const resolvedSettings = mergeStudentReportTemplateSettings(
       selectedSettings,
       normalizedTemplate,
-      selectedAssignment
+      selectedAssignment,
     );
 
     const TemplateComponent = getStudentReportTemplateComponent(
-      resolvedSettings.templateCode || normalizedTemplate.code || templateCode
+      resolvedSettings.templateCode || normalizedTemplate.code || templateCode,
     );
 
     return {

@@ -25,9 +25,7 @@
  * - keep color printing, while remaining readable in black-and-white
  */
 
-import type {
-  ReportPrintMode,
-} from "../engine/report-types";
+import type { ReportPrintMode } from "../engine/report-types";
 
 // ======================================================
 // TYPES
@@ -51,7 +49,7 @@ export type PrintReportTargetOptions = {
 
 function resolveOrientation(
   mode: ReportPrintMode,
-  orientation?: ReportPrintOrientation
+  orientation?: ReportPrintOrientation,
 ): ReportPrintOrientation {
   if (orientation) return orientation;
 
@@ -84,17 +82,21 @@ function collectDocumentStyles() {
 
   const parts: string[] = [];
 
-  document.querySelectorAll<HTMLStyleElement | HTMLLinkElement>("style, link[rel='stylesheet']").forEach((node) => {
-    if (node.tagName.toLowerCase() === "style") {
-      parts.push((node as HTMLStyleElement).outerHTML);
-      return;
-    }
+  document
+    .querySelectorAll<
+      HTMLStyleElement | HTMLLinkElement
+    >("style, link[rel='stylesheet']")
+    .forEach((node) => {
+      if (node.tagName.toLowerCase() === "style") {
+        parts.push((node as HTMLStyleElement).outerHTML);
+        return;
+      }
 
-    const link = node as HTMLLinkElement;
-    if (link.href) {
-      parts.push(`<link rel="stylesheet" href="${link.href}">`);
-    }
-  });
+      const link = node as HTMLLinkElement;
+      if (link.href) {
+        parts.push(`<link rel="stylesheet" href="${link.href}">`);
+      }
+    });
 
   return parts.join("\n");
 }
@@ -341,11 +343,12 @@ function getPrintableReportNodes(target: HTMLElement) {
     "[data-report-page='true']",
   ].join(", ");
 
-  const pages = Array.from(target.querySelectorAll<HTMLElement>(selector))
-    .filter((page) => {
-      const text = (page.textContent || "").replace(/\\n/g, "").trim();
-      return text.length > 0 || page.querySelector("img, table, svg");
-    });
+  const pages = Array.from(
+    target.querySelectorAll<HTMLElement>(selector),
+  ).filter((page) => {
+    const text = (page.textContent || "").replace(/\\n/g, "").trim();
+    return text.length > 0 || page.querySelector("img, table, svg");
+  });
 
   /*
    * Important:
@@ -368,7 +371,8 @@ function writePrintFrameDocument(args: {
   orientation: ReportPrintOrientation;
   pageSize: "A4";
 }) {
-  const doc = args.iframe.contentDocument || args.iframe.contentWindow?.document;
+  const doc =
+    args.iframe.contentDocument || args.iframe.contentWindow?.document;
   if (!doc) throw new Error("Unable to open report print frame.");
 
   const cssVariables = collectCssVariables(args.target);
@@ -459,12 +463,15 @@ export async function printReportTarget({
   }
 
   const hasReportPage =
-    target.querySelector(".student-report-card-page, .classic-formal-template-page, .src-a4-page, .print-page, [data-report-page='true']") ||
-    target.textContent?.trim();
+    target.querySelector(
+      ".student-report-card-page, .classic-formal-template-page, .src-a4-page, .print-page, [data-report-page='true']",
+    ) || target.textContent?.trim();
 
   if (!hasReportPage) {
     console.error(`[Eleeveon Reports] Print target is empty: ${targetId}`);
-    alert("No report is available to print yet. Please select a report and try again.");
+    alert(
+      "No report is available to print yet. Please select a report and try again.",
+    );
     return;
   }
 
@@ -521,7 +528,9 @@ export async function printReportTarget({
   } catch (error) {
     console.error("[Eleeveon Reports] Failed to print report:", error);
     iframe.remove();
-    alert("Unable to prepare the report for printing. Please refresh and try again.");
+    alert(
+      "Unable to prepare the report for printing. Please refresh and try again.",
+    );
   }
 }
 

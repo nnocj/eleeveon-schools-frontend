@@ -27,8 +27,8 @@ import React from "react";
 type AnyRow = Record<string, any>;
 
 type TeacherScheduleForm = {
-  id: number;
-  sourceId: number;
+  id: string;
+  sourceId: string;
   timetableName: string;
   timetableId: string;
   dayOfWeek: string;
@@ -39,12 +39,20 @@ type TeacherScheduleForm = {
   endTime: string;
   classId: string;
   subjectId: string;
-  teacherLocalId: string;
+  teacherId: string;
   resourceId: string;
   roomName: string;
 };
 
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
 const DAY_LABELS: Record<string, string> = {
   monday: "Monday",
   tuesday: "Tuesday",
@@ -65,11 +73,18 @@ const SHORT_DAY_LABELS: Record<string, string> = {
 };
 
 function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId;
+  return row?.id;
 }
 
 function rowName(row?: AnyRow) {
-  return String(row?.fullName || row?.name || row?.title || row?.label || row?.email || "Unnamed").trim();
+  return String(
+    row?.fullName ||
+      row?.name ||
+      row?.title ||
+      row?.label ||
+      row?.email ||
+      "Unnamed",
+  ).trim();
 }
 
 export function TeacherScheduleEditor({
@@ -97,7 +112,7 @@ export function TeacherScheduleEditor({
   form: TeacherScheduleForm;
   setForm: React.Dispatch<React.SetStateAction<TeacherScheduleForm>>;
   timetables: AnyRow[];
-  selectedTimetableId: number | "";
+  selectedTimetableId: string | "";
   classes: AnyRow[];
   subjects: AnyRow[];
   teachers: AnyRow[];
@@ -109,10 +124,16 @@ export function TeacherScheduleEditor({
 
   function toggleRepeatDay(day: string) {
     setForm((current) => {
-      const existing = Array.isArray(current.repeatDays) ? current.repeatDays : [];
+      const existing = Array.isArray(current.repeatDays)
+        ? current.repeatDays
+        : [];
       const hasDay = existing.includes(day);
-      const nextDays = hasDay ? existing.filter((item) => item !== day) : [...existing, day];
-      const cleanDays = nextDays.length ? nextDays : [current.dayOfWeek || "monday"];
+      const nextDays = hasDay
+        ? existing.filter((item) => item !== day)
+        : [...existing, day];
+      const cleanDays = nextDays.length
+        ? nextDays
+        : [current.dayOfWeek || "monday"];
 
       return {
         ...current,
@@ -126,20 +147,20 @@ export function TeacherScheduleEditor({
     mode === "edit"
       ? "Edit Teacher Session"
       : mode === "duplicate"
-      ? "Duplicate Teacher Session"
-      : mode === "move"
-      ? "Move Teacher Session"
-      : "New Teacher Session";
+        ? "Duplicate Teacher Session"
+        : mode === "move"
+          ? "Move Teacher Session"
+          : "New Teacher Session";
 
   const buttonText = saving
     ? "Saving..."
     : mode === "edit"
-    ? "Save Changes"
-    : mode === "duplicate"
-    ? "Save Duplicate"
-    : mode === "move"
-    ? "Move Session"
-    : "Save Session";
+      ? "Save Changes"
+      : mode === "duplicate"
+        ? "Save Duplicate"
+        : mode === "move"
+          ? "Move Session"
+          : "Save Session";
 
   return (
     <div className="ba-drawer-layer">
@@ -166,11 +187,19 @@ export function TeacherScheduleEditor({
               <span>Use Existing Timetable</span>
               <select
                 value={form.timetableId || selectedTimetableId}
-                onChange={(event) => setForm((current) => ({ ...current, timetableId: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    timetableId: event.target.value,
+                  }))
+                }
               >
                 <option value="">Create / Use Default</option>
                 {timetables.map((timetable: AnyRow) => (
-                  <option key={String(idOf(timetable))} value={String(idOf(timetable))}>
+                  <option
+                    key={String(idOf(timetable))}
+                    value={String(idOf(timetable))}
+                  >
                     {timetable.name || timetable.title || "Teacher Timetable"}
                   </option>
                 ))}
@@ -181,7 +210,12 @@ export function TeacherScheduleEditor({
               <span>New Timetable Name if needed</span>
               <input
                 value={form.timetableName}
-                onChange={(event) => setForm((current) => ({ ...current, timetableName: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    timetableName: event.target.value,
+                  }))
+                }
                 placeholder="Teacher Timetable"
               />
             </label>
@@ -195,7 +229,9 @@ export function TeacherScheduleEditor({
                   setForm((current) => ({
                     ...current,
                     dayOfWeek: nextDay,
-                    repeatDays: Array.from(new Set([nextDay, ...(current.repeatDays || [])])),
+                    repeatDays: Array.from(
+                      new Set([nextDay, ...(current.repeatDays || [])]),
+                    ),
                   }));
                 }}
               >
@@ -208,13 +244,17 @@ export function TeacherScheduleEditor({
             </label>
 
             <label className="wide">
-              <span>{form.id ? "Apply changes across days" : "Repeat across days"}</span>
+              <span>
+                {form.id ? "Apply changes across days" : "Repeat across days"}
+              </span>
               <div className="ba-day-picker">
                 {DAYS.map((day) => (
                   <button
                     key={day}
                     type="button"
-                    className={(form.repeatDays || []).includes(day) ? "active" : ""}
+                    className={
+                      (form.repeatDays || []).includes(day) ? "active" : ""
+                    }
                     onClick={() => toggleRepeatDay(day)}
                   >
                     {SHORT_DAY_LABELS[day]}
@@ -222,7 +262,8 @@ export function TeacherScheduleEditor({
                 ))}
               </div>
               <small className="ba-help-text">
-                Select multiple days for repeated teacher lessons, assemblies, routines, or recurring periods.
+                Select multiple days for repeated teacher lessons, assemblies,
+                routines, or recurring periods.
               </small>
             </label>
 
@@ -230,7 +271,12 @@ export function TeacherScheduleEditor({
               <span>Session Type</span>
               <select
                 value={form.sessionType}
-                onChange={(event) => setForm((current) => ({ ...current, sessionType: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    sessionType: event.target.value,
+                  }))
+                }
               >
                 <option value="lesson">Lesson</option>
                 <option value="exam">Exam</option>
@@ -245,7 +291,12 @@ export function TeacherScheduleEditor({
               <input
                 type="time"
                 value={form.startTime}
-                onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    startTime: event.target.value,
+                  }))
+                }
               />
             </label>
 
@@ -254,7 +305,12 @@ export function TeacherScheduleEditor({
               <input
                 type="time"
                 value={form.endTime}
-                onChange={(event) => setForm((current) => ({ ...current, endTime: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    endTime: event.target.value,
+                  }))
+                }
               />
             </label>
 
@@ -262,7 +318,12 @@ export function TeacherScheduleEditor({
               <span>Title</span>
               <input
                 value={form.title}
-                onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    title: event.target.value,
+                  }))
+                }
                 placeholder="Optional custom title"
               />
             </label>
@@ -270,8 +331,13 @@ export function TeacherScheduleEditor({
             <label>
               <span>Teacher</span>
               <select
-                value={form.teacherLocalId}
-                onChange={(event) => setForm((current) => ({ ...current, teacherLocalId: event.target.value }))}
+                value={form.teacherId}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    teacherId: event.target.value,
+                  }))
+                }
               >
                 <option value="">No teacher</option>
                 {teachers.map((row: AnyRow) => (
@@ -286,7 +352,12 @@ export function TeacherScheduleEditor({
               <span>Class</span>
               <select
                 value={form.classId}
-                onChange={(event) => setForm((current) => ({ ...current, classId: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    classId: event.target.value,
+                  }))
+                }
               >
                 <option value="">No class</option>
                 {classes.map((row: AnyRow) => (
@@ -301,7 +372,12 @@ export function TeacherScheduleEditor({
               <span>Subject</span>
               <select
                 value={form.subjectId}
-                onChange={(event) => setForm((current) => ({ ...current, subjectId: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    subjectId: event.target.value,
+                  }))
+                }
               >
                 <option value="">No subject</option>
                 {subjects.map((row: AnyRow) => (
@@ -316,7 +392,12 @@ export function TeacherScheduleEditor({
               <span>Resource</span>
               <select
                 value={form.resourceId}
-                onChange={(event) => setForm((current) => ({ ...current, resourceId: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    resourceId: event.target.value,
+                  }))
+                }
               >
                 <option value="">No resource</option>
                 {resources.map((row: AnyRow) => (
@@ -331,7 +412,12 @@ export function TeacherScheduleEditor({
               <span>Room name if no resource</span>
               <input
                 value={form.roomName}
-                onChange={(event) => setForm((current) => ({ ...current, roomName: event.target.value }))}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    roomName: event.target.value,
+                  }))
+                }
               />
             </label>
           </div>
@@ -341,7 +427,12 @@ export function TeacherScheduleEditor({
           <button className="ba-btn" type="button" onClick={onClose}>
             Cancel
           </button>
-          <button className="ba-primary" type="button" disabled={saving} onClick={onSave}>
+          <button
+            className="ba-primary"
+            type="button"
+            disabled={saving}
+            onClick={onSave}
+          >
             {buttonText}
           </button>
         </div>

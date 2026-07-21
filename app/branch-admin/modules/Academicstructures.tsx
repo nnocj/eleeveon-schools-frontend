@@ -39,7 +39,12 @@ import {
   type ClassSubject,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
@@ -50,9 +55,6 @@ import {
   commitMediaAssetsToOwner,
   createMediaSessionKey,
   saveImageAsset,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
@@ -62,23 +64,23 @@ type StatusFilter = "all" | "active" | "inactive";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type AcademicStructureForm = {
-  id?: number;
+  id?: string;
   name: string;
   level: AcademicLevel | string;
   startDate: string;
   endDate: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
 };
 
@@ -90,7 +92,7 @@ type StructureStats = {
 };
 
 type StructureView = {
-  id: number;
+  id: string;
   row: AcademicStructure;
   levelName: string;
   stats: StructureStats;
@@ -126,10 +128,9 @@ const emptyForm = (): AcademicStructureForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -138,11 +139,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -153,7 +154,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -178,13 +181,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -195,16 +198,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -216,9 +223,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -226,13 +237,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -247,7 +260,11 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return String(value);
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return String(value);
   }
@@ -265,8 +282,11 @@ const safeRecordMediaValue = (value?: string) => {
   return media;
 };
 
-function countByStructure<T extends any[]>(rows: T, getStructureId: (row: T[number]) => any) {
-  const map = new Map<number, number>();
+function countByStructure<T extends any[]>(
+  rows: T,
+  getStructureId: (row: T[number]) => any,
+) {
+  const map = new Map<string, number>();
   rows.forEach((row) => {
     const id = idOf(getStructureId(row));
     if (!id) return;
@@ -285,11 +305,25 @@ function statusLabel(item: StructureView) {
   return item.active ? "Active" : "Inactive";
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -299,7 +333,15 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
   );
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
@@ -309,14 +351,26 @@ function Avatar({ name, photo, primary }: { name: string; photo?: string; primar
           : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
       }}
     >
-      {!photo && String(name || "AS").slice(0, 2).toUpperCase()}
+      {!photo &&
+        String(name || "AS")
+          .slice(0, 2)
+          .toUpperCase()}
     </div>
   );
 }
 
 export default function Academicstructures() {
-  const dataRevision = useBranchTableRevision(["academicStructures", "classes", "programs", "curriculums", "mediaAssets", "mediaBlobs"]);
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE));
+  const dataRevision = useBranchTableRevision([
+    "academicStructures",
+    "classes",
+    "programs",
+    "curriculums",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE),
+  );
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -360,17 +414,30 @@ export default function Academicstructures() {
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<AcademicStructureForm>(emptyForm());
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -380,7 +447,11 @@ export default function Academicstructures() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -400,10 +471,20 @@ export default function Academicstructures() {
 
     try {
       setLoading(true);
-      const [structureRows, periodRows, classRows, classSubjectRows, assessmentStructureRows] = await Promise.all([
+      const [
+        structureRows,
+        periodRows,
+        classRows,
+        classSubjectRows,
+        assessmentStructureRows,
+      ] = await Promise.all([
         tableSafe("academicStructures")?.toArray?.() || [],
         tableSafe("academicPeriods")?.toArray?.() || [],
-        listActiveLocal("classes", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("classes", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("classSubjects")?.toArray?.() || [],
         tableSafe("assessmentStructures")?.toArray?.() || [],
       ]);
@@ -414,13 +495,32 @@ export default function Academicstructures() {
           .sort((a: any, b: any) => {
             const aCurrent = sameId(a.id, currentStructureId) ? 1 : 0;
             const bCurrent = sameId(b.id, currentStructureId) ? 1 : 0;
-            return bCurrent - aCurrent || String(a.name || "").localeCompare(String(b.name || ""));
-          })
+            return (
+              bCurrent - aCurrent ||
+              String(a.name || "").localeCompare(String(b.name || ""))
+            );
+          }),
       );
-      setPeriods((periodRows as AcademicPeriod[]).filter((row) => sameTenant(row as TenantRow)));
-      setClasses((classRows as Class[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setAssessmentStructures((assessmentStructureRows as AssessmentStructure[]).filter((row) => sameTenant(row as TenantRow)));
+      setPeriods(
+        (periodRows as AcademicPeriod[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setClasses(
+        (classRows as Class[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setAssessmentStructures(
+        (assessmentStructureRows as AssessmentStructure[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load academic structures:", error);
       clearData();
@@ -434,16 +534,41 @@ export default function Academicstructures() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, currentStructureId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    currentStructureId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const periodCountByStructure = useMemo(() => countByStructure(periods, (row: any) => row.academicStructureId), [periods]);
-  const classCountByStructure = useMemo(() => countByStructure(classes, (row: any) => row.academicStructureId), [classes]);
-  const classSubjectCountByStructure = useMemo(() => countByStructure(classSubjects, (row: any) => row.academicStructureId), [classSubjects]);
-  const assessmentCountByStructure = useMemo(() => countByStructure(assessmentStructures, (row: any) => row.academicStructureId), [assessmentStructures]);
+  const periodCountByStructure = useMemo(
+    () => countByStructure(periods, (row: any) => row.academicStructureId),
+    [periods],
+  );
+  const classCountByStructure = useMemo(
+    () => countByStructure(classes, (row: any) => row.academicStructureId),
+    [classes],
+  );
+  const classSubjectCountByStructure = useMemo(
+    () =>
+      countByStructure(classSubjects, (row: any) => row.academicStructureId),
+    [classSubjects],
+  );
+  const assessmentCountByStructure = useMemo(
+    () =>
+      countByStructure(
+        assessmentStructures,
+        (row: any) => row.academicStructureId,
+      ),
+    [assessmentStructures],
+  );
 
-  const getStats = (structureId?: number): StructureStats => {
+  const getStats = (structureId?: string): StructureStats => {
     const id = idOf(structureId);
     return {
       periodCount: periodCountByStructure.get(id) || 0,
@@ -464,11 +589,24 @@ export default function Academicstructures() {
         current: sameId(row.id, currentStructureId),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [structures, currentStructureId, periodCountByStructure, classCountByStructure, classSubjectCountByStructure, assessmentCountByStructure]
+    [
+      structures,
+      currentStructureId,
+      periodCountByStructure,
+      classCountByStructure,
+      classSubjectCountByStructure,
+      assessmentCountByStructure,
+    ],
   );
 
   const levelOptions = useMemo(() => {
-    const levels = Array.from(new Set(structures.map((row: any) => String(row.level || "").trim()).filter(Boolean)));
+    const levels = Array.from(
+      new Set(
+        structures
+          .map((row: any) => String(row.level || "").trim())
+          .filter(Boolean),
+      ),
+    );
     return levels.sort((a, b) => levelLabel(a).localeCompare(levelLabel(b)));
   }, [structures]);
 
@@ -482,15 +620,25 @@ export default function Academicstructures() {
           `${row.name || ""} ${row.level || ""} ${item.levelName} ${row.startDate || ""} ${row.endDate || ""}`
             .toLowerCase()
             .includes(term);
-        const statusOk = statusFilter === "all" || (statusFilter === "active" ? item.active : !item.active);
+        const statusOk =
+          statusFilter === "all" ||
+          (statusFilter === "active" ? item.active : !item.active);
         const levelOk = levelFilter === "all" || sameId(row.level, levelFilter);
         return searchOk && statusOk && levelOk;
       })
-      .sort((a, b) => Number(b.current) - Number(a.current) || String((a.row as any).name || "").localeCompare(String((b.row as any).name || "")));
+      .sort(
+        (a, b) =>
+          Number(b.current) - Number(a.current) ||
+          String((a.row as any).name || "").localeCompare(
+            String((b.row as any).name || ""),
+          ),
+      );
   }, [levelFilter, search, statusFilter, viewRows]);
 
   const summary = useMemo(() => {
-    const configured = viewRows.filter((row) => row.stats.periodCount > 0).length;
+    const configured = viewRows.filter(
+      (row) => row.stats.periodCount > 0,
+    ).length;
     return {
       total: viewRows.length,
       active: viewRows.filter((row) => row.active).length,
@@ -500,15 +648,40 @@ export default function Academicstructures() {
       assessments: assessmentStructures.length,
       showing: filteredRows.length,
     };
-  }, [assessmentStructures.length, classes.length, filteredRows.length, viewRows]);
+  }, [
+    assessmentStructures.length,
+    classes.length,
+    filteredRows.length,
+    viewRows,
+  ]);
 
-  const activeFilterCount = useMemo(() => [statusFilter, levelFilter].filter((value) => value !== "all" && value !== "active").length + (statusFilter !== "active" ? 1 : 0), [levelFilter, statusFilter]);
+  const activeFilterCount = useMemo(
+    () =>
+      [statusFilter, levelFilter].filter(
+        (value) => value !== "all" && value !== "active",
+      ).length + (statusFilter !== "active" ? 1 : 0),
+    [levelFilter, statusFilter],
+  );
 
-  const countsByLevel = useMemo(() => groupedCounts(viewRows, (item) => item.levelName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (item) => (item.active ? "Active" : "Inactive")), [viewRows]);
-  const countsBySetup = useMemo(() => groupedCounts(viewRows, (item) => (item.stats.periodCount ? "Configured" : "Needs periods")), [viewRows]);
+  const countsByLevel = useMemo(
+    () => groupedCounts(viewRows, (item) => item.levelName),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (item) => (item.active ? "Active" : "Inactive")),
+    [viewRows],
+  );
+  const countsBySetup = useMemo(
+    () =>
+      groupedCounts(viewRows, (item) =>
+        item.stats.periodCount ? "Configured" : "Needs periods",
+      ),
+    [viewRows],
+  );
 
-  const updateForm = (patch: Partial<AcademicStructureForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<AcademicStructureForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -521,8 +694,14 @@ export default function Academicstructures() {
   const openCreate = () => {
     if (!requireTenant()) return;
     setSelectedItem(null);
-    mediaSessionKeyRef.current = createMediaSessionKey(ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE);
-    setForm({ ...emptyForm(), level: levelFilter !== "all" ? levelFilter : "primary", active: statusFilter !== "inactive" });
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE,
+    );
+    setForm({
+      ...emptyForm(),
+      level: levelFilter !== "all" ? levelFilter : "primary",
+      active: statusFilter !== "inactive",
+    });
     setModalOpen(true);
   };
 
@@ -535,10 +714,18 @@ export default function Academicstructures() {
       level: item.level || "primary",
       startDate: item.startDate || todayISO(),
       endDate: item.endDate || endOfYearISO(),
-      photo: mediaById[idOf(item.id)]?.photo || safeRecordMediaValue(item.photo) || "",
-      photoMediaId: item.photoMediaId ? Number(item.photoMediaId) : undefined,
-      bannerImage: mediaById[idOf(item.id)]?.bannerImage || safeRecordMediaValue(item.bannerImage) || "",
-      bannerImageMediaId: item.bannerImageMediaId ? Number(item.bannerImageMediaId) : undefined,
+      photo:
+        mediaById[idOf(item.id)]?.photo ||
+        safeRecordMediaValue(item.photo) ||
+        "",
+      photoMediaId: item.photoMediaId ? String(item.photoMediaId) : undefined,
+      bannerImage:
+        mediaById[idOf(item.id)]?.bannerImage ||
+        safeRecordMediaValue(item.bannerImage) ||
+        "",
+      bannerImageMediaId: item.bannerImageMediaId
+        ? String(item.bannerImageMediaId)
+        : undefined,
       active: isActiveRow(item),
     });
     setModalOpen(true);
@@ -551,7 +738,8 @@ export default function Academicstructures() {
     if (!form.level) return "Select academic level.";
     if (!form.startDate) return "Select start date.";
     if (!form.endDate) return "Select end date.";
-    if (form.endDate < form.startDate) return "End date cannot be before start date.";
+    if (form.endDate < form.startDate)
+      return "End date cannot be before start date.";
 
     const duplicate = structures.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
@@ -559,7 +747,8 @@ export default function Academicstructures() {
       return safeLower(row.name) === safeLower(form.name);
     });
 
-    if (duplicate) return "Academic structure with this name already exists in this branch.";
+    if (duplicate)
+      return "Academic structure with this name already exists in this branch.";
     return "";
   };
 
@@ -574,11 +763,13 @@ export default function Academicstructures() {
 
     try {
       setSaving(true);
-      const existing = form.id ? structures.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? structures.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<AcademicStructure> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         name: form.name.trim(),
         level: form.level as AcademicLevel,
         startDate: form.startDate,
@@ -594,17 +785,22 @@ export default function Academicstructures() {
 
       const savedStructure =
         form.id && existing
-          ? await updateLocal("academicStructures", Number(form.id), payload)
-          : await createLocal("academicStructures", payload as AcademicStructure);
+          ? await updateLocal("academicStructures", String(form.id), payload)
+          : await createLocal(
+              "academicStructures",
+              payload as AcademicStructure,
+            );
 
-      const savedStructureId = Number((savedStructure as any)?.id || form.id || 0);
+      const savedStructureId = idOf(
+        (savedStructure as any)?.id || form.id || 0,
+      );
 
       if (savedStructureId) {
         await commitMediaAssetsToOwner({
           accountId: String(accountId),
           ownerTable: ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedStructureId,
-          ownerCloudId: (savedStructure as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedStructureId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: "photo" },
@@ -613,9 +809,14 @@ export default function Academicstructures() {
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
-      showToast("success", form.id ? "Academic structure updated." : "Academic structure created.");
+      showToast(
+        "success",
+        form.id ? "Academic structure updated." : "Academic structure created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save academic structure:", error);
@@ -628,7 +829,8 @@ export default function Academicstructures() {
   const archive = async (item: StructureView) => {
     const row: any = item.row;
     const stats = item.stats;
-    const linked = stats.periodCount || stats.classCount || stats.assessmentStructureCount;
+    const linked =
+      stats.periodCount || stats.classCount || stats.assessmentStructureCount;
     const warning = linked
       ? `"${row.name}" has linked records. Delete anyway? Existing child records will remain, but this structure will be soft deleted locally.`
       : `Delete "${row.name}"?`;
@@ -636,26 +838,20 @@ export default function Academicstructures() {
     if (!window.confirm(warning)) return;
 
     await Promise.all(
-
       ["photo", "bannerImage"].map((fieldKey) =>
-
         softDeleteOwnerFieldAssets({
-
           accountId: String(accountId),
 
           ownerTable: "academicStructures",
 
-          ownerLocalId: Number(row.id),
+          ownerId: idOf(row.id) || undefined,
 
           fieldKey,
-
         }),
-
       ),
-
     );
 
-    await softDeleteLocal("academicStructures", Number(row.id));
+    await softDeleteLocal("academicStructures", String(row.id));
     setSelectedItem(null);
     showToast("success", "Academic structure deleted.");
     await load();
@@ -664,32 +860,45 @@ export default function Academicstructures() {
   const toggleActive = async (item: StructureView) => {
     const row: any = item.row;
     if (!row.id) return;
-    await updateLocal("academicStructures", Number(row.id), {
+    await updateLocal("academicStructures", String(row.id), {
       active: !item.active,
       status: !item.active ? "active" : "inactive",
       isDeleted: false,
     } as unknown as Partial<AcademicStructure>);
     setSelectedItem(null);
-    showToast("success", item.active ? "Academic structure deactivated." : "Academic structure activated.");
+    showToast(
+      "success",
+      item.active
+        ? "Academic structure deactivated."
+        : "Academic structure activated.",
+    );
     await load();
   };
 
   const setAsCurrent = async (item: StructureView) => {
     try {
       const settingsRows = await tableSafe("schoolBranchSettings")?.toArray?.();
-      const branchSetting = (settingsRows || []).find((row: any) => sameTenant(row));
+      const branchSetting = (settingsRows || []).find((row: any) =>
+        sameTenant(row),
+      );
 
       if (!branchSetting?.id) {
-        showToast("error", "Create branch settings first before setting current academic structure.");
+        showToast(
+          "error",
+          "Create branch settings first before setting current academic structure.",
+        );
         return;
       }
 
-      await updateLocal("schoolBranchSettings", Number(branchSetting.id), {
+      await updateLocal("schoolBranchSettings", String(branchSetting.id), {
         currentAcademicStructureId: item.id,
       } as any);
 
       setSelectedItem(null);
-      showToast("success", `"${(item.row as any).name}" is now the current academic structure.`);
+      showToast(
+        "success",
+        `"${(item.row as any).name}" is now the current academic structure.`,
+      );
       await load();
     } catch (error) {
       console.error("Failed to set current academic structure:", error);
@@ -703,10 +912,10 @@ export default function Academicstructures() {
     try {
       const result = await saveImageAsset(file, {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: ACADEMIC_STRUCTURE_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
         fieldKey: target,
         variant: target === "photo" ? "avatar" : "cover",
@@ -715,10 +924,14 @@ export default function Academicstructures() {
 
       updateForm({
         [target]: result.previewUrl,
-        [target === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [target === "photo" ? "photoMediaId" : "bannerImageMediaId"]:
+          result.assetId,
       } as Partial<AcademicStructureForm>);
 
-      showToast("info", `${target === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+      showToast(
+        "info",
+        `${target === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`,
+      );
     } catch (error: any) {
       showToast("error", error?.message || "Failed to process image.");
     }
@@ -730,21 +943,40 @@ export default function Academicstructures() {
   };
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
-    return <State primary={primary} title="Opening Academic Structures..." text="Checking account, branch, periods, classes and assessment links." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Academic Structures..."
+        text="Checking account, branch, periods, classes and assessment links."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing academic structures." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing academic structures."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Academic structures belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -753,34 +985,65 @@ export default function Academicstructures() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Academic structure search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Academic structure search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search structures..." aria-label="Search academic structures" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search structures..."
+            aria-label="Search academic structures"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add academic structure">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add academic structure"
+        >
           +
         </button>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
@@ -802,27 +1065,63 @@ export default function Academicstructures() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Structures by Level" rows={countsByLevel} total={summary.total} />
-          <AnalysisCard title="Structures by Status" rows={countsByStatus} total={summary.total} />
-          <AnalysisCard title="Setup Health" rows={countsBySetup} total={summary.total} />
+          <AnalysisCard
+            title="Structures by Level"
+            rows={countsByLevel}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Structures by Status"
+            rows={countsByStatus}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Setup Health"
+            rows={countsBySetup}
+            total={summary.total}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{summary.showing}</strong>
-            <p>Academic structure record(s) currently match your search and filter conditions.</p>
+            <p>
+              Academic structure record(s) currently match your search and
+              filter conditions.
+            </p>
           </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} archive={archive} toggleActive={toggleActive} setAsCurrent={setAsCurrent} />}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          archive={archive}
+          toggleActive={toggleActive}
+          setAsCurrent={setAsCurrent}
+        />
+      )}
 
       {viewMode === "cards" && (
         <section className="ba-list">
           {filteredRows.map((item) => (
-            <StructureListItem key={String(item.id)} item={item} photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)} primary={primary} onOpen={() => setSelectedItem(item)} />
+            <StructureListItem
+              key={String(item.id)}
+              item={item}
+              photo={
+                mediaById[item.id]?.photo ||
+                safeRecordMediaValue((item.row as any).photo)
+              }
+              primary={primary}
+              onOpen={() => setSelectedItem(item)}
+            />
           ))}
 
           {!filteredRows.length && (
-            <Empty icon="🧱" title="No academic structures found" text="Create structures such as Primary, JHS, SHS, Montessori, vocational, or custom levels for this branch." />
+            <Empty
+              icon="🧱"
+              title="No academic structures found"
+              text="Create structures such as Primary, JHS, SHS, Montessori, vocational, or custom levels for this branch."
+            />
           )}
         </section>
       )}
@@ -855,17 +1154,44 @@ export default function Academicstructures() {
       )}
 
       {selectedItem && (
-        <ActionSheet item={selectedItem} openEdit={openEdit} archive={archive} toggleActive={toggleActive} setAsCurrent={setAsCurrent} onClose={() => setSelectedItem(null)} />
+        <ActionSheet
+          item={selectedItem}
+          openEdit={openEdit}
+          archive={archive}
+          toggleActive={toggleActive}
+          setAsCurrent={setAsCurrent}
+          onClose={() => setSelectedItem(null)}
+        />
       )}
 
-      {modalOpen && <StructureModal form={form} saving={saving} updateForm={updateForm} uploadImage={uploadImage} setModalOpen={setModalOpen} save={save} />}
+      {modalOpen && (
+        <StructureModal
+          form={form}
+          saving={saving}
+          updateForm={updateForm}
+          uploadImage={uploadImage}
+          setModalOpen={setModalOpen}
+          save={save}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -876,7 +1202,17 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function StructureListItem({ item, photo, primary, onOpen }: { item: StructureView; photo?: string; primary: string; onOpen: () => void }) {
+function StructureListItem({
+  item,
+  photo,
+  primary,
+  onOpen,
+}: {
+  item: StructureView;
+  photo?: string;
+  primary: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
   return (
     <button type="button" className="student-row" onClick={onOpen}>
@@ -887,11 +1223,16 @@ function StructureListItem({ item, photo, primary, onOpen }: { item: StructureVi
           {item.levelName} · {timeText(row.startDate)} - {timeText(row.endDate)}
         </small>
         <em>
-          {item.stats.periodCount} periods · {item.stats.classCount} classes · {item.stats.assessmentStructureCount} assessments
+          {item.stats.periodCount} periods · {item.stats.classCount} classes ·{" "}
+          {item.stats.assessmentStructureCount} assessments
         </em>
       </span>
       <span className="student-side">
-        <span className={`status-dot-mini ${statusTone(item)}`} title={statusLabel(item)} aria-label={statusLabel(item)} />
+        <span
+          className={`status-dot-mini ${statusTone(item)}`}
+          title={statusLabel(item)}
+          aria-label={statusLabel(item)}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -944,7 +1285,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Level</span>
-            <select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}>
+            <select
+              value={levelFilter}
+              onChange={(event) => setLevelFilter(event.target.value)}
+            >
               <option value="all">All levels</option>
               {levelOptions.map((level) => (
                 <option key={level} value={level}>
@@ -956,7 +1300,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / archived</option>
@@ -965,15 +1314,29 @@ function FilterSheet({
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={clearFilters}>Clear</button>
-          <button type="button" className="primary" onClick={onClose}>Apply</button>
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
@@ -982,21 +1345,43 @@ function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: Vi
             <h2>More</h2>
             <p>Advanced views are here so the main page stays simple.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
-            <span>☰</span><b>List view</b><small>Compact academic structures</small>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact academic structures</small>
           </button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
-            <span>☷</span><b>Table view</b><small>Dense structure records</small>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense structure records</small>
           </button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
-            <span>◔</span><b>Analytics</b><small>Level, status and setup summaries</small>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Level, status and setup summaries</small>
           </button>
           <button type="button" onClick={onRefresh}>
-            <span>↻</span><b>Refresh</b><small>Reload local branch records</small>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch records</small>
           </button>
         </div>
       </section>
@@ -1026,36 +1411,96 @@ function ActionSheet({
         <div className="ba-sheet-profile">
           <div>
             <h2>{row.name || "Academic Structure"}</h2>
-            <p>{item.levelName} · {statusLabel(item)}</p>
+            <p>
+              {item.levelName} · {statusLabel(item)}
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close structure actions">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close structure actions"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="student-detail-strip">
-          <span><b>Periods</b>{item.stats.periodCount}</span>
-          <span><b>Classes</b>{item.stats.classCount}</span>
-          <span><b>Assessments</b>{item.stats.assessmentStructureCount}</span>
+          <span>
+            <b>Periods</b>
+            {item.stats.periodCount}
+          </span>
+          <span>
+            <b>Classes</b>
+            {item.stats.classCount}
+          </span>
+          <span>
+            <b>Assessments</b>
+            {item.stats.assessmentStructureCount}
+          </span>
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" onClick={() => openEdit(item.row)}><span>✎</span><b>Edit structure</b><small>Update name, dates, level and media</small></button>
-          {!item.current && <button type="button" onClick={() => setAsCurrent(item)}><span>★</span><b>Set current</b><small>Use this for active academic work</small></button>}
-          <button type="button" onClick={() => toggleActive(item)}><span>{item.active ? "⏸" : "✓"}</span><b>{item.active ? "Deactivate" : "Activate"}</b><small>Change active visibility without deleting</small></button>
-          <button type="button" className="danger" onClick={() => archive(item)}><span>⌫</span><b>Delete</b><small>Soft delete this structure locally</small></button>
+          <button type="button" onClick={() => openEdit(item.row)}>
+            <span>✎</span>
+            <b>Edit structure</b>
+            <small>Update name, dates, level and media</small>
+          </button>
+          {!item.current && (
+            <button type="button" onClick={() => setAsCurrent(item)}>
+              <span>★</span>
+              <b>Set current</b>
+              <small>Use this for active academic work</small>
+            </button>
+          )}
+          <button type="button" onClick={() => toggleActive(item)}>
+            <span>{item.active ? "⏸" : "✓"}</span>
+            <b>{item.active ? "Deactivate" : "Activate"}</b>
+            <small>Change active visibility without deleting</small>
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(item)}
+          >
+            <span>⌫</span>
+            <b>Delete</b>
+            <small>Soft delete this structure locally</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function TableView({ rows, openEdit, archive, toggleActive, setAsCurrent }: { rows: StructureView[]; openEdit: (row: AcademicStructure) => void; archive: (item: StructureView) => void; toggleActive: (item: StructureView) => void; setAsCurrent: (item: StructureView) => void }) {
+function TableView({
+  rows,
+  openEdit,
+  archive,
+  toggleActive,
+  setAsCurrent,
+}: {
+  rows: StructureView[];
+  openEdit: (row: AcademicStructure) => void;
+  archive: (item: StructureView) => void;
+  toggleActive: (item: StructureView) => void;
+  setAsCurrent: (item: StructureView) => void;
+}) {
   return (
     <section className="ba-table-card">
       <div className="ba-table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Structures ({rows.length})</th><th>Level</th><th>Dates</th><th>Periods</th><th>Classes</th><th>Class Subjects</th><th>Assessments</th><th>Status</th><th>Updated</th><th>Actions</th>
+              <th>Structures ({rows.length})</th>
+              <th>Level</th>
+              <th>Dates</th>
+              <th>Periods</th>
+              <th>Classes</th>
+              <th>Class Subjects</th>
+              <th>Assessments</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1063,21 +1508,49 @@ function TableView({ rows, openEdit, archive, toggleActive, setAsCurrent }: { ro
               const row: any = item.row;
               return (
                 <tr key={String(item.id)}>
-                  <td><strong>{row.name}</strong><span>{item.current ? "Current academic structure" : "Branch academic structure"}</span></td>
+                  <td>
+                    <strong>{row.name}</strong>
+                    <span>
+                      {item.current
+                        ? "Current academic structure"
+                        : "Branch academic structure"}
+                    </span>
+                  </td>
                   <td>{item.levelName}</td>
-                  <td>{timeText(row.startDate)} - {timeText(row.endDate)}</td>
+                  <td>
+                    {timeText(row.startDate)} - {timeText(row.endDate)}
+                  </td>
                   <td>{item.stats.periodCount}</td>
                   <td>{item.stats.classCount}</td>
                   <td>{item.stats.classSubjectCount}</td>
                   <td>{item.stats.assessmentStructureCount}</td>
-                  <td><Chip tone={statusTone(item)}>{statusLabel(item)}</Chip></td>
+                  <td>
+                    <Chip tone={statusTone(item)}>{statusLabel(item)}</Chip>
+                  </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
-                      <button type="button" onClick={() => openEdit(item.row)}>Edit</button>
-                      {!item.current && <button type="button" onClick={() => setAsCurrent(item)}>Set Current</button>}
-                      <button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button>
-                      <button type="button" className="ba-delete" onClick={() => archive(item)}>Delete</button>
+                      <button type="button" onClick={() => openEdit(item.row)}>
+                        Edit
+                      </button>
+                      {!item.current && (
+                        <button
+                          type="button"
+                          onClick={() => setAsCurrent(item)}
+                        >
+                          Set Current
+                        </button>
+                      )}
+                      <button type="button" onClick={() => toggleActive(item)}>
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archive(item)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1085,7 +1558,11 @@ function TableView({ rows, openEdit, archive, toggleActive, setAsCurrent }: { ro
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No academic structure matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No academic structure matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1102,7 +1579,10 @@ function StructureModal({
   form: AcademicStructureForm;
   saving: boolean;
   updateForm: (patch: Partial<AcademicStructureForm>) => void;
-  uploadImage: (target: "photo" | "bannerImage", file?: File) => void | Promise<void>;
+  uploadImage: (
+    target: "photo" | "bannerImage",
+    file?: File,
+  ) => void | Promise<void>;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
 }) {
@@ -1111,20 +1591,79 @@ function StructureModal({
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
-            <h2>{form.id ? "Edit Academic Structure" : "Add Academic Structure"}</h2>
-            <p>Define the academic level used by periods, classes, assessments and reports.</p>
+            <h2>
+              {form.id ? "Edit Academic Structure" : "Add Academic Structure"}
+            </h2>
+            <p>
+              Define the academic level used by periods, classes, assessments
+              and reports.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close form">✕</button>
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close form"
+          >
+            ✕
+          </button>
         </div>
 
         <section className="ba-form-section">
           <h3>Structure</h3>
           <div className="ba-form">
-            <label><span>Name</span><input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} placeholder="e.g. Primary, JHS, SHS" /></label>
-            <label><span>Academic Level</span><select value={form.level} onChange={(event) => updateForm({ level: event.target.value })}>{ACADEMIC_LEVELS.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}</select></label>
-            <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(event) => updateForm({ active: event.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-            <label><span>Start Date</span><input type="date" value={form.startDate} onChange={(event) => updateForm({ startDate: event.target.value })} /></label>
-            <label><span>End Date</span><input type="date" value={form.endDate} onChange={(event) => updateForm({ endDate: event.target.value })} /></label>
+            <label>
+              <span>Name</span>
+              <input
+                value={form.name}
+                onChange={(event) => updateForm({ name: event.target.value })}
+                placeholder="e.g. Primary, JHS, SHS"
+              />
+            </label>
+            <label>
+              <span>Academic Level</span>
+              <select
+                value={form.level}
+                onChange={(event) => updateForm({ level: event.target.value })}
+              >
+                {ACADEMIC_LEVELS.map((row) => (
+                  <option key={row.value} value={row.value}>
+                    {row.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
+            <label>
+              <span>Start Date</span>
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(event) =>
+                  updateForm({ startDate: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>End Date</span>
+              <input
+                type="date"
+                value={form.endDate}
+                onChange={(event) =>
+                  updateForm({ endDate: event.target.value })
+                }
+              />
+            </label>
           </div>
         </section>
 
@@ -1133,36 +1672,85 @@ function StructureModal({
           <div className="ba-form two">
             <label>
               <span>Photo</span>
-              <label className="ba-media-button">Upload Photo<input type="file" accept="image/*" onChange={(event) => uploadImage("photo", event.target.files?.[0])} hidden /></label>
-              {form.photo && <img src={form.photo} alt="Academic structure preview" className="ba-preview-photo" />}
+              <label className="ba-media-button">
+                Upload Photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    uploadImage("photo", event.target.files?.[0])
+                  }
+                  hidden
+                />
+              </label>
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Academic structure preview"
+                  className="ba-preview-photo"
+                />
+              )}
             </label>
             <label>
               <span>Banner Image</span>
-              <label className="ba-media-button">Upload Banner<input type="file" accept="image/*" onChange={(event) => uploadImage("bannerImage", event.target.files?.[0])} hidden /></label>
-              {form.bannerImage && <img src={form.bannerImage} alt="Academic structure banner preview" className="ba-preview-banner" />}
+              <label className="ba-media-button">
+                Upload Banner
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(event) =>
+                    uploadImage("bannerImage", event.target.files?.[0])
+                  }
+                  hidden
+                />
+              </label>
+              {form.bannerImage && (
+                <img
+                  src={form.bannerImage}
+                  alt="Academic structure banner preview"
+                  className="ba-preview-banner"
+                />
+              )}
             </label>
           </div>
         </section>
 
         <div className="ba-modal-actions">
-          <button type="button" onClick={() => setModalOpen(false)}>Cancel</button>
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Add Structure"}</button>
+          <button type="button" onClick={() => setModalOpen(false)}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : form.id ? "Save Changes" : "Add Structure"}
+          </button>
         </div>
       </form>
     </div>
   );
 }
 
-function groupedCounts(rows: StructureView[], keyFn: (item: StructureView) => string) {
+function groupedCounts(
+  rows: StructureView[],
+  keyFn: (item: StructureView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -1172,8 +1760,15 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
           const share = total ? Math.round((row.value / total) * 100) : 0;
           return (
             <section key={row.label}>
-              <div><b>{row.label}</b><small>{row.value} · {share}%</small></div>
-              <div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
             </section>
           );
         })}

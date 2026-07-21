@@ -1,556 +1,657 @@
-Ordered fix plan
+Eleeveon Schools Multi-Device Rebuild Plan
 
-The fixes should be completed in this order because theme readiness, role switching, and Branch Admin data consistency depend on one another.
+We will rebuild the system around one rule:
 
-Phase 1 — Define role appearance scopes
+Every synced business record has one permanent string ID used everywhere: Dexie, backend, relationships, memberships, media, permissions, reports and sync.
 
-Create:
+There will be no numeric local relationship IDs in synced business data.
 
-app/lib/theme/appearanceScope.ts
+Phase 1 — Permanent identity foundation
 
-This file becomes the single authority for deciding which settings source a role may use.
+This is where we start.
 
-export type AppearanceScope =
-  | "platform"
-  | "account"
-  | "school"
-  | "branch";
+Goal
 
-Recommended mapping:
+Replace the current dual identity system:
 
-developer         → platform
-platform_team     → platform
+id?: number;
+cloudId?: string;
 
-owner             → account
-super_admin       → account
+with:
 
-admin             → school
-school_admin      → school
+id: string;
 
-branch_admin      → branch
-teacher           → branch
-student           → branch
-parent            → branch
-accountant        → branch
+The id will be created with:
 
-It should also expose helpers such as:
+crypto.randomUUID()
 
-appearanceScopeForRole(role)
-requiresSchoolAppearance(role)
-requiresBranchAppearance(role)
+before the record is first saved, including when offline.
 
-This must be completed first so every later provider uses the same rules.
+New base type
+export interface BaseSync {
+  id: string;
+  accountId: string;
 
-Phase 2 — Build explicit scoped-theme application and cleanup
+  createdAt: number;
+  updatedAt: number;
+  version: number;
 
-Create:
+  createdByDeviceId: string;
+  updatedByDeviceId: string;
 
-app/lib/theme/applyScopedAppearance.ts
-
-This file should own all writes to global CSS variables and document attributes.
-
-Functions:
-
-clearScopedAppearance()
-applyPlatformAppearance()
-applyAccountAppearance()
-applySchoolAppearance()
-applyBranchAppearance()
-
-Before applying a new scope, always clear the previous one:
-
-clearScopedAppearance();
-applyBranchAppearance(settings);
-
-Clear variables such as:
-
---primary-color
---dashboard-primary
---branch-primary
---font-family
---font-size
---card-radius
---surface
-
-Also clear scope markers:
-
-data-appearance-scope
-data-role
-data-account-id
-data-school-id
-data-branch-id
-
-This phase fixes the leakage problem where a branch colour remains active after switching to Owner or Developer.
-
-Phase 3 — Make workspace bootstrap return exact settings
-
-Update:
-
-app/lib/sync/workspaceBootstrap.ts
-backend/src/sync/sync.service.ts
-
-The backend bootstrap response should explicitly return:
-
-{
-  account,
-  school,
-  branch,
-  schoolBranchSettings,
-  requiredTables,
-  completed,
-  revision,
+  syncStatus: SyncStatus;
+  isDeleted: boolean;
 }
+Relationships
 
-The frontend should commit the records to Dexie first and then return the exact committed settings row:
+Old:
 
-{
-  settings,
-  school,
-  branch,
-  completedAt,
-  revision,
-}
+studentId: number;
+classId: number;
+branchId: number;
 
-It should also persist a scoped cache:
+New:
 
-accountId + schoolId + branchId
+studentId: string;
+classId: string;
+branchId: string;
 
-Never store branch settings as an unscoped global object.
+These string IDs mean the same thing on every device.
 
-Phase 4 — Rebuild SettingsContext as role-aware
+First file batch
 
-Update:
+Send together:
 
-app/context/settings-context.tsx
+lib/db/db.ts
+lib/db/db-version.ts
+lib/constants/syncStatus.ts
+lib/sync table registry
+lib/sync shared types
+What we will do
+Rewrite all synced entity interfaces to string IDs.
+Remove cloudId.
+Remove numeric foreign-key relationships.
+Keep numeric IDs only for truly local-only tables such as blob storage or debug logs.
+Rebuild Dexie schemas and indexes.
+Increase the database version.
+Reset the development database rather than migrate old data.
+Phase 2 — Safe local data layer
 
-The current context must stop treating branch settings as universally applicable.
+Pages should not create or mutate synced records directly.
 
-Recommended state:
+Goal
 
-type SettingsContextValue = {
-  effectiveSettings: unknown | null;
-  effectiveScope: AppearanceScope;
+Create one controlled API for all local business data.
 
-  platformSettings: unknown | null;
-  accountSettings: unknown | null;
-  schoolSettings: unknown | null;
-  branchSettings: unknown | null;
-
-  ready: boolean;
-  loading: boolean;
-
-  loadedFor: {
-    role: string;
-    accountId?: string;
-    schoolId?: number;
-    branchId?: number;
-  } | null;
-
-  refreshSettings(): Promise<void>;
-  hydrateSettingsForMembership(
-    membership: UserMembership,
-  ): Promise<void>;
-};
-
-Resolution must depend on the active role:
-
-platform role → platform settings only
-owner role    → account settings
-school role   → school settings
-branch role   → branch settings
-
-A cached branch row may remain in memory, but it must not become effectiveSettings while Owner is active.
-
-Phase 5 — Rebuild ThemeContext around exact applied scope
-
-Update:
-
-app/context/theme-context.tsx
-
-ThemeContext should no longer just expose a theme object and generic loading flag.
-
-It should expose:
-
-{
-  theme,
-  ready,
-  effectiveScope,
-
-  appliedFor: {
-    role: string;
-    accountId?: string;
-    schoolId?: number;
-    branchId?: number;
-  } | null;
-
-  applyForMembership(
-    membership: UserMembership,
-  ): Promise<void>;
-
-  resetAppearance(): void;
-}
-
-When the active role changes:
-
-clear old scoped appearance
-→ determine new scope
-→ load valid settings
-→ apply new appearance
-→ record appliedFor
-→ mark ready
-
-Theme readiness must require an exact match.
-
-For Branch Admin:
-
-role matches
-accountId matches
-schoolId matches
-branchId matches
-scope is branch
-
-For Owner:
-
-role matches
-accountId matches
-scope is account
-branch does not matter
-Phase 6 — Make membership switching atomic
-
-Update:
-
-app/context/active-membership-context.tsx
-app/select-role/page.tsx
-
-The role-switch sequence should become:
-
-start role transition
-→ clear previous scoped theme
-→ set active membership
-→ set active school and branch
-→ bootstrap required workspace
-→ hydrate role-appropriate settings
-→ apply target appearance
-→ verify appearance matches target role
-→ navigate
-
-For Owner or Developer:
-
-no branch bootstrap required
-→ clear branch theme
-→ apply account/platform theme
-→ navigate
-
-For Branch Admin:
-
-bootstrap branch workspace
-→ hydrate exact schoolBranchSettings
-→ apply branch theme
-→ navigate
-
-The target portal must not open until the target appearance has been applied.
-
-Phase 7 — Add a workspace-appearance readiness runtime
-
-Create:
-
-app/components/PortalAppearanceRuntime.tsx
-
-Responsibilities:
-
-observe active membership changes;
-determine the expected appearance scope;
-apply the correct settings;
-clear stale branch appearance;
-recover appearance after reload;
-react to Branch Settings changes;
-expose first-entry readiness.
-
-Mount it globally in:
-
-app/providers.tsx
-
-This component should be responsible for applying appearance outside the Branch Settings editor itself.
-
-Branch Settings edits the settings; the runtime applies them.
-
-Phase 8 — Correct provider order
-
-Update:
-
-app/providers.tsx
-
-Recommended dependency order:
-
-DatabaseBootstrap
-└── AccountProvider
-    └── ActiveBranchProvider
-        └── ActiveMembershipProvider
-            └── SettingsProvider
-                └── ThemeProvider
-                    └── PortalAppearanceRuntime
-                        └── RealtimeProvider
-                            └── SyncBootstrapProvider
-
-Important requirements:
-
-SettingsProvider must know the active membership and selected workspace.
-ThemeProvider must receive the resolved effective settings.
-PortalAppearanceRuntime must run before portal content renders.
-Realtime and sync should not become the source of initial appearance readiness.
-Phase 9 — Add exact readiness gating to RolePortalShell
-
-Update:
-
-app/components/role-portals/RolePortalShell.tsx
-
-The shell should calculate:
-
-const expectedScope =
-  appearanceScopeForRole(activeRole);
-
-Then verify:
-
-const appearanceMatchesRole =
-  theme.ready &&
-  theme.effectiveScope === expectedScope &&
-  theme.appliedFor?.role === activeRole;
-
-For branch roles, also require matching school and branch IDs.
-
-Before the portal has rendered once:
-
-appearance not ready
-→ show Preparing workspace
-
-After the portal is already visible:
-
-background settings refresh
-→ keep current page visible
-
-Use a ref such as:
-
-const renderedWorkspaceRef =
-  useRef<string | null>(null);
-
-This prevents the recurring “Opening…” flicker.
-
-Phase 10 — Correct Branch Settings save propagation
-
-Update:
-
-app/branch-admin/modules/Branchsettings.tsx
-app/lib/events/dataEvents.ts
-app/lib/sync/syncEvents.ts
-
-Saving Branch Settings should do:
-
-update schoolBranchSettings in Dexie
-→ publish changedTables: ["schoolBranchSettings"]
-→ SettingsContext reloads exact active row
-→ ThemeContext reapplies branch appearance
-→ schedule sync
-
-The Branch Settings page should not be the only component capable of applying the colour.
-
-Acceptance flow:
-
-save new branch colour
-→ whole branch portal changes immediately
-→ switch to Owner
-→ owner theme replaces branch theme
-→ switch back
-→ saved branch colour restores immediately
-Phase 11 — Separate local personal preferences
-
-Create or update:
-
-app/lib/theme/localPortalAppearance.ts
-app/components/LocalAppearanceRuntime.tsx
-app/components/role-portals/LocalSettings.tsx
-
-Local Settings should control only device-specific preferences:
-
-light/dark/system override
-density
-motion
-personal font-size override
-
-It must not control:
-
-branch primary colour
-branch logo
-branch branding
-shared branch font
-
-Recommended precedence:
-
-branch/account/platform branding
-+
-local device display override
-
-For example:
-
-finalAppearanceMode =
-  localMode === "system"
-    ? branchOrPlatformDefaultMode
-    : localMode;
-
-This can be completed after the shared branch theme is stable.
-
-Phase 12 — Validate role transitions
-
-Before rebuilding more pages, test these transitions:
-
-Branch Admin → Owner
-Owner → Branch Admin
-Branch Admin A → Branch Admin B
-Teacher → Owner
-Developer → Branch Admin
-Branch Admin → Developer
-School Admin → Branch Admin
-Branch Admin → School Admin
-
-For every transition verify:
-
-no previous colour flash
-no previous logo
-no previous branch font
-correct settings before portal opens
-correct school/branch data
-no unnecessary broad resync
-
-This is the completion gate for the appearance foundation.
-
-Phase 13 — Standardize the Branch Admin data foundation
-
-Once appearance is stable, update every Branch Admin page to use:
-
-useBranchWorkspaceScope()
-useBranchTableRevision()
+Core functions
 createLocal()
 updateLocal()
 softDeleteLocal()
+getLocalById()
+listScopedLocal()
+Creation rules
+
+createLocal() will automatically add:
+
+id: crypto.randomUUID()
+accountId
+createdAt
+updatedAt
+version
+createdByDeviceId
+updatedByDeviceId
+syncStatus
+isDeleted
+
+The page will not be allowed to provide or override identity fields.
+
+Update rules
+
+Before updating:
+
+Find the exact record by permanent ID
+Verify account
+Verify school
+Verify branch
+Protect immutable fields
+Apply patch
+Increment version
+Mark pending
+Scope rules
+
+All queries must match exact scope:
+
+row.accountId === workspace.accountId
+row.schoolId === workspace.schoolId
+row.branchId === workspace.branchId
+
+Missing scope will not be treated as permission to show the record everywhere.
+
+Second file batch
+lib/local/createLocal.ts
+lib/local/updateLocal.ts
+lib/local/softDeleteLocal.ts
+lib/local/listActiveLocal.ts
+lib/local/helpers.ts
+lib/local/index.ts
+Phase 3 — Relationship validation
+
+Permanent IDs alone are not enough. The system must verify that referenced records belong together.
+
+Goal
+
+Prevent records such as an Isaac assessment referencing Jennifer, a class from another branch, or a period from another school.
+
+Relationship registry
+
+We will define required relationships centrally:
+
+const RELATIONSHIPS = {
+  studentEnrollments: {
+    studentId: "students",
+    classId: "classes",
+    academicStructureId: "academicStructures",
+    academicPeriodId: "academicPeriods",
+  },
+
+  assessmentEntries: {
+    studentId: "students",
+    classId: "classes",
+    subjectId: "subjects",
+    classSubjectId: "classSubjects",
+    assessmentStructureItemId: "assessmentStructureItems",
+    academicPeriodId: "academicPeriods",
+  },
+};
+Before saving
+
+For every relation, the data layer will verify:
+
+the parent exists;
+it belongs to the same account;
+it belongs to the same school;
+it belongs to the same branch where applicable;
+it is not deleted;
+the relationship is permitted.
+Third file batch
+lib/sync/entityRegistry.ts
+lib/sync/relationRegistry.ts
+lib/sync/relationshipValidator.ts
+lib/sync/recordValidator.ts
+
+Some of these may be new files.
+
+Phase 4 — Backend Prisma identity reset
+
+After frontend types are settled, we rebuild backend identity.
+
+Goal
+
+The backend must never know or accept device-local record identity.
+
+Membership model
+
+New membership structure:
+
+model UserMembership {
+  id        String @id @default(uuid())
+  accountId String
+  userId    String
+  role      String
+
+  schoolId  String?
+  branchId  String?
+
+  teacherId String?
+  studentId String?
+  parentId  String?
+
+  active    Boolean @default(true)
+}
 
 Remove:
 
-manual localStorage workspace resolution
-unscoped Dexie reads
-duplicate settings lookups
-page-specific theme loading
+school local IDs
+branch local IDs
+studentLocalId
+teacherLocalId
+parentLocalId
+Sync record model
+model SyncRecord {
+  rowId      String  @id @default(uuid())
+  accountId  String
+  tableName  String
+  entityId   String
+  version    Int
+  payload    Json
+  isDeleted  Boolean
+  updatedAt  BigInt
 
-Recommended first module batch:
+  @@unique([accountId, tableName, entityId])
+}
 
-Organizations
-Students
-Teachers
-Parents
-Classes
-Subjects
-Academic Structures
-Assessment Structures
-Class Subjects
-Curriculum Setup
-Phase 14 — Standardize Branch Admin media
+The backend upserts only by:
 
-All image-bearing pages must use:
+accountId + tableName + entityId
+Fourth file batch
+prisma/schema.prisma
+src/sync DTO files
+src/memberships DTO files
+src/workspace-bootstrap DTO files
 
-saveImageAsset()
-commitMediaAssetsToOwner()
-useEntityMediaUrls()
-softDeleteOwnerFieldAssets()
+We will reset the backend development database after the Prisma redesign.
 
-Rules:
+Phase 5 — Rebuild backend push and pull
+Goal
 
-no Base64
-no direct Blob URL in entity rows
-no loose media owner attachment
-no duplicate page-wide media resolver
+Ensure retries, offline records and multiple devices always resolve to the same permanent entity.
 
-Media acceptance tests:
+Push
 
-save image
-reload
-switch page
-switch role
-switch device
-remove image
-sync removal
-Phase 15 — Rebuild remaining Branch Admin modules
+Each record sent by the frontend contains:
 
-Proceed in this order:
+{
+  id: "permanent-uuid",
+  accountId: "account-uuid",
+  studentId: "student-uuid",
+  classId: "class-uuid",
+  version: 4
+}
 
-Academic setup
-Enrollment
-Assessment
-Attendance
-Scheduling
-Communication
-Reports
-Finance
-Dashboard
+The server will:
 
-The dashboard must be rebuilt last so it consumes the exact selectors used by the destination pages.
+override account identity using the JWT;
+validate the record schema;
+validate all required relationships;
+verify tenant ownership;
+reject wrong-branch references;
+upsert by permanent ID;
+handle version conflicts;
+return accepted and rejected records explicitly.
+Pull
 
-Recommended delivery batches
-Batch 1 — Scope and appearance foundation
-appearanceScope.ts
-applyScopedAppearance.ts
-workspaceBootstrap.ts
-settings-context.tsx
-theme-context.tsx
-Batch 2 — Role switching and first portal entry
-active-membership-context.tsx
-select-role/page.tsx
-PortalAppearanceRuntime.tsx
-providers.tsx
+The server returns records unchanged with permanent IDs.
+
+No foreign-key remapping will be required because every device uses the same IDs.
+
+Dependency order
+1. Schools
+2. Branches
+3. Academic structures and periods
+4. People
+5. Classes, subjects and curricula
+6. Relationship tables
+7. Enrollments
+8. Assessments and attendance
+9. Reports and promotion
+10. Finance and communications
+11. Media metadata
+Fifth file batch
+src/sync/*
+frontend lib/sync/push*
+frontend lib/sync/pull*
+frontend lib/sync/runSync*
+frontend lib/sync/bootstrap*
+Phase 6 — One workspace authority
+Goal
+
+Prevent one page from thinking the user is in Branch A while another thinks the user is in Branch B.
+
+New workspace structure
+interface WorkspaceScope {
+  accountId: string;
+  userId: string;
+  membershipId: string;
+  role: Role;
+
+  schoolId?: string;
+  branchId?: string;
+
+  teacherId?: string;
+  studentId?: string;
+  parentId?: string;
+
+  key: string;
+  ready: boolean;
+}
+One source
+
+Every page will use:
+
+const workspace = useWorkspaceScope();
+
+Pages will no longer read identity independently from:
+
+localStorage;
+sessionStorage;
+active branch state;
+settings;
+first membership;
+first branch;
+URL fallback.
+Storage
+
+One account- and user-scoped storage key:
+
+eleeveon:workspace:<userId>:<accountId>
+Workspace transitions
+
+When switching:
+
+invalidate old workspace
+cancel old queries
+clear page state
+verify new membership
+construct new workspace
+render new portal
+Sixth file batch
+account-context
+active-membership-context
+active-branch-context
+settings-context
+activeMembership.ts
 RolePortalShell.tsx
-Batch 3 — Live Branch Settings propagation
-Branchsettings.tsx
-dataEvents.ts
-syncEvents.ts
-Batch 4 — Personal appearance separation
-localPortalAppearance.ts
-LocalAppearanceRuntime.tsx
-LocalSettings.tsx
-Batch 5 — Core Branch Admin modules
+useBranchWorkspaceScope.ts
+app/providers.tsx
+
+We may replace useBranchWorkspaceScope() with a generic useWorkspaceScope().
+
+Phase 7 — Race-safe loading
+Goal
+
+Prevent delayed Branch A requests or media loads from overwriting Branch B after switching.
+
+Every loader will capture:
+
+const requestedWorkspaceKey = workspace.key;
+const requestId = ++requestRef.current;
+
+Before committing:
+
+if (requestId !== requestRef.current) return;
+if (workspaceRef.current.key !== requestedWorkspaceKey) return;
+
+This applies to:
+
+student lists;
+enrollments;
+assessments;
+reports;
+branding;
+settings;
+media previews;
+dashboard counts.
+Seventh file batch
+useBackgroundLoader
+useEntityMediaUrls
+useEntityMediaController
+useDataRevision
+useBranchTableRevision
+shared loading helpers
+Phase 8 — Media rebuild
+Goal
+
+Isaac’s image can only belong to Isaac’s permanent ID.
+
+Media model
+interface MediaAsset extends BaseSync {
+  schoolId?: string;
+  branchId?: string;
+
+  ownerTable: string;
+  ownerId: string;
+  fieldKey: string;
+
+  remoteKey?: string;
+  remoteUrl?: string;
+  uploadStatus: MediaUploadStatus;
+}
+
+Permanent identity:
+
+accountId + ownerTable + ownerId + fieldKey
+
+No canonical use of:
+
+ownerLocalId
+photoMediaId as numeric local ID
+student numeric ID
+Backend validation
+
+Before accepting an upload:
+
+authenticate user;
+verify account;
+find owner by permanent ID;
+verify owner belongs to the correct school and branch;
+verify user has permission to edit that owner;
+save the file to durable object storage.
+Durable storage
+
+Production files should not live only in the backend’s local uploads directory.
+
+We will introduce a storage adapter so development may use local storage, while production uses durable object storage.
+
+Eighth file batch
+frontend lib/media/*
+frontend media hooks
+backend src/media/*
+media storage adapter
+Phase 9 — Transactional academic services
+
+Module pages should not manually execute several dependent writes.
+
+Enrollment service
+enrollStudent()
+
+One transaction:
+
+verify student;
+verify class;
+verify period;
+prevent duplicate active enrollment;
+create enrollment;
+update current class.
+Assessment service
+saveAssessmentBatch()
+
+One transaction:
+
+validate each student;
+validate applicability;
+create or update the correct logical entry;
+prevent duplicates.
+
+Logical assessment uniqueness:
+
+studentId
++ classSubjectId
++ assessmentStructureItemId
++ academicPeriodId
+Attendance service
+
+Logical uniqueness:
+
+studentId + academicPeriodId + date
+Promotion service
+
+One idempotent operation:
+
+create report snapshot;
+complete source enrollment;
+create destination enrollment;
+update current class;
+create promotion record;
+record operation ID.
+
+Retrying will not promote the student twice.
+
+Ninth file batch
+lib/services/enrollmentService.ts
+lib/services/assessmentService.ts
+lib/services/attendanceService.ts
+lib/services/promotionService.ts
+lib/services/reportService.ts
+Phase 10 — Rewrite modules
+
+Once Phases 1–9 are stable, we rewrite the pages.
+
+Batch A — Core ownership entities
+Schools
+Branches
+Academic Structures
+Academic Periods
 Organizations
+Classes
+Subjects
 Students
 Teachers
 Parents
-Classes
-Subjects
-Academic Structures
-Assessment Structures
+Batch B — Relationship entities
+Student Parents
+Class Teachers
 Class Subjects
-Curriculum Setup
-Batch 6 — Remaining portal modules
-Academic
-Assessment
-Attendance
-Scheduling
-Communication
-Reports
+Curricula
+Curriculum Subjects
+Student Curriculums
+Subject Offerings
+Student Enrollments
+Batch C — Academic execution
+Assessment Structures
+Assessment Structure Items
+Assessment Applicability
+Assessment Entry
+Student Attendance
+Teacher Attendance
+Batch D — Results and progression
+Computed Results
+Student Reports
+Report Cards
+Broadsheets
+Cumulative Records
+Promotion
+Student Report Snapshots
+Batch E — Remaining modules
+Calendar
+Timetables
+Communications
 Finance
-Dashboard
-Final success condition
+Payroll
+Settings
+Phase 11 — Backend logical uniqueness
 
-The system is correct when all of these work:
+Permanent IDs prevent accidental identity collision, but logical duplicates must also be prevented.
 
-Branch Admin selected
-→ exact branch settings loaded
-→ branch colour applied
-→ branch portal opens
+The backend will enforce unique business keys where applicable.
 
-Branch Admin → Owner
-→ branch appearance cleared
-→ account/platform appearance applied
-→ Owner opens with no branch styling
+Examples:
 
-Owner → Branch Admin
-→ cached branch appearance restored
-→ Branch Admin opens with no default flash
+Enrollment:
+studentId + academicPeriodId + active status
 
-Branch Settings colour saved
-→ current branch portal changes immediately
-→ other role scopes remain unaffected
+Assessment:
+studentId + classSubjectId
++ assessmentStructureItemId + academicPeriodId
+
+Attendance:
+studentId + academicPeriodId + date
+
+Student-parent link:
+studentId + parentId
+
+Class subject:
+classId + subjectId + academicPeriodId
+
+This prevents two devices from independently creating duplicate logical records.
+
+Phase 12 — Multi-device integrity tests
+
+The architecture will be tested specifically against the failures you fear.
+
+Required test 1 — Numeric collision is irrelevant
+
+Even though Dexie no longer uses numeric business IDs, we will simulate different insertion orders across two devices.
+
+Verify:
+
+scores remain attached;
+photos remain attached;
+attendance remains attached;
+reports remain attached.
+Required test 2 — Offline creation
+
+Device A and Device B each create students offline.
+
+After sync:
+
+both exist;
+neither replaces the other;
+relationships remain correct.
+Required test 3 — Workspace race
+
+Begin loading Branch A, immediately switch to Branch B, then allow Branch A to finish.
+
+Branch A data must never commit.
+
+Required test 4 — Media race
+
+Start loading Isaac’s photo, switch workspace, then resolve the image later.
+
+The image must be discarded.
+
+Required test 5 — Sync retry
+
+Push the same record repeatedly.
+
+Only one server record should exist.
+
+Required test 6 — Promotion retry
+
+Interrupt promotion midway, retry it, then sync from another device.
+
+There must be:
+
+one promotion record;
+one destination enrollment;
+one correct current class.
+Required test 7 — Cross-branch attack
+
+Submit a real student ID belonging to another branch.
+
+The backend must reject it.
+
+Required test 8 — Reinstallation
+
+Clear Dexie completely and bootstrap from the cloud.
+
+All students, relationships, reports and media must reconstruct correctly.
+
+Exact execution sequence
+
+We will follow this order without skipping ahead:
+
+1. db.ts and permanent identity types
+2. Dexie schemas and indexes
+3. local CRUD layer
+4. relationship registry and validation
+5. Prisma models
+6. backend sync
+7. frontend sync
+8. membership and workspace
+9. race-safe loaders
+10. media
+11. domain transaction services
+12. core modules
+13. relationship modules
+14. assessments and attendance
+15. reports and promotion
+16. multi-device tests
+First batch to send
+
+Send these together:
+
+lib/db/db.ts
+lib/db/db-version.ts
+lib/constants/syncStatus.ts
+the file containing sync table classifications/registry
+the main frontend sync types file

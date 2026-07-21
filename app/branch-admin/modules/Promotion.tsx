@@ -95,8 +95,8 @@ type ViewMode = "cards" | "table";
 
 type TenantRow = {
   accountId?: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   isDeleted?: boolean;
 };
 
@@ -107,9 +107,9 @@ type PromotionRow = {
   engineReportItem?: any;
   storedReportCard?: ReportCard;
 
-  fromClassId: number;
-  fromAcademicStructureId?: number;
-  fromAcademicPeriodId?: number;
+  fromClassId: string;
+  fromAcademicStructureId?: string;
+  fromAcademicPeriodId?: string;
 
   total: number;
   average: number;
@@ -118,8 +118,8 @@ type PromotionRow = {
 
   recommendation: Decision;
   finalDecision: Decision;
-  recommendedClassId?: number;
-  finalClassId?: number;
+  recommendedClassId?: string;
+  finalClassId?: string;
 
   selected: boolean;
   note: string;
@@ -127,11 +127,11 @@ type PromotionRow = {
 };
 
 type OverrideState = Record<
-  number,
+  string,
   {
     selected?: boolean;
     finalDecision?: Decision;
-    finalClassId?: number;
+    finalClassId?: string;
     note?: string;
   }
 >;
@@ -159,21 +159,24 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
   openedAt?: number;
 };
 
-function idOf(value: unknown) {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function idOf(value: unknown): string {
+  return cleanId(value);
 }
 
 function sameTextId(a: unknown, b: unknown) {
@@ -186,7 +189,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -214,10 +219,10 @@ function readStoredActiveMembership() {
 function firstLocalId(...values: unknown[]) {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -228,7 +233,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -237,7 +246,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -249,7 +258,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -259,21 +272,41 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-function tenantMatches(row: TenantRow, args: { accountId?: string | null; schoolId?: number; branchId?: number }) {
+function tenantMatches(
+  row: TenantRow,
+  args: { accountId?: string | null; schoolId?: string; branchId?: string },
+) {
   if (row.isDeleted) return false;
 
-  if (row.accountId && args.accountId && !sameTextId(row.accountId, args.accountId)) return false;
-  if (row.schoolId && args.schoolId && idOf(row.schoolId) !== idOf(args.schoolId)) return false;
-  if (row.branchId && args.branchId && idOf(row.branchId) !== idOf(args.branchId)) return false;
+  if (
+    row.accountId &&
+    args.accountId &&
+    !sameTextId(row.accountId, args.accountId)
+  )
+    return false;
+  if (
+    row.schoolId &&
+    args.schoolId &&
+    idOf(row.schoolId) !== idOf(args.schoolId)
+  )
+    return false;
+  if (
+    row.branchId &&
+    args.branchId &&
+    idOf(row.branchId) !== idOf(args.branchId)
+  )
+    return false;
 
   return true;
 }
 
-function sortNamed<T extends { name?: string; order?: number; id?: number }>(items: T[]) {
+function sortNamed<T extends { name?: string; order?: number; id?: string }>(
+  items: T[],
+) {
   return [...items].sort((a, b) => {
     const orderA = safeNumber(a.order, 9999);
     const orderB = safeNumber(b.order, 9999);
@@ -282,7 +315,10 @@ function sortNamed<T extends { name?: string; order?: number; id?: number }>(ite
   });
 }
 
-function recommendationFromAverage(average: number, hasNextClass: boolean): Decision {
+function recommendationFromAverage(
+  average: number,
+  hasNextClass: boolean,
+): Decision {
   if (!hasNextClass) return "graduate";
   return average < 50 ? "repeat" : "promote";
 }
@@ -294,7 +330,11 @@ function decisionTone(decision: Decision): "green" | "orange" | "purple" {
 }
 
 function isActiveStudent(student: Student) {
-  return !student.isDeleted && student.status !== "withdrawn" && student.status !== "graduated";
+  return (
+    !student.isDeleted &&
+    student.status !== "withdrawn" &&
+    student.status !== "graduated"
+  );
 }
 
 // ======================================================
@@ -306,11 +346,7 @@ export default function PromotionPage() {
 
   const router = useRouter();
 
-  const {
-    accountId,
-    authenticated,
-    loading: accountLoading,
-  } = useAccount();
+  const { accountId, authenticated, loading: accountLoading } = useAccount();
 
   const { settings, loading: settingsLoading } = useSettings();
 
@@ -352,8 +388,12 @@ export default function PromotionPage() {
 
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [schoolBranchSettings, setSchoolBranchSettings] = useState<SchoolBranchSetting[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [schoolBranchSettings, setSchoolBranchSettings] = useState<
+    SchoolBranchSetting[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -363,11 +403,21 @@ export default function PromotionPage() {
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
   const [classTeachers, setClassTeachers] = useState<ClassTeacher[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [studentEnrollments, setStudentEnrollments] = useState<StudentEnrollment[]>([]);
-  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<AssessmentApplicability[]>([]);
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
-  const [assessmentStructureItems, setAssessmentStructureItems] = useState<AssessmentStructureItem[]>([]);
-  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>([]);
+  const [studentEnrollments, setStudentEnrollments] = useState<
+    StudentEnrollment[]
+  >([]);
+  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
+  const [assessmentStructureItems, setAssessmentStructureItems] = useState<
+    AssessmentStructureItem[]
+  >([]);
+  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>(
+    [],
+  );
   const [gradingSystems, setGradingSystems] = useState<GradingSystem[]>([]);
   const [gradeRules, setGradeRules] = useState<GradeRule[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
@@ -376,13 +426,23 @@ export default function PromotionPage() {
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
   const [promotions, setPromotions] = useState<StudentPromotion[]>([]);
 
-  const [fromAcademicStructureId, setFromAcademicStructureId] = useState<number | undefined>();
-  const [fromAcademicPeriodId, setFromAcademicPeriodId] = useState<number | undefined>();
-  const [fromClassId, setFromClassId] = useState<number | undefined>();
+  const [fromAcademicStructureId, setFromAcademicStructureId] = useState<
+    string | undefined
+  >();
+  const [fromAcademicPeriodId, setFromAcademicPeriodId] = useState<
+    string | undefined
+  >();
+  const [fromClassId, setFromClassId] = useState<string | undefined>();
 
-  const [toAcademicStructureId, setToAcademicStructureId] = useState<number | undefined>();
-  const [toAcademicPeriodId, setToAcademicPeriodId] = useState<number | undefined>();
-  const [defaultToClassId, setDefaultToClassId] = useState<number | undefined>();
+  const [toAcademicStructureId, setToAcademicStructureId] = useState<
+    string | undefined
+  >();
+  const [toAcademicPeriodId, setToAcademicPeriodId] = useState<
+    string | undefined
+  >();
+  const [defaultToClassId, setDefaultToClassId] = useState<
+    string | undefined
+  >();
 
   const [rowOverrides, setRowOverrides] = useState<OverrideState>({});
   const [search, setSearch] = useState("");
@@ -391,7 +451,9 @@ export default function PromotionPage() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [selectedPromotionStudentId, setSelectedPromotionStudentId] = useState<number | null>(null);
+  const [selectedPromotionStudentId, setSelectedPromotionStudentId] = useState<
+    string | null
+  >(null);
 
   // ======================================================
   // AUTH + CONTEXT PROTECTION
@@ -403,13 +465,7 @@ export default function PromotionPage() {
     if (!authenticated || !accountId) {
       router.replace("/login");
     }
-  }, [
-    accountLoading,
-    contextLoading,
-    authenticated,
-    accountId,
-    router,
-  ]);
+  }, [accountLoading, contextLoading, authenticated, accountId, router]);
 
   // ======================================================
   // LOAD DB DATA
@@ -516,25 +572,78 @@ export default function PromotionPage() {
         db.studentPromotions.toArray(),
       ]);
 
-      setSchools(schoolRows.filter((row) => sameTenantLoose(row) || idOf(row.id) === idOf(schoolId)));
-      setBranches(branchRows.filter((row) => sameTenantLoose(row) || idOf(row.id) === idOf(branchId) || (activeBranch && idOf((activeBranch as any).id) === idOf(branchId))));
+      setSchools(
+        schoolRows.filter(
+          (row) => sameTenantLoose(row) || idOf(row.id) === idOf(schoolId),
+        ),
+      );
+      setBranches(
+        branchRows.filter(
+          (row) =>
+            sameTenantLoose(row) ||
+            idOf(row.id) === idOf(branchId) ||
+            (activeBranch && idOf((activeBranch as any).id) === idOf(branchId)),
+        ),
+      );
       setSchoolBranchSettings(settingRows.filter(sameTenantLoose));
-      setAcademicStructures(sortNamed(structureRows.filter((row) => sameTenantLoose(row) && row.active !== false)));
-      setAcademicPeriods(sortNamed(periodRows.filter((row) => sameTenantLoose(row) && row.active !== false)));
-      setClasses(sortNamed(classRows.filter((row) => sameTenantLoose(row) && row.active !== false)));
-      setSubjects(sortNamed(subjectRows.filter((row) => sameTenantLoose(row) && row.active !== false)));
+      setAcademicStructures(
+        sortNamed(
+          structureRows.filter(
+            (row) => sameTenantLoose(row) && row.active !== false,
+          ),
+        ),
+      );
+      setAcademicPeriods(
+        sortNamed(
+          periodRows.filter(
+            (row) => sameTenantLoose(row) && row.active !== false,
+          ),
+        ),
+      );
+      setClasses(
+        sortNamed(
+          classRows.filter(
+            (row) => sameTenantLoose(row) && row.active !== false,
+          ),
+        ),
+      );
+      setSubjects(
+        sortNamed(
+          subjectRows.filter(
+            (row) => sameTenantLoose(row) && row.active !== false,
+          ),
+        ),
+      );
       setStudents(studentRows.filter(sameTenantLoose));
       setTeachers(teacherRows.filter(sameTenantLoose));
       setParents(parentRows.filter(sameTenantLoose));
       setStudentParents(studentParentRows.filter(sameTenantLoose));
       setClassTeachers(classTeacherRows.filter(sameTenantLoose));
-      setClassSubjects(classSubjectRows.filter((row) => sameTenantLoose(row) && row.active !== false));
+      setClassSubjects(
+        classSubjectRows.filter(
+          (row) => sameTenantLoose(row) && row.active !== false,
+        ),
+      );
       setStudentEnrollments(enrollmentRows.filter(sameTenantLoose));
-      setAssessmentApplicabilities(applicabilityRows.filter((row) => sameTenantLoose(row) && row.active !== false));
-      setAssessmentStructures(assessmentStructureRows.filter((row) => sameTenantLoose(row) && row.active !== false));
-      setAssessmentStructureItems(assessmentStructureItemRows.filter(sameTenantLoose));
+      setAssessmentApplicabilities(
+        applicabilityRows.filter(
+          (row) => sameTenantLoose(row) && row.active !== false,
+        ),
+      );
+      setAssessmentStructures(
+        assessmentStructureRows.filter(
+          (row) => sameTenantLoose(row) && row.active !== false,
+        ),
+      );
+      setAssessmentStructureItems(
+        assessmentStructureItemRows.filter(sameTenantLoose),
+      );
       setAssessmentEntries(assessmentEntryRows.filter(sameTenantLoose));
-      setGradingSystems(gradingSystemRows.filter((row) => sameTenantLoose(row) && row.active !== false));
+      setGradingSystems(
+        gradingSystemRows.filter(
+          (row) => sameTenantLoose(row) && row.active !== false,
+        ),
+      );
       setGradeRules(gradeRuleRows.filter(sameTenantLoose));
       setAttendance(attendanceRows.filter(sameTenantLoose));
       setComputedResults(computedRows.filter(sameTenantLoose));
@@ -553,9 +662,7 @@ export default function PromotionPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [authenticated, accountId, schoolId, branchId, dataRevision]);
 
   useEffect(() => {
     const refresh = () => load();
@@ -574,7 +681,11 @@ export default function PromotionPage() {
 
   const currentSetting = useMemo(() => {
     return (
-      schoolBranchSettings.find((row) => idOf(row.schoolId) === idOf(schoolId) && idOf(row.branchId) === idOf(branchId)) ||
+      schoolBranchSettings.find(
+        (row) =>
+          idOf(row.schoolId) === idOf(schoolId) &&
+          idOf(row.branchId) === idOf(branchId),
+      ) ||
       settings ||
       undefined
     );
@@ -584,16 +695,25 @@ export default function PromotionPage() {
    * `currentSetting` may resolve to full branch settings or appearance-only
    * settings. Normalize academic IDs before placing them in number state.
    */
-  const currentAcademicStructureId: number | undefined =
+  const currentAcademicStructureId: string | undefined =
     idOf(currentSetting?.currentAcademicStructureId) || undefined;
 
-  const currentAcademicPeriodId: number | undefined =
+  const currentAcademicPeriodId: string | undefined =
     idOf(currentSetting?.currentAcademicPeriodId) || undefined;
 
-  const branchAcademicStructures = useMemo(() => sortNamed(academicStructures), [academicStructures]);
-  const branchAcademicPeriods = useMemo(() => sortNamed(academicPeriods), [academicPeriods]);
+  const branchAcademicStructures = useMemo(
+    () => sortNamed(academicStructures),
+    [academicStructures],
+  );
+  const branchAcademicPeriods = useMemo(
+    () => sortNamed(academicPeriods),
+    [academicPeriods],
+  );
   const branchClasses = useMemo(() => sortNamed(classes), [classes]);
-  const branchStudents = useMemo(() => students.filter(isActiveStudent), [students]);
+  const branchStudents = useMemo(
+    () => students.filter(isActiveStudent),
+    [students],
+  );
   const branchStudentEnrollments = studentEnrollments;
   const branchReportCards = reportCards;
   const branchPromotions = promotions;
@@ -604,7 +724,8 @@ export default function PromotionPage() {
 
   useEffect(() => {
     if (!fromAcademicStructureId) {
-      const next = currentAcademicStructureId || branchAcademicStructures[0]?.id;
+      const next =
+        currentAcademicStructureId || branchAcademicStructures[0]?.id;
       if (next) {
         setFromAcademicStructureId(next);
         setToAcademicStructureId((prev) => prev || next);
@@ -627,30 +748,47 @@ export default function PromotionPage() {
   const fromPeriods = useMemo(() => {
     return branchAcademicPeriods.filter((row) => {
       if (!fromAcademicStructureId) return true;
-      return row.academicStructureId === fromAcademicStructureId;
+      return sameTextId(row.academicStructureId, fromAcademicStructureId);
     });
   }, [branchAcademicPeriods, fromAcademicStructureId]);
 
   const toPeriods = useMemo(() => {
     return branchAcademicPeriods.filter((row) => {
       if (!toAcademicStructureId) return true;
-      return row.academicStructureId === toAcademicStructureId;
+      return sameTextId(row.academicStructureId, toAcademicStructureId);
     });
   }, [branchAcademicPeriods, toAcademicStructureId]);
 
   const availableFromClasses = useMemo(() => {
-    const classIds = new Set<number>();
+    const classIds = new Set<string>();
 
     branchStudentEnrollments.forEach((enrollment) => {
       if (enrollment.status !== "active") return;
-      if (fromAcademicStructureId && enrollment.academicStructureId !== fromAcademicStructureId) return;
-      if (fromAcademicPeriodId && enrollment.academicPeriodId !== fromAcademicPeriodId) return;
+      if (
+        fromAcademicStructureId &&
+        !sameTextId(enrollment.academicStructureId, fromAcademicStructureId)
+      )
+        return;
+      if (
+        fromAcademicPeriodId &&
+        !sameTextId(enrollment.academicPeriodId, fromAcademicPeriodId)
+      )
+        return;
       classIds.add(enrollment.classId);
     });
 
-    const classesWithEnrollments = branchClasses.filter((row) => row.id && classIds.has(row.id));
-    return classesWithEnrollments.length ? classesWithEnrollments : branchClasses;
-  }, [branchStudentEnrollments, branchClasses, fromAcademicStructureId, fromAcademicPeriodId]);
+    const classesWithEnrollments = branchClasses.filter(
+      (row) => row.id && classIds.has(row.id),
+    );
+    return classesWithEnrollments.length
+      ? classesWithEnrollments
+      : branchClasses;
+  }, [
+    branchStudentEnrollments,
+    branchClasses,
+    fromAcademicStructureId,
+    fromAcademicPeriodId,
+  ]);
 
   useEffect(() => {
     if (!fromClassId && availableFromClasses[0]?.id) {
@@ -660,7 +798,7 @@ export default function PromotionPage() {
 
   const nextAvailableClassId = useMemo(() => {
     if (!fromClassId) return undefined;
-    const index = branchClasses.findIndex((row) => row.id === fromClassId);
+    const index = branchClasses.findIndex((row) => sameTextId(row.id, fromClassId));
     if (index < 0) return undefined;
     return branchClasses[index + 1]?.id;
   }, [branchClasses, fromClassId]);
@@ -674,16 +812,28 @@ export default function PromotionPage() {
   useEffect(() => {
     if (!toAcademicStructureId) {
       setToAcademicStructureId(
-        fromAcademicStructureId || currentAcademicStructureId || branchAcademicStructures[0]?.id
+        fromAcademicStructureId ||
+          currentAcademicStructureId ||
+          branchAcademicStructures[0]?.id,
       );
     }
-  }, [toAcademicStructureId, fromAcademicStructureId, currentAcademicStructureId, branchAcademicStructures]);
+  }, [
+    toAcademicStructureId,
+    fromAcademicStructureId,
+    currentAcademicStructureId,
+    branchAcademicStructures,
+  ]);
 
   useEffect(() => {
     if (!toAcademicPeriodId) {
-      const currentIndex = branchAcademicPeriods.findIndex((row) => row.id === fromAcademicPeriodId);
-      const nextPeriod = currentIndex >= 0 ? branchAcademicPeriods[currentIndex + 1] : undefined;
-      setToAcademicPeriodId(nextPeriod?.id || fromAcademicPeriodId || branchAcademicPeriods[0]?.id);
+      const currentIndex = branchAcademicPeriods.findIndex(
+        (row) => sameTextId(row.id, fromAcademicPeriodId),
+      );
+      const nextPeriod =
+        currentIndex >= 0 ? branchAcademicPeriods[currentIndex + 1] : undefined;
+      setToAcademicPeriodId(
+        nextPeriod?.id || fromAcademicPeriodId || branchAcademicPeriods[0]?.id,
+      );
     }
   }, [toAcademicPeriodId, fromAcademicPeriodId, branchAcademicPeriods]);
 
@@ -758,7 +908,12 @@ export default function PromotionPage() {
   }, [branchId, fromAcademicStructureId, fromAcademicPeriodId, fromClassId]);
 
   const reportEngineOutput = useMemo(() => {
-    if (!branchId || !fromAcademicStructureId || !fromAcademicPeriodId || !fromClassId) {
+    if (
+      !branchId ||
+      !fromAcademicStructureId ||
+      !fromAcademicPeriodId ||
+      !fromClassId
+    ) {
       return undefined;
     }
 
@@ -768,10 +923,17 @@ export default function PromotionPage() {
       console.error("Report engine failed inside promotion page:", error);
       return undefined;
     }
-  }, [branchId, fromAcademicStructureId, fromAcademicPeriodId, fromClassId, reportDataset, reportFilters]);
+  }, [
+    branchId,
+    fromAcademicStructureId,
+    fromAcademicPeriodId,
+    fromClassId,
+    reportDataset,
+    reportFilters,
+  ]);
 
   const engineReportMap = useMemo(() => {
-    const map = new Map<number, ComputedStudentReport>();
+    const map = new Map<string, ComputedStudentReport>();
 
     (reportEngineOutput?.classReports || []).forEach((item: any) => {
       const report = item?.report as ComputedStudentReport | undefined;
@@ -791,7 +953,7 @@ export default function PromotionPage() {
    * through the selected student report template.
    */
   const engineReportItemMap = useMemo(() => {
-    const map = new Map<number, any>();
+    const map = new Map<string, any>();
 
     (reportEngineOutput?.classReports || []).forEach((item: any) => {
       const report = item?.report as ComputedStudentReport | undefined;
@@ -815,29 +977,39 @@ export default function PromotionPage() {
     const strict = branchStudentEnrollments.filter((row) => {
       if (row.status !== "active") return false;
       if (idOf(row.classId) !== idOf(fromClassId)) return false;
-      if (fromAcademicStructureId && row.academicStructureId !== fromAcademicStructureId) return false;
-      if (fromAcademicPeriodId && row.academicPeriodId !== fromAcademicPeriodId) return false;
+      if (
+        fromAcademicStructureId &&
+        !sameTextId(row.academicStructureId, fromAcademicStructureId)
+      )
+        return false;
+      if (fromAcademicPeriodId && !sameTextId(row.academicPeriodId, fromAcademicPeriodId))
+        return false;
       return true;
     });
 
     if (strict.length) return strict;
 
     return branchStudents
-      .filter((student) => student.currentClassId === fromClassId && student.id)
+      .filter((student) => sameTextId(student.currentClassId, fromClassId) && student.id)
       .map(
         (student) =>
           ({
             id: undefined,
             accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId || student.branchId),
-            studentId: Number(student.id),
+            schoolId,
+            branchId: cleanId(branchId || student.branchId) || undefined,
+            studentId: cleanId(student.id),
             classId: fromClassId,
-            academicStructureId: Number(fromAcademicStructureId || currentAcademicStructureId || 0),
-            academicPeriodId: Number(fromAcademicPeriodId || currentAcademicPeriodId || 0),
+            academicStructureId:
+              cleanId(
+                fromAcademicStructureId || currentAcademicStructureId,
+              ) || undefined,
+            academicPeriodId:
+              cleanId(fromAcademicPeriodId || currentAcademicPeriodId) ||
+              undefined,
             startDate: todayISO(),
             status: "active",
-          }) as StudentEnrollment
+          }) as unknown as StudentEnrollment,
       );
   }, [
     branchStudentEnrollments,
@@ -856,10 +1028,22 @@ export default function PromotionPage() {
   // LOOKUPS
   // ======================================================
 
-  const studentMap = useMemo(() => new Map(branchStudents.map((row) => [row.id, row])), [branchStudents]);
-  const classMap = useMemo(() => new Map(branchClasses.map((row) => [row.id, row])), [branchClasses]);
-  const periodMap = useMemo(() => new Map(branchAcademicPeriods.map((row) => [row.id, row])), [branchAcademicPeriods]);
-  const structureMap = useMemo(() => new Map(branchAcademicStructures.map((row) => [row.id, row])), [branchAcademicStructures]);
+  const studentMap = useMemo(
+    () => new Map(branchStudents.map((row) => [row.id, row])),
+    [branchStudents],
+  );
+  const classMap = useMemo(
+    () => new Map(branchClasses.map((row) => [row.id, row])),
+    [branchClasses],
+  );
+  const periodMap = useMemo(
+    () => new Map(branchAcademicPeriods.map((row) => [row.id, row])),
+    [branchAcademicPeriods],
+  );
+  const structureMap = useMemo(
+    () => new Map(branchAcademicStructures.map((row) => [row.id, row])),
+    [branchAcademicStructures],
+  );
 
   // ======================================================
   // PROMOTION ROWS
@@ -875,26 +1059,49 @@ export default function PromotionPage() {
         const engineReportItem = engineReportItemMap.get(student.id);
 
         const storedReportCard = branchReportCards.find((row) => {
-          if (row.studentId !== student.id) return false;
-          if (row.classId !== enrollment.classId) return false;
-          if (enrollment.academicStructureId && row.academicStructureId !== enrollment.academicStructureId) return false;
-          if (enrollment.academicPeriodId && row.academicPeriodId !== enrollment.academicPeriodId) return false;
+          if (!sameTextId(row.studentId, student.id)) return false;
+          if (!sameTextId(row.classId, enrollment.classId)) return false;
+          if (
+            enrollment.academicStructureId &&
+            !sameTextId(row.academicStructureId, enrollment.academicStructureId)
+          )
+            return false;
+          if (
+            enrollment.academicPeriodId &&
+            !sameTextId(row.academicPeriodId, enrollment.academicPeriodId)
+          )
+            return false;
           return true;
         });
 
-        const total = safeNumber(engineReport?.total, safeNumber(storedReportCard?.total, 0));
-        const average = safeNumber(engineReport?.average, safeNumber(storedReportCard?.average, 0));
-        const position = engineReport?.overallPosition || storedReportCard?.position;
+        const total = safeNumber(
+          engineReport?.total,
+          safeNumber(storedReportCard?.total, 0),
+        );
+        const average = safeNumber(
+          engineReport?.average,
+          safeNumber(storedReportCard?.average, 0),
+        );
+        const position =
+          engineReport?.overallPosition || storedReportCard?.position;
         const subjectCount = engineReport?.subjectResults?.length || 0;
 
         const hasNextClass = !!defaultToClassId || !!nextAvailableClassId;
         const recommendation = recommendationFromAverage(average, hasNextClass);
 
         const alreadyProcessed = branchPromotions.some((row) => {
-          if (row.studentId !== student.id) return false;
-          if (row.fromClassId !== enrollment.classId) return false;
-          if (enrollment.academicStructureId && row.fromAcademicStructureId !== enrollment.academicStructureId) return false;
-          if (enrollment.academicPeriodId && row.fromAcademicPeriodId !== enrollment.academicPeriodId) return false;
+          if (!sameTextId(row.studentId, student.id)) return false;
+          if (!sameTextId(row.fromClassId, enrollment.classId)) return false;
+          if (
+            enrollment.academicStructureId &&
+            !sameTextId(row.fromAcademicStructureId, enrollment.academicStructureId)
+          )
+            return false;
+          if (
+            enrollment.academicPeriodId &&
+            !sameTextId(row.fromAcademicPeriodId, enrollment.academicPeriodId)
+          )
+            return false;
           return !row.isDeleted;
         });
 
@@ -902,8 +1109,8 @@ export default function PromotionPage() {
           recommendation === "promote"
             ? defaultToClassId || nextAvailableClassId
             : recommendation === "repeat"
-            ? enrollment.classId
-            : undefined;
+              ? enrollment.classId
+              : undefined;
 
         const override = rowOverrides[student.id] || {};
         const finalDecision = override.finalDecision || recommendation;
@@ -912,8 +1119,8 @@ export default function PromotionPage() {
           (finalDecision === "promote"
             ? defaultToClassId || recommendedClassId
             : finalDecision === "repeat"
-            ? enrollment.classId
-            : undefined);
+              ? enrollment.classId
+              : undefined);
 
         return {
           student,
@@ -922,8 +1129,10 @@ export default function PromotionPage() {
           engineReportItem,
           storedReportCard,
           fromClassId: enrollment.classId,
-          fromAcademicStructureId: enrollment.academicStructureId || fromAcademicStructureId,
-          fromAcademicPeriodId: enrollment.academicPeriodId || fromAcademicPeriodId,
+          fromAcademicStructureId:
+            enrollment.academicStructureId || fromAcademicStructureId,
+          fromAcademicPeriodId:
+            enrollment.academicPeriodId || fromAcademicPeriodId,
           total,
           average,
           position,
@@ -938,7 +1147,11 @@ export default function PromotionPage() {
         } as PromotionRow;
       })
       .filter((row): row is PromotionRow => !!row)
-      .sort((a, b) => b.average - a.average || a.student.fullName.localeCompare(b.student.fullName));
+      .sort(
+        (a, b) =>
+          b.average - a.average ||
+          a.student.fullName.localeCompare(b.student.fullName),
+      );
   }, [
     sourceEnrollments,
     studentMap,
@@ -958,7 +1171,8 @@ export default function PromotionPage() {
 
     return generatedRows.filter((row) => {
       if (decisionFilter === "selected" && !row.selected) return false;
-      if (decisionFilter === "notProcessed" && row.alreadyProcessed) return false;
+      if (decisionFilter === "notProcessed" && row.alreadyProcessed)
+        return false;
       if (["promote", "repeat", "graduate"].includes(decisionFilter)) {
         if (row.finalDecision !== decisionFilter) return false;
       }
@@ -973,21 +1187,41 @@ export default function PromotionPage() {
 
   const selectedRows = useMemo(
     () => generatedRows.filter((row) => row.selected && !row.alreadyProcessed),
-    [generatedRows]
+    [generatedRows],
   );
 
   const summary = useMemo(() => {
     const total = generatedRows.length;
     const selected = selectedRows.length;
-    const promote = generatedRows.filter((row) => row.finalDecision === "promote").length;
-    const repeat = generatedRows.filter((row) => row.finalDecision === "repeat").length;
-    const graduate = generatedRows.filter((row) => row.finalDecision === "graduate").length;
-    const processed = generatedRows.filter((row) => row.alreadyProcessed).length;
+    const promote = generatedRows.filter(
+      (row) => row.finalDecision === "promote",
+    ).length;
+    const repeat = generatedRows.filter(
+      (row) => row.finalDecision === "repeat",
+    ).length;
+    const graduate = generatedRows.filter(
+      (row) => row.finalDecision === "graduate",
+    ).length;
+    const processed = generatedRows.filter(
+      (row) => row.alreadyProcessed,
+    ).length;
     const classAverage = total
-      ? Number((generatedRows.reduce((sum, row) => sum + row.average, 0) / total).toFixed(2))
+      ? Number(
+          (
+            generatedRows.reduce((sum, row) => sum + row.average, 0) / total
+          ).toFixed(2),
+        )
       : 0;
 
-    return { total, selected, promote, repeat, graduate, processed, classAverage };
+    return {
+      total,
+      selected,
+      promote,
+      repeat,
+      graduate,
+      processed,
+      classAverage,
+    };
   }, [generatedRows, selectedRows]);
 
   const warnings = useMemo(() => {
@@ -995,16 +1229,30 @@ export default function PromotionPage() {
 
     if (!schoolId) list.push("No active school selected.");
     if (!branchId) list.push("No active branch selected.");
-    if (branchId && !branchAcademicStructures.length) list.push("No academic structures found for this branch.");
-    if (branchId && !branchAcademicPeriods.length) list.push("No academic periods found for this branch.");
-    if (branchId && !branchClasses.length) list.push("No classes found for this branch.");
-    if (branchId && !branchStudents.length) list.push("No active students found for this branch.");
-    if (fromClassId && !sourceEnrollments.length) list.push("No active enrollments/current-class students found for this class.");
+    if (branchId && !branchAcademicStructures.length)
+      list.push("No academic structures found for this branch.");
+    if (branchId && !branchAcademicPeriods.length)
+      list.push("No academic periods found for this branch.");
+    if (branchId && !branchClasses.length)
+      list.push("No classes found for this branch.");
+    if (branchId && !branchStudents.length)
+      list.push("No active students found for this branch.");
+    if (fromClassId && !sourceEnrollments.length)
+      list.push(
+        "No active enrollments/current-class students found for this class.",
+      );
     if (fromClassId && sourceEnrollments.length && !engineReportMap.size) {
-      list.push("Report engine returned no class reports. Check class subjects, assessment applicability, enrollments, and assessment entries.");
+      list.push(
+        "Report engine returned no class reports. Check class subjects, assessment applicability, enrollments, and assessment entries.",
+      );
     }
-    if (generatedRows.length && generatedRows.some((row) => row.subjectCount === 0)) {
-      list.push("Some students have no subject results from the report engine, so their average may show 0%.");
+    if (
+      generatedRows.length &&
+      generatedRows.some((row) => row.subjectCount === 0)
+    ) {
+      list.push(
+        "Some students have no subject results from the report engine, so their average may show 0%.",
+      );
     }
 
     return [...list, ...engineWarnings];
@@ -1026,7 +1274,7 @@ export default function PromotionPage() {
   // ROW ACTIONS
   // ======================================================
 
-  const updateRow = (studentId: number, patch: Partial<PromotionRow>) => {
+  const updateRow = (studentId: string, patch: Partial<PromotionRow>) => {
     setRowOverrides((prev) => ({
       ...prev,
       [studentId]: {
@@ -1060,8 +1308,8 @@ export default function PromotionPage() {
           decision === "promote"
             ? defaultToClassId || row.recommendedClassId
             : decision === "repeat"
-            ? row.fromClassId
-            : undefined;
+              ? row.fromClassId
+              : undefined;
 
         next[row.student.id] = {
           ...next[row.student.id],
@@ -1089,13 +1337,25 @@ export default function PromotionPage() {
     });
   };
 
-  const countStudentsInClassPeriod = (classId?: number, academicStructureId?: number, academicPeriodId?: number) => {
+  const countStudentsInClassPeriod = (
+    classId?: string,
+    academicStructureId?: string,
+    academicPeriodId?: string,
+  ) => {
     const strictCount = branchStudentEnrollments.filter((enrollment) => {
       if (enrollment.isDeleted) return false;
       if (enrollment.status !== "active") return false;
       if (classId && idOf(enrollment.classId) !== idOf(classId)) return false;
-      if (academicStructureId && idOf(enrollment.academicStructureId) !== idOf(academicStructureId)) return false;
-      if (academicPeriodId && idOf(enrollment.academicPeriodId) !== idOf(academicPeriodId)) return false;
+      if (
+        academicStructureId &&
+        idOf(enrollment.academicStructureId) !== idOf(academicStructureId)
+      )
+        return false;
+      if (
+        academicPeriodId &&
+        idOf(enrollment.academicPeriodId) !== idOf(academicPeriodId)
+      )
+        return false;
       return true;
     }).length;
 
@@ -1103,7 +1363,8 @@ export default function PromotionPage() {
 
     return branchStudents.filter((student) => {
       if (!isActiveStudent(student)) return false;
-      if (classId && idOf(student.currentClassId) !== idOf(classId)) return false;
+      if (classId && idOf(student.currentClassId) !== idOf(classId))
+        return false;
       return true;
     }).length;
   };
@@ -1118,7 +1379,9 @@ export default function PromotionPage() {
       branches.find((item) => idOf(item.id) === idOf(branchId)) || activeBranch;
 
     const fromClass = classMap.get(row.fromClassId);
-    const toClass = row.finalClassId ? classMap.get(row.finalClassId) : undefined;
+    const toClass = row.finalClassId
+      ? classMap.get(row.finalClassId)
+      : undefined;
 
     const fromAcademicPeriod = row.fromAcademicPeriodId
       ? periodMap.get(row.fromAcademicPeriodId)
@@ -1238,23 +1501,37 @@ export default function PromotionPage() {
     });
 
     const classTeacherRecord = classTeacher?.teacherId
-      ? teachers.find((teacher) => idOf(teacher.id) === idOf(classTeacher.teacherId))
+      ? teachers.find(
+          (teacher) => idOf(teacher.id) === idOf(classTeacher.teacherId),
+        )
       : undefined;
 
     const headTeacherRecord =
-      teachers.find((teacher) => teacher.role === "head_teacher" && !teacher.isDeleted) ||
-      teachers.find((teacher) => teacher.role === "principal" && !teacher.isDeleted);
+      teachers.find(
+        (teacher) => teacher.role === "head_teacher" && !teacher.isDeleted,
+      ) ||
+      teachers.find(
+        (teacher) => teacher.role === "principal" && !teacher.isDeleted,
+      );
 
     const studentParentLink =
       studentParents.find((link) => {
-        return !link.isDeleted && idOf(link.studentId) === idOf(row.student.id) && link.isPrimary === true;
+        return (
+          !link.isDeleted &&
+          idOf(link.studentId) === idOf(row.student.id) &&
+          link.isPrimary === true
+        );
       }) ||
       studentParents.find((link) => {
         return !link.isDeleted && idOf(link.studentId) === idOf(row.student.id);
       });
 
     const parentRecord = studentParentLink
-      ? parents.find((parent) => idOf(parent.id) === idOf(studentParentLink.parentId) && !parent.isDeleted)
+      ? parents.find(
+          (parent) =>
+            idOf(parent.id) === idOf(studentParentLink.parentId) &&
+            !parent.isDeleted,
+        )
       : undefined;
 
     /*
@@ -1271,7 +1548,8 @@ export default function PromotionPage() {
         branch: branchRecord,
         academicStructure: fromAcademicStructure,
         academicStructureName:
-          fromAcademicStructure?.name || (engineHeader as any)?.academicStructureName,
+          fromAcademicStructure?.name ||
+          (engineHeader as any)?.academicStructureName,
         academicPeriod: currentAcademicPeriod,
         academicPeriodName: currentAcademicPeriod.name,
         classData: fromClass,
@@ -1313,13 +1591,9 @@ export default function PromotionPage() {
           (report as any)?.classTeacherName ||
           "",
         headTeacherName:
-          headTeacherRecord?.fullName ||
-          (report as any)?.headTeacherName ||
-          "",
+          headTeacherRecord?.fullName || (report as any)?.headTeacherName || "",
         principalName:
-          headTeacherRecord?.fullName ||
-          (report as any)?.principalName ||
-          "",
+          headTeacherRecord?.fullName || (report as any)?.principalName || "",
         parentName:
           parentRecord?.fullName ||
           row.student.parentName ||
@@ -1358,14 +1632,18 @@ export default function PromotionPage() {
         finalDecision: row.finalDecision,
         fromClassId: row.fromClassId,
         fromClassName: fromClass?.name,
-        toClassId: row.finalDecision === "graduate" ? undefined : row.finalClassId,
-        toClassName: row.finalDecision === "graduate" ? undefined : toClass?.name,
+        toClassId:
+          row.finalDecision === "graduate" ? undefined : row.finalClassId,
+        toClassName:
+          row.finalDecision === "graduate" ? undefined : toClass?.name,
         fromAcademicStructureId: row.fromAcademicStructureId,
         fromAcademicStructureName: fromAcademicStructure?.name,
         toAcademicStructureId:
           row.finalDecision === "graduate" ? undefined : toAcademicStructureId,
         toAcademicStructureName:
-          row.finalDecision === "graduate" ? undefined : toAcademicStructure?.name,
+          row.finalDecision === "graduate"
+            ? undefined
+            : toAcademicStructure?.name,
         fromAcademicPeriodId: row.fromAcademicPeriodId,
         fromAcademicPeriodName: fromAcademicPeriod?.name,
         toAcademicPeriodId:
@@ -1399,11 +1677,13 @@ export default function PromotionPage() {
     });
 
     if (invalid.length) {
-      return alert("Some selected students need destination class, next academic structure, and next academic period.");
+      return alert(
+        "Some selected students need destination class, next academic structure, and next academic period.",
+      );
     }
 
     const confirmed = window.confirm(
-      `Process ${selectedRows.length} selected student(s)? This will save report snapshots and update enrollments.`
+      `Process ${selectedRows.length} selected student(s)? This will save report snapshots and update enrollments.`,
     );
 
     if (!confirmed) return;
@@ -1415,21 +1695,28 @@ export default function PromotionPage() {
         const studentId = row.student.id;
         if (!studentId || row.alreadyProcessed) continue;
 
-        const fromStructureId = row.fromAcademicStructureId || fromAcademicStructureId || currentAcademicStructureId;
-        const fromPeriodId = row.fromAcademicPeriodId || fromAcademicPeriodId || currentAcademicPeriodId;
+        const fromStructureId =
+          row.fromAcademicStructureId ||
+          fromAcademicStructureId ||
+          currentAcademicStructureId;
+        const fromPeriodId =
+          row.fromAcademicPeriodId ||
+          fromAcademicPeriodId ||
+          currentAcademicPeriodId;
 
         if (!fromStructureId || !fromPeriodId) continue;
 
         const snapshotPayload = prepareSyncData({
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           studentId,
           classId: row.fromClassId,
           academicStructureId: fromStructureId,
           academicPeriodId: fromPeriodId,
           academicYear: currentSetting?.academicYear || undefined,
-          term: currentSetting?.currentTerm || periodMap.get(fromPeriodId)?.name,
+          term:
+            currentSetting?.currentTerm || periodMap.get(fromPeriodId)?.name,
           reportData: buildSnapshotData(row),
           total: row.total,
           average: row.average,
@@ -1443,19 +1730,24 @@ export default function PromotionPage() {
 
         const promotionPayload = prepareSyncData({
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           studentId,
           fromClassId: row.fromClassId,
-          toClassId: row.finalDecision === "graduate" ? undefined : row.finalClassId,
+          toClassId:
+            row.finalDecision === "graduate" ? undefined : row.finalClassId,
           fromAcademicStructureId: fromStructureId,
-          toAcademicStructureId: row.finalDecision === "graduate" ? undefined : toAcademicStructureId,
+          toAcademicStructureId:
+            row.finalDecision === "graduate"
+              ? undefined
+              : toAcademicStructureId,
           fromAcademicPeriodId: fromPeriodId,
-          toAcademicPeriodId: row.finalDecision === "graduate" ? undefined : toAcademicPeriodId,
+          toAcademicPeriodId:
+            row.finalDecision === "graduate" ? undefined : toAcademicPeriodId,
           average: row.average,
           recommendation: row.recommendation,
           finalDecision: row.finalDecision,
-          snapshotId: Number(snapshotId),
+          snapshotId: String(snapshotId),
           note: row.note.trim() || undefined,
         }) as StudentPromotion;
 
@@ -1470,30 +1762,37 @@ export default function PromotionPage() {
           } as any);
         }
 
-        if (row.finalDecision !== "graduate" && row.finalClassId && toAcademicStructureId && toAcademicPeriodId) {
-          const existingNextEnrollment = branchStudentEnrollments.find((item) => {
-            return (
-              item.studentId === studentId &&
-              item.classId === row.finalClassId &&
-              item.academicStructureId === toAcademicStructureId &&
-              item.academicPeriodId === toAcademicPeriodId &&
-              item.status === "active" &&
-              !item.isDeleted
-            );
-          });
+        if (
+          row.finalDecision !== "graduate" &&
+          row.finalClassId &&
+          toAcademicStructureId &&
+          toAcademicPeriodId
+        ) {
+          const existingNextEnrollment = branchStudentEnrollments.find(
+            (item) => {
+              return (
+                sameTextId(item.studentId, studentId) &&
+                sameTextId(item.classId, row.finalClassId) &&
+                sameTextId(item.academicStructureId, toAcademicStructureId) &&
+                sameTextId(item.academicPeriodId, toAcademicPeriodId) &&
+                item.status === "active" &&
+                !item.isDeleted
+              );
+            },
+          );
 
           if (!existingNextEnrollment) {
             const enrollmentPayload = prepareSyncData({
               accountId,
-              schoolId: Number(schoolId),
-              branchId: Number(branchId),
+              schoolId: schoolId,
+              branchId: branchId,
               studentId,
               classId: row.finalClassId,
               academicStructureId: toAcademicStructureId,
               academicPeriodId: toAcademicPeriodId,
               startDate: todayISO(),
               status: "active",
-            }) as StudentEnrollment;
+            }) as unknown as StudentEnrollment;
 
             await db.studentEnrollments.add(enrollmentPayload);
           }
@@ -1517,7 +1816,9 @@ export default function PromotionPage() {
 
       setRowOverrides({});
       await load();
-      alert("Promotion completed. Report snapshots were saved for cumulative records.");
+      alert(
+        "Promotion completed. Report snapshots were saved for cumulative records.",
+      );
     } catch (error) {
       console.error("Promotion failed:", error);
       alert("Promotion failed");
@@ -1525,7 +1826,6 @@ export default function PromotionPage() {
       setPromoting(false);
     }
   };
-
 
   // ======================================================
   // GOLDEN COMPACT UI
@@ -1551,10 +1851,16 @@ export default function PromotionPage() {
     decisionFilter,
   ]);
 
-  const selectedFromClassName = fromClassId ? classMap.get(fromClassId)?.name || "Not found" : "Not selected";
-  const selectedToClassName = defaultToClassId ? classMap.get(defaultToClassId)?.name || "Not found" : "Not selected";
+  const selectedFromClassName = fromClassId
+    ? classMap.get(fromClassId)?.name || "Not found"
+    : "Not selected";
+  const selectedToClassName = defaultToClassId
+    ? classMap.get(defaultToClassId)?.name || "Not found"
+    : "Not selected";
   const selectedPromotion = selectedPromotionStudentId
-    ? filteredRows.find((row) => Number(row.student.id) === selectedPromotionStudentId) || null
+    ? filteredRows.find(
+        (row) => String(row.student.id) === selectedPromotionStudentId,
+      ) || null
     : null;
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
@@ -1568,16 +1874,27 @@ export default function PromotionPage() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before processing promotions." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before processing promotions."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page promotion-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page promotion-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Assigned branch required</h2>
-          <p>Promotions are locked to the branch-admin assigned school branch.</p>
+          <p>
+            Promotions are locked to the branch-admin assigned school branch.
+          </p>
           <button type="button" className="ba-state-button" onClick={load}>
             Refresh Context
           </button>
@@ -1587,10 +1904,16 @@ export default function PromotionPage() {
   }
 
   return (
-    <main className="ba-page promotion-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page promotion-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card" aria-label="Promotion search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Promotion search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -1623,20 +1946,31 @@ export default function PromotionPage() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active promotion filters">
+        <section
+          className="ba-filter-chips"
+          aria-label="Active promotion filters"
+        >
           {fromClassId && (
             <button type="button" onClick={() => setFromClassId(undefined)}>
               From: {selectedFromClassName} ×
             </button>
           )}
           {defaultToClassId && (
-            <button type="button" onClick={() => setDefaultToClassId(undefined)}>
+            <button
+              type="button"
+              onClick={() => setDefaultToClassId(undefined)}
+            >
               To: {selectedToClassName} ×
             </button>
           )}
@@ -1651,18 +1985,25 @@ export default function PromotionPage() {
       {viewMode === "cards" && (
         <section className="ba-list promotion-list">
           {filteredRows.map((row) => {
-            const studentId = Number(row.student.id);
+            const studentId = String(row.student.id);
             const currentClass = classMap.get(row.fromClassId);
-            const currentPeriod = row.fromAcademicPeriodId ? periodMap.get(row.fromAcademicPeriodId) : undefined;
+            const currentPeriod = row.fromAcademicPeriodId
+              ? periodMap.get(row.fromAcademicPeriodId)
+              : undefined;
 
             return (
               <article key={studentId} className="promo-row-card compact-row">
-                <label className="promo-check compact" aria-label={`Select ${row.student.fullName}`}>
+                <label
+                  className="promo-check compact"
+                  aria-label={`Select ${row.student.fullName}`}
+                >
                   <input
                     type="checkbox"
                     checked={!!row.selected}
                     disabled={row.alreadyProcessed}
-                    onChange={(event) => updateRow(studentId, { selected: event.target.checked })}
+                    onChange={(event) =>
+                      updateRow(studentId, { selected: event.target.checked })
+                    }
                   />
                 </label>
 
@@ -1672,15 +2013,22 @@ export default function PromotionPage() {
                   onClick={() => setSelectedPromotionStudentId(studentId)}
                   aria-label={`Open ${row.student.fullName} promotion actions`}
                 >
-                  <div className="promo-avatar">{row.student.fullName.slice(0, 1).toUpperCase()}</div>
+                  <div className="promo-avatar">
+                    {row.student.fullName.slice(0, 1).toUpperCase()}
+                  </div>
 
                   <span className="student-main">
                     <strong>{row.student.fullName}</strong>
                     <small>
-                      {currentClass?.name || "Unknown class"}{row.student.admissionNumber ? ` · ${row.student.admissionNumber}` : ""}
+                      {currentClass?.name || "Unknown class"}
+                      {row.student.admissionNumber
+                        ? ` · ${row.student.admissionNumber}`
+                        : ""}
                     </small>
                     <em>
-                      {currentPeriod?.name || "Unknown period"} · Avg {row.average}% · Pos {row.position || "—"} · {decisionLabel[row.finalDecision]}
+                      {currentPeriod?.name || "Unknown period"} · Avg{" "}
+                      {row.average}% · Pos {row.position || "—"} ·{" "}
+                      {decisionLabel[row.finalDecision]}
                     </em>
                   </span>
 
@@ -1690,7 +2038,9 @@ export default function PromotionPage() {
                   </span>
 
                   <span className="student-side">
-                    <span className={`status-dot-mini ${row.alreadyProcessed ? "gray" : row.selected ? "green" : "orange"}`} />
+                    <span
+                      className={`status-dot-mini ${row.alreadyProcessed ? "gray" : row.selected ? "green" : "orange"}`}
+                    />
                     <i>⋯</i>
                   </span>
                 </button>
@@ -1702,7 +2052,11 @@ export default function PromotionPage() {
             <Empty
               icon="🚀"
               title="No promotion rows"
-              text={fromClassId ? "No students found for this class/period. Check enrollments, current class values, and report engine setup." : "Select a current class to load students."}
+              text={
+                fromClassId
+                  ? "No students found for this class/period. Check enrollments, current class values, and report engine setup."
+                  : "Select a current class to load students."
+              }
             />
           )}
         </section>
@@ -1729,9 +2083,11 @@ export default function PromotionPage() {
 
               <tbody>
                 {filteredRows.map((row) => {
-                  const studentId = Number(row.student.id);
+                  const studentId = String(row.student.id);
                   const currentClass = classMap.get(row.fromClassId);
-                  const currentPeriod = row.fromAcademicPeriodId ? periodMap.get(row.fromAcademicPeriodId) : undefined;
+                  const currentPeriod = row.fromAcademicPeriodId
+                    ? periodMap.get(row.fromAcademicPeriodId)
+                    : undefined;
 
                   return (
                     <tr key={studentId}>
@@ -1741,11 +2097,18 @@ export default function PromotionPage() {
                             type="checkbox"
                             checked={!!row.selected}
                             disabled={row.alreadyProcessed}
-                            onChange={(event) => updateRow(studentId, { selected: event.target.checked })}
+                            onChange={(event) =>
+                              updateRow(studentId, {
+                                selected: event.target.checked,
+                              })
+                            }
                           />
                           <span>
                             <strong>{row.student.fullName}</strong>
-                            <small>{row.student.admissionNumber || "No admission no."}</small>
+                            <small>
+                              {row.student.admissionNumber ||
+                                "No admission no."}
+                            </small>
                           </span>
                         </div>
                       </td>
@@ -1760,7 +2123,9 @@ export default function PromotionPage() {
                       <td>{row.average}%</td>
                       <td>{row.position || "—"}</td>
                       <td>
-                        <Chip tone={decisionTone(row.recommendation)}>{decisionLabel[row.recommendation]}</Chip>
+                        <Chip tone={decisionTone(row.recommendation)}>
+                          {decisionLabel[row.recommendation]}
+                        </Chip>
                       </td>
                       <td>
                         <select
@@ -1772,10 +2137,13 @@ export default function PromotionPage() {
                               decision === "promote"
                                 ? defaultToClassId || row.recommendedClassId
                                 : decision === "repeat"
-                                ? row.fromClassId
-                                : undefined;
+                                  ? row.fromClassId
+                                  : undefined;
 
-                            updateRow(studentId, { finalDecision: decision, finalClassId });
+                            updateRow(studentId, {
+                              finalDecision: decision,
+                              finalClassId,
+                            });
                           }}
                         >
                           <option value="promote">Promote</option>
@@ -1786,24 +2154,50 @@ export default function PromotionPage() {
                       <td>
                         <select
                           value={row.finalClassId || ""}
-                          disabled={row.alreadyProcessed || row.finalDecision === "graduate"}
-                          onChange={(event) => updateRow(studentId, { finalClassId: Number(event.target.value) || undefined })}
+                          disabled={
+                            row.alreadyProcessed ||
+                            row.finalDecision === "graduate"
+                          }
+                          onChange={(event) =>
+                            updateRow(studentId, {
+                              finalClassId:
+                                cleanId(event.target.value) || undefined,
+                            })
+                          }
                         >
                           <option value="">No class</option>
-                          {branchClasses.map((cls) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+                          {branchClasses.map((cls) => (
+                            <option key={cls.id} value={cls.id}>
+                              {cls.name}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>
                         <input
                           value={row.note}
                           disabled={row.alreadyProcessed}
-                          onChange={(event) => updateRow(studentId, { note: event.target.value })}
+                          onChange={(event) =>
+                            updateRow(studentId, { note: event.target.value })
+                          }
                           placeholder="Optional note"
                         />
                       </td>
                       <td>
-                        <Chip tone={row.alreadyProcessed ? "gray" : row.selected ? "blue" : "orange"}>
-                          {row.alreadyProcessed ? "Processed" : row.selected ? "Ready" : "Not selected"}
+                        <Chip
+                          tone={
+                            row.alreadyProcessed
+                              ? "gray"
+                              : row.selected
+                                ? "blue"
+                                : "orange"
+                          }
+                        >
+                          {row.alreadyProcessed
+                            ? "Processed"
+                            : row.selected
+                              ? "Ready"
+                              : "Not selected"}
                         </Chip>
                       </td>
                     </tr>
@@ -1814,7 +2208,9 @@ export default function PromotionPage() {
 
             {!filteredRows.length && (
               <div className="ba-empty-table">
-                {fromClassId ? "No students found for this class/period." : "Select a current class to load students."}
+                {fromClassId
+                  ? "No students found for this class/period."
+                  : "Select a current class to load students."}
               </div>
             )}
           </div>
@@ -1896,9 +2292,20 @@ export default function PromotionPage() {
 // GOLDEN SMALL COMPONENTS
 // ======================================================
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page promotion-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page promotion-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1909,7 +2316,15 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -1973,24 +2388,24 @@ function FilterSheet({
   setDecisionFilter,
   onClose,
 }: {
-  fromAcademicStructureId?: number;
-  fromAcademicPeriodId?: number;
-  fromClassId?: number;
-  toAcademicStructureId?: number;
-  toAcademicPeriodId?: number;
-  defaultToClassId?: number;
+  fromAcademicStructureId?: string;
+  fromAcademicPeriodId?: string;
+  fromClassId?: string;
+  toAcademicStructureId?: string;
+  toAcademicPeriodId?: string;
+  defaultToClassId?: string;
   decisionFilter: DecisionFilter;
   branchAcademicStructures: AcademicStructure[];
   fromPeriods: AcademicPeriod[];
   toPeriods: AcademicPeriod[];
   availableFromClasses: Class[];
   branchClasses: Class[];
-  setFromAcademicStructureId: (id?: number) => void;
-  setFromAcademicPeriodId: (id?: number) => void;
-  setFromClassId: (id?: number) => void;
-  setToAcademicStructureId: (id?: number) => void;
-  setToAcademicPeriodId: (id?: number) => void;
-  setDefaultToClassId: (id?: number) => void;
+  setFromAcademicStructureId: (id?: string) => void;
+  setFromAcademicPeriodId: (id?: string) => void;
+  setFromClassId: (id?: string) => void;
+  setToAcademicStructureId: (id?: string) => void;
+  setToAcademicPeriodId: (id?: string) => void;
+  setDefaultToClassId: (id?: string) => void;
   setDecisionFilter: (value: DecisionFilter) => void;
   onClose: () => void;
 }) {
@@ -2000,7 +2415,10 @@ function FilterSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Promotion Setup</h2>
-            <p>Select current and destination academic context for this assigned branch only.</p>
+            <p>
+              Select current and destination academic context for this assigned
+              branch only.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -2013,13 +2431,17 @@ function FilterSheet({
             <select
               value={fromAcademicStructureId || ""}
               onChange={(event) => {
-                setFromAcademicStructureId(Number(event.target.value) || undefined);
+                setFromAcademicStructureId(cleanId(event.target.value) || undefined);
                 setFromAcademicPeriodId(undefined);
                 setFromClassId(undefined);
               }}
             >
               <option value="">Current Academic Structure</option>
-              {branchAcademicStructures.map((row) => <option key={row.id} value={row.id}>{row.name} · {(row as any).level || ""}</option>)}
+              {branchAcademicStructures.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name} · {(row as any).level || ""}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -2028,12 +2450,18 @@ function FilterSheet({
             <select
               value={fromAcademicPeriodId || ""}
               onChange={(event) => {
-                setFromAcademicPeriodId(Number(event.target.value) || undefined);
+                setFromAcademicPeriodId(
+                  cleanId(event.target.value) || undefined,
+                );
                 setFromClassId(undefined);
               }}
             >
               <option value="">Current Academic Period</option>
-              {fromPeriods.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+              {fromPeriods.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -2042,12 +2470,16 @@ function FilterSheet({
             <select
               value={fromClassId || ""}
               onChange={(event) => {
-                setFromClassId(Number(event.target.value) || undefined);
+                setFromClassId(cleanId(event.target.value) || undefined);
                 setDefaultToClassId(undefined);
               }}
             >
               <option value="">Current Class</option>
-              {availableFromClasses.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+              {availableFromClasses.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -2056,34 +2488,63 @@ function FilterSheet({
             <select
               value={toAcademicStructureId || ""}
               onChange={(event) => {
-                setToAcademicStructureId(Number(event.target.value) || undefined);
+                setToAcademicStructureId(
+                  cleanId(event.target.value) || undefined,
+                );
                 setToAcademicPeriodId(undefined);
               }}
             >
               <option value="">Next Academic Structure</option>
-              {branchAcademicStructures.map((row) => <option key={row.id} value={row.id}>{row.name} · {(row as any).level || ""}</option>)}
+              {branchAcademicStructures.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name} · {(row as any).level || ""}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Next Academic Period</span>
-            <select value={toAcademicPeriodId || ""} onChange={(event) => setToAcademicPeriodId(Number(event.target.value) || undefined)}>
+            <select
+              value={toAcademicPeriodId || ""}
+              onChange={(event) =>
+                setToAcademicPeriodId(cleanId(event.target.value) || undefined)
+              }
+            >
               <option value="">Next Academic Period</option>
-              {toPeriods.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+              {toPeriods.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Default Next Class</span>
-            <select value={defaultToClassId || ""} onChange={(event) => setDefaultToClassId(Number(event.target.value) || undefined)}>
+            <select
+              value={defaultToClassId || ""}
+              onChange={(event) =>
+                setDefaultToClassId(cleanId(event.target.value) || undefined)
+              }
+            >
               <option value="">Default Next Class</option>
-              {branchClasses.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}
+              {branchClasses.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Decision Filter</span>
-            <select value={decisionFilter} onChange={(event) => setDecisionFilter(event.target.value as DecisionFilter)}>
+            <select
+              value={decisionFilter}
+              onChange={(event) =>
+                setDecisionFilter(event.target.value as DecisionFilter)
+              }
+            >
               <option value="all">All</option>
               <option value="selected">Selected</option>
               <option value="notProcessed">Not processed</option>
@@ -2166,7 +2627,11 @@ function MoreSheet({
             <small>Dense laptop view for many students</small>
           </button>
 
-          <button type="button" onClick={onProcess} disabled={promoting || !selectedCount}>
+          <button
+            type="button"
+            onClick={onProcess}
+            disabled={promoting || !selectedCount}
+          >
             <span>✓</span>
             <b>{promoting ? "Processing..." : `Process ${selectedCount}`}</b>
             <small>Save snapshots, promotions, and next enrollments</small>
@@ -2195,7 +2660,6 @@ function MoreSheet({
   );
 }
 
-
 function PromotionActionSheet({
   row,
   branchClasses,
@@ -2205,19 +2669,19 @@ function PromotionActionSheet({
 }: {
   row: PromotionRow;
   branchClasses: Class[];
-  defaultToClassId?: number;
-  updateRow: (studentId: number, patch: Partial<PromotionRow>) => void;
+  defaultToClassId?: string;
+  updateRow: (studentId: string, patch: Partial<PromotionRow>) => void;
   onClose: () => void;
 }) {
-  const studentId = Number(row.student.id);
+  const studentId = String(row.student.id);
 
   const setDecision = (decision: Decision) => {
     const finalClassId =
       decision === "promote"
         ? defaultToClassId || row.recommendedClassId
         : decision === "repeat"
-        ? row.fromClassId
-        : undefined;
+          ? row.fromClassId
+          : undefined;
 
     updateRow(studentId, { finalDecision: decision, finalClassId });
   };
@@ -2228,15 +2692,33 @@ function PromotionActionSheet({
         <div className="ba-sheet-profile compact-promo-profile">
           <div>
             <h2>{row.student.fullName}</h2>
-            <p>Avg {row.average}% · Pos {row.position || "—"} · {row.subjectCount} subject(s)</p>
+            <p>
+              Avg {row.average}% · Pos {row.position || "—"} ·{" "}
+              {row.subjectCount} subject(s)
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close promotion actions">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close promotion actions"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="promo-sheet-summary">
-          <span><b>Total</b>{row.total}</span>
-          <span><b>Average</b>{row.average}%</span>
-          <span><b>Decision</b>{decisionLabel[row.finalDecision]}</span>
+          <span>
+            <b>Total</b>
+            {row.total}
+          </span>
+          <span>
+            <b>Average</b>
+            {row.average}%
+          </span>
+          <span>
+            <b>Decision</b>
+            {decisionLabel[row.finalDecision]}
+          </span>
         </div>
 
         <div className="ba-form compact promo-sheet-form">
@@ -2257,11 +2739,21 @@ function PromotionActionSheet({
             <span>Destination</span>
             <select
               value={row.finalClassId || ""}
-              disabled={row.alreadyProcessed || row.finalDecision === "graduate"}
-              onChange={(event) => updateRow(studentId, { finalClassId: Number(event.target.value) || undefined })}
+              disabled={
+                row.alreadyProcessed || row.finalDecision === "graduate"
+              }
+              onChange={(event) =>
+                updateRow(studentId, {
+                  finalClassId: cleanId(event.target.value) || undefined,
+                })
+              }
             >
               <option value="">No class</option>
-              {branchClasses.map((cls) => <option key={cls.id} value={cls.id}>{cls.name}</option>)}
+              {branchClasses.map((cls) => (
+                <option key={cls.id} value={cls.id}>
+                  {cls.name}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -2270,26 +2762,48 @@ function PromotionActionSheet({
             <input
               value={row.note}
               disabled={row.alreadyProcessed}
-              onChange={(event) => updateRow(studentId, { note: event.target.value })}
+              onChange={(event) =>
+                updateRow(studentId, { note: event.target.value })
+              }
               placeholder="Optional note"
             />
           </label>
         </div>
 
         <div className="ba-menu-list promo-decision-list">
-          <button type="button" onClick={() => setDecision("promote")} disabled={row.alreadyProcessed}>
-            <span>⬆</span><b>Promote</b><small>Move student to the destination class</small>
+          <button
+            type="button"
+            onClick={() => setDecision("promote")}
+            disabled={row.alreadyProcessed}
+          >
+            <span>⬆</span>
+            <b>Promote</b>
+            <small>Move student to the destination class</small>
           </button>
-          <button type="button" onClick={() => setDecision("repeat")} disabled={row.alreadyProcessed}>
-            <span>↻</span><b>Repeat</b><small>Keep student in the current class</small>
+          <button
+            type="button"
+            onClick={() => setDecision("repeat")}
+            disabled={row.alreadyProcessed}
+          >
+            <span>↻</span>
+            <b>Repeat</b>
+            <small>Keep student in the current class</small>
           </button>
-          <button type="button" onClick={() => setDecision("graduate")} disabled={row.alreadyProcessed}>
-            <span>🎓</span><b>Graduate</b><small>Mark student as graduated</small>
+          <button
+            type="button"
+            onClick={() => setDecision("graduate")}
+            disabled={row.alreadyProcessed}
+          >
+            <span>🎓</span>
+            <b>Graduate</b>
+            <small>Mark student as graduated</small>
           </button>
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" className="primary" onClick={onClose}>Done</button>
+          <button type="button" className="primary" onClick={onClose}>
+            Done
+          </button>
         </div>
       </section>
     </div>
@@ -2319,7 +2833,11 @@ function BulkSheet({
             <h2>Bulk Actions</h2>
             <p>Apply actions to the currently shown promotion rows.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close bulk actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close bulk actions"
+          >
             ✕
           </button>
         </div>

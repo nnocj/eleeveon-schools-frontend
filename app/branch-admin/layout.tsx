@@ -15,9 +15,5 @@ export default function BranchAdminLayout({
 }: {
   children: ReactNode;
 }) {
-  return (
-    <div className="branch-admin-theme">
-      {children}
-    </div>
-  );
+  return <div className="branch-admin-theme">{children}</div>;
 }

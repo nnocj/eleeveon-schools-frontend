@@ -44,25 +44,37 @@ import {
   type TermType,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
-type StatusFilter = "all" | "active" | "inactive" | "current" | "running" | "upcoming" | "ended";
+type StatusFilter =
+  | "all"
+  | "active"
+  | "inactive"
+  | "current"
+  | "running"
+  | "upcoming"
+  | "ended";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type PeriodForm = {
-  id?: number;
+  id?: string;
   academicStructureId: string;
   name: string;
   type: TermType | "";
@@ -75,11 +87,11 @@ type PeriodForm = {
 
 type PeriodViewRow = {
   row: AcademicPeriod;
-  id: number;
+  id: string;
   name: string;
   type: string;
   structureName: string;
-  academicStructureId: number;
+  academicStructureId: string;
   startDate: string;
   endDate: string;
   order: number;
@@ -115,10 +127,9 @@ const emptyForm = (): PeriodForm => ({
   makeCurrent: false,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -127,11 +138,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -142,7 +153,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -167,13 +180,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -184,16 +197,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -205,9 +222,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -215,18 +236,21 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const toISODate = (value?: string | number | null) => {
   if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    return value;
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "";
   return new Date(time).toISOString().slice(0, 10);
@@ -236,9 +260,11 @@ const friendlyDate = (value?: string | number | null) => {
   const iso = toISODate(value);
   if (!iso) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(
-      new Date(`${iso}T00:00:00`)
-    );
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(`${iso}T00:00:00`));
   } catch {
     return iso;
   }
@@ -252,7 +278,7 @@ const isActiveRow = (row: any) => {
 };
 
 const countBy = <T,>(rows: T[], getter: (row: T) => any) => {
-  const map = new Map<number, number>();
+  const map = new Map<string, number>();
   rows.forEach((row) => {
     const id = idOf(getter(row));
     if (!id) return;
@@ -273,13 +299,21 @@ const getPeriodStatus = (row: PeriodViewRow) => {
   const today = todayISO();
   if (!row.active) return "inactive";
   if (row.current) return "current";
-  if (row.startDate && row.endDate && today >= row.startDate && today <= row.endDate) return "running";
+  if (
+    row.startDate &&
+    row.endDate &&
+    today >= row.startDate &&
+    today <= row.endDate
+  )
+    return "running";
   if (row.startDate && today < row.startDate) return "upcoming";
   if (row.endDate && today > row.endDate) return "ended";
   return "active";
 };
 
-function statusTone(status: string): "green" | "red" | "blue" | "gray" | "orange" | "purple" {
+function statusTone(
+  status: string,
+): "green" | "red" | "blue" | "gray" | "orange" | "purple" {
   if (status === "current") return "purple";
   if (status === "running" || status === "active") return "green";
   if (status === "upcoming") return "blue";
@@ -303,7 +337,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -317,9 +359,19 @@ export default function Academicperiods() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -348,7 +400,9 @@ export default function Academicperiods() {
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [structures, setStructures] = useState<AcademicStructure[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>([]);
+  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>(
+    [],
+  );
   const [branchSetting, setBranchSetting] = useState<any>(null);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
@@ -362,13 +416,24 @@ export default function Academicperiods() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<PeriodForm>(emptyForm());
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -378,7 +443,11 @@ export default function Academicperiods() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -399,25 +468,40 @@ export default function Academicperiods() {
     try {
       setLoading(true);
 
-      const [periodRows, structureRows, classSubjectRows, entryRows, branchSettingRows] = await Promise.all([
+      const [
+        periodRows,
+        structureRows,
+        classSubjectRows,
+        entryRows,
+        branchSettingRows,
+      ] = await Promise.all([
         tableSafe("academicPeriods")?.toArray?.() || [],
-        listActiveLocal("academicStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("academicStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("classSubjects")?.toArray?.() || [],
         tableSafe("assessmentEntries")?.toArray?.() || [],
         tableSafe("schoolBranchSettings")?.toArray?.() || [],
       ]);
 
       const setting =
-        (branchSettingRows as any[]).find((row) => sameTenant(row as TenantRow)) ||
-        (branchSettingRows as any[]).find((row) => sameId(row.schoolId, schoolId) && sameId(row.branchId, branchId)) ||
+        (branchSettingRows as any[]).find((row) =>
+          sameTenant(row as TenantRow),
+        ) ||
+        (branchSettingRows as any[]).find(
+          (row) =>
+            sameId(row.schoolId, schoolId) && sameId(row.branchId, branchId),
+        ) ||
         null;
 
       setBranchSetting(setting);
 
       setStructures(
         (structureRows as AcademicStructure[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setPeriods(
@@ -425,14 +509,24 @@ export default function Academicperiods() {
           .filter((row) => sameTenant(row as TenantRow))
           .sort(
             (a: any, b: any) =>
-              idOf(a.academicStructureId) - idOf(b.academicStructureId) ||
+              idOf(a.academicStructureId).localeCompare(
+                idOf(b.academicStructureId),
+              ) ||
               Number(a.order || 0) - Number(b.order || 0) ||
-              String(a.name || "").localeCompare(String(b.name || ""))
-          )
+              String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
 
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setAssessmentEntries((entryRows as AssessmentEntry[]).filter((row) => sameTenant(row as TenantRow)));
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setAssessmentEntries(
+        (entryRows as AssessmentEntry[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load academic periods:", error);
       clearData();
@@ -446,21 +540,44 @@ export default function Academicperiods() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const structureMap = useMemo(() => new Map(structures.map((row: any) => [idOf(row.id), row])), [structures]);
-  const classSubjectCountByPeriod = useMemo(() => countBy(classSubjects as any[], (row) => row.academicPeriodId), [classSubjects]);
-  const entryCountByPeriod = useMemo(() => countBy(assessmentEntries as any[], (row) => row.academicPeriodId), [assessmentEntries]);
+  const structureMap = useMemo(
+    () => new Map(structures.map((row: any) => [idOf(row.id), row])),
+    [structures],
+  );
+  const classSubjectCountByPeriod = useMemo(
+    () => countBy(classSubjects as any[], (row) => row.academicPeriodId),
+    [classSubjects],
+  );
+  const entryCountByPeriod = useMemo(
+    () => countBy(assessmentEntries as any[], (row) => row.academicPeriodId),
+    [assessmentEntries],
+  );
 
-  const currentPeriodId = idOf(branchSetting?.currentAcademicPeriodId || settings?.currentAcademicPeriodId);
-  const currentStructureId = idOf(branchSetting?.currentAcademicStructureId || settings?.currentAcademicStructureId);
+  const currentPeriodId = idOf(
+    branchSetting?.currentAcademicPeriodId || settings?.currentAcademicPeriodId,
+  );
+  const currentStructureId = idOf(
+    branchSetting?.currentAcademicStructureId ||
+      settings?.currentAcademicStructureId,
+  );
 
   const periodRows = useMemo<PeriodViewRow[]>(() => {
     return periods.map((period: any) => {
       const id = idOf(period.id);
-      const structure = structureMap.get(idOf(period.academicStructureId)) as any;
+      const structure = structureMap.get(
+        idOf(period.academicStructureId),
+      ) as any;
 
       return {
         row: period,
@@ -473,24 +590,39 @@ export default function Academicperiods() {
         endDate: toISODate(period.endDate),
         order: Number(period.order || 0),
         active: isActiveRow(period),
-        current: currentPeriodId > 0 && sameId(currentPeriodId, id),
+        current: Boolean(currentPeriodId) && sameId(currentPeriodId, id),
         classSubjectCount: classSubjectCountByPeriod.get(id) || 0,
         entryCount: entryCountByPeriod.get(id) || 0,
       };
     });
-  }, [periods, structureMap, currentPeriodId, classSubjectCountByPeriod, entryCountByPeriod]);
+  }, [
+    periods,
+    structureMap,
+    currentPeriodId,
+    classSubjectCountByPeriod,
+    entryCountByPeriod,
+  ]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
 
     return periodRows.filter((period) => {
       const status = getPeriodStatus(period);
-      const haystack = [period.name, period.type, period.structureName, period.startDate, period.endDate, period.order]
+      const haystack = [
+        period.name,
+        period.type,
+        period.structureName,
+        period.startDate,
+        period.endDate,
+        period.order,
+      ]
         .join(" ")
         .toLowerCase();
 
       const searchOk = !term || haystack.includes(term);
-      const structureOk = structureFilter === "all" || sameId(period.academicStructureId, structureFilter);
+      const structureOk =
+        structureFilter === "all" ||
+        sameId(period.academicStructureId, structureFilter);
       const statusOk =
         statusFilter === "all" ||
         (statusFilter === "active" && period.active) ||
@@ -502,35 +634,63 @@ export default function Academicperiods() {
     });
   }, [periodRows, search, structureFilter, statusFilter]);
 
-  const currentPeriod = useMemo(() => periodRows.find((row) => row.current), [periodRows]);
-  const upcomingCount = useMemo(() => periodRows.filter((row) => getPeriodStatus(row) === "upcoming").length, [periodRows]);
+  const currentPeriod = useMemo(
+    () => periodRows.find((row) => row.current),
+    [periodRows],
+  );
+  const upcomingCount = useMemo(
+    () =>
+      periodRows.filter((row) => getPeriodStatus(row) === "upcoming").length,
+    [periodRows],
+  );
   const runningCount = useMemo(
-    () => periodRows.filter((row) => ["current", "running"].includes(getPeriodStatus(row))).length,
-    [periodRows]
+    () =>
+      periodRows.filter((row) =>
+        ["current", "running"].includes(getPeriodStatus(row)),
+      ).length,
+    [periodRows],
   );
   const readyStructuresCount = useMemo(
-    () => new Set(periodRows.map((row) => row.academicStructureId).filter(Boolean)).size,
-    [periodRows]
+    () =>
+      new Set(periodRows.map((row) => row.academicStructureId).filter(Boolean))
+        .size,
+    [periodRows],
   );
-  const totalEntryRecords = useMemo(() => periodRows.reduce((sum, row) => sum + row.entryCount, 0), [periodRows]);
+  const totalEntryRecords = useMemo(
+    () => periodRows.reduce((sum, row) => sum + row.entryCount, 0),
+    [periodRows],
+  );
 
-  const countsByStructure = useMemo(() => groupedCounts(periodRows, (row) => row.structureName), [periodRows]);
-  const countsByStatus = useMemo(() => groupedCounts(periodRows, (row) => statusLabel(getPeriodStatus(row))), [periodRows]);
-  const countsByType = useMemo(() => groupedCounts(periodRows, (row) => row.type || "Not set"), [periodRows]);
+  const countsByStructure = useMemo(
+    () => groupedCounts(periodRows, (row) => row.structureName),
+    [periodRows],
+  );
+  const countsByStatus = useMemo(
+    () => groupedCounts(periodRows, (row) => statusLabel(getPeriodStatus(row))),
+    [periodRows],
+  );
+  const countsByType = useMemo(
+    () => groupedCounts(periodRows, (row) => row.type || "Not set"),
+    [periodRows],
+  );
 
   const activeFilterCount = useMemo(
-    () => [structureFilter, statusFilter].filter((value) => value !== "all").length,
-    [structureFilter, statusFilter]
+    () =>
+      [structureFilter, statusFilter].filter((value) => value !== "all").length,
+    [structureFilter, statusFilter],
   );
 
-  const nextOrderForStructure = (academicStructureId: number) => {
+  const nextOrderForStructure = (academicStructureId: string) => {
     const orders = periods
-      .filter((row: any) => sameId(row.academicStructureId, academicStructureId))
+      .filter((row: any) =>
+        sameId(row.academicStructureId, academicStructureId),
+      )
       .map((row: any) => Number(row.order || 0));
     return orders.length ? Math.max(...orders) + 1 : 1;
   };
 
-  const updateForm = (patch: Partial<PeriodForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<PeriodForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -544,13 +704,17 @@ export default function Academicperiods() {
     if (!requireTenant()) return;
 
     const defaultStructureId =
-      structureFilter !== "all" ? idOf(structureFilter) : currentStructureId || idOf((structures[0] as any)?.id);
+      structureFilter !== "all"
+        ? idOf(structureFilter)
+        : currentStructureId || idOf((structures[0] as any)?.id);
 
     setSelectedItem(null);
     setForm({
       ...emptyForm(),
       academicStructureId: defaultStructureId ? String(defaultStructureId) : "",
-      order: String(defaultStructureId ? nextOrderForStructure(defaultStructureId) : 1),
+      order: String(
+        defaultStructureId ? nextOrderForStructure(defaultStructureId) : 1,
+      ),
       makeCurrent: !currentPeriodId,
     });
     setModalOpen(true);
@@ -577,7 +741,8 @@ export default function Academicperiods() {
     if (!form.name.trim()) return "Enter academic period name.";
     if (!form.startDate) return "Select start date.";
     if (!form.endDate) return "Select end date.";
-    if (form.endDate < form.startDate) return "End date cannot be before start date.";
+    if (form.endDate < form.startDate)
+      return "End date cannot be before start date.";
     if (Number(form.order || 1) < 1) return "Order must be at least 1.";
 
     const duplicate = periods.find((row: any) => {
@@ -589,19 +754,21 @@ export default function Academicperiods() {
       );
     });
 
-    if (duplicate) return "An academic period with this name already exists under the selected academic structure.";
+    if (duplicate)
+      return "An academic period with this name already exists under the selected academic structure.";
     return "";
   };
 
-  const ensureBranchSetting = async (academicStructureId?: number) => {
+  const ensureBranchSetting = async (academicStructureId?: string) => {
     if (branchSetting?.id) return branchSetting;
     if (!tableSafe("schoolBranchSettings")?.add) return null;
 
     const payload: any = {
       accountId,
-      schoolId: Number(schoolId),
-      branchId: Number(branchId),
-      currentAcademicStructureId: academicStructureId || idOf(form.academicStructureId) || undefined,
+      schoolId: schoolId,
+      branchId: branchId,
+      currentAcademicStructureId:
+        academicStructureId || idOf(form.academicStructureId) || undefined,
       currentAcademicPeriodId: undefined,
       active: true,
       isDeleted: false,
@@ -623,15 +790,20 @@ export default function Academicperiods() {
     }
   };
 
-  const updateCurrentPeriod = async (period: PeriodViewRow | { id: number; academicStructureId: number }) => {
+  const updateCurrentPeriod = async (
+    period: PeriodViewRow | { id: string; academicStructureId: string },
+  ) => {
     const setting = await ensureBranchSetting(period.academicStructureId);
     if (!setting?.id || !tableSafe("schoolBranchSettings")?.update) {
-      showToast("error", "Branch settings table is not ready. Create branch settings first.");
+      showToast(
+        "error",
+        "Branch settings table is not ready. Create branch settings first.",
+      );
       return false;
     }
 
     try {
-      await updateLocal("schoolBranchSettings" as any, Number(setting.id), {
+      await updateLocal("schoolBranchSettings" as any, String(setting.id), {
         currentAcademicStructureId: period.academicStructureId,
         currentAcademicPeriodId: period.id,
         active: true,
@@ -671,12 +843,14 @@ export default function Academicperiods() {
 
     try {
       setSaving(true);
-      const existing = form.id ? periods.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? periods.find((row: any) => sameId(row.id, form.id))
+        : undefined;
 
       const payload: Partial<AcademicPeriod> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         academicStructureId: idOf(form.academicStructureId),
         name: form.name.trim(),
         type: form.type || undefined,
@@ -687,18 +861,27 @@ export default function Academicperiods() {
         isDeleted: false,
       } as Partial<AcademicPeriod>;
 
-      const saved = form.id && existing
-        ? await updateLocal("academicPeriods", Number(form.id), payload)
-        : await createLocal("academicPeriods", payload as AcademicPeriod);
+      const saved =
+        form.id && existing
+          ? await updateLocal("academicPeriods", String(form.id), payload)
+          : await createLocal("academicPeriods", payload as AcademicPeriod);
 
-      const savedId = Number(typeof saved === "number" ? saved : (saved as any)?.id || form.id || 0);
+      const savedId = idOf(
+        typeof saved === "number" ? saved : (saved as any)?.id || form.id || 0,
+      );
 
       if (form.makeCurrent && savedId) {
-        await updateCurrentPeriod({ id: savedId, academicStructureId: idOf(form.academicStructureId) });
+        await updateCurrentPeriod({
+          id: savedId,
+          academicStructureId: idOf(form.academicStructureId),
+        });
       }
 
       setModalOpen(false);
-      showToast("success", form.id ? "Academic period updated." : "Academic period created.");
+      showToast(
+        "success",
+        form.id ? "Academic period updated." : "Academic period created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save academic period:", error);
@@ -714,7 +897,12 @@ export default function Academicperiods() {
       isDeleted: false,
     } as Partial<AcademicPeriod>);
     setSelectedItem(null);
-    showToast("success", period.active ? "Academic period deactivated." : "Academic period activated.");
+    showToast(
+      "success",
+      period.active
+        ? "Academic period deactivated."
+        : "Academic period activated.",
+    );
     await load();
   };
 
@@ -723,18 +911,26 @@ export default function Academicperiods() {
     const confirmed = window.confirm(
       hasRecords
         ? `"${period.name}" has linked records. Archive it instead of deleting permanently?`
-        : `Archive "${period.name}"?`
+        : `Archive "${period.name}"?`,
     );
 
     if (!confirmed) return;
 
     await softDeleteLocal("academicPeriods", period.id);
 
-    if (period.current && branchSetting?.id && tableSafe("schoolBranchSettings")?.update) {
+    if (
+      period.current &&
+      branchSetting?.id &&
+      tableSafe("schoolBranchSettings")?.update
+    ) {
       try {
-        await updateLocal("schoolBranchSettings" as any, Number(branchSetting.id), {
-          currentAcademicPeriodId: undefined,
-        } as any);
+        await updateLocal(
+          "schoolBranchSettings" as any,
+          String(branchSetting.id),
+          {
+            currentAcademicPeriodId: undefined,
+          } as any,
+        );
       } catch {
         await tableSafe("schoolBranchSettings").update(branchSetting.id, {
           currentAcademicPeriodId: undefined,
@@ -755,21 +951,40 @@ export default function Academicperiods() {
   };
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
-    return <State primary={primary} title="Opening Academic Periods..." text="Checking branch structures, terms, class links and assessment records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Academic Periods..."
+        text="Checking branch structures, terms, class links and assessment records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing academic periods." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing academic periods."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Academic periods belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -778,19 +993,29 @@ export default function Academicperiods() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Academic period search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Academic period search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -801,7 +1026,12 @@ export default function Academicperiods() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add academic period">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add academic period"
+        >
           +
         </button>
 
@@ -816,14 +1046,21 @@ export default function Academicperiods() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {!structures.length && (
         <section className="ba-warning">
-          Create an academic structure first. Academic periods must belong to a structure such as Primary, JHS, SHS, Montessori, Cambridge, or any custom grouping.
+          Create an academic structure first. Academic periods must belong to a
+          structure such as Primary, JHS, SHS, Montessori, Cambridge, or any
+          custom grouping.
         </section>
       )}
 
@@ -831,7 +1068,10 @@ export default function Academicperiods() {
         <section className="ba-filter-chips" aria-label="Active filters">
           {structureFilter !== "all" && (
             <button type="button" onClick={() => setStructureFilter("all")}>
-              Structure: {(structureMap.get(idOf(structureFilter)) as any)?.name || structureFilter} ×
+              Structure:{" "}
+              {(structureMap.get(idOf(structureFilter)) as any)?.name ||
+                structureFilter}{" "}
+              ×
             </button>
           )}
           {statusFilter !== "all" && (
@@ -842,42 +1082,79 @@ export default function Academicperiods() {
         </section>
       )}
 
-      {currentPeriod && viewMode === "cards" && !search && activeFilterCount === 0 && (
-        <section className="ba-current-card">
-          <div>
-            <span>Current period</span>
-            <strong>{currentPeriod.name}</strong>
-            <p>
-              {currentPeriod.structureName} · {friendlyDate(currentPeriod.startDate)} to {friendlyDate(currentPeriod.endDate)}
-            </p>
-          </div>
-          <Chip tone="purple">Current</Chip>
-        </section>
-      )}
+      {currentPeriod &&
+        viewMode === "cards" &&
+        !search &&
+        activeFilterCount === 0 && (
+          <section className="ba-current-card">
+            <div>
+              <span>Current period</span>
+              <strong>{currentPeriod.name}</strong>
+              <p>
+                {currentPeriod.structureName} ·{" "}
+                {friendlyDate(currentPeriod.startDate)} to{" "}
+                {friendlyDate(currentPeriod.endDate)}
+              </p>
+            </div>
+            <Chip tone="purple">Current</Chip>
+          </section>
+        )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Periods by Structure" rows={countsByStructure} total={periodRows.length} />
-          <AnalysisCard title="Periods by Status" rows={countsByStatus} total={periodRows.length} />
-          <AnalysisCard title="Periods by Type" rows={countsByType} total={periodRows.length} />
+          <AnalysisCard
+            title="Periods by Structure"
+            rows={countsByStructure}
+            total={periodRows.length}
+          />
+          <AnalysisCard
+            title="Periods by Status"
+            rows={countsByStatus}
+            total={periodRows.length}
+          />
+          <AnalysisCard
+            title="Periods by Type"
+            rows={countsByType}
+            total={periodRows.length}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{filteredRows.length}</strong>
-            <p>{runningCount} running/current · {upcomingCount} upcoming · {readyStructuresCount} structure(s) ready · {totalEntryRecords} score entries.</p>
+            <p>
+              {runningCount} running/current · {upcomingCount} upcoming ·{" "}
+              {readyStructuresCount} structure(s) ready · {totalEntryRecords}{" "}
+              score entries.
+            </p>
           </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} toggleActive={toggleActive} setCurrent={setAsCurrentPeriod} remove={archivePeriod} />}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          toggleActive={toggleActive}
+          setCurrent={setAsCurrentPeriod}
+          remove={archivePeriod}
+        />
+      )}
 
       {viewMode === "cards" && (
         <section className="ba-list period-list">
           {filteredRows.map((period) => (
-            <PeriodListItem key={String(period.id)} period={period} onOpen={() => setSelectedItem(period)} />
+            <PeriodListItem
+              key={String(period.id)}
+              period={period}
+              onOpen={() => setSelectedItem(period)}
+            />
           ))}
 
           {!filteredRows.length && (
-            <Empty icon="🗓️" title="No academic periods found" text="Create terms, semesters, or custom sessions for this branch." />
+            <Empty
+              icon="🗓️"
+              title="No academic periods found"
+              text="Create terms, semesters, or custom sessions for this branch."
+            />
           )}
         </section>
       )}
@@ -936,9 +1213,20 @@ export default function Academicperiods() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -949,7 +1237,13 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function PeriodListItem({ period, onOpen }: { period: PeriodViewRow; onOpen: () => void }) {
+function PeriodListItem({
+  period,
+  onOpen,
+}: {
+  period: PeriodViewRow;
+  onOpen: () => void;
+}) {
   const status = getPeriodStatus(period);
 
   return (
@@ -963,12 +1257,17 @@ function PeriodListItem({ period, onOpen }: { period: PeriodViewRow; onOpen: () 
           {period.type ? ` · ${period.type}` : ""}
         </small>
         <em>
-          {friendlyDate(period.startDate)} to {friendlyDate(period.endDate)} · {periodDurationDays(period.startDate, period.endDate)} days
+          {friendlyDate(period.startDate)} to {friendlyDate(period.endDate)} ·{" "}
+          {periodDurationDays(period.startDate, period.endDate)} days
         </em>
       </span>
 
       <span className="student-side">
-        <span className={`status-dot-mini ${statusTone(status)}`} title={statusLabel(status)} aria-label={statusLabel(status)} />
+        <span
+          className={`status-dot-mini ${statusTone(status)}`}
+          title={statusLabel(status)}
+          aria-label={statusLabel(status)}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1021,7 +1320,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Academic Structure</span>
-            <select value={structureFilter} onChange={(event) => setStructureFilter(event.target.value)}>
+            <select
+              value={structureFilter}
+              onChange={(event) => setStructureFilter(event.target.value)}
+            >
               <option value="all">All structures</option>
               {structures.map((structure: any) => (
                 <option key={String(structure.id)} value={String(structure.id)}>
@@ -1033,7 +1335,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All periods</option>
               <option value="active">Active only</option>
               <option value="current">Current period</option>
@@ -1083,19 +1390,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact academic period cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Structure, type and status summaries</small>
@@ -1139,7 +1458,11 @@ function ActionSheet({
               {period.structureName} · {statusLabel(status)}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close period actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close period actions"
+          >
             ✕
           </button>
         </div>
@@ -1164,23 +1487,35 @@ function ActionSheet({
             <button type="button" onClick={() => setCurrent(period)}>
               <span>⭐</span>
               <b>Set current</b>
-              <small>Use this period as the default for attendance and assessment</small>
+              <small>
+                Use this period as the default for attendance and assessment
+              </small>
             </button>
           )}
 
           <button type="button" onClick={() => openEdit(period)}>
             <span>✎</span>
             <b>Edit period</b>
-            <small>Update dates, order, status and current-period setting</small>
+            <small>
+              Update dates, order, status and current-period setting
+            </small>
           </button>
 
           <button type="button" onClick={() => toggleActive(period)}>
             <span>{period.active ? "⏸" : "✓"}</span>
             <b>{period.active ? "Deactivate" : "Activate"}</b>
-            <small>{period.active ? "Hide from active workflows" : "Return to active workflows"}</small>
+            <small>
+              {period.active
+                ? "Hide from active workflows"
+                : "Return to active workflows"}
+            </small>
           </button>
 
-          <button type="button" className="danger" onClick={() => remove(period)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => remove(period)}
+          >
             <span>⌫</span>
             <b>Archive</b>
             <small>Soft delete this academic period locally</small>
@@ -1236,7 +1571,9 @@ function TableView({
                     {friendlyDate(period.startDate)}
                     <span>to {friendlyDate(period.endDate)}</span>
                   </td>
-                  <td>{periodDurationDays(period.startDate, period.endDate)}</td>
+                  <td>
+                    {periodDurationDays(period.startDate, period.endDate)}
+                  </td>
                   <td>{period.classSubjectCount}</td>
                   <td>{period.entryCount}</td>
                   <td>
@@ -1245,17 +1582,27 @@ function TableView({
                   <td>
                     <div className="ba-table-actions">
                       {!period.current && period.active && (
-                        <button type="button" onClick={() => setCurrent(period)}>
+                        <button
+                          type="button"
+                          onClick={() => setCurrent(period)}
+                        >
                           Set Current
                         </button>
                       )}
                       <button type="button" onClick={() => openEdit(period)}>
                         Edit
                       </button>
-                      <button type="button" onClick={() => toggleActive(period)}>
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(period)}
+                      >
                         {period.active ? "Deactivate" : "Activate"}
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => remove(period)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(period)}
+                      >
                         Archive
                       </button>
                     </div>
@@ -1266,7 +1613,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No academic period matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No academic period matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1287,7 +1638,7 @@ function PeriodModal({
   structures: AcademicStructure[];
   termOptions: TermType[];
   updateForm: (patch: Partial<PeriodForm>) => void;
-  nextOrderForStructure: (academicStructureId: number) => number;
+  nextOrderForStructure: (academicStructureId: string) => number;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
 }) {
@@ -1297,9 +1648,16 @@ function PeriodModal({
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Academic Period" : "New Academic Period"}</h2>
-            <p>Academic periods control attendance, assessment entry, reports, promotion, and other branch academic records.</p>
+            <p>
+              Academic periods control attendance, assessment entry, reports,
+              promotion, and other branch academic records.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close period form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close period form"
+          >
             ✕
           </button>
         </div>
@@ -1315,13 +1673,18 @@ function PeriodModal({
                   const structureId = idOf(event.target.value);
                   updateForm({
                     academicStructureId: event.target.value,
-                    order: form.id ? form.order : String(nextOrderForStructure(structureId)),
+                    order: form.id
+                      ? form.order
+                      : String(nextOrderForStructure(structureId)),
                   });
                 }}
               >
                 <option value="">Select academic structure</option>
                 {structures.map((structure: any) => (
-                  <option key={String(structure.id)} value={String(structure.id)}>
+                  <option
+                    key={String(structure.id)}
+                    value={String(structure.id)}
+                  >
                     {structure.name}
                   </option>
                 ))}
@@ -1330,12 +1693,21 @@ function PeriodModal({
 
             <label>
               <span>Period Name</span>
-              <input value={form.name} onChange={(event) => updateForm({ name: event.target.value })} placeholder="Example: 2026 Term 1" />
+              <input
+                value={form.name}
+                onChange={(event) => updateForm({ name: event.target.value })}
+                placeholder="Example: 2026 Term 1"
+              />
             </label>
 
             <label>
               <span>Type</span>
-              <select value={form.type} onChange={(event) => updateForm({ type: event.target.value as TermType })}>
+              <select
+                value={form.type}
+                onChange={(event) =>
+                  updateForm({ type: event.target.value as TermType })
+                }
+              >
                 <option value="">Custom / Not set</option>
                 {termOptions.map((option) => (
                   <option key={option} value={option}>
@@ -1347,22 +1719,44 @@ function PeriodModal({
 
             <label>
               <span>Start Date</span>
-              <input type="date" value={form.startDate} onChange={(event) => updateForm({ startDate: event.target.value })} />
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(event) =>
+                  updateForm({ startDate: event.target.value })
+                }
+              />
             </label>
 
             <label>
               <span>End Date</span>
-              <input type="date" value={form.endDate} onChange={(event) => updateForm({ endDate: event.target.value })} />
+              <input
+                type="date"
+                value={form.endDate}
+                onChange={(event) =>
+                  updateForm({ endDate: event.target.value })
+                }
+              />
             </label>
 
             <label>
               <span>Order</span>
-              <input type="number" min={1} value={form.order} onChange={(event) => updateForm({ order: event.target.value })} />
+              <input
+                type="number"
+                min={1}
+                value={form.order}
+                onChange={(event) => updateForm({ order: event.target.value })}
+              />
             </label>
 
             <label>
               <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(event) => updateForm({ active: event.target.value === "active" })}>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -1370,7 +1764,12 @@ function PeriodModal({
 
             <label>
               <span>Current Period</span>
-              <select value={form.makeCurrent ? "yes" : "no"} onChange={(event) => updateForm({ makeCurrent: event.target.value === "yes" })}>
+              <select
+                value={form.makeCurrent ? "yes" : "no"}
+                onChange={(event) =>
+                  updateForm({ makeCurrent: event.target.value === "yes" })
+                }
+              >
                 <option value="no">No</option>
                 <option value="yes">Set as current</option>
               </select>
@@ -1379,7 +1778,8 @@ function PeriodModal({
         </section>
 
         <section className="ba-note">
-          <strong>Tip:</strong> The current period becomes the default for attendance, assessment entry, reports, and promotion workflows.
+          <strong>Tip:</strong> The current period becomes the default for
+          attendance, assessment entry, reports, and promotion workflows.
         </section>
 
         <div className="ba-modal-actions">
@@ -1395,7 +1795,10 @@ function PeriodModal({
   );
 }
 
-function groupedCounts(rows: PeriodViewRow[], keyFn: (item: PeriodViewRow) => string) {
+function groupedCounts(
+  rows: PeriodViewRow[],
+  keyFn: (item: PeriodViewRow) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1406,7 +1809,15 @@ function groupedCounts(rows: PeriodViewRow[], keyFn: (item: PeriodViewRow) => st
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

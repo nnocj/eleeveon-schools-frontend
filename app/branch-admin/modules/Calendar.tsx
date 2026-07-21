@@ -68,9 +68,9 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 }
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -79,11 +79,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -94,7 +94,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -119,13 +121,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = cleanId(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -136,16 +138,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -157,9 +163,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -167,10 +177,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 function dateValue(value?: number | string | null) {
   if (!value) return 0;
@@ -281,12 +290,16 @@ function startOfMonthGrid(date: Date) {
 
 function getMonthGridDays(date: Date) {
   const start = startOfMonthGrid(date);
-  return Array.from({ length: 42 }, (_unused: unknown, index: number) => addDays(start, index));
+  return Array.from({ length: 42 }, (_unused: unknown, index: number) =>
+    addDays(start, index),
+  );
 }
 
 function getWeekDays(date: Date) {
   const start = startOfWeek(date);
-  return Array.from({ length: 7 }, (_unused: unknown, index: number) => addDays(start, index));
+  return Array.from({ length: 7 }, (_unused: unknown, index: number) =>
+    addDays(start, index),
+  );
 }
 
 function eventTime(row: AnyRow) {
@@ -294,7 +307,9 @@ function eventTime(row: AnyRow) {
 }
 
 function eventEndTime(row: AnyRow) {
-  return dateValue(row.endAt || row.endDate || row.startAt || row.date || row.createdAt);
+  return dateValue(
+    row.endAt || row.endDate || row.startAt || row.date || row.createdAt,
+  );
 }
 
 function eventTitle(row: AnyRow) {
@@ -323,14 +338,17 @@ function priorityTone(priority?: string): Tone {
 
 function statusTone(status?: string): Tone {
   const value = String(status || "").toLowerCase();
-  if (["done", "completed", "held", "active", "scheduled"].includes(value)) return "green";
+  if (["done", "completed", "held", "active", "scheduled"].includes(value))
+    return "green";
   if (["cancelled", "failed"].includes(value)) return "red";
   if (["draft", "pending"].includes(value)) return "orange";
   return "blue";
 }
 
 function rowId(row: AnyRow) {
-  return row.id ?? row.localId ?? row.cloudId ?? `${row.branchId || "branch"}-${eventTime(row)}-${eventTitle(row)}`;
+  return (
+    row.id ?? `${row.branchId || "branch"}-${eventTime(row)}-${eventTitle(row)}`
+  );
 }
 
 function dayRange(date: Date) {
@@ -402,7 +420,8 @@ function occurrenceLabel(row: AnyRow, date?: Date) {
   if (!date || total <= 1) return "";
   const segment = occurrenceSegment(row, date);
   if (segment === "start") return `Starts · Day 1/${total}`;
-  if (segment === "end") return `Ends · Day ${eventDayIndex(row, date)}/${total}`;
+  if (segment === "end")
+    return `Ends · Day ${eventDayIndex(row, date)}/${total}`;
   return `Continues · Day ${eventDayIndex(row, date)}/${total}`;
 }
 
@@ -422,7 +441,9 @@ function eventsForMonth(events: AnyRow[], year: number, month: number) {
 }
 
 function monthName(index: number) {
-  return new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(2026, index, 1));
+  return new Intl.DateTimeFormat(undefined, { month: "short" }).format(
+    new Date(2026, index, 1),
+  );
 }
 
 function Chip({
@@ -449,7 +470,9 @@ function SummaryCard({
   warning?: boolean;
 }) {
   return (
-    <article className={`ba-summary ${positive ? "positive" : ""} ${warning ? "warning" : ""}`}>
+    <article
+      className={`ba-summary ${positive ? "positive" : ""} ${warning ? "warning" : ""}`}
+    >
       <div>{icon}</div>
       <section>
         <strong>{value}</strong>
@@ -468,7 +491,13 @@ function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EmptyCard({ title = "No records", text }: { title?: string; text: string }) {
+function EmptyCard({
+  title = "No records",
+  text,
+}: {
+  title?: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div>📌</div>
@@ -598,7 +627,7 @@ export default function Calendar() {
   const [message, setMessage] = useState("");
 
   const emptyForm = {
-    id: 0,
+    id: "",
     title: "",
     description: "",
     eventType: "branch_event",
@@ -633,12 +662,15 @@ export default function Calendar() {
         rows
           .filter((event: AnyRow) => {
             if (event?.isDeleted === true) return false;
-            if (String(event.accountId || "") !== String(accountId)) return false;
-            if (Number(event.schoolId || 0) !== Number(schoolId)) return false;
-            if (Number(event.branchId || 0) !== Number(branchId)) return false;
+            if (String(event.accountId || "") !== String(accountId))
+              return false;
+            if (String(event.schoolId ?? "") !== String(schoolId ?? ""))
+              return false;
+            if (String(event.branchId ?? "") !== String(branchId ?? ""))
+              return false;
             return true;
           })
-          .sort((a: AnyRow, b: AnyRow) => eventTime(a) - eventTime(b))
+          .sort((a: AnyRow, b: AnyRow) => eventTime(a) - eventTime(b)),
       );
     } catch (error) {
       console.error("Failed to load branch calendar:", error);
@@ -651,9 +683,7 @@ export default function Calendar() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [accountId, schoolId, branchId, dataRevision]);
 
   function resetForm() {
     setForm(emptyForm);
@@ -677,7 +707,7 @@ export default function Calendar() {
   function openEdit(event: AnyRow) {
     setMessage("");
     setForm({
-      id: cleanId(event.id || event.localId),
+      id: cleanId(event.id),
       title: eventTitle(event),
       description: String(event.description || ""),
       eventType: String(event.eventType || "branch_event"),
@@ -695,16 +725,32 @@ export default function Calendar() {
     const today = new Date();
     const weekStart = startOfWeek(focusDate).getTime();
     const weekEnd = addDays(startOfWeek(focusDate), 7).getTime();
-    const monthStart = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1).getTime();
-    const monthEnd = new Date(focusDate.getFullYear(), focusDate.getMonth() + 1, 1).getTime();
+    const monthStart = new Date(
+      focusDate.getFullYear(),
+      focusDate.getMonth(),
+      1,
+    ).getTime();
+    const monthEnd = new Date(
+      focusDate.getFullYear(),
+      focusDate.getMonth() + 1,
+      1,
+    ).getTime();
 
     return events
       .filter((event: AnyRow) => type === "all" || eventType(event) === type)
-      .filter((event: AnyRow) => statusFilter === "all" || eventStatus(event) === statusFilter)
-      .filter((event: AnyRow) => priorityFilter === "all" || eventPriority(event) === priorityFilter)
+      .filter(
+        (event: AnyRow) =>
+          statusFilter === "all" || eventStatus(event) === statusFilter,
+      )
+      .filter(
+        (event: AnyRow) =>
+          priorityFilter === "all" || eventPriority(event) === priorityFilter,
+      )
       .filter((event: AnyRow) => {
-        if (locationFilter === "with_location") return !!String(event.location || "").trim();
-        if (locationFilter === "no_location") return !String(event.location || "").trim();
+        if (locationFilter === "with_location")
+          return !!String(event.location || "").trim();
+        if (locationFilter === "no_location")
+          return !String(event.location || "").trim();
         return true;
       })
       .filter((event: AnyRow) => {
@@ -712,11 +758,14 @@ export default function Calendar() {
         if (!range.start) return dateScope === "all";
 
         if (dateScope === "today") return eventOverlapsDate(event, today);
-        if (dateScope === "upcoming") return range.end >= now() && eventStatus(event) !== "cancelled";
+        if (dateScope === "upcoming")
+          return range.end >= now() && eventStatus(event) !== "cancelled";
         if (dateScope === "past") return range.end < now();
         if (dateScope === "multi_day") return eventDurationDays(event) > 1;
-        if (dateScope === "focus_week") return range.start < weekEnd && range.end > weekStart;
-        if (dateScope === "focus_month") return range.start < monthEnd && range.end > monthStart;
+        if (dateScope === "focus_week")
+          return range.start < weekEnd && range.end > weekStart;
+        if (dateScope === "focus_month")
+          return range.start < monthEnd && range.end > monthStart;
 
         return true;
       })
@@ -727,7 +776,16 @@ export default function Calendar() {
           .includes(q);
       })
       .sort((a: AnyRow, b: AnyRow) => eventTime(a) - eventTime(b));
-  }, [dateScope, events, focusDate, locationFilter, priorityFilter, query, statusFilter, type]);
+  }, [
+    dateScope,
+    events,
+    focusDate,
+    locationFilter,
+    priorityFilter,
+    query,
+    statusFilter,
+    type,
+  ]);
 
   const filtersActive =
     !!query.trim() ||
@@ -738,8 +796,11 @@ export default function Calendar() {
     locationFilter !== "all";
 
   const activeFilterCount = useMemo(
-    () => [type, statusFilter, priorityFilter, dateScope, locationFilter].filter((value) => value !== "all").length,
-    [dateScope, locationFilter, priorityFilter, statusFilter, type]
+    () =>
+      [type, statusFilter, priorityFilter, dateScope, locationFilter].filter(
+        (value) => value !== "all",
+      ).length,
+    [dateScope, locationFilter, priorityFilter, statusFilter, type],
   );
 
   function clearFilters() {
@@ -754,11 +815,23 @@ export default function Calendar() {
   const summary = useMemo(() => {
     return {
       total: events.length,
-      upcoming: events.filter((event: AnyRow) => eventTime(event) >= now() && eventStatus(event) !== "cancelled").length,
-      today: events.filter((event: AnyRow) => eventOverlapsDate(event, new Date())).length,
-      meetings: events.filter((event: AnyRow) => eventType(event) === "meeting").length,
-      exams: events.filter((event: AnyRow) => eventType(event) === "exam" || eventType(event) === "assessment").length,
-      urgent: events.filter((event: AnyRow) => eventPriority(event) === "urgent" || eventPriority(event) === "high").length,
+      upcoming: events.filter(
+        (event: AnyRow) =>
+          eventTime(event) >= now() && eventStatus(event) !== "cancelled",
+      ).length,
+      today: events.filter((event: AnyRow) =>
+        eventOverlapsDate(event, new Date()),
+      ).length,
+      meetings: events.filter((event: AnyRow) => eventType(event) === "meeting")
+        .length,
+      exams: events.filter(
+        (event: AnyRow) =>
+          eventType(event) === "exam" || eventType(event) === "assessment",
+      ).length,
+      urgent: events.filter(
+        (event: AnyRow) =>
+          eventPriority(event) === "urgent" || eventPriority(event) === "high",
+      ).length,
     };
   }, [events]);
 
@@ -788,10 +861,10 @@ export default function Calendar() {
     try {
       const eventPayload: Partial<CalendarEvent> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         scopeType: "branch",
-        scopeId: Number(branchId),
+        scopeId: branchId,
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         eventType: form.eventType as CalendarEvent["eventType"],
@@ -811,30 +884,50 @@ export default function Calendar() {
       const editingId = cleanId(form.id);
 
       if (editingId) {
-        await updateLocal("calendarEvents", editingId, eventPayload as Partial<CalendarEvent>);
+        await updateLocal(
+          "calendarEvents",
+          editingId,
+          eventPayload as Partial<CalendarEvent>,
+        );
       } else {
-        const createdEvent = (await createLocal("calendarEvents", eventPayload as CalendarEvent)) as CalendarEvent | undefined;
+        const createdEvent = (await createLocal(
+          "calendarEvents",
+          eventPayload as CalendarEvent,
+        )) as CalendarEvent | undefined;
         const eventId = cleanId(createdEvent?.id);
 
         if (eventId) {
           const reminders: Partial<CalendarEventReminder>[] = [
-            { channel: "in_app", minutesBefore: 60, status: "pending", active: true },
-            { channel: "in_app", minutesBefore: 1440, status: "pending", active: true },
+            {
+              channel: "in_app",
+              minutesBefore: 60,
+              status: "pending",
+              active: true,
+            },
+            {
+              channel: "in_app",
+              minutesBefore: 1440,
+              status: "pending",
+              active: true,
+            },
           ];
 
           for (const reminder of reminders) {
             await createLocal("calendarEventReminders", {
               accountId,
-              schoolId: Number(schoolId),
-              branchId: Number(branchId),
+              schoolId: schoolId,
+              branchId: branchId,
               eventId,
               channel: reminder.channel || "in_app",
               minutesBefore: Number(reminder.minutesBefore || 60),
-              scheduledAt: Math.max(0, start - Number(reminder.minutesBefore || 60) * 60_000),
+              scheduledAt: Math.max(
+                0,
+                start - Number(reminder.minutesBefore || 60) * 60_000,
+              ),
               status: reminder.status || "pending",
               active: true,
               isDeleted: false,
-            } as CalendarEventReminder);
+            } as unknown as CalendarEventReminder);
           }
         }
       }
@@ -851,7 +944,7 @@ export default function Calendar() {
   }
 
   async function cancelEvent(event: AnyRow) {
-    const id = cleanId(event.id || event.localId);
+    const id = cleanId(event.id);
     if (!id) return;
 
     try {
@@ -868,10 +961,12 @@ export default function Calendar() {
   }
 
   async function deleteEvent(event: AnyRow) {
-    const id = cleanId(event.id || event.localId);
+    const id = cleanId(event.id);
     if (!id) return;
 
-    const ok = window.confirm(`Delete "${eventTitle(event)}"? This will remove it from the calendar and sync the deletion safely.`);
+    const ok = window.confirm(
+      `Delete "${eventTitle(event)}"? This will remove it from the calendar and sync the deletion safely.`,
+    );
     if (!ok) return;
 
     try {
@@ -884,16 +979,22 @@ export default function Calendar() {
   }
 
   function moveBack() {
-    if (calendarMode === "year") setFocusDate((date: Date) => addYears(date, -1));
-    else if (calendarMode === "month") setFocusDate((date: Date) => addMonths(date, -1));
-    else if (calendarMode === "week") setFocusDate((date: Date) => addDays(date, -7));
+    if (calendarMode === "year")
+      setFocusDate((date: Date) => addYears(date, -1));
+    else if (calendarMode === "month")
+      setFocusDate((date: Date) => addMonths(date, -1));
+    else if (calendarMode === "week")
+      setFocusDate((date: Date) => addDays(date, -7));
     else setFocusDate((date: Date) => addDays(date, -1));
   }
 
   function moveNext() {
-    if (calendarMode === "year") setFocusDate((date: Date) => addYears(date, 1));
-    else if (calendarMode === "month") setFocusDate((date: Date) => addMonths(date, 1));
-    else if (calendarMode === "week") setFocusDate((date: Date) => addDays(date, 7));
+    if (calendarMode === "year")
+      setFocusDate((date: Date) => addYears(date, 1));
+    else if (calendarMode === "month")
+      setFocusDate((date: Date) => addMonths(date, 1));
+    else if (calendarMode === "week")
+      setFocusDate((date: Date) => addDays(date, 7));
     else setFocusDate((date: Date) => addDays(date, 1));
   }
 
@@ -901,14 +1002,17 @@ export default function Calendar() {
     calendarMode === "year"
       ? String(focusDate.getFullYear())
       : calendarMode === "day"
-      ? dayTitle(focusDate)
-      : calendarMode === "week"
-      ? `${dateLabel(startOfWeek(focusDate).getTime(), false)} - ${dateLabel(addDays(startOfWeek(focusDate), 6).getTime(), false)}`
-      : monthTitle(focusDate);
+        ? dayTitle(focusDate)
+        : calendarMode === "week"
+          ? `${dateLabel(startOfWeek(focusDate).getTime(), false)} - ${dateLabel(addDays(startOfWeek(focusDate), 6).getTime(), false)}`
+          : monthTitle(focusDate);
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Opening calendar...</h2>
@@ -919,12 +1023,25 @@ export default function Calendar() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {message ? <section className="ba-toast error">{message}<button type="button" onClick={() => setMessage("")}>✕</button></section> : null}
+      {message ? (
+        <section className="ba-toast error">
+          {message}
+          <button type="button" onClick={() => setMessage("")}>
+            ✕
+          </button>
+        </section>
+      ) : null}
 
-      <section className="ba-search-card" aria-label="Calendar search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Calendar search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -935,7 +1052,12 @@ export default function Calendar() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add event">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add event"
+        >
           +
         </button>
 
@@ -950,19 +1072,51 @@ export default function Calendar() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {(filtersActive || view !== "calendar") && (
-        <section className="ba-filter-chips" aria-label="Active calendar filters">
-          {view !== "calendar" ? <button type="button" onClick={() => setView("calendar")}>View: {view} ×</button> : null}
-          {type !== "all" ? <button type="button" onClick={() => setType("all")}>Type: {type.replaceAll("_", " ")} ×</button> : null}
-          {statusFilter !== "all" ? <button type="button" onClick={() => setStatusFilter("all")}>Status: {statusFilter} ×</button> : null}
-          {priorityFilter !== "all" ? <button type="button" onClick={() => setPriorityFilter("all")}>Priority: {priorityFilter} ×</button> : null}
-          {dateScope !== "all" ? <button type="button" onClick={() => setDateScope("all")}>Date: {dateScope.replaceAll("_", " ")} ×</button> : null}
-          {locationFilter !== "all" ? <button type="button" onClick={() => setLocationFilter("all")}>Location: {locationFilter.replaceAll("_", " ")} ×</button> : null}
+        <section
+          className="ba-filter-chips"
+          aria-label="Active calendar filters"
+        >
+          {view !== "calendar" ? (
+            <button type="button" onClick={() => setView("calendar")}>
+              View: {view} ×
+            </button>
+          ) : null}
+          {type !== "all" ? (
+            <button type="button" onClick={() => setType("all")}>
+              Type: {type.replaceAll("_", " ")} ×
+            </button>
+          ) : null}
+          {statusFilter !== "all" ? (
+            <button type="button" onClick={() => setStatusFilter("all")}>
+              Status: {statusFilter} ×
+            </button>
+          ) : null}
+          {priorityFilter !== "all" ? (
+            <button type="button" onClick={() => setPriorityFilter("all")}>
+              Priority: {priorityFilter} ×
+            </button>
+          ) : null}
+          {dateScope !== "all" ? (
+            <button type="button" onClick={() => setDateScope("all")}>
+              Date: {dateScope.replaceAll("_", " ")} ×
+            </button>
+          ) : null}
+          {locationFilter !== "all" ? (
+            <button type="button" onClick={() => setLocationFilter("all")}>
+              Location: {locationFilter.replaceAll("_", " ")} ×
+            </button>
+          ) : null}
         </section>
       )}
 
@@ -973,16 +1127,26 @@ export default function Calendar() {
               <p>Branch Calendar</p>
               <h3>{currentTitle}</h3>
               <span className="ba-calendar-subtitle">
-                {filtered.length} event(s) · {activeBranch?.name || "Assigned branch"}
+                {filtered.length} event(s) ·{" "}
+                {activeBranch?.name || "Assigned branch"}
               </span>
             </div>
 
             <div className="ba-calendar-head-actions">
-              <CalendarModeSwitch mode={calendarMode} setMode={setCalendarMode} />
+              <CalendarModeSwitch
+                mode={calendarMode}
+                setMode={setCalendarMode}
+              />
               <div className="ba-calendar-nav">
-                <button type="button" onClick={moveBack}>←</button>
-                <button type="button" onClick={() => setFocusDate(new Date())}>Today</button>
-                <button type="button" onClick={moveNext}>→</button>
+                <button type="button" onClick={moveBack}>
+                  ←
+                </button>
+                <button type="button" onClick={() => setFocusDate(new Date())}>
+                  Today
+                </button>
+                <button type="button" onClick={moveNext}>
+                  →
+                </button>
               </div>
             </div>
           </div>
@@ -1009,7 +1173,9 @@ export default function Calendar() {
             />
           ) : null}
 
-          {calendarMode === "day" ? <DayCalendar date={focusDate} events={filtered} /> : null}
+          {calendarMode === "day" ? (
+            <DayCalendar date={focusDate} events={filtered} />
+          ) : null}
 
           {calendarMode === "year" ? (
             <YearCalendar
@@ -1037,18 +1203,38 @@ export default function Calendar() {
             <article key={item.label} className="ba-breakdown ba-analysis">
               <span>{item.label}</span>
               <strong>{item.value}</strong>
-              <p>{item.label === "Total Events" ? "All branch calendar records." : "Filtered from current branch events."}</p>
+              <p>
+                {item.label === "Total Events"
+                  ? "All branch calendar records."
+                  : "Filtered from current branch events."}
+              </p>
             </article>
           ))}
 
-          {["branch_event", "meeting", "exam", "assessment", "fee_deadline", "holiday"].map((key) => {
-            const count = events.filter((event: AnyRow) => eventType(event) === key).length;
-            const share = events.length ? Math.round((count / events.length) * 100) : 0;
+          {[
+            "branch_event",
+            "meeting",
+            "exam",
+            "assessment",
+            "fee_deadline",
+            "holiday",
+          ].map((key) => {
+            const count = events.filter(
+              (event: AnyRow) => eventType(event) === key,
+            ).length;
+            const share = events.length
+              ? Math.round((count / events.length) * 100)
+              : 0;
             return (
               <article key={key} className="ba-breakdown">
                 <strong>{key.replaceAll("_", " ")}</strong>
-                <div className="ba-bar"><div style={{ width: `${share}%` }} /></div>
-                <div className="ba-chip-row"><Chip tone="blue">{count}</Chip><Chip>{share}%</Chip></div>
+                <div className="ba-bar">
+                  <div style={{ width: `${share}%` }} />
+                </div>
+                <div className="ba-chip-row">
+                  <Chip tone="blue">{count}</Chip>
+                  <Chip>{share}%</Chip>
+                </div>
               </article>
             );
           })}
@@ -1074,23 +1260,51 @@ export default function Calendar() {
               <tbody>
                 {filtered.map((event: AnyRow) => (
                   <tr key={String(rowId(event))}>
-                    <td><strong>{eventTitle(event)}</strong><span>{event.description || "—"}</span></td>
+                    <td>
+                      <strong>{eventTitle(event)}</strong>
+                      <span>{event.description || "—"}</span>
+                    </td>
                     <td>{eventType(event).replaceAll("_", " ")}</td>
                     <td>{dateLabel(event.startAt)}</td>
                     <td>{dateLabel(event.endAt)}</td>
                     <td>{eventDurationDays(event)} day(s)</td>
                     <td>{event.location || "—"}</td>
-                    <td><Chip tone={statusTone(eventStatus(event))}>{eventStatus(event)}</Chip></td>
+                    <td>
+                      <Chip tone={statusTone(eventStatus(event))}>
+                        {eventStatus(event)}
+                      </Chip>
+                    </td>
                     <td>
                       <div className="ba-table-actions">
-                        <button type="button" onClick={() => openEdit(event)}>Edit</button>
-                        {eventStatus(event) !== "cancelled" ? <button type="button" onClick={() => cancelEvent(event)}>Cancel</button> : null}
-                        <button type="button" className="ba-delete" onClick={() => deleteEvent(event)}>Delete</button>
+                        <button type="button" onClick={() => openEdit(event)}>
+                          Edit
+                        </button>
+                        {eventStatus(event) !== "cancelled" ? (
+                          <button
+                            type="button"
+                            onClick={() => cancelEvent(event)}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="ba-delete"
+                          onClick={() => deleteEvent(event)}
+                        >
+                          Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
                 ))}
-                {!filtered.length ? <tr><td colSpan={8}><EmptyCard text="No calendar events found." /></td></tr> : null}
+                {!filtered.length ? (
+                  <tr>
+                    <td colSpan={8}>
+                      <EmptyCard text="No calendar events found." />
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -1102,23 +1316,47 @@ export default function Calendar() {
           {filtered.map((event: AnyRow) => (
             <article key={String(rowId(event))} className="calendar-row">
               <div className="calendar-date-badge">
-                <strong>{new Intl.DateTimeFormat(undefined, { day: "2-digit" }).format(new Date(eventTime(event) || Date.now()))}</strong>
-                <span>{new Intl.DateTimeFormat(undefined, { month: "short" }).format(new Date(eventTime(event) || Date.now()))}</span>
+                <strong>
+                  {new Intl.DateTimeFormat(undefined, {
+                    day: "2-digit",
+                  }).format(new Date(eventTime(event) || Date.now()))}
+                </strong>
+                <span>
+                  {new Intl.DateTimeFormat(undefined, {
+                    month: "short",
+                  }).format(new Date(eventTime(event) || Date.now()))}
+                </span>
               </div>
 
               <span className="calendar-main">
                 <strong>{eventTitle(event)}</strong>
-                <small>{dateLabel(event.startAt)} · {event.location || "No location"}</small>
-                <em>{eventType(event).replaceAll("_", " ")} · {eventDurationDays(event)} day(s)</em>
+                <small>
+                  {dateLabel(event.startAt)} · {event.location || "No location"}
+                </small>
+                <em>
+                  {eventType(event).replaceAll("_", " ")} ·{" "}
+                  {eventDurationDays(event)} day(s)
+                </em>
               </span>
 
               <span className="calendar-side">
-                <span className={`status-dot-mini ${statusTone(eventStatus(event))}`} title={eventStatus(event)} />
-                <button type="button" onClick={() => openEdit(event)} aria-label="Edit event">⋯</button>
+                <span
+                  className={`status-dot-mini ${statusTone(eventStatus(event))}`}
+                  title={eventStatus(event)}
+                />
+                <button
+                  type="button"
+                  onClick={() => openEdit(event)}
+                  aria-label="Edit event"
+                >
+                  ⋯
+                </button>
               </span>
             </article>
           ))}
-          {!filtered.length ? <EmptyCard text="No calendar events found." /> : null}
+          {!filtered.length ? (
+            <EmptyCard text="No calendar events found." />
+          ) : null}
         </section>
       ) : null}
 
@@ -1145,44 +1383,158 @@ export default function Calendar() {
         <MoreSheet
           view={view}
           calendarMode={calendarMode}
-          setView={(nextView) => { setView(nextView); setMoreOpen(false); }}
-          setCalendarMode={(nextMode) => { setCalendarMode(nextMode); setView("calendar"); setMoreOpen(false); }}
-          onToday={() => { setFocusDate(new Date()); setView("calendar"); setMoreOpen(false); }}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          setView={(nextView) => {
+            setView(nextView);
+            setMoreOpen(false);
+          }}
+          setCalendarMode={(nextMode) => {
+            setCalendarMode(nextMode);
+            setView("calendar");
+            setMoreOpen(false);
+          }}
+          onToday={() => {
+            setFocusDate(new Date());
+            setView("calendar");
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       ) : null}
 
       {drawer ? (
         <div className="ba-drawer-layer">
-          <button className="ba-drawer-overlay" type="button" onClick={() => setDrawer(false)} />
+          <button
+            className="ba-drawer-overlay"
+            type="button"
+            onClick={() => setDrawer(false)}
+          />
           <aside className="ba-drawer">
             <div className="ba-drawer-head">
               <div>
                 <p>{form.id ? "Edit Event" : "New Event"}</p>
-                <h2>{form.id ? "Update Branch Event" : "Branch Calendar Event"}</h2>
+                <h2>
+                  {form.id ? "Update Branch Event" : "Branch Calendar Event"}
+                </h2>
                 <span>{activeBranch?.name || "Assigned branch"}</span>
               </div>
-              <button type="button" onClick={() => { setDrawer(false); resetForm(); }}>✕</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDrawer(false);
+                  resetForm();
+                }}
+              >
+                ✕
+              </button>
             </div>
 
             {message ? <div className="ba-message">{message}</div> : null}
 
             <section className="ba-form-card">
               <div className="ba-form-grid">
-                <label className="wide"><span>Title</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
-                <label><span>Type</span><select value={form.eventType} onChange={(event) => setForm({ ...form, eventType: event.target.value })}><option value="branch_event">Branch Event</option><option value="meeting">Meeting</option><option value="exam">Exam</option><option value="assessment">Assessment</option><option value="fee_deadline">Fee Deadline</option><option value="holiday">Holiday</option></select></label>
-                <label><span>Priority</span><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></label>
-                <label><span>Start</span><input type="datetime-local" value={form.startAt} onChange={(event) => setForm({ ...form, startAt: event.target.value })} /></label>
-                <label><span>End</span><input type="datetime-local" value={form.endAt} onChange={(event) => setForm({ ...form, endAt: event.target.value })} /></label>
-                <label className="wide"><span>Location</span><input value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
-                <label className="wide"><span>Description</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+                <label className="wide">
+                  <span>Title</span>
+                  <input
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm({ ...form, title: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>Type</span>
+                  <select
+                    value={form.eventType}
+                    onChange={(event) =>
+                      setForm({ ...form, eventType: event.target.value })
+                    }
+                  >
+                    <option value="branch_event">Branch Event</option>
+                    <option value="meeting">Meeting</option>
+                    <option value="exam">Exam</option>
+                    <option value="assessment">Assessment</option>
+                    <option value="fee_deadline">Fee Deadline</option>
+                    <option value="holiday">Holiday</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Priority</span>
+                  <select
+                    value={form.priority}
+                    onChange={(event) =>
+                      setForm({ ...form, priority: event.target.value })
+                    }
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="low">Low</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Start</span>
+                  <input
+                    type="datetime-local"
+                    value={form.startAt}
+                    onChange={(event) =>
+                      setForm({ ...form, startAt: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>End</span>
+                  <input
+                    type="datetime-local"
+                    value={form.endAt}
+                    onChange={(event) =>
+                      setForm({ ...form, endAt: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="wide">
+                  <span>Location</span>
+                  <input
+                    value={form.location}
+                    onChange={(event) =>
+                      setForm({ ...form, location: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="wide">
+                  <span>Description</span>
+                  <textarea
+                    value={form.description}
+                    onChange={(event) =>
+                      setForm({ ...form, description: event.target.value })
+                    }
+                  />
+                </label>
               </div>
             </section>
 
             <div className="ba-drawer-actions">
-              <button className="ba-btn" type="button" onClick={() => { setDrawer(false); resetForm(); }}>Cancel</button>
-              <button className="ba-primary" type="button" disabled={saving} onClick={save}>{saving ? "Saving..." : form.id ? "Save Changes" : "Save Event"}</button>
+              <button
+                className="ba-btn"
+                type="button"
+                onClick={() => {
+                  setDrawer(false);
+                  resetForm();
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="ba-primary"
+                type="button"
+                disabled={saving}
+                onClick={save}
+              >
+                {saving ? "Saving..." : form.id ? "Save Changes" : "Save Event"}
+              </button>
             </div>
           </aside>
         </div>
@@ -1239,18 +1591,100 @@ function FilterSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
-          <div><h2>Calendar Filters</h2><p>Filter branch events without crowding the main calendar.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <div>
+            <h2>Calendar Filters</h2>
+            <p>Filter branch events without crowding the main calendar.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
         <div className="ba-form compact">
-          <label><span>Search</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search title, location, description..." /></label>
-          <label><span>Type</span><select value={type} onChange={(event) => setType(event.target.value)}><option value="all">All Types</option><option value="branch_event">Branch Event</option><option value="meeting">Meeting</option><option value="exam">Exam</option><option value="assessment">Assessment</option><option value="fee_deadline">Fee Deadline</option><option value="holiday">Holiday</option></select></label>
-          <label><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All Statuses</option><option value="scheduled">Scheduled</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option><option value="draft">Draft</option><option value="pending">Pending</option></select></label>
-          <label><span>Priority</span><select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">All Priorities</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></label>
-          <label><span>Date Scope</span><select value={dateScope} onChange={(event) => setDateScope(event.target.value)}><option value="all">All Dates</option><option value="today">Today</option><option value="upcoming">Upcoming</option><option value="past">Past</option><option value="multi_day">Multi-day</option><option value="focus_week">Current Week View</option><option value="focus_month">Current Month View</option></select></label>
-          <label><span>Location</span><select value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}><option value="all">All Locations</option><option value="with_location">With Location</option><option value="no_location">No Location</option></select></label>
+          <label>
+            <span>Search</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search title, location, description..."
+            />
+          </label>
+          <label>
+            <span>Type</span>
+            <select
+              value={type}
+              onChange={(event) => setType(event.target.value)}
+            >
+              <option value="all">All Types</option>
+              <option value="branch_event">Branch Event</option>
+              <option value="meeting">Meeting</option>
+              <option value="exam">Exam</option>
+              <option value="assessment">Assessment</option>
+              <option value="fee_deadline">Fee Deadline</option>
+              <option value="holiday">Holiday</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              <option value="all">All Statuses</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="completed">Completed</option>
+              <option value="draft">Draft</option>
+              <option value="pending">Pending</option>
+            </select>
+          </label>
+          <label>
+            <span>Priority</span>
+            <select
+              value={priorityFilter}
+              onChange={(event) => setPriorityFilter(event.target.value)}
+            >
+              <option value="all">All Priorities</option>
+              <option value="normal">Normal</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+          <label>
+            <span>Date Scope</span>
+            <select
+              value={dateScope}
+              onChange={(event) => setDateScope(event.target.value)}
+            >
+              <option value="all">All Dates</option>
+              <option value="today">Today</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="past">Past</option>
+              <option value="multi_day">Multi-day</option>
+              <option value="focus_week">Current Week View</option>
+              <option value="focus_month">Current Month View</option>
+            </select>
+          </label>
+          <label>
+            <span>Location</span>
+            <select
+              value={locationFilter}
+              onChange={(event) => setLocationFilter(event.target.value)}
+            >
+              <option value="all">All Locations</option>
+              <option value="with_location">With Location</option>
+              <option value="no_location">No Location</option>
+            </select>
+          </label>
         </div>
-        <div className="ba-sheet-actions"><button type="button" onClick={clearFilters}>Clear</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -1277,18 +1711,71 @@ function MoreSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
-          <div><h2>More</h2><p>Calendar views and quick actions.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <div>
+            <h2>More</h2>
+            <p>Calendar views and quick actions.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
         <div className="ba-menu-list">
-          {(["calendar", "cards", "table", "analytics"] as ViewMode[]).map((mode) => (
-            <button key={mode} type="button" className={view === mode ? "active" : ""} onClick={() => setView(mode)}><span>{mode === "calendar" ? "📅" : mode === "cards" ? "☰" : mode === "table" ? "☷" : "◔"}</span><b>{mode === "cards" ? "List" : mode.charAt(0).toUpperCase() + mode.slice(1)}</b><small>{mode === "calendar" ? "Month, week, day and year" : mode === "analytics" ? "Summary breakdowns" : "Alternative event view"}</small></button>
-          ))}
+          {(["calendar", "cards", "table", "analytics"] as ViewMode[]).map(
+            (mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={view === mode ? "active" : ""}
+                onClick={() => setView(mode)}
+              >
+                <span>
+                  {mode === "calendar"
+                    ? "📅"
+                    : mode === "cards"
+                      ? "☰"
+                      : mode === "table"
+                        ? "☷"
+                        : "◔"}
+                </span>
+                <b>
+                  {mode === "cards"
+                    ? "List"
+                    : mode.charAt(0).toUpperCase() + mode.slice(1)}
+                </b>
+                <small>
+                  {mode === "calendar"
+                    ? "Month, week, day and year"
+                    : mode === "analytics"
+                      ? "Summary breakdowns"
+                      : "Alternative event view"}
+                </small>
+              </button>
+            ),
+          )}
           {(["month", "week", "day", "year"] as CalendarMode[]).map((mode) => (
-            <button key={mode} type="button" className={calendarMode === mode && view === "calendar" ? "active" : ""} onClick={() => setCalendarMode(mode)}><span>↳</span><b>{mode.charAt(0).toUpperCase() + mode.slice(1)} calendar</b><small>Switch calendar mode</small></button>
+            <button
+              key={mode}
+              type="button"
+              className={
+                calendarMode === mode && view === "calendar" ? "active" : ""
+              }
+              onClick={() => setCalendarMode(mode)}
+            >
+              <span>↳</span>
+              <b>{mode.charAt(0).toUpperCase() + mode.slice(1)} calendar</b>
+              <small>Switch calendar mode</small>
+            </button>
           ))}
-          <button type="button" onClick={onToday}><span>◎</span><b>Today</b><small>Return to today</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch events</small></button>
+          <button type="button" onClick={onToday}>
+            <span>◎</span>
+            <b>Today</b>
+            <small>Return to today</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch events</small>
+          </button>
         </div>
       </section>
     </div>
@@ -1312,9 +1799,15 @@ function EventPill({
     : `${shortTime(event.startAt || event.startDate || event.date)} · ${eventTitle(event)}`;
 
   return (
-    <article className={`ba-event-pill ${compact ? "compact" : ""} ${totalDays > 1 ? "multi" : ""} ${segment}`}>
+    <article
+      className={`ba-event-pill ${compact ? "compact" : ""} ${totalDays > 1 ? "multi" : ""} ${segment}`}
+    >
       <strong>{title}</strong>
-      {!compact ? <span>{eventType(event)} · {eventPriority(event)}</span> : null}
+      {!compact ? (
+        <span>
+          {eventType(event)} · {eventPriority(event)}
+        </span>
+      ) : null}
       {label ? <small>{label}</small> : null}
     </article>
   );
@@ -1356,10 +1849,17 @@ function MonthCalendar({
 
               <div>
                 {dayEvents.slice(0, 3).map((event: AnyRow) => (
-                  <EventPill key={`${String(rowId(event))}-${dayKey(day)}`} event={event} compact occurrenceDate={day} />
+                  <EventPill
+                    key={`${String(rowId(event))}-${dayKey(day)}`}
+                    event={event}
+                    compact
+                    occurrenceDate={day}
+                  />
                 ))}
 
-                {dayEvents.length > 3 ? <small>+{dayEvents.length - 3} more</small> : null}
+                {dayEvents.length > 3 ? (
+                  <small>+{dayEvents.length - 3} more</small>
+                ) : null}
               </div>
             </button>
           );
@@ -1386,15 +1886,26 @@ function WeekCalendar({
         const dayEvents = eventsForDate(events, day);
 
         return (
-          <article key={day.toISOString()} className={`ba-week-day ${sameDay(day, new Date()) ? "today" : ""}`}>
+          <article
+            key={day.toISOString()}
+            className={`ba-week-day ${sameDay(day, new Date()) ? "today" : ""}`}
+          >
             <button type="button" onClick={() => onSelectDay(day)}>
-              <strong>{new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(day)}</strong>
+              <strong>
+                {new Intl.DateTimeFormat(undefined, {
+                  weekday: "short",
+                }).format(day)}
+              </strong>
               <span>{day.getDate()}</span>
             </button>
 
             <div className="ba-day-events">
               {dayEvents.map((event: AnyRow) => (
-                <EventPill key={`${String(rowId(event))}-${dayKey(day)}`} event={event} occurrenceDate={day} />
+                <EventPill
+                  key={`${String(rowId(event))}-${dayKey(day)}`}
+                  event={event}
+                  occurrenceDate={day}
+                />
               ))}
 
               {!dayEvents.length ? <p>No events</p> : null}
@@ -1406,33 +1917,38 @@ function WeekCalendar({
   );
 }
 
-function DayCalendar({
-  date,
-  events,
-}: {
-  date: Date;
-  events: AnyRow[];
-}) {
-  const dayEvents = eventsForDate(events, date).sort((a: AnyRow, b: AnyRow) => eventTime(a) - eventTime(b));
+function DayCalendar({ date, events }: { date: Date; events: AnyRow[] }) {
+  const dayEvents = eventsForDate(events, date).sort(
+    (a: AnyRow, b: AnyRow) => eventTime(a) - eventTime(b),
+  );
 
   return (
     <section className="ba-day-view">
       {dayEvents.map((event: AnyRow) => (
         <article key={String(rowId(event))} className="ba-day-event">
-          <time>{shortTime(event.startAt || event.startDate || event.date)}</time>
+          <time>
+            {shortTime(event.startAt || event.startDate || event.date)}
+          </time>
 
           <div>
             <h3>{eventTitle(event)}</h3>
             <p>
-              {eventType(event)} · {eventStatus(event)} · {event.location || "No location"}
+              {eventType(event)} · {eventStatus(event)} ·{" "}
+              {event.location || "No location"}
             </p>
-            {occurrenceLabel(event, date) ? <small className="ba-span-note">{occurrenceLabel(event, date)}</small> : null}
+            {occurrenceLabel(event, date) ? (
+              <small className="ba-span-note">
+                {occurrenceLabel(event, date)}
+              </small>
+            ) : null}
             {event.description ? <span>{event.description}</span> : null}
           </div>
         </article>
       ))}
 
-      {!dayEvents.length ? <EmptyCard text="No event is scheduled for this day." /> : null}
+      {!dayEvents.length ? (
+        <EmptyCard text="No event is scheduled for this day." />
+      ) : null}
     </section>
   );
 }
@@ -1454,7 +1970,12 @@ function YearCalendar({
         const monthEvents = eventsForMonth(events, year, monthIndex);
 
         return (
-          <button key={monthIndex} type="button" className="ba-year-month" onClick={() => onSelectMonth(monthIndex)}>
+          <button
+            key={monthIndex}
+            type="button"
+            className="ba-year-month"
+            onClick={() => onSelectMonth(monthIndex)}
+          >
             <strong>{monthName(monthIndex)}</strong>
             <span>{monthEvents.length} event(s)</span>
             <div className="ba-mini-dots">

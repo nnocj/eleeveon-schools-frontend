@@ -43,23 +43,24 @@ export default function ModernCleanHeader({
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
   const contrast = getContrastTextColor(primary);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -71,7 +72,9 @@ export default function ModernCleanHeader({
     .filter(Boolean)
     .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
   const logoSize = compact ? 54 : 64;
 
   const metaItems = [
@@ -164,7 +167,9 @@ export default function ModernCleanHeader({
                   textTransform: "uppercase",
                 }}
               >
-                School<br />Logo
+                School
+                <br />
+                Logo
               </span>
             )}
           </div>

@@ -38,9 +38,18 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
-import { db, type AssessmentApplicability, type GradeRule, type GradingSystem } from "../../lib/db/db";
+import {
+  db,
+  type AssessmentApplicability,
+  type GradeRule,
+  type GradingSystem,
+} from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -50,15 +59,15 @@ type ToastTone = "success" | "error" | "info";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type SystemForm = {
-  id?: number;
+  id?: string;
   name: string;
   code: string;
   description: string;
@@ -66,7 +75,7 @@ type SystemForm = {
 };
 
 type SystemViewRow = {
-  id: number;
+  id: string;
   row: GradingSystem;
   name: string;
   code: string;
@@ -85,10 +94,9 @@ const emptyForm = (): SystemForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -97,11 +105,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -112,7 +120,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -137,13 +147,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -154,7 +164,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -163,7 +177,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -175,7 +189,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -185,13 +203,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -227,7 +247,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -241,9 +269,19 @@ export default function GradingSystems() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -275,7 +313,9 @@ export default function GradingSystems() {
 
   const [systems, setSystems] = useState<GradingSystem[]>([]);
   const [rules, setRules] = useState<GradeRule[]>([]);
-  const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -284,13 +324,24 @@ export default function GradingSystems() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<SystemForm>(emptyForm());
 
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -300,7 +351,11 @@ export default function GradingSystems() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -328,16 +383,25 @@ export default function GradingSystems() {
       setSystems(
         (systemRows as GradingSystem[])
           .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
 
       setRules(
         (ruleRows as GradeRule[])
           .filter((row) => sameTenant(row as TenantRow))
-          .sort((a: any, b: any) => Number(b.minScore || 0) - Number(a.minScore || 0))
+          .sort(
+            (a: any, b: any) =>
+              Number(b.minScore || 0) - Number(a.minScore || 0),
+          ),
       );
 
-      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter((row) => sameTenant(row as TenantRow)));
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load grading systems:", error);
       clearData();
@@ -351,12 +415,19 @@ export default function GradingSystems() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
   const ruleCountBySystem = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     rules.forEach((rule: any) => {
       const id = idOf(rule.gradingSystemId);
@@ -368,7 +439,7 @@ export default function GradingSystems() {
   }, [rules]);
 
   const activeRuleCountBySystem = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     rules.filter(isActiveRow).forEach((rule: any) => {
       const id = idOf(rule.gradingSystemId);
@@ -380,7 +451,7 @@ export default function GradingSystems() {
   }, [rules]);
 
   const usageCountBySystem = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     applicabilities.forEach((row: any) => {
       const id = idOf(row.gradingSystemId);
@@ -414,7 +485,9 @@ export default function GradingSystems() {
     const term = search.trim().toLowerCase();
 
     return viewRows.filter((system) => {
-      const haystack = [system.name, system.code, system.description].join(" ").toLowerCase();
+      const haystack = [system.name, system.code, system.description]
+        .join(" ")
+        .toLowerCase();
       const searchOk = !term || haystack.includes(term);
       const statusOk =
         statusFilter === "all" ||
@@ -429,11 +502,28 @@ export default function GradingSystems() {
   const readySystems = viewRows.filter((row) => row.ready).length;
   const usedSystems = viewRows.filter((row) => row.usageCount > 0).length;
 
-  const activeFilterCount = useMemo(() => [statusFilter].filter((value) => value !== "all").length, [statusFilter]);
+  const activeFilterCount = useMemo(
+    () => [statusFilter].filter((value) => value !== "all").length,
+    [statusFilter],
+  );
 
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")), [viewRows]);
-  const countsByReadiness = useMemo(() => groupedCounts(viewRows, (row) => (row.ready ? "Ready" : "Needs rules")), [viewRows]);
-  const countsByUsage = useMemo(() => groupedCounts(viewRows, (row) => (row.usageCount > 0 ? "Used" : "Unused")), [viewRows]);
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
+    [viewRows],
+  );
+  const countsByReadiness = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) => (row.ready ? "Ready" : "Needs rules")),
+    [viewRows],
+  );
+  const countsByUsage = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) =>
+        row.usageCount > 0 ? "Used" : "Unused",
+      ),
+    [viewRows],
+  );
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -447,7 +537,8 @@ export default function GradingSystems() {
     setStatusFilter("all");
   };
 
-  const updateForm = (patch: Partial<SystemForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<SystemForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const openCreate = () => {
     if (!requireTenant()) return;
@@ -497,12 +588,14 @@ export default function GradingSystems() {
     try {
       setSaving(true);
 
-      const existing = form.id ? systems.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? systems.find((row: any) => sameId(row.id, form.id))
+        : undefined;
 
       const payload: Partial<GradingSystem> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         description: form.description.trim() || undefined,
@@ -511,13 +604,19 @@ export default function GradingSystems() {
       } as Partial<GradingSystem>;
 
       if (form.id && existing) {
-        await updateLocal("gradingSystems", Number(form.id), payload);
+        await updateLocal("gradingSystems", String(form.id), payload);
       } else {
-        await createLocal("gradingSystems", payload as unknown as GradingSystem);
+        await createLocal(
+          "gradingSystems",
+          payload as unknown as GradingSystem,
+        );
       }
 
       setModalOpen(false);
-      showToast("success", form.id ? "Grading system updated." : "Grading system created.");
+      showToast(
+        "success",
+        form.id ? "Grading system updated." : "Grading system created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save grading system:", error);
@@ -531,7 +630,7 @@ export default function GradingSystems() {
     const confirmed = window.confirm(
       row.usageCount
         ? `"${row.name}" is used by ${row.usageCount} assessment applicability record(s). Archive anyway?`
-        : `Archive "${row.name}"?`
+        : `Archive "${row.name}"?`,
     );
 
     if (!confirmed) return;
@@ -548,8 +647,8 @@ export default function GradingSystems() {
     try {
       const newId = await createLocal("gradingSystems", {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         name: `${row.name || "Grading System"} Copy`,
         code: row.code || "COPY",
         description: row.description || undefined,
@@ -557,21 +656,31 @@ export default function GradingSystems() {
         isDeleted: false,
       } as unknown as GradingSystem);
 
-      const savedId = Number(typeof newId === "number" ? newId : (newId as any)?.id || 0);
+      const savedId = idOf(
+        typeof newId === "string" || typeof newId === "number"
+          ? newId
+          : (newId as any)?.id,
+      );
 
       if (savedId) {
-        const relatedRules = rules.filter((rule: any) => sameId(rule.gradingSystemId, row.id) && !rule.isDeleted);
+        const relatedRules = rules.filter(
+          (rule: any) =>
+            sameId(rule.gradingSystemId, row.id) && !rule.isDeleted,
+        );
         for (const rule of relatedRules as any[]) {
-          const { id, cloudId, createdAt, updatedAt, version, synced, ...clone } = rule;
-          await createLocal("gradeRules" as any, {
-            ...clone,
-            accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId),
-            gradingSystemId: savedId,
-            active: true,
-            isDeleted: false,
-          } as any);
+          const { id, createdAt, updatedAt, version, synced, ...clone } = rule;
+          await createLocal(
+            "gradeRules" as any,
+            {
+              ...clone,
+              accountId,
+              schoolId: schoolId,
+              branchId: branchId,
+              gradingSystemId: savedId,
+              active: true,
+              isDeleted: false,
+            } as any,
+          );
         }
       }
 
@@ -585,21 +694,40 @@ export default function GradingSystems() {
   };
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
-    return <State primary={primary} title="Opening Grading Systems..." text="Preparing branch grading systems and rule coverage." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Grading Systems..."
+        text="Preparing branch grading systems and rule coverage."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing grading systems." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing grading systems."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Grading systems are managed under the active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -608,19 +736,29 @@ export default function GradingSystems() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Grading systems search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Grading systems search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -631,7 +769,12 @@ export default function GradingSystems() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add grading system">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add grading system"
+        >
           +
         </button>
 
@@ -646,7 +789,12 @@ export default function GradingSystems() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
@@ -663,27 +811,49 @@ export default function GradingSystems() {
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="By Status" rows={countsByStatus} total={viewRows.length} />
-          <AnalysisCard title="By Readiness" rows={countsByReadiness} total={viewRows.length} />
-          <AnalysisCard title="By Usage" rows={countsByUsage} total={viewRows.length} />
+          <AnalysisCard
+            title="By Status"
+            rows={countsByStatus}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="By Readiness"
+            rows={countsByReadiness}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="By Usage"
+            rows={countsByUsage}
+            total={viewRows.length}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{filteredRows.length}</strong>
             <p>
-              {activeCount} active · {archivedCount} archived · {readySystems} ready · {usedSystems} used · {rules.length} rules.
+              {activeCount} active · {archivedCount} archived · {readySystems}{" "}
+              ready · {usedSystems} used · {rules.length} rules.
             </p>
           </article>
         </section>
       )}
 
       {viewMode === "table" && (
-        <TableView rows={filteredRows} openEdit={openEdit} duplicate={duplicate} archive={archive} />
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          duplicate={duplicate}
+          archive={archive}
+        />
       )}
 
       {viewMode === "cards" && (
         <section className="ba-list grading-list">
           {filteredRows.map((row) => (
-            <SystemListRow key={String(row.id)} item={row} onOpen={() => setSelectedItem(row)} />
+            <SystemListRow
+              key={String(row.id)}
+              item={row}
+              onOpen={() => setSelectedItem(row)}
+            />
           ))}
 
           {!filteredRows.length && (
@@ -743,9 +913,20 @@ export default function GradingSystems() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -756,7 +937,13 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function SystemListRow({ item, onOpen }: { item: SystemViewRow; onOpen: () => void }) {
+function SystemListRow({
+  item,
+  onOpen,
+}: {
+  item: SystemViewRow;
+  onOpen: () => void;
+}) {
   return (
     <button type="button" className="student-row grading-row" onClick={onOpen}>
       <span className="grading-icon">🧮</span>
@@ -767,7 +954,8 @@ function SystemListRow({ item, onOpen }: { item: SystemViewRow; onOpen: () => vo
           {item.code || "No code"} · {item.activeRuleCount} active rule(s)
         </small>
         <em>
-          {item.ruleCount} total rules · {item.usageCount} usage · {item.ready ? "Ready" : "Needs rules"}
+          {item.ruleCount} total rules · {item.usageCount} usage ·{" "}
+          {item.ready ? "Ready" : "Needs rules"}
         </em>
       </span>
 
@@ -823,7 +1011,12 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / Archived</option>
@@ -869,19 +1062,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact grading system cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Status, readiness and usage summaries</small>
@@ -918,10 +1123,15 @@ function ActionSheet({
           <div>
             <h2>{item.name}</h2>
             <p>
-              {item.code || "No code"} · {item.ready ? "Rules ready" : "Needs rules"}
+              {item.code || "No code"} ·{" "}
+              {item.ready ? "Rules ready" : "Needs rules"}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close grading system actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close grading system actions"
+          >
             ✕
           </button>
         </div>
@@ -954,7 +1164,11 @@ function ActionSheet({
             <small>Create a copy and clone existing grade rules</small>
           </button>
 
-          <button type="button" className="danger" onClick={() => archive(item)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(item)}
+          >
             <span>⌫</span>
             <b>Archive</b>
             <small>Soft delete this grading system locally</small>
@@ -1009,8 +1223,14 @@ function TableView({
                   <td>{system.usageCount}</td>
                   <td>
                     <div className="ba-chip-row">
-                      <Chip tone={system.active ? "green" : "gray"}>{system.active ? "Active" : "Inactive"}</Chip>
-                      {system.ready ? <Chip tone="blue">Rules ready</Chip> : <Chip tone="orange">Needs rules</Chip>}
+                      <Chip tone={system.active ? "green" : "gray"}>
+                        {system.active ? "Active" : "Inactive"}
+                      </Chip>
+                      {system.ready ? (
+                        <Chip tone="blue">Rules ready</Chip>
+                      ) : (
+                        <Chip tone="orange">Needs rules</Chip>
+                      )}
                     </div>
                   </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
@@ -1022,7 +1242,11 @@ function TableView({
                       <button type="button" onClick={() => duplicate(system)}>
                         Duplicate
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => archive(system)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archive(system)}
+                      >
                         Archive
                       </button>
                     </div>
@@ -1033,7 +1257,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No grading system matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No grading system matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1058,9 +1286,16 @@ function SystemModal({
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Grading System" : "New Grading System"}</h2>
-            <p>A grading system groups grade rules such as A1, B2, Pass, Fail or custom remarks.</p>
+            <p>
+              A grading system groups grade rules such as A1, B2, Pass, Fail or
+              custom remarks.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close grading system form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close grading system form"
+          >
             ✕
           </button>
         </div>
@@ -1088,7 +1323,12 @@ function SystemModal({
 
             <label>
               <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(event) => updateForm({ active: event.target.value === "active" })}>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -1098,7 +1338,9 @@ function SystemModal({
               <span>Description</span>
               <textarea
                 value={form.description}
-                onChange={(event) => updateForm({ description: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ description: event.target.value })
+                }
                 placeholder="Describe where this grading system should be used."
               />
             </label>
@@ -1106,7 +1348,8 @@ function SystemModal({
         </section>
 
         <section className="ba-note">
-          <strong>Next:</strong> After creating a grading system, add grade rules in the Grade Rules page.
+          <strong>Next:</strong> After creating a grading system, add grade
+          rules in the Grade Rules page.
         </section>
 
         <div className="ba-modal-actions">
@@ -1122,7 +1365,10 @@ function SystemModal({
   );
 }
 
-function groupedCounts(rows: SystemViewRow[], keyFn: (item: SystemViewRow) => string) {
+function groupedCounts(
+  rows: SystemViewRow[],
+  keyFn: (item: SystemViewRow) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1134,7 +1380,15 @@ function groupedCounts(rows: SystemViewRow[], keyFn: (item: SystemViewRow) => st
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

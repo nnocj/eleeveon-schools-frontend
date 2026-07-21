@@ -62,20 +62,20 @@ type AnyRow = Record<string, any>;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type PathwayView = {
-  id: number;
+  id: string;
   row: CurriculumPathway;
   name: string;
   code: string;
   description: string;
-  curriculumId: number;
+  curriculumId: string;
   curriculumName: string;
   subjectCount: number;
   studentCount: number;
@@ -83,7 +83,7 @@ type PathwayView = {
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   curriculumId: string;
   name: string;
   code: string;
@@ -99,10 +99,9 @@ const emptyForm: FormState = {
   active: true,
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -111,11 +110,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -126,7 +125,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -151,13 +152,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -168,7 +169,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -177,7 +182,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -189,7 +194,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -199,10 +208,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
 const safeLower = (value: any) =>
@@ -399,8 +407,8 @@ export default function CurriculumPathways() {
           tableSafe("curriculumPathways")?.toArray?.() || [],
           listActiveLocal("curriculums", {
             accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId),
+            schoolId: schoolId,
+            branchId: branchId,
           } as any),
           tableSafe("curriculumSubjects")?.toArray?.() || [],
           tableSafe("studentCurriculums")?.toArray?.() || [],
@@ -453,14 +461,14 @@ export default function CurriculumPathways() {
   ]);
 
   const curriculumMap = useMemo(() => {
-    const map = new Map<number, Curriculum>();
+    const map = new Map<string, Curriculum>();
     curriculums.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [curriculums]);
 
   const usage = useMemo(() => {
-    const subjectMap = new Map<number, number>();
-    const studentMap = new Map<number, number>();
+    const subjectMap = new Map<string, number>();
+    const studentMap = new Map<string, number>();
 
     curriculumSubjects.forEach((row: any) => {
       const pathwayId = idOf(row.pathwayId);
@@ -656,8 +664,8 @@ export default function CurriculumPathways() {
         : undefined;
       const payload: Partial<CurriculumPathway> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         curriculumId: idOf(form.curriculumId),
         name: form.name.trim(),
         code: form.code.trim() || undefined,
@@ -667,7 +675,7 @@ export default function CurriculumPathways() {
       } as Partial<CurriculumPathway>;
 
       if (form.id && existing)
-        await updateLocal("curriculumPathways", Number(form.id), payload);
+        await updateLocal("curriculumPathways", String(form.id), payload);
       else
         await createLocal("curriculumPathways", payload as CurriculumPathway);
 
@@ -685,7 +693,7 @@ export default function CurriculumPathways() {
   const toggleActive = async (item: PathwayView) => {
     if (!item.id) return;
 
-    await updateLocal("curriculumPathways", Number(item.id), {
+    await updateLocal("curriculumPathways", String(item.id), {
       active: !item.active,
       isDeleted: false,
     } as Partial<CurriculumPathway>);
@@ -708,7 +716,7 @@ export default function CurriculumPathways() {
 
     if (!ok) return;
 
-    await softDeleteLocal("curriculumPathways", Number(item.id));
+    await softDeleteLocal("curriculumPathways", String(item.id));
     setSelectedItem(null);
     showToast("success", "Pathway deleted.");
     await load();

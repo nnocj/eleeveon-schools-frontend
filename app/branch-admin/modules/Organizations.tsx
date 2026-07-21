@@ -61,9 +61,6 @@ import {
   commitMediaAssetsToOwner,
   createMediaSessionKey,
   saveImageAsset,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 
@@ -79,10 +76,10 @@ type OrganizationType =
   | "administration";
 
 type TenantRow = {
-  id?: number;
+  id?: string;
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -91,20 +88,20 @@ type TenantRow = {
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   parentOrganizationId: string;
   name: string;
   type: OrganizationType;
   description: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
 };
 
 type OrganizationView = {
-  id: number;
+  id: string;
   row: Organization;
   parentName: string;
   childrenCount: number;
@@ -146,15 +143,17 @@ const emptyForm: FormState = {
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "").trim();
-  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  if (!media || media.startsWith("blob:") || media.startsWith("data:"))
+    return undefined;
   return media;
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
+
+const cleanId = (value: any): string => idOf(value);
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
@@ -162,11 +161,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -177,7 +176,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -202,13 +203,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -219,7 +220,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -228,7 +233,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -240,7 +245,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -250,10 +259,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
 
@@ -390,8 +398,22 @@ function Avatar({
 
 export default function Organizations() {
   const { activeSchool, activeBranch } = useActiveBranch();
-  const dataRevision = useBranchTableRevision(["organizations", "students", "teachers", "classes", "subjects", "curriculums", "incomes", "expenses", "assessmentStructures", "mediaAssets", "mediaBlobs"]);
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE));
+  const dataRevision = useBranchTableRevision([
+    "organizations",
+    "students",
+    "teachers",
+    "classes",
+    "subjects",
+    "curriculums",
+    "incomes",
+    "expenses",
+    "assessmentStructures",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE),
+  );
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
   const {
@@ -574,7 +596,7 @@ export default function Organizations() {
   ]);
 
   const organizationMap = useMemo(() => {
-    const map = new Map<number, Organization>();
+    const map = new Map<string, Organization>();
     rows.forEach((row: any) => map.set(idOf(row.id), row));
     return map;
   }, [rows]);
@@ -745,7 +767,7 @@ export default function Organizations() {
     );
   }, [viewRows]);
 
-  const childrenOf = (parentId: number) =>
+  const childrenOf = (parentId: string) =>
     viewRows
       .filter(
         (item) => idOf((item.row as any).parentOrganizationId) === parentId,
@@ -768,10 +790,10 @@ export default function Organizations() {
     try {
       const result = await saveImageAsset(file, {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: ORGANIZATION_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
         fieldKey: field,
         variant: field === "photo" ? "avatar" : "cover",
@@ -780,10 +802,14 @@ export default function Organizations() {
 
       updateForm({
         [field]: result.previewUrl,
-        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]:
+          result.assetId,
       } as Partial<FormState>);
 
-      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+      showToast(
+        "info",
+        `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`,
+      );
     } catch (error: any) {
       showToast("error", error?.message || "Failed to process image.");
     }
@@ -805,7 +831,9 @@ export default function Organizations() {
 
   const openCreate = () => {
     if (!requireContext()) return;
-    mediaSessionKeyRef.current = createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE);
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      ORGANIZATION_MEDIA_OWNER_TABLE,
+    );
     setForm({
       ...emptyForm,
       type: filterType === "all" ? "department" : filterType,
@@ -826,10 +854,16 @@ export default function Organizations() {
       name: row.name || "",
       type: (row.type || "department") as OrganizationType,
       description: row.description || "",
-      photo: mediaById[idOf(row.id)]?.photo || safeRecordMediaValue(row.photo) || "",
-      photoMediaId: row.photoMediaId ? Number(row.photoMediaId) : undefined,
-      bannerImage: mediaById[idOf(row.id)]?.bannerImage || safeRecordMediaValue(row.bannerImage) || "",
-      bannerImageMediaId: row.bannerImageMediaId ? Number(row.bannerImageMediaId) : undefined,
+      photo:
+        mediaById[idOf(row.id)]?.photo || safeRecordMediaValue(row.photo) || "",
+      photoMediaId: row.photoMediaId ? String(row.photoMediaId) : undefined,
+      bannerImage:
+        mediaById[idOf(row.id)]?.bannerImage ||
+        safeRecordMediaValue(row.bannerImage) ||
+        "",
+      bannerImageMediaId: row.bannerImageMediaId
+        ? String(row.bannerImageMediaId)
+        : undefined,
       active: item.active,
     });
 
@@ -885,8 +919,8 @@ export default function Organizations() {
 
       const payload: Partial<Organization> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         parentOrganizationId: form.parentOrganizationId
           ? idOf(form.parentOrganizationId)
           : undefined,
@@ -904,17 +938,22 @@ export default function Organizations() {
 
       const savedOrganization =
         form.id && existing
-          ? await updateLocal("organizations", Number(form.id), payload)
-          : await createLocal("organizations", payload as unknown as Organization);
+          ? await updateLocal("organizations", String(form.id), payload)
+          : await createLocal(
+              "organizations",
+              payload as unknown as Organization,
+            );
 
-      const savedOrganizationId = Number((savedOrganization as any)?.id || form.id || 0);
+      const savedOrganizationId = idOf(
+        (savedOrganization as any)?.id || form.id || 0,
+      );
 
       if (savedOrganizationId) {
         await commitMediaAssetsToOwner({
           accountId: String(accountId),
           ownerTable: ORGANIZATION_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedOrganizationId,
-          ownerCloudId: (savedOrganization as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedOrganizationId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: "photo" },
@@ -923,7 +962,9 @@ export default function Organizations() {
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(ORGANIZATION_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        ORGANIZATION_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
       showToast("success", "Organization saved.");
       await load();
@@ -940,7 +981,7 @@ export default function Organizations() {
     if (!row.id) return;
 
     try {
-      await updateLocal("organizations", Number(row.id), {
+      await updateLocal("organizations", String(row.id), {
         active: !item.active,
         status: !item.active ? "active" : "inactive",
         isDeleted: false,
@@ -968,28 +1009,21 @@ export default function Organizations() {
     if (!window.confirm(warning)) return;
 
     try {
-
       await Promise.all(
-
         ["photo", "bannerImage"].map((fieldKey) =>
-
           softDeleteOwnerFieldAssets({
-
             accountId: String(accountId),
 
             ownerTable: "organizations",
 
-            ownerLocalId: Number(id),
+            ownerId: id || undefined,
 
             fieldKey,
-
           }),
-
         ),
-
       );
 
-      await softDeleteLocal("organizations", Number(id));
+      await softDeleteLocal("organizations", String(id));
       setSelectedItem(null);
       showToast("success", "Organization deleted.");
       await load();
@@ -1213,7 +1247,10 @@ export default function Organizations() {
             <OrganizationListItem
               key={String(item.id)}
               item={item}
-              photo={mediaById[item.id]?.photo || safeRecordMediaValue((item.row as any).photo)}
+              photo={
+                mediaById[item.id]?.photo ||
+                safeRecordMediaValue((item.row as any).photo)
+              }
               primary={primary}
               onOpen={() => setSelectedItem(item)}
             />

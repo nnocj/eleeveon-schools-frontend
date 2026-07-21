@@ -16,7 +16,10 @@ import type {
   ResolvedBroadsheetTemplateSettings,
 } from "../../../broadsheet-templates/broadsheet-template-types";
 
-import { firstText, friendlyDate } from "../../../broadsheet-templates/broadsheet-template-utils";
+import {
+  firstText,
+  friendlyDate,
+} from "../../../broadsheet-templates/broadsheet-template-utils";
 
 type Props = {
   kind: BroadsheetKind;
@@ -156,7 +159,9 @@ export default function BroadsheetClassicHeader({
                 lineHeight: 1.2,
               }}
             >
-              {[branding.motto, branding.branchName].filter(Boolean).join("  •  ")}
+              {[branding.motto, branding.branchName]
+                .filter(Boolean)
+                .join("  •  ")}
             </div>
           )}
 
@@ -267,7 +272,8 @@ export default function BroadsheetClassicHeader({
             fontWeight: 750,
           }}
         >
-          {settings.broadsheetGeneratedDateLabel || "Generated"}: {friendlyDate(generatedAt || new Date())}
+          {settings.broadsheetGeneratedDateLabel || "Generated"}:{" "}
+          {friendlyDate(generatedAt || new Date())}
         </div>
       )}
     </header>

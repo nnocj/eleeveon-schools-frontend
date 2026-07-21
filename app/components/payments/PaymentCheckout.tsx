@@ -72,10 +72,10 @@ type SubscriptionProps = CommonProps & {
 
 type StudentFeeProps = CommonProps & {
   purpose: "student_fee";
-  invoiceId: string | number;
-  studentId: string | number;
-  schoolId: number;
-  branchId: number;
+  invoiceId: string;
+  studentId: string;
+  schoolId: string;
+  branchId: string;
   planId?: never;
   billingCycle?: never;
 };
@@ -199,9 +199,9 @@ export default function PaymentCheckout(props: Props) {
           method: "POST",
           headers: authHeaders(),
           body: JSON.stringify({
-            schoolId: Number(props.schoolId),
-            branchId: Number(props.branchId),
-            studentId: Number(props.studentId),
+            schoolId: props.schoolId,
+            branchId: props.branchId,
+            studentId: props.studentId,
             invoiceId: props.invoiceId,
             amount,
             channel: payload.method === "momo" ? "momo" : "card",

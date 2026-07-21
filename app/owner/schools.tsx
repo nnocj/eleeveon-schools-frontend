@@ -18,6 +18,11 @@
  * - unsaved uploads use ownerTempKey and are attached after create/update
  * - UI uses the same ba-* theme classes as Students for dark mode and local settings support
  *
+ * Permanent-ID persistence fix:
+ * - Treats School and Branch IDs as stable string UUIDs throughout the page.
+ * - Verifies every create/update directly from Dexie before reporting success.
+ * - Keeps media ownership and branch counts linked to the real school UUID.
+ *
  * Workspace source fix:
  * - Resolves account/workspace from eleeveon_open_workspace first.
  * - Falls back to active membership, AccountContext, settings, then storage.
@@ -68,7 +73,7 @@ type TenantRow = {
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   name: string;
   motto: string;
   phone: string;
@@ -76,16 +81,16 @@ type FormState = {
   address: string;
   website: string;
   logo: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
 };
 
 type SchoolView = {
-  id: number;
+  id: string;
   row: School;
   branchCount: number;
   logoUrl?: string;
@@ -147,10 +152,9 @@ const emptyForm: FormState = {
   active: true,
 };
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+const idOf = (value: unknown) => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -177,7 +181,7 @@ const timeText = (v?: string | number | null) => {
   }
 };
 
-const mediaKey = (schoolId: number, field: CameraField) => `schools:${schoolId}:${field}`;
+const mediaKey = (schoolId: string, field: CameraField) => `schools:${schoolId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "");
@@ -373,13 +377,12 @@ export default function OwnerSchoolsPage() {
           const ownedAsset = await getOwnerFieldMediaAsset({
             accountId: selectedAccountId || undefined,
             ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-            ownerLocalId: schoolId,
-            ownerCloudId: school.cloudId || undefined,
+            ownerId: String(school.cloudId || school.id || schoolId),
             fieldKey: SCHOOL_FIELD_KEYS[field],
           });
 
           if (ownedAsset?.id) {
-            const url = await getMediaObjectUrl(Number(ownedAsset.id));
+            const url = await getMediaObjectUrl(String(ownedAsset.id));
             if (url) return url;
           }
 
@@ -397,7 +400,7 @@ export default function OwnerSchoolsPage() {
             sameId(fallbackAsset.ownerLocalId, schoolId);
 
           if (!belongsToThisSchool) return "";
-          return getMediaObjectUrl(fallbackId);
+          return getMediaObjectUrl(String(fallbackId));
         };
 
         try {
@@ -441,7 +444,7 @@ export default function OwnerSchoolsPage() {
         .filter((r) => sameAccount(r as TenantRow))
         .sort((a: any, b: any) => schoolName(a).localeCompare(schoolName(b)));
 
-      const schoolIds = new Set(scopedSchools.map((r: any) => idOf(r.id)).filter(Boolean));
+      const schoolIds = new Set(scopedSchools.map((r: any) => idOf(r.id)).filter((id) => Boolean(id)));
       const scopedBranches = (branchRows as Branch[]).filter((r: any) => sameAccount(r) && schoolIds.has(idOf(r.schoolId)));
 
       setRows(scopedSchools);
@@ -514,7 +517,7 @@ export default function OwnerSchoolsPage() {
   }, [cameraOpen, cameraFacing]);
 
   const branchCountMap = useMemo(() => {
-    const m = new Map<number, number>();
+    const m = new Map<string, number>();
     branches.forEach((branch: any) => {
       const sid = idOf(branch.schoolId);
       if (!sid) return;
@@ -590,7 +593,7 @@ export default function OwnerSchoolsPage() {
         schoolId: form.id || undefined,
         branchId: undefined,
         ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id ? String(form.id) : undefined,
         ownerTempKey,
         fieldKey: SCHOOL_FIELD_KEYS[field],
         variant: field === "logo" ? "avatar" : field === "bannerImage" ? "cover" : "image",
@@ -632,11 +635,11 @@ export default function OwnerSchoolsPage() {
       address: s.address || "",
       website: s.website || "",
       logo: mediaPreviewUrls[mediaKey(id, "logo")] || safeRecordMediaValue(s.logo) || "",
-      logoMediaId: s.logoMediaId ? Number(s.logoMediaId) : undefined,
+      logoMediaId: s.logoMediaId ? String(s.logoMediaId) : undefined,
       photo: mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(s.photo) || "",
-      photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
+      photoMediaId: s.photoMediaId ? String(s.photoMediaId) : undefined,
       bannerImage: mediaPreviewUrls[mediaKey(id, "bannerImage")] || safeRecordMediaValue(s.bannerImage) || "",
-      bannerImageMediaId: s.bannerImageMediaId ? Number(s.bannerImageMediaId) : undefined,
+      bannerImageMediaId: s.bannerImageMediaId ? String(s.bannerImageMediaId) : undefined,
       active: s.active !== false,
     });
     setModalOpen(true);
@@ -693,35 +696,52 @@ export default function OwnerSchoolsPage() {
         isDeleted: false,
       } as Partial<School>;
 
-      const savedSchool = form.id && existing ? await updateLocal("schools", Number(form.id), payload) : await createLocal("schools", payload as School);
-      const savedSchoolId = Number(typeof savedSchool === "number" ? savedSchool : (savedSchool as any)?.id || form.id || 0);
+      const savedSchool =
+        form.id && existing
+          ? await updateLocal("schools", form.id, payload)
+          : await createLocal("schools", payload as School);
 
-      if (savedSchoolId) {
-        await Promise.all(
-          [
-            { id: form.logoMediaId, field: "logo" as CameraField },
-            { id: form.photoMediaId, field: "photo" as CameraField },
-            { id: form.bannerImageMediaId, field: "bannerImage" as CameraField },
-          ]
-            .filter((asset) => Boolean(asset.id))
-            .map((asset) =>
-              attachMediaAssetToOwner({
-                assetId: Number(asset.id),
-                ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-                ownerLocalId: savedSchoolId,
-                ownerTempKey: mediaSessionKeyRef.current,
-              })
-            )
-        );
+      const savedSchoolId = idOf((savedSchool as any)?.id || form.id);
+
+      if (!savedSchoolId) {
+        throw new Error("The school record was written without a valid permanent ID.");
       }
+
+      const persistedSchool = await tableSafe("schools")?.get?.(savedSchoolId);
+
+      if (!persistedSchool || persistedSchool.isDeleted) {
+        throw new Error("The school could not be verified in local storage after saving.");
+      }
+
+      if (cleanText(persistedSchool.accountId) !== selectedAccountId) {
+        throw new Error("The school was saved under the wrong account workspace.");
+      }
+
+      await Promise.all(
+        [
+          { id: form.logoMediaId, field: "logo" as CameraField },
+          { id: form.photoMediaId, field: "photo" as CameraField },
+          { id: form.bannerImageMediaId, field: "bannerImage" as CameraField },
+        ]
+          .filter((asset) => Boolean(asset.id))
+          .map((asset) =>
+            attachMediaAssetToOwner({
+              assetId: String(asset.id),
+              ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
+              ownerId: savedSchoolId,
+              ownerTempKey: mediaSessionKeyRef.current,
+              fieldKey: SCHOOL_FIELD_KEYS[asset.field],
+            })
+          )
+      );
 
       mediaSessionKeyRef.current = createSchoolMediaSessionKey();
       setModalOpen(false);
-      showToast("success", "School saved.");
       await load();
-    } catch (error) {
-      console.error(error);
-      showToast("error", "Failed to save school.");
+      showToast("success", form.id ? "School changes saved." : "School created and saved locally.");
+    } catch (error: any) {
+      console.error("Failed to save school:", error);
+      showToast("error", error?.message || "Failed to save school.");
     } finally {
       setSaving(false);
     }
@@ -738,7 +758,7 @@ export default function OwnerSchoolsPage() {
     );
 
     if (!ok) return;
-    await softDeleteLocal("schools", Number(id));
+    await softDeleteLocal("schools", String(id));
     setSelectedItem(null);
     showToast("success", "School deleted.");
     await load();
@@ -748,7 +768,7 @@ export default function OwnerSchoolsPage() {
     const id = idOf((item.row as any).id);
     if (!id) return;
 
-    await updateLocal("schools", id, { active, isDeleted: false } as Partial<School>);
+    await updateLocal("schools", String(id), { active, isDeleted: false } as Partial<School>);
     setSelectedItem(null);
     showToast("success", active ? "School activated." : "School deactivated.");
     await load();

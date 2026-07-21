@@ -49,7 +49,11 @@ import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 
 import { db, type Teacher, type TeacherAttendance } from "../../lib/db/db";
-import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -57,12 +61,12 @@ type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type TeacherStatus = "present" | "incomplete" | "not_marked";
 type TeacherStatusFilter = TeacherStatus | "all";
-type AttendanceMap = Record<number, { clockIn: string; clockOut: string }>;
+type AttendanceMap = Record<string, { clockIn: string; clockOut: string }>;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -74,11 +78,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -89,7 +93,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -114,13 +120,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -131,7 +137,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -140,7 +150,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -152,7 +162,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -162,13 +176,12 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 type TeacherRow = {
-  id: number;
+  id: string;
   teacher: Teacher;
   existingAttendance?: TeacherAttendance;
   clockIn: string;
@@ -180,10 +193,9 @@ type TeacherRow = {
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const currentTime = () => new Date().toTimeString().slice(0, 5);
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -193,7 +205,8 @@ const isActiveRow = (row: any) => {
   const status = String(row?.status || "").toLowerCase();
   if (row?.isDeleted) return false;
   if (row?.active === false) return false;
-  if (["inactive", "deleted", "archived", "suspended"].includes(status)) return false;
+  if (["inactive", "deleted", "archived", "suspended"].includes(status))
+    return false;
   return true;
 };
 
@@ -205,13 +218,18 @@ function formatRole(role?: Teacher["role"] | string) {
     .join(" ");
 }
 
-function teacherStatus(row?: { clockIn?: string; clockOut?: string }): TeacherStatus {
+function teacherStatus(row?: {
+  clockIn?: string;
+  clockOut?: string;
+}): TeacherStatus {
   if (row?.clockIn && row?.clockOut) return "present";
   if (row?.clockIn || row?.clockOut) return "incomplete";
   return "not_marked";
 }
 
-function statusTone(status?: TeacherStatus): "green" | "red" | "orange" | "gray" {
+function statusTone(
+  status?: TeacherStatus,
+): "green" | "red" | "orange" | "gray" {
   if (status === "present") return "green";
   if (status === "incomplete") return "orange";
   return "gray";
@@ -239,30 +257,61 @@ function dateText(value?: string | number | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
       style={{
-        background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+        background: photo
+          ? `url(${photo}) center/cover`
+          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
       }}
     >
-      {!photo && String(name || "T").slice(0, 1).toUpperCase()}
+      {!photo &&
+        String(name || "T")
+          .slice(0, 1)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -279,7 +328,13 @@ export default function TeacherAttendance() {
 
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -315,13 +370,24 @@ export default function TeacherAttendance() {
   const [attendanceMap, setAttendanceMap] = useState<AttendanceMap>({});
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/account");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -331,7 +397,11 @@ export default function TeacherAttendance() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -355,11 +425,19 @@ export default function TeacherAttendance() {
 
       setTeachers(
         (teacherRows as Teacher[])
-          .filter((row: any) => sameTenant(row as TenantRow) && isActiveRow(row))
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")))
+          .filter(
+            (row: any) => sameTenant(row as TenantRow) && isActiveRow(row),
+          )
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
 
-      setAttendanceRows((attendanceData as TeacherAttendance[]).filter((row) => sameTenant(row as TenantRow)));
+      setAttendanceRows(
+        (attendanceData as TeacherAttendance[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load teacher attendance:", error);
       clearData();
@@ -373,12 +451,19 @@ export default function TeacherAttendance() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
   const attendanceKeyMap = useMemo(() => {
-    const map = new Map<number, TeacherAttendance>();
+    const map = new Map<string, TeacherAttendance>();
     attendanceRows.forEach((row: any) => {
       if (row.date !== date || row.isDeleted) return;
       const teacherId = idOf(row.teacherId);
@@ -406,7 +491,9 @@ export default function TeacherAttendance() {
   const roles = useMemo(() => {
     const set = new Set<Teacher["role"]>();
     teachers.forEach((row: any) => row.role && set.add(row.role));
-    return Array.from(set).sort((a, b) => formatRole(a).localeCompare(formatRole(b)));
+    return Array.from(set).sort((a, b) =>
+      formatRole(a).localeCompare(formatRole(b)),
+    );
   }, [teachers]);
 
   const teacherRows = useMemo<TeacherRow[]>(() => {
@@ -442,24 +529,57 @@ export default function TeacherAttendance() {
 
   const summary = useMemo(() => {
     const total = filteredTeachers.length;
-    const present = filteredTeachers.filter((row) => row.status === "present").length;
-    const incomplete = filteredTeachers.filter((row) => row.status === "incomplete").length;
-    const notMarked = filteredTeachers.filter((row) => row.status === "not_marked").length;
+    const present = filteredTeachers.filter(
+      (row) => row.status === "present",
+    ).length;
+    const incomplete = filteredTeachers.filter(
+      (row) => row.status === "incomplete",
+    ).length;
+    const notMarked = filteredTeachers.filter(
+      (row) => row.status === "not_marked",
+    ).length;
     const marked = present + incomplete;
     const completion = total ? Math.round((marked / total) * 100) : 0;
-    const totalHours = Math.round(filteredTeachers.reduce((sum, row) => sum + row.hours, 0) * 10) / 10;
-    return { total, marked, present, incomplete, notMarked, completion, totalHours };
+    const totalHours =
+      Math.round(
+        filteredTeachers.reduce((sum, row) => sum + row.hours, 0) * 10,
+      ) / 10;
+    return {
+      total,
+      marked,
+      present,
+      incomplete,
+      notMarked,
+      completion,
+      totalHours,
+    };
   }, [filteredTeachers]);
 
   const fullSummary = useMemo(() => {
     const total = teacherRows.length;
-    const present = teacherRows.filter((row) => row.status === "present").length;
-    const incomplete = teacherRows.filter((row) => row.status === "incomplete").length;
-    const notMarked = teacherRows.filter((row) => row.status === "not_marked").length;
+    const present = teacherRows.filter(
+      (row) => row.status === "present",
+    ).length;
+    const incomplete = teacherRows.filter(
+      (row) => row.status === "incomplete",
+    ).length;
+    const notMarked = teacherRows.filter(
+      (row) => row.status === "not_marked",
+    ).length;
     const marked = present + incomplete;
     const completion = total ? Math.round((marked / total) * 100) : 0;
-    const totalHours = Math.round(teacherRows.reduce((sum, row) => sum + row.hours, 0) * 10) / 10;
-    return { total, present, incomplete, notMarked, marked, completion, totalHours };
+    const totalHours =
+      Math.round(teacherRows.reduce((sum, row) => sum + row.hours, 0) * 10) /
+      10;
+    return {
+      total,
+      present,
+      incomplete,
+      notMarked,
+      marked,
+      completion,
+      totalHours,
+    };
   }, [teacherRows]);
 
   const countsByStatus = useMemo(
@@ -468,7 +588,7 @@ export default function TeacherAttendance() {
       { label: "Incomplete", value: fullSummary.incomplete },
       { label: "Not Marked", value: fullSummary.notMarked },
     ],
-    [fullSummary]
+    [fullSummary],
   );
 
   const countsByRole = useMemo(() => {
@@ -482,9 +602,16 @@ export default function TeacherAttendance() {
       .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
   }, [teacherRows]);
 
-  const activeFilterCount = useMemo(() => [roleFilter, statusFilter].filter((value) => value !== "all").length, [roleFilter, statusFilter]);
+  const activeFilterCount = useMemo(
+    () => [roleFilter, statusFilter].filter((value) => value !== "all").length,
+    [roleFilter, statusFilter],
+  );
 
-  const updateTeacherAttendance = (teacherId: number, field: "clockIn" | "clockOut", value: string) => {
+  const updateTeacherAttendance = (
+    teacherId: string,
+    field: "clockIn" | "clockOut",
+    value: string,
+  ) => {
     setAttendanceMap((prev) => ({
       ...prev,
       [teacherId]: {
@@ -495,10 +622,12 @@ export default function TeacherAttendance() {
     }));
   };
 
-  const clockInTeacher = (teacherId: number) => updateTeacherAttendance(teacherId, "clockIn", currentTime());
-  const clockOutTeacher = (teacherId: number) => updateTeacherAttendance(teacherId, "clockOut", currentTime());
+  const clockInTeacher = (teacherId: string) =>
+    updateTeacherAttendance(teacherId, "clockIn", currentTime());
+  const clockOutTeacher = (teacherId: string) =>
+    updateTeacherAttendance(teacherId, "clockOut", currentTime());
 
-  const clearTeacherAttendance = (teacherId: number) => {
+  const clearTeacherAttendance = (teacherId: string) => {
     setAttendanceMap((prev) => {
       const next = { ...prev };
       delete next[teacherId];
@@ -511,7 +640,11 @@ export default function TeacherAttendance() {
     setAttendanceMap((prev) => {
       const next = { ...prev };
       filteredTeachers.forEach(({ id }) => {
-        if (id) next[id] = { clockIn: next[id]?.clockIn || time, clockOut: next[id]?.clockOut || "" };
+        if (id)
+          next[id] = {
+            clockIn: next[id]?.clockIn || time,
+            clockOut: next[id]?.clockOut || "",
+          };
       });
       return next;
     });
@@ -522,7 +655,11 @@ export default function TeacherAttendance() {
     setAttendanceMap((prev) => {
       const next = { ...prev };
       filteredTeachers.forEach(({ id }) => {
-        if (id) next[id] = { clockIn: next[id]?.clockIn || "", clockOut: next[id]?.clockOut || time };
+        if (id)
+          next[id] = {
+            clockIn: next[id]?.clockIn || "",
+            clockOut: next[id]?.clockOut || time,
+          };
       });
       return next;
     });
@@ -544,7 +681,8 @@ export default function TeacherAttendance() {
   };
 
   const saveAttendance = async () => {
-    if (!authenticated || !accountId) return showToast("error", "Sign in first.");
+    if (!authenticated || !accountId)
+      return showToast("error", "Sign in first.");
     if (!schoolId) return showToast("error", "Select school first.");
     if (!branchId) return showToast("error", "Select branch first.");
     if (!date) return showToast("error", "Select date.");
@@ -559,7 +697,10 @@ export default function TeacherAttendance() {
         const shouldClear = !row || (!row.clockIn && !row.clockOut);
 
         if ((existing as any)?.id && shouldClear) {
-          await softDeleteLocal("teacherAttendance", Number((existing as any).id));
+          await softDeleteLocal(
+            "teacherAttendance",
+            String((existing as any).id),
+          );
           continue;
         }
 
@@ -567,8 +708,8 @@ export default function TeacherAttendance() {
 
         const payload: Partial<TeacherAttendance> = {
           accountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           teacherId,
           date,
           clockIn: row.clockIn || undefined,
@@ -577,8 +718,17 @@ export default function TeacherAttendance() {
           active: true,
         } as Partial<TeacherAttendance>;
 
-        if ((existing as any)?.id) await updateLocal("teacherAttendance", Number((existing as any).id), payload);
-        else await createLocal("teacherAttendance", payload as unknown as TeacherAttendance);
+        if ((existing as any)?.id)
+          await updateLocal(
+            "teacherAttendance",
+            String((existing as any).id),
+            payload,
+          );
+        else
+          await createLocal(
+            "teacherAttendance",
+            payload as unknown as TeacherAttendance,
+          );
       }
 
       await load();
@@ -592,82 +742,186 @@ export default function TeacherAttendance() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Teacher Attendance..." text="Checking account, branch, active teachers, and attendance records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Teacher Attendance..."
+        text="Checking account, branch, active teachers, and attendance records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing teacher attendance." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing teacher attendance."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Teacher attendance belongs to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <p>
+            Teacher attendance belongs to the selected branch-admin workspace.
+            Use Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Teacher attendance search and actions">
-        <span className={`module-dot ${summary.completion === 100 && summary.total > 0 ? "green" : summary.marked ? "orange" : "gray"}`} title={`${summary.completion}% complete`} />
+      <section
+        className="ba-search-card"
+        aria-label="Teacher attendance search and actions"
+      >
+        <span
+          className={`module-dot ${summary.completion === 100 && summary.total > 0 ? "green" : summary.marked ? "orange" : "gray"}`}
+          title={`${summary.completion}% complete`}
+        />
 
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search teachers..." aria-label="Search teachers" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search teachers..."
+            aria-label="Search teachers"
+          />
         </label>
 
-        <button type="button" className="ba-save-inline" onClick={saveAttendance} disabled={saving} aria-label="Save attendance">
+        <button
+          type="button"
+          className="ba-save-inline"
+          onClick={saveAttendance}
+          disabled={saving}
+          aria-label="Save attendance"
+        >
           {saving ? "…" : "✓"}
         </button>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
-      <section className="ba-register-line" aria-label="Teacher attendance register context">
+      <section
+        className="ba-register-line"
+        aria-label="Teacher attendance register context"
+      >
         <span>{date || "No date"}</span>
-        <b>{summary.marked}/{summary.total} marked</b>
+        <b>
+          {summary.marked}/{summary.total} marked
+        </b>
         <span>{summary.totalHours} hour(s)</span>
         <span>{summary.completion}% complete</span>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {roleFilter !== "all" && <button type="button" onClick={() => setRoleFilter("all")}>Role: {formatRole(roleFilter)} ×</button>}
-          {statusFilter !== "all" && <button type="button" onClick={() => setStatusFilter("all")}>Status: {statusLabel(statusFilter)} ×</button>}
+          {roleFilter !== "all" && (
+            <button type="button" onClick={() => setRoleFilter("all")}>
+              Role: {formatRole(roleFilter)} ×
+            </button>
+          )}
+          {statusFilter !== "all" && (
+            <button type="button" onClick={() => setStatusFilter("all")}>
+              Status: {statusLabel(statusFilter)} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Attendance Breakdown" rows={countsByStatus} total={Math.max(1, fullSummary.total)} />
-          <AnalysisCard title="Teachers by Role" rows={countsByRole} total={Math.max(1, fullSummary.total)} />
-          <article className="ba-analysis"><span>Total Hours</span><strong>{fullSummary.totalHours}</strong><p>Total completed work hours based on clock-in and clock-out times for this date.</p></article>
-          <article className="ba-analysis"><span>Completion</span><strong>{fullSummary.completion}%</strong><p>Marked teachers divided by all active teachers in this branch.</p></article>
+          <AnalysisCard
+            title="Attendance Breakdown"
+            rows={countsByStatus}
+            total={Math.max(1, fullSummary.total)}
+          />
+          <AnalysisCard
+            title="Teachers by Role"
+            rows={countsByRole}
+            total={Math.max(1, fullSummary.total)}
+          />
+          <article className="ba-analysis">
+            <span>Total Hours</span>
+            <strong>{fullSummary.totalHours}</strong>
+            <p>
+              Total completed work hours based on clock-in and clock-out times
+              for this date.
+            </p>
+          </article>
+          <article className="ba-analysis">
+            <span>Completion</span>
+            <strong>{fullSummary.completion}%</strong>
+            <p>
+              Marked teachers divided by all active teachers in this branch.
+            </p>
+          </article>
         </section>
       )}
 
       {viewMode === "table" && (
-        <TableView rows={filteredTeachers} date={date} updateTeacherAttendance={updateTeacherAttendance} clockInTeacher={clockInTeacher} clockOutTeacher={clockOutTeacher} clearTeacherAttendance={clearTeacherAttendance} />
+        <TableView
+          rows={filteredTeachers}
+          date={date}
+          updateTeacherAttendance={updateTeacherAttendance}
+          clockInTeacher={clockInTeacher}
+          clockOutTeacher={clockOutTeacher}
+          clearTeacherAttendance={clearTeacherAttendance}
+        />
       )}
 
       {viewMode === "cards" && (
@@ -684,7 +938,13 @@ export default function TeacherAttendance() {
             />
           ))}
 
-          {!filteredTeachers.length && <Empty icon="🕒" title="No teachers found" text="No active teachers were found in this branch or for the selected filters." />}
+          {!filteredTeachers.length && (
+            <Empty
+              icon="🕒"
+              title="No teachers found"
+              text="No active teachers were found in this branch or for the selected filters."
+            />
+          )}
         </section>
       )}
 
@@ -706,11 +966,26 @@ export default function TeacherAttendance() {
         <MoreSheet
           viewMode={viewMode}
           summary={summary}
-          setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }}
-          onClockIn={() => { markAllClockIn(); setMoreOpen(false); }}
-          onClockOut={() => { markAllClockOut(); setMoreOpen(false); }}
-          onClear={() => { clearShown(); setMoreOpen(false); }}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onClockIn={() => {
+            markAllClockIn();
+            setMoreOpen(false);
+          }}
+          onClockOut={() => {
+            markAllClockOut();
+            setMoreOpen(false);
+          }}
+          onClear={() => {
+            clearShown();
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       )}
@@ -718,9 +993,20 @@ export default function TeacherAttendance() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -741,24 +1027,43 @@ function TeacherRowItem({
 }: {
   row: TeacherRow;
   primary: string;
-  updateTeacherAttendance: (teacherId: number, field: "clockIn" | "clockOut", value: string) => void;
-  clockInTeacher: (teacherId: number) => void;
-  clockOutTeacher: (teacherId: number) => void;
-  clearTeacherAttendance: (teacherId: number) => void;
+  updateTeacherAttendance: (
+    teacherId: string,
+    field: "clockIn" | "clockOut",
+    value: string,
+  ) => void;
+  clockInTeacher: (teacherId: string) => void;
+  clockOutTeacher: (teacherId: string) => void;
+  clearTeacherAttendance: (teacherId: string) => void;
 }) {
   const teacherAny: any = row.teacher;
 
   return (
     <article className="teacher-row">
       <div className="teacher-row-main">
-        <Avatar name={teacherAny.fullName} photo={teacherAny.photo} primary={primary} />
+        <Avatar
+          name={teacherAny.fullName}
+          photo={teacherAny.photo}
+          primary={primary}
+        />
         <span className="teacher-main">
           <strong>{teacherAny.fullName || "Unnamed teacher"}</strong>
-          <small>{formatRole(teacherAny.role)}{teacherAny.phone ? ` · ${teacherAny.phone}` : ""}</small>
-          <em>{teacherAny.email || teacherAny.qualification || "No contact provided"}</em>
+          <small>
+            {formatRole(teacherAny.role)}
+            {teacherAny.phone ? ` · ${teacherAny.phone}` : ""}
+          </small>
+          <em>
+            {teacherAny.email ||
+              teacherAny.qualification ||
+              "No contact provided"}
+          </em>
         </span>
         <span className="teacher-side">
-          <span className={`status-dot-mini ${statusTone(row.status)}`} title={statusLabel(row.status)} aria-label={statusLabel(row.status)} />
+          <span
+            className={`status-dot-mini ${statusTone(row.status)}`}
+            title={statusLabel(row.status)}
+            aria-label={statusLabel(row.status)}
+          />
           <i>{row.hours ? `${row.hours}h` : "—"}</i>
         </span>
       </div>
@@ -766,18 +1071,40 @@ function TeacherRowItem({
       <div className="time-row">
         <label>
           <span>In</span>
-          <input type="time" value={row.clockIn} onChange={(event) => updateTeacherAttendance(row.id, "clockIn", event.target.value)} />
+          <input
+            type="time"
+            value={row.clockIn}
+            onChange={(event) =>
+              updateTeacherAttendance(row.id, "clockIn", event.target.value)
+            }
+          />
         </label>
         <label>
           <span>Out</span>
-          <input type="time" value={row.clockOut} onChange={(event) => updateTeacherAttendance(row.id, "clockOut", event.target.value)} />
+          <input
+            type="time"
+            value={row.clockOut}
+            onChange={(event) =>
+              updateTeacherAttendance(row.id, "clockOut", event.target.value)
+            }
+          />
         </label>
       </div>
 
       <div className="teacher-actions">
-        <button type="button" onClick={() => clockInTeacher(row.id)}>Clock In</button>
-        <button type="button" onClick={() => clockOutTeacher(row.id)}>Clock Out</button>
-        <button type="button" className="danger" onClick={() => clearTeacherAttendance(row.id)}>Clear</button>
+        <button type="button" onClick={() => clockInTeacher(row.id)}>
+          Clock In
+        </button>
+        <button type="button" onClick={() => clockOutTeacher(row.id)}>
+          Clock Out
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => clearTeacherAttendance(row.id)}
+        >
+          Clear
+        </button>
       </div>
     </article>
   );
@@ -793,10 +1120,14 @@ function TableView({
 }: {
   rows: TeacherRow[];
   date: string;
-  updateTeacherAttendance: (teacherId: number, field: "clockIn" | "clockOut", value: string) => void;
-  clockInTeacher: (teacherId: number) => void;
-  clockOutTeacher: (teacherId: number) => void;
-  clearTeacherAttendance: (teacherId: number) => void;
+  updateTeacherAttendance: (
+    teacherId: string,
+    field: "clockIn" | "clockOut",
+    value: string,
+  ) => void;
+  clockInTeacher: (teacherId: string) => void;
+  clockOutTeacher: (teacherId: string) => void;
+  clearTeacherAttendance: (teacherId: string) => void;
 }) {
   return (
     <section className="ba-table-card">
@@ -816,31 +1147,101 @@ function TableView({
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ id, teacher, existingAttendance, clockIn, clockOut, hours, status }) => {
-              const teacherAny: any = teacher;
-              return (
-                <tr key={String(id)}>
-                  <td><strong>{teacherAny.fullName}</strong><span>{teacherAny.qualification || "No qualification"}</span></td>
-                  <td>{formatRole(teacherAny.role)}</td>
-                  <td><strong>{teacherAny.phone || "—"}</strong><span>{teacherAny.email || "No email"}</span></td>
-                  <td><input type="time" value={clockIn} onChange={(event) => updateTeacherAttendance(id, "clockIn", event.target.value)} /></td>
-                  <td><input type="time" value={clockOut} onChange={(event) => updateTeacherAttendance(id, "clockOut", event.target.value)} /></td>
-                  <td>{hours}</td>
-                  <td>{(existingAttendance as any)?.id ? `Saved · ${dateText((existingAttendance as any).updatedAt)}` : `New · ${date}`}</td>
-                  <td><Chip tone={statusTone(status)}>{statusLabel(status)}</Chip></td>
-                  <td>
-                    <div className="ba-table-actions">
-                      <button type="button" onClick={() => clockInTeacher(id)}>Clock In</button>
-                      <button type="button" onClick={() => clockOutTeacher(id)}>Clock Out</button>
-                      <button type="button" className="ba-delete" onClick={() => clearTeacherAttendance(id)}>Clear</button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+            {rows.map(
+              ({
+                id,
+                teacher,
+                existingAttendance,
+                clockIn,
+                clockOut,
+                hours,
+                status,
+              }) => {
+                const teacherAny: any = teacher;
+                return (
+                  <tr key={String(id)}>
+                    <td>
+                      <strong>{teacherAny.fullName}</strong>
+                      <span>
+                        {teacherAny.qualification || "No qualification"}
+                      </span>
+                    </td>
+                    <td>{formatRole(teacherAny.role)}</td>
+                    <td>
+                      <strong>{teacherAny.phone || "—"}</strong>
+                      <span>{teacherAny.email || "No email"}</span>
+                    </td>
+                    <td>
+                      <input
+                        type="time"
+                        value={clockIn}
+                        onChange={(event) =>
+                          updateTeacherAttendance(
+                            id,
+                            "clockIn",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="time"
+                        value={clockOut}
+                        onChange={(event) =>
+                          updateTeacherAttendance(
+                            id,
+                            "clockOut",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </td>
+                    <td>{hours}</td>
+                    <td>
+                      {(existingAttendance as any)?.id
+                        ? `Saved · ${dateText((existingAttendance as any).updatedAt)}`
+                        : `New · ${date}`}
+                    </td>
+                    <td>
+                      <Chip tone={statusTone(status)}>
+                        {statusLabel(status)}
+                      </Chip>
+                    </td>
+                    <td>
+                      <div className="ba-table-actions">
+                        <button
+                          type="button"
+                          onClick={() => clockInTeacher(id)}
+                        >
+                          Clock In
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => clockOutTeacher(id)}
+                        >
+                          Clock Out
+                        </button>
+                        <button
+                          type="button"
+                          className="ba-delete"
+                          onClick={() => clearTeacherAttendance(id)}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              },
+            )}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No teachers match this register/filter.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No teachers match this register/filter.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -884,22 +1285,50 @@ function FilterSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
-          <div><h2>Filters</h2><p>Choose the date, role, and attendance status for this register.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <div>
+            <h2>Filters</h2>
+            <p>
+              Choose the date, role, and attendance status for this register.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
-          <label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
+          <label>
+            <span>Date</span>
+            <input
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
+          </label>
           <label>
             <span>Role</span>
-            <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as Teacher["role"] | "all")}>
+            <select
+              value={roleFilter}
+              onChange={(event) =>
+                setRoleFilter(event.target.value as Teacher["role"] | "all")
+              }
+            >
               <option value="all">All roles</option>
-              {roles.map((role) => <option key={String(role)} value={String(role)}>{formatRole(role)}</option>)}
+              {roles.map((role) => (
+                <option key={String(role)} value={String(role)}>
+                  {formatRole(role)}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as TeacherStatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as TeacherStatusFilter)
+              }
+            >
               <option value="all">All teachers</option>
               <option value="present">Present</option>
               <option value="incomplete">Incomplete</option>
@@ -909,8 +1338,12 @@ function FilterSheet({
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={clearFilters}>Clear</button>
-          <button type="button" className="primary" onClick={onClose}>Apply</button>
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
@@ -928,7 +1361,15 @@ function MoreSheet({
   onClose,
 }: {
   viewMode: ViewMode;
-  summary: { total: number; marked: number; present: number; incomplete: number; notMarked: number; completion: number; totalHours: number };
+  summary: {
+    total: number;
+    marked: number;
+    present: number;
+    incomplete: number;
+    notMarked: number;
+    completion: number;
+    totalHours: number;
+  };
   setViewMode: (mode: ViewMode) => void;
   onClockIn: () => void;
   onClockOut: () => void;
@@ -940,25 +1381,81 @@ function MoreSheet({
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
-          <div><h2>More</h2><p>{summary.marked} of {summary.total} teacher record(s) marked · {summary.totalHours} hour(s).</p></div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <div>
+            <h2>More</h2>
+            <p>
+              {summary.marked} of {summary.total} teacher record(s) marked ·{" "}
+              {summary.totalHours} hour(s).
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>List view</b><small>Compact teacher attendance rows</small></button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Dense register for laptop work</small></button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Status, role, hours and completion</small></button>
-          <button type="button" onClick={onClockIn}><span>↘</span><b>Clock in shown</b><small>Set clock-in time for visible teachers</small></button>
-          <button type="button" onClick={onClockOut}><span>↗</span><b>Clock out shown</b><small>Set clock-out time for visible teachers</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local teacher attendance records</small></button>
-          <button type="button" className="danger" onClick={onClear}><span>⌫</span><b>Clear shown</b><small>Clear visible unsaved clock times</small></button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact teacher attendance rows</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense register for laptop work</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Status, role, hours and completion</small>
+          </button>
+          <button type="button" onClick={onClockIn}>
+            <span>↘</span>
+            <b>Clock in shown</b>
+            <small>Set clock-in time for visible teachers</small>
+          </button>
+          <button type="button" onClick={onClockOut}>
+            <span>↗</span>
+            <b>Clock out shown</b>
+            <small>Set clock-out time for visible teachers</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local teacher attendance records</small>
+          </button>
+          <button type="button" className="danger" onClick={onClear}>
+            <span>⌫</span>
+            <b>Clear shown</b>
+            <small>Clear visible unsaved clock times</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -968,8 +1465,15 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
           const share = total ? Math.round((row.value / total) * 100) : 0;
           return (
             <section key={row.label}>
-              <div><b>{row.label}</b><small>{row.value} · {share}%</small></div>
-              <div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
             </section>
           );
         })}

@@ -44,14 +44,14 @@ export async function createTimetable(input: CreateScheduleTimetableInput) {
 
   return {
     ...record,
-    id: Number(id),
+    id: String(id),
   };
 }
 
 export async function listTimetables(input: {
   accountId: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   includeDeleted?: boolean;
 }) {
   let rows = await db.scheduleTimetables
@@ -61,8 +61,8 @@ export async function listTimetables(input: {
 
   rows = rows.filter((row) => {
     if (!input.includeDeleted && row.isDeleted) return false;
-    if (input.schoolId && Number(row.schoolId) !== Number(input.schoolId)) return false;
-    if (input.branchId && Number(row.branchId) !== Number(input.branchId)) return false;
+    if (input.schoolId && String(row.schoolId) !== String(input.schoolId)) return false;
+    if (input.branchId && String(row.branchId) !== String(input.branchId)) return false;
     return true;
   });
 
@@ -70,7 +70,7 @@ export async function listTimetables(input: {
 }
 
 export async function updateTimetable(
-  timetableId: number,
+  timetableId: string,
   patch: Partial<ScheduleTimetable>
 ) {
   const existing = await db.scheduleTimetables.get(timetableId);
@@ -89,21 +89,21 @@ export async function updateTimetable(
   return db.scheduleTimetables.get(timetableId);
 }
 
-export async function activateTimetable(timetableId: number) {
+export async function activateTimetable(timetableId: string) {
   return updateTimetable(timetableId, {
     status: "active",
     active: true,
   });
 }
 
-export async function archiveTimetable(timetableId: number) {
+export async function archiveTimetable(timetableId: string) {
   return updateTimetable(timetableId, {
     status: "archived",
     active: false,
   });
 }
 
-export async function softDeleteTimetable(timetableId: number) {
+export async function softDeleteTimetable(timetableId: string) {
   const existing = await db.scheduleTimetables.get(timetableId);
 
   if (!existing) {
@@ -149,7 +149,7 @@ export async function addScheduleSession(input: {
   }
 
   const id = await db.scheduleSessions.add(candidate);
-  const savedSession = { ...candidate, id: Number(id) };
+  const savedSession = { ...candidate, id: String(id) };
 
   if (conflicts.length && input.saveConflicts !== false) {
     for (const conflict of conflicts) {
@@ -167,7 +167,7 @@ export async function addScheduleSession(input: {
 }
 
 export async function updateScheduleSession(
-  sessionId: number,
+  sessionId: string,
   patch: Partial<ScheduleSession>,
   options?: {
     checkConflicts?: boolean;
@@ -230,7 +230,7 @@ export async function updateScheduleSession(
   };
 }
 
-export async function listSessionsForTimetable(timetableId: number) {
+export async function listSessionsForTimetable(timetableId: string) {
   const rows = await db.scheduleSessions
     .where("timetableId")
     .equals(timetableId)
@@ -243,8 +243,8 @@ export async function listSessionsForTimetable(timetableId: number) {
 
 export async function listSessionsForBranch(input: {
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
 }) {
   const rows = await db.scheduleSessions
     .where("accountId")
@@ -255,14 +255,14 @@ export async function listSessionsForBranch(input: {
     rows.filter((session) => {
       if (!isSessionActive(session)) return false;
       return (
-        Number(session.schoolId) === Number(input.schoolId) &&
-        Number(session.branchId) === Number(input.branchId)
+        String(session.schoolId) === String(input.schoolId) &&
+        String(session.branchId) === String(input.branchId)
       );
     })
   );
 }
 
-export async function softDeleteScheduleSession(sessionId: number) {
+export async function softDeleteScheduleSession(sessionId: string) {
   const existing = await db.scheduleSessions.get(sessionId);
 
   if (!existing) {
@@ -284,14 +284,14 @@ export async function createScheduleResource(input: CreateScheduleResourceInput)
 
   return {
     ...record,
-    id: Number(id),
+    id: String(id),
   };
 }
 
 export async function listScheduleResources(input: {
   accountId: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   includeDeleted?: boolean;
 }) {
   let rows = await db.scheduleResources
@@ -301,8 +301,8 @@ export async function listScheduleResources(input: {
 
   rows = rows.filter((row) => {
     if (!input.includeDeleted && row.isDeleted) return false;
-    if (input.schoolId && Number(row.schoolId) !== Number(input.schoolId)) return false;
-    if (input.branchId && Number(row.branchId) !== Number(input.branchId)) return false;
+    if (input.schoolId && String(row.schoolId) !== String(input.schoolId)) return false;
+    if (input.branchId && String(row.branchId) !== String(input.branchId)) return false;
     return true;
   });
 
@@ -310,7 +310,7 @@ export async function listScheduleResources(input: {
 }
 
 export async function updateScheduleResource(
-  resourceId: number,
+  resourceId: string,
   patch: Partial<ScheduleResource>
 ) {
   const existing = await db.scheduleResources.get(resourceId);
@@ -331,8 +331,8 @@ export async function updateScheduleResource(
 
 export async function listOpenScheduleConflicts(input: {
   accountId: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
 }) {
   let rows = await db.scheduleConflicts
     .where("accountId")
@@ -342,8 +342,8 @@ export async function listOpenScheduleConflicts(input: {
   rows = rows.filter((row) => {
     if (row.isDeleted) return false;
     if (row.status !== "open") return false;
-    if (input.schoolId && Number(row.schoolId) !== Number(input.schoolId)) return false;
-    if (input.branchId && Number(row.branchId) !== Number(input.branchId)) return false;
+    if (input.schoolId && String(row.schoolId) !== String(input.schoolId)) return false;
+    if (input.branchId && String(row.branchId) !== String(input.branchId)) return false;
     return true;
   });
 
@@ -351,9 +351,9 @@ export async function listOpenScheduleConflicts(input: {
 }
 
 export async function resolveScheduleConflict(
-  conflictId: number,
+  conflictId: string,
   input: {
-    resolvedByUserId?: number | string | null;
+    resolvedByUserId?: string | null;
     resolutionNote?: string;
   }
 ) {
@@ -377,7 +377,7 @@ export async function resolveScheduleConflict(
 }
 
 export async function ignoreScheduleConflict(
-  conflictId: number,
+  conflictId: string,
   note?: string
 ) {
   const existing = await db.scheduleConflicts.get(conflictId);

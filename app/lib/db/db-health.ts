@@ -1,3 +1,4 @@
+
 import type Dexie from "dexie";
 import { SyncStatus } from "../constants/syncStatus";
 import { APP_DB_VERSION } from "./db-version";
@@ -48,12 +49,28 @@ const SYNC_TABLES_TO_SAMPLE = [
   "mediaAssets",
 ] as const;
 
-function recordId(record: Record<string, unknown>) {
-  const value = record.id ?? record.cloudId;
-  return typeof value === "string" || typeof value === "number" ? value : undefined;
+function recordId(
+  record: Record<string, unknown>,
+): string | number | undefined {
+  const value = record.id;
+
+  return typeof value === "string" || typeof value === "number"
+    ? value
+    : undefined;
 }
 
-export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHealthReport> {
+function permanentId(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+export async function checkDatabaseHealth(
+  database: Dexie,
+): Promise<DatabaseHealthReport> {
   const issues: DatabaseHealthIssue[] = [];
   const available = new Set(database.tables.map((table) => table.name));
 
@@ -80,20 +97,41 @@ export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHeal
   let failedRecords = 0;
 
   for (const tableName of SYNC_TABLES_TO_SAMPLE) {
-    if (!available.has(tableName)) continue;
+    if (!available.has(tableName)) {
+      continue;
+    }
+
     const table = database.table(tableName);
 
     pendingRecords += await table
-      .filter((row: Record<string, unknown>) => row.synced === SyncStatus.PENDING)
+      .filter(
+        (row: Record<string, unknown>) =>
+          row.synced === SyncStatus.PENDING,
+      )
       .count();
+
     failedRecords += await table
-      .filter((row: Record<string, unknown>) => row.synced === SyncStatus.FAILED)
+      .filter(
+        (row: Record<string, unknown>) =>
+          row.synced === SyncStatus.FAILED,
+      )
       .count();
 
     const invalid = await table
       .filter((row: Record<string, unknown>) => {
-        if (row.isDeleted) return false;
-        return !row.accountId || !row.updatedAt || !row.version || !row.deviceId;
+        if (row.isDeleted === true) {
+          return false;
+        }
+
+        return (
+          !permanentId(row.id) ||
+          !permanentId(row.accountId) ||
+          typeof row.updatedAt !== "number" ||
+          row.updatedAt <= 0 ||
+          typeof row.version !== "number" ||
+          row.version <= 0 ||
+          !permanentId(row.deviceId)
+        );
       })
       .limit(25)
       .toArray();
@@ -104,7 +142,9 @@ export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHeal
         severity: "warning",
         tableName,
         recordId: recordId(row),
-        message: `${tableName} contains a record missing accountId, updatedAt, version, or deviceId.`,
+        message:
+          `${tableName} contains a record missing its permanent id, ` +
+          "accountId, updatedAt, version, or deviceId.",
       });
     }
   }
@@ -113,8 +153,15 @@ export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHeal
     const invalidMedia = await database
       .table("mediaAssets")
       .filter((row: Record<string, unknown>) => {
-        if (row.isDeleted || row.active === false) return false;
-        return !row.ownerTable || !row.fieldKey || (!row.ownerCloudId && !row.ownerTempKey && !row.ownerLocalId);
+        if (row.isDeleted === true || row.active === false) {
+          return false;
+        }
+
+        return (
+          !permanentId(row.ownerTable) ||
+          !permanentId(row.ownerId) ||
+          !permanentId(row.fieldKey)
+        );
       })
       .limit(50)
       .toArray();
@@ -125,29 +172,64 @@ export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHeal
         severity: "warning",
         tableName: "mediaAssets",
         recordId: recordId(row),
-        message: "Active media asset has incomplete owner identity.",
+        message:
+          "Active media asset has incomplete permanent owner identity.",
       });
     }
   }
 
-  if (available.has("reportCardTemplateAssignments")) {
-    const templateIds = new Set<number>(
-      (await database.table("reportCardTemplates").toArray())
-        .map((row: Record<string, unknown>) => Number(row.id || 0))
-        .filter(Boolean),
+  if (
+    available.has("reportCardTemplates") &&
+    available.has("reportCardTemplateSettings") &&
+    available.has("reportCardTemplateAssignments")
+  ) {
+    const templateIds = new Set<string>(
+      (
+        await database
+          .table("reportCardTemplates")
+          .toArray()
+      )
+        .map((row: Record<string, unknown>) => permanentId(row.id))
+        .filter((id): id is string => Boolean(id)),
     );
-    const settingIds = new Set<number>(
-      (await database.table("reportCardTemplateSettings").toArray())
-        .map((row: Record<string, unknown>) => Number(row.id || 0))
-        .filter(Boolean),
+
+    const settingIds = new Set<string>(
+      (
+        await database
+          .table("reportCardTemplateSettings")
+          .toArray()
+      )
+        .map((row: Record<string, unknown>) => permanentId(row.id))
+        .filter((id): id is string => Boolean(id)),
     );
-    const assignments = await database.table("reportCardTemplateAssignments").toArray();
+
+    const assignments = await database
+      .table("reportCardTemplateAssignments")
+      .toArray();
 
     for (const assignment of assignments as Record<string, unknown>[]) {
-      if (assignment.isDeleted || assignment.active === false) continue;
-      const templateId = Number(assignment.templateId || 0);
-      const settingsId = Number(assignment.templateSettingsId || 0);
-      if (templateId && !templateIds.has(templateId)) {
+      if (
+        assignment.isDeleted === true ||
+        assignment.active === false
+      ) {
+        continue;
+      }
+
+      const templateId = permanentId(assignment.templateId);
+      const settingsId = permanentId(
+        assignment.templateSettingsId,
+      );
+
+      if (!templateId) {
+        issues.push({
+          code: "MISSING_TEMPLATE_REFERENCE",
+          severity: "warning",
+          tableName: "reportCardTemplateAssignments",
+          recordId: recordId(assignment),
+          message:
+            "Template assignment is missing its permanent templateId.",
+        });
+      } else if (!templateIds.has(templateId)) {
         issues.push({
           code: "ORPHAN_TEMPLATE_ASSIGNMENT",
           severity: "warning",
@@ -156,7 +238,17 @@ export async function checkDatabaseHealth(database: Dexie): Promise<DatabaseHeal
           message: `Template assignment points to missing template ${templateId}.`,
         });
       }
-      if (settingsId && !settingIds.has(settingsId)) {
+
+      if (!settingsId) {
+        issues.push({
+          code: "MISSING_TEMPLATE_SETTINGS_REFERENCE",
+          severity: "warning",
+          tableName: "reportCardTemplateAssignments",
+          recordId: recordId(assignment),
+          message:
+            "Template assignment is missing its permanent templateSettingsId.",
+        });
+      } else if (!settingIds.has(settingsId)) {
         issues.push({
           code: "ORPHAN_TEMPLATE_SETTINGS",
           severity: "warning",

@@ -72,8 +72,8 @@ type ViewMode = "cards" | "details" | "analytics";
 
 type TenantRow = {
   accountId?: string;
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
   active?: boolean;
   isDeleted?: boolean;
 };
@@ -82,8 +82,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -129,7 +129,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -154,18 +156,21 @@ function cleanText(value: unknown) {
   return String(value || "").trim();
 }
 
-function cleanId(value: unknown) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
 function sameId(a: unknown, b: unknown) {
   const left = cleanId(a);
   const right = cleanId(b);
-  return left > 0 && right > 0 && left === right;
+  return Boolean(left && right && left === right);
 }
 
-function accountMatches(rowAccountId: unknown, selectedAccountId?: string | null) {
+function accountMatches(
+  rowAccountId: unknown,
+  selectedAccountId?: string | null,
+) {
   if (!selectedAccountId) return true;
   if (!rowAccountId) return true;
   return String(rowAccountId) === String(selectedAccountId);
@@ -179,7 +184,10 @@ async function activeRows<T>(tableName: string): Promise<T[]> {
   return ((await listActiveLocal(tableName as any)) || []) as T[];
 }
 
-function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: number) {
+function labelOf<T extends { id?: string; name?: string }>(
+  rows: T[],
+  id?: string,
+) {
   if (!id) return "All";
   return rows.find((row) => row.id === id)?.name || "Not found";
 }
@@ -213,7 +221,12 @@ export default function AcademicProgress() {
       cleanText(openWorkspace?.membership?.accountId) ||
       cleanText(activeMembership?.accountId) ||
       cleanText(settings?.accountId),
-    [accountId, activeMembership?.accountId, openWorkspace?.membership?.accountId, settings?.accountId]
+    [
+      accountId,
+      activeMembership?.accountId,
+      openWorkspace?.membership?.accountId,
+      settings?.accountId,
+    ],
   );
 
   const schoolId = useMemo(
@@ -236,7 +249,7 @@ export default function AcademicProgress() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -263,33 +276,48 @@ export default function AcademicProgress() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
+  const { loading: pageLoading, setLoading: setPageLoading } =
+    useBackgroundLoader();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
-  const [studentCurriculums, setStudentCurriculums] = useState<StudentCurriculum[]>([]);
+  const [studentCurriculums, setStudentCurriculums] = useState<
+    StudentCurriculum[]
+  >([]);
   const [classes, setClasses] = useState<Class[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>([]);
+  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>(
+    [],
+  );
   const [computedResults, setComputedResults] = useState<ComputedResult[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
 
   const [search, setSearch] = useState("");
-  const [filterClassId, setFilterClassId] = useState<number | undefined>();
-  const [filterStructureId, setFilterStructureId] = useState<number | undefined>();
-  const [filterPeriodId, setFilterPeriodId] = useState<number | undefined>();
-  const [filterCurriculumId, setFilterCurriculumId] = useState<number | undefined>();
-  const [filterStatus, setFilterStatus] = useState<"all" | ProgressStatus>("all");
-  const [selectedStudentId, setSelectedStudentId] = useState<number | undefined>();
+  const [filterClassId, setFilterClassId] = useState<string | undefined>();
+  const [filterStructureId, setFilterStructureId] = useState<
+    string | undefined
+  >();
+  const [filterPeriodId, setFilterPeriodId] = useState<string | undefined>();
+  const [filterCurriculumId, setFilterCurriculumId] = useState<
+    string | undefined
+  >();
+  const [filterStatus, setFilterStatus] = useState<"all" | ProgressStatus>(
+    "all",
+  );
+  const [selectedStudentId, setSelectedStudentId] = useState<
+    string | undefined
+  >();
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -373,12 +401,18 @@ export default function AcademicProgress() {
         studentRows
           .filter((row: any) => sameTenant(row))
           .filter((student) => student.status !== "withdrawn")
-          .sort((a, b) => cleanText(a.fullName).localeCompare(cleanText(b.fullName)))
+          .sort((a, b) =>
+            cleanText(a.fullName).localeCompare(cleanText(b.fullName)),
+          ),
       );
       setEnrollments(enrollmentRows.filter((row: any) => sameTenant(row)));
-      setStudentCurriculums(studentCurriculumRows.filter((row: any) => sameTenant(row)));
+      setStudentCurriculums(
+        studentCurriculumRows.filter((row: any) => sameTenant(row)),
+      );
       setClasses(classRows.filter((row: any) => sameTenant(row)));
-      setAcademicStructures(structureRows.filter((row: any) => sameTenant(row)));
+      setAcademicStructures(
+        structureRows.filter((row: any) => sameTenant(row)),
+      );
       setAcademicPeriods(periodRows.filter((row: any) => sameTenant(row)));
       setCurriculums(curriculumRows.filter((row: any) => sameTenant(row)));
       setPathways(pathwayRows.filter((row: any) => sameTenant(row)));
@@ -416,14 +450,29 @@ export default function AcademicProgress() {
   // LOOKUPS
   // ======================================================
 
-  const classMap = useMemo(() => new Map(classes.map((row) => [row.id, row])), [classes]);
-  const structureMap = useMemo(() => new Map(academicStructures.map((row) => [row.id, row])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(academicPeriods.map((row) => [row.id, row])), [academicPeriods]);
-  const curriculumMap = useMemo(() => new Map(curriculums.map((row) => [row.id, row])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((row) => [row.id, row])), [pathways]);
+  const classMap = useMemo(
+    () => new Map(classes.map((row) => [row.id, row])),
+    [classes],
+  );
+  const structureMap = useMemo(
+    () => new Map(academicStructures.map((row) => [row.id, row])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(academicPeriods.map((row) => [row.id, row])),
+    [academicPeriods],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((row) => [row.id, row])),
+    [curriculums],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((row) => [row.id, row])),
+    [pathways],
+  );
 
   const activeEnrollmentByStudent = useMemo(() => {
-    const map = new Map<number, StudentEnrollment>();
+    const map = new Map<string, StudentEnrollment>();
 
     [...enrollments]
       .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
@@ -436,7 +485,7 @@ export default function AcademicProgress() {
   }, [enrollments]);
 
   const activeCurriculumByStudent = useMemo(() => {
-    const map = new Map<number, StudentCurriculum>();
+    const map = new Map<string, StudentCurriculum>();
 
     [...studentCurriculums]
       .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
@@ -453,7 +502,7 @@ export default function AcademicProgress() {
 
     classSubjects.forEach((row) => {
       if (row.active === false) return;
-      const periodKey = row.academicPeriodId || 0;
+      const periodKey = cleanId(row.academicPeriodId);
       const key = `${row.classId}:${row.academicStructureId}:${periodKey}`;
       const list = map.get(key) || [];
       list.push(row);
@@ -464,7 +513,7 @@ export default function AcademicProgress() {
   }, [classSubjects]);
 
   const entriesByStudent = useMemo(() => {
-    const map = new Map<number, AssessmentEntry[]>();
+    const map = new Map<string, AssessmentEntry[]>();
     assessmentEntries.forEach((row) => {
       if (row.active === false) return;
       const list = map.get(row.studentId) || [];
@@ -475,7 +524,7 @@ export default function AcademicProgress() {
   }, [assessmentEntries]);
 
   const resultsByStudent = useMemo(() => {
-    const map = new Map<number, ComputedResult[]>();
+    const map = new Map<string, ComputedResult[]>();
     computedResults.forEach((row) => {
       const list = map.get(row.studentId) || [];
       list.push(row);
@@ -485,7 +534,7 @@ export default function AcademicProgress() {
   }, [computedResults]);
 
   const attendanceByStudent = useMemo(() => {
-    const map = new Map<number, Attendance[]>();
+    const map = new Map<string, Attendance[]>();
     attendance.forEach((row) => {
       const list = map.get(row.studentId) || [];
       list.push(row);
@@ -494,7 +543,9 @@ export default function AcademicProgress() {
     return map;
   }, [attendance]);
 
-  const statusTone = (status: ProgressStatus): "green" | "blue" | "orange" | "red" | "gray" => {
+  const statusTone = (
+    status: ProgressStatus,
+  ): "green" | "blue" | "orange" | "red" | "gray" => {
     if (status === "excellent") return "green";
     if (status === "good") return "blue";
     if (status === "watch") return "orange";
@@ -516,18 +567,28 @@ export default function AcademicProgress() {
 
   const progressRows = useMemo<StudentProgressView[]>(() => {
     return students.map((student) => {
-      const studentId = student.id || 0;
+      const studentId = cleanId(student.id);
       const enrollment = activeEnrollmentByStudent.get(studentId);
       const curriculumPlacement = activeCurriculumByStudent.get(studentId);
 
-      const classRow = enrollment?.classId ? classMap.get(enrollment.classId) : undefined;
-      const structure = enrollment?.academicStructureId ? structureMap.get(enrollment.academicStructureId) : undefined;
-      const period = enrollment?.academicPeriodId ? periodMap.get(enrollment.academicPeriodId) : undefined;
-      const curriculum = curriculumPlacement?.curriculumId ? curriculumMap.get(curriculumPlacement.curriculumId) : undefined;
-      const pathway = curriculumPlacement?.pathwayId ? pathwayMap.get(curriculumPlacement.pathwayId) : undefined;
+      const classRow = enrollment?.classId
+        ? classMap.get(enrollment.classId)
+        : undefined;
+      const structure = enrollment?.academicStructureId
+        ? structureMap.get(enrollment.academicStructureId)
+        : undefined;
+      const period = enrollment?.academicPeriodId
+        ? periodMap.get(enrollment.academicPeriodId)
+        : undefined;
+      const curriculum = curriculumPlacement?.curriculumId
+        ? curriculumMap.get(curriculumPlacement.curriculumId)
+        : undefined;
+      const pathway = curriculumPlacement?.pathwayId
+        ? pathwayMap.get(curriculumPlacement.pathwayId)
+        : undefined;
 
       const classPeriodKey = enrollment
-        ? `${enrollment.classId}:${enrollment.academicStructureId}:${enrollment.academicPeriodId || 0}`
+        ? `${enrollment.classId}:${enrollment.academicStructureId}:${cleanId(enrollment.academicPeriodId)}`
         : "";
 
       const deliverySubjects = enrollment
@@ -536,33 +597,42 @@ export default function AcademicProgress() {
             (row) =>
               row.classId === enrollment.classId &&
               row.academicStructureId === enrollment.academicStructureId &&
-              (row.academicPeriodId === enrollment.academicPeriodId || !row.academicPeriodId) &&
-              row.active !== false
+              (row.academicPeriodId === enrollment.academicPeriodId ||
+                !row.academicPeriodId) &&
+              row.active !== false,
           )
         : [];
 
-      const studentEntries = (entriesByStudent.get(studentId) || []).filter((row) => {
-        if (!enrollment) return true;
-        return (
-          row.classId === enrollment.classId &&
-          row.academicStructureId === enrollment.academicStructureId &&
-          row.academicPeriodId === enrollment.academicPeriodId
-        );
-      });
+      const studentEntries = (entriesByStudent.get(studentId) || []).filter(
+        (row) => {
+          if (!enrollment) return true;
+          return (
+            row.classId === enrollment.classId &&
+            row.academicStructureId === enrollment.academicStructureId &&
+            row.academicPeriodId === enrollment.academicPeriodId
+          );
+        },
+      );
 
-      const studentResults = (resultsByStudent.get(studentId) || []).filter((row) => {
-        if (!enrollment) return true;
-        return (
-          row.classId === enrollment.classId &&
-          row.academicStructureId === enrollment.academicStructureId &&
-          row.academicPeriodId === enrollment.academicPeriodId
-        );
-      });
+      const studentResults = (resultsByStudent.get(studentId) || []).filter(
+        (row) => {
+          if (!enrollment) return true;
+          return (
+            row.classId === enrollment.classId &&
+            row.academicStructureId === enrollment.academicStructureId &&
+            row.academicPeriodId === enrollment.academicPeriodId
+          );
+        },
+      );
 
-      const assessedSubjectIds = new Set(studentResults.map((row) => row.subjectId));
+      const assessedSubjectIds = new Set(
+        studentResults.map((row) => row.subjectId),
+      );
       studentEntries.forEach((row) => assessedSubjectIds.add(row.subjectId));
 
-      const studentAttendance = (attendanceByStudent.get(studentId) || []).filter((row) => {
+      const studentAttendance = (
+        attendanceByStudent.get(studentId) || []
+      ).filter((row) => {
         if (!enrollment) return true;
         return (
           row.classId === enrollment.classId &&
@@ -572,17 +642,35 @@ export default function AcademicProgress() {
       });
 
       const attendanceTotal = studentAttendance.length;
-      const attendancePresent = studentAttendance.filter((row) => row.status === "present").length;
-      const attendanceAbsent = studentAttendance.filter((row) => row.status === "absent").length;
-      const attendanceLate = studentAttendance.filter((row) => row.status === "late").length;
-      const attendanceRate = attendanceTotal ? Math.round((attendancePresent / attendanceTotal) * 100) : undefined;
+      const attendancePresent = studentAttendance.filter(
+        (row) => row.status === "present",
+      ).length;
+      const attendanceAbsent = studentAttendance.filter(
+        (row) => row.status === "absent",
+      ).length;
+      const attendanceLate = studentAttendance.filter(
+        (row) => row.status === "late",
+      ).length;
+      const attendanceRate = attendanceTotal
+        ? Math.round((attendancePresent / attendanceTotal) * 100)
+        : undefined;
 
       const resultPercentages = studentResults
-        .map((row) => Number((row as any).percentage ?? (row as any).average ?? (row as any).total ?? 0))
+        .map((row) =>
+          Number(
+            (row as any).percentage ??
+              (row as any).average ??
+              (row as any).total ??
+              0,
+          ),
+        )
         .filter((value) => !Number.isNaN(value));
 
       const averagePercentage = resultPercentages.length
-        ? Math.round(resultPercentages.reduce((sum, value) => sum + value, 0) / resultPercentages.length)
+        ? Math.round(
+            resultPercentages.reduce((sum, value) => sum + value, 0) /
+              resultPercentages.length,
+          )
         : undefined;
 
       const gpas = studentResults
@@ -590,7 +678,11 @@ export default function AcademicProgress() {
         .filter((value) => value !== undefined && value !== null) as number[];
 
       const averageGpa = gpas.length
-        ? Number((gpas.reduce((sum, value) => sum + Number(value), 0) / gpas.length).toFixed(2))
+        ? Number(
+            (
+              gpas.reduce((sum, value) => sum + Number(value), 0) / gpas.length
+            ).toFixed(2),
+          )
         : undefined;
 
       const positions = studentResults
@@ -598,15 +690,24 @@ export default function AcademicProgress() {
         .filter((value) => value !== undefined && value !== null) as number[];
 
       const averagePosition = positions.length
-        ? Math.round(positions.reduce((sum, value) => sum + Number(value), 0) / positions.length)
+        ? Math.round(
+            positions.reduce((sum, value) => sum + Number(value), 0) /
+              positions.length,
+          )
         : undefined;
 
       const subjectCount = deliverySubjects.length;
       const assessedSubjectCount = assessedSubjectIds.size;
-      const assessmentCompletion = subjectCount ? Math.round((assessedSubjectCount / subjectCount) * 100) : 0;
+      const assessmentCompletion = subjectCount
+        ? Math.round((assessedSubjectCount / subjectCount) * 100)
+        : 0;
       const performanceScore = averagePercentage ?? 0;
       const attendanceScore = attendanceRate ?? 0;
-      const progressScore = Math.round(performanceScore * 0.55 + assessmentCompletion * 0.3 + attendanceScore * 0.15);
+      const progressScore = Math.round(
+        performanceScore * 0.55 +
+          assessmentCompletion * 0.3 +
+          attendanceScore * 0.15,
+      );
 
       let status: ProgressStatus = "no_data";
       if (studentResults.length || studentEntries.length || attendanceTotal) {
@@ -619,12 +720,12 @@ export default function AcademicProgress() {
       const readinessLabel = !enrollment
         ? "No active enrollment"
         : !curriculumPlacement
-        ? "No active curriculum"
-        : subjectCount === 0
-        ? "No class subjects"
-        : assessedSubjectCount < subjectCount
-        ? "Assessment incomplete"
-        : "Progress ready";
+          ? "No active curriculum"
+          : subjectCount === 0
+            ? "No class subjects"
+            : assessedSubjectCount < subjectCount
+              ? "Assessment incomplete"
+              : "Progress ready";
 
       return {
         student,
@@ -639,7 +740,10 @@ export default function AcademicProgress() {
         assessedSubjectCount,
         assessmentEntryCount: studentEntries.length,
         computedResultCount: studentResults.length,
-        totalScore: studentResults.reduce((sum, row: any) => sum + Number(row.total || 0), 0),
+        totalScore: studentResults.reduce(
+          (sum, row: any) => sum + Number(row.total || 0),
+          0,
+        ),
         averagePercentage,
         averageGpa,
         averagePosition,
@@ -674,11 +778,25 @@ export default function AcademicProgress() {
 
     return progressRows
       .filter((item) => {
-        if (filterClassId && item.enrollment?.classId !== filterClassId) return false;
-        if (filterStructureId && item.enrollment?.academicStructureId !== filterStructureId) return false;
-        if (filterPeriodId && item.enrollment?.academicPeriodId !== filterPeriodId) return false;
-        if (filterCurriculumId && item.curriculumPlacement?.curriculumId !== filterCurriculumId) return false;
-        if (filterStatus !== "all" && item.status !== filterStatus) return false;
+        if (filterClassId && item.enrollment?.classId !== filterClassId)
+          return false;
+        if (
+          filterStructureId &&
+          item.enrollment?.academicStructureId !== filterStructureId
+        )
+          return false;
+        if (
+          filterPeriodId &&
+          item.enrollment?.academicPeriodId !== filterPeriodId
+        )
+          return false;
+        if (
+          filterCurriculumId &&
+          item.curriculumPlacement?.curriculumId !== filterCurriculumId
+        )
+          return false;
+        if (filterStatus !== "all" && item.status !== filterStatus)
+          return false;
 
         if (!query) return true;
 
@@ -692,28 +810,63 @@ export default function AcademicProgress() {
           ${item.pathwayName}
           ${item.status}
           ${item.readinessLabel}
-        `.toLowerCase().includes(query);
+        `
+          .toLowerCase()
+          .includes(query);
       })
-      .sort((a, b) => b.progressScore - a.progressScore || cleanText(a.student.fullName).localeCompare(cleanText(b.student.fullName)));
-  }, [progressRows, search, filterClassId, filterStructureId, filterPeriodId, filterCurriculumId, filterStatus]);
+      .sort(
+        (a, b) =>
+          b.progressScore - a.progressScore ||
+          cleanText(a.student.fullName).localeCompare(
+            cleanText(b.student.fullName),
+          ),
+      );
+  }, [
+    progressRows,
+    search,
+    filterClassId,
+    filterStructureId,
+    filterPeriodId,
+    filterCurriculumId,
+    filterStatus,
+  ]);
 
   const selectedProgress = useMemo(() => {
-    return progressRows.find((row) => row.student.id === selectedStudentId) || filteredRows[0];
+    return (
+      progressRows.find((row) => row.student.id === selectedStudentId) ||
+      filteredRows[0]
+    );
   }, [progressRows, filteredRows, selectedStudentId]);
 
   const summary = useMemo(() => {
-    const activeStudents = progressRows.filter((row) => !!row.enrollment).length;
-    const excellent = progressRows.filter((row) => row.status === "excellent").length;
+    const activeStudents = progressRows.filter(
+      (row) => !!row.enrollment,
+    ).length;
+    const excellent = progressRows.filter(
+      (row) => row.status === "excellent",
+    ).length;
     const risk = progressRows.filter((row) => row.status === "risk").length;
-    const noData = progressRows.filter((row) => row.status === "no_data").length;
+    const noData = progressRows.filter(
+      (row) => row.status === "no_data",
+    ).length;
 
     const progressAverage = progressRows.length
-      ? Math.round(progressRows.reduce((sum, row) => sum + row.progressScore, 0) / progressRows.length)
+      ? Math.round(
+          progressRows.reduce((sum, row) => sum + row.progressScore, 0) /
+            progressRows.length,
+        )
       : 0;
 
-    const attendanceRows = progressRows.filter((row) => row.attendanceRate !== undefined);
+    const attendanceRows = progressRows.filter(
+      (row) => row.attendanceRate !== undefined,
+    );
     const attendanceAverage = attendanceRows.length
-      ? Math.round(attendanceRows.reduce((sum, row) => sum + Number(row.attendanceRate || 0), 0) / attendanceRows.length)
+      ? Math.round(
+          attendanceRows.reduce(
+            (sum, row) => sum + Number(row.attendanceRate || 0),
+            0,
+          ) / attendanceRows.length,
+        )
       : 0;
 
     return {
@@ -736,7 +889,14 @@ export default function AcademicProgress() {
       filterStatus !== "all" ? filterStatus : undefined,
       viewMode !== "cards" ? viewMode : undefined,
     ].filter(Boolean).length;
-  }, [filterClassId, filterCurriculumId, filterPeriodId, filterStatus, filterStructureId, viewMode]);
+  }, [
+    filterClassId,
+    filterCurriculumId,
+    filterPeriodId,
+    filterStatus,
+    filterStructureId,
+    viewMode,
+  ]);
 
   const contextName = `${activeBranch?.name || "Selected branch"}${activeSchool?.name ? ` · ${activeSchool.name}` : ""}`;
 
@@ -745,21 +905,42 @@ export default function AcademicProgress() {
   // ======================================================
 
   if (accountLoading || contextLoading || settingsLoading || pageLoading) {
-    return <State primary={primary} title="Opening academic progress..." text="Checking account, workspace and student progress data." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening academic progress..."
+        text="Checking account, workspace and student progress data."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before viewing academic progress." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing academic progress."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ap-page" style={{ "--ap-primary": primary } as React.CSSProperties}>
+      <main
+        className="ap-page"
+        style={{ "--ap-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ap-state-card">
           <h2>Select a branch first</h2>
-          <p>Academic progress is calculated inside one active school branch.</p>
-          <button type="button" className="ap-primary-btn" onClick={() => router.push("/account")}>
+          <p>
+            Academic progress is calculated inside one active school branch.
+          </p>
+          <button
+            type="button"
+            className="ap-primary-btn"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -772,11 +953,16 @@ export default function AcademicProgress() {
   // ======================================================
 
   return (
-    <main className="ap-page" style={{ "--ap-primary": primary } as React.CSSProperties}>
+    <main
+      className="ap-page"
+      style={{ "--ap-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       <section className="ap-search-card">
-        <span className={`ap-status-dot ${summary.risk ? "orange" : summary.students ? "green" : "gray"}`} />
+        <span
+          className={`ap-status-dot ${summary.risk ? "orange" : summary.students ? "green" : "gray"}`}
+        />
 
         <label className="ap-search">
           <span>⌕</span>
@@ -787,7 +973,13 @@ export default function AcademicProgress() {
           />
         </label>
 
-        <button type="button" className="ap-add-inline" onClick={load} title="Refresh" aria-label="Refresh">
+        <button
+          type="button"
+          className="ap-add-inline"
+          onClick={load}
+          title="Refresh"
+          aria-label="Refresh"
+        >
           ↻
         </button>
 
@@ -802,28 +994,74 @@ export default function AcademicProgress() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ap-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ap-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ap-filter-chips">
-          {filterClassId && <button type="button" onClick={() => setFilterClassId(undefined)}>Class: {labelOf(classes, filterClassId)} ×</button>}
-          {filterStructureId && <button type="button" onClick={() => setFilterStructureId(undefined)}>Structure: {labelOf(academicStructures, filterStructureId)} ×</button>}
-          {filterPeriodId && <button type="button" onClick={() => setFilterPeriodId(undefined)}>Period: {labelOf(academicPeriods, filterPeriodId)} ×</button>}
-          {filterCurriculumId && <button type="button" onClick={() => setFilterCurriculumId(undefined)}>Curriculum: {labelOf(curriculums, filterCurriculumId)} ×</button>}
-          {filterStatus !== "all" && <button type="button" onClick={() => setFilterStatus("all")}>Status: {statusLabel(filterStatus)} ×</button>}
-          {viewMode !== "cards" && <button type="button" onClick={() => setViewMode("cards")}>View: {viewMode} ×</button>}
+          {filterClassId && (
+            <button type="button" onClick={() => setFilterClassId(undefined)}>
+              Class: {labelOf(classes, filterClassId)} ×
+            </button>
+          )}
+          {filterStructureId && (
+            <button
+              type="button"
+              onClick={() => setFilterStructureId(undefined)}
+            >
+              Structure: {labelOf(academicStructures, filterStructureId)} ×
+            </button>
+          )}
+          {filterPeriodId && (
+            <button type="button" onClick={() => setFilterPeriodId(undefined)}>
+              Period: {labelOf(academicPeriods, filterPeriodId)} ×
+            </button>
+          )}
+          {filterCurriculumId && (
+            <button
+              type="button"
+              onClick={() => setFilterCurriculumId(undefined)}
+            >
+              Curriculum: {labelOf(curriculums, filterCurriculumId)} ×
+            </button>
+          )}
+          {filterStatus !== "all" && (
+            <button type="button" onClick={() => setFilterStatus("all")}>
+              Status: {statusLabel(filterStatus)} ×
+            </button>
+          )}
+          {viewMode !== "cards" && (
+            <button type="button" onClick={() => setViewMode("cards")}>
+              View: {viewMode} ×
+            </button>
+          )}
         </section>
       )}
 
       <section className="ap-summary-line">
         <div>
-          <strong>{viewMode === "details" ? (selectedProgress ? 1 : 0) : filteredRows.length}</strong>
-          <span>{viewMode === "details" ? "student selected" : "students shown"}</span>
+          <strong>
+            {viewMode === "details"
+              ? selectedProgress
+                ? 1
+                : 0
+              : filteredRows.length}
+          </strong>
+          <span>
+            {viewMode === "details" ? "student selected" : "students shown"}
+          </span>
         </div>
-        <p>{contextName} · Avg {summary.progressAverage}% · Att {summary.attendanceAverage}%</p>
+        <p>
+          {contextName} · Avg {summary.progressAverage}% · Att{" "}
+          {summary.attendanceAverage}%
+        </p>
       </section>
 
       {viewMode === "analytics" && (
@@ -834,7 +1072,10 @@ export default function AcademicProgress() {
           <Metric label="At Risk" value={summary.risk} />
           <Metric label="No Data" value={summary.noData} />
           <Metric label="Avg Progress" value={`${summary.progressAverage}%`} />
-          <Metric label="Avg Attendance" value={`${summary.attendanceAverage}%`} />
+          <Metric
+            label="Avg Attendance"
+            value={`${summary.attendanceAverage}%`}
+          />
         </section>
       )}
 
@@ -857,19 +1098,26 @@ export default function AcademicProgress() {
 
                 <span className="ap-student-main">
                   <strong>{item.student.fullName}</strong>
-                  <small>{item.student.admissionNumber || "No admission no."} · {item.className}</small>
+                  <small>
+                    {item.student.admissionNumber || "No admission no."} ·{" "}
+                    {item.className}
+                  </small>
                   <em>{item.readinessLabel}</em>
                 </span>
 
                 <span className="ap-student-side">
                   <b>{item.progressScore}%</b>
-                  <Chip tone={statusTone(item.status)}>{statusLabel(item.status)}</Chip>
+                  <Chip tone={statusTone(item.status)}>
+                    {statusLabel(item.status)}
+                  </Chip>
                 </span>
               </button>
             );
           })}
 
-          {!filteredRows.length && <Empty text="No academic progress records match the current filters." />}
+          {!filteredRows.length && (
+            <Empty text="No academic progress records match the current filters." />
+          )}
         </section>
       )}
 
@@ -877,13 +1125,22 @@ export default function AcademicProgress() {
         <section className="ap-detail-panel">
           <div className="ap-detail-head">
             <div className="ap-detail-title-row">
-              <Avatar student={selectedProgress.student} primary={primary} large />
+              <Avatar
+                student={selectedProgress.student}
+                primary={primary}
+                large
+              />
               <div>
                 <h2>{selectedProgress.student.fullName}</h2>
-                <p>{selectedProgress.student.admissionNumber || "No admission number"}</p>
+                <p>
+                  {selectedProgress.student.admissionNumber ||
+                    "No admission number"}
+                </p>
               </div>
             </div>
-            <Chip tone={statusTone(selectedProgress.status)}>{statusLabel(selectedProgress.status)}</Chip>
+            <Chip tone={statusTone(selectedProgress.status)}>
+              {statusLabel(selectedProgress.status)}
+            </Chip>
           </div>
 
           <section className="ap-progress-card">
@@ -911,11 +1168,22 @@ export default function AcademicProgress() {
           <section className="ap-detail-card">
             <span>Assessment Progress</span>
             <div className="ap-chip-row">
-              <Chip tone="blue">Subjects {selectedProgress.assessedSubjectCount}/{selectedProgress.subjectCount}</Chip>
-              <Chip tone="gray">Entries {selectedProgress.assessmentEntryCount}</Chip>
-              <Chip tone="green">Computed {selectedProgress.computedResultCount}</Chip>
-              <Chip tone="purple">Average {selectedProgress.averagePercentage ?? "-"}%</Chip>
-              <Chip tone="orange">Position {selectedProgress.averagePosition ?? "-"}</Chip>
+              <Chip tone="blue">
+                Subjects {selectedProgress.assessedSubjectCount}/
+                {selectedProgress.subjectCount}
+              </Chip>
+              <Chip tone="gray">
+                Entries {selectedProgress.assessmentEntryCount}
+              </Chip>
+              <Chip tone="green">
+                Computed {selectedProgress.computedResultCount}
+              </Chip>
+              <Chip tone="purple">
+                Average {selectedProgress.averagePercentage ?? "-"}%
+              </Chip>
+              <Chip tone="orange">
+                Position {selectedProgress.averagePosition ?? "-"}
+              </Chip>
               <Chip tone="gray">GPA {selectedProgress.averageGpa ?? "-"}</Chip>
             </div>
           </section>
@@ -923,10 +1191,14 @@ export default function AcademicProgress() {
           <section className="ap-detail-card">
             <span>Attendance Strength</span>
             <div className="ap-chip-row">
-              <Chip tone="green">Present {selectedProgress.attendancePresent}</Chip>
+              <Chip tone="green">
+                Present {selectedProgress.attendancePresent}
+              </Chip>
               <Chip tone="red">Absent {selectedProgress.attendanceAbsent}</Chip>
               <Chip tone="orange">Late {selectedProgress.attendanceLate}</Chip>
-              <Chip tone="blue">Rate {selectedProgress.attendanceRate ?? "-"}%</Chip>
+              <Chip tone="blue">
+                Rate {selectedProgress.attendanceRate ?? "-"}%
+              </Chip>
               <Chip tone="gray">Total {selectedProgress.attendanceTotal}</Chip>
             </div>
           </section>
@@ -972,9 +1244,20 @@ export default function AcademicProgress() {
 // SMALL COMPONENTS
 // ======================================================
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ap-page" style={{ "--ap-primary": primary } as React.CSSProperties}>
+    <main
+      className="ap-page"
+      style={{ "--ap-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ap-state-card">
         <div className="ap-spinner" />
@@ -994,7 +1277,15 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function Avatar({ student, primary, large = false }: { student: Student; primary: string; large?: boolean }) {
+function Avatar({
+  student,
+  primary,
+  large = false,
+}: {
+  student: Student;
+  primary: string;
+  large?: boolean;
+}) {
   return (
     <div
       className={`ap-avatar ${large ? "large" : ""}`}
@@ -1004,12 +1295,19 @@ function Avatar({ student, primary, large = false }: { student: Student; primary
           : `linear-gradient(135deg, ${primary}, rgba(255,255,255,.2))`,
       }}
     >
-      {!(student as any).photo && cleanText(student.fullName).slice(0, 1).toUpperCase()}
+      {!(student as any).photo &&
+        cleanText(student.fullName).slice(0, 1).toUpperCase()}
     </div>
   );
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ap-chip ${tone}`}>{children}</span>;
 }
 
@@ -1079,14 +1377,14 @@ function FilterSheet({
   academicStructures: AcademicStructure[];
   academicPeriods: AcademicPeriod[];
   curriculums: Curriculum[];
-  filterClassId?: number;
-  setFilterClassId: (id?: number) => void;
-  filterStructureId?: number;
-  setFilterStructureId: (id?: number) => void;
-  filterPeriodId?: number;
-  setFilterPeriodId: (id?: number) => void;
-  filterCurriculumId?: number;
-  setFilterCurriculumId: (id?: number) => void;
+  filterClassId?: string;
+  setFilterClassId: (id?: string) => void;
+  filterStructureId?: string;
+  setFilterStructureId: (id?: string) => void;
+  filterPeriodId?: string;
+  setFilterPeriodId: (id?: string) => void;
+  filterCurriculumId?: string;
+  setFilterCurriculumId: (id?: string) => void;
   filterStatus: "all" | ProgressStatus;
   setFilterStatus: (status: "all" | ProgressStatus) => void;
   close: () => void;
@@ -1097,55 +1395,90 @@ function FilterSheet({
         <div className="ap-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose the academic progress scope. School and branch stay locked.</p>
+            <p>
+              Choose the academic progress scope. School and branch stay locked.
+            </p>
           </div>
-          <button type="button" onClick={close}>✕</button>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
         </div>
 
         <div className="ap-form">
           <label>
             <span>Class</span>
-            <select value={filterClassId || ""} onChange={(event) => setFilterClassId(cleanId(event.target.value) || undefined)}>
+            <select
+              value={filterClassId || ""}
+              onChange={(event) =>
+                setFilterClassId(event.target.value.trim() || undefined)
+              }
+            >
               <option value="">All classes</option>
               {classes.map((row) => (
-                <option key={row.id} value={row.id}>{row.name}</option>
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
               ))}
             </select>
           </label>
 
           <label>
             <span>Academic Structure</span>
-            <select value={filterStructureId || ""} onChange={(event) => setFilterStructureId(cleanId(event.target.value) || undefined)}>
+            <select
+              value={filterStructureId || ""}
+              onChange={(event) =>
+                setFilterStructureId(event.target.value.trim() || undefined)
+              }
+            >
               <option value="">All structures</option>
               {academicStructures.map((row: any) => (
-                <option key={row.id} value={row.id}>{row.name} {row.level ? `· ${row.level}` : ""}</option>
+                <option key={row.id} value={row.id}>
+                  {row.name} {row.level ? `· ${row.level}` : ""}
+                </option>
               ))}
             </select>
           </label>
 
           <label>
             <span>Academic Period</span>
-            <select value={filterPeriodId || ""} onChange={(event) => setFilterPeriodId(cleanId(event.target.value) || undefined)}>
+            <select
+              value={filterPeriodId || ""}
+              onChange={(event) =>
+                setFilterPeriodId(event.target.value.trim() || undefined)
+              }
+            >
               <option value="">All periods</option>
               {academicPeriods.map((row) => (
-                <option key={row.id} value={row.id}>{row.name}</option>
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
               ))}
             </select>
           </label>
 
           <label>
             <span>Curriculum</span>
-            <select value={filterCurriculumId || ""} onChange={(event) => setFilterCurriculumId(cleanId(event.target.value) || undefined)}>
+            <select
+              value={filterCurriculumId || ""}
+              onChange={(event) =>
+                setFilterCurriculumId(event.target.value.trim() || undefined)
+              }
+            >
               <option value="">All curriculums</option>
               {curriculums.map((row) => (
-                <option key={row.id} value={row.id}>{row.name}</option>
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
               ))}
             </select>
           </label>
 
           <label>
             <span>Status</span>
-            <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as any)}>
+            <select
+              value={filterStatus}
+              onChange={(event) => setFilterStatus(event.target.value as any)}
+            >
               <option value="all">All progress status</option>
               <option value="excellent">Excellent</option>
               <option value="good">Good</option>
@@ -1169,7 +1502,9 @@ function FilterSheet({
           >
             Clear
           </button>
-          <button type="button" className="primary" onClick={close}>Apply</button>
+          <button type="button" className="primary" onClick={close}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
@@ -1195,21 +1530,49 @@ function MoreSheet({
             <h2>More</h2>
             <p>Academic progress views and refresh.</p>
           </div>
-          <button type="button" onClick={close}>✕</button>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
         </div>
 
         <div className="ap-menu-list">
-          <button className={viewMode === "cards" ? "active" : ""} onClick={() => { setViewMode("cards"); close(); }}>
-            <span>☰</span><b>Students</b><small>Compact student progress list</small>
+          <button
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => {
+              setViewMode("cards");
+              close();
+            }}
+          >
+            <span>☰</span>
+            <b>Students</b>
+            <small>Compact student progress list</small>
           </button>
-          <button className={viewMode === "details" ? "active" : ""} onClick={() => { setViewMode("details"); close(); }}>
-            <span>👤</span><b>Details</b><small>Selected student deep view</small>
+          <button
+            className={viewMode === "details" ? "active" : ""}
+            onClick={() => {
+              setViewMode("details");
+              close();
+            }}
+          >
+            <span>👤</span>
+            <b>Details</b>
+            <small>Selected student deep view</small>
           </button>
-          <button className={viewMode === "analytics" ? "active" : ""} onClick={() => { setViewMode("analytics"); close(); }}>
-            <span>◔</span><b>Analytics</b><small>Progress summary metrics</small>
+          <button
+            className={viewMode === "analytics" ? "active" : ""}
+            onClick={() => {
+              setViewMode("analytics");
+              close();
+            }}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Progress summary metrics</small>
           </button>
           <button onClick={refresh}>
-            <span>↻</span><b>Refresh</b><small>Reload progress data</small>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload progress data</small>
           </button>
         </div>
       </section>

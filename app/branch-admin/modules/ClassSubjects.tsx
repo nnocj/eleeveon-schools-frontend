@@ -45,7 +45,12 @@ import {
   type Teacher,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 import {
   softDeleteOwnerFieldAssets,
   attachCameraStreamToVideo,
@@ -62,9 +67,6 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -79,8 +81,8 @@ type CameraField = "photo" | "bannerImage";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -92,11 +94,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -107,7 +109,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -132,13 +136,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -149,16 +153,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -170,9 +178,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -180,10 +192,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 type SettingsLike = {
   currentAcademicStructureId?: unknown;
@@ -197,9 +208,7 @@ function readOptionalPositiveId(value: unknown): number | undefined {
 
   const parsed = Number(value);
 
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : undefined;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function readClassSubjectSettings(value: unknown): SettingsLike | undefined {
@@ -215,9 +224,8 @@ function readClassSubjectSettings(value: unknown): SettingsLike | undefined {
   };
 }
 
-
 type FormState = {
-  id?: number;
+  id?: string;
   classId: string;
   subjectId: string;
   curriculumSubjectId: string;
@@ -232,15 +240,15 @@ type FormState = {
   compulsory: boolean;
   elective: boolean;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
   locked: boolean;
 };
 
 type ClassSubjectView = {
-  id: number;
+  id: string;
   row: ClassSubject;
   photoUrl?: string;
   bannerImageUrl?: string;
@@ -259,7 +267,7 @@ type ClassSubjectView = {
 };
 
 type ClassSubjectClassView = {
-  id: number;
+  id: string;
   row: Class;
   name: string;
   code: string;
@@ -273,14 +281,16 @@ type ClassSubjectClassView = {
   updatedAt?: number | string | null;
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const CLASS_SUBJECT_MEDIA_OWNER_TABLE = "classSubjects";
@@ -327,7 +337,8 @@ const makeEmptyForm = (settings?: unknown): FormState => {
 
 const isActiveRow = (row: any) => !row?.isDeleted && row?.active !== false;
 
-const mediaKey = (classSubjectId: number, field: CameraField) => `${CLASS_SUBJECT_MEDIA_OWNER_TABLE}:${classSubjectId}:${field}`;
+const mediaKey = (classSubjectId: string, field: CameraField) =>
+  `${CLASS_SUBJECT_MEDIA_OWNER_TABLE}:${classSubjectId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "");
@@ -342,14 +353,18 @@ const typeLabel = (value?: string) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-function typeTone(value?: string): "green" | "blue" | "purple" | "orange" | "gray" {
+function typeTone(
+  value?: string,
+): "green" | "blue" | "purple" | "orange" | "gray" {
   if (value === "elective") return "blue";
   if (value === "optional") return "orange";
   if (value === "core") return "green";
   return "gray";
 }
 
-function statusTone(item: ClassSubjectView): "green" | "red" | "orange" | "gray" {
+function statusTone(
+  item: ClassSubjectView,
+): "green" | "red" | "orange" | "gray" {
   if (item.locked) return "orange";
   return item.active ? "green" : "red";
 }
@@ -359,28 +374,61 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
 };
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
-      style={{ background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))` }}
+      style={{
+        background: photo
+          ? `url(${photo}) center/cover`
+          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+      }}
     >
-      {!photo && String(name || "CS").slice(0, 2).toUpperCase()}
+      {!photo &&
+        String(name || "CS")
+          .slice(0, 2)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -391,7 +439,19 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function ClassSubjectsPage() {
-  const dataRevision = useBranchTableRevision(["classSubjects", "classes", "subjects", "teachers", "academicStructures", "academicPeriods", "curriculumSubjects", "assessmentApplicabilities", "assessmentEntries", "mediaAssets", "mediaBlobs"]);
+  const dataRevision = useBranchTableRevision([
+    "classSubjects",
+    "classes",
+    "subjects",
+    "teachers",
+    "academicStructures",
+    "academicPeriods",
+    "curriculumSubjects",
+    "assessmentApplicabilities",
+    "assessmentEntries",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -424,12 +484,20 @@ export default function ClassSubjectsPage() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
-  const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
   const [entries, setEntries] = useState<AssessmentEntry[]>([]);
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
@@ -443,18 +511,26 @@ export default function ClassSubjectsPage() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<ClassSubjectView | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ClassSubjectView | null>(
+    null,
+  );
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(() => makeEmptyForm(settings));
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE));
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE),
+  );
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("photo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
 
@@ -462,7 +538,15 @@ export default function ClassSubjectsPage() {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -472,7 +556,11 @@ export default function ClassSubjectsPage() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const stopCurrentCamera = () => {
@@ -495,7 +583,9 @@ export default function ClassSubjectsPage() {
     setMediaPreviewUrls({});
   };
 
-  const resolveClassSubjectMediaUrls = async (classSubjectRows: ClassSubject[]) => {
+  const resolveClassSubjectMediaUrls = async (
+    classSubjectRows: ClassSubject[],
+  ) => {
     const next: Record<string, string> = {};
 
     await Promise.all(
@@ -503,24 +593,28 @@ export default function ClassSubjectsPage() {
         const classSubjectId = idOf(classSubject.id);
         if (!classSubjectId) return;
 
-        const resolveOwnedAssetUrl = async (fieldKey: string, fallbackMediaId?: number | string | null) => {
+        const resolveOwnedAssetUrl = async (
+          fieldKey: string,
+          fallbackMediaId?: string | string | null,
+        ) => {
           const ownedAsset = await getOwnerFieldMediaAsset({
             accountId: accountId || undefined,
             ownerTable: CLASS_SUBJECT_MEDIA_OWNER_TABLE,
-            ownerLocalId: classSubjectId,
-            ownerCloudId: classSubject.cloudId || undefined,
+            ownerId: classSubjectId,
+
             fieldKey,
           });
 
           if (ownedAsset?.id) {
-            const url = await getMediaObjectUrl(Number(ownedAsset.id));
+            const url = await getMediaObjectUrl(String(ownedAsset.id));
             if (url) return url;
           }
 
           const fallbackId = idOf(fallbackMediaId);
           if (!fallbackId) return "";
 
-          const fallbackAsset = await tableSafe("mediaAssets")?.get?.(fallbackId);
+          const fallbackAsset =
+            await tableSafe("mediaAssets")?.get?.(fallbackId);
           const belongsToThisRecord =
             fallbackAsset &&
             !fallbackAsset.isDeleted &&
@@ -528,27 +622,39 @@ export default function ClassSubjectsPage() {
             fallbackAsset.accountId === accountId &&
             fallbackAsset.ownerTable === CLASS_SUBJECT_MEDIA_OWNER_TABLE &&
             fallbackAsset.fieldKey === fieldKey &&
-            sameId(fallbackAsset.ownerLocalId, classSubjectId);
+            sameId(fallbackAsset.ownerId, classSubjectId);
 
           if (!belongsToThisRecord) return "";
           return getMediaObjectUrl(fallbackId);
         };
 
         try {
-          const photoUrl = await resolveOwnedAssetUrl(MediaFieldKeys.PHOTO, classSubject.photoMediaId);
+          const photoUrl = await resolveOwnedAssetUrl(
+            MediaFieldKeys.PHOTO,
+            classSubject.photoMediaId,
+          );
           if (photoUrl) next[mediaKey(classSubjectId, "photo")] = photoUrl;
 
-          const bannerUrl = await resolveOwnedAssetUrl(CLASS_SUBJECT_BANNER_FIELD_KEY, classSubject.bannerImageMediaId);
-          if (bannerUrl) next[mediaKey(classSubjectId, "bannerImage")] = bannerUrl;
+          const bannerUrl = await resolveOwnedAssetUrl(
+            CLASS_SUBJECT_BANNER_FIELD_KEY,
+            classSubject.bannerImageMediaId,
+          );
+          if (bannerUrl)
+            next[mediaKey(classSubjectId, "bannerImage")] = bannerUrl;
         } catch (error) {
-          console.error("Failed to resolve class subject media:", classSubjectId, error);
+          console.error(
+            "Failed to resolve class subject media:",
+            classSubjectId,
+            error,
+          );
         }
-      })
+      }),
     );
 
     setMediaPreviewUrls((current) => {
       Object.values(current).forEach((url) => {
-        if (!(Object.values(next) as string[]).includes(url as string)) revokeMediaObjectUrl(url as string);
+        if (!(Object.values(next) as string[]).includes(url as string))
+          revokeMediaObjectUrl(url as string);
       });
       return next;
     });
@@ -563,57 +669,114 @@ export default function ClassSubjectsPage() {
 
     try {
       setLoading(true);
-      const [classRows, subjectRows, teacherRows, structureRows, periodRows, curriculumRows, classSubjectRows, applicabilityRows, entryRows] =
-        await Promise.all([
-          listActiveLocal("classes", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          listActiveLocal("subjects", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          listActiveLocal("teachers", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          listActiveLocal("academicStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          listActiveLocal("academicPeriods", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          listActiveLocal("curriculumSubjects", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-          tableSafe("classSubjects")?.toArray?.() || [],
-          tableSafe("assessmentApplicabilities")?.toArray?.() || [],
-          tableSafe("assessmentEntries")?.toArray?.() || [],
-        ]);
+      const [
+        classRows,
+        subjectRows,
+        teacherRows,
+        structureRows,
+        periodRows,
+        curriculumRows,
+        classSubjectRows,
+        applicabilityRows,
+        entryRows,
+      ] = await Promise.all([
+        listActiveLocal("classes", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("subjects", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("teachers", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("academicStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("academicPeriods", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("curriculumSubjects", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        tableSafe("classSubjects")?.toArray?.() || [],
+        tableSafe("assessmentApplicabilities")?.toArray?.() || [],
+        tableSafe("assessmentEntries")?.toArray?.() || [],
+      ]);
 
       const scopedClassSubjects = (classSubjectRows as ClassSubject[])
         .filter((r) => sameTenant(r as TenantRow))
-        .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+        .sort(
+          (a: any, b: any) =>
+            Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
+        );
 
       setClasses(
         (classRows as Class[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
       setSubjects(
         (subjectRows as Subject[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
       setTeachers(
         (teacherRows as Teacher[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")))
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
       setAcademicStructures(
         (structureRows as AcademicStructure[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
       );
       setAcademicPeriods(
         (periodRows as AcademicPeriod[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0))
+          .sort(
+            (a: any, b: any) => Number(a.order || 0) - Number(b.order || 0),
+          ),
       );
       setCurriculumSubjects(
         (curriculumRows as CurriculumSubject[])
           .filter((r) => sameTenant(r as TenantRow) && isActiveRow(r))
-          .sort((a: any, b: any) => Number(a.orderIndex || 0) - Number(b.orderIndex || 0))
+          .sort(
+            (a: any, b: any) =>
+              Number(a.orderIndex || 0) - Number(b.orderIndex || 0),
+          ),
       );
       setRows(scopedClassSubjects);
       await resolveClassSubjectMediaUrls(scopedClassSubjects);
-      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter((r) => sameTenant(r as TenantRow)));
-      setEntries((entryRows as AssessmentEntry[]).filter((r) => sameTenant(r as TenantRow)));
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load class subjects:", error);
       clearData();
@@ -627,7 +790,14 @@ export default function ClassSubjectsPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
@@ -649,7 +819,11 @@ export default function ClassSubjectsPage() {
         setCameraStarting(true);
         stopCurrentCamera();
 
-        const stream = await openCameraStream({ facingMode: cameraFacing, width: 1280, height: 720 });
+        const stream = await openCameraStream({
+          facingMode: cameraFacing,
+          width: 1280,
+          height: 720,
+        });
 
         if (cancelled) {
           stopCameraStream(stream);
@@ -679,35 +853,61 @@ export default function ClassSubjectsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOpen, cameraFacing]);
 
-  const classMap = useMemo(() => new Map(classes.map((r: any) => [idOf(r.id), r])), [classes]);
-  const subjectMap = useMemo(() => new Map(subjects.map((r: any) => [idOf(r.id), r])), [subjects]);
-  const teacherMap = useMemo(() => new Map(teachers.map((r: any) => [idOf(r.id), r])), [teachers]);
-  const structureMap = useMemo(() => new Map(academicStructures.map((r: any) => [idOf(r.id), r])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(academicPeriods.map((r: any) => [idOf(r.id), r])), [academicPeriods]);
-  const curriculumMap = useMemo(() => new Map(curriculumSubjects.map((r: any) => [idOf(r.id), r])), [curriculumSubjects]);
+  const classMap = useMemo(
+    () => new Map(classes.map((r: any) => [idOf(r.id), r])),
+    [classes],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((r: any) => [idOf(r.id), r])),
+    [subjects],
+  );
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((r: any) => [idOf(r.id), r])),
+    [teachers],
+  );
+  const structureMap = useMemo(
+    () => new Map(academicStructures.map((r: any) => [idOf(r.id), r])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(academicPeriods.map((r: any) => [idOf(r.id), r])),
+    [academicPeriods],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculumSubjects.map((r: any) => [idOf(r.id), r])),
+    [curriculumSubjects],
+  );
 
   const availablePeriods = useMemo(() => {
-    return academicPeriods.filter((period: any) => !form.academicStructureId || sameId(period.academicStructureId, form.academicStructureId));
+    return academicPeriods.filter(
+      (period: any) =>
+        !form.academicStructureId ||
+        sameId(period.academicStructureId, form.academicStructureId),
+    );
   }, [academicPeriods, form.academicStructureId]);
 
   const availableCurriculumSubjects = useMemo(() => {
-    return curriculumSubjects.filter((row: any) => !form.subjectId || sameId(row.subjectId, form.subjectId));
+    return curriculumSubjects.filter(
+      (row: any) => !form.subjectId || sameId(row.subjectId, form.subjectId),
+    );
   }, [curriculumSubjects, form.subjectId]);
 
   const applicabilityCounts = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     applicabilities.forEach((row: any) => {
       const classSubjectId = idOf(row.classSubjectId);
-      if (classSubjectId) map.set(classSubjectId, (map.get(classSubjectId) || 0) + 1);
+      if (classSubjectId)
+        map.set(classSubjectId, (map.get(classSubjectId) || 0) + 1);
     });
     return map;
   }, [applicabilities]);
 
   const entryCounts = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     entries.forEach((row: any) => {
       const classSubjectId = idOf(row.classSubjectId);
-      if (classSubjectId) map.set(classSubjectId, (map.get(classSubjectId) || 0) + 1);
+      if (classSubjectId)
+        map.set(classSubjectId, (map.get(classSubjectId) || 0) + 1);
     });
     return map;
   }, [entries]);
@@ -718,17 +918,31 @@ export default function ClassSubjectsPage() {
         const id = idOf(row.id);
         const classData: any = classMap.get(idOf(row.classId));
         const subject: any = subjectMap.get(idOf(row.subjectId));
-        const teacher: any = row.teacherId ? teacherMap.get(idOf(row.teacherId)) : undefined;
+        const teacher: any = row.teacherId
+          ? teacherMap.get(idOf(row.teacherId))
+          : undefined;
         const structure: any = structureMap.get(idOf(row.academicStructureId));
-        const period: any = row.academicPeriodId ? periodMap.get(idOf(row.academicPeriodId)) : undefined;
-        const curriculum: any = row.curriculumSubjectId ? curriculumMap.get(idOf(row.curriculumSubjectId)) : undefined;
-        const curriculumSubject: any = curriculum?.subjectId ? subjectMap.get(idOf(curriculum.subjectId)) : undefined;
+        const period: any = row.academicPeriodId
+          ? periodMap.get(idOf(row.academicPeriodId))
+          : undefined;
+        const curriculum: any = row.curriculumSubjectId
+          ? curriculumMap.get(idOf(row.curriculumSubjectId))
+          : undefined;
+        const curriculumSubject: any = curriculum?.subjectId
+          ? subjectMap.get(idOf(curriculum.subjectId))
+          : undefined;
 
         return {
           id,
           row,
-          photoUrl: resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-          bannerImageUrl: resolvedMediaById[id]?.bannerImage || mediaPreviewUrls[mediaKey(id, "bannerImage")] || safeRecordMediaValue(row.bannerImage),
+          photoUrl:
+            resolvedMediaById[id]?.photo ||
+            mediaPreviewUrls[mediaKey(id, "photo")] ||
+            safeRecordMediaValue(row.photo),
+          bannerImageUrl:
+            resolvedMediaById[id]?.bannerImage ||
+            mediaPreviewUrls[mediaKey(id, "bannerImage")] ||
+            safeRecordMediaValue(row.bannerImage),
           className: classData?.name || "Unknown Class",
           subjectName: row.name || subject?.name || "Unknown Subject",
           subjectCode: row.code || subject?.code || "",
@@ -736,21 +950,38 @@ export default function ClassSubjectsPage() {
           teacherPhoto: teacher?.photo,
           structureName: structure?.name || "Unknown Structure",
           periodName: period?.name || "All Periods",
-          curriculumLabel: curriculumSubject?.name || (curriculum ? `Curriculum Subject #${curriculum.id}` : "No curriculum link"),
+          curriculumLabel:
+            curriculumSubject?.name ||
+            (curriculum
+              ? `Curriculum Subject #${curriculum.id}`
+              : "No curriculum link"),
           applicabilityCount: applicabilityCounts.get(id) || 0,
           entryCount: entryCounts.get(id) || 0,
           active: isActiveRow(row),
           locked: !!row.locked,
         };
       }),
-    [applicabilityCounts, classMap, curriculumMap, entryCounts, mediaPreviewUrls, periodMap, rows, structureMap, subjectMap, teacherMap]
+    [
+      applicabilityCounts,
+      classMap,
+      curriculumMap,
+      entryCounts,
+      mediaPreviewUrls,
+      periodMap,
+      rows,
+      structureMap,
+      subjectMap,
+      teacherMap,
+    ],
   );
 
   const classListRows = useMemo<ClassSubjectClassView[]>(() => {
     return classes
       .map((classRow: any) => {
         const classId = idOf(classRow.id);
-        const subjectsForClass = viewRows.filter((item) => sameId((item.row as any).classId, classId));
+        const subjectsForClass = viewRows.filter((item) =>
+          sameId((item.row as any).classId, classId),
+        );
 
         return {
           id: classId,
@@ -759,11 +990,20 @@ export default function ClassSubjectsPage() {
           code: classRow.code || "",
           level: classRow.level || "",
           subjectCount: subjectsForClass.length,
-          activeSubjectCount: subjectsForClass.filter((item) => item.active).length,
-          unassignedCount: subjectsForClass.filter((item) => !(item.row as any).teacherId).length,
+          activeSubjectCount: subjectsForClass.filter((item) => item.active)
+            .length,
+          unassignedCount: subjectsForClass.filter(
+            (item) => !(item.row as any).teacherId,
+          ).length,
           lockedCount: subjectsForClass.filter((item) => item.locked).length,
-          rulesCount: subjectsForClass.reduce((sum, item) => sum + item.applicabilityCount, 0),
-          entriesCount: subjectsForClass.reduce((sum, item) => sum + item.entryCount, 0),
+          rulesCount: subjectsForClass.reduce(
+            (sum, item) => sum + item.applicabilityCount,
+            0,
+          ),
+          entriesCount: subjectsForClass.reduce(
+            (sum, item) => sum + item.entryCount,
+            0,
+          ),
           updatedAt: classRow.updatedAt || classRow.createdAt,
         };
       })
@@ -772,7 +1012,9 @@ export default function ClassSubjectsPage() {
 
   const selectedClass = useMemo(() => {
     if (!selectedClassId) return null;
-    return classListRows.find((item) => sameId(item.id, selectedClassId)) || null;
+    return (
+      classListRows.find((item) => sameId(item.id, selectedClassId)) || null
+    );
   }, [classListRows, selectedClassId]);
 
   const filteredRows = useMemo(() => {
@@ -780,11 +1022,25 @@ export default function ClassSubjectsPage() {
     return viewRows
       .filter((item) => {
         const row: any = item.row;
-        if (selectedClassId && !sameId(row.classId, selectedClassId)) return false;
-        if (filterClassId !== "all" && !sameId(row.classId, filterClassId)) return false;
-        if (filterStructureId !== "all" && !sameId(row.academicStructureId, filterStructureId)) return false;
-        if (filterPeriodId !== "all" && !sameId(row.academicPeriodId, filterPeriodId)) return false;
-        if (filterTeacherId !== "all" && !sameId(row.teacherId, filterTeacherId)) return false;
+        if (selectedClassId && !sameId(row.classId, selectedClassId))
+          return false;
+        if (filterClassId !== "all" && !sameId(row.classId, filterClassId))
+          return false;
+        if (
+          filterStructureId !== "all" &&
+          !sameId(row.academicStructureId, filterStructureId)
+        )
+          return false;
+        if (
+          filterPeriodId !== "all" &&
+          !sameId(row.academicPeriodId, filterPeriodId)
+        )
+          return false;
+        if (
+          filterTeacherId !== "all" &&
+          !sameId(row.teacherId, filterTeacherId)
+        )
+          return false;
         if (filterType !== "all" && row.type !== filterType) return false;
         if (filterStatus === "active" && !item.active) return false;
         if (filterStatus === "inactive" && item.active) return false;
@@ -795,8 +1051,22 @@ export default function ClassSubjectsPage() {
           .toLowerCase()
           .includes(query);
       })
-      .sort((a, b) => a.className.localeCompare(b.className) || a.subjectName.localeCompare(b.subjectName));
-  }, [filterClassId, filterPeriodId, filterStatus, filterStructureId, filterTeacherId, filterType, search, selectedClassId, viewRows]);
+      .sort(
+        (a, b) =>
+          a.className.localeCompare(b.className) ||
+          a.subjectName.localeCompare(b.subjectName),
+      );
+  }, [
+    filterClassId,
+    filterPeriodId,
+    filterStatus,
+    filterStructureId,
+    filterTeacherId,
+    filterType,
+    search,
+    selectedClassId,
+    viewRows,
+  ]);
 
   const summary = useMemo(
     () => ({
@@ -804,44 +1074,88 @@ export default function ClassSubjectsPage() {
       active: viewRows.filter((row) => row.active).length,
       inactive: viewRows.filter((row) => !row.active).length,
       locked: viewRows.filter((row) => row.locked).length,
-      teachersAssigned: viewRows.filter((row) => !!(row.row as any).teacherId).length,
+      teachersAssigned: viewRows.filter((row) => !!(row.row as any).teacherId)
+        .length,
       unassigned: viewRows.filter((row) => !(row.row as any).teacherId).length,
-      withApplicability: viewRows.filter((row) => row.applicabilityCount > 0).length,
+      withApplicability: viewRows.filter((row) => row.applicabilityCount > 0)
+        .length,
       withEntries: viewRows.filter((row) => row.entryCount > 0).length,
       showing: filteredRows.length,
     }),
-    [filteredRows.length, rows.length, viewRows]
+    [filteredRows.length, rows.length, viewRows],
   );
 
   const activeFilterCount = useMemo(() => {
-    return [filterClassId, filterStructureId, filterPeriodId, filterTeacherId, filterType, filterStatus].filter((value) => value !== "all").length;
-  }, [filterClassId, filterPeriodId, filterStatus, filterStructureId, filterTeacherId, filterType]);
+    return [
+      filterClassId,
+      filterStructureId,
+      filterPeriodId,
+      filterTeacherId,
+      filterType,
+      filterStatus,
+    ].filter((value) => value !== "all").length;
+  }, [
+    filterClassId,
+    filterPeriodId,
+    filterStatus,
+    filterStructureId,
+    filterTeacherId,
+    filterType,
+  ]);
 
   const filteredClassListRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query || selectedClassId) return classListRows;
 
     return classListRows.filter((item) =>
-      `${item.name} ${item.code} ${item.level} ${item.subjectCount}`.toLowerCase().includes(query)
+      `${item.name} ${item.code} ${item.level} ${item.subjectCount}`
+        .toLowerCase()
+        .includes(query),
     );
   }, [classListRows, search, selectedClassId]);
 
-  const countsByClass = useMemo(() => groupedCounts(viewRows, (item) => item.className), [viewRows]);
-  const countsByType = useMemo(() => groupedCounts(viewRows, (item) => typeLabel((item.row as any).type)), [viewRows]);
-  const countsByStructure = useMemo(() => groupedCounts(viewRows, (item) => item.structureName), [viewRows]);
-  const countsByTeacher = useMemo(() => groupedCounts(viewRows, (item) => item.teacherName), [viewRows]);
+  const countsByClass = useMemo(
+    () => groupedCounts(viewRows, (item) => item.className),
+    [viewRows],
+  );
+  const countsByType = useMemo(
+    () => groupedCounts(viewRows, (item) => typeLabel((item.row as any).type)),
+    [viewRows],
+  );
+  const countsByStructure = useMemo(
+    () => groupedCounts(viewRows, (item) => item.structureName),
+    [viewRows],
+  );
+  const countsByTeacher = useMemo(
+    () => groupedCounts(viewRows, (item) => item.teacherName),
+    [viewRows],
+  );
 
   useEffect(() => {
     if (!form.curriculumSubjectId) return;
-    const curriculumSubject: any = curriculumMap.get(idOf(form.curriculumSubjectId));
+    const curriculumSubject: any = curriculumMap.get(
+      idOf(form.curriculumSubjectId),
+    );
     if (!curriculumSubject) return;
     setForm((current) => {
-      const inferredType = (current.type || curriculumSubject.type || "core") as CurriculumSubjectType;
+      const inferredType = (current.type ||
+        curriculumSubject.type ||
+        "core") as CurriculumSubjectType;
       return {
         ...current,
-        subjectId: curriculumSubject.subjectId ? String(curriculumSubject.subjectId) : current.subjectId,
-        credits: current.credits || (curriculumSubject.credits == null ? "" : String(curriculumSubject.credits)),
-        contactHours: current.contactHours || (curriculumSubject.contactHours == null ? "" : String(curriculumSubject.contactHours)),
+        subjectId: curriculumSubject.subjectId
+          ? String(curriculumSubject.subjectId)
+          : current.subjectId,
+        credits:
+          current.credits ||
+          (curriculumSubject.credits == null
+            ? ""
+            : String(curriculumSubject.credits)),
+        contactHours:
+          current.contactHours ||
+          (curriculumSubject.contactHours == null
+            ? ""
+            : String(curriculumSubject.contactHours)),
         type: inferredType,
         compulsory: inferredType !== "elective",
         elective: inferredType === "elective",
@@ -849,7 +1163,8 @@ export default function ClassSubjectsPage() {
     });
   }, [curriculumMap, form.curriculumSubjectId]);
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const handleImageUpload = async (field: CameraField, file?: File) => {
     if (!file) return;
@@ -863,12 +1178,15 @@ export default function ClassSubjectsPage() {
       const ownerTempKey = form.id ? undefined : mediaSessionKeyRef.current;
       const result = await saveImageAsset(file, {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: CLASS_SUBJECT_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey,
-        fieldKey: field === "photo" ? MediaFieldKeys.PHOTO : CLASS_SUBJECT_BANNER_FIELD_KEY,
+        fieldKey:
+          field === "photo"
+            ? MediaFieldKeys.PHOTO
+            : CLASS_SUBJECT_BANNER_FIELD_KEY,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
       });
@@ -878,7 +1196,12 @@ export default function ClassSubjectsPage() {
         [`${field}MediaId`]: result.assetId,
       } as Partial<FormState>);
 
-      showToast("success", field === "photo" ? "Class subject photo optimized." : "Class subject banner optimized.");
+      showToast(
+        "success",
+        field === "photo"
+          ? "Class subject photo optimized."
+          : "Class subject banner optimized.",
+      );
     } catch (error: any) {
       console.error("Failed to process class subject image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -949,7 +1272,9 @@ export default function ClassSubjectsPage() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
-    mediaSessionKeyRef.current = createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE);
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      CLASS_SUBJECT_MEDIA_OWNER_TABLE,
+    );
     setSelectedItem(null);
     setForm({
       ...makeEmptyForm(settings),
@@ -960,15 +1285,24 @@ export default function ClassSubjectsPage() {
 
   const openEdit = (row: ClassSubject) => {
     const item: any = row;
-    mediaSessionKeyRef.current = createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE, idOf(item.id) || "existing");
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      CLASS_SUBJECT_MEDIA_OWNER_TABLE,
+      idOf(item.id) || "existing",
+    );
     setSelectedItem(null);
     setForm({
       id: idOf(item.id),
       classId: item.classId ? String(item.classId) : "",
       subjectId: item.subjectId ? String(item.subjectId) : "",
-      curriculumSubjectId: item.curriculumSubjectId ? String(item.curriculumSubjectId) : "",
-      academicStructureId: item.academicStructureId ? String(item.academicStructureId) : "",
-      academicPeriodId: item.academicPeriodId ? String(item.academicPeriodId) : "",
+      curriculumSubjectId: item.curriculumSubjectId
+        ? String(item.curriculumSubjectId)
+        : "",
+      academicStructureId: item.academicStructureId
+        ? String(item.academicStructureId)
+        : "",
+      academicPeriodId: item.academicPeriodId
+        ? String(item.academicPeriodId)
+        : "",
       teacherId: item.teacherId ? String(item.teacherId) : "",
       name: item.name || "",
       code: item.code || "",
@@ -977,10 +1311,18 @@ export default function ClassSubjectsPage() {
       type: item.type || "core",
       compulsory: item.compulsory ?? true,
       elective: item.elective ?? false,
-      photo: mediaPreviewUrls[mediaKey(idOf(item.id), "photo")] || safeRecordMediaValue(item.photo) || "",
-      photoMediaId: item.photoMediaId ? Number(item.photoMediaId) : undefined,
-      bannerImage: mediaPreviewUrls[mediaKey(idOf(item.id), "bannerImage")] || safeRecordMediaValue(item.bannerImage) || "",
-      bannerImageMediaId: item.bannerImageMediaId ? Number(item.bannerImageMediaId) : undefined,
+      photo:
+        mediaPreviewUrls[mediaKey(idOf(item.id), "photo")] ||
+        safeRecordMediaValue(item.photo) ||
+        "",
+      photoMediaId: item.photoMediaId ? String(item.photoMediaId) : undefined,
+      bannerImage:
+        mediaPreviewUrls[mediaKey(idOf(item.id), "bannerImage")] ||
+        safeRecordMediaValue(item.bannerImage) ||
+        "",
+      bannerImageMediaId: item.bannerImageMediaId
+        ? String(item.bannerImageMediaId)
+        : undefined,
       active: item.active !== false,
       locked: !!item.locked,
     });
@@ -995,8 +1337,10 @@ export default function ClassSubjectsPage() {
     if (!form.subjectId) return "Select a subject.";
     if (!form.curriculumSubjectId) return "Select a curriculum subject.";
     if (!form.academicStructureId) return "Select an academic structure.";
-    if (form.credits !== "" && Number(form.credits) < 0) return "Credits cannot be negative.";
-    if (form.contactHours !== "" && Number(form.contactHours) < 0) return "Contact hours cannot be negative.";
+    if (form.credits !== "" && Number(form.credits) < 0)
+      return "Credits cannot be negative.";
+    if (form.contactHours !== "" && Number(form.contactHours) < 0)
+      return "Contact hours cannot be negative.";
 
     const duplicate = rows.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
@@ -1009,7 +1353,8 @@ export default function ClassSubjectsPage() {
       );
     });
 
-    if (duplicate) return "This class subject already exists for the selected class, structure, and period.";
+    if (duplicate)
+      return "This class subject already exists for the selected class, structure, and period.";
     return "";
   };
 
@@ -1024,21 +1369,26 @@ export default function ClassSubjectsPage() {
 
     try {
       setSaving(true);
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<ClassSubject> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        classId: Number(form.classId),
-        subjectId: Number(form.subjectId),
-        curriculumSubjectId: Number(form.curriculumSubjectId),
-        academicStructureId: Number(form.academicStructureId),
-        academicPeriodId: form.academicPeriodId ? Number(form.academicPeriodId) : undefined,
-        teacherId: form.teacherId ? Number(form.teacherId) : undefined,
+        schoolId: schoolId,
+        branchId: branchId,
+        classId: idOf(form.classId) || undefined,
+        subjectId: idOf(form.subjectId) || undefined,
+        curriculumSubjectId: String(form.curriculumSubjectId),
+        academicStructureId: idOf(form.academicStructureId) || undefined,
+        academicPeriodId: form.academicPeriodId
+          ? String(form.academicPeriodId)
+          : undefined,
+        teacherId: form.teacherId || undefined,
         name: form.name.trim() || undefined,
         code: form.code.trim() || undefined,
         credits: form.credits === "" ? undefined : Number(form.credits),
-        contactHours: form.contactHours === "" ? undefined : Number(form.contactHours),
+        contactHours:
+          form.contactHours === "" ? undefined : Number(form.contactHours),
         type: form.type,
         compulsory: !!form.compulsory,
         elective: !!form.elective,
@@ -1053,28 +1403,38 @@ export default function ClassSubjectsPage() {
 
       const savedClassSubject =
         form.id && existing
-          ? await updateLocal("classSubjects", Number(form.id), payload)
-          : await createLocal("classSubjects", payload as unknown as ClassSubject);
+          ? await updateLocal("classSubjects", String(form.id), payload)
+          : await createLocal(
+              "classSubjects",
+              payload as unknown as ClassSubject,
+            );
 
-      const savedClassSubjectId = Number(
-        typeof savedClassSubject === "number" ? savedClassSubject : (savedClassSubject as any)?.id || form.id || 0
+      const savedClassSubjectId = idOf(
+        typeof savedClassSubject === "number"
+          ? savedClassSubject
+          : (savedClassSubject as any)?.id || form.id || 0,
       );
 
       if (savedClassSubjectId) {
         await commitMediaAssetsToOwner({
           accountId,
           ownerTable: CLASS_SUBJECT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedClassSubjectId,
-          ownerCloudId: (savedClassSubject as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedClassSubjectId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: MediaFieldKeys.PHOTO },
-            { assetId: form.bannerImageMediaId, fieldKey: CLASS_SUBJECT_BANNER_FIELD_KEY },
+            {
+              assetId: form.bannerImageMediaId,
+              fieldKey: CLASS_SUBJECT_BANNER_FIELD_KEY,
+            },
           ],
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(CLASS_SUBJECT_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        CLASS_SUBJECT_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
       showToast("success", "Class subject saved.");
       await load();
@@ -1092,31 +1452,25 @@ export default function ClassSubjectsPage() {
     const ok = window.confirm(
       item.applicabilityCount || item.entryCount
         ? `This class subject has ${item.applicabilityCount} assessment rule(s) and ${item.entryCount} entry record(s). Delete anyway?`
-        : `Delete ${item.subjectName} for ${item.className}?`
+        : `Delete ${item.subjectName} for ${item.className}?`,
     );
     if (!ok) return;
 
     await Promise.all(
-
       ["photo", "bannerImage"].map((fieldKey) =>
-
         softDeleteOwnerFieldAssets({
-
           accountId: String(accountId),
 
           ownerTable: "classSubjects",
 
-          ownerLocalId: Number(id),
+          ownerId: idOf(id) || undefined,
 
           fieldKey,
-
         }),
-
       ),
-
     );
 
-    await softDeleteLocal("classSubjects", Number(id));
+    await softDeleteLocal("classSubjects", String(id));
     setSelectedItem(null);
     showToast("success", "Class subject deleted.");
     await load();
@@ -1125,37 +1479,70 @@ export default function ClassSubjectsPage() {
   const toggleActive = async (item: ClassSubjectView) => {
     const id = idOf((item.row as any).id);
     if (!id) return;
-    await updateLocal("classSubjects", id, { active: !item.active, isDeleted: false } as unknown as Partial<ClassSubject>);
+    await updateLocal("classSubjects", id, {
+      active: !item.active,
+      isDeleted: false,
+    } as unknown as Partial<ClassSubject>);
     setSelectedItem(null);
-    showToast("success", item.active ? "Class subject deactivated." : "Class subject activated.");
+    showToast(
+      "success",
+      item.active ? "Class subject deactivated." : "Class subject activated.",
+    );
     await load();
   };
 
   const toggleLocked = async (item: ClassSubjectView) => {
     const id = idOf((item.row as any).id);
     if (!id) return;
-    await updateLocal("classSubjects", id, { locked: !item.locked } as unknown as Partial<ClassSubject>);
+    await updateLocal("classSubjects", id, {
+      locked: !item.locked,
+    } as unknown as Partial<ClassSubject>);
     setSelectedItem(null);
-    showToast("success", item.locked ? "Class subject unlocked." : "Class subject locked.");
+    showToast(
+      "success",
+      item.locked ? "Class subject unlocked." : "Class subject locked.",
+    );
     await load();
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Class Subjects..." text="Checking account, branch, classes, curriculum subjects, teachers, and assessment links." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Class Subjects..."
+        text="Checking account, branch, classes, curriculum subjects, teachers, and assessment links."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing class subjects." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing class subjects."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>No branch workspace selected</h2>
-          <p>Class subjects belong to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <p>
+            Class subjects belong to the selected branch-admin workspace. Use
+            Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -1164,29 +1551,46 @@ export default function ClassSubjectsPage() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Class subject search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Class subject search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
-            placeholder={selectedClassId ? "Search subjects..." : "Search classes..."}
+            placeholder={
+              selectedClassId ? "Search subjects..." : "Search classes..."
+            }
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             aria-label="Search class subjects"
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add class subject">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add class subject"
+        >
           +
         </button>
 
@@ -1201,37 +1605,105 @@ export default function ClassSubjectsPage() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {filterClassId !== "all" && <button type="button" onClick={() => setFilterClassId("all")}>Class: {(classMap.get(idOf(filterClassId)) as any)?.name || filterClassId} ×</button>}
-          {filterStructureId !== "all" && <button type="button" onClick={() => setFilterStructureId("all")}>Structure: {(structureMap.get(idOf(filterStructureId)) as any)?.name || filterStructureId} ×</button>}
-          {filterPeriodId !== "all" && <button type="button" onClick={() => setFilterPeriodId("all")}>Period: {(periodMap.get(idOf(filterPeriodId)) as any)?.name || filterPeriodId} ×</button>}
-          {filterTeacherId !== "all" && <button type="button" onClick={() => setFilterTeacherId("all")}>Teacher: {(teacherMap.get(idOf(filterTeacherId)) as any)?.fullName || filterTeacherId} ×</button>}
-          {filterType !== "all" && <button type="button" onClick={() => setFilterType("all")}>Type: {typeLabel(filterType)} ×</button>}
-          {filterStatus !== "all" && <button type="button" onClick={() => setFilterStatus("all")}>Status: {filterStatus} ×</button>}
+          {filterClassId !== "all" && (
+            <button type="button" onClick={() => setFilterClassId("all")}>
+              Class:{" "}
+              {(classMap.get(idOf(filterClassId)) as any)?.name ||
+                filterClassId}{" "}
+              ×
+            </button>
+          )}
+          {filterStructureId !== "all" && (
+            <button type="button" onClick={() => setFilterStructureId("all")}>
+              Structure:{" "}
+              {(structureMap.get(idOf(filterStructureId)) as any)?.name ||
+                filterStructureId}{" "}
+              ×
+            </button>
+          )}
+          {filterPeriodId !== "all" && (
+            <button type="button" onClick={() => setFilterPeriodId("all")}>
+              Period:{" "}
+              {(periodMap.get(idOf(filterPeriodId)) as any)?.name ||
+                filterPeriodId}{" "}
+              ×
+            </button>
+          )}
+          {filterTeacherId !== "all" && (
+            <button type="button" onClick={() => setFilterTeacherId("all")}>
+              Teacher:{" "}
+              {(teacherMap.get(idOf(filterTeacherId)) as any)?.fullName ||
+                filterTeacherId}{" "}
+              ×
+            </button>
+          )}
+          {filterType !== "all" && (
+            <button type="button" onClick={() => setFilterType("all")}>
+              Type: {typeLabel(filterType)} ×
+            </button>
+          )}
+          {filterStatus !== "all" && (
+            <button type="button" onClick={() => setFilterStatus("all")}>
+              Status: {filterStatus} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="By Class" rows={countsByClass} total={summary.total} />
-          <AnalysisCard title="By Type" rows={countsByType} total={summary.total} />
-          <AnalysisCard title="By Structure" rows={countsByStructure} total={summary.total} />
-          <AnalysisCard title="Teacher Assignment" rows={countsByTeacher} total={summary.total} />
+          <AnalysisCard
+            title="By Class"
+            rows={countsByClass}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="By Type"
+            rows={countsByType}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="By Structure"
+            rows={countsByStructure}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Teacher Assignment"
+            rows={countsByTeacher}
+            total={summary.total}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{summary.showing}</strong>
-            <p>Class subject record(s) currently match your search and filter conditions.</p>
+            <p>
+              Class subject record(s) currently match your search and filter
+              conditions.
+            </p>
           </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} remove={remove} toggleActive={toggleActive} toggleLocked={toggleLocked} />}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          remove={remove}
+          toggleActive={toggleActive}
+          toggleLocked={toggleLocked}
+        />
+      )}
 
       {viewMode === "cards" && !selectedClassId && (
         <section className="ba-list class-picker-list">
@@ -1271,7 +1743,12 @@ export default function ClassSubjectsPage() {
 
           <section className="ba-list">
             {filteredRows.map((item) => (
-              <ClassSubjectListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />
+              <ClassSubjectListItem
+                key={String(item.id)}
+                item={item}
+                primary={primary}
+                onOpen={() => setSelectedItem(item)}
+              />
             ))}
 
             {!filteredRows.length && (
@@ -1371,9 +1848,20 @@ export default function ClassSubjectsPage() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1384,10 +1872,26 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function ClassSubjectClassItem({ item, primary, onOpen }: { item: ClassSubjectClassView; primary: string; onOpen: () => void }) {
+function ClassSubjectClassItem({
+  item,
+  primary,
+  onOpen,
+}: {
+  item: ClassSubjectClassView;
+  primary: string;
+  onOpen: () => void;
+}) {
   return (
-    <button type="button" className="class-subject-row class-picker-row" onClick={onOpen}>
-      <Avatar name={item.name} photo={safeRecordMediaValue((item.row as any).photo)} primary={primary} />
+    <button
+      type="button"
+      className="class-subject-row class-picker-row"
+      onClick={onOpen}
+    >
+      <Avatar
+        name={item.name}
+        photo={safeRecordMediaValue((item.row as any).photo)}
+        primary={primary}
+      />
 
       <span className="class-subject-main">
         <strong>{item.name}</strong>
@@ -1404,7 +1908,10 @@ function ClassSubjectClassItem({ item, primary, onOpen }: { item: ClassSubjectCl
       </span>
 
       <span className="class-subject-side">
-        <span className={`status-dot-mini ${item.subjectCount ? "green" : "gray"}`} title={item.subjectCount ? "Has subjects" : "No subjects yet"} />
+        <span
+          className={`status-dot-mini ${item.subjectCount ? "green" : "gray"}`}
+          title={item.subjectCount ? "Has subjects" : "No subjects yet"}
+        />
         <i>›</i>
       </span>
     </button>
@@ -1437,11 +1944,23 @@ function ClassSubjectClassHeader({
   );
 }
 
-function ClassSubjectListItem({ item, primary, onOpen }: { item: ClassSubjectView; primary: string; onOpen: () => void }) {
+function ClassSubjectListItem({
+  item,
+  primary,
+  onOpen,
+}: {
+  item: ClassSubjectView;
+  primary: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
   return (
     <button type="button" className="class-subject-row" onClick={onOpen}>
-      <Avatar name={item.subjectName} photo={item.photoUrl || safeRecordMediaValue(row.photo)} primary={primary} />
+      <Avatar
+        name={item.subjectName}
+        photo={item.photoUrl || safeRecordMediaValue(row.photo)}
+        primary={primary}
+      />
 
       <span className="class-subject-main">
         <strong>{item.subjectName}</strong>
@@ -1455,7 +1974,13 @@ function ClassSubjectListItem({ item, primary, onOpen }: { item: ClassSubjectVie
       </span>
 
       <span className="class-subject-side">
-        <span className={`status-dot-mini ${statusTone(item)}`} title={item.locked ? "Locked" : item.active ? "Active" : "Inactive"} aria-label={item.locked ? "Locked" : item.active ? "Active" : "Inactive"} />
+        <span
+          className={`status-dot-mini ${statusTone(item)}`}
+          title={item.locked ? "Locked" : item.active ? "Active" : "Inactive"}
+          aria-label={
+            item.locked ? "Locked" : item.active ? "Active" : "Inactive"
+          }
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1520,7 +2045,10 @@ function FilterSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose only what you need. The class subject list updates after applying.</p>
+            <p>
+              Choose only what you need. The class subject list updates after
+              applying.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1530,7 +2058,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Class</span>
-            <select value={filterClassId} onChange={(event) => setFilterClassId(event.target.value)}>
+            <select
+              value={filterClassId}
+              onChange={(event) => setFilterClassId(event.target.value)}
+            >
               <option value="all">All classes</option>
               {classes.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1542,7 +2073,10 @@ function FilterSheet({
 
           <label>
             <span>Structure</span>
-            <select value={filterStructureId} onChange={(event) => setFilterStructureId(event.target.value)}>
+            <select
+              value={filterStructureId}
+              onChange={(event) => setFilterStructureId(event.target.value)}
+            >
               <option value="all">All structures</option>
               {academicStructures.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1554,7 +2088,10 @@ function FilterSheet({
 
           <label>
             <span>Period</span>
-            <select value={filterPeriodId} onChange={(event) => setFilterPeriodId(event.target.value)}>
+            <select
+              value={filterPeriodId}
+              onChange={(event) => setFilterPeriodId(event.target.value)}
+            >
               <option value="all">All periods</option>
               {academicPeriods.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1566,7 +2103,10 @@ function FilterSheet({
 
           <label>
             <span>Teacher</span>
-            <select value={filterTeacherId} onChange={(event) => setFilterTeacherId(event.target.value)}>
+            <select
+              value={filterTeacherId}
+              onChange={(event) => setFilterTeacherId(event.target.value)}
+            >
               <option value="all">All teachers</option>
               {teachers.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1578,7 +2118,12 @@ function FilterSheet({
 
           <label>
             <span>Type</span>
-            <select value={filterType as string} onChange={(event) => setFilterType(event.target.value as SubjectTypeFilter)}>
+            <select
+              value={filterType as string}
+              onChange={(event) =>
+                setFilterType(event.target.value as SubjectTypeFilter)
+              }
+            >
               <option value="all">All types</option>
               <option value="core">Core</option>
               <option value="elective">Elective</option>
@@ -1588,7 +2133,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={filterStatus} onChange={(event) => setFilterStatus(event.target.value as StatusFilter)}>
+            <select
+              value={filterStatus}
+              onChange={(event) =>
+                setFilterStatus(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All status</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
@@ -1619,7 +2169,15 @@ function MoreSheet({
   onClose,
 }: {
   viewMode: ViewMode;
-  summary: { total: number; active: number; inactive: number; locked: number; teachersAssigned: number; unassigned: number; showing: number };
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+    locked: number;
+    teachersAssigned: number;
+    unassigned: number;
+    showing: number;
+  };
   setViewMode: (mode: ViewMode) => void;
   onRefresh: () => void | Promise<void>;
   onClose: () => void;
@@ -1631,7 +2189,8 @@ function MoreSheet({
           <div>
             <h2>More</h2>
             <p>
-              {summary.showing} of {summary.total} class subject record(s) shown.
+              {summary.showing} of {summary.total} class subject record(s)
+              shown.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close menu">
@@ -1640,17 +2199,29 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact class-subject records</small>
           </button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Class, type, structure and teacher summaries</small>
@@ -1692,7 +2263,11 @@ function ActionSheet({
               {item.className} · {item.teacherName}
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close class subject actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close class subject actions"
+          >
             ✕
           </button>
         </div>
@@ -1716,17 +2291,25 @@ function ActionSheet({
           <button type="button" onClick={() => openEdit(item.row)}>
             <span>✎</span>
             <b>Edit class subject</b>
-            <small>Update class, subject, teacher, period, media and flags</small>
+            <small>
+              Update class, subject, teacher, period, media and flags
+            </small>
           </button>
           <button type="button" onClick={() => toggleActive(item)}>
             <span>{item.active ? "⏸" : "✓"}</span>
             <b>{item.active ? "Deactivate" : "Activate"}</b>
-            <small>{item.active ? "Pause this class subject" : "Mark this class subject active"}</small>
+            <small>
+              {item.active
+                ? "Pause this class subject"
+                : "Mark this class subject active"}
+            </small>
           </button>
           <button type="button" onClick={() => toggleLocked(item)}>
             <span>{item.locked ? "🔓" : "🔒"}</span>
             <b>{item.locked ? "Unlock" : "Lock"}</b>
-            <small>{item.locked ? "Allow changes again" : "Prevent normal editing"}</small>
+            <small>
+              {item.locked ? "Allow changes again" : "Prevent normal editing"}
+            </small>
           </button>
           <button type="button" className="danger" onClick={() => remove(item)}>
             <span>⌫</span>
@@ -1784,20 +2367,36 @@ function TableView({
                   <td>{item.teacherName}</td>
                   <td>{item.structureName}</td>
                   <td>{item.periodName}</td>
-                  <td><Chip tone={typeTone(row.type)}>{typeLabel(row.type)}</Chip></td>
+                  <td>
+                    <Chip tone={typeTone(row.type)}>{typeLabel(row.type)}</Chip>
+                  </td>
                   <td>{item.applicabilityCount}</td>
                   <td>{item.entryCount}</td>
                   <td>
-                    <Chip tone={item.active ? "green" : "red"}>{item.active ? "Active" : "Inactive"}</Chip>
+                    <Chip tone={item.active ? "green" : "red"}>
+                      {item.active ? "Active" : "Inactive"}
+                    </Chip>
                     <span>{item.locked ? "Locked" : "Unlocked"}</span>
                   </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
-                      <button type="button" onClick={() => openEdit(item.row)}>Edit</button>
-                      <button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button>
-                      <button type="button" onClick={() => toggleLocked(item)}>{item.locked ? "Unlock" : "Lock"}</button>
-                      <button type="button" className="ba-delete" onClick={() => remove(item)}>Delete</button>
+                      <button type="button" onClick={() => openEdit(item.row)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => toggleActive(item)}>
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button type="button" onClick={() => toggleLocked(item)}>
+                        {item.locked ? "Unlock" : "Lock"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(item)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1805,7 +2404,11 @@ function TableView({
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No class subject matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No class subject matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1835,7 +2438,7 @@ function ClassSubjectModal({
   academicStructures: AcademicStructure[];
   availablePeriods: AcademicPeriod[];
   availableCurriculumSubjects: CurriculumSubject[];
-  subjectMap: Map<number, Subject>;
+  subjectMap: Map<string, Subject>;
   setModalOpen: (open: boolean) => void;
   updateForm: (patch: Partial<FormState>) => void;
   handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>;
@@ -1848,9 +2451,16 @@ function ClassSubjectModal({
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Class Subject" : "Add Class Subject"}</h2>
-            <p>Connect a class, subject, curriculum rule, academic period, and teacher into one delivery context.</p>
+            <p>
+              Connect a class, subject, curriculum rule, academic period, and
+              teacher into one delivery context.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close class subject form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close class subject form"
+          >
             ✕
           </button>
         </div>
@@ -1860,33 +2470,71 @@ function ClassSubjectModal({
           <div className="ba-form">
             <label>
               <span>Class</span>
-              <select value={form.classId} onChange={(e) => updateForm({ classId: e.target.value })}>
+              <select
+                value={form.classId}
+                onChange={(e) => updateForm({ classId: e.target.value })}
+              >
                 <option value="">Select class</option>
-                {classes.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}
+                {classes.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
               <span>Subject</span>
-              <select value={form.subjectId} onChange={(e) => updateForm({ subjectId: e.target.value, curriculumSubjectId: "" })}>
+              <select
+                value={form.subjectId}
+                onChange={(e) =>
+                  updateForm({
+                    subjectId: e.target.value,
+                    curriculumSubjectId: "",
+                  })
+                }
+              >
                 <option value="">Select subject</option>
-                {subjects.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}{row.code ? ` · ${row.code}` : ""}</option>)}
+                {subjects.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                    {row.code ? ` · ${row.code}` : ""}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
               <span>Curriculum Subject</span>
-              <select value={form.curriculumSubjectId} onChange={(e) => updateForm({ curriculumSubjectId: e.target.value })}>
+              <select
+                value={form.curriculumSubjectId}
+                onChange={(e) =>
+                  updateForm({ curriculumSubjectId: e.target.value })
+                }
+              >
                 <option value="">Select curriculum subject</option>
                 {availableCurriculumSubjects.map((row: any) => {
                   const subject: any = subjectMap.get(idOf(row.subjectId));
-                  return <option key={String(row.id)} value={String(row.id)}>{subject?.name || "Subject"} · {row.type || "core"}{row.credits ? ` · ${row.credits} credits` : ""}</option>;
+                  return (
+                    <option key={String(row.id)} value={String(row.id)}>
+                      {subject?.name || "Subject"} · {row.type || "core"}
+                      {row.credits ? ` · ${row.credits} credits` : ""}
+                    </option>
+                  );
                 })}
               </select>
             </label>
             <label>
               <span>Teacher</span>
-              <select value={form.teacherId} onChange={(e) => updateForm({ teacherId: e.target.value })}>
+              <select
+                value={form.teacherId}
+                onChange={(e) => updateForm({ teacherId: e.target.value })}
+              >
                 <option value="">Unassigned</option>
-                {teachers.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.fullName}{row.role ? ` · ${row.role}` : ""}</option>)}
+                {teachers.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.fullName}
+                    {row.role ? ` · ${row.role}` : ""}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -1897,16 +2545,38 @@ function ClassSubjectModal({
           <div className="ba-form two">
             <label>
               <span>Academic Structure</span>
-              <select value={form.academicStructureId} onChange={(e) => updateForm({ academicStructureId: e.target.value, academicPeriodId: "" })}>
+              <select
+                value={form.academicStructureId}
+                onChange={(e) =>
+                  updateForm({
+                    academicStructureId: e.target.value,
+                    academicPeriodId: "",
+                  })
+                }
+              >
                 <option value="">Select structure</option>
-                {academicStructures.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}{row.level ? ` · ${row.level}` : ""}</option>)}
+                {academicStructures.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                    {row.level ? ` · ${row.level}` : ""}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
               <span>Academic Period</span>
-              <select value={form.academicPeriodId} onChange={(e) => updateForm({ academicPeriodId: e.target.value })}>
+              <select
+                value={form.academicPeriodId}
+                onChange={(e) =>
+                  updateForm({ academicPeriodId: e.target.value })
+                }
+              >
                 <option value="">All periods / not specific</option>
-                {availablePeriods.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}
+                {availablePeriods.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -1917,23 +2587,51 @@ function ClassSubjectModal({
           <div className="ba-form">
             <label>
               <span>Display Name Override</span>
-              <input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} placeholder="Optional subject name override" />
+              <input
+                value={form.name}
+                onChange={(e) => updateForm({ name: e.target.value })}
+                placeholder="Optional subject name override"
+              />
             </label>
             <label>
               <span>Code Override</span>
-              <input value={form.code} onChange={(e) => updateForm({ code: e.target.value })} placeholder="Optional code" />
+              <input
+                value={form.code}
+                onChange={(e) => updateForm({ code: e.target.value })}
+                placeholder="Optional code"
+              />
             </label>
             <label>
               <span>Credits</span>
-              <input type="number" value={form.credits} onChange={(e) => updateForm({ credits: e.target.value })} placeholder="Credits" />
+              <input
+                type="number"
+                value={form.credits}
+                onChange={(e) => updateForm({ credits: e.target.value })}
+                placeholder="Credits"
+              />
             </label>
             <label>
               <span>Contact Hours</span>
-              <input type="number" value={form.contactHours} onChange={(e) => updateForm({ contactHours: e.target.value })} placeholder="Hours" />
+              <input
+                type="number"
+                value={form.contactHours}
+                onChange={(e) => updateForm({ contactHours: e.target.value })}
+                placeholder="Hours"
+              />
             </label>
             <label>
               <span>Type</span>
-              <select value={form.type as string} onChange={(e) => { const type = e.target.value as CurriculumSubjectType; updateForm({ type, elective: type === "elective", compulsory: type !== "elective" }); }}>
+              <select
+                value={form.type as string}
+                onChange={(e) => {
+                  const type = e.target.value as CurriculumSubjectType;
+                  updateForm({
+                    type,
+                    elective: type === "elective",
+                    compulsory: type !== "elective",
+                  });
+                }}
+              >
                 <option value="core">Core</option>
                 <option value="elective">Elective</option>
                 <option value="optional">Optional</option>
@@ -1941,7 +2639,12 @@ function ClassSubjectModal({
             </label>
             <label>
               <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(e) =>
+                  updateForm({ active: e.target.value === "active" })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -1949,9 +2652,30 @@ function ClassSubjectModal({
           </div>
 
           <div className="ba-check-grid">
-            <label className="ba-check"><input type="checkbox" checked={!!form.compulsory} onChange={(e) => updateForm({ compulsory: e.target.checked })} /><span>Compulsory</span></label>
-            <label className="ba-check"><input type="checkbox" checked={!!form.elective} onChange={(e) => updateForm({ elective: e.target.checked })} /><span>Elective</span></label>
-            <label className="ba-check"><input type="checkbox" checked={!!form.locked} onChange={(e) => updateForm({ locked: e.target.checked })} /><span>Locked</span></label>
+            <label className="ba-check">
+              <input
+                type="checkbox"
+                checked={!!form.compulsory}
+                onChange={(e) => updateForm({ compulsory: e.target.checked })}
+              />
+              <span>Compulsory</span>
+            </label>
+            <label className="ba-check">
+              <input
+                type="checkbox"
+                checked={!!form.elective}
+                onChange={(e) => updateForm({ elective: e.target.checked })}
+              />
+              <span>Elective</span>
+            </label>
+            <label className="ba-check">
+              <input
+                type="checkbox"
+                checked={!!form.locked}
+                onChange={(e) => updateForm({ locked: e.target.checked })}
+              />
+              <span>Locked</span>
+            </label>
           </div>
         </section>
 
@@ -1963,12 +2687,34 @@ function ClassSubjectModal({
               <div className="ba-media-actions">
                 <label className="ba-media-button">
                   Upload Photo
-                  <input type="file" accept="image/*" onChange={(e) => handleImageUpload("photo", e.target.files?.[0])} hidden />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      handleImageUpload("photo", e.target.files?.[0])
+                    }
+                    hidden
+                  />
                 </label>
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>Take Photo</button>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("photo")}
+                >
+                  Take Photo
+                </button>
               </div>
-              <small className="ba-media-hint">Upload from files or take a quick camera photo. The image is optimized and saved as a media asset.</small>
-              {form.photo && <img src={form.photo} alt="Subject preview" className="ba-preview-photo" />}
+              <small className="ba-media-hint">
+                Upload from files or take a quick camera photo. The image is
+                optimized and saved as a media asset.
+              </small>
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Subject preview"
+                  className="ba-preview-photo"
+                />
+              )}
             </label>
 
             <label>
@@ -1976,19 +2722,49 @@ function ClassSubjectModal({
               <div className="ba-media-actions">
                 <label className="ba-media-button">
                   Upload Banner
-                  <input type="file" accept="image/*" onChange={(e) => handleImageUpload("bannerImage", e.target.files?.[0])} hidden />
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      handleImageUpload("bannerImage", e.target.files?.[0])
+                    }
+                    hidden
+                  />
                 </label>
-                <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("bannerImage")}>Take Photo</button>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("bannerImage")}
+                >
+                  Take Photo
+                </button>
               </div>
-              <small className="ba-media-hint">Upload from files or use the camera. The banner is compressed separately so sync records stay small.</small>
-              {form.bannerImage && <img src={form.bannerImage} alt="Subject banner preview" className="ba-preview-banner" />}
+              <small className="ba-media-hint">
+                Upload from files or use the camera. The banner is compressed
+                separately so sync records stay small.
+              </small>
+              {form.bannerImage && (
+                <img
+                  src={form.bannerImage}
+                  alt="Subject banner preview"
+                  className="ba-preview-banner"
+                />
+              )}
             </label>
           </div>
         </section>
 
         <div className="ba-modal-actions">
-          <button type="button" onClick={() => setModalOpen(false)}>Cancel</button>
-          <button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Add Class Subject"}</button>
+          <button type="button" onClick={() => setModalOpen(false)}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving
+              ? "Saving..."
+              : form.id
+                ? "Save Changes"
+                : "Add Class Subject"}
+          </button>
         </div>
       </form>
     </div>
@@ -2016,41 +2792,91 @@ function CameraCaptureModal({
   close: () => void;
   entityLabel: string;
 }) {
-  const title = field === "photo" ? `Take ${entityLabel} Photo` : `Take ${entityLabel} Banner Photo`;
+  const title =
+    field === "photo"
+      ? `Take ${entityLabel} Photo`
+      : `Take ${entityLabel} Banner Photo`;
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
-            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+            <p>
+              Use the live camera preview, then capture. The image will still be
+              compressed and saved as a media asset.
+            </p>
           </div>
-          <button type="button" onClick={close} aria-label="Close camera">✕</button>
+          <button type="button" onClick={close} aria-label="Close camera">
+            ✕
+          </button>
         </div>
         <div className="ba-camera-preview">
           <video ref={videoRef} autoPlay muted playsInline />
-          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
         </div>
         <div className="ba-camera-actions">
-          <button type="button" className="ba-camera-secondary" onClick={() => setFacing(facing === "environment" ? "user" : "environment")} disabled={starting || capturing}>Switch Camera</button>
-          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>Cancel</button>
-          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>{capturing ? "Capturing..." : "Capture Photo"}</button>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
+            disabled={starting || capturing}
+          >
+            Switch Camera
+          </button>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
+            {capturing ? "Capturing..." : "Capture Photo"}
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function groupedCounts(rows: ClassSubjectView[], keyFn: (item: ClassSubjectView) => string) {
+function groupedCounts(
+  rows: ClassSubjectView[],
+  keyFn: (item: ClassSubjectView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -2062,9 +2888,13 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
             <section key={row.label}>
               <div>
                 <b>{row.label}</b>
-                <small>{row.value} · {share}%</small>
+                <small>
+                  {row.value} · {share}%
+                </small>
               </div>
-              <div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
             </section>
           );
         })}

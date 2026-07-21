@@ -34,8 +34,8 @@ export type CumulativeBookTemplateTone =
   | "compact";
 
 export type CumulativeBookPeriodDataset = {
-  id?: number | string;
-  academicPeriodId?: number | string | null;
+  id?: string | string;
+  academicPeriodId?: string | string | null;
   academicPeriodName?: string | null;
   academicYear?: string | null;
   term?: string | null;
@@ -61,7 +61,7 @@ export type CumulativeBookPeriodDataset = {
 };
 
 export type CumulativeBookStudentInfo = {
-  id?: number | string | null;
+  id?: string | string | null;
   fullName?: string | null;
   name?: string | null;
   admissionNumber?: string | null;
@@ -123,23 +123,24 @@ export type CumulativeReportBookDataset = {
   notes?: string[];
 };
 
-export type CumulativeReportBookSettings = Partial<StudentReportTemplateSettings> & {
-  reportType?: "cumulative_book" | string;
+export type CumulativeReportBookSettings =
+  Partial<StudentReportTemplateSettings> & {
+    reportType?: "cumulative_book" | string;
 
-  showBookFrontCover?: boolean;
-  showBookStudentProfilePage?: boolean;
-  showBookAcademicJourneyPage?: boolean;
-  showBookSummaryPage?: boolean;
-  showBookBackCover?: boolean;
+    showBookFrontCover?: boolean;
+    showBookStudentProfilePage?: boolean;
+    showBookAcademicJourneyPage?: boolean;
+    showBookSummaryPage?: boolean;
+    showBookBackCover?: boolean;
 
-  bookTitleLabel?: string;
-  bookSubtitleLabel?: string;
+    bookTitleLabel?: string;
+    bookSubtitleLabel?: string;
 
-  showGeneratedDate?: boolean;
-  generatedDateLabel?: string;
+    showGeneratedDate?: boolean;
+    generatedDateLabel?: string;
 
-  footerText?: string;
-};
+    footerText?: string;
+  };
 
 export type CumulativeReportBookProps = {
   dataset?: CumulativeReportBookDataset | null;

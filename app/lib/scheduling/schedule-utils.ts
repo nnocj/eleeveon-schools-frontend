@@ -92,34 +92,34 @@ export function getSessionDurationMinutes(
 }
 
 export function sessionMatchesTeacher(
-  session: Pick<ScheduleSession, "teacherLocalId">,
-  teacherLocalId?: number | null
+  session: Pick<ScheduleSession, "teacherId">,
+  teacherId?: string | null
 ) {
   return Boolean(
-    teacherLocalId &&
-      session.teacherLocalId &&
-      Number(session.teacherLocalId) === Number(teacherLocalId)
+    teacherId &&
+      session.teacherId &&
+      String(session.teacherId) === String(teacherId)
   );
 }
 
 export function sessionMatchesClass(
   session: Pick<ScheduleSession, "classId">,
-  classId?: number | null
+  classId?: string | null
 ) {
   return Boolean(
     classId &&
       session.classId &&
-      Number(session.classId) === Number(classId)
+      String(session.classId) === String(classId)
   );
 }
 
 export function sessionMatchesResource(
   session: Pick<ScheduleSession, "resourceId">,
-  resourceId?: number | null
+  resourceId?: string | null
 ) {
   return Boolean(
     resourceId &&
       session.resourceId &&
-      Number(session.resourceId) === Number(resourceId)
+      String(session.resourceId) === String(resourceId)
   );
 }

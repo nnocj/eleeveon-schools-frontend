@@ -87,21 +87,11 @@ export default function BroadsheetModernHeader({
     academicStructureName
       ? { label: "Structure", value: academicStructureName }
       : null,
-    academicPeriodName
-      ? { label: "Period", value: academicPeriodName }
-      : null,
-    academicYear
-      ? { label: "Year", value: academicYear }
-      : null,
-    className
-      ? { label: "Class", value: className }
-      : null,
-    subjectName
-      ? { label: "Subject", value: subjectName }
-      : null,
-    teacherName
-      ? { label: "Teacher", value: teacherName }
-      : null,
+    academicPeriodName ? { label: "Period", value: academicPeriodName } : null,
+    academicYear ? { label: "Year", value: academicYear } : null,
+    className ? { label: "Class", value: className } : null,
+    subjectName ? { label: "Subject", value: subjectName } : null,
+    teacherName ? { label: "Teacher", value: teacherName } : null,
   ].filter(Boolean) as { label: string; value: string }[];
 
   const contactLine = [

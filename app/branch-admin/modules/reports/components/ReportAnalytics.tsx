@@ -84,7 +84,7 @@ export default function ReportAnalytics({
           gap: 12,
         }}
       >
-        {cards.map(card => (
+        {cards.map((card) => (
           <div
             key={card.label}
             style={{

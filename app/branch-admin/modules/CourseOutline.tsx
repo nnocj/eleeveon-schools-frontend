@@ -55,19 +55,25 @@ import {
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type ViewMode = "cards" | "table" | "summary";
-type ReadinessFilter = "all" | "ready" | "incomplete" | "locked" | "inactive" | "unassigned";
+type ReadinessFilter =
+  | "all"
+  | "ready"
+  | "incomplete"
+  | "locked"
+  | "inactive"
+  | "unassigned";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type CourseOutlineView = {
-  id: number;
+  id: string;
   classSubject: ClassSubject;
   className: string;
   subjectName: string;
@@ -88,10 +94,9 @@ type CourseOutlineView = {
   statusLabel: "Ready" | "Needs Assessment Setup" | "Locked" | "Inactive";
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -100,11 +105,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -115,7 +120,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -140,13 +147,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -157,16 +164,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -178,9 +189,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -188,20 +203,23 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
   const status = safeLower(row?.status);
   if (row?.isDeleted) return false;
   if (row?.active === false) return false;
-  if (["inactive", "deleted", "archived", "suspended"].includes(status)) return false;
+  if (["inactive", "deleted", "archived", "suspended"].includes(status))
+    return false;
   return true;
 };
 
@@ -210,17 +228,35 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
 };
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -239,13 +275,28 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
-      style={{ background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))` }}
+      style={{
+        background: photo
+          ? `url(${photo}) center/cover`
+          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+      }}
     >
-      {!photo && String(name || "CO").slice(0, 2).toUpperCase()}
+      {!photo &&
+        String(name || "CO")
+          .slice(0, 2)
+          .toUpperCase()}
     </div>
   );
 }
@@ -269,7 +320,13 @@ export default function CourseOutline() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -294,15 +351,21 @@ export default function CourseOutline() {
 
   const { loading, setLoading } = useBackgroundLoader();
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
-  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
@@ -313,8 +376,11 @@ export default function CourseOutline() {
   const [filterTeacherId, setFilterTeacherId] = useState("");
   const [filterCurriculumId, setFilterCurriculumId] = useState("");
   const [filterPeriodId, setFilterPeriodId] = useState("");
-  const [filterReadiness, setFilterReadiness] = useState<ReadinessFilter>("all");
-  const [selectedClassSubjectId, setSelectedClassSubjectId] = useState<number | undefined>();
+  const [filterReadiness, setFilterReadiness] =
+    useState<ReadinessFilter>("all");
+  const [selectedClassSubjectId, setSelectedClassSubjectId] = useState<
+    string | undefined
+  >();
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -323,7 +389,15 @@ export default function CourseOutline() {
       return;
     }
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -353,7 +427,18 @@ export default function CourseOutline() {
 
     try {
       setLoading(true);
-      const [classSubjectRows, curriculumSubjectRows, curriculumRows, pathwayRows, subjectRows, classRows, teacherRows, structureRows, periodRows, applicabilityRows] = await Promise.all([
+      const [
+        classSubjectRows,
+        curriculumSubjectRows,
+        curriculumRows,
+        pathwayRows,
+        subjectRows,
+        classRows,
+        teacherRows,
+        structureRows,
+        periodRows,
+        applicabilityRows,
+      ] = await Promise.all([
         tableSafe("classSubjects")?.toArray?.() || [],
         tableSafe("curriculumSubjects")?.toArray?.() || [],
         tableSafe("curriculums")?.toArray?.() || [],
@@ -366,16 +451,73 @@ export default function CourseOutline() {
         tableSafe("assessmentApplicabilities")?.toArray?.() || [],
       ]);
 
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setCurriculumSubjects((curriculumSubjectRows as CurriculumSubject[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => Number(a.orderIndex || 0) - Number(b.orderIndex || 0)));
-      setCurriculums((curriculumRows as Curriculum[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setPathways((pathwayRows as CurriculumPathway[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setSubjects((subjectRows as Subject[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setClasses((classRows as Class[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setTeachers((teacherRows as Teacher[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))));
-      setAcademicStructures((structureRows as AcademicStructure[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setAcademicPeriods((periodRows as AcademicPeriod[]).filter((row) => sameTenant(row as TenantRow) && isActiveRow(row)).sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0)));
-      setAssessmentApplicabilities((applicabilityRows as AssessmentApplicability[]).filter((row) => sameTenant(row as TenantRow)));
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setCurriculumSubjects(
+        (curriculumSubjectRows as CurriculumSubject[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort(
+            (a: any, b: any) =>
+              Number(a.orderIndex || 0) - Number(b.orderIndex || 0),
+          ),
+      );
+      setCurriculums(
+        (curriculumRows as Curriculum[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setPathways(
+        (pathwayRows as CurriculumPathway[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setSubjects(
+        (subjectRows as Subject[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setClasses(
+        (classRows as Class[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setTeachers(
+        (teacherRows as Teacher[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
+      );
+      setAcademicStructures(
+        (structureRows as AcademicStructure[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setAcademicPeriods(
+        (periodRows as AcademicPeriod[])
+          .filter((row) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort(
+            (a: any, b: any) => Number(a.order || 0) - Number(b.order || 0),
+          ),
+      );
+      setAssessmentApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load course outline:", error);
       clearData();
@@ -388,21 +530,52 @@ export default function CourseOutline() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const classMap = useMemo(() => new Map(classes.map((row: any) => [idOf(row.id), row])), [classes]);
-  const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);
-  const teacherMap = useMemo(() => new Map(teachers.map((row: any) => [idOf(row.id), row])), [teachers]);
-  const structureMap = useMemo(() => new Map(academicStructures.map((row: any) => [idOf(row.id), row])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(academicPeriods.map((row: any) => [idOf(row.id), row])), [academicPeriods]);
-  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map((row: any) => [idOf(row.id), row])), [curriculumSubjects]);
-  const curriculumMap = useMemo(() => new Map(curriculums.map((row: any) => [idOf(row.id), row])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((row: any) => [idOf(row.id), row])), [pathways]);
+  const classMap = useMemo(
+    () => new Map(classes.map((row: any) => [idOf(row.id), row])),
+    [classes],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((row: any) => [idOf(row.id), row])),
+    [subjects],
+  );
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((row: any) => [idOf(row.id), row])),
+    [teachers],
+  );
+  const structureMap = useMemo(
+    () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(academicPeriods.map((row: any) => [idOf(row.id), row])),
+    [academicPeriods],
+  );
+  const curriculumSubjectMap = useMemo(
+    () => new Map(curriculumSubjects.map((row: any) => [idOf(row.id), row])),
+    [curriculumSubjects],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((row: any) => [idOf(row.id), row])),
+    [curriculums],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((row: any) => [idOf(row.id), row])),
+    [pathways],
+  );
 
   const applicabilityByClassSubject = useMemo(() => {
-    const map = new Map<number, AssessmentApplicability[]>();
+    const map = new Map<string, AssessmentApplicability[]>();
     assessmentApplicabilities.forEach((row: any) => {
       const id = idOf(row.classSubjectId);
       if (!id) return;
@@ -417,17 +590,34 @@ export default function CourseOutline() {
     return classSubjects.map((classSubject: any) => {
       const classRow: any = classMap.get(idOf(classSubject.classId));
       const subject: any = subjectMap.get(idOf(classSubject.subjectId));
-      const teacher: any = classSubject.teacherId ? teacherMap.get(idOf(classSubject.teacherId)) : undefined;
-      const structure: any = structureMap.get(idOf(classSubject.academicStructureId));
-      const period: any = classSubject.academicPeriodId ? periodMap.get(idOf(classSubject.academicPeriodId)) : undefined;
-      const curriculumSubject: any = curriculumSubjectMap.get(idOf(classSubject.curriculumSubjectId));
-      const curriculum: any = curriculumSubject ? curriculumMap.get(idOf(curriculumSubject.curriculumId)) : undefined;
-      const pathway: any = curriculumSubject?.pathwayId ? pathwayMap.get(idOf(curriculumSubject.pathwayId)) : undefined;
-      const applicability = idOf(classSubject.id) ? applicabilityByClassSubject.get(idOf(classSubject.id)) || [] : [];
-      const activeApplicability = applicability.find((row: any) => row.active !== false);
+      const teacher: any = classSubject.teacherId
+        ? teacherMap.get(idOf(classSubject.teacherId))
+        : undefined;
+      const structure: any = structureMap.get(
+        idOf(classSubject.academicStructureId),
+      );
+      const period: any = classSubject.academicPeriodId
+        ? periodMap.get(idOf(classSubject.academicPeriodId))
+        : undefined;
+      const curriculumSubject: any = curriculumSubjectMap.get(
+        idOf(classSubject.curriculumSubjectId),
+      );
+      const curriculum: any = curriculumSubject
+        ? curriculumMap.get(idOf(curriculumSubject.curriculumId))
+        : undefined;
+      const pathway: any = curriculumSubject?.pathwayId
+        ? pathwayMap.get(idOf(curriculumSubject.pathwayId))
+        : undefined;
+      const applicability = idOf(classSubject.id)
+        ? applicabilityByClassSubject.get(idOf(classSubject.id)) || []
+        : [];
+      const activeApplicability = applicability.find(
+        (row: any) => row.active !== false,
+      );
       const assessmentConfigured = !!activeApplicability;
       const credits = classSubject.credits ?? curriculumSubject?.credits;
-      const contactHours = classSubject.contactHours ?? curriculumSubject?.contactHours;
+      const contactHours =
+        classSubject.contactHours ?? curriculumSubject?.contactHours;
       const type = classSubject.type || curriculumSubject?.type || "core";
       const statusLabel: CourseOutlineView["statusLabel"] = classSubject.locked
         ? "Locked"
@@ -441,7 +631,10 @@ export default function CourseOutline() {
         id: idOf(classSubject.id),
         classSubject,
         className: classRow?.name || `Class #${classSubject.classId || "-"}`,
-        subjectName: classSubject.name || subject?.name || `Subject #${classSubject.subjectId || "-"}`,
+        subjectName:
+          classSubject.name ||
+          subject?.name ||
+          `Subject #${classSubject.subjectId || "-"}`,
         subjectCode: classSubject.code || subject?.code || "",
         teacherName: teacher?.fullName || "No teacher assigned",
         teacherPhoto: teacher?.photo || "",
@@ -459,7 +652,18 @@ export default function CourseOutline() {
         statusLabel,
       };
     });
-  }, [applicabilityByClassSubject, classMap, classSubjects, curriculumMap, curriculumSubjectMap, pathwayMap, periodMap, structureMap, subjectMap, teacherMap]);
+  }, [
+    applicabilityByClassSubject,
+    classMap,
+    classSubjects,
+    curriculumMap,
+    curriculumSubjectMap,
+    pathwayMap,
+    periodMap,
+    structureMap,
+    subjectMap,
+    teacherMap,
+  ]);
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -467,47 +671,108 @@ export default function CourseOutline() {
       .filter((item) => {
         const row: any = item.classSubject;
         if (filterClassId && !sameId(row.classId, filterClassId)) return false;
-        if (filterSubjectId && !sameId(row.subjectId, filterSubjectId)) return false;
-        if (filterTeacherId && !sameId(row.teacherId, filterTeacherId)) return false;
-        if (filterPeriodId && !sameId(row.academicPeriodId, filterPeriodId)) return false;
+        if (filterSubjectId && !sameId(row.subjectId, filterSubjectId))
+          return false;
+        if (filterTeacherId && !sameId(row.teacherId, filterTeacherId))
+          return false;
+        if (filterPeriodId && !sameId(row.academicPeriodId, filterPeriodId))
+          return false;
         if (filterCurriculumId) {
-          const curriculumSubject: any = curriculumSubjectMap.get(idOf(row.curriculumSubjectId));
-          if (!sameId(curriculumSubject?.curriculumId, filterCurriculumId)) return false;
+          const curriculumSubject: any = curriculumSubjectMap.get(
+            idOf(row.curriculumSubjectId),
+          );
+          if (!sameId(curriculumSubject?.curriculumId, filterCurriculumId))
+            return false;
         }
-        if (filterReadiness === "ready" && !item.assessmentConfigured) return false;
-        if (filterReadiness === "incomplete" && item.assessmentConfigured) return false;
+        if (filterReadiness === "ready" && !item.assessmentConfigured)
+          return false;
+        if (filterReadiness === "incomplete" && item.assessmentConfigured)
+          return false;
         if (filterReadiness === "locked" && !row.locked) return false;
-        if (filterReadiness === "inactive" && row.active !== false) return false;
+        if (filterReadiness === "inactive" && row.active !== false)
+          return false;
         if (filterReadiness === "unassigned" && !!row.teacherId) return false;
         if (!query) return true;
-        return `${item.className} ${item.subjectName} ${item.subjectCode} ${item.teacherName} ${item.curriculumName} ${item.pathwayName} ${item.academicStructureName} ${item.academicPeriodName} ${item.type} ${item.statusLabel}`.toLowerCase().includes(query);
+        return `${item.className} ${item.subjectName} ${item.subjectCode} ${item.teacherName} ${item.curriculumName} ${item.pathwayName} ${item.academicStructureName} ${item.academicPeriodName} ${item.type} ${item.statusLabel}`
+          .toLowerCase()
+          .includes(query);
       })
-      .sort((a, b) => a.className.localeCompare(b.className) || a.subjectName.localeCompare(b.subjectName));
-  }, [curriculumSubjectMap, filterClassId, filterCurriculumId, filterPeriodId, filterReadiness, filterSubjectId, filterTeacherId, outlineRows, search]);
+      .sort(
+        (a, b) =>
+          a.className.localeCompare(b.className) ||
+          a.subjectName.localeCompare(b.subjectName),
+      );
+  }, [
+    curriculumSubjectMap,
+    filterClassId,
+    filterCurriculumId,
+    filterPeriodId,
+    filterReadiness,
+    filterSubjectId,
+    filterTeacherId,
+    outlineRows,
+    search,
+  ]);
 
   const selectedOutline = useMemo(
-    () => filteredRows.find((row) => row.id === selectedClassSubjectId) || filteredRows[0] || outlineRows[0],
-    [filteredRows, outlineRows, selectedClassSubjectId]
+    () =>
+      filteredRows.find((row) => row.id === selectedClassSubjectId) ||
+      filteredRows[0] ||
+      outlineRows[0],
+    [filteredRows, outlineRows, selectedClassSubjectId],
   );
 
-  const summary = useMemo(() => ({
-    total: outlineRows.length,
-    ready: outlineRows.filter((row) => row.assessmentConfigured).length,
-    incomplete: outlineRows.filter((row) => !row.assessmentConfigured).length,
-    withTeachers: outlineRows.filter((row) => !!(row.classSubject as any).teacherId).length,
-    locked: outlineRows.filter((row) => (row.classSubject as any).locked).length,
-    showing: filteredRows.length,
-  }), [filteredRows.length, outlineRows]);
+  const summary = useMemo(
+    () => ({
+      total: outlineRows.length,
+      ready: outlineRows.filter((row) => row.assessmentConfigured).length,
+      incomplete: outlineRows.filter((row) => !row.assessmentConfigured).length,
+      withTeachers: outlineRows.filter(
+        (row) => !!(row.classSubject as any).teacherId,
+      ).length,
+      locked: outlineRows.filter((row) => (row.classSubject as any).locked)
+        .length,
+      showing: filteredRows.length,
+    }),
+    [filteredRows.length, outlineRows],
+  );
 
   const activeFilterCount = useMemo(
-    () => [filterClassId, filterSubjectId, filterTeacherId, filterCurriculumId, filterPeriodId, filterReadiness === "all" ? "" : filterReadiness].filter(Boolean).length,
-    [filterClassId, filterCurriculumId, filterPeriodId, filterReadiness, filterSubjectId, filterTeacherId]
+    () =>
+      [
+        filterClassId,
+        filterSubjectId,
+        filterTeacherId,
+        filterCurriculumId,
+        filterPeriodId,
+        filterReadiness === "all" ? "" : filterReadiness,
+      ].filter(Boolean).length,
+    [
+      filterClassId,
+      filterCurriculumId,
+      filterPeriodId,
+      filterReadiness,
+      filterSubjectId,
+      filterTeacherId,
+    ],
   );
 
-  const countsByStatus = useMemo(() => groupedCounts(outlineRows, (row) => row.statusLabel), [outlineRows]);
-  const countsByClass = useMemo(() => groupedCounts(outlineRows, (row) => row.className), [outlineRows]);
-  const countsByCurriculum = useMemo(() => groupedCounts(outlineRows, (row) => row.curriculumName), [outlineRows]);
-  const countsByTeacher = useMemo(() => groupedCounts(outlineRows, (row) => row.teacherName), [outlineRows]);
+  const countsByStatus = useMemo(
+    () => groupedCounts(outlineRows, (row) => row.statusLabel),
+    [outlineRows],
+  );
+  const countsByClass = useMemo(
+    () => groupedCounts(outlineRows, (row) => row.className),
+    [outlineRows],
+  );
+  const countsByCurriculum = useMemo(
+    () => groupedCounts(outlineRows, (row) => row.curriculumName),
+    [outlineRows],
+  );
+  const countsByTeacher = useMemo(
+    () => groupedCounts(outlineRows, (row) => row.teacherName),
+    [outlineRows],
+  );
 
   const clearFilters = () => {
     setFilterClassId("");
@@ -519,65 +784,170 @@ export default function CourseOutline() {
   };
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Course Outlines..." text="Checking account, branch, class subjects, curriculum, teachers, and assessment readiness." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Course Outlines..."
+        text="Checking account, branch, class subjects, curriculum, teachers, and assessment readiness."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before viewing course outlines." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing course outlines."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
-          <p>Course outlines are generated from class subjects inside one active branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <p>
+            Course outlines are generated from class subjects inside one active
+            branch.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card" aria-label="Course outline search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Course outline search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search course outlines..." aria-label="Search course outlines" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search course outlines..."
+            aria-label="Search course outlines"
+          />
         </label>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {filterClassId && <button type="button" onClick={() => setFilterClassId("")}>Class: {(classMap.get(idOf(filterClassId)) as any)?.name || filterClassId} ×</button>}
-          {filterSubjectId && <button type="button" onClick={() => setFilterSubjectId("")}>Subject: {(subjectMap.get(idOf(filterSubjectId)) as any)?.name || filterSubjectId} ×</button>}
-          {filterTeacherId && <button type="button" onClick={() => setFilterTeacherId("")}>Teacher: {(teacherMap.get(idOf(filterTeacherId)) as any)?.fullName || filterTeacherId} ×</button>}
-          {filterCurriculumId && <button type="button" onClick={() => setFilterCurriculumId("")}>Curriculum: {(curriculumMap.get(idOf(filterCurriculumId)) as any)?.name || filterCurriculumId} ×</button>}
-          {filterPeriodId && <button type="button" onClick={() => setFilterPeriodId("")}>Period: {(periodMap.get(idOf(filterPeriodId)) as any)?.name || filterPeriodId} ×</button>}
-          {filterReadiness !== "all" && <button type="button" onClick={() => setFilterReadiness("all")}>Readiness: {filterReadiness} ×</button>}
+          {filterClassId && (
+            <button type="button" onClick={() => setFilterClassId("")}>
+              Class:{" "}
+              {(classMap.get(idOf(filterClassId)) as any)?.name ||
+                filterClassId}{" "}
+              ×
+            </button>
+          )}
+          {filterSubjectId && (
+            <button type="button" onClick={() => setFilterSubjectId("")}>
+              Subject:{" "}
+              {(subjectMap.get(idOf(filterSubjectId)) as any)?.name ||
+                filterSubjectId}{" "}
+              ×
+            </button>
+          )}
+          {filterTeacherId && (
+            <button type="button" onClick={() => setFilterTeacherId("")}>
+              Teacher:{" "}
+              {(teacherMap.get(idOf(filterTeacherId)) as any)?.fullName ||
+                filterTeacherId}{" "}
+              ×
+            </button>
+          )}
+          {filterCurriculumId && (
+            <button type="button" onClick={() => setFilterCurriculumId("")}>
+              Curriculum:{" "}
+              {(curriculumMap.get(idOf(filterCurriculumId)) as any)?.name ||
+                filterCurriculumId}{" "}
+              ×
+            </button>
+          )}
+          {filterPeriodId && (
+            <button type="button" onClick={() => setFilterPeriodId("")}>
+              Period:{" "}
+              {(periodMap.get(idOf(filterPeriodId)) as any)?.name ||
+                filterPeriodId}{" "}
+              ×
+            </button>
+          )}
+          {filterReadiness !== "all" && (
+            <button type="button" onClick={() => setFilterReadiness("all")}>
+              Readiness: {filterReadiness} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid course-analysis-grid">
-          <AnalysisCard title="Readiness by Status" rows={countsByStatus} total={summary.total} />
-          <AnalysisCard title="Outlines by Class" rows={countsByClass} total={summary.total} />
-          <AnalysisCard title="Outlines by Curriculum" rows={countsByCurriculum} total={summary.total} />
-          <AnalysisCard title="Teacher Load" rows={countsByTeacher} total={summary.total} />
+          <AnalysisCard
+            title="Readiness by Status"
+            rows={countsByStatus}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Outlines by Class"
+            rows={countsByClass}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Outlines by Curriculum"
+            rows={countsByCurriculum}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Teacher Load"
+            rows={countsByTeacher}
+            total={summary.total}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{summary.showing}</strong>
-            <p>Course outline record(s) currently match your search and filters.</p>
+            <p>
+              Course outline record(s) currently match your search and filters.
+            </p>
           </article>
         </section>
       )}
@@ -588,20 +958,42 @@ export default function CourseOutline() {
         <section className="course-layout">
           <div className="ba-grid course-card-grid">
             {filteredRows.map((item) => (
-              <button key={String(item.id)} type="button" onClick={() => setSelectedClassSubjectId(item.id)} className={`course-row-card ${selectedOutline?.id === item.id ? "active" : ""}`}>
-                <Avatar name={item.subjectName} photo={item.teacherPhoto} primary={primary} />
+              <button
+                key={String(item.id)}
+                type="button"
+                onClick={() => setSelectedClassSubjectId(item.id)}
+                className={`course-row-card ${selectedOutline?.id === item.id ? "active" : ""}`}
+              >
+                <Avatar
+                  name={item.subjectName}
+                  photo={item.teacherPhoto}
+                  primary={primary}
+                />
                 <span className="course-row-main">
                   <strong>{item.subjectName}</strong>
-                  <small>{item.className} · {item.academicPeriodName}</small>
-                  <em>{item.curriculumName} → {item.pathwayName}</em>
+                  <small>
+                    {item.className} · {item.academicPeriodName}
+                  </small>
+                  <em>
+                    {item.curriculumName} → {item.pathwayName}
+                  </em>
                 </span>
                 <span className="course-row-side">
-                  <span className={`status-dot-mini ${statusTone(item.statusLabel)}`} title={item.statusLabel} />
+                  <span
+                    className={`status-dot-mini ${statusTone(item.statusLabel)}`}
+                    title={item.statusLabel}
+                  />
                   <i>⋯</i>
                 </span>
               </button>
             ))}
-            {!filteredRows.length ? <Empty icon="📖" title="No course outlines found" text="Create Class Subjects first, then this page will project delivery-ready course outlines from them." /> : null}
+            {!filteredRows.length ? (
+              <Empty
+                icon="📖"
+                title="No course outlines found"
+                text="Create Class Subjects first, then this page will project delivery-ready course outlines from them."
+              />
+            ) : null}
           </div>
 
           <aside className="ba-card course-detail-card">
@@ -610,49 +1002,125 @@ export default function CourseOutline() {
                 <div className="course-detail-head">
                   <div>
                     <h3>{selectedOutline.subjectName}</h3>
-                    <p>{selectedOutline.className} · {selectedOutline.academicPeriodName}</p>
+                    <p>
+                      {selectedOutline.className} ·{" "}
+                      {selectedOutline.academicPeriodName}
+                    </p>
                   </div>
-                  <Chip tone={statusTone(selectedOutline.statusLabel)}>{selectedOutline.statusLabel}</Chip>
+                  <Chip tone={statusTone(selectedOutline.statusLabel)}>
+                    {selectedOutline.statusLabel}
+                  </Chip>
                 </div>
 
-                <section className="connection-map" aria-label="Course outline connection map">
-                  <div><span>Course</span><strong>{selectedOutline.subjectName}</strong><small>{selectedOutline.subjectCode || "No code"}</small></div>
+                <section
+                  className="connection-map"
+                  aria-label="Course outline connection map"
+                >
+                  <div>
+                    <span>Course</span>
+                    <strong>{selectedOutline.subjectName}</strong>
+                    <small>{selectedOutline.subjectCode || "No code"}</small>
+                  </div>
                   <i />
-                  <div><span>Class</span><strong>{selectedOutline.className}</strong><small>{selectedOutline.academicPeriodName}</small></div>
+                  <div>
+                    <span>Class</span>
+                    <strong>{selectedOutline.className}</strong>
+                    <small>{selectedOutline.academicPeriodName}</small>
+                  </div>
                   <i />
-                  <div><span>Outline</span><strong>{selectedOutline.curriculumName}</strong><small>{selectedOutline.pathwayName}</small></div>
+                  <div>
+                    <span>Outline</span>
+                    <strong>{selectedOutline.curriculumName}</strong>
+                    <small>{selectedOutline.pathwayName}</small>
+                  </div>
                 </section>
 
                 <section className="course-detail-section">
                   <h4>Course Identity</h4>
                   <div className="ba-mini-chips">
-                    <Chip tone={typeTone(selectedOutline.type)}>Type: {selectedOutline.type}</Chip>
-                    <Chip tone="blue">Credits: {selectedOutline.credits ?? "-"}</Chip>
-                    <Chip tone="blue">Hours: {selectedOutline.contactHours ?? "-"}</Chip>
-                    <Chip tone="orange">Min Pass: {selectedOutline.minimumPassScore ?? "-"}</Chip>
+                    <Chip tone={typeTone(selectedOutline.type)}>
+                      Type: {selectedOutline.type}
+                    </Chip>
+                    <Chip tone="blue">
+                      Credits: {selectedOutline.credits ?? "-"}
+                    </Chip>
+                    <Chip tone="blue">
+                      Hours: {selectedOutline.contactHours ?? "-"}
+                    </Chip>
+                    <Chip tone="orange">
+                      Min Pass: {selectedOutline.minimumPassScore ?? "-"}
+                    </Chip>
                   </div>
                 </section>
 
                 <section className="course-detail-section">
                   <h4>Academic Context</h4>
-                  <InfoGrid items={[["Curriculum", selectedOutline.curriculumName], ["Pathway", selectedOutline.pathwayName], ["Academic Structure", selectedOutline.academicStructureName], ["Academic Period", selectedOutline.academicPeriodName]]} />
+                  <InfoGrid
+                    items={[
+                      ["Curriculum", selectedOutline.curriculumName],
+                      ["Pathway", selectedOutline.pathwayName],
+                      [
+                        "Academic Structure",
+                        selectedOutline.academicStructureName,
+                      ],
+                      ["Academic Period", selectedOutline.academicPeriodName],
+                    ]}
+                  />
                 </section>
 
                 <section className="course-detail-section">
                   <h4>Delivery Ownership</h4>
-                  <InfoGrid items={[["Teacher", selectedOutline.teacherName], ["Locked", (selectedOutline.classSubject as any).locked ? "Yes" : "No"], ["Active", (selectedOutline.classSubject as any).active === false ? "No" : "Yes"], ["Applicability Records", `${selectedOutline.applicabilityCount}`]]} />
+                  <InfoGrid
+                    items={[
+                      ["Teacher", selectedOutline.teacherName],
+                      [
+                        "Locked",
+                        (selectedOutline.classSubject as any).locked
+                          ? "Yes"
+                          : "No",
+                      ],
+                      [
+                        "Active",
+                        (selectedOutline.classSubject as any).active === false
+                          ? "No"
+                          : "Yes",
+                      ],
+                      [
+                        "Applicability Records",
+                        `${selectedOutline.applicabilityCount}`,
+                      ],
+                    ]}
+                  />
                 </section>
 
                 <section className="course-detail-section readiness">
                   <h4>Assessment Readiness</h4>
                   <div className="ba-mini-chips">
-                    <Chip tone={selectedOutline.assessmentConfigured ? "green" : "orange"}>{selectedOutline.assessmentConfigured ? "Assessment applicability configured" : "Assessment applicability not configured"}</Chip>
+                    <Chip
+                      tone={
+                        selectedOutline.assessmentConfigured
+                          ? "green"
+                          : "orange"
+                      }
+                    >
+                      {selectedOutline.assessmentConfigured
+                        ? "Assessment applicability configured"
+                        : "Assessment applicability not configured"}
+                    </Chip>
                   </div>
-                  <p>This outline is generated from academic delivery setup. To make this course report-ready, configure Assessment Applicability for this ClassSubject.</p>
+                  <p>
+                    This outline is generated from academic delivery setup. To
+                    make this course report-ready, configure Assessment
+                    Applicability for this ClassSubject.
+                  </p>
                 </section>
               </>
             ) : (
-              <Empty icon="📖" title="No outline selected" text="Select a course outline to view details." />
+              <Empty
+                icon="📖"
+                title="No outline selected"
+                text="Select a course outline to view details."
+              />
             )}
           </aside>
         </section>
@@ -685,8 +1153,14 @@ export default function CourseOutline() {
       {moreOpen && (
         <MoreSheet
           viewMode={viewMode}
-          setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       )}
@@ -694,9 +1168,20 @@ export default function CourseOutline() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -756,7 +1241,9 @@ function TableView({ rows }: { rows: CourseOutlineView[] }) {
                       <i>→</i>
                       <b>{item.subjectName}</b>
                     </div>
-                    <small className="table-note">Class subject delivery record</small>
+                    <small className="table-note">
+                      Class subject delivery record
+                    </small>
                   </td>
                   <td>
                     <div className="table-link-map muted">
@@ -764,26 +1251,48 @@ function TableView({ rows }: { rows: CourseOutlineView[] }) {
                       <i>→</i>
                       <b>{item.pathwayName}</b>
                     </div>
-                    <small className="table-note">Curriculum outline source</small>
+                    <small className="table-note">
+                      Curriculum outline source
+                    </small>
                   </td>
                   <td>{item.teacherName}</td>
                   <td>{item.academicPeriodName}</td>
-                  <td><Chip tone={typeTone(item.type)}>{item.type}</Chip></td>
+                  <td>
+                    <Chip tone={typeTone(item.type)}>{item.type}</Chip>
+                  </td>
                   <td>
                     <div className="table-load">
-                      <span>{item.credits ?? "—"}<small>credits</small></span>
-                      <span>{item.contactHours ?? "—"}<small>hours</small></span>
+                      <span>
+                        {item.credits ?? "—"}
+                        <small>credits</small>
+                      </span>
+                      <span>
+                        {item.contactHours ?? "—"}
+                        <small>hours</small>
+                      </span>
                     </div>
                   </td>
-                  <td>{item.applicabilityCount ? `${item.applicabilityCount} record(s)` : "Not configured"}</td>
-                  <td><Chip tone={statusTone(item.statusLabel)}>{item.statusLabel}</Chip></td>
+                  <td>
+                    {item.applicabilityCount
+                      ? `${item.applicabilityCount} record(s)`
+                      : "Not configured"}
+                  </td>
+                  <td>
+                    <Chip tone={statusTone(item.statusLabel)}>
+                      {item.statusLabel}
+                    </Chip>
+                  </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length ? <div className="ba-empty-table">No course outline matches your filters.</div> : null}
+        {!rows.length ? (
+          <div className="ba-empty-table">
+            No course outline matches your filters.
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -816,28 +1325,131 @@ function FilterSheet(props: {
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Filter by the academic link between class, subject, curriculum and readiness.</p>
+            <p>
+              Filter by the academic link between class, subject, curriculum and
+              readiness.
+            </p>
           </div>
-          <button type="button" onClick={props.onClose} aria-label="Close filters">✕</button>
+          <button
+            type="button"
+            onClick={props.onClose}
+            aria-label="Close filters"
+          >
+            ✕
+          </button>
         </div>
         <div className="ba-form compact">
-          <label><span>Class</span><select value={props.filterClassId} onChange={(e) => props.setFilterClassId(e.target.value)}><option value="">All classes</option>{props.classes.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Subject</span><select value={props.filterSubjectId} onChange={(e) => props.setFilterSubjectId(e.target.value)}><option value="">All subjects</option>{props.subjects.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Teacher</span><select value={props.filterTeacherId} onChange={(e) => props.setFilterTeacherId(e.target.value)}><option value="">All teachers</option>{props.teachers.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.fullName}</option>)}</select></label>
-          <label><span>Curriculum</span><select value={props.filterCurriculumId} onChange={(e) => props.setFilterCurriculumId(e.target.value)}><option value="">All curriculums</option>{props.curriculums.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Period</span><select value={props.filterPeriodId} onChange={(e) => props.setFilterPeriodId(e.target.value)}><option value="">All periods</option>{props.academicPeriods.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Readiness</span><select value={props.filterReadiness} onChange={(e) => props.setFilterReadiness(e.target.value as ReadinessFilter)}><option value="all">All readiness</option><option value="ready">Assessment ready</option><option value="incomplete">Needs assessment setup</option><option value="locked">Locked</option><option value="inactive">Inactive</option><option value="unassigned">No teacher</option></select></label>
+          <label>
+            <span>Class</span>
+            <select
+              value={props.filterClassId}
+              onChange={(e) => props.setFilterClassId(e.target.value)}
+            >
+              <option value="">All classes</option>
+              {props.classes.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Subject</span>
+            <select
+              value={props.filterSubjectId}
+              onChange={(e) => props.setFilterSubjectId(e.target.value)}
+            >
+              <option value="">All subjects</option>
+              {props.subjects.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Teacher</span>
+            <select
+              value={props.filterTeacherId}
+              onChange={(e) => props.setFilterTeacherId(e.target.value)}
+            >
+              <option value="">All teachers</option>
+              {props.teachers.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.fullName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Curriculum</span>
+            <select
+              value={props.filterCurriculumId}
+              onChange={(e) => props.setFilterCurriculumId(e.target.value)}
+            >
+              <option value="">All curriculums</option>
+              {props.curriculums.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Period</span>
+            <select
+              value={props.filterPeriodId}
+              onChange={(e) => props.setFilterPeriodId(e.target.value)}
+            >
+              <option value="">All periods</option>
+              {props.academicPeriods.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Readiness</span>
+            <select
+              value={props.filterReadiness}
+              onChange={(e) =>
+                props.setFilterReadiness(e.target.value as ReadinessFilter)
+              }
+            >
+              <option value="all">All readiness</option>
+              <option value="ready">Assessment ready</option>
+              <option value="incomplete">Needs assessment setup</option>
+              <option value="locked">Locked</option>
+              <option value="inactive">Inactive</option>
+              <option value="unassigned">No teacher</option>
+            </select>
+          </label>
         </div>
         <div className="ba-sheet-actions">
-          <button type="button" onClick={props.clearFilters}>Clear</button>
-          <button type="button" className="primary" onClick={props.onClose}>Apply</button>
+          <button type="button" onClick={props.clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={props.onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
@@ -846,13 +1458,43 @@ function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: Vi
             <h2>More</h2>
             <p>Advanced views are here so the main page stays simple.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>Card view</b><small>Course list with outline detail panel</small></button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Visual course-to-outline mapping</small></button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Readiness, class, curriculum and teacher load</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local delivery records</small></button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>Card view</b>
+            <small>Course list with outline detail panel</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Visual course-to-outline mapping</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Readiness, class, curriculum and teacher load</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local delivery records</small>
+          </button>
         </div>
       </section>
     </div>
@@ -860,19 +1502,41 @@ function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: Vi
 }
 
 function InfoGrid({ items }: { items: [string, string][] }) {
-  return <div className="course-info-grid">{items.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>;
+  return (
+    <div className="course-info-grid">
+      {items.map(([label, value]) => (
+        <div key={label}>
+          <span>{label}</span>
+          <strong>{value}</strong>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function groupedCounts(rows: CourseOutlineView[], keyFn: (row: CourseOutlineView) => string) {
+function groupedCounts(
+  rows: CourseOutlineView[],
+  keyFn: (row: CourseOutlineView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>
@@ -880,7 +1544,19 @@ function AnalysisCard({ title, rows, total }: { title: string; rows: { label: st
       <div className="ba-analysis-list">
         {rows.slice(0, 8).map((row) => {
           const share = total ? Math.round((row.value / total) * 100) : 0;
-          return <section key={row.label}><div><b>{row.label}</b><small>{row.value} · {share}%</small></div><div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div></section>;
+          return (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
+            </section>
+          );
         })}
         {!rows.length ? <p>No data available.</p> : null}
       </div>

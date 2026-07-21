@@ -53,17 +53,19 @@
  * - keeps branch settings as the protected source for branch color/font/theme while
  *   rendering with the same light/dark surface, input, card and shell tokens
  *
- * Theme safety fix:
+ * Theme + primary-colour atomic save fix:
  * - opening the Branch Settings tab is passive and never changes the active app theme
  * - Save, Save All, sheet saves and the More modal never mutate document theme variables
- * - successful settings commits publish schoolBranchSettings through syncEvents
- * - SettingsContext + PortalAppearanceRuntime reload and apply the exact active branch
- * - this module stores theme values only; global theme application remains outside this page
+ * - schoolBranchSettings commits now go through SettingsContext.updateSettings(...)
+ * - theme, primary colour and typography are published as one exact committed record
+ * - the old post-save refresh race can no longer replace the primary colour with a fallback
+ * - successful settings commits still publish schoolBranchSettings through syncEvents
+ * - global theme application remains outside this page
  *
  * Media removal fix:
  * - clicking Remove clears the preview, fallback string field and saved mediaId field immediately
  * - removals are tracked by owner identity, not only by mediaId
- * - Save soft-deletes every active mediaAsset for ownerTable + ownerLocalId + fieldKey
+ * - Save soft-deletes every active mediaAsset for ownerTable + ownerId + fieldKey
  * - this handles records resolved through getOwnerFieldMediaAsset(...) even when the form has no mediaId
  * - owner records are saved with empty string fallbacks and null media IDs so old links cannot survive merge updates
  * - removed mediaAssets and their mediaBlobs are soft-deleted locally and marked pending sync
@@ -98,11 +100,9 @@ import {
 } from "../../lib/db/db";
 
 import {
-  attachMediaAssetToOwner,
   commitMediaAssetsToOwner,
   createMediaSessionKey as createSharedMediaSessionKey,
-  getMediaObjectUrl,
-  getOwnerFieldMediaAsset,
+  resolveOwnerMediaUrl,
   revokeMediaObjectUrl,
   saveImageAsset,
 } from "../../lib/media/mediaAssetUtils";
@@ -114,9 +114,7 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 
-import {
-  publishBranchSettingsSaved,
-} from "../../lib/sync/syncEvents";
+import { publishBranchSettingsSaved } from "../../lib/sync/syncEvents";
 
 import {
   STUDENT_REPORT_TEMPLATE_REGISTRY,
@@ -140,10 +138,14 @@ import BroadsheetCard from "./reports/components/BroadsheetCard";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
-const TemplatePreviewStudentReportCard = StudentReportCard as React.ComponentType<any>;
-const TemplatePreviewCumulativeReportBook = CumulativeReportBook as React.ComponentType<any>;
-const TemplatePreviewCumulativeTranscriptCard = CumulativeTranscriptCard as React.ComponentType<any>;
-const TemplatePreviewBroadsheetCard = BroadsheetCard as React.ComponentType<any>;
+const TemplatePreviewStudentReportCard =
+  StudentReportCard as React.ComponentType<any>;
+const TemplatePreviewCumulativeReportBook =
+  CumulativeReportBook as React.ComponentType<any>;
+const TemplatePreviewCumulativeTranscriptCard =
+  CumulativeTranscriptCard as React.ComponentType<any>;
+const TemplatePreviewBroadsheetCard =
+  BroadsheetCard as React.ComponentType<any>;
 
 // ======================================================
 // COLOR UTILITIES
@@ -201,7 +203,6 @@ const fontOptions = [
   { label: "Monaco", value: "Monaco, monospace" },
 ];
 
-
 const generatedDateLabelOptions = [
   "Generated",
   "Report Generated",
@@ -218,7 +219,15 @@ type ReportTemplateReportType =
   | "subject_broadsheet"
   | "class_broadsheet"
   | "annual_broadsheet";
-type SettingsSection = "academic" | "school" | "branch" | "appearance" | "dashboardMedia" | "reportMedia" | "reportTemplates" | "gallery";
+type SettingsSection =
+  | "academic"
+  | "school"
+  | "branch"
+  | "appearance"
+  | "dashboardMedia"
+  | "reportMedia"
+  | "reportTemplates"
+  | "gallery";
 
 type ImageField =
   | "logo"
@@ -233,9 +242,9 @@ type ImageField =
   | "subjectPlaceholderImage";
 
 type SettingsForm = {
-  id?: number;
-  schoolId?: number;
-  branchId?: number;
+  id?: string;
+  schoolId?: string;
+  branchId?: string;
   mode: string;
   fontFamily: string;
   fontSize: number;
@@ -243,45 +252,45 @@ type SettingsForm = {
   theme: "light" | "dark";
   currentTerm: string;
   academicYear: string;
-  currentAcademicStructureId?: number;
-  currentAcademicPeriodId?: number;
+  currentAcademicStructureId?: string;
+  currentAcademicPeriodId?: string;
   logo: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   reportCardBackgroundImage: string;
-  reportCardBackgroundImageMediaId?: number;
+  reportCardBackgroundImageMediaId?: string;
   reportCardWatermark: string;
-  reportCardWatermarkMediaId?: number;
+  reportCardWatermarkMediaId?: string;
   reportCardSignatureImage: string;
-  reportCardSignatureImageMediaId?: number;
+  reportCardSignatureImageMediaId?: string;
   dashboardHeroImage: string;
-  dashboardHeroImageMediaId?: number;
+  dashboardHeroImageMediaId?: string;
   dashboardBannerImage: string;
-  dashboardBannerImageMediaId?: number;
+  dashboardBannerImageMediaId?: string;
   studentPortalImage: string;
-  studentPortalImageMediaId?: number;
+  studentPortalImageMediaId?: string;
   teacherPortalImage: string;
-  teacherPortalImageMediaId?: number;
+  teacherPortalImageMediaId?: string;
   classroomPlaceholderImage: string;
-  classroomPlaceholderImageMediaId?: number;
+  classroomPlaceholderImageMediaId?: string;
   subjectPlaceholderImage: string;
-  subjectPlaceholderImageMediaId?: number;
+  subjectPlaceholderImageMediaId?: string;
   schoolGalleryImages: string[];
-  schoolGalleryMediaIds?: number[];
+  schoolGalleryMediaIds?: string[];
 };
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
 };
 
 type SchoolForm = {
-  id?: number;
+  id?: string;
   name?: string;
   motto?: string;
   logo?: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   address?: string;
   location?: string;
   email?: string;
@@ -289,13 +298,13 @@ type SchoolForm = {
   website?: string;
   galleryImages?: string[];
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active?: boolean;
 };
 
 type BranchForm = {
-  id?: number;
-  schoolId?: number;
+  id?: string;
+  schoolId?: string;
   name?: string;
   code?: string;
   address?: string;
@@ -305,17 +314,16 @@ type BranchForm = {
   phone?: string;
   website?: string;
   logo?: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   bannerImage?: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active?: boolean;
 };
 
-
 type ReportTemplateForm = {
-  templateId?: number;
-  templateSettingsId?: number;
-  assignmentId?: number;
+  templateId?: string;
+  templateSettingsId?: string;
+  assignmentId?: string;
 
   reportType: ReportTemplateReportType;
 
@@ -430,10 +438,10 @@ type ReportTemplateForm = {
 };
 
 type ReportTemplateRow = {
-  id?: number;
+  id?: string;
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   name?: string;
   code?: string;
   layoutKey?: string;
@@ -448,11 +456,11 @@ type ReportTemplateRow = {
 };
 
 type ReportTemplateSettingsRow = {
-  id?: number;
+  id?: string;
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  templateId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  templateId?: string | string | null;
   reportType?: ReportTemplateReportType | string;
   active?: boolean;
   isDeleted?: boolean;
@@ -460,31 +468,29 @@ type ReportTemplateSettingsRow = {
 };
 
 type ReportTemplateAssignmentRow = {
-  id?: number;
+  id?: string;
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  templateId?: number | string | null;
-  templateSettingsId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  templateId?: string | string | null;
+  templateSettingsId?: string | string | null;
   reportType?: ReportTemplateReportType | string;
   scopeType?: string | null;
-  scopeId?: number | string | null;
+  scopeId?: string | null;
   isDefault?: boolean;
   active?: boolean;
   isDeleted?: boolean;
   [key: string]: any;
 };
 
-
 type PendingMediaRemoval = {
-  assetId?: number | null;
+  assetId?: string | null;
   ownerTable: string;
   fieldKey: string;
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
-  ownerLocalId?: number | null;
-  ownerCloudId?: string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  ownerId?: string | null;
   ownerTempKey?: string | null;
 };
 
@@ -494,10 +500,9 @@ type SaveOptions = {
   persistRemovals?: boolean;
 };
 
-
 const defaultForm = (
-  schoolId?: number | null,
-  branchId?: number | null
+  schoolId?: string | null,
+  branchId?: string | null,
 ): SettingsForm => ({
   schoolId: schoolId || undefined,
   branchId: branchId || undefined,
@@ -522,7 +527,6 @@ const defaultForm = (
   subjectPlaceholderImage: "",
   schoolGalleryImages: [],
 });
-
 
 function studentReportTemplateDefinitionOptions(): ReportTemplateRow[] {
   return STUDENT_REPORT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
@@ -555,22 +559,24 @@ function cumulativeBookTemplateDefinitionOptions(): ReportTemplateRow[] {
 }
 
 function cumulativeTranscriptTemplateDefinitionOptions(): ReportTemplateRow[] {
-  return CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
-    name: item.name,
-    code: item.code,
-    layoutKey: item.layoutKey,
-    reportType: "cumulative_transcript",
-    orientation: item.orientation || "portrait",
-    paperSize: item.paperSize || "A4",
-    density: item.density || "compact",
-    description: item.description || "Cumulative transcript template.",
-    active: item.active !== false,
-    isDefault: item.isDefault === true || index === 0,
-  }));
+  return CUMULATIVE_TRANSCRIPT_TEMPLATE_REGISTRY.map(
+    (item: any, index: number) => ({
+      name: item.name,
+      code: item.code,
+      layoutKey: item.layoutKey,
+      reportType: "cumulative_transcript",
+      orientation: item.orientation || "portrait",
+      paperSize: item.paperSize || "A4",
+      density: item.density || "compact",
+      description: item.description || "Cumulative transcript template.",
+      active: item.active !== false,
+      isDefault: item.isDefault === true || index === 0,
+    }),
+  );
 }
 
 function broadsheetTemplateDefinitionOptions(
-  reportType: "subject_broadsheet" | "class_broadsheet" | "annual_broadsheet"
+  reportType: "subject_broadsheet" | "class_broadsheet" | "annual_broadsheet",
 ): ReportTemplateRow[] {
   return BROADSHEET_TEMPLATE_REGISTRY.map((item: any, index: number) => ({
     name: item.name,
@@ -586,7 +592,9 @@ function broadsheetTemplateDefinitionOptions(
   }));
 }
 
-function reportTemplateDefinitionOptions(reportType?: ReportTemplateReportType): ReportTemplateRow[] {
+function reportTemplateDefinitionOptions(
+  reportType?: ReportTemplateReportType,
+): ReportTemplateRow[] {
   const all = [
     ...studentReportTemplateDefinitionOptions(),
     ...cumulativeBookTemplateDefinitionOptions(),
@@ -596,29 +604,45 @@ function reportTemplateDefinitionOptions(reportType?: ReportTemplateReportType):
     ...broadsheetTemplateDefinitionOptions("annual_broadsheet"),
   ];
 
-  return reportType ? all.filter((item: any) => item.reportType === reportType) : all;
+  return reportType
+    ? all.filter((item: any) => item.reportType === reportType)
+    : all;
 }
 
-function defaultReportTemplateDefinition(reportType: ReportTemplateReportType = "student_report") {
-  return reportTemplateDefinitionOptions(reportType)[0] || reportTemplateDefinitionOptions("student_report")[0];
+function defaultReportTemplateDefinition(
+  reportType: ReportTemplateReportType = "student_report",
+) {
+  return (
+    reportTemplateDefinitionOptions(reportType)[0] ||
+    reportTemplateDefinitionOptions("student_report")[0]
+  );
 }
 
 function reportTemplateFormFromDefinition(
   template?: Partial<ReportTemplateRow> | null,
-  reportType: ReportTemplateReportType = "student_report"
+  reportType: ReportTemplateReportType = "student_report",
 ): ReportTemplateForm {
   const fallback = defaultReportTemplateDefinition(reportType);
   const selected = template || fallback;
-  const selectedReportType = ((selected as any).reportType || reportType || "student_report") as ReportTemplateReportType;
+  const selectedReportType = ((selected as any).reportType ||
+    reportType ||
+    "student_report") as ReportTemplateReportType;
 
   return {
     reportType: selectedReportType,
     templateName: selected.name || fallback.name || "Classic Formal",
     templateCode: selected.code || fallback.code || "classic_formal",
     layoutKey: selected.layoutKey || fallback.layoutKey || "classic_formal",
-    orientation: ((selected.orientation || fallback.orientation || "portrait") as "portrait" | "landscape"),
-    paperSize: ((selected.paperSize || fallback.paperSize || "A4") as "A4" | "Letter"),
-    density: ((selected.density || fallback.density || "compact") as "compact" | "comfortable" | "spacious"),
+    orientation: (selected.orientation ||
+      fallback.orientation ||
+      "portrait") as "portrait" | "landscape",
+    paperSize: (selected.paperSize || fallback.paperSize || "A4") as
+      | "A4"
+      | "Letter",
+    density: (selected.density || fallback.density || "compact") as
+      | "compact"
+      | "comfortable"
+      | "spacious",
 
     showSubjectPosition: true,
     showClassPosition: true,
@@ -695,17 +719,27 @@ function reportTemplateFormFromDefinition(
     nextAcademicPeriodLabel: "Next Academic Period Begins",
     numberOnRollLabel: "Number On Roll",
     classPositionLabel: "Class Position",
-    subjectPositionLabel: selectedReportType === "cumulative_transcript" ? "Rank" : "Position",
+    subjectPositionLabel:
+      selectedReportType === "cumulative_transcript" ? "Rank" : "Position",
     generatedDateLabel: "Generated",
     bookTitleLabel: "Cumulative Academic Report Book",
     bookSubtitleLabel: "Student Academic Journey",
     studentNameLabel: "Student",
     admissionNumberLabel: "Student ID",
     genderLabel: "Gender",
-    classLabel: selectedReportType === "cumulative_transcript" ? "Programme / Class" : "Class",
+    classLabel:
+      selectedReportType === "cumulative_transcript"
+        ? "Programme / Class"
+        : "Class",
     academicStructureLabel: "Academic Structure",
-    academicPeriodLabel: selectedReportType === "cumulative_transcript" ? "Academic Period" : "Academic Period",
-    subjectLabel: selectedReportType === "cumulative_transcript" ? "Course / Subject" : "Subject",
+    academicPeriodLabel:
+      selectedReportType === "cumulative_transcript"
+        ? "Academic Period"
+        : "Academic Period",
+    subjectLabel:
+      selectedReportType === "cumulative_transcript"
+        ? "Course / Subject"
+        : "Subject",
     totalLabel: "Total",
     averageLabel: "Average",
     gradeLabel: "Grade",
@@ -720,7 +754,8 @@ function reportTemplateFormFromDefinition(
             ? "Annual Cumulative Broadsheet"
             : "Broadsheet",
     broadsheetGeneratedDateLabel: "Generated",
-    broadsheetFooterText: "Official academic broadsheet generated by Eleeveon Schools.",
+    broadsheetFooterText:
+      "Official academic broadsheet generated by Eleeveon Schools.",
     studentColumnLabel: "Student",
     admissionNumberColumnLabel: "Admission No.",
     positionColumnLabel: "Position",
@@ -732,22 +767,30 @@ function reportTemplateFormFromDefinition(
 }
 
 const defaultReportTemplateForm = (): ReportTemplateForm =>
-  reportTemplateFormFromDefinition(defaultReportTemplateDefinition("student_report"), "student_report");
+  reportTemplateFormFromDefinition(
+    defaultReportTemplateDefinition("student_report"),
+    "student_report",
+  );
 
 function reportTemplatePreviewSettingsFromForm(
   form: ReportTemplateForm,
-  template?: Partial<ReportTemplateRow> | null
+  template?: Partial<ReportTemplateRow> | null,
 ) {
   const selected = template || null;
 
   return {
     ...form,
-    reportType: (selected as any)?.reportType || form.reportType || "student_report",
+    reportType:
+      (selected as any)?.reportType || form.reportType || "student_report",
     templateName: selected?.name || form.templateName,
     templateCode: selected?.code || form.templateCode,
     layoutKey: selected?.layoutKey || form.layoutKey,
-    orientation: (form.orientation || selected?.orientation || "portrait") as "portrait" | "landscape",
-    paperSize: (form.paperSize || selected?.paperSize || "A4") as "A4" | "Letter",
+    orientation: (form.orientation || selected?.orientation || "portrait") as
+      | "portrait"
+      | "landscape",
+    paperSize: (form.paperSize || selected?.paperSize || "A4") as
+      | "A4"
+      | "Letter",
     density: form.density || selected?.density || "compact",
   };
 }
@@ -755,20 +798,39 @@ function reportTemplatePreviewSettingsFromForm(
 function selectReportTemplateIntoForm(
   template: Partial<ReportTemplateRow> | null | undefined,
   updateField: (key: keyof ReportTemplateForm, value: any) => void,
-  reportType?: ReportTemplateReportType
+  reportType?: ReportTemplateReportType,
 ) {
-  const resolvedReportType = ((template as any)?.reportType || reportType || "student_report") as ReportTemplateReportType;
-  const selected = template || defaultReportTemplateDefinition(resolvedReportType);
-  const code = selected.code || selected.layoutKey || defaultReportTemplateDefinition(resolvedReportType).code || "classic_formal";
+  const resolvedReportType = ((template as any)?.reportType ||
+    reportType ||
+    "student_report") as ReportTemplateReportType;
+  const selected =
+    template || defaultReportTemplateDefinition(resolvedReportType);
+  const code =
+    selected.code ||
+    selected.layoutKey ||
+    defaultReportTemplateDefinition(resolvedReportType).code ||
+    "classic_formal";
 
   updateField("reportType", resolvedReportType);
   updateField("templateId", idOf((selected as any)?.id) || undefined);
   updateField("templateName", selected.name || "Report Template");
   updateField("templateCode", code);
   updateField("layoutKey", selected.layoutKey || code);
-  updateField("orientation", ((selected as any)?.orientation || "portrait") as "portrait" | "landscape");
-  updateField("paperSize", ((selected as any)?.paperSize || "A4") as "A4" | "Letter");
-  updateField("density", ((selected as any)?.density || "compact") as "compact" | "comfortable" | "spacious");
+  updateField(
+    "orientation",
+    ((selected as any)?.orientation || "portrait") as "portrait" | "landscape",
+  );
+  updateField(
+    "paperSize",
+    ((selected as any)?.paperSize || "A4") as "A4" | "Letter",
+  );
+  updateField(
+    "density",
+    ((selected as any)?.density || "compact") as
+      | "compact"
+      | "comfortable"
+      | "spacious",
+  );
 }
 
 function createDummyStudentReportPreviewDataset(args: {
@@ -803,8 +865,20 @@ function createDummyStudentReportPreviewDataset(args: {
   };
 
   const assessmentColumns = [
-    { assessmentStructureItemId: 1, name: "Class Score", maxScore: 50, weight: 50, order: 1 },
-    { assessmentStructureItemId: 2, name: "Exam", maxScore: 100, weight: 50, order: 2 },
+    {
+      assessmentStructureItemId: 1,
+      name: "Class Score",
+      maxScore: 50,
+      weight: 50,
+      order: 1,
+    },
+    {
+      assessmentStructureItemId: 2,
+      name: "Exam",
+      maxScore: 100,
+      weight: 50,
+      order: 2,
+    },
   ];
 
   const subjects = [
@@ -902,17 +976,29 @@ function createDummyStudentReportPreviewDataset(args: {
       average: 86,
       overallPosition: 2,
       overallGPA: 3.82,
-      classTeacherRemark: "Jonathan is attentive, respectful and participates actively in class.",
-      headTeacherRemark: "A strong performance. Keep building excellent learning habits.",
+      classTeacherRemark:
+        "Jonathan is attentive, respectful and participates actively in class.",
+      headTeacherRemark:
+        "A strong performance. Keep building excellent learning habits.",
       subjectResults: subjects.map((subject, index) => {
-        const [subjectName, teacherName, classScore, examScore, percentage, grade, position, remark] = subject;
+        const [
+          subjectName,
+          teacherName,
+          classScore,
+          examScore,
+          percentage,
+          grade,
+          position,
+          remark,
+        ] = subject;
         return {
           classSubjectId: index + 1,
           subjectName,
           teacherName,
           breakdown: assessmentColumns.map((column) => ({
             ...column,
-            score: column.assessmentStructureItemId === 1 ? classScore : examScore,
+            score:
+              column.assessmentStructureItemId === 1 ? classScore : examScore,
           })),
           weightedTotal: percentage,
           percentage,
@@ -924,8 +1010,6 @@ function createDummyStudentReportPreviewDataset(args: {
     },
   };
 }
-
-
 
 function createDummyCumulativeReportBookPreviewDataset(args: {
   schoolName?: string;
@@ -941,16 +1025,28 @@ function createDummyCumulativeReportBookPreviewDataset(args: {
   const term2 = createDummyStudentReportPreviewDataset(args) as any;
   const term3 = createDummyStudentReportPreviewDataset(args) as any;
 
-  term1.header.academicPeriod = { ...term1.header.academicPeriod, name: "Term 1, 2026", formattedEndDate: "Apr 04, 2026" };
+  term1.header.academicPeriod = {
+    ...term1.header.academicPeriod,
+    name: "Term 1, 2026",
+    formattedEndDate: "Apr 04, 2026",
+  };
   term1.header.academicPeriodName = "Term 1, 2026";
   term1.report.average = 82.4;
   term1.report.total = 329.6;
   term1.report.overallPosition = 4;
 
-  term2.header.academicPeriod = { ...term2.header.academicPeriod, name: "Term 2, 2026", formattedEndDate: "Jul 31, 2026" };
+  term2.header.academicPeriod = {
+    ...term2.header.academicPeriod,
+    name: "Term 2, 2026",
+    formattedEndDate: "Jul 31, 2026",
+  };
   term2.header.academicPeriodName = "Term 2, 2026";
 
-  term3.header.academicPeriod = { ...term3.header.academicPeriod, name: "Term 3, 2026", formattedEndDate: "Dec 12, 2026" };
+  term3.header.academicPeriod = {
+    ...term3.header.academicPeriod,
+    name: "Term 3, 2026",
+    formattedEndDate: "Dec 12, 2026",
+  };
   term3.header.academicPeriodName = "Term 3, 2026";
   term3.report.average = 89.2;
   term3.report.total = 356.8;
@@ -974,9 +1070,36 @@ function createDummyCumulativeReportBookPreviewDataset(args: {
       studentPhoto: "",
     },
     periods: [
-      { id: 1, academicPeriodName: "Term 1, 2026", academicYear: "2026", dataset: term1, average: 82.4, position: 4, gpa: 3.54, recommendation: "promote" },
-      { id: 2, academicPeriodName: "Term 2, 2026", academicYear: "2026", dataset: term2, average: 86, position: 2, gpa: 3.82, recommendation: "promote" },
-      { id: 3, academicPeriodName: "Term 3, 2026", academicYear: "2026", dataset: term3, average: 89.2, position: 1, gpa: 3.9, recommendation: "promote" },
+      {
+        id: 1,
+        academicPeriodName: "Term 1, 2026",
+        academicYear: "2026",
+        dataset: term1,
+        average: 82.4,
+        position: 4,
+        gpa: 3.54,
+        recommendation: "promote",
+      },
+      {
+        id: 2,
+        academicPeriodName: "Term 2, 2026",
+        academicYear: "2026",
+        dataset: term2,
+        average: 86,
+        position: 2,
+        gpa: 3.82,
+        recommendation: "promote",
+      },
+      {
+        id: 3,
+        academicPeriodName: "Term 3, 2026",
+        academicYear: "2026",
+        dataset: term3,
+        average: 89.2,
+        position: 1,
+        gpa: 3.9,
+        recommendation: "promote",
+      },
     ],
     notes: [
       "This is a preview-only academic booklet using dummy records.",
@@ -1038,9 +1161,33 @@ function createDummyCumulativeTranscriptPreviewDataset(args: {
           position: 4,
           recommendation: "promote",
           subjectResults: [
-            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 82, grade: "A", remark: "Very Good", position: 3 },
-            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 86, grade: "A", remark: "Excellent", position: 2 },
-            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 80, grade: "B+", remark: "Good", position: 5 },
+            {
+              subjectId: 1,
+              subjectName: "English Language",
+              subjectCode: "ENG",
+              percentage: 82,
+              grade: "A",
+              remark: "Very Good",
+              position: 3,
+            },
+            {
+              subjectId: 2,
+              subjectName: "Mathematics",
+              subjectCode: "MATH",
+              percentage: 86,
+              grade: "A",
+              remark: "Excellent",
+              position: 2,
+            },
+            {
+              subjectId: 3,
+              subjectName: "Science",
+              subjectCode: "SCI",
+              percentage: 80,
+              grade: "B+",
+              remark: "Good",
+              position: 5,
+            },
           ],
         },
         {
@@ -1054,9 +1201,33 @@ function createDummyCumulativeTranscriptPreviewDataset(args: {
           position: 2,
           recommendation: "promote",
           subjectResults: [
-            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 88, grade: "A", remark: "Excellent", position: 2 },
-            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 92, grade: "A+", remark: "Outstanding", position: 1 },
-            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 84, grade: "A", remark: "Very Good", position: 3 },
+            {
+              subjectId: 1,
+              subjectName: "English Language",
+              subjectCode: "ENG",
+              percentage: 88,
+              grade: "A",
+              remark: "Excellent",
+              position: 2,
+            },
+            {
+              subjectId: 2,
+              subjectName: "Mathematics",
+              subjectCode: "MATH",
+              percentage: 92,
+              grade: "A+",
+              remark: "Outstanding",
+              position: 1,
+            },
+            {
+              subjectId: 3,
+              subjectName: "Science",
+              subjectCode: "SCI",
+              percentage: 84,
+              grade: "A",
+              remark: "Very Good",
+              position: 3,
+            },
           ],
         },
         {
@@ -1070,9 +1241,33 @@ function createDummyCumulativeTranscriptPreviewDataset(args: {
           position: 1,
           recommendation: "promote",
           subjectResults: [
-            { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", percentage: 90, grade: "A+", remark: "Outstanding", position: 1 },
-            { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", percentage: 94, grade: "A+", remark: "Outstanding", position: 1 },
-            { subjectId: 3, subjectName: "Science", subjectCode: "SCI", percentage: 88, grade: "A", remark: "Excellent", position: 2 },
+            {
+              subjectId: 1,
+              subjectName: "English Language",
+              subjectCode: "ENG",
+              percentage: 90,
+              grade: "A+",
+              remark: "Outstanding",
+              position: 1,
+            },
+            {
+              subjectId: 2,
+              subjectName: "Mathematics",
+              subjectCode: "MATH",
+              percentage: 94,
+              grade: "A+",
+              remark: "Outstanding",
+              position: 1,
+            },
+            {
+              subjectId: 3,
+              subjectName: "Science",
+              subjectCode: "SCI",
+              percentage: 88,
+              grade: "A",
+              remark: "Excellent",
+              position: 2,
+            },
           ],
         },
       ],
@@ -1119,9 +1314,11 @@ function createDummyBroadsheetPreviewHeader(args: {
       logo: args.logo || "",
       resolvedLogoUrl: args.logo || "",
       reportCardBackgroundImage: args.reportCardBackgroundImage || "",
-      resolvedReportCardBackgroundImageUrl: args.reportCardBackgroundImage || "",
+      resolvedReportCardBackgroundImageUrl:
+        args.reportCardBackgroundImage || "",
       reportCardWatermark: args.reportCardWatermark || args.logo || "",
-      resolvedReportCardWatermarkUrl: args.reportCardWatermark || args.logo || "",
+      resolvedReportCardWatermarkUrl:
+        args.reportCardWatermark || args.logo || "",
       reportCardSignatureImage: args.reportCardSignatureImage || "",
       resolvedReportCardSignatureImageUrl: args.reportCardSignatureImage || "",
     },
@@ -1136,8 +1333,20 @@ function createDummyBroadsheetPreviewHeader(args: {
 
 function createDummySubjectBroadsheetPreviewDataset() {
   const assessmentColumns = [
-    { assessmentStructureItemId: 1, name: "Class Score", maxScore: 50, weight: 50, order: 1 },
-    { assessmentStructureItemId: 2, name: "Exam", maxScore: 100, weight: 50, order: 2 },
+    {
+      assessmentStructureItemId: 1,
+      name: "Class Score",
+      maxScore: 50,
+      weight: 50,
+      order: 1,
+    },
+    {
+      assessmentStructureItemId: 2,
+      name: "Exam",
+      maxScore: 100,
+      weight: 50,
+      order: 2,
+    },
   ];
   const rows = [
     ["Jonathan Commey", "STD-014", 42, 88, 86, "A", 2, "Excellent"],
@@ -1177,9 +1386,27 @@ function createDummySubjectBroadsheetPreviewDataset() {
 
 function createDummyClassBroadsheetPreviewDataset() {
   const subjectColumns = [
-    { classSubjectId: 1, subjectId: 1, subjectName: "English Language", subjectCode: "ENG", shortName: "ENG" },
-    { classSubjectId: 2, subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", shortName: "MATH" },
-    { classSubjectId: 3, subjectId: 3, subjectName: "Science", subjectCode: "SCI", shortName: "SCI" },
+    {
+      classSubjectId: 1,
+      subjectId: 1,
+      subjectName: "English Language",
+      subjectCode: "ENG",
+      shortName: "ENG",
+    },
+    {
+      classSubjectId: 2,
+      subjectId: 2,
+      subjectName: "Mathematics",
+      subjectCode: "MATH",
+      shortName: "MATH",
+    },
+    {
+      classSubjectId: 3,
+      subjectId: 3,
+      subjectName: "Science",
+      subjectCode: "SCI",
+      shortName: "SCI",
+    },
   ];
   const rows: any[] = [
     ["Jonathan Commey", "STD-014", [88, 92, 84], 88, 2],
@@ -1199,7 +1426,12 @@ function createDummyClassBroadsheetPreviewDataset() {
       subjects: subjectColumns.map((subject, subjectIndex) => ({
         ...subject,
         percentage: row[2][subjectIndex],
-        grade: row[2][subjectIndex] >= 90 ? "A+" : row[2][subjectIndex] >= 80 ? "A" : "B",
+        grade:
+          row[2][subjectIndex] >= 90
+            ? "A+"
+            : row[2][subjectIndex] >= 80
+              ? "A"
+              : "B",
       })),
       total: row[2].reduce((sum: number, value: number) => sum + value, 0),
       average: row[3],
@@ -1215,9 +1447,24 @@ function createDummyClassBroadsheetPreviewDataset() {
 
 function createDummyAnnualBroadsheetPreviewDataset() {
   const subjectColumns = [
-    { subjectId: 1, subjectName: "English Language", subjectCode: "ENG", shortName: "ENG" },
-    { subjectId: 2, subjectName: "Mathematics", subjectCode: "MATH", shortName: "MATH" },
-    { subjectId: 3, subjectName: "Science", subjectCode: "SCI", shortName: "SCI" },
+    {
+      subjectId: 1,
+      subjectName: "English Language",
+      subjectCode: "ENG",
+      shortName: "ENG",
+    },
+    {
+      subjectId: 2,
+      subjectName: "Mathematics",
+      subjectCode: "MATH",
+      shortName: "MATH",
+    },
+    {
+      subjectId: 3,
+      subjectName: "Science",
+      subjectCode: "SCI",
+      shortName: "SCI",
+    },
   ];
   const periods = ["Term 1, 2026", "Term 2, 2026", "Term 3, 2026"];
   const rows: any[] = [
@@ -1244,7 +1491,12 @@ function createDummyAnnualBroadsheetPreviewDataset() {
       subjects: subjectColumns.map((subject, subjectIndex) => ({
         ...subject,
         average: row[2][subjectIndex],
-        grade: row[2][subjectIndex] >= 90 ? "A+" : row[2][subjectIndex] >= 80 ? "A" : "B",
+        grade:
+          row[2][subjectIndex] >= 90
+            ? "A+"
+            : row[2][subjectIndex] >= 80
+              ? "A"
+              : "B",
         periodScores: periods.map((academicPeriodName, periodIndex) => ({
           academicPeriodId: periodIndex + 1,
           academicPeriodName,
@@ -1335,7 +1587,6 @@ const reportBooleanKeys: (keyof ReportTemplateForm)[] = [
   "showBroadsheetLatestPeriod",
 ];
 
-
 // ======================================================
 // HELPERS
 // ======================================================
@@ -1344,11 +1595,12 @@ function sameId(a: unknown, b: unknown) {
   return String(a ?? "") === String(b ?? "");
 }
 
-const idOf = (value: unknown) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+const idOf = (value: unknown): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
+
+const cleanId = (value: unknown): string => idOf(value);
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
@@ -1361,11 +1613,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -1376,7 +1628,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -1401,13 +1655,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -1418,16 +1672,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -1439,9 +1697,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -1449,7 +1711,7 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
@@ -1466,12 +1728,12 @@ function branchMediaIdFieldFor(field: keyof BranchForm) {
 }
 
 function isPositiveMediaId(value: unknown) {
-  return idOf(value) > 0;
+  return Boolean(idOf(value));
 }
 
-function mediaIdOrNull(value: unknown) {
+function mediaIdOrNull(value: unknown): string | null {
   const parsed = idOf(value);
-  return parsed > 0 ? parsed : null;
+  return parsed || null;
 }
 
 function safeRecordMediaValue(value?: string) {
@@ -1482,8 +1744,12 @@ function safeRecordMediaValue(value?: string) {
   return media;
 }
 
-function assetPreviewKey(ownerTable: string, ownerLocalId: number, fieldKey: string) {
-  return `${ownerTable}:${ownerLocalId}:${fieldKey}`;
+function assetPreviewKey(
+  ownerTable: string,
+  ownerId: string,
+  fieldKey: string,
+) {
+  return `${ownerTable}:${ownerId}:${fieldKey}`;
 }
 
 function createSettingsMediaSessionKey() {
@@ -1497,8 +1763,7 @@ function createPendingRemoval(args: {
   accountId?: string | null;
   schoolId?: unknown;
   branchId?: unknown;
-  ownerLocalId?: unknown;
-  ownerCloudId?: string | null;
+  ownerId?: unknown;
   ownerTempKey?: string | null;
 }): PendingMediaRemoval {
   return {
@@ -1508,8 +1773,8 @@ function createPendingRemoval(args: {
     accountId: args.accountId || null,
     schoolId: idOf(args.schoolId) || null,
     branchId: idOf(args.branchId) || null,
-    ownerLocalId: idOf(args.ownerLocalId) || null,
-    ownerCloudId: args.ownerCloudId || null,
+    ownerId: idOf(args.ownerId) || null,
+
     ownerTempKey: args.ownerTempKey || null,
   };
 }
@@ -1524,7 +1789,7 @@ function valueOrExisting<T>(source: any, key: string, existingValue: T): T {
 
 function makeSettingsPayload(
   payload: Partial<SchoolBranchSetting>,
-  existing?: Partial<SchoolBranchSetting>
+  existing?: Partial<SchoolBranchSetting>,
 ): SchoolBranchSetting {
   const now = Date.now();
 
@@ -1532,52 +1797,129 @@ function makeSettingsPayload(
     ...(existing || {}),
     ...payload,
     accountId: payload.accountId ?? existing?.accountId ?? "",
-    schoolId: Number(payload.schoolId ?? existing?.schoolId ?? 0),
-    branchId: Number(payload.branchId ?? existing?.branchId ?? 0),
+    schoolId: cleanId(payload.schoolId ?? existing?.schoolId) || undefined,
+    branchId: cleanId(payload.branchId ?? existing?.branchId) || undefined,
 
     mode: payload.mode ?? existing?.mode ?? "manual",
     theme: payload.theme ?? existing?.theme ?? "light",
     primaryColor: payload.primaryColor ?? existing?.primaryColor ?? "#2f6fed",
-    fontFamily: payload.fontFamily ?? existing?.fontFamily ?? "system-ui, -apple-system, sans-serif",
+    fontFamily:
+      payload.fontFamily ??
+      existing?.fontFamily ??
+      "system-ui, -apple-system, sans-serif",
     fontSize: Number(payload.fontSize ?? existing?.fontSize ?? 16),
 
     academicYear: payload.academicYear ?? existing?.academicYear ?? "",
     currentTerm: payload.currentTerm ?? existing?.currentTerm ?? "Term 1",
     currentAcademicStructureId:
-      payload.currentAcademicStructureId ?? existing?.currentAcademicStructureId,
+      payload.currentAcademicStructureId ??
+      existing?.currentAcademicStructureId,
     currentAcademicPeriodId:
       payload.currentAcademicPeriodId ?? existing?.currentAcademicPeriodId,
 
     logo: valueOrExisting(payload, "logo", existing?.logo),
-    logoMediaId: hasOwn(payload as any, "logoMediaId") ? (payload as any).logoMediaId : (existing as any)?.logoMediaId,
-    reportCardBackgroundImage:
-      valueOrExisting(payload, "reportCardBackgroundImage", existing?.reportCardBackgroundImage),
-    reportCardBackgroundImageMediaId:
-      hasOwn(payload as any, "reportCardBackgroundImageMediaId") ? (payload as any).reportCardBackgroundImageMediaId : (existing as any)?.reportCardBackgroundImageMediaId,
-    reportCardWatermark:
-      valueOrExisting(payload, "reportCardWatermark", existing?.reportCardWatermark),
-    reportCardWatermarkMediaId:
-      hasOwn(payload as any, "reportCardWatermarkMediaId") ? (payload as any).reportCardWatermarkMediaId : (existing as any)?.reportCardWatermarkMediaId,
-    reportCardSignatureImage:
-      valueOrExisting(payload, "reportCardSignatureImage", existing?.reportCardSignatureImage),
-    reportCardSignatureImageMediaId:
-      hasOwn(payload as any, "reportCardSignatureImageMediaId") ? (payload as any).reportCardSignatureImageMediaId : (existing as any)?.reportCardSignatureImageMediaId,
-    dashboardHeroImage: valueOrExisting(payload, "dashboardHeroImage", existing?.dashboardHeroImage),
-    dashboardHeroImageMediaId: hasOwn(payload as any, "dashboardHeroImageMediaId") ? (payload as any).dashboardHeroImageMediaId : (existing as any)?.dashboardHeroImageMediaId,
-    dashboardBannerImage: valueOrExisting(payload, "dashboardBannerImage", existing?.dashboardBannerImage),
-    dashboardBannerImageMediaId: hasOwn(payload as any, "dashboardBannerImageMediaId") ? (payload as any).dashboardBannerImageMediaId : (existing as any)?.dashboardBannerImageMediaId,
-    studentPortalImage: valueOrExisting(payload, "studentPortalImage", existing?.studentPortalImage),
-    studentPortalImageMediaId: hasOwn(payload as any, "studentPortalImageMediaId") ? (payload as any).studentPortalImageMediaId : (existing as any)?.studentPortalImageMediaId,
-    teacherPortalImage: valueOrExisting(payload, "teacherPortalImage", existing?.teacherPortalImage),
-    teacherPortalImageMediaId: hasOwn(payload as any, "teacherPortalImageMediaId") ? (payload as any).teacherPortalImageMediaId : (existing as any)?.teacherPortalImageMediaId,
-    classroomPlaceholderImage:
-      valueOrExisting(payload, "classroomPlaceholderImage", existing?.classroomPlaceholderImage),
-    classroomPlaceholderImageMediaId:
-      hasOwn(payload as any, "classroomPlaceholderImageMediaId") ? (payload as any).classroomPlaceholderImageMediaId : (existing as any)?.classroomPlaceholderImageMediaId,
-    subjectPlaceholderImage:
-      valueOrExisting(payload, "subjectPlaceholderImage", existing?.subjectPlaceholderImage),
-    subjectPlaceholderImageMediaId:
-      hasOwn(payload as any, "subjectPlaceholderImageMediaId") ? (payload as any).subjectPlaceholderImageMediaId : (existing as any)?.subjectPlaceholderImageMediaId,
+    logoMediaId: hasOwn(payload as any, "logoMediaId")
+      ? (payload as any).logoMediaId
+      : (existing as any)?.logoMediaId,
+    reportCardBackgroundImage: valueOrExisting(
+      payload,
+      "reportCardBackgroundImage",
+      existing?.reportCardBackgroundImage,
+    ),
+    reportCardBackgroundImageMediaId: hasOwn(
+      payload as any,
+      "reportCardBackgroundImageMediaId",
+    )
+      ? (payload as any).reportCardBackgroundImageMediaId
+      : (existing as any)?.reportCardBackgroundImageMediaId,
+    reportCardWatermark: valueOrExisting(
+      payload,
+      "reportCardWatermark",
+      existing?.reportCardWatermark,
+    ),
+    reportCardWatermarkMediaId: hasOwn(
+      payload as any,
+      "reportCardWatermarkMediaId",
+    )
+      ? (payload as any).reportCardWatermarkMediaId
+      : (existing as any)?.reportCardWatermarkMediaId,
+    reportCardSignatureImage: valueOrExisting(
+      payload,
+      "reportCardSignatureImage",
+      existing?.reportCardSignatureImage,
+    ),
+    reportCardSignatureImageMediaId: hasOwn(
+      payload as any,
+      "reportCardSignatureImageMediaId",
+    )
+      ? (payload as any).reportCardSignatureImageMediaId
+      : (existing as any)?.reportCardSignatureImageMediaId,
+    dashboardHeroImage: valueOrExisting(
+      payload,
+      "dashboardHeroImage",
+      existing?.dashboardHeroImage,
+    ),
+    dashboardHeroImageMediaId: hasOwn(
+      payload as any,
+      "dashboardHeroImageMediaId",
+    )
+      ? (payload as any).dashboardHeroImageMediaId
+      : (existing as any)?.dashboardHeroImageMediaId,
+    dashboardBannerImage: valueOrExisting(
+      payload,
+      "dashboardBannerImage",
+      existing?.dashboardBannerImage,
+    ),
+    dashboardBannerImageMediaId: hasOwn(
+      payload as any,
+      "dashboardBannerImageMediaId",
+    )
+      ? (payload as any).dashboardBannerImageMediaId
+      : (existing as any)?.dashboardBannerImageMediaId,
+    studentPortalImage: valueOrExisting(
+      payload,
+      "studentPortalImage",
+      existing?.studentPortalImage,
+    ),
+    studentPortalImageMediaId: hasOwn(
+      payload as any,
+      "studentPortalImageMediaId",
+    )
+      ? (payload as any).studentPortalImageMediaId
+      : (existing as any)?.studentPortalImageMediaId,
+    teacherPortalImage: valueOrExisting(
+      payload,
+      "teacherPortalImage",
+      existing?.teacherPortalImage,
+    ),
+    teacherPortalImageMediaId: hasOwn(
+      payload as any,
+      "teacherPortalImageMediaId",
+    )
+      ? (payload as any).teacherPortalImageMediaId
+      : (existing as any)?.teacherPortalImageMediaId,
+    classroomPlaceholderImage: valueOrExisting(
+      payload,
+      "classroomPlaceholderImage",
+      existing?.classroomPlaceholderImage,
+    ),
+    classroomPlaceholderImageMediaId: hasOwn(
+      payload as any,
+      "classroomPlaceholderImageMediaId",
+    )
+      ? (payload as any).classroomPlaceholderImageMediaId
+      : (existing as any)?.classroomPlaceholderImageMediaId,
+    subjectPlaceholderImage: valueOrExisting(
+      payload,
+      "subjectPlaceholderImage",
+      existing?.subjectPlaceholderImage,
+    ),
+    subjectPlaceholderImageMediaId: hasOwn(
+      payload as any,
+      "subjectPlaceholderImageMediaId",
+    )
+      ? (payload as any).subjectPlaceholderImageMediaId
+      : (existing as any)?.subjectPlaceholderImageMediaId,
     schoolGalleryImages: Array.isArray(payload.schoolGalleryImages)
       ? payload.schoolGalleryImages
       : Array.isArray(existing?.schoolGalleryImages)
@@ -1592,18 +1934,17 @@ function makeSettingsPayload(
     createdAt: existing?.createdAt || payload.createdAt || now,
     updatedAt: now,
     version: Number(existing?.version || 0) + 1,
-    cloudId: payload.cloudId ?? existing?.cloudId,
+
     synced: "pending" as unknown as SchoolBranchSetting["synced"],
     isDeleted: payload.isDeleted ?? existing?.isDeleted ?? false,
   } as unknown as SchoolBranchSetting;
 }
 
-
 function makeReportTemplatePayload(args: {
   form: ReportTemplateForm;
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: string;
+  branchId: string;
   existing?: any;
 }) {
   const now = Date.now();
@@ -1614,16 +1955,26 @@ function makeReportTemplatePayload(args: {
     accountId: args.accountId,
     schoolId: args.schoolId,
     branchId: args.branchId,
-    name: args.form.templateName?.trim() || defaultReportTemplateDefinition().name || "Classic Formal",
-    code: args.form.templateCode?.trim() || defaultReportTemplateDefinition().code || "classic_formal",
-    layoutKey: args.form.layoutKey || defaultReportTemplateDefinition().layoutKey || "classic_formal",
+    name:
+      args.form.templateName?.trim() ||
+      defaultReportTemplateDefinition().name ||
+      "Classic Formal",
+    code:
+      args.form.templateCode?.trim() ||
+      defaultReportTemplateDefinition().code ||
+      "classic_formal",
+    layoutKey:
+      args.form.layoutKey ||
+      defaultReportTemplateDefinition().layoutKey ||
+      "classic_formal",
     orientation: args.form.orientation || "portrait",
     paperSize: args.form.paperSize || "A4",
     density: args.form.density || "compact",
     templateKey: args.form.templateCode?.trim() || args.form.layoutKey,
     reportType: args.form.reportType || "student_report",
-    description: existing.description || (
-      args.form.reportType === "cumulative_book"
+    description:
+      existing.description ||
+      (args.form.reportType === "cumulative_book"
         ? "Default configurable cumulative report book template."
         : args.form.reportType === "cumulative_transcript"
           ? "Default configurable cumulative transcript template."
@@ -1633,8 +1984,7 @@ function makeReportTemplatePayload(args: {
               ? "Default configurable class broadsheet template."
               : args.form.reportType === "annual_broadsheet"
                 ? "Default configurable annual broadsheet template."
-                : "Default configurable student report card template."
-    ),
+                : "Default configurable student report card template."),
     active: args.form.active !== false,
     isDefault: true,
     createdAt: existing.createdAt || now,
@@ -1648,9 +1998,9 @@ function makeReportTemplatePayload(args: {
 function makeReportTemplateSettingsPayload(args: {
   form: ReportTemplateForm;
   accountId: string;
-  schoolId: number;
-  branchId: number;
-  templateId: number;
+  schoolId: string;
+  branchId: string;
+  templateId: string;
   existing?: any;
 }) {
   const now = Date.now();
@@ -1699,10 +2049,13 @@ function makeReportTemplateSettingsPayload(args: {
 
     showTranscriptTermBreakdown: !!args.form.showTranscriptTermBreakdown,
     showTranscriptYearAverage: !!args.form.showTranscriptYearAverage,
-    showTranscriptCumulativeAverage: !!args.form.showTranscriptCumulativeAverage,
-    showTranscriptCumulativePosition: !!args.form.showTranscriptCumulativePosition,
+    showTranscriptCumulativeAverage:
+      !!args.form.showTranscriptCumulativeAverage,
+    showTranscriptCumulativePosition:
+      !!args.form.showTranscriptCumulativePosition,
     showTranscriptGPAProgression: !!args.form.showTranscriptGPAProgression,
-    showTranscriptFinalRecommendation: !!args.form.showTranscriptFinalRecommendation,
+    showTranscriptFinalRecommendation:
+      !!args.form.showTranscriptFinalRecommendation,
     showBroadsheetLogo: !!args.form.showBroadsheetLogo,
     showBroadsheetWatermark: !!args.form.showBroadsheetWatermark,
     showBroadsheetGeneratedDate: !!args.form.showBroadsheetGeneratedDate,
@@ -1711,7 +2064,8 @@ function makeReportTemplateSettingsPayload(args: {
     showBroadsheetSummary: !!args.form.showBroadsheetSummary,
     showBroadsheetStatistics: !!args.form.showBroadsheetStatistics,
     showBroadsheetStudentPhoto: !!args.form.showBroadsheetStudentPhoto,
-    showBroadsheetAssessmentBreakdown: !!args.form.showBroadsheetAssessmentBreakdown,
+    showBroadsheetAssessmentBreakdown:
+      !!args.form.showBroadsheetAssessmentBreakdown,
     showBroadsheetWeightedTotal: !!args.form.showBroadsheetWeightedTotal,
     showBroadsheetPercentage: !!args.form.showBroadsheetPercentage,
     showBroadsheetGrade: !!args.form.showBroadsheetGrade,
@@ -1727,46 +2081,67 @@ function makeReportTemplateSettingsPayload(args: {
     showBroadsheetAverage: !!args.form.showBroadsheetAverage,
     showBroadsheetClassPosition: !!args.form.showBroadsheetClassPosition,
     showBroadsheetAttendance: !!args.form.showBroadsheetAttendance,
-    showBroadsheetClassHighestAverage: !!args.form.showBroadsheetClassHighestAverage,
-    showBroadsheetClassLowestAverage: !!args.form.showBroadsheetClassLowestAverage,
+    showBroadsheetClassHighestAverage:
+      !!args.form.showBroadsheetClassHighestAverage,
+    showBroadsheetClassLowestAverage:
+      !!args.form.showBroadsheetClassLowestAverage,
     showBroadsheetPeriodScores: !!args.form.showBroadsheetPeriodScores,
     showBroadsheetAnnualAverage: !!args.form.showBroadsheetAnnualAverage,
     showBroadsheetAnnualGPA: !!args.form.showBroadsheetAnnualGPA,
     showBroadsheetAnnualPosition: !!args.form.showBroadsheetAnnualPosition,
     showBroadsheetTrend: !!args.form.showBroadsheetTrend,
-    showBroadsheetPromotionDecision: !!args.form.showBroadsheetPromotionDecision,
+    showBroadsheetPromotionDecision:
+      !!args.form.showBroadsheetPromotionDecision,
     showBroadsheetBestPeriod: !!args.form.showBroadsheetBestPeriod,
     showBroadsheetLatestPeriod: !!args.form.showBroadsheetLatestPeriod,
 
     classTeacherLabel: args.form.classTeacherLabel?.trim() || "Class Teacher",
-    headTeacherLabel: args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
+    headTeacherLabel:
+      args.form.headTeacherLabel?.trim() || "Headteacher / Principal",
     parentLabel: args.form.parentLabel?.trim() || "Parent / Guardian",
     principalLabel: args.form.principalLabel?.trim() || "Principal",
-    currentAcademicPeriodEndLabel: args.form.currentAcademicPeriodEndLabel?.trim() || "This Academic Period Ends",
-    nextAcademicPeriodLabel: args.form.nextAcademicPeriodLabel?.trim() || "Next Academic Period Begins",
+    currentAcademicPeriodEndLabel:
+      args.form.currentAcademicPeriodEndLabel?.trim() ||
+      "This Academic Period Ends",
+    nextAcademicPeriodLabel:
+      args.form.nextAcademicPeriodLabel?.trim() ||
+      "Next Academic Period Begins",
     numberOnRollLabel: args.form.numberOnRollLabel?.trim() || "Number On Roll",
-    classPositionLabel: args.form.classPositionLabel?.trim() || "Class Position",
+    classPositionLabel:
+      args.form.classPositionLabel?.trim() || "Class Position",
     subjectPositionLabel: args.form.subjectPositionLabel?.trim() || "Position",
     generatedDateLabel: args.form.generatedDateLabel?.trim() || "Generated",
-    bookTitleLabel: args.form.bookTitleLabel?.trim() || "Cumulative Academic Report Book",
-    bookSubtitleLabel: args.form.bookSubtitleLabel?.trim() || "Student Academic Journey",
+    bookTitleLabel:
+      args.form.bookTitleLabel?.trim() || "Cumulative Academic Report Book",
+    bookSubtitleLabel:
+      args.form.bookSubtitleLabel?.trim() || "Student Academic Journey",
     studentNameLabel: args.form.studentNameLabel?.trim() || "Student",
-    admissionNumberLabel: args.form.admissionNumberLabel?.trim() || "Student ID",
+    admissionNumberLabel:
+      args.form.admissionNumberLabel?.trim() || "Student ID",
     genderLabel: args.form.genderLabel?.trim() || "Gender",
     classLabel: args.form.classLabel?.trim() || "Class",
-    academicStructureLabel: args.form.academicStructureLabel?.trim() || "Academic Structure",
-    academicPeriodLabel: args.form.academicPeriodLabel?.trim() || "Academic Period",
+    academicStructureLabel:
+      args.form.academicStructureLabel?.trim() || "Academic Structure",
+    academicPeriodLabel:
+      args.form.academicPeriodLabel?.trim() || "Academic Period",
     subjectLabel: args.form.subjectLabel?.trim() || "Subject",
     totalLabel: args.form.totalLabel?.trim() || "Total",
     averageLabel: args.form.averageLabel?.trim() || "Average",
     gradeLabel: args.form.gradeLabel?.trim() || "Grade",
     gpaLabel: args.form.gpaLabel?.trim() || "GPA",
-    footerText: args.form.footerText?.trim() || "Official academic document generated by Eleeveon Schools.",
-    broadsheetTitleLabel: args.form.broadsheetTitleLabel?.trim() || "Broadsheet",
-    broadsheetGeneratedDateLabel: args.form.broadsheetGeneratedDateLabel?.trim() || "Generated",
-    broadsheetFooterText: args.form.broadsheetFooterText?.trim() || "Official academic broadsheet generated by Eleeveon Schools.",
+    footerText:
+      args.form.footerText?.trim() ||
+      "Official academic document generated by Eleeveon Schools.",
+    broadsheetTitleLabel:
+      args.form.broadsheetTitleLabel?.trim() || "Broadsheet",
+    broadsheetGeneratedDateLabel:
+      args.form.broadsheetGeneratedDateLabel?.trim() || "Generated",
+    broadsheetFooterText:
+      args.form.broadsheetFooterText?.trim() ||
+      "Official academic broadsheet generated by Eleeveon Schools.",
     studentColumnLabel: args.form.studentColumnLabel?.trim() || "Student",
-    admissionNumberColumnLabel: args.form.admissionNumberColumnLabel?.trim() || "Admission No.",
+    admissionNumberColumnLabel:
+      args.form.admissionNumberColumnLabel?.trim() || "Admission No.",
     positionColumnLabel: args.form.positionColumnLabel?.trim() || "Position",
     gradeColumnLabel: args.form.gradeColumnLabel?.trim() || "Grade",
     remarkColumnLabel: args.form.remarkColumnLabel?.trim() || "Remark",
@@ -1783,10 +2158,10 @@ function makeReportTemplateSettingsPayload(args: {
 function makeReportTemplateAssignmentPayload(args: {
   form: ReportTemplateForm;
   accountId: string;
-  schoolId: number;
-  branchId: number;
-  templateId: number;
-  templateSettingsId: number;
+  schoolId: string;
+  branchId: string;
+  templateId: string;
+  templateSettingsId: string;
   existing?: any;
 }) {
   const now = Date.now();
@@ -1833,8 +2208,11 @@ export default function Branchsettings() {
   const accountContext = useAccount() as any;
   const { accountId, authenticated, loading: accountLoading } = accountContext;
 
-  const { settings,
-    refreshSettings, loading: settingsLoading } = useSettings();
+  const {
+    settings,
+    updateSettings: updateContextSettings,
+    loading: settingsLoading,
+  } = useSettings();
 
   const {
     activeSchool,
@@ -1870,7 +2248,10 @@ export default function Branchsettings() {
   // STATE
   // ======================================================
 
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -1878,19 +2259,28 @@ export default function Branchsettings() {
 
   const [school, setSchool] = useState<School | null>(null);
   const [branch, setBranch] = useState<Branch | null>(null);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
-  const [settingsRow, setSettingsRow] = useState<SchoolBranchSetting | null>(null);
-  const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>([]);
-  const [reportTemplateSettingsRow, setReportTemplateSettingsRow] = useState<ReportTemplateSettingsRow | null>(null);
-  const [reportTemplateAssignmentRow, setReportTemplateAssignmentRow] = useState<ReportTemplateAssignmentRow | null>(null);
+  const [settingsRow, setSettingsRow] = useState<SchoolBranchSetting | null>(
+    null,
+  );
+  const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
+    [],
+  );
+  const [reportTemplateSettingsRow, setReportTemplateSettingsRow] =
+    useState<ReportTemplateSettingsRow | null>(null);
+  const [reportTemplateAssignmentRow, setReportTemplateAssignmentRow] =
+    useState<ReportTemplateAssignmentRow | null>(null);
 
   const [form, setForm] = useState<SettingsForm>(
-    defaultForm(selectedSchoolId, selectedBranchId)
+    defaultForm(selectedSchoolId, selectedBranchId),
   );
   const [schoolForm, setSchoolForm] = useState<SchoolForm>({});
   const [branchForm, setBranchForm] = useState<BranchForm>({});
-  const [reportTemplateForm, setReportTemplateForm] = useState<ReportTemplateForm>(defaultReportTemplateForm());
+  const [reportTemplateForm, setReportTemplateForm] =
+    useState<ReportTemplateForm>(defaultReportTemplateForm());
 
   const { loading, setLoading } = useBackgroundLoader();
   const [savingAll, setSavingAll] = useState(false);
@@ -1898,9 +2288,33 @@ export default function Branchsettings() {
   const [savingSchool, setSavingSchool] = useState(false);
   const [savingBranch, setSavingBranch] = useState(false);
   const [savingReportTemplate, setSavingReportTemplate] = useState(false);
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
-  const [pendingMediaRemovals, setPendingMediaRemovals] = useState<PendingMediaRemoval[]>([]);
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
+  const [pendingMediaRemovals, setPendingMediaRemovals] = useState<
+    PendingMediaRemoval[]
+  >([]);
   const settingsMediaSessionKeyRef = useRef(createSettingsMediaSessionKey());
+  const schoolMediaSessionKeyRef = useRef(
+    createSharedMediaSessionKey(SCHOOL_MEDIA_OWNER_TABLE),
+  );
+  const branchMediaSessionKeyRef = useRef(
+    createSharedMediaSessionKey(BRANCH_MEDIA_OWNER_TABLE),
+  );
+
+  /**
+   * Track only media selected during the current edit session. This mirrors
+   * Students.tsx and prevents an unchanged saved image from being mistaken for
+   * a newly staged upload.
+   */
+  const uploadedSettingsMediaIdsRef =
+    useRef<Partial<Record<ImageField, string>>>({});
+
+  const uploadedSchoolMediaIdsRef =
+    useRef<Record<string, string>>({});
+
+  const uploadedBranchMediaIdsRef =
+    useRef<Record<string, string>>({});
 
   // ======================================================
   // TENANT HELPERS
@@ -1937,52 +2351,70 @@ export default function Branchsettings() {
     setForm(defaultForm(selectedSchoolId, selectedBranchId));
   };
 
-
+  /**
+   * Resolve media through the same shared owner-aware path used by Students.
+   *
+   * resolveOwnerMediaUrl checks:
+   * - the committed ownerTable + ownerId + fieldKey relationship;
+   * - the explicit media ID stored on the owner record;
+   * - local mediaBlobs for offline display;
+   * - remote/public/storage/download URLs after synchronization.
+   *
+   * This is important on a second device, where mediaBlobs do not exist and
+   * only the synchronized remote URL is available.
+   */
   const resolveOwnedAssetUrl = async ({
     ownerTable,
-    ownerLocalId,
-    ownerCloudId,
+    ownerId,
     fieldKey,
     fallbackMediaId,
   }: {
     ownerTable: string;
-    ownerLocalId?: number | string | null;
-    ownerCloudId?: string | null;
+    ownerId?: string | null;
     fieldKey: string;
-    fallbackMediaId?: number | string | null;
+    fallbackMediaId?: string | null;
   }) => {
-    const localId = idOf(ownerLocalId);
+    const ownerIdValue = cleanId(ownerId);
+    const fallbackAssetId = cleanId(fallbackMediaId);
 
-    if (localId) {
-      const ownedAsset = await getOwnerFieldMediaAsset({
-        accountId: selectedAccountId || undefined,
-        ownerTable,
-        ownerLocalId: localId,
-        ownerCloudId: ownerCloudId || undefined,
-        fieldKey,
-      });
-
-      if (ownedAsset?.id && !(ownedAsset as any).isDeleted && (ownedAsset as any).active !== false) {
-        const url = await getMediaObjectUrl(Number(ownedAsset.id));
-        if (url) return url;
-      }
+    if (!ownerIdValue && !fallbackAssetId) {
+      return "";
     }
 
-    const fallbackId = idOf(fallbackMediaId);
-    if (!fallbackId) return "";
+    try {
+      return (
+        (await resolveOwnerMediaUrl({
+          accountId:
+            cleanId(selectedAccountId) ||
+            undefined,
+          ownerTable,
+          ownerId:
+            ownerIdValue ||
+            undefined,
+          fieldKey,
+          fallbackAssetId:
+            fallbackAssetId ||
+            undefined,
+        })) || ""
+      );
+    } catch (error) {
+      console.error(
+        "Failed to resolve branch-settings media:",
+        {
+          ownerTable,
+          ownerId:
+            ownerIdValue ||
+            null,
+          fieldKey,
+          fallbackAssetId:
+            fallbackAssetId ||
+            null,
+          error,
+        },
+      );
 
-    const fallbackAsset = await (db as any).mediaAssets?.get?.(fallbackId);
-    const belongsToOwner =
-      fallbackAsset &&
-      !fallbackAsset.isDeleted &&
-      fallbackAsset.active !== false &&
-      (!selectedAccountId || fallbackAsset.accountId === selectedAccountId) &&
-      fallbackAsset.ownerTable === ownerTable &&
-      fallbackAsset.fieldKey === fieldKey &&
-      (!localId || sameId(fallbackAsset.ownerLocalId, localId));
-
-    if (!belongsToOwner) return "";
-    return getMediaObjectUrl(fallbackId);
+      return "";
+    }
   };
 
   const resolveBranchSettingsMedia = async ({
@@ -1998,23 +2430,23 @@ export default function Branchsettings() {
 
     const resolveAndPut = async (
       ownerTable: string,
-      ownerLocalId: number | string | null | undefined,
-      ownerCloudId: string | null | undefined,
+      ownerId: string | string | null | undefined,
+
       fieldKey: string,
-      fallbackMediaId?: number | string | null
+      fallbackMediaId?: string | string | null,
     ) => {
-      const localId = idOf(ownerLocalId);
-      if (!localId) return "";
+      const ownerIdValue = cleanId(ownerId);
+      if (!ownerIdValue) return "";
 
       const url = await resolveOwnedAssetUrl({
         ownerTable,
-        ownerLocalId: localId,
-        ownerCloudId: ownerCloudId || undefined,
+        ownerId: ownerIdValue,
+
         fieldKey,
         fallbackMediaId,
       });
 
-      if (url) next[assetPreviewKey(ownerTable, localId, fieldKey)] = url;
+      if (url) next[assetPreviewKey(ownerTable, ownerIdValue, fieldKey)] = url;
       return url;
     };
 
@@ -2025,31 +2457,27 @@ export default function Branchsettings() {
     const schoolLogoUrl = await resolveAndPut(
       SCHOOL_MEDIA_OWNER_TABLE,
       schoolIdValue,
-      (currentSchool as any)?.cloudId,
       "logo",
-      (currentSchool as any)?.logoMediaId
+      (currentSchool as any)?.logoMediaId,
     );
     const schoolBannerUrl = await resolveAndPut(
       SCHOOL_MEDIA_OWNER_TABLE,
       schoolIdValue,
-      (currentSchool as any)?.cloudId,
       "bannerImage",
-      (currentSchool as any)?.bannerImageMediaId
+      (currentSchool as any)?.bannerImageMediaId,
     );
 
     const branchLogoUrl = await resolveAndPut(
       BRANCH_MEDIA_OWNER_TABLE,
       branchIdValue,
-      (currentBranch as any)?.cloudId,
       "logo",
-      (currentBranch as any)?.logoMediaId
+      (currentBranch as any)?.logoMediaId,
     );
     const branchBannerUrl = await resolveAndPut(
       BRANCH_MEDIA_OWNER_TABLE,
       branchIdValue,
-      (currentBranch as any)?.cloudId,
       "bannerImage",
-      (currentBranch as any)?.bannerImageMediaId
+      (currentBranch as any)?.bannerImageMediaId,
     );
 
     const settingUrls: Partial<Record<ImageField, string>> = {};
@@ -2068,23 +2496,24 @@ export default function Branchsettings() {
       const url = await resolveAndPut(
         SETTINGS_MEDIA_OWNER_TABLE,
         settingIdValue,
-        (currentSetting as any)?.cloudId,
         field,
-        (currentSetting as any)?.[mediaIdFieldFor(field)]
+        (currentSetting as any)?.[mediaIdFieldFor(field)],
       );
       if (url) settingUrls[field] = url;
     }
 
     const galleryUrls: string[] = [];
-    const galleryIds = Array.isArray((currentSetting as any)?.schoolGalleryMediaIds)
+    const galleryIds = Array.isArray(
+      (currentSetting as any)?.schoolGalleryMediaIds,
+    )
       ? (currentSetting as any).schoolGalleryMediaIds
       : [];
 
     for (const assetId of galleryIds) {
       const url = await resolveOwnedAssetUrl({
         ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
-        ownerLocalId: settingIdValue,
-        ownerCloudId: (currentSetting as any)?.cloudId,
+        ownerId: settingIdValue,
+
         fieldKey: GALLERY_FIELD_KEY,
         fallbackMediaId: assetId,
       });
@@ -2113,7 +2542,12 @@ export default function Branchsettings() {
   // ======================================================
 
   const load = async () => {
-    if (!authenticated || !selectedAccountId || !selectedSchoolId || !selectedBranchId) {
+    if (
+      !authenticated ||
+      !selectedAccountId ||
+      !selectedSchoolId ||
+      !selectedBranchId
+    ) {
       clearData();
       setLoading(false);
       return;
@@ -2121,7 +2555,7 @@ export default function Branchsettings() {
 
     try {
       setLoading(true);
-  
+
       const [
         schoolRows,
         branchRows,
@@ -2137,13 +2571,13 @@ export default function Branchsettings() {
         db.schoolBranchSettings.toArray(),
         listActiveLocal("academicStructures", {
           accountId: selectedAccountId,
-          schoolId: Number(selectedSchoolId),
-          branchId: Number(selectedBranchId),
+          schoolId: cleanId(selectedSchoolId) || undefined,
+          branchId: cleanId(selectedBranchId) || undefined,
         } as any),
         listActiveLocal("academicPeriods", {
           accountId: selectedAccountId,
-          schoolId: Number(selectedSchoolId),
-          branchId: Number(selectedBranchId),
+          schoolId: cleanId(selectedSchoolId) || undefined,
+          branchId: cleanId(selectedBranchId) || undefined,
         } as any),
         (db as any).reportCardTemplates?.toArray?.() || [],
         (db as any).reportCardTemplateSettings?.toArray?.() || [],
@@ -2155,9 +2589,11 @@ export default function Branchsettings() {
           (row: any) =>
             row.accountId === selectedAccountId &&
             sameId(row.id, selectedSchoolId) &&
-            !row.isDeleted
+            !row.isDeleted,
         ) ||
-        schoolRows.find((row: any) => sameId(row.id, selectedSchoolId) && !row.isDeleted) ||
+        schoolRows.find(
+          (row: any) => sameId(row.id, selectedSchoolId) && !row.isDeleted,
+        ) ||
         null;
 
       const currentBranch =
@@ -2166,46 +2602,60 @@ export default function Branchsettings() {
             row.accountId === selectedAccountId &&
             sameId(row.schoolId, selectedSchoolId) &&
             sameId(row.id, selectedBranchId) &&
-            !row.isDeleted
+            !row.isDeleted,
         ) ||
         branchRows.find(
           (row: any) =>
             sameId(row.schoolId, selectedSchoolId) &&
             sameId(row.id, selectedBranchId) &&
-            !row.isDeleted
+            !row.isDeleted,
         ) ||
         null;
 
       const currentSetting =
         settingRows.find((row: any) => sameTenant(row)) || null;
 
-      const dbReportTemplates = (reportTemplateRows as ReportTemplateRow[])
-        .filter((row: any) => {
-          if (row.isDeleted || row.active === false) return false;
-          if (row.accountId && row.accountId !== selectedAccountId) return false;
-          if (row.schoolId && !sameId(row.schoolId, selectedSchoolId)) return false;
-          if (row.branchId && !sameId(row.branchId, selectedBranchId)) return false;
-          return true;
-        });
+      const dbReportTemplates = (
+        reportTemplateRows as ReportTemplateRow[]
+      ).filter((row: any) => {
+        if (row.isDeleted || row.active === false) return false;
+        if (row.accountId && row.accountId !== selectedAccountId) return false;
+        if (row.schoolId && !sameId(row.schoolId, selectedSchoolId))
+          return false;
+        if (row.branchId && !sameId(row.branchId, selectedBranchId))
+          return false;
+        return true;
+      });
 
       const templateMap = new Map<string, ReportTemplateRow>();
 
       reportTemplateDefinitionOptions().forEach((template) => {
-        const baseKey = String(template.code || template.layoutKey || template.name || "").trim();
+        const baseKey = String(
+          template.code || template.layoutKey || template.name || "",
+        ).trim();
         const reportTypeKey = String(template.reportType || "student_report");
         const key = baseKey ? `${reportTypeKey}:${baseKey}` : "";
         if (key) templateMap.set(key, template);
       });
 
       dbReportTemplates.forEach((template) => {
-        const baseKey = String(template.code || template.layoutKey || template.name || template.id || "").trim();
+        const baseKey = String(
+          template.code ||
+            template.layoutKey ||
+            template.name ||
+            template.id ||
+            "",
+        ).trim();
         const reportTypeKey = String(template.reportType || "student_report");
         const key = baseKey ? `${reportTypeKey}:${baseKey}` : "";
         if (key) {
           templateMap.set(key, {
             ...(templateMap.get(key) || {}),
             ...template,
-            reportType: (template as any).reportType || (templateMap.get(key) as any)?.reportType || "student_report",
+            reportType:
+              (template as any).reportType ||
+              (templateMap.get(key) as any)?.reportType ||
+              "student_report",
           });
         }
       });
@@ -2220,62 +2670,84 @@ export default function Branchsettings() {
 
       const defaultReportTemplate =
         branchReportTemplates.find((row: any) => row.isDefault) ||
-        branchReportTemplates.find((row: any) => String(row.code || "") === defaultReportTemplateDefinition().code) ||
+        branchReportTemplates.find(
+          (row: any) =>
+            String(row.code || "") === defaultReportTemplateDefinition().code,
+        ) ||
         branchReportTemplates[0] ||
         defaultReportTemplateDefinition();
 
       const currentReportAssignment =
-        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          (row.reportType === "student_report" || !row.reportType) &&
-          row.isDefault === true &&
-          (!row.scopeType || row.scopeType === "branch")
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find(
+          (row: any) =>
+            sameTenant(row) &&
+            row.active !== false &&
+            (row.reportType === "student_report" || !row.reportType) &&
+            row.isDefault === true &&
+            (!row.scopeType || row.scopeType === "branch"),
         ) ||
-        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find((row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          (row.reportType === "student_report" || !row.reportType)
+        (reportTemplateAssignmentRows as ReportTemplateAssignmentRow[]).find(
+          (row: any) =>
+            sameTenant(row) &&
+            row.active !== false &&
+            (row.reportType === "student_report" || !row.reportType),
         ) ||
         null;
 
-      const assignedTemplateId = idOf(currentReportAssignment?.templateId) || idOf(defaultReportTemplate?.id);
+      const assignedTemplateId =
+        idOf(currentReportAssignment?.templateId) ||
+        idOf(defaultReportTemplate?.id);
 
-      const assignedTemplateCode = String((currentReportAssignment as any)?.templateCode || "").trim();
+      const assignedTemplateCode = String(
+        (currentReportAssignment as any)?.templateCode || "",
+      ).trim();
 
       const currentReportTemplate =
-        branchReportTemplates.find((row: any) => assignedTemplateId > 0 && sameId(row.id, assignedTemplateId)) ||
-        branchReportTemplates.find((row: any) => assignedTemplateCode && sameId(row.code, assignedTemplateCode)) ||
+        branchReportTemplates.find(
+          (row: any) =>
+            Boolean(assignedTemplateId) && sameId(row.id, assignedTemplateId),
+        ) ||
+        branchReportTemplates.find(
+          (row: any) =>
+            assignedTemplateCode && sameId(row.code, assignedTemplateCode),
+        ) ||
         defaultReportTemplate;
 
-      const assignedSettingsId = idOf(currentReportAssignment?.templateSettingsId);
+      const assignedSettingsId = idOf(
+        currentReportAssignment?.templateSettingsId,
+      );
 
       const currentReportTemplateSettings =
-        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          (row.reportType === "student_report" || !row.reportType) &&
-          assignedSettingsId > 0 &&
-          sameId(row.id, assignedSettingsId)
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find(
+          (row: any) =>
+            sameTenant(row) &&
+            row.active !== false &&
+            (row.reportType === "student_report" || !row.reportType) &&
+            Boolean(assignedSettingsId) &&
+            sameId(row.id, assignedSettingsId),
         ) ||
-        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          (row.reportType === "student_report" || !row.reportType) &&
-          currentReportTemplate?.id &&
-          sameId(row.templateId, currentReportTemplate.id)
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find(
+          (row: any) =>
+            sameTenant(row) &&
+            row.active !== false &&
+            (row.reportType === "student_report" || !row.reportType) &&
+            currentReportTemplate?.id &&
+            sameId(row.templateId, currentReportTemplate.id),
         ) ||
-        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find((row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          (row.reportType === "student_report" || !row.reportType)
+        (reportTemplateSettingsRows as ReportTemplateSettingsRow[]).find(
+          (row: any) =>
+            sameTenant(row) &&
+            row.active !== false &&
+            (row.reportType === "student_report" || !row.reportType),
         ) ||
         null;
 
       const branchStructures = structureRows
         .filter((row: any) => sameTenant(row))
         .filter((row: any) => row.active !== false)
-        .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+        .sort((a, b) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        );
 
       const branchPeriods = periodRows
         .filter((row: any) => sameTenant(row))
@@ -2301,7 +2773,10 @@ export default function Branchsettings() {
         id: currentSchool?.id,
         name: currentSchool?.name || "",
         motto: currentSchool?.motto || "",
-        logo: mediaUrls.schoolLogoUrl || safeRecordMediaValue(currentSchool?.logo || currentSchool?.photo) || "",
+        logo:
+          mediaUrls.schoolLogoUrl ||
+          safeRecordMediaValue(currentSchool?.logo || currentSchool?.photo) ||
+          "",
         logoMediaId: (currentSchool as any)?.logoMediaId,
         address: currentSchool?.address || "",
         location: (currentSchool as any)?.location || "",
@@ -2311,7 +2786,10 @@ export default function Branchsettings() {
         galleryImages: Array.isArray(currentSchool?.galleryImages)
           ? currentSchool.galleryImages
           : [],
-        bannerImage: mediaUrls.schoolBannerUrl || safeRecordMediaValue(currentSchool?.bannerImage) || "",
+        bannerImage:
+          mediaUrls.schoolBannerUrl ||
+          safeRecordMediaValue(currentSchool?.bannerImage) ||
+          "",
         bannerImageMediaId: (currentSchool as any)?.bannerImageMediaId,
         active: (currentSchool as any)?.active !== false,
       });
@@ -2327,9 +2805,15 @@ export default function Branchsettings() {
         email: currentBranch?.email || "",
         phone: currentBranch?.phone || "",
         website: (currentBranch as any)?.website || "",
-        logo: mediaUrls.branchLogoUrl || safeRecordMediaValue(currentBranch?.logo || currentBranch?.photo) || "",
+        logo:
+          mediaUrls.branchLogoUrl ||
+          safeRecordMediaValue(currentBranch?.logo || currentBranch?.photo) ||
+          "",
         logoMediaId: (currentBranch as any)?.logoMediaId,
-        bannerImage: mediaUrls.branchBannerUrl || safeRecordMediaValue(currentBranch?.bannerImage) || "",
+        bannerImage:
+          mediaUrls.branchBannerUrl ||
+          safeRecordMediaValue(currentBranch?.bannerImage) ||
+          "",
         bannerImageMediaId: (currentBranch as any)?.bannerImageMediaId,
         active: currentBranch?.active !== false,
       });
@@ -2356,41 +2840,83 @@ export default function Branchsettings() {
           (currentSetting as any)?.currentAcademicStructureId || undefined,
         currentAcademicPeriodId:
           (currentSetting as any)?.currentAcademicPeriodId || undefined,
-        logo: mediaUrls.settingUrls.logo || safeRecordMediaValue((currentSetting as any)?.logo) || "",
+        logo:
+          mediaUrls.settingUrls.logo ||
+          safeRecordMediaValue((currentSetting as any)?.logo) ||
+          "",
         logoMediaId: (currentSetting as any)?.logoMediaId,
         reportCardBackgroundImage:
-          mediaUrls.settingUrls.reportCardBackgroundImage || safeRecordMediaValue((currentSetting as any)?.reportCardBackgroundImage) || "",
-        reportCardBackgroundImageMediaId: (currentSetting as any)?.reportCardBackgroundImageMediaId,
+          mediaUrls.settingUrls.reportCardBackgroundImage ||
+          safeRecordMediaValue(
+            (currentSetting as any)?.reportCardBackgroundImage,
+          ) ||
+          "",
+        reportCardBackgroundImageMediaId: (currentSetting as any)
+          ?.reportCardBackgroundImageMediaId,
         reportCardWatermark:
-          mediaUrls.settingUrls.reportCardWatermark || safeRecordMediaValue((currentSetting as any)?.reportCardWatermark) || "",
-        reportCardWatermarkMediaId: (currentSetting as any)?.reportCardWatermarkMediaId,
+          mediaUrls.settingUrls.reportCardWatermark ||
+          safeRecordMediaValue((currentSetting as any)?.reportCardWatermark) ||
+          "",
+        reportCardWatermarkMediaId: (currentSetting as any)
+          ?.reportCardWatermarkMediaId,
         reportCardSignatureImage:
-          mediaUrls.settingUrls.reportCardSignatureImage || safeRecordMediaValue((currentSetting as any)?.reportCardSignatureImage) || "",
-        reportCardSignatureImageMediaId: (currentSetting as any)?.reportCardSignatureImageMediaId,
+          mediaUrls.settingUrls.reportCardSignatureImage ||
+          safeRecordMediaValue(
+            (currentSetting as any)?.reportCardSignatureImage,
+          ) ||
+          "",
+        reportCardSignatureImageMediaId: (currentSetting as any)
+          ?.reportCardSignatureImageMediaId,
         dashboardHeroImage:
-          mediaUrls.settingUrls.dashboardHeroImage || safeRecordMediaValue((currentSetting as any)?.dashboardHeroImage) || "",
-        dashboardHeroImageMediaId: (currentSetting as any)?.dashboardHeroImageMediaId,
+          mediaUrls.settingUrls.dashboardHeroImage ||
+          safeRecordMediaValue((currentSetting as any)?.dashboardHeroImage) ||
+          "",
+        dashboardHeroImageMediaId: (currentSetting as any)
+          ?.dashboardHeroImageMediaId,
         dashboardBannerImage:
-          mediaUrls.settingUrls.dashboardBannerImage || safeRecordMediaValue((currentSetting as any)?.dashboardBannerImage) || "",
-        dashboardBannerImageMediaId: (currentSetting as any)?.dashboardBannerImageMediaId,
+          mediaUrls.settingUrls.dashboardBannerImage ||
+          safeRecordMediaValue((currentSetting as any)?.dashboardBannerImage) ||
+          "",
+        dashboardBannerImageMediaId: (currentSetting as any)
+          ?.dashboardBannerImageMediaId,
         studentPortalImage:
-          mediaUrls.settingUrls.studentPortalImage || safeRecordMediaValue((currentSetting as any)?.studentPortalImage) || "",
-        studentPortalImageMediaId: (currentSetting as any)?.studentPortalImageMediaId,
+          mediaUrls.settingUrls.studentPortalImage ||
+          safeRecordMediaValue((currentSetting as any)?.studentPortalImage) ||
+          "",
+        studentPortalImageMediaId: (currentSetting as any)
+          ?.studentPortalImageMediaId,
         teacherPortalImage:
-          mediaUrls.settingUrls.teacherPortalImage || safeRecordMediaValue((currentSetting as any)?.teacherPortalImage) || "",
-        teacherPortalImageMediaId: (currentSetting as any)?.teacherPortalImageMediaId,
+          mediaUrls.settingUrls.teacherPortalImage ||
+          safeRecordMediaValue((currentSetting as any)?.teacherPortalImage) ||
+          "",
+        teacherPortalImageMediaId: (currentSetting as any)
+          ?.teacherPortalImageMediaId,
         classroomPlaceholderImage:
-          mediaUrls.settingUrls.classroomPlaceholderImage || safeRecordMediaValue((currentSetting as any)?.classroomPlaceholderImage) || "",
-        classroomPlaceholderImageMediaId: (currentSetting as any)?.classroomPlaceholderImageMediaId,
+          mediaUrls.settingUrls.classroomPlaceholderImage ||
+          safeRecordMediaValue(
+            (currentSetting as any)?.classroomPlaceholderImage,
+          ) ||
+          "",
+        classroomPlaceholderImageMediaId: (currentSetting as any)
+          ?.classroomPlaceholderImageMediaId,
         subjectPlaceholderImage:
-          mediaUrls.settingUrls.subjectPlaceholderImage || safeRecordMediaValue((currentSetting as any)?.subjectPlaceholderImage) || "",
-        subjectPlaceholderImageMediaId: (currentSetting as any)?.subjectPlaceholderImageMediaId,
+          mediaUrls.settingUrls.subjectPlaceholderImage ||
+          safeRecordMediaValue(
+            (currentSetting as any)?.subjectPlaceholderImage,
+          ) ||
+          "",
+        subjectPlaceholderImageMediaId: (currentSetting as any)
+          ?.subjectPlaceholderImageMediaId,
         schoolGalleryImages: mediaUrls.galleryUrls.length
           ? mediaUrls.galleryUrls
           : Array.isArray((currentSetting as any)?.schoolGalleryImages)
-            ? (currentSetting as any).schoolGalleryImages.filter((value: string) => !!safeRecordMediaValue(value))
+            ? (currentSetting as any).schoolGalleryImages.filter(
+                (value: string) => !!safeRecordMediaValue(value),
+              )
             : [],
-        schoolGalleryMediaIds: Array.isArray((currentSetting as any)?.schoolGalleryMediaIds)
+        schoolGalleryMediaIds: Array.isArray(
+          (currentSetting as any)?.schoolGalleryMediaIds,
+        )
           ? (currentSetting as any).schoolGalleryMediaIds
           : [],
       });
@@ -2399,17 +2925,35 @@ export default function Branchsettings() {
         ...defaultReportTemplateForm(),
         ...(currentReportTemplateSettings || {}),
         templateId: idOf(currentReportTemplate?.id) || undefined,
-        templateSettingsId: idOf(currentReportTemplateSettings?.id) || undefined,
+        templateSettingsId:
+          idOf(currentReportTemplateSettings?.id) || undefined,
         assignmentId: idOf(currentReportAssignment?.id) || undefined,
         reportType: "student_report",
-        templateName: currentReportTemplate?.name || currentReportTemplateSettings?.templateName || defaultReportTemplateDefinition().name || "Classic Formal",
-        templateCode: currentReportTemplate?.code || currentReportTemplateSettings?.templateCode || defaultReportTemplateDefinition().code || "classic_formal",
-        layoutKey: currentReportTemplate?.layoutKey || currentReportTemplateSettings?.layoutKey || defaultReportTemplateDefinition().layoutKey || "classic_formal",
-        orientation: (currentReportTemplateSettings?.orientation || currentReportTemplate?.orientation || "portrait") as "portrait" | "landscape",
-        paperSize: (currentReportTemplateSettings?.paperSize || currentReportTemplate?.paperSize || "A4") as "A4" | "Letter",
-        density: (currentReportTemplateSettings?.density || currentReportTemplate?.density || "compact") as "compact" | "comfortable" | "spacious",
+        templateName:
+          currentReportTemplate?.name ||
+          currentReportTemplateSettings?.templateName ||
+          defaultReportTemplateDefinition().name ||
+          "Classic Formal",
+        templateCode:
+          currentReportTemplate?.code ||
+          currentReportTemplateSettings?.templateCode ||
+          defaultReportTemplateDefinition().code ||
+          "classic_formal",
+        layoutKey:
+          currentReportTemplate?.layoutKey ||
+          currentReportTemplateSettings?.layoutKey ||
+          defaultReportTemplateDefinition().layoutKey ||
+          "classic_formal",
+        orientation: (currentReportTemplateSettings?.orientation ||
+          currentReportTemplate?.orientation ||
+          "portrait") as "portrait" | "landscape",
+        paperSize: (currentReportTemplateSettings?.paperSize ||
+          currentReportTemplate?.paperSize ||
+          "A4") as "A4" | "Letter",
+        density: (currentReportTemplateSettings?.density ||
+          currentReportTemplate?.density ||
+          "compact") as "compact" | "comfortable" | "spacious",
       });
-
     } catch (error) {
       console.error("Failed to load branch settings:", error);
       clearData();
@@ -2469,32 +3013,33 @@ export default function Branchsettings() {
 
   const activeStructure = useMemo(() => {
     return filteredAcademicStructures.find((row: any) =>
-      sameId(row.id, form.currentAcademicStructureId)
+      sameId(row.id, form.currentAcademicStructureId),
     );
   }, [filteredAcademicStructures, form.currentAcademicStructureId]);
 
   const activePeriod = useMemo(() => {
     return filteredAcademicPeriods.find((row: any) =>
-      sameId(row.id, form.currentAcademicPeriodId)
+      sameId(row.id, form.currentAcademicPeriodId),
     );
   }, [filteredAcademicPeriods, form.currentAcademicPeriodId]);
 
-  const assetCount = [
-    schoolForm.logo,
-    schoolForm.bannerImage,
-    branchForm.logo,
-    branchForm.bannerImage,
-    form.logo,
-    form.dashboardHeroImage,
-    form.dashboardBannerImage,
-    form.studentPortalImage,
-    form.teacherPortalImage,
-    form.classroomPlaceholderImage,
-    form.subjectPlaceholderImage,
-    form.reportCardBackgroundImage,
-    form.reportCardWatermark,
-    form.reportCardSignatureImage,
-  ].filter(Boolean).length + (form.schoolGalleryImages?.length || 0);
+  const assetCount =
+    [
+      schoolForm.logo,
+      schoolForm.bannerImage,
+      branchForm.logo,
+      branchForm.bannerImage,
+      form.logo,
+      form.dashboardHeroImage,
+      form.dashboardBannerImage,
+      form.studentPortalImage,
+      form.teacherPortalImage,
+      form.classroomPlaceholderImage,
+      form.subjectPlaceholderImage,
+      form.reportCardBackgroundImage,
+      form.reportCardWatermark,
+      form.reportCardSignatureImage,
+    ].filter(Boolean).length + (form.schoolGalleryImages?.length || 0);
 
   const completion = useMemo(() => {
     const checks = [
@@ -2513,7 +3058,6 @@ export default function Branchsettings() {
     return Math.round((checks.filter(Boolean).length / checks.length) * 100);
   }, [school, branch, form, schoolForm.logo, branchForm.logo]);
 
-
   // ======================================================
   // FIELD HELPERS
   // ======================================================
@@ -2530,7 +3074,10 @@ export default function Branchsettings() {
     setBranchForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const updateReportTemplateField = (key: keyof ReportTemplateForm, value: any) => {
+  const updateReportTemplateField = (
+    key: keyof ReportTemplateForm,
+    value: any,
+  ) => {
     setReportTemplateForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -2542,7 +3089,11 @@ export default function Branchsettings() {
       branchId: removal.branchId || selectedBranchId || null,
     });
 
-    if (!normalized.assetId && !normalized.ownerLocalId && !normalized.ownerTempKey && !normalized.ownerCloudId) {
+    if (
+      !normalized.assetId &&
+      !normalized.ownerId &&
+      !normalized.ownerTempKey
+    ) {
       return;
     }
 
@@ -2552,9 +3103,8 @@ export default function Branchsettings() {
           idOf(item.assetId) === idOf(normalized.assetId) &&
           item.ownerTable === normalized.ownerTable &&
           item.fieldKey === normalized.fieldKey &&
-          sameId(item.ownerLocalId, normalized.ownerLocalId) &&
-          sameId(item.ownerTempKey, normalized.ownerTempKey) &&
-          sameId(item.ownerCloudId, normalized.ownerCloudId)
+          sameId(item.ownerId, normalized.ownerId) &&
+          sameId(item.ownerTempKey, normalized.ownerTempKey),
       );
 
       return exists ? current : [...current, normalized];
@@ -2562,9 +3112,11 @@ export default function Branchsettings() {
   };
 
   const clearSettingsImage = (field: ImageField) => {
+    delete uploadedSettingsMediaIdsRef.current[field];
+
     const mediaField = mediaIdFieldFor(field);
     const assetId = idOf(form[mediaField]);
-    const ownerLocalId = settingsRow?.id || form.id || undefined;
+    const ownerId = settingsRow?.id || form.id || undefined;
 
     queueMediaRemoval(
       createPendingRemoval({
@@ -2574,10 +3126,9 @@ export default function Branchsettings() {
         accountId: selectedAccountId,
         schoolId: selectedSchoolId,
         branchId: selectedBranchId,
-        ownerLocalId,
-        ownerCloudId: (settingsRow as any)?.cloudId,
-        ownerTempKey: ownerLocalId ? null : settingsMediaSessionKeyRef.current,
-      })
+        ownerId,
+        ownerTempKey: ownerId ? null : settingsMediaSessionKeyRef.current,
+      }),
     );
 
     setForm((prev) => ({
@@ -2588,6 +3139,8 @@ export default function Branchsettings() {
   };
 
   const clearSchoolImage = (field: keyof SchoolForm) => {
+    delete uploadedSchoolMediaIdsRef.current[String(field)];
+
     const mediaField = schoolMediaIdFieldFor(field);
     const assetId = idOf((schoolForm as any)[mediaField]);
 
@@ -2599,9 +3152,8 @@ export default function Branchsettings() {
         accountId: selectedAccountId,
         schoolId: selectedSchoolId,
         branchId: selectedBranchId,
-        ownerLocalId: schoolForm.id,
-        ownerCloudId: (school as any)?.cloudId,
-      })
+        ownerId: schoolForm.id,
+      }),
     );
 
     setSchoolForm((prev) => ({
@@ -2612,6 +3164,8 @@ export default function Branchsettings() {
   };
 
   const clearBranchImage = (field: keyof BranchForm) => {
+    delete uploadedBranchMediaIdsRef.current[String(field)];
+
     const mediaField = branchMediaIdFieldFor(field);
     const assetId = idOf((branchForm as any)[mediaField]);
 
@@ -2623,9 +3177,8 @@ export default function Branchsettings() {
         accountId: selectedAccountId,
         schoolId: selectedSchoolId,
         branchId: selectedBranchId,
-        ownerLocalId: branchForm.id,
-        ownerCloudId: (branch as any)?.cloudId,
-      })
+        ownerId: branchForm.id,
+      }),
     );
 
     setBranchForm((prev) => ({
@@ -2640,17 +3193,18 @@ export default function Branchsettings() {
     if (!requireTenant()) return;
 
     try {
-      const ownerLocalId = settingsRow?.id || form.id || undefined;
-      const ownerTempKey = ownerLocalId ? undefined : settingsMediaSessionKeyRef.current;
-
+      /*
+       * Always stage under the current form session. This is the same safety
+       * model used by Students.tsx: the currently committed image remains
+       * untouched until the user presses Save.
+       */
       const result = await saveImageAsset(file, {
         accountId: selectedAccountId,
-        schoolId: Number(selectedSchoolId),
-        branchId: Number(selectedBranchId),
+        schoolId: cleanId(selectedSchoolId) || undefined,
+        branchId: cleanId(selectedBranchId) || undefined,
         ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
-        ownerLocalId,
-        ownerCloudId: (settingsRow as any)?.cloudId,
-        ownerTempKey,
+        ownerId: undefined,
+        ownerTempKey: settingsMediaSessionKeyRef.current,
         fieldKey: field,
         variant:
           field === "logo"
@@ -2661,17 +3215,33 @@ export default function Branchsettings() {
         replaceExisting: true,
       });
 
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The image was processed but no media asset ID was created.",
+        );
+      }
+
+      uploadedSettingsMediaIdsRef.current = {
+        ...uploadedSettingsMediaIdsRef.current,
+        [field]: uploadedAssetId,
+      };
+
       updateForm(field, result.previewUrl);
-      updateForm(mediaIdFieldFor(field), result.assetId);
+      updateForm(mediaIdFieldFor(field), uploadedAssetId);
       setPendingMediaRemovals((current) =>
         current.filter(
           (item) =>
             item.assetId !== result.assetId ||
             item.ownerTable !== SETTINGS_MEDIA_OWNER_TABLE ||
-            item.fieldKey !== field
-        )
+            item.fieldKey !== field,
+        ),
       );
-      showToast("info", "Image prepared locally. Click Save to attach and verify it.");
+      showToast(
+        "info",
+        "Image prepared locally. Click Save to attach and verify it.",
+      );
     } catch (error: any) {
       console.error("Failed to process settings image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2681,34 +3251,55 @@ export default function Branchsettings() {
   const uploadSchoolImage = async (field: keyof SchoolForm, file?: File) => {
     if (!file) return;
     if (!selectedAccountId || !selectedSchoolId || !schoolForm.id) {
-      showToast("error", "Assigned school record is required before uploading media.");
+      showToast(
+        "error",
+        "Assigned school record is required before uploading media.",
+      );
       return;
     }
 
     try {
       const result = await saveImageAsset(file, {
         accountId: selectedAccountId,
-        schoolId: Number(selectedSchoolId),
-        branchId: selectedBranchId ? Number(selectedBranchId) : undefined,
+        schoolId: cleanId(selectedSchoolId) || undefined,
+        branchId: selectedBranchId ? String(selectedBranchId) : undefined,
         ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-        ownerLocalId: Number(schoolForm.id),
-        ownerCloudId: (school as any)?.cloudId,
+        ownerId: undefined,
+        ownerTempKey: schoolMediaSessionKeyRef.current,
         fieldKey: String(field),
-        variant: String(field).toLowerCase().includes("logo") ? "logo" : "cover",
+        variant: String(field).toLowerCase().includes("logo")
+          ? "logo"
+          : "cover",
         replaceExisting: true,
       });
 
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The school image was processed but no media asset ID was created.",
+        );
+      }
+
+      uploadedSchoolMediaIdsRef.current = {
+        ...uploadedSchoolMediaIdsRef.current,
+        [String(field)]: uploadedAssetId,
+      };
+
       updateSchoolField(field, result.previewUrl);
-      updateSchoolField(schoolMediaIdFieldFor(field), result.assetId);
+      updateSchoolField(schoolMediaIdFieldFor(field), uploadedAssetId);
       setPendingMediaRemovals((current) =>
         current.filter(
           (item) =>
             item.assetId !== result.assetId ||
             item.ownerTable !== SCHOOL_MEDIA_OWNER_TABLE ||
-            item.fieldKey !== String(field)
-        )
+            item.fieldKey !== String(field),
+        ),
       );
-      showToast("info", "School image prepared locally. Click Save to attach and verify it.");
+      showToast(
+        "info",
+        "School image prepared locally. Click Save to attach and verify it.",
+      );
     } catch (error: any) {
       console.error("Failed to process school image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2717,35 +3308,61 @@ export default function Branchsettings() {
 
   const uploadBranchImage = async (field: keyof BranchForm, file?: File) => {
     if (!file) return;
-    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId || !branchForm.id) {
-      showToast("error", "Assigned branch record is required before uploading media.");
+    if (
+      !selectedAccountId ||
+      !selectedSchoolId ||
+      !selectedBranchId ||
+      !branchForm.id
+    ) {
+      showToast(
+        "error",
+        "Assigned branch record is required before uploading media.",
+      );
       return;
     }
 
     try {
       const result = await saveImageAsset(file, {
         accountId: selectedAccountId,
-        schoolId: Number(selectedSchoolId),
-        branchId: Number(selectedBranchId),
+        schoolId: cleanId(selectedSchoolId) || undefined,
+        branchId: cleanId(selectedBranchId) || undefined,
         ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-        ownerLocalId: Number(branchForm.id),
-        ownerCloudId: (branch as any)?.cloudId,
+        ownerId: undefined,
+        ownerTempKey: branchMediaSessionKeyRef.current,
         fieldKey: String(field),
-        variant: String(field).toLowerCase().includes("logo") ? "avatar" : "cover",
+        variant: String(field).toLowerCase().includes("logo")
+          ? "avatar"
+          : "cover",
         replaceExisting: true,
       });
 
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The branch image was processed but no media asset ID was created.",
+        );
+      }
+
+      uploadedBranchMediaIdsRef.current = {
+        ...uploadedBranchMediaIdsRef.current,
+        [String(field)]: uploadedAssetId,
+      };
+
       updateBranchField(field, result.previewUrl);
-      updateBranchField(branchMediaIdFieldFor(field), result.assetId);
+      updateBranchField(branchMediaIdFieldFor(field), uploadedAssetId);
       setPendingMediaRemovals((current) =>
         current.filter(
           (item) =>
             item.assetId !== result.assetId ||
             item.ownerTable !== BRANCH_MEDIA_OWNER_TABLE ||
-            item.fieldKey !== String(field)
-        )
+            item.fieldKey !== String(field),
+        ),
       );
-      showToast("info", "Branch image prepared locally. Click Save to attach and verify it.");
+      showToast(
+        "info",
+        "Branch image prepared locally. Click Save to attach and verify it.",
+      );
     } catch (error: any) {
       console.error("Failed to process branch image:", error);
       showToast("error", error?.message || "Failed to process image.");
@@ -2757,22 +3374,24 @@ export default function Branchsettings() {
     if (!requireTenant()) return;
 
     try {
-      const ownerLocalId = settingsRow?.id || form.id || undefined;
-      const ownerTempKey = ownerLocalId ? undefined : settingsMediaSessionKeyRef.current;
+      const ownerId = settingsRow?.id || form.id || undefined;
+      const ownerTempKey = ownerId
+        ? undefined
+        : settingsMediaSessionKeyRef.current;
       const results = await Promise.all(
         Array.from(files).map((file) =>
           saveImageAsset(file, {
             accountId: selectedAccountId,
-            schoolId: Number(selectedSchoolId),
-            branchId: Number(selectedBranchId),
+            schoolId: cleanId(selectedSchoolId) || undefined,
+            branchId: cleanId(selectedBranchId) || undefined,
             ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
-            ownerLocalId,
+            ownerId,
             ownerTempKey,
             fieldKey: GALLERY_FIELD_KEY,
             variant: "cover",
             replaceExisting: false,
-          })
-        )
+          }),
+        ),
       );
 
       setForm((prev) => ({
@@ -2786,7 +3405,10 @@ export default function Branchsettings() {
           ...results.map((result) => result.assetId),
         ],
       }));
-      showToast("success", "Gallery image(s) optimized and stored as media assets.");
+      showToast(
+        "success",
+        "Gallery image(s) optimized and stored as media assets.",
+      );
     } catch (error: any) {
       console.error("Failed to process gallery images:", error);
       showToast("error", error?.message || "Failed to process gallery images.");
@@ -2795,7 +3417,7 @@ export default function Branchsettings() {
 
   const removeGalleryImage = (index: number) => {
     const assetId = idOf(form.schoolGalleryMediaIds?.[index]);
-    const ownerLocalId = settingsRow?.id || form.id || undefined;
+    const ownerId = settingsRow?.id || form.id || undefined;
 
     queueMediaRemoval(
       createPendingRemoval({
@@ -2805,16 +3427,19 @@ export default function Branchsettings() {
         accountId: selectedAccountId,
         schoolId: selectedSchoolId,
         branchId: selectedBranchId,
-        ownerLocalId,
-        ownerCloudId: (settingsRow as any)?.cloudId,
-        ownerTempKey: ownerLocalId ? null : settingsMediaSessionKeyRef.current,
-      })
+        ownerId,
+        ownerTempKey: ownerId ? null : settingsMediaSessionKeyRef.current,
+      }),
     );
 
     setForm((prev) => ({
       ...prev,
-      schoolGalleryImages: (prev.schoolGalleryImages || []).filter((_, i) => i !== index),
-      schoolGalleryMediaIds: (prev.schoolGalleryMediaIds || []).filter((_, i) => i !== index),
+      schoolGalleryImages: (prev.schoolGalleryImages || []).filter(
+        (_, i) => i !== index,
+      ),
+      schoolGalleryMediaIds: (prev.schoolGalleryMediaIds || []).filter(
+        (_, i) => i !== index,
+      ),
     }));
   };
 
@@ -2824,7 +3449,11 @@ export default function Branchsettings() {
 
   const persistPendingMediaRemovals = async () => {
     const removals = pendingMediaRemovals.filter(
-      (item) => isPositiveMediaId(item.assetId) || idOf(item.ownerLocalId) || item.ownerTempKey || item.ownerCloudId
+      (item) =>
+        isPositiveMediaId(item.assetId) ||
+        idOf(item.ownerId) ||
+        item.ownerTempKey ||
+        item.ownerId,
     );
 
     if (!removals.length) return;
@@ -2842,36 +3471,48 @@ export default function Branchsettings() {
       return sameId(a, b);
     };
 
-    const assetsToDelete = new Map<number, any>();
+    const assetsToDelete = new Map<string, any>();
 
     for (const removal of removals) {
       if (isPositiveMediaId(removal.assetId)) {
-        const asset = await (db as any).mediaAssets?.get?.(Number(removal.assetId));
-        if (asset?.id) assetsToDelete.set(Number(asset.id), asset);
+        const asset = await (db as any).mediaAssets?.get?.(
+          String(removal.assetId),
+        );
+        if (asset?.id) assetsToDelete.set(String(asset.id), asset);
       }
 
       const ownerMatches = (allAssets || []).filter((asset: any) => {
-        if (!asset?.id || asset.isDeleted || asset.active === false) return false;
+        if (!asset?.id || asset.isDeleted || asset.active === false)
+          return false;
         if (asset.ownerTable !== removal.ownerTable) return false;
         if (asset.fieldKey !== removal.fieldKey) return false;
-        if (removal.accountId && asset.accountId !== removal.accountId) return false;
-        if (!sameOptionalNumber(asset.schoolId, removal.schoolId)) return false;
-        if (!sameOptionalNumber(asset.branchId, removal.branchId)) return false;
+        if (removal.accountId && asset.accountId !== removal.accountId)
+          return false;
+        if (!sameOptionalString(asset.schoolId, removal.schoolId)) return false;
+        if (!sameOptionalString(asset.branchId, removal.branchId)) return false;
 
-        const localMatch = idOf(removal.ownerLocalId) && sameId(asset.ownerLocalId, removal.ownerLocalId);
-        const cloudMatch = removal.ownerCloudId && sameOptionalString(asset.ownerCloudId, removal.ownerCloudId) && String(asset.ownerCloudId || "");
-        const tempMatch = removal.ownerTempKey && sameId(asset.ownerTempKey, removal.ownerTempKey);
+        const localMatch =
+          idOf(removal.ownerId) && sameId(asset.ownerId, removal.ownerId);
+        const cloudMatch =
+          removal.ownerId &&
+          sameOptionalString(asset.ownerId, removal.ownerId) &&
+          String(asset.ownerId || "");
+        const tempMatch =
+          removal.ownerTempKey &&
+          sameId(asset.ownerTempKey, removal.ownerTempKey);
 
         return !!localMatch || !!cloudMatch || !!tempMatch;
       });
 
-      ownerMatches.forEach((asset: any) => assetsToDelete.set(Number(asset.id), asset));
+      ownerMatches.forEach((asset: any) =>
+        assetsToDelete.set(String(asset.id), asset),
+      );
     }
 
     await Promise.all(
       Array.from(assetsToDelete.values()).map(async (asset: any) => {
         try {
-          await updateLocal("mediaAssets", Number(asset.id), {
+          await updateLocal("mediaAssets", String(asset.id), {
             active: false,
             isDeleted: true,
             deletedAt: now,
@@ -2879,7 +3520,7 @@ export default function Branchsettings() {
             synced: "pending",
             uploadStatus: asset.uploadStatus || "local",
           } as any).catch(async () => {
-            await (db as any).mediaAssets?.update?.(Number(asset.id), {
+            await (db as any).mediaAssets?.update?.(String(asset.id), {
               active: false,
               isDeleted: true,
               deletedAt: now,
@@ -2890,7 +3531,7 @@ export default function Branchsettings() {
 
           const blobId = asset.localBlobId || asset.blobId || asset.mediaBlobId;
           if (blobId) {
-            await (db as any).mediaBlobs?.update?.(Number(blobId), {
+            await (db as any).mediaBlobs?.update?.(String(blobId), {
               active: false,
               isDeleted: true,
               deletedAt: now,
@@ -2903,9 +3544,13 @@ export default function Branchsettings() {
             revokeMediaObjectUrl(asset.localObjectUrl);
           }
         } catch (error) {
-          console.warn("Failed to soft-delete removed media asset:", asset, error);
+          console.warn(
+            "Failed to soft-delete removed media asset:",
+            asset,
+            error,
+          );
         }
-      })
+      }),
     );
 
     setPendingMediaRemovals([]);
@@ -2930,10 +3575,14 @@ export default function Branchsettings() {
     return true;
   };
 
-  const saveSchoolBranchSettings = async (options: boolean | SaveOptions = false) => {
+  const saveSchoolBranchSettings = async (
+    options: boolean | SaveOptions = false,
+  ) => {
     const silent = typeof options === "boolean" ? options : !!options.silent;
-    const reloadAfterSave = typeof options === "boolean" ? true : options.reloadAfterSave !== false;
-    const shouldPersistRemovals = typeof options === "boolean" ? true : options.persistRemovals !== false;
+    const reloadAfterSave =
+      typeof options === "boolean" ? true : options.reloadAfterSave !== false;
+    const shouldPersistRemovals =
+      typeof options === "boolean" ? true : options.persistRemovals !== false;
     if (!requireTenant()) return false;
 
     try {
@@ -2941,29 +3590,55 @@ export default function Branchsettings() {
 
       const settingsMediaPatch = {
         logo: safeRecordMediaValue(form.logo) || "",
-        reportCardBackgroundImage: safeRecordMediaValue(form.reportCardBackgroundImage) || "",
-        reportCardWatermark: safeRecordMediaValue(form.reportCardWatermark) || "",
-        reportCardSignatureImage: safeRecordMediaValue(form.reportCardSignatureImage) || "",
+        reportCardBackgroundImage:
+          safeRecordMediaValue(form.reportCardBackgroundImage) || "",
+        reportCardWatermark:
+          safeRecordMediaValue(form.reportCardWatermark) || "",
+        reportCardSignatureImage:
+          safeRecordMediaValue(form.reportCardSignatureImage) || "",
         dashboardHeroImage: safeRecordMediaValue(form.dashboardHeroImage) || "",
-        dashboardBannerImage: safeRecordMediaValue(form.dashboardBannerImage) || "",
+        dashboardBannerImage:
+          safeRecordMediaValue(form.dashboardBannerImage) || "",
         studentPortalImage: safeRecordMediaValue(form.studentPortalImage) || "",
         teacherPortalImage: safeRecordMediaValue(form.teacherPortalImage) || "",
-        classroomPlaceholderImage: safeRecordMediaValue(form.classroomPlaceholderImage) || "",
-        subjectPlaceholderImage: safeRecordMediaValue(form.subjectPlaceholderImage) || "",
+        classroomPlaceholderImage:
+          safeRecordMediaValue(form.classroomPlaceholderImage) || "",
+        subjectPlaceholderImage:
+          safeRecordMediaValue(form.subjectPlaceholderImage) || "",
         schoolGalleryImages: (form.schoolGalleryImages || [])
           .map(safeRecordMediaValue)
           .filter(Boolean) as string[],
         logoMediaId: mediaIdOrNull(form.logoMediaId),
-        reportCardBackgroundImageMediaId: mediaIdOrNull(form.reportCardBackgroundImageMediaId),
-        reportCardWatermarkMediaId: mediaIdOrNull(form.reportCardWatermarkMediaId),
-        reportCardSignatureImageMediaId: mediaIdOrNull(form.reportCardSignatureImageMediaId),
-        dashboardHeroImageMediaId: mediaIdOrNull(form.dashboardHeroImageMediaId),
-        dashboardBannerImageMediaId: mediaIdOrNull(form.dashboardBannerImageMediaId),
-        studentPortalImageMediaId: mediaIdOrNull(form.studentPortalImageMediaId),
-        teacherPortalImageMediaId: mediaIdOrNull(form.teacherPortalImageMediaId),
-        classroomPlaceholderImageMediaId: mediaIdOrNull(form.classroomPlaceholderImageMediaId),
-        subjectPlaceholderImageMediaId: mediaIdOrNull(form.subjectPlaceholderImageMediaId),
-        schoolGalleryMediaIds: (form.schoolGalleryMediaIds || []).map(mediaIdOrNull).filter(Boolean) as number[],
+        reportCardBackgroundImageMediaId: mediaIdOrNull(
+          form.reportCardBackgroundImageMediaId,
+        ),
+        reportCardWatermarkMediaId: mediaIdOrNull(
+          form.reportCardWatermarkMediaId,
+        ),
+        reportCardSignatureImageMediaId: mediaIdOrNull(
+          form.reportCardSignatureImageMediaId,
+        ),
+        dashboardHeroImageMediaId: mediaIdOrNull(
+          form.dashboardHeroImageMediaId,
+        ),
+        dashboardBannerImageMediaId: mediaIdOrNull(
+          form.dashboardBannerImageMediaId,
+        ),
+        studentPortalImageMediaId: mediaIdOrNull(
+          form.studentPortalImageMediaId,
+        ),
+        teacherPortalImageMediaId: mediaIdOrNull(
+          form.teacherPortalImageMediaId,
+        ),
+        classroomPlaceholderImageMediaId: mediaIdOrNull(
+          form.classroomPlaceholderImageMediaId,
+        ),
+        subjectPlaceholderImageMediaId: mediaIdOrNull(
+          form.subjectPlaceholderImageMediaId,
+        ),
+        schoolGalleryMediaIds: (form.schoolGalleryMediaIds || [])
+          .map(mediaIdOrNull)
+          .filter(Boolean) as string[],
       };
 
       const payload = makeSettingsPayload(
@@ -2971,34 +3646,57 @@ export default function Branchsettings() {
           ...form,
           ...settingsMediaPatch,
           accountId: selectedAccountId,
-          schoolId: Number(selectedSchoolId),
-          branchId: Number(selectedBranchId),
-          currentAcademicStructureId: form.currentAcademicStructureId || undefined,
+          schoolId: cleanId(selectedSchoolId) || undefined,
+          branchId: cleanId(selectedBranchId) || undefined,
+          currentAcademicStructureId:
+            form.currentAcademicStructureId || undefined,
           currentAcademicPeriodId: form.currentAcademicPeriodId || undefined,
           schoolGalleryImages: settingsMediaPatch.schoolGalleryImages,
           schoolGalleryMediaIds: settingsMediaPatch.schoolGalleryMediaIds,
           isDeleted: false,
         } as Partial<SchoolBranchSetting>,
-        settingsRow || undefined
+        settingsRow || undefined,
       );
 
-      const existingId = settingsRow?.id || form.id;
+      /**
+       * Commit through SettingsContext instead of writing the settings table
+       * directly. This keeps the saved theme, primary colour and typography in
+       * one atomic state update and prevents refreshSettings from rehydrating a
+       * fallback/default colour after a theme-only change.
+       */
+      const committedSettings = await updateContextSettings({
+        ...payload,
+        accountId: selectedAccountId,
+        schoolId: cleanId(selectedSchoolId) || undefined,
+        branchId: cleanId(selectedBranchId) || undefined,
+        isDeleted: false,
+      } as any);
 
-      let savedSettingsId = Number(existingId || 0);
+      const savedSettingsId = idOf(committedSettings.id);
 
-      if (existingId) {
-        await updateLocal("schoolBranchSettings", Number(existingId), {
-          ...payload,
-          accountId: selectedAccountId,
-          schoolId: Number(selectedSchoolId),
-          branchId: Number(selectedBranchId),
-          isDeleted: false,
-        } as any);
-      } else {
-        const { id, ...withoutId } = payload as any;
-        const created = await createLocal("schoolBranchSettings", withoutId as any);
-        savedSettingsId = Number(typeof created === "number" ? created : (created as any)?.id || 0);
-      }
+      setSettingsRow(committedSettings);
+      setForm((current) => ({
+        ...current,
+        ...committedSettings,
+        id: committedSettings.id,
+        schoolId: cleanId(committedSettings.schoolId) || undefined,
+        branchId: cleanId(committedSettings.branchId) || undefined,
+        primaryColor:
+          committedSettings.primaryColor ||
+          current.primaryColor ||
+          "#2f6fed",
+        theme:
+          (committedSettings.theme || current.theme || "light") as
+            | "light"
+            | "dark",
+        fontFamily:
+          committedSettings.fontFamily ||
+          current.fontFamily,
+        fontSize:
+          Number(committedSettings.fontSize) ||
+          current.fontSize ||
+          16,
+      }));
 
       if (savedSettingsId) {
         const mediaIds = [
@@ -3015,18 +3713,47 @@ export default function Branchsettings() {
           ...(form.schoolGalleryMediaIds || []),
         ].filter(Boolean);
 
-        const savedSettingsRow = await (db as any).schoolBranchSettings?.get?.(savedSettingsId);
+        const savedSettingsRow = await (db as any).schoolBranchSettings?.get?.(
+          savedSettingsId,
+        );
         const settingsFieldAssets = [
           { assetId: form.logoMediaId, fieldKey: "logo" },
-          { assetId: form.reportCardBackgroundImageMediaId, fieldKey: "reportCardBackgroundImage" },
-          { assetId: form.reportCardWatermarkMediaId, fieldKey: "reportCardWatermark" },
-          { assetId: form.reportCardSignatureImageMediaId, fieldKey: "reportCardSignatureImage" },
-          { assetId: form.dashboardHeroImageMediaId, fieldKey: "dashboardHeroImage" },
-          { assetId: form.dashboardBannerImageMediaId, fieldKey: "dashboardBannerImage" },
-          { assetId: form.studentPortalImageMediaId, fieldKey: "studentPortalImage" },
-          { assetId: form.teacherPortalImageMediaId, fieldKey: "teacherPortalImage" },
-          { assetId: form.classroomPlaceholderImageMediaId, fieldKey: "classroomPlaceholderImage" },
-          { assetId: form.subjectPlaceholderImageMediaId, fieldKey: "subjectPlaceholderImage" },
+          {
+            assetId: form.reportCardBackgroundImageMediaId,
+            fieldKey: "reportCardBackgroundImage",
+          },
+          {
+            assetId: form.reportCardWatermarkMediaId,
+            fieldKey: "reportCardWatermark",
+          },
+          {
+            assetId: form.reportCardSignatureImageMediaId,
+            fieldKey: "reportCardSignatureImage",
+          },
+          {
+            assetId: form.dashboardHeroImageMediaId,
+            fieldKey: "dashboardHeroImage",
+          },
+          {
+            assetId: form.dashboardBannerImageMediaId,
+            fieldKey: "dashboardBannerImage",
+          },
+          {
+            assetId: form.studentPortalImageMediaId,
+            fieldKey: "studentPortalImage",
+          },
+          {
+            assetId: form.teacherPortalImageMediaId,
+            fieldKey: "teacherPortalImage",
+          },
+          {
+            assetId: form.classroomPlaceholderImageMediaId,
+            fieldKey: "classroomPlaceholderImage",
+          },
+          {
+            assetId: form.subjectPlaceholderImageMediaId,
+            fieldKey: "subjectPlaceholderImage",
+          },
           ...(form.schoolGalleryMediaIds || []).map((assetId) => ({
             assetId,
             fieldKey: GALLERY_FIELD_KEY,
@@ -3037,17 +3764,17 @@ export default function Branchsettings() {
         await commitMediaAssetsToOwner({
           accountId: selectedAccountId,
           ownerTable: SETTINGS_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedSettingsId,
-          ownerCloudId: (savedSettingsRow as any)?.cloudId,
+          ownerId: savedSettingsId,
+
           ownerTempKey: settingsMediaSessionKeyRef.current,
           assets: settingsFieldAssets,
         });
 
+        uploadedSettingsMediaIdsRef.current = {};
         settingsMediaSessionKeyRef.current = createSettingsMediaSessionKey();
       }
 
       await persistPendingMediaRemovals();
-
 
       if (reloadAfterSave) {
         await load();
@@ -3064,18 +3791,25 @@ export default function Branchsettings() {
        */
       publishBranchSettingsSaved({
         accountId: selectedAccountId,
-        schoolId: Number(selectedSchoolId),
-        branchId: Number(selectedBranchId),
-        localId: savedSettingsId || null,
+        schoolId: cleanId(selectedSchoolId), 
+        branchId: cleanId(selectedBranchId)
       });
 
-      await refreshSettings?.();
+      /*
+       * updateContextSettings already updated effectiveSettings and announced
+       * the exact committed record. Do not perform a second settings reload
+       * here; that was the race which could replace the saved primary colour.
+       */
 
-      if (!silent) showToast("success", "School branch settings saved successfully.");
+      if (!silent)
+        showToast("success", "School branch settings saved successfully.");
       return true;
     } catch (error: any) {
       console.error("Failed to save school branch settings:", error);
-      showToast("error", error?.message || "Failed to save school branch settings.");
+      showToast(
+        "error",
+        error?.message || "Failed to save school branch settings.",
+      );
       return false;
     } finally {
       setSavingSettings(false);
@@ -3084,8 +3818,10 @@ export default function Branchsettings() {
 
   const saveSchoolIdentity = async (options: boolean | SaveOptions = false) => {
     const silent = typeof options === "boolean" ? options : !!options.silent;
-    const reloadAfterSave = typeof options === "boolean" ? true : options.reloadAfterSave !== false;
-    const shouldPersistRemovals = typeof options === "boolean" ? true : options.persistRemovals !== false;
+    const reloadAfterSave =
+      typeof options === "boolean" ? true : options.reloadAfterSave !== false;
+    const shouldPersistRemovals =
+      typeof options === "boolean" ? true : options.persistRemovals !== false;
     if (!selectedAccountId) {
       showToast("error", "Sign in first.");
       return false;
@@ -3104,7 +3840,7 @@ export default function Branchsettings() {
     try {
       setSavingSchool(true);
 
-      await updateLocal("schools", Number(schoolForm.id), {
+      await updateLocal("schools", String(schoolForm.id), {
         accountId: selectedAccountId,
         name: schoolForm.name.trim(),
         motto: schoolForm.motto?.trim() || undefined,
@@ -3112,7 +3848,9 @@ export default function Branchsettings() {
         logoMediaId: mediaIdOrNull(schoolForm.logoMediaId),
         bannerImage: safeRecordMediaValue(schoolForm.bannerImage) || "",
         bannerImageMediaId: mediaIdOrNull(schoolForm.bannerImageMediaId),
-        galleryImages: (schoolForm.galleryImages || []).map(safeRecordMediaValue).filter(Boolean),
+        galleryImages: (schoolForm.galleryImages || [])
+          .map(safeRecordMediaValue)
+          .filter(Boolean),
         address: schoolForm.address?.trim() || undefined,
         location: schoolForm.location?.trim() || undefined,
         email: schoolForm.email?.trim() || undefined,
@@ -3123,17 +3861,57 @@ export default function Branchsettings() {
         synced: "pending",
       } as any);
 
-      const savedSchoolRow = await (db as any).schools?.get?.(Number(schoolForm.id));
-      await commitMediaAssetsToOwner({
+      const stagedSchoolLogoId = cleanId(
+        uploadedSchoolMediaIdsRef.current.logo,
+      );
+      const stagedSchoolBannerId = cleanId(
+        uploadedSchoolMediaIdsRef.current.bannerImage,
+      );
+
+      const committedSchoolMedia = await commitMediaAssetsToOwner({
         accountId: selectedAccountId,
         ownerTable: SCHOOL_MEDIA_OWNER_TABLE,
-        ownerLocalId: Number(schoolForm.id),
-        ownerCloudId: (savedSchoolRow as any)?.cloudId || (school as any)?.cloudId,
+        ownerId: cleanId(schoolForm.id) || undefined,
+        ownerTempKey: schoolMediaSessionKeyRef.current,
         assets: [
-          { assetId: schoolForm.logoMediaId, fieldKey: "logo" },
-          { assetId: schoolForm.bannerImageMediaId, fieldKey: "bannerImage" },
+          {
+            assetId: stagedSchoolLogoId || undefined,
+            fieldKey: "logo",
+          },
+          {
+            assetId: stagedSchoolBannerId || undefined,
+            fieldKey: "bannerImage",
+          },
         ],
       });
+
+      const committedSchoolLogoId = committedSchoolMedia.find(
+        (item) => item.fieldKey === "logo",
+      )?.assetId;
+
+      const committedSchoolBannerId = committedSchoolMedia.find(
+        (item) => item.fieldKey === "bannerImage",
+      )?.assetId;
+
+      if (committedSchoolLogoId || committedSchoolBannerId) {
+        await updateLocal("schools", String(schoolForm.id), {
+          logoMediaId:
+            committedSchoolLogoId ||
+            schoolForm.logoMediaId ||
+            undefined,
+          bannerImageMediaId:
+            committedSchoolBannerId ||
+            schoolForm.bannerImageMediaId ||
+            undefined,
+          logo: safeRecordMediaValue(schoolForm.logo) || "",
+          bannerImage:
+            safeRecordMediaValue(schoolForm.bannerImage) || "",
+        } as any);
+      }
+
+      uploadedSchoolMediaIdsRef.current = {};
+      schoolMediaSessionKeyRef.current =
+        createSharedMediaSessionKey(SCHOOL_MEDIA_OWNER_TABLE);
 
       if (shouldPersistRemovals) await persistPendingMediaRemovals();
 
@@ -3154,8 +3932,10 @@ export default function Branchsettings() {
 
   const saveBranchIdentity = async (options: boolean | SaveOptions = false) => {
     const silent = typeof options === "boolean" ? options : !!options.silent;
-    const reloadAfterSave = typeof options === "boolean" ? true : options.reloadAfterSave !== false;
-    const shouldPersistRemovals = typeof options === "boolean" ? true : options.persistRemovals !== false;
+    const reloadAfterSave =
+      typeof options === "boolean" ? true : options.reloadAfterSave !== false;
+    const shouldPersistRemovals =
+      typeof options === "boolean" ? true : options.persistRemovals !== false;
     if (!selectedAccountId) {
       showToast("error", "Sign in first.");
       return false;
@@ -3174,9 +3954,9 @@ export default function Branchsettings() {
     try {
       setSavingBranch(true);
 
-      await updateLocal("branches", Number(branchForm.id), {
+      await updateLocal("branches", String(branchForm.id), {
         accountId: selectedAccountId,
-        schoolId: Number(selectedSchoolId || branchForm.schoolId),
+        schoolId: cleanId(selectedSchoolId || branchForm.schoolId) || undefined,
         name: branchForm.name.trim(),
         code: branchForm.code?.trim() || undefined,
         logo: safeRecordMediaValue(branchForm.logo) || "",
@@ -3185,7 +3965,8 @@ export default function Branchsettings() {
         bannerImageMediaId: mediaIdOrNull(branchForm.bannerImageMediaId),
         address: branchForm.address?.trim() || undefined,
         location: branchForm.location?.trim() || undefined,
-        city: branchForm.city?.trim() || branchForm.location?.trim() || undefined,
+        city:
+          branchForm.city?.trim() || branchForm.location?.trim() || undefined,
         email: branchForm.email?.trim() || undefined,
         phone: branchForm.phone?.trim() || undefined,
         website: branchForm.website?.trim() || undefined,
@@ -3194,17 +3975,57 @@ export default function Branchsettings() {
         synced: "pending",
       } as any);
 
-      const savedBranchRow = await (db as any).branches?.get?.(Number(branchForm.id));
-      await commitMediaAssetsToOwner({
+      const stagedBranchLogoId = cleanId(
+        uploadedBranchMediaIdsRef.current.logo,
+      );
+      const stagedBranchBannerId = cleanId(
+        uploadedBranchMediaIdsRef.current.bannerImage,
+      );
+
+      const committedBranchMedia = await commitMediaAssetsToOwner({
         accountId: selectedAccountId,
         ownerTable: BRANCH_MEDIA_OWNER_TABLE,
-        ownerLocalId: Number(branchForm.id),
-        ownerCloudId: (savedBranchRow as any)?.cloudId || (branch as any)?.cloudId,
+        ownerId: cleanId(branchForm.id) || undefined,
+        ownerTempKey: branchMediaSessionKeyRef.current,
         assets: [
-          { assetId: branchForm.logoMediaId, fieldKey: "logo" },
-          { assetId: branchForm.bannerImageMediaId, fieldKey: "bannerImage" },
+          {
+            assetId: stagedBranchLogoId || undefined,
+            fieldKey: "logo",
+          },
+          {
+            assetId: stagedBranchBannerId || undefined,
+            fieldKey: "bannerImage",
+          },
         ],
       });
+
+      const committedBranchLogoId = committedBranchMedia.find(
+        (item) => item.fieldKey === "logo",
+      )?.assetId;
+
+      const committedBranchBannerId = committedBranchMedia.find(
+        (item) => item.fieldKey === "bannerImage",
+      )?.assetId;
+
+      if (committedBranchLogoId || committedBranchBannerId) {
+        await updateLocal("branches", String(branchForm.id), {
+          logoMediaId:
+            committedBranchLogoId ||
+            branchForm.logoMediaId ||
+            undefined,
+          bannerImageMediaId:
+            committedBranchBannerId ||
+            branchForm.bannerImageMediaId ||
+            undefined,
+          logo: safeRecordMediaValue(branchForm.logo) || "",
+          bannerImage:
+            safeRecordMediaValue(branchForm.bannerImage) || "",
+        } as any);
+      }
+
+      uploadedBranchMediaIdsRef.current = {};
+      branchMediaSessionKeyRef.current =
+        createSharedMediaSessionKey(BRANCH_MEDIA_OWNER_TABLE);
 
       if (shouldPersistRemovals) await persistPendingMediaRemovals();
 
@@ -3223,15 +4044,24 @@ export default function Branchsettings() {
     }
   };
 
-
-  const saveReportCardTemplateSettings = async (options: boolean | SaveOptions = false) => {
+  const saveReportCardTemplateSettings = async (
+    options: boolean | SaveOptions = false,
+  ) => {
     const silent = typeof options === "boolean" ? options : !!options.silent;
-    const reloadAfterSave = typeof options === "boolean" ? true : options.reloadAfterSave !== false;
+    const reloadAfterSave =
+      typeof options === "boolean" ? true : options.reloadAfterSave !== false;
 
     if (!requireTenant()) return false;
 
-    if (!(db as any).reportCardTemplates || !(db as any).reportCardTemplateSettings || !(db as any).reportCardTemplateAssignments) {
-      showToast("error", "Report card template tables are missing. Update db.ts first.");
+    if (
+      !(db as any).reportCardTemplates ||
+      !(db as any).reportCardTemplateSettings ||
+      !(db as any).reportCardTemplateAssignments
+    ) {
+      showToast(
+        "error",
+        "Report card template tables are missing. Update db.ts first.",
+      );
       return false;
     }
 
@@ -3239,24 +4069,28 @@ export default function Branchsettings() {
       setSavingReportTemplate(true);
 
       const accountIdValue = String(selectedAccountId);
-      const schoolIdValue = Number(selectedSchoolId);
-      const branchIdValue = Number(selectedBranchId);
+      const schoolIdValue = String(selectedSchoolId);
+      const branchIdValue = String(selectedBranchId);
 
-      const activeReportType = (reportTemplateForm.reportType || "student_report") as ReportTemplateReportType;
+      const activeReportType = (reportTemplateForm.reportType ||
+        "student_report") as ReportTemplateReportType;
       const existingTemplateId = idOf(reportTemplateForm.templateId);
-      const allExistingTemplates = await ((db as any).reportCardTemplates?.toArray?.() || []);
-      const existingTemplate =
-        existingTemplateId > 0
-          ? await (db as any).reportCardTemplates.get(existingTemplateId)
-          : (allExistingTemplates as any[]).find((row: any) =>
+      const allExistingTemplates = await ((
+        db as any
+      ).reportCardTemplates?.toArray?.() || []);
+      const existingTemplate = Boolean(existingTemplateId)
+        ? await (db as any).reportCardTemplates.get(existingTemplateId)
+        : (allExistingTemplates as any[]).find(
+            (row: any) =>
               !row.isDeleted &&
               row.active !== false &&
               row.accountId === accountIdValue &&
               sameId(row.schoolId, schoolIdValue) &&
               sameId(row.branchId, branchIdValue) &&
-              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
-              sameId(row.code, reportTemplateForm.templateCode)
-            ) || null;
+              (row.reportType === activeReportType ||
+                (!row.reportType && activeReportType === "student_report")) &&
+              sameId(row.code, reportTemplateForm.templateCode),
+          ) || null;
 
       const templatePayload = makeReportTemplatePayload({
         form: reportTemplateForm,
@@ -3269,11 +4103,22 @@ export default function Branchsettings() {
       let savedTemplateId = existingTemplateId || idOf(existingTemplate?.id);
 
       if (savedTemplateId) {
-        await updateLocal("reportCardTemplates" as any, savedTemplateId, templatePayload as any);
+        await updateLocal(
+          "reportCardTemplates" as any,
+          savedTemplateId,
+          templatePayload as any,
+        );
       } else {
         const { id, ...withoutId } = templatePayload as any;
-        const created = await createLocal("reportCardTemplates" as any, withoutId as any);
-        savedTemplateId = Number(typeof created === "number" ? created : (created as any)?.id || 0);
+        const created = await createLocal(
+          "reportCardTemplates" as any,
+          withoutId as any,
+        );
+        savedTemplateId = idOf(
+          typeof created === "string" || typeof created === "number"
+            ? created
+            : (created as any)?.id,
+        );
       }
 
       if (!savedTemplateId) {
@@ -3281,20 +4126,28 @@ export default function Branchsettings() {
       }
 
       const existingSettingsId = idOf(reportTemplateForm.templateSettingsId);
-      const existingTemplateSettingsById = existingSettingsId > 0
+      const existingTemplateSettingsById = Boolean(existingSettingsId)
         ? await (db as any).reportCardTemplateSettings.get(existingSettingsId)
         : null;
       const existingTemplateSettings =
-        existingTemplateSettingsById && (existingTemplateSettingsById.reportType === activeReportType || (!existingTemplateSettingsById.reportType && activeReportType === "student_report"))
+        existingTemplateSettingsById &&
+        (existingTemplateSettingsById.reportType === activeReportType ||
+          (!existingTemplateSettingsById.reportType &&
+            activeReportType === "student_report"))
           ? existingTemplateSettingsById
-          : (await ((db as any).reportCardTemplateSettings?.toArray?.() || [])).find((row: any) =>
-              !row.isDeleted &&
-              row.active !== false &&
-              row.accountId === accountIdValue &&
-              sameId(row.schoolId, schoolIdValue) &&
-              sameId(row.branchId, branchIdValue) &&
-              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
-              (sameId(row.templateCode, reportTemplateForm.templateCode) || sameId(row.templateId, savedTemplateId))
+          : (
+              await ((db as any).reportCardTemplateSettings?.toArray?.() || [])
+            ).find(
+              (row: any) =>
+                !row.isDeleted &&
+                row.active !== false &&
+                row.accountId === accountIdValue &&
+                sameId(row.schoolId, schoolIdValue) &&
+                sameId(row.branchId, branchIdValue) &&
+                (row.reportType === activeReportType ||
+                  (!row.reportType && activeReportType === "student_report")) &&
+                (sameId(row.templateCode, reportTemplateForm.templateCode) ||
+                  sameId(row.templateId, savedTemplateId)),
             ) || null;
 
       const settingsPayload = makeReportTemplateSettingsPayload({
@@ -3309,11 +4162,22 @@ export default function Branchsettings() {
       let savedSettingsId = idOf(existingTemplateSettings?.id);
 
       if (savedSettingsId) {
-        await updateLocal("reportCardTemplateSettings" as any, savedSettingsId, settingsPayload as any);
+        await updateLocal(
+          "reportCardTemplateSettings" as any,
+          savedSettingsId,
+          settingsPayload as any,
+        );
       } else {
         const { id, ...withoutId } = settingsPayload as any;
-        const created = await createLocal("reportCardTemplateSettings" as any, withoutId as any);
-        savedSettingsId = Number(typeof created === "number" ? created : (created as any)?.id || 0);
+        const created = await createLocal(
+          "reportCardTemplateSettings" as any,
+          withoutId as any,
+        );
+        savedSettingsId = idOf(
+          typeof created === "string" || typeof created === "number"
+            ? created
+            : (created as any)?.id,
+        );
       }
 
       if (!savedSettingsId) {
@@ -3321,21 +4185,31 @@ export default function Branchsettings() {
       }
 
       const existingAssignmentId = idOf(reportTemplateForm.assignmentId);
-      const existingAssignmentById = existingAssignmentId > 0
-        ? await (db as any).reportCardTemplateAssignments.get(existingAssignmentId)
+      const existingAssignmentById = Boolean(existingAssignmentId)
+        ? await (db as any).reportCardTemplateAssignments.get(
+            existingAssignmentId,
+          )
         : null;
       const existingAssignment =
-        existingAssignmentById && (existingAssignmentById.reportType === activeReportType || (!existingAssignmentById.reportType && activeReportType === "student_report"))
+        existingAssignmentById &&
+        (existingAssignmentById.reportType === activeReportType ||
+          (!existingAssignmentById.reportType &&
+            activeReportType === "student_report"))
           ? existingAssignmentById
-          : (await ((db as any).reportCardTemplateAssignments?.toArray?.() || [])).find((row: any) =>
-              !row.isDeleted &&
-              row.active !== false &&
-              row.accountId === accountIdValue &&
-              sameId(row.schoolId, schoolIdValue) &&
-              sameId(row.branchId, branchIdValue) &&
-              (row.reportType === activeReportType || (!row.reportType && activeReportType === "student_report")) &&
-              (!row.scopeType || row.scopeType === "branch") &&
-              sameId(row.scopeId, branchIdValue)
+          : (
+              await ((db as any).reportCardTemplateAssignments?.toArray?.() ||
+                [])
+            ).find(
+              (row: any) =>
+                !row.isDeleted &&
+                row.active !== false &&
+                row.accountId === accountIdValue &&
+                sameId(row.schoolId, schoolIdValue) &&
+                sameId(row.branchId, branchIdValue) &&
+                (row.reportType === activeReportType ||
+                  (!row.reportType && activeReportType === "student_report")) &&
+                (!row.scopeType || row.scopeType === "branch") &&
+                sameId(row.scopeId, branchIdValue),
             ) || null;
 
       const assignmentPayload = makeReportTemplateAssignmentPayload({
@@ -3350,10 +4224,17 @@ export default function Branchsettings() {
 
       const saveAssignmentId = idOf(existingAssignment?.id);
       if (saveAssignmentId) {
-        await updateLocal("reportCardTemplateAssignments" as any, saveAssignmentId, assignmentPayload as any);
+        await updateLocal(
+          "reportCardTemplateAssignments" as any,
+          saveAssignmentId,
+          assignmentPayload as any,
+        );
       } else {
         const { id, ...withoutId } = assignmentPayload as any;
-        await createLocal("reportCardTemplateAssignments" as any, withoutId as any);
+        await createLocal(
+          "reportCardTemplateAssignments" as any,
+          withoutId as any,
+        );
       }
 
       if (reloadAfterSave) await load();
@@ -3372,12 +4253,18 @@ export default function Branchsettings() {
                   : activeReportType === "annual_broadsheet"
                     ? "Annual broadsheet"
                     : "Student report card";
-        showToast("success", `${savedLabel} template settings saved successfully.`);
+        showToast(
+          "success",
+          `${savedLabel} template settings saved successfully.`,
+        );
       }
       return true;
     } catch (error: any) {
       console.error("Failed to save report card template settings:", error);
-      showToast("error", error?.message || "Failed to save report card template settings.");
+      showToast(
+        "error",
+        error?.message || "Failed to save report card template settings.",
+      );
       return false;
     } finally {
       setSavingReportTemplate(false);
@@ -3421,8 +4308,13 @@ export default function Branchsettings() {
       await persistPendingMediaRemovals();
       await load();
       await refreshInstitution?.();
-      await refreshSettings?.();
 
+      /*
+       * saveSchoolBranchSettings() already commits through
+       * SettingsContext.updateSettings(), which updates effectiveSettings
+       * immediately. A second refresh here is unnecessary and previously
+       * reintroduced the stale-settings race.
+       */
       showToast("success", "All school branch settings saved successfully.");
     } finally {
       setSavingAll(false);
@@ -3442,7 +4334,8 @@ export default function Branchsettings() {
     if (!icon) return;
 
     const link: HTMLLinkElement =
-      document.querySelector("link[rel~='icon']") || document.createElement("link");
+      document.querySelector("link[rel~='icon']") ||
+      document.createElement("link");
 
     link.rel = "icon";
     link.href = icon;
@@ -3460,7 +4353,6 @@ export default function Branchsettings() {
     borderColor: "var(--border, rgba(0,0,0,.10))",
   };
 
-
   // ======================================================
   // GOLDEN COMPACT UI
   // ======================================================
@@ -3470,7 +4362,9 @@ export default function Branchsettings() {
       form.currentAcademicStructureId,
       form.currentAcademicPeriodId,
       form.academicYear,
-      form.currentTerm && form.currentTerm !== "Term 1" ? form.currentTerm : undefined,
+      form.currentTerm && form.currentTerm !== "Term 1"
+        ? form.currentTerm
+        : undefined,
       form.theme !== "light" ? form.theme : undefined,
       form.mode !== "manual" ? form.mode : undefined,
     ].filter(Boolean).length;
@@ -3523,27 +4417,34 @@ export default function Branchsettings() {
         key: "dashboardMedia" as SettingsSection,
         icon: "🖼️",
         title: "Dashboard & Portal Images",
-        subtitle: `${[
-          form.dashboardHeroImage,
-          form.dashboardBannerImage,
-          form.studentPortalImage,
-          form.teacherPortalImage,
-          form.classroomPlaceholderImage,
-          form.subjectPlaceholderImage,
-        ].filter(Boolean).length} asset(s)`,
+        subtitle: `${
+          [
+            form.dashboardHeroImage,
+            form.dashboardBannerImage,
+            form.studentPortalImage,
+            form.teacherPortalImage,
+            form.classroomPlaceholderImage,
+            form.subjectPlaceholderImage,
+          ].filter(Boolean).length
+        } asset(s)`,
         detail: "Dashboards, portals, classes and subject placeholders",
-        tone: form.dashboardHeroImage || form.dashboardBannerImage ? "green" : "gray",
+        tone:
+          form.dashboardHeroImage || form.dashboardBannerImage
+            ? "green"
+            : "gray",
       },
       {
         key: "reportMedia" as SettingsSection,
         icon: "📄",
         title: "Report Branding",
-        subtitle: `${[
-          form.reportCardBackgroundImage,
-          form.reportCardWatermark,
-          form.reportCardSignatureImage,
-          form.logo,
-        ].filter(Boolean).length} asset(s)`,
+        subtitle: `${
+          [
+            form.reportCardBackgroundImage,
+            form.reportCardWatermark,
+            form.reportCardSignatureImage,
+            form.logo,
+          ].filter(Boolean).length
+        } asset(s)`,
         detail: "Report background, watermark, signature and branch logo",
         tone: form.reportCardSignatureImage ? "green" : "gray",
       },
@@ -3552,14 +4453,20 @@ export default function Branchsettings() {
         icon: "🧾",
         title: "Report Card Template",
         subtitle: `${reportTemplateForm.templateName || "Classic Ghana Report"} · ${reportTemplateForm.density}`,
-        detail: `${[
-          reportTemplateForm.showSubjectPosition ? "Subject pos." : "",
-          reportTemplateForm.showClassPosition ? "Class pos." : "",
-          reportTemplateForm.showNumberOnRoll ? "Roll" : "",
-          reportTemplateForm.showCurrentAcademicPeriodEnd ? "Period end" : "",
-          reportTemplateForm.showNextAcademicPeriod ? "Next period" : "",
-          reportTemplateForm.showGeneratedDate ? (reportTemplateForm.generatedDateLabel || "Generated") : "",
-        ].filter(Boolean).join(" · ") || "Display controls ready"}`,
+        detail: `${
+          [
+            reportTemplateForm.showSubjectPosition ? "Subject pos." : "",
+            reportTemplateForm.showClassPosition ? "Class pos." : "",
+            reportTemplateForm.showNumberOnRoll ? "Roll" : "",
+            reportTemplateForm.showCurrentAcademicPeriodEnd ? "Period end" : "",
+            reportTemplateForm.showNextAcademicPeriod ? "Next period" : "",
+            reportTemplateForm.showGeneratedDate
+              ? reportTemplateForm.generatedDateLabel || "Generated"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" · ") || "Display controls ready"
+        }`,
         tone: reportTemplateForm.active ? "green" : "gray",
       },
       {
@@ -3575,7 +4482,9 @@ export default function Branchsettings() {
     if (!searchTerm) return sections;
 
     return sections.filter((section) =>
-      `${section.title} ${section.subtitle} ${section.detail}`.toLowerCase().includes(searchTerm)
+      `${section.title} ${section.subtitle} ${section.detail}`
+        .toLowerCase()
+        .includes(searchTerm),
     );
   }, [activePeriod, activeStructure, branchForm, form, schoolForm, searchTerm]);
 
@@ -3590,27 +4499,51 @@ export default function Branchsettings() {
   }
 
   if (!authenticated || !selectedAccountId) {
-    return <State primary={primary} title="Sign in required" text="You must sign in before managing school branch settings." />;
+    return (
+      <State
+        primary={primary}
+        title="Sign in required"
+        text="You must sign in before managing school branch settings."
+      />
+    );
   }
 
   if (!selectedSchoolId || !selectedBranchId) {
-    return <State primary={primary} title="Assigned branch required" text="This settings page is locked to the active branch-admin school branch assignment." />;
+    return (
+      <State
+        primary={primary}
+        title="Assigned branch required"
+        text="This settings page is locked to the active branch-admin school branch assignment."
+      />
+    );
   }
 
   return (
-    <main className="ba-page branch-settings-page" style={{ "--ba-primary": form.primaryColor || primary } as React.CSSProperties}>
+    <main
+      className="ba-page branch-settings-page"
+      style={
+        { "--ba-primary": form.primaryColor || primary } as React.CSSProperties
+      }
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Branch settings search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Branch settings search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -3643,25 +4576,44 @@ export default function Branchsettings() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active branch setting filters">
+        <section
+          className="ba-filter-chips"
+          aria-label="Active branch setting filters"
+        >
           {form.currentAcademicStructureId && (
-            <button type="button" onClick={() => updateForm("currentAcademicStructureId", undefined)}>
+            <button
+              type="button"
+              onClick={() =>
+                updateForm("currentAcademicStructureId", undefined)
+              }
+            >
               Structure: {activeStructure?.name || "Selected"} ×
             </button>
           )}
           {form.currentAcademicPeriodId && (
-            <button type="button" onClick={() => updateForm("currentAcademicPeriodId", undefined)}>
+            <button
+              type="button"
+              onClick={() => updateForm("currentAcademicPeriodId", undefined)}
+            >
               Period: {activePeriod?.name || "Selected"} ×
             </button>
           )}
           {form.academicYear && (
-            <button type="button" onClick={() => updateForm("academicYear", "")}>
+            <button
+              type="button"
+              onClick={() => updateForm("academicYear", "")}
+            >
               Year: {form.academicYear} ×
             </button>
           )}
@@ -3674,18 +4626,34 @@ export default function Branchsettings() {
       )}
 
       <section className="branch-live-preview" style={previewStyle}>
-        <div className="branch-preview-aa" style={{ background: form.primaryColor, color: getContrastTextColor(form.primaryColor) }}>
+        <div
+          className="branch-preview-aa"
+          style={{
+            background: form.primaryColor,
+            color: getContrastTextColor(form.primaryColor),
+          }}
+        >
           Aa
         </div>
         <div>
-          <strong>{school?.name || activeSchool?.name || "School"} · {branch?.name || activeBranch?.name || "Branch"}</strong>
-          <span>{completion}% complete · {assetCount} asset(s)</span>
+          <strong>
+            {school?.name || activeSchool?.name || "School"} ·{" "}
+            {branch?.name || activeBranch?.name || "Branch"}
+          </strong>
+          <span>
+            {completion}% complete · {assetCount} asset(s)
+          </span>
         </div>
       </section>
 
       <section className="ba-list branch-settings-list">
         {visibleSections.map((section) => (
-          <button key={section.key} type="button" className="student-row" onClick={() => setSectionOpen(section.key)}>
+          <button
+            key={section.key}
+            type="button"
+            className="student-row"
+            onClick={() => setSectionOpen(section.key)}
+          >
             <span className="branch-settings-icon">{section.icon}</span>
 
             <span className="student-main">
@@ -3702,7 +4670,11 @@ export default function Branchsettings() {
         ))}
 
         {!visibleSections.length && (
-          <Empty icon="⚙️" title="No settings found" text="Try another search term or open More to refresh the branch settings." />
+          <Empty
+            icon="⚙️"
+            title="No settings found"
+            text="Try another search term or open More to refresh the branch settings."
+          />
         )}
       </section>
 
@@ -3790,12 +4762,36 @@ export default function Branchsettings() {
           text="These images belong only to the assigned school branch settings row."
           form={form}
           fields={[
-            ["Dashboard Hero Image", "dashboardHeroImage", "Main dashboard hero visual for this branch."],
-            ["Dashboard Banner Image", "dashboardBannerImage", "Wide dashboard and finance banner visual for this branch."],
-            ["Student Portal Image", "studentPortalImage", "Image used for student dashboard/portal cards in this branch."],
-            ["Teacher Portal Image", "teacherPortalImage", "Image used for teacher dashboard/portal cards in this branch."],
-            ["Classroom Placeholder Image", "classroomPlaceholderImage", "Image used for class/classroom cards in this branch."],
-            ["Subject Placeholder Image", "subjectPlaceholderImage", "Image used for subject cards in this branch."],
+            [
+              "Dashboard Hero Image",
+              "dashboardHeroImage",
+              "Main dashboard hero visual for this branch.",
+            ],
+            [
+              "Dashboard Banner Image",
+              "dashboardBannerImage",
+              "Wide dashboard and finance banner visual for this branch.",
+            ],
+            [
+              "Student Portal Image",
+              "studentPortalImage",
+              "Image used for student dashboard/portal cards in this branch.",
+            ],
+            [
+              "Teacher Portal Image",
+              "teacherPortalImage",
+              "Image used for teacher dashboard/portal cards in this branch.",
+            ],
+            [
+              "Classroom Placeholder Image",
+              "classroomPlaceholderImage",
+              "Image used for class/classroom cards in this branch.",
+            ],
+            [
+              "Subject Placeholder Image",
+              "subjectPlaceholderImage",
+              "Image used for subject cards in this branch.",
+            ],
           ]}
           uploadImage={uploadImage}
           updateForm={updateForm}
@@ -3810,10 +4806,26 @@ export default function Branchsettings() {
           text="These report card assets belong only to the assigned school branch."
           form={form}
           fields={[
-            ["Report Background Image", "reportCardBackgroundImage", "A light background image for this branch's printed report cards."],
-            ["Report Watermark", "reportCardWatermark", "Used behind report card content for this branch."],
-            ["Official Signature Image", "reportCardSignatureImage", "Used near the headteacher/principal signature section."],
-            ["Branch Settings Logo", "logo", "Optional settings-level logo for this branch experience."],
+            [
+              "Report Background Image",
+              "reportCardBackgroundImage",
+              "A light background image for this branch's printed report cards.",
+            ],
+            [
+              "Report Watermark",
+              "reportCardWatermark",
+              "Used behind report card content for this branch.",
+            ],
+            [
+              "Official Signature Image",
+              "reportCardSignatureImage",
+              "Used near the headteacher/principal signature section.",
+            ],
+            [
+              "Branch Settings Logo",
+              "logo",
+              "Optional settings-level logo for this branch experience.",
+            ],
           ]}
           uploadImage={uploadImage}
           updateForm={updateForm}
@@ -3827,8 +4839,18 @@ export default function Branchsettings() {
           form={reportTemplateForm}
           templates={reportTemplates}
           settingsForm={form}
-          schoolName={schoolForm.name || school?.name || activeSchool?.name || "Eleeveon International Academy"}
-          branchName={branchForm.name || branch?.name || activeBranch?.name || "Main Campus"}
+          schoolName={
+            schoolForm.name ||
+            school?.name ||
+            activeSchool?.name ||
+            "Eleeveon International Academy"
+          }
+          branchName={
+            branchForm.name ||
+            branch?.name ||
+            activeBranch?.name ||
+            "Main Campus"
+          }
           saving={savingReportTemplate}
           updateField={updateReportTemplateField}
           saveReportCardTemplateSettings={saveReportCardTemplateSettings}
@@ -3852,9 +4874,20 @@ export default function Branchsettings() {
 // GOLDEN SMALL COMPONENTS
 // ======================================================
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page branch-settings-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page branch-settings-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -3865,7 +4898,15 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -3888,7 +4929,13 @@ function SliderIcon() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="branch-field">
       <span>{label}</span>
@@ -3897,7 +4944,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function ImagePreview({ label, value, clear }: { label: string; value: string; clear: () => void }) {
+function ImagePreview({
+  label,
+  value,
+  clear,
+}: {
+  label: string;
+  value: string;
+  clear: () => void;
+}) {
   return (
     <div className="branch-image-preview">
       <img src={value} alt={label} />
@@ -3927,7 +4982,11 @@ function ImageUploader({
     <div className="branch-media-block">
       <div className="branch-media-title">{label}</div>
       {helper && <p>{helper}</p>}
-      <input type="file" accept="image/*" onChange={(event) => upload(field, event.target.files?.[0])} />
+      <input
+        type="file"
+        accept="image/*"
+        onChange={(event) => upload(field, event.target.files?.[0])}
+      />
       {value && <ImagePreview label={label} value={value} clear={clear} />}
     </div>
   );
@@ -3952,7 +5011,11 @@ function GenericImageUploader<TField extends string>({
     <div className="branch-media-block">
       <div className="branch-media-title">{label}</div>
       {helper && <p>{helper}</p>}
-      <input type="file" accept="image/*" onChange={(event) => upload(field, event.target.files?.[0])} />
+      <input
+        type="file"
+        accept="image/*"
+        onChange={(event) => upload(field, event.target.files?.[0])}
+      />
       {value && <ImagePreview label={label} value={value} clear={clear} />}
     </div>
   );
@@ -3989,7 +5052,10 @@ function AcademicFilterSheet({
             <select
               value={form.currentAcademicStructureId || ""}
               onChange={(event) => {
-                updateForm("currentAcademicStructureId", Number(event.target.value) || undefined);
+                updateForm(
+                  "currentAcademicStructureId",
+                  Number(event.target.value) || undefined,
+                );
                 updateForm("currentAcademicPeriodId", undefined);
               }}
             >
@@ -4003,7 +5069,15 @@ function AcademicFilterSheet({
           </Field>
 
           <Field label="Academic Period">
-            <select value={form.currentAcademicPeriodId || ""} onChange={(event) => updateForm("currentAcademicPeriodId", Number(event.target.value) || undefined)}>
+            <select
+              value={form.currentAcademicPeriodId || ""}
+              onChange={(event) =>
+                updateForm(
+                  "currentAcademicPeriodId",
+                  Number(event.target.value) || undefined,
+                )
+              }
+            >
               <option value="">Select academic period</option>
               {filteredAcademicPeriods.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -4014,11 +5088,22 @@ function AcademicFilterSheet({
           </Field>
 
           <Field label="Academic Year">
-            <input value={form.academicYear || ""} onChange={(event) => updateForm("academicYear", event.target.value)} placeholder="e.g. 2025/2026" />
+            <input
+              value={form.academicYear || ""}
+              onChange={(event) =>
+                updateForm("academicYear", event.target.value)
+              }
+              placeholder="e.g. 2025/2026"
+            />
           </Field>
 
           <Field label="Current Term">
-            <select value={form.currentTerm || "Term 1"} onChange={(event) => updateForm("currentTerm", event.target.value)}>
+            <select
+              value={form.currentTerm || "Term 1"}
+              onChange={(event) =>
+                updateForm("currentTerm", event.target.value)
+              }
+            >
               <option>Term 1</option>
               <option>Term 2</option>
               <option>Term 3</option>
@@ -4028,14 +5113,22 @@ function AcademicFilterSheet({
           </Field>
 
           <Field label="Theme">
-            <select value={form.theme} onChange={(event) => updateForm("theme", event.target.value as "light" | "dark")}>
+            <select
+              value={form.theme}
+              onChange={(event) =>
+                updateForm("theme", event.target.value as "light" | "dark")
+              }
+            >
               <option value="light">Light Theme</option>
               <option value="dark">Dark Theme</option>
             </select>
           </Field>
 
           <Field label="Mode">
-            <select value={form.mode} onChange={(event) => updateForm("mode", event.target.value)}>
+            <select
+              value={form.mode}
+              onChange={(event) => updateForm("mode", event.target.value)}
+            >
               <option value="manual">Manual Mode</option>
               <option value="auto">Auto Mode</option>
             </select>
@@ -4078,15 +5171,60 @@ function MoreSheet({
   openSection: (section: SettingsSection) => void;
   onClose: () => void;
 }) {
-  const sections: { key: SettingsSection; icon: string; label: string; note: string }[] = [
-    { key: "academic", icon: "📚", label: "Academic Defaults", note: "Structure, period, term and year" },
-    { key: "school", icon: "🏫", label: "School Identity", note: "Name, motto, contacts and logo" },
-    { key: "branch", icon: "🏢", label: "Branch Identity", note: "Branch name, code, contact and media" },
-    { key: "appearance", icon: "🎨", label: "Appearance", note: "Theme, primary color and font" },
-    { key: "dashboardMedia", icon: "🖼️", label: "Dashboard Media", note: "Portal and dashboard images" },
-    { key: "reportMedia", icon: "📄", label: "Report Branding", note: "Report images, watermark and signature" },
-    { key: "reportTemplates", icon: "🧾", label: "Report Card Template", note: "Template, visibility, labels and report fields" },
-    { key: "gallery", icon: "🌄", label: "Gallery", note: "Branch experience images" },
+  const sections: {
+    key: SettingsSection;
+    icon: string;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      key: "academic",
+      icon: "📚",
+      label: "Academic Defaults",
+      note: "Structure, period, term and year",
+    },
+    {
+      key: "school",
+      icon: "🏫",
+      label: "School Identity",
+      note: "Name, motto, contacts and logo",
+    },
+    {
+      key: "branch",
+      icon: "🏢",
+      label: "Branch Identity",
+      note: "Branch name, code, contact and media",
+    },
+    {
+      key: "appearance",
+      icon: "🎨",
+      label: "Appearance",
+      note: "Theme, primary color and font",
+    },
+    {
+      key: "dashboardMedia",
+      icon: "🖼️",
+      label: "Dashboard Media",
+      note: "Portal and dashboard images",
+    },
+    {
+      key: "reportMedia",
+      icon: "📄",
+      label: "Report Branding",
+      note: "Report images, watermark and signature",
+    },
+    {
+      key: "reportTemplates",
+      icon: "🧾",
+      label: "Report Card Template",
+      note: "Template, visibility, labels and report fields",
+    },
+    {
+      key: "gallery",
+      icon: "🌄",
+      label: "Gallery",
+      note: "Branch experience images",
+    },
   ];
 
   return (
@@ -4104,7 +5242,11 @@ function MoreSheet({
 
         <div className="ba-menu-list">
           {sections.map((section) => (
-            <button key={section.key} type="button" onClick={() => openSection(section.key)}>
+            <button
+              key={section.key}
+              type="button"
+              onClick={() => openSection(section.key)}
+            >
               <span>{section.icon}</span>
               <b>{section.label}</b>
               <small>{section.note}</small>
@@ -4142,7 +5284,9 @@ function AcademicSheet({
   filteredAcademicStructures: AcademicStructure[];
   filteredAcademicPeriods: AcademicPeriod[];
   updateForm: (key: keyof SettingsForm, value: any) => void;
-  saveSchoolBranchSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
+  saveSchoolBranchSettings: (
+    options?: boolean | SaveOptions,
+  ) => Promise<boolean>;
   onClose: () => void;
 }) {
   return (
@@ -4151,9 +5295,16 @@ function AcademicSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Academic Defaults</h2>
-            <p>Set current structure, period, academic year and term for this branch.</p>
+            <p>
+              Set current structure, period, academic year and term for this
+              branch.
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close academic defaults">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close academic defaults"
+          >
             ✕
           </button>
         </div>
@@ -4163,32 +5314,58 @@ function AcademicSheet({
             <select
               value={form.currentAcademicStructureId || ""}
               onChange={(event) => {
-                updateForm("currentAcademicStructureId", Number(event.target.value) || undefined);
+                updateForm(
+                  "currentAcademicStructureId",
+                  Number(event.target.value) || undefined,
+                );
                 updateForm("currentAcademicPeriodId", undefined);
               }}
             >
               <option value="">Select Academic Structure</option>
               {filteredAcademicStructures.map((item) => (
-                <option key={item.id} value={item.id}>{item.name} ({(item as any).level || "Level"})</option>
+                <option key={item.id} value={item.id}>
+                  {item.name} ({(item as any).level || "Level"})
+                </option>
               ))}
             </select>
           </Field>
 
           <Field label="Academic Period">
-            <select value={form.currentAcademicPeriodId || ""} onChange={(event) => updateForm("currentAcademicPeriodId", Number(event.target.value) || undefined)}>
+            <select
+              value={form.currentAcademicPeriodId || ""}
+              onChange={(event) =>
+                updateForm(
+                  "currentAcademicPeriodId",
+                  Number(event.target.value) || undefined,
+                )
+              }
+            >
               <option value="">Select Academic Period</option>
               {filteredAcademicPeriods.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </Field>
 
           <Field label="Academic Year">
-            <input value={form.academicYear || ""} onChange={(event) => updateForm("academicYear", event.target.value)} placeholder="e.g. 2025/2026" />
+            <input
+              value={form.academicYear || ""}
+              onChange={(event) =>
+                updateForm("academicYear", event.target.value)
+              }
+              placeholder="e.g. 2025/2026"
+            />
           </Field>
 
           <Field label="Current Term">
-            <select value={form.currentTerm || "Term 1"} onChange={(event) => updateForm("currentTerm", event.target.value)}>
+            <select
+              value={form.currentTerm || "Term 1"}
+              onChange={(event) =>
+                updateForm("currentTerm", event.target.value)
+              }
+            >
               <option>Term 1</option>
               <option>Term 2</option>
               <option>Term 3</option>
@@ -4198,7 +5375,10 @@ function AcademicSheet({
           </Field>
 
           <Field label="Mode">
-            <select value={form.mode} onChange={(event) => updateForm("mode", event.target.value)}>
+            <select
+              value={form.mode}
+              onChange={(event) => updateForm("mode", event.target.value)}
+            >
               <option value="manual">Manual Mode</option>
               <option value="auto">Auto Mode</option>
             </select>
@@ -4206,7 +5386,9 @@ function AcademicSheet({
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
           <button
             type="button"
             className="primary"
@@ -4236,7 +5418,10 @@ function SchoolSheet({
   schoolForm: SchoolForm;
   savingSchool: boolean;
   updateSchoolField: (key: keyof SchoolForm, value: any) => void;
-  uploadSchoolImage: (field: keyof SchoolForm, file?: File) => void | Promise<void>;
+  uploadSchoolImage: (
+    field: keyof SchoolForm,
+    file?: File,
+  ) => void | Promise<void>;
   saveSchoolIdentity: (options?: boolean | SaveOptions) => Promise<boolean>;
   clearImage: (field: keyof SchoolForm) => void;
   onClose: () => void;
@@ -4249,27 +5434,106 @@ function SchoolSheet({
             <h2>School Identity</h2>
             <p>School identity remains on the school record.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close school identity">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close school identity"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
-          <Field label="School Name"><input value={schoolForm.name || ""} onChange={(event) => updateSchoolField("name", event.target.value)} /></Field>
-          <Field label="Motto"><input value={schoolForm.motto || ""} onChange={(event) => updateSchoolField("motto", event.target.value)} /></Field>
-          <Field label="Location"><input value={schoolForm.location || ""} onChange={(event) => updateSchoolField("location", event.target.value)} /></Field>
-          <Field label="Address"><input value={schoolForm.address || ""} onChange={(event) => updateSchoolField("address", event.target.value)} /></Field>
-          <Field label="Email"><input value={schoolForm.email || ""} onChange={(event) => updateSchoolField("email", event.target.value)} /></Field>
-          <Field label="Phone"><input value={schoolForm.phone || ""} onChange={(event) => updateSchoolField("phone", event.target.value)} /></Field>
-          <Field label="Website"><input value={schoolForm.website || ""} onChange={(event) => updateSchoolField("website", event.target.value)} /></Field>
+          <Field label="School Name">
+            <input
+              value={schoolForm.name || ""}
+              onChange={(event) =>
+                updateSchoolField("name", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Motto">
+            <input
+              value={schoolForm.motto || ""}
+              onChange={(event) =>
+                updateSchoolField("motto", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Location">
+            <input
+              value={schoolForm.location || ""}
+              onChange={(event) =>
+                updateSchoolField("location", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Address">
+            <input
+              value={schoolForm.address || ""}
+              onChange={(event) =>
+                updateSchoolField("address", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              value={schoolForm.email || ""}
+              onChange={(event) =>
+                updateSchoolField("email", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              value={schoolForm.phone || ""}
+              onChange={(event) =>
+                updateSchoolField("phone", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Website">
+            <input
+              value={schoolForm.website || ""}
+              onChange={(event) =>
+                updateSchoolField("website", event.target.value)
+              }
+            />
+          </Field>
         </div>
 
         <div className="branch-media-grid">
-          <GenericImageUploader label="School Logo" field="logo" helper="Official school logo stored on the school record." value={schoolForm.logo || ""} upload={uploadSchoolImage} clear={() => clearImage("logo")} />
-          <GenericImageUploader label="School Banner" field="bannerImage" helper="General school banner stored on the school record." value={schoolForm.bannerImage || ""} upload={uploadSchoolImage} clear={() => clearImage("bannerImage")} />
+          <GenericImageUploader
+            label="School Logo"
+            field="logo"
+            helper="Official school logo stored on the school record."
+            value={schoolForm.logo || ""}
+            upload={uploadSchoolImage}
+            clear={() => clearImage("logo")}
+          />
+          <GenericImageUploader
+            label="School Banner"
+            field="bannerImage"
+            helper="General school banner stored on the school record."
+            value={schoolForm.bannerImage || ""}
+            upload={uploadSchoolImage}
+            clear={() => clearImage("bannerImage")}
+          />
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary" disabled={savingSchool} onClick={async () => { await saveSchoolIdentity(); onClose(); }}>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={savingSchool}
+            onClick={async () => {
+              await saveSchoolIdentity();
+              onClose();
+            }}
+          >
             {savingSchool ? "Saving..." : "Save"}
           </button>
         </div>
@@ -4290,7 +5554,10 @@ function BranchSheet({
   branchForm: BranchForm;
   savingBranch: boolean;
   updateBranchField: (key: keyof BranchForm, value: any) => void;
-  uploadBranchImage: (field: keyof BranchForm, file?: File) => void | Promise<void>;
+  uploadBranchImage: (
+    field: keyof BranchForm,
+    file?: File,
+  ) => void | Promise<void>;
   saveBranchIdentity: (options?: boolean | SaveOptions) => Promise<boolean>;
   clearImage: (field: keyof BranchForm) => void;
   onClose: () => void;
@@ -4303,29 +5570,113 @@ function BranchSheet({
             <h2>Branch Identity</h2>
             <p>Branch identity remains on the assigned branch record.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close branch identity">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close branch identity"
+          >
+            ✕
+          </button>
         </div>
 
-        {!branchForm.id && <div className="ba-warning">Assigned branch record was not found.</div>}
+        {!branchForm.id && (
+          <div className="ba-warning">
+            Assigned branch record was not found.
+          </div>
+        )}
 
         <div className="ba-form compact">
-          <Field label="Branch Name"><input value={branchForm.name || ""} onChange={(event) => updateBranchField("name", event.target.value)} /></Field>
-          <Field label="Branch Code"><input value={branchForm.code || ""} onChange={(event) => updateBranchField("code", event.target.value)} /></Field>
-          <Field label="Location / City"><input value={branchForm.location || ""} onChange={(event) => { updateBranchField("location", event.target.value); updateBranchField("city", event.target.value); }} /></Field>
-          <Field label="Address"><input value={branchForm.address || ""} onChange={(event) => updateBranchField("address", event.target.value)} /></Field>
-          <Field label="Email"><input value={branchForm.email || ""} onChange={(event) => updateBranchField("email", event.target.value)} /></Field>
-          <Field label="Phone"><input value={branchForm.phone || ""} onChange={(event) => updateBranchField("phone", event.target.value)} /></Field>
-          <Field label="Website"><input value={branchForm.website || ""} onChange={(event) => updateBranchField("website", event.target.value)} /></Field>
+          <Field label="Branch Name">
+            <input
+              value={branchForm.name || ""}
+              onChange={(event) =>
+                updateBranchField("name", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Branch Code">
+            <input
+              value={branchForm.code || ""}
+              onChange={(event) =>
+                updateBranchField("code", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Location / City">
+            <input
+              value={branchForm.location || ""}
+              onChange={(event) => {
+                updateBranchField("location", event.target.value);
+                updateBranchField("city", event.target.value);
+              }}
+            />
+          </Field>
+          <Field label="Address">
+            <input
+              value={branchForm.address || ""}
+              onChange={(event) =>
+                updateBranchField("address", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Email">
+            <input
+              value={branchForm.email || ""}
+              onChange={(event) =>
+                updateBranchField("email", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Phone">
+            <input
+              value={branchForm.phone || ""}
+              onChange={(event) =>
+                updateBranchField("phone", event.target.value)
+              }
+            />
+          </Field>
+          <Field label="Website">
+            <input
+              value={branchForm.website || ""}
+              onChange={(event) =>
+                updateBranchField("website", event.target.value)
+              }
+            />
+          </Field>
         </div>
 
         <div className="branch-media-grid">
-          <GenericImageUploader label="Branch Logo" field="logo" helper="Optional branch-specific logo stored on the branch record." value={branchForm.logo || ""} upload={uploadBranchImage} clear={() => clearImage("logo")} />
-          <GenericImageUploader label="Branch Banner" field="bannerImage" helper="Optional branch-specific banner stored on the branch record." value={branchForm.bannerImage || ""} upload={uploadBranchImage} clear={() => clearImage("bannerImage")} />
+          <GenericImageUploader
+            label="Branch Logo"
+            field="logo"
+            helper="Optional branch-specific logo stored on the branch record."
+            value={branchForm.logo || ""}
+            upload={uploadBranchImage}
+            clear={() => clearImage("logo")}
+          />
+          <GenericImageUploader
+            label="Branch Banner"
+            field="bannerImage"
+            helper="Optional branch-specific banner stored on the branch record."
+            value={branchForm.bannerImage || ""}
+            upload={uploadBranchImage}
+            clear={() => clearImage("bannerImage")}
+          />
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary" disabled={savingBranch} onClick={async () => { await saveBranchIdentity(); onClose(); }}>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={savingBranch}
+            onClick={async () => {
+              await saveBranchIdentity();
+              onClose();
+            }}
+          >
             {savingBranch ? "Saving..." : "Save"}
           </button>
         </div>
@@ -4347,7 +5698,9 @@ function AppearanceSheet({
   form: SettingsForm;
   savingSettings: boolean;
   updateForm: (key: keyof SettingsForm, value: any) => void;
-  saveSchoolBranchSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
+  saveSchoolBranchSettings: (
+    options?: boolean | SaveOptions,
+  ) => Promise<boolean>;
   previewStyle: React.CSSProperties;
   schoolName: string;
   branchName: string;
@@ -4361,26 +5714,55 @@ function AppearanceSheet({
             <h2>Appearance</h2>
             <p>Theme, color and font belong to this school branch only.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close appearance">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close appearance">
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
           <Field label="Font Family">
-            <select value={form.fontFamily} onChange={(event) => updateForm("fontFamily", event.target.value)}>
-              {fontOptions.map((font) => <option key={font.value} value={font.value}>{font.label}</option>)}
+            <select
+              value={form.fontFamily}
+              onChange={(event) => updateForm("fontFamily", event.target.value)}
+            >
+              {fontOptions.map((font) => (
+                <option key={font.value} value={font.value}>
+                  {font.label}
+                </option>
+              ))}
             </select>
           </Field>
 
           <Field label="Font Size">
-            <input type="number" min={12} max={22} value={form.fontSize} onChange={(event) => updateForm("fontSize", Number(event.target.value))} />
+            <input
+              type="number"
+              min={12}
+              max={22}
+              value={form.fontSize}
+              onChange={(event) =>
+                updateForm("fontSize", Number(event.target.value))
+              }
+            />
           </Field>
 
           <Field label="Primary Color">
-            <input className="branch-color-input" type="color" value={form.primaryColor} onChange={(event) => updateForm("primaryColor", event.target.value)} />
+            <input
+              className="branch-color-input"
+              type="color"
+              value={form.primaryColor}
+              onChange={(event) =>
+                updateForm("primaryColor", event.target.value)
+              }
+            />
           </Field>
 
           <Field label="Theme">
-            <select value={form.theme} onChange={(event) => updateForm("theme", event.target.value as "light" | "dark")}>
+            <select
+              value={form.theme}
+              onChange={(event) =>
+                updateForm("theme", event.target.value as "light" | "dark")
+              }
+            >
               <option value="light">Light Theme</option>
               <option value="dark">Dark Theme</option>
             </select>
@@ -4388,16 +5770,36 @@ function AppearanceSheet({
         </div>
 
         <div className="branch-live-preview sheet-preview" style={previewStyle}>
-          <div className="branch-preview-aa" style={{ background: form.primaryColor, color: getContrastTextColor(form.primaryColor) }}>Aa</div>
+          <div
+            className="branch-preview-aa"
+            style={{
+              background: form.primaryColor,
+              color: getContrastTextColor(form.primaryColor),
+            }}
+          >
+            Aa
+          </div>
           <div>
-            <strong>{schoolName} · {branchName}</strong>
+            <strong>
+              {schoolName} · {branchName}
+            </strong>
             <span>Live Branch Theme Preview</span>
           </div>
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary" disabled={savingSettings} onClick={async () => { await saveSchoolBranchSettings(); onClose(); }}>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={savingSettings}
+            onClick={async () => {
+              await saveSchoolBranchSettings();
+              onClose();
+            }}
+          >
             {savingSettings ? "Saving..." : "Save"}
           </button>
         </div>
@@ -4405,7 +5807,6 @@ function AppearanceSheet({
     </div>
   );
 }
-
 
 function ReportTemplateSheet({
   form,
@@ -4425,7 +5826,9 @@ function ReportTemplateSheet({
   branchName: string;
   saving: boolean;
   updateField: (key: keyof ReportTemplateForm, value: any) => void;
-  saveReportCardTemplateSettings: (options?: boolean | SaveOptions) => Promise<boolean>;
+  saveReportCardTemplateSettings: (
+    options?: boolean | SaveOptions,
+  ) => Promise<boolean>;
   onClose: () => void;
 }) {
   const reportTabGroups: {
@@ -4435,50 +5838,90 @@ function ReportTemplateSheet({
     {
       title: "Academic Reports",
       tabs: [
-        { key: "student_report", label: "Student Report Cards", note: "Existing template gallery and display controls." },
-        { key: "cumulative_book", label: "Cumulative Report Book", note: "Student report templates assembled as printable booklets." },
-        { key: "cumulative_transcript", label: "Cumulative Transcript", note: "Official transcript-style academic history." },
+        {
+          key: "student_report",
+          label: "Student Report Cards",
+          note: "Existing template gallery and display controls.",
+        },
+        {
+          key: "cumulative_book",
+          label: "Cumulative Report Book",
+          note: "Student report templates assembled as printable booklets.",
+        },
+        {
+          key: "cumulative_transcript",
+          label: "Cumulative Transcript",
+          note: "Official transcript-style academic history.",
+        },
       ],
     },
     {
       title: "Broadsheets",
       tabs: [
-        { key: "subject_broadsheet", label: "Subject Broadsheet", note: "Assessment breakdown and subject performance." },
-        { key: "class_broadsheet", label: "Class Broadsheet", note: "Students across all subjects for one period." },
-        { key: "annual_broadsheet", label: "Annual Broadsheet", note: "Cumulative class performance across periods." },
+        {
+          key: "subject_broadsheet",
+          label: "Subject Broadsheet",
+          note: "Assessment breakdown and subject performance.",
+        },
+        {
+          key: "class_broadsheet",
+          label: "Class Broadsheet",
+          note: "Students across all subjects for one period.",
+        },
+        {
+          key: "annual_broadsheet",
+          label: "Annual Broadsheet",
+          note: "Cumulative class performance across periods.",
+        },
       ],
     },
   ];
 
-  const activeReportType = (form.reportType || "student_report") as ReportTemplateReportType;
+  const activeReportType = (form.reportType ||
+    "student_report") as ReportTemplateReportType;
 
-  const studentTemplates = reportTemplateDefinitionOptions("student_report").map((definition) => {
-    const existing = templates.find((row: any) =>
-      (row.reportType === "student_report" || !row.reportType) &&
-      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
+  const studentTemplates = reportTemplateDefinitionOptions(
+    "student_report",
+  ).map((definition) => {
+    const existing = templates.find(
+      (row: any) =>
+        (row.reportType === "student_report" || !row.reportType) &&
+        (sameId(row.code, definition.code) ||
+          sameId(row.layoutKey, definition.layoutKey)),
     );
     return { ...definition, ...(existing || {}) };
   });
 
-  const bookTemplates = reportTemplateDefinitionOptions("cumulative_book").map((definition) => {
-    const existing = templates.find((row: any) =>
-      row.reportType === "cumulative_book" &&
-      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
+  const bookTemplates = reportTemplateDefinitionOptions("cumulative_book").map(
+    (definition) => {
+      const existing = templates.find(
+        (row: any) =>
+          row.reportType === "cumulative_book" &&
+          (sameId(row.code, definition.code) ||
+            sameId(row.layoutKey, definition.layoutKey)),
+      );
+      return { ...definition, ...(existing || {}) };
+    },
+  );
+
+  const transcriptTemplates = reportTemplateDefinitionOptions(
+    "cumulative_transcript",
+  ).map((definition) => {
+    const existing = templates.find(
+      (row: any) =>
+        row.reportType === "cumulative_transcript" &&
+        (sameId(row.code, definition.code) ||
+          sameId(row.layoutKey, definition.layoutKey)),
     );
     return { ...definition, ...(existing || {}) };
   });
 
-  const transcriptTemplates = reportTemplateDefinitionOptions("cumulative_transcript").map((definition) => {
-    const existing = templates.find((row: any) =>
-      row.reportType === "cumulative_transcript" &&
-      (sameId(row.code, definition.code) || sameId(row.layoutKey, definition.layoutKey))
-    );
-    return { ...definition, ...(existing || {}) };
-  });
-
-  const subjectBroadsheetTemplates = reportTemplateDefinitionOptions("subject_broadsheet");
-  const classBroadsheetTemplates = reportTemplateDefinitionOptions("class_broadsheet");
-  const annualBroadsheetTemplates = reportTemplateDefinitionOptions("annual_broadsheet");
+  const subjectBroadsheetTemplates =
+    reportTemplateDefinitionOptions("subject_broadsheet");
+  const classBroadsheetTemplates =
+    reportTemplateDefinitionOptions("class_broadsheet");
+  const annualBroadsheetTemplates =
+    reportTemplateDefinitionOptions("annual_broadsheet");
 
   const galleryTemplates =
     activeReportType === "cumulative_book"
@@ -4514,7 +5957,7 @@ function ReportTemplateSheet({
       settingsForm.reportCardBackgroundImage,
       settingsForm.reportCardWatermark,
       settingsForm.reportCardSignatureImage,
-    ]
+    ],
   );
 
   const bookPreviewDataset = useMemo(
@@ -4529,7 +5972,16 @@ function ReportTemplateSheet({
         reportCardWatermark: settingsForm.reportCardWatermark,
         reportCardSignatureImage: settingsForm.reportCardSignatureImage,
       }),
-    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardBackgroundImage, settingsForm.reportCardWatermark, settingsForm.reportCardSignatureImage]
+    [
+      schoolName,
+      branchName,
+      settingsForm.primaryColor,
+      settingsForm.fontFamily,
+      settingsForm.logo,
+      settingsForm.reportCardBackgroundImage,
+      settingsForm.reportCardWatermark,
+      settingsForm.reportCardSignatureImage,
+    ],
   );
 
   const transcriptPreviewDataset = useMemo(
@@ -4542,7 +5994,14 @@ function ReportTemplateSheet({
         logo: settingsForm.logo,
         reportCardWatermark: settingsForm.reportCardWatermark,
       }),
-    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardWatermark]
+    [
+      schoolName,
+      branchName,
+      settingsForm.primaryColor,
+      settingsForm.fontFamily,
+      settingsForm.logo,
+      settingsForm.reportCardWatermark,
+    ],
   );
 
   const broadsheetPreviewHeader = useMemo(
@@ -4557,12 +6016,30 @@ function ReportTemplateSheet({
         reportCardWatermark: settingsForm.reportCardWatermark,
         reportCardSignatureImage: settingsForm.reportCardSignatureImage,
       }),
-    [schoolName, branchName, settingsForm.primaryColor, settingsForm.fontFamily, settingsForm.logo, settingsForm.reportCardBackgroundImage, settingsForm.reportCardWatermark, settingsForm.reportCardSignatureImage]
+    [
+      schoolName,
+      branchName,
+      settingsForm.primaryColor,
+      settingsForm.fontFamily,
+      settingsForm.logo,
+      settingsForm.reportCardBackgroundImage,
+      settingsForm.reportCardWatermark,
+      settingsForm.reportCardSignatureImage,
+    ],
   );
 
-  const subjectBroadsheetPreviewDataset = useMemo(() => createDummySubjectBroadsheetPreviewDataset(), []);
-  const classBroadsheetPreviewDataset = useMemo(() => createDummyClassBroadsheetPreviewDataset(), []);
-  const annualBroadsheetPreviewDataset = useMemo(() => createDummyAnnualBroadsheetPreviewDataset(), []);
+  const subjectBroadsheetPreviewDataset = useMemo(
+    () => createDummySubjectBroadsheetPreviewDataset(),
+    [],
+  );
+  const classBroadsheetPreviewDataset = useMemo(
+    () => createDummyClassBroadsheetPreviewDataset(),
+    [],
+  );
+  const annualBroadsheetPreviewDataset = useMemo(
+    () => createDummyAnnualBroadsheetPreviewDataset(),
+    [],
+  );
 
   const isBroadsheetType = activeReportType.endsWith("_broadsheet");
   const activeBroadsheetKind =
@@ -4590,97 +6067,361 @@ function ReportTemplateSheet({
 
   const selectedPreviewSettings = reportTemplatePreviewSettingsFromForm(
     form,
-    selectedPreviewTemplate as any
+    selectedPreviewTemplate as any,
   );
 
-  const studentVisibilityControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
-    { key: "showSubjectPosition", label: "Subject Positions", note: "Remove the subject position column entirely when off." },
-    { key: "showClassPosition", label: "Class Position", note: "Remove class position summary entirely when off." },
-    { key: "showNumberOnRoll", label: "Number On Roll", note: "Show class size/roll count only for schools that want it." },
-    { key: "showAttendance", label: "Attendance", note: "Show attendance count section." },
-    { key: "showAttendancePercent", label: "Attendance Percentage", note: "Show attendance percentage field." },
-    { key: "showStudentPhoto", label: "Student Photo", note: "Show or hide student photo box." },
-    { key: "showTeacherNames", label: "Subject Teacher Names", note: "Show teacher name under each subject." },
-    { key: "showCurrentAcademicPeriodEnd", label: "Current Period End", note: "Show this academic period ends line before the next period line." },
-    { key: "showNextAcademicPeriod", label: "Next Academic Period", note: "Show reopening/next period begins line." },
-    { key: "showPromotionStatus", label: "Promotion Status", note: "Show promote/repeat/graduate status when available." },
+  const studentVisibilityControls: {
+    key: keyof ReportTemplateForm;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      key: "showSubjectPosition",
+      label: "Subject Positions",
+      note: "Remove the subject position column entirely when off.",
+    },
+    {
+      key: "showClassPosition",
+      label: "Class Position",
+      note: "Remove class position summary entirely when off.",
+    },
+    {
+      key: "showNumberOnRoll",
+      label: "Number On Roll",
+      note: "Show class size/roll count only for schools that want it.",
+    },
+    {
+      key: "showAttendance",
+      label: "Attendance",
+      note: "Show attendance count section.",
+    },
+    {
+      key: "showAttendancePercent",
+      label: "Attendance Percentage",
+      note: "Show attendance percentage field.",
+    },
+    {
+      key: "showStudentPhoto",
+      label: "Student Photo",
+      note: "Show or hide student photo box.",
+    },
+    {
+      key: "showTeacherNames",
+      label: "Subject Teacher Names",
+      note: "Show teacher name under each subject.",
+    },
+    {
+      key: "showCurrentAcademicPeriodEnd",
+      label: "Current Period End",
+      note: "Show this academic period ends line before the next period line.",
+    },
+    {
+      key: "showNextAcademicPeriod",
+      label: "Next Academic Period",
+      note: "Show reopening/next period begins line.",
+    },
+    {
+      key: "showPromotionStatus",
+      label: "Promotion Status",
+      note: "Show promote/repeat/graduate status when available.",
+    },
     { key: "showGPA", label: "GPA", note: "Show GPA summary field." },
-    { key: "showAverage", label: "Average", note: "Show average summary field." },
+    {
+      key: "showAverage",
+      label: "Average",
+      note: "Show average summary field.",
+    },
     { key: "showTotal", label: "Total", note: "Show total summary field." },
     { key: "showGrade", label: "Grade", note: "Show grade column." },
-    { key: "showSubjectRemarks", label: "Subject Remarks", note: "Show subject remark column." },
-    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on report cards." },
-    { key: "showParentSignature", label: "Parent Signature", note: "Show parent/guardian signature area." },
-    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date using the selected label." },
+    {
+      key: "showSubjectRemarks",
+      label: "Subject Remarks",
+      note: "Show subject remark column.",
+    },
+    {
+      key: "showWatermark",
+      label: "Watermark",
+      note: "Use saved report watermark on report cards.",
+    },
+    {
+      key: "showParentSignature",
+      label: "Parent Signature",
+      note: "Show parent/guardian signature area.",
+    },
+    {
+      key: "showGeneratedDate",
+      label: "Generated Date",
+      note: "Show generated/printed date using the selected label.",
+    },
   ];
 
-  const bookControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
-    { key: "showBookFrontCover", label: "Front Cover", note: "Start the cumulative book with a designed cover page." },
-    { key: "showBookStudentProfilePage", label: "Student Profile Page", note: "Show student identity, parent and branch profile details." },
-    { key: "showBookAcademicJourneyPage", label: "Academic Journey Page", note: "Show the student's period-by-period progress timeline." },
-    { key: "showBookSummaryPage", label: "Summary Page", note: "Show cumulative average, GPA, trend and final recommendation." },
-    { key: "showBookBackCover", label: "Back Cover", note: "End the printable booklet with an official closing cover." },
-    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date on cover and info pages." },
-    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on book pages." },
+  const bookControls: {
+    key: keyof ReportTemplateForm;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      key: "showBookFrontCover",
+      label: "Front Cover",
+      note: "Start the cumulative book with a designed cover page.",
+    },
+    {
+      key: "showBookStudentProfilePage",
+      label: "Student Profile Page",
+      note: "Show student identity, parent and branch profile details.",
+    },
+    {
+      key: "showBookAcademicJourneyPage",
+      label: "Academic Journey Page",
+      note: "Show the student's period-by-period progress timeline.",
+    },
+    {
+      key: "showBookSummaryPage",
+      label: "Summary Page",
+      note: "Show cumulative average, GPA, trend and final recommendation.",
+    },
+    {
+      key: "showBookBackCover",
+      label: "Back Cover",
+      note: "End the printable booklet with an official closing cover.",
+    },
+    {
+      key: "showGeneratedDate",
+      label: "Generated Date",
+      note: "Show generated/printed date on cover and info pages.",
+    },
+    {
+      key: "showWatermark",
+      label: "Watermark",
+      note: "Use saved report watermark on book pages.",
+    },
   ];
 
-  const transcriptControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
-    { key: "showTranscriptTermBreakdown", label: "Term / Period Breakdown", note: "Show subject rows grouped under each academic period." },
-    { key: "showTranscriptYearAverage", label: "Year Average", note: "Show academic-year average/statistics where available." },
-    { key: "showTranscriptCumulativeAverage", label: "Cumulative Average", note: "Show overall cumulative average in the transcript summary." },
-    { key: "showTranscriptCumulativePosition", label: "Cumulative Position", note: "Show latest/cumulative rank or position where available." },
-    { key: "showTranscriptGPAProgression", label: "GPA Progression", note: "Show term GPA and cumulative GPA values." },
-    { key: "showTranscriptFinalRecommendation", label: "Final Recommendation", note: "Show promote/repeat/graduate recommendation." },
-    { key: "showStudentPhoto", label: "Student Photo", note: "Show student photo if the template supports it." },
-    { key: "showGeneratedDate", label: "Generated Date", note: "Show generated/printed date in transcript footer or metadata." },
-    { key: "showWatermark", label: "Watermark", note: "Use saved report watermark on transcripts." },
+  const transcriptControls: {
+    key: keyof ReportTemplateForm;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      key: "showTranscriptTermBreakdown",
+      label: "Term / Period Breakdown",
+      note: "Show subject rows grouped under each academic period.",
+    },
+    {
+      key: "showTranscriptYearAverage",
+      label: "Year Average",
+      note: "Show academic-year average/statistics where available.",
+    },
+    {
+      key: "showTranscriptCumulativeAverage",
+      label: "Cumulative Average",
+      note: "Show overall cumulative average in the transcript summary.",
+    },
+    {
+      key: "showTranscriptCumulativePosition",
+      label: "Cumulative Position",
+      note: "Show latest/cumulative rank or position where available.",
+    },
+    {
+      key: "showTranscriptGPAProgression",
+      label: "GPA Progression",
+      note: "Show term GPA and cumulative GPA values.",
+    },
+    {
+      key: "showTranscriptFinalRecommendation",
+      label: "Final Recommendation",
+      note: "Show promote/repeat/graduate recommendation.",
+    },
+    {
+      key: "showStudentPhoto",
+      label: "Student Photo",
+      note: "Show student photo if the template supports it.",
+    },
+    {
+      key: "showGeneratedDate",
+      label: "Generated Date",
+      note: "Show generated/printed date in transcript footer or metadata.",
+    },
+    {
+      key: "showWatermark",
+      label: "Watermark",
+      note: "Use saved report watermark on transcripts.",
+    },
   ];
 
-  const broadsheetSharedControls: { key: keyof ReportTemplateForm; label: string; note: string }[] = [
-    { key: "showBroadsheetLogo", label: "School Logo", note: "Show the resolved school or branch logo." },
-    { key: "showBroadsheetWatermark", label: "Watermark", note: "Use the saved report watermark." },
-    { key: "showBroadsheetGeneratedDate", label: "Generated Date", note: "Show generated or printed date." },
-    { key: "showBroadsheetPageNumber", label: "Page Number", note: "Show page numbering in the footer." },
-    { key: "showBroadsheetSignatures", label: "Signatures", note: "Show official sign-off areas." },
-    { key: "showBroadsheetSummary", label: "Summary", note: "Show top academic summary statistics." },
-    { key: "showBroadsheetStatistics", label: "Statistics", note: "Show additional statistics and period context." },
-    { key: "showBroadsheetStudentPhoto", label: "Student Photos", note: "Show student photos when available." },
+  const broadsheetSharedControls: {
+    key: keyof ReportTemplateForm;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      key: "showBroadsheetLogo",
+      label: "School Logo",
+      note: "Show the resolved school or branch logo.",
+    },
+    {
+      key: "showBroadsheetWatermark",
+      label: "Watermark",
+      note: "Use the saved report watermark.",
+    },
+    {
+      key: "showBroadsheetGeneratedDate",
+      label: "Generated Date",
+      note: "Show generated or printed date.",
+    },
+    {
+      key: "showBroadsheetPageNumber",
+      label: "Page Number",
+      note: "Show page numbering in the footer.",
+    },
+    {
+      key: "showBroadsheetSignatures",
+      label: "Signatures",
+      note: "Show official sign-off areas.",
+    },
+    {
+      key: "showBroadsheetSummary",
+      label: "Summary",
+      note: "Show top academic summary statistics.",
+    },
+    {
+      key: "showBroadsheetStatistics",
+      label: "Statistics",
+      note: "Show additional statistics and period context.",
+    },
+    {
+      key: "showBroadsheetStudentPhoto",
+      label: "Student Photos",
+      note: "Show student photos when available.",
+    },
   ];
   const subjectBroadsheetControls = [
     ...broadsheetSharedControls,
-    { key: "showBroadsheetAssessmentBreakdown", label: "Assessment Breakdown", note: "Show assessment component columns." },
-    { key: "showBroadsheetWeightedTotal", label: "Weighted Total", note: "Show weighted total." },
-    { key: "showBroadsheetPercentage", label: "Percentage", note: "Show final percentage." },
+    {
+      key: "showBroadsheetAssessmentBreakdown",
+      label: "Assessment Breakdown",
+      note: "Show assessment component columns.",
+    },
+    {
+      key: "showBroadsheetWeightedTotal",
+      label: "Weighted Total",
+      note: "Show weighted total.",
+    },
+    {
+      key: "showBroadsheetPercentage",
+      label: "Percentage",
+      note: "Show final percentage.",
+    },
     { key: "showBroadsheetGrade", label: "Grade", note: "Show grade column." },
     { key: "showBroadsheetGPA", label: "GPA", note: "Show GPA." },
-    { key: "showBroadsheetPosition", label: "Position", note: "Show subject position." },
-    { key: "showBroadsheetRemark", label: "Remark", note: "Show remark column." },
-    { key: "showBroadsheetHighestScore", label: "Highest Score", note: "Show highest score statistic." },
-    { key: "showBroadsheetLowestScore", label: "Lowest Score", note: "Show lowest score statistic." },
-    { key: "showBroadsheetClassAverage", label: "Class Average", note: "Show class average statistic." },
+    {
+      key: "showBroadsheetPosition",
+      label: "Position",
+      note: "Show subject position.",
+    },
+    {
+      key: "showBroadsheetRemark",
+      label: "Remark",
+      note: "Show remark column.",
+    },
+    {
+      key: "showBroadsheetHighestScore",
+      label: "Highest Score",
+      note: "Show highest score statistic.",
+    },
+    {
+      key: "showBroadsheetLowestScore",
+      label: "Lowest Score",
+      note: "Show lowest score statistic.",
+    },
+    {
+      key: "showBroadsheetClassAverage",
+      label: "Class Average",
+      note: "Show class average statistic.",
+    },
   ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
   const classBroadsheetControls = [
     ...broadsheetSharedControls,
-    { key: "showBroadsheetSubjectScores", label: "Subject Scores", note: "Show all subject columns." },
-    { key: "showBroadsheetSubjectGrades", label: "Subject Grades", note: "Show grades below scores." },
+    {
+      key: "showBroadsheetSubjectScores",
+      label: "Subject Scores",
+      note: "Show all subject columns.",
+    },
+    {
+      key: "showBroadsheetSubjectGrades",
+      label: "Subject Grades",
+      note: "Show grades below scores.",
+    },
     { key: "showBroadsheetTotal", label: "Total", note: "Show total column." },
-    { key: "showBroadsheetAverage", label: "Average", note: "Show average column." },
+    {
+      key: "showBroadsheetAverage",
+      label: "Average",
+      note: "Show average column.",
+    },
     { key: "showBroadsheetGPA", label: "GPA", note: "Show GPA column." },
-    { key: "showBroadsheetClassPosition", label: "Class Position", note: "Show class position." },
-    { key: "showBroadsheetAttendance", label: "Attendance", note: "Show attendance percentage." },
-    { key: "showBroadsheetClassHighestAverage", label: "Highest Average", note: "Show highest average." },
-    { key: "showBroadsheetClassLowestAverage", label: "Lowest Average", note: "Show lowest average." },
+    {
+      key: "showBroadsheetClassPosition",
+      label: "Class Position",
+      note: "Show class position.",
+    },
+    {
+      key: "showBroadsheetAttendance",
+      label: "Attendance",
+      note: "Show attendance percentage.",
+    },
+    {
+      key: "showBroadsheetClassHighestAverage",
+      label: "Highest Average",
+      note: "Show highest average.",
+    },
+    {
+      key: "showBroadsheetClassLowestAverage",
+      label: "Lowest Average",
+      note: "Show lowest average.",
+    },
   ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
   const annualBroadsheetControls = [
     ...broadsheetSharedControls,
-    { key: "showBroadsheetPeriodScores", label: "Period Scores", note: "Show period scores under subject averages." },
-    { key: "showBroadsheetAnnualAverage", label: "Annual Average", note: "Show annual average." },
-    { key: "showBroadsheetAnnualGPA", label: "Annual GPA", note: "Show annual GPA." },
-    { key: "showBroadsheetAnnualPosition", label: "Annual Position", note: "Show annual rank." },
-    { key: "showBroadsheetTrend", label: "Trend", note: "Show performance trend where supported." },
-    { key: "showBroadsheetPromotionDecision", label: "Promotion Decision", note: "Show promote, repeat or graduate decision." },
-    { key: "showBroadsheetBestPeriod", label: "Best Period", note: "Show best period where supported." },
-    { key: "showBroadsheetLatestPeriod", label: "Latest Period", note: "Show latest period where supported." },
+    {
+      key: "showBroadsheetPeriodScores",
+      label: "Period Scores",
+      note: "Show period scores under subject averages.",
+    },
+    {
+      key: "showBroadsheetAnnualAverage",
+      label: "Annual Average",
+      note: "Show annual average.",
+    },
+    {
+      key: "showBroadsheetAnnualGPA",
+      label: "Annual GPA",
+      note: "Show annual GPA.",
+    },
+    {
+      key: "showBroadsheetAnnualPosition",
+      label: "Annual Position",
+      note: "Show annual rank.",
+    },
+    {
+      key: "showBroadsheetTrend",
+      label: "Trend",
+      note: "Show performance trend where supported.",
+    },
+    {
+      key: "showBroadsheetPromotionDecision",
+      label: "Promotion Decision",
+      note: "Show promote, repeat or graduate decision.",
+    },
+    {
+      key: "showBroadsheetBestPeriod",
+      label: "Best Period",
+      note: "Show best period where supported.",
+    },
+    {
+      key: "showBroadsheetLatestPeriod",
+      label: "Latest Period",
+      note: "Show latest period where supported.",
+    },
   ] as { key: keyof ReportTemplateForm; label: string; note: string }[];
 
   const activeControls =
@@ -4702,7 +6443,10 @@ function ReportTemplateSheet({
     selectReportTemplateIntoForm(defaultTemplate, updateField, reportType);
   };
 
-  const renderPreviewCard = (template: ReportTemplateRow, templateSettings: any) => {
+  const renderPreviewCard = (
+    template: ReportTemplateRow,
+    templateSettings: any,
+  ) => {
     if (isBroadsheetType) {
       return (
         <TemplatePreviewBroadsheetCard
@@ -4822,16 +6566,32 @@ function ReportTemplateSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Academic Document & Broadsheet Templates</h2>
-            <p>Configure student reports, cumulative documents and separate subject, class and annual broadsheet defaults. Every tab saves its own template, settings and branch assignment.</p>
+            <p>
+              Configure student reports, cumulative documents and separate
+              subject, class and annual broadsheet defaults. Every tab saves its
+              own template, settings and branch assignment.
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close report template settings">✕</button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close report template settings"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="report-template-tab-groups">
           {reportTabGroups.map((group) => (
             <section key={group.title} className="report-template-tab-group">
-              <div className="report-template-tab-group-title">{group.title}</div>
-              <div className="report-template-tabs" role="tablist" aria-label={`${group.title} template tabs`}>
+              <div className="report-template-tab-group-title">
+                {group.title}
+              </div>
+              <div
+                className="report-template-tabs"
+                role="tablist"
+                aria-label={`${group.title} template tabs`}
+              >
                 {group.tabs.map((tab) => (
                   <button
                     type="button"
@@ -4849,25 +6609,44 @@ function ReportTemplateSheet({
         </div>
 
         <div className="ba-form compact">
-          <Field label={activeReportType === "cumulative_book" ? "Book Style" : activeReportType === "cumulative_transcript" ? "Transcript Template" : "Template"}>
+          <Field
+            label={
+              activeReportType === "cumulative_book"
+                ? "Book Style"
+                : activeReportType === "cumulative_transcript"
+                  ? "Transcript Template"
+                  : "Template"
+            }
+          >
             <select
               value={form.templateCode || ""}
               onChange={(event) => {
                 const templateCode = event.target.value;
                 const selected =
-                  galleryTemplates.find((item) => sameId(item.code, templateCode)) ||
-                  galleryTemplates.find((item) => sameId(item.layoutKey, templateCode)) ||
+                  galleryTemplates.find((item) =>
+                    sameId(item.code, templateCode),
+                  ) ||
+                  galleryTemplates.find((item) =>
+                    sameId(item.layoutKey, templateCode),
+                  ) ||
                   (activeReportType === "cumulative_transcript"
                     ? getCumulativeTranscriptTemplateRegistryItem(templateCode)
                     : isBroadsheetType
                       ? getBroadsheetTemplateRegistryItem(templateCode)
                       : getStudentReportTemplateRegistryItem(templateCode));
 
-                selectReportTemplateIntoForm(selected as any, updateField, activeReportType);
+                selectReportTemplateIntoForm(
+                  selected as any,
+                  updateField,
+                  activeReportType,
+                );
               }}
             >
               {galleryTemplates.map((template) => (
-                <option key={`${activeReportType}-${template.code || template.id || template.name}`} value={template.code || template.layoutKey || ""}>
+                <option
+                  key={`${activeReportType}-${template.code || template.id || template.name}`}
+                  value={template.code || template.layoutKey || ""}
+                >
                   {template.name || template.code || "Report Template"}
                 </option>
               ))}
@@ -4883,21 +6662,42 @@ function ReportTemplateSheet({
           </Field>
 
           <Field label="Paper">
-            <select value={form.paperSize} onChange={(event) => updateField("paperSize", event.target.value as "A4" | "Letter")}>
+            <select
+              value={form.paperSize}
+              onChange={(event) =>
+                updateField("paperSize", event.target.value as "A4" | "Letter")
+              }
+            >
               <option value="A4">A4</option>
               <option value="Letter">Letter</option>
             </select>
           </Field>
 
           <Field label="Orientation">
-            <select value={form.orientation} onChange={(event) => updateField("orientation", event.target.value as "portrait" | "landscape")}>
+            <select
+              value={form.orientation}
+              onChange={(event) =>
+                updateField(
+                  "orientation",
+                  event.target.value as "portrait" | "landscape",
+                )
+              }
+            >
               <option value="portrait">Portrait</option>
               <option value="landscape">Landscape</option>
             </select>
           </Field>
 
           <Field label="Density">
-            <select value={form.density} onChange={(event) => updateField("density", event.target.value as "compact" | "comfortable" | "spacious")}>
+            <select
+              value={form.density}
+              onChange={(event) =>
+                updateField(
+                  "density",
+                  event.target.value as "compact" | "comfortable" | "spacious",
+                )
+              }
+            >
               <option value="compact">Compact</option>
               <option value="comfortable">Comfortable</option>
               <option value="spacious">Spacious</option>
@@ -4908,31 +6708,56 @@ function ReportTemplateSheet({
         <section className="branch-settings-subsection template-preview-studio">
           <div className="template-preview-studio-head">
             <div>
-              <h3>{activeReportType === "cumulative_book" ? "Cumulative Book Preview Studio" : activeReportType === "cumulative_transcript" ? "Transcript Preview Studio" : "Student Report Preview Studio"}</h3>
-              <p>{activeReportType === "cumulative_book" ? "Preview each student-report style as a printable report book with covers and journey pages." : activeReportType === "cumulative_transcript" ? "Preview each transcript design using a dummy academic-history dataset." : "Preview every student report-card design with the same dummy filled dataset before saving."}</p>
+              <h3>
+                {activeReportType === "cumulative_book"
+                  ? "Cumulative Book Preview Studio"
+                  : activeReportType === "cumulative_transcript"
+                    ? "Transcript Preview Studio"
+                    : "Student Report Preview Studio"}
+              </h3>
+              <p>
+                {activeReportType === "cumulative_book"
+                  ? "Preview each student-report style as a printable report book with covers and journey pages."
+                  : activeReportType === "cumulative_transcript"
+                    ? "Preview each transcript design using a dummy academic-history dataset."
+                    : "Preview every student report-card design with the same dummy filled dataset before saving."}
+              </p>
             </div>
             <span className="template-preview-badge">Preview only</span>
           </div>
 
           <div className="template-preview-gallery">
             {galleryTemplates.map((template) => {
-              const templateCode = String(template.code || template.layoutKey || template.name || "");
+              const templateCode = String(
+                template.code || template.layoutKey || template.name || "",
+              );
               const isSelected =
                 sameId(template.code, form.templateCode) ||
                 sameId(template.layoutKey, form.layoutKey) ||
                 sameId(template.name, form.templateName);
 
-              const templateSettings = reportTemplatePreviewSettingsFromForm(form, template);
+              const templateSettings = reportTemplatePreviewSettingsFromForm(
+                form,
+                template,
+              );
 
               return (
                 <button
                   type="button"
                   key={`${activeReportType}-${templateCode || template.id || template.name}`}
                   className={`template-preview-card ${isSelected ? "selected" : ""}`}
-                  onClick={() => selectReportTemplateIntoForm(template, updateField, activeReportType)}
+                  onClick={() =>
+                    selectReportTemplateIntoForm(
+                      template,
+                      updateField,
+                      activeReportType,
+                    )
+                  }
                 >
                   <span className="template-preview-card-top">
-                    <strong>{template.name || template.code || "Report Template"}</strong>
+                    <strong>
+                      {template.name || template.code || "Report Template"}
+                    </strong>
                     <em>{isSelected ? "Selected" : "Tap to select"}</em>
                   </span>
 
@@ -4948,20 +6773,38 @@ function ReportTemplateSheet({
 
           <div className="template-preview-focus">
             <div className="template-preview-focus-head">
-              <strong>{selectedPreviewTemplate?.name || form.templateName || "Selected Template"}</strong>
-              <span>Live fit-preview using the selected template and current display controls.</span>
+              <strong>
+                {selectedPreviewTemplate?.name ||
+                  form.templateName ||
+                  "Selected Template"}
+              </strong>
+              <span>
+                Live fit-preview using the selected template and current display
+                controls.
+              </span>
             </div>
             {renderFocusedPreview()}
           </div>
         </section>
 
         <section className="branch-settings-subsection">
-          <h3>{activeReportType === "cumulative_book" ? "Book Pages" : activeReportType === "cumulative_transcript" ? "Transcript Display Controls" : "Student Report Display Controls"}</h3>
-          <p>Turn a field off to remove it from the printed output completely.</p>
+          <h3>
+            {activeReportType === "cumulative_book"
+              ? "Book Pages"
+              : activeReportType === "cumulative_transcript"
+                ? "Transcript Display Controls"
+                : "Student Report Display Controls"}
+          </h3>
+          <p>
+            Turn a field off to remove it from the printed output completely.
+          </p>
 
           <div className="branch-report-toggle-grid">
             {activeControls.map((control) => (
-              <label key={String(control.key)} className={`branch-report-toggle ${form[control.key] ? "is-on" : "is-off"}`}>
+              <label
+                key={String(control.key)}
+                className={`branch-report-toggle ${form[control.key] ? "is-on" : "is-off"}`}
+              >
                 <span>
                   <strong>{control.label}</strong>
                   <small>{control.note}</small>
@@ -4969,7 +6812,9 @@ function ReportTemplateSheet({
 
                 <select
                   value={form[control.key] ? "yes" : "no"}
-                  onChange={(event) => updateField(control.key, event.target.value === "yes")}
+                  onChange={(event) =>
+                    updateField(control.key, event.target.value === "yes")
+                  }
                 >
                   <option value="yes">Show</option>
                   <option value="no">Hide</option>
@@ -4980,84 +6825,361 @@ function ReportTemplateSheet({
         </section>
 
         <section className="branch-settings-subsection">
-          <h3>{activeReportType === "cumulative_book" ? "Book Labels" : activeReportType === "cumulative_transcript" ? "Transcript Labels" : "Report Labels"}</h3>
-          <p>Use each school's preferred wording without changing component code.</p>
+          <h3>
+            {activeReportType === "cumulative_book"
+              ? "Book Labels"
+              : activeReportType === "cumulative_transcript"
+                ? "Transcript Labels"
+                : "Report Labels"}
+          </h3>
+          <p>
+            Use each school's preferred wording without changing component code.
+          </p>
 
           <div className="ba-form compact">
             {activeReportType === "student_report" && (
               <>
-                <Field label="Class Teacher Label"><input value={form.classTeacherLabel} onChange={(event) => updateField("classTeacherLabel", event.target.value)} /></Field>
-                <Field label="Headteacher Label"><input value={form.headTeacherLabel} onChange={(event) => updateField("headTeacherLabel", event.target.value)} /></Field>
-                <Field label="Parent Label"><input value={form.parentLabel} onChange={(event) => updateField("parentLabel", event.target.value)} /></Field>
-                <Field label="Principal Label"><input value={form.principalLabel} onChange={(event) => updateField("principalLabel", event.target.value)} /></Field>
-                <Field label="Current Period End Label"><input value={form.currentAcademicPeriodEndLabel} onChange={(event) => updateField("currentAcademicPeriodEndLabel", event.target.value)} /></Field>
-                <Field label="Next Period Label"><input value={form.nextAcademicPeriodLabel} onChange={(event) => updateField("nextAcademicPeriodLabel", event.target.value)} /></Field>
-                <Field label="Number On Roll Label"><input value={form.numberOnRollLabel} onChange={(event) => updateField("numberOnRollLabel", event.target.value)} /></Field>
-                <Field label="Class Position Label"><input value={form.classPositionLabel} onChange={(event) => updateField("classPositionLabel", event.target.value)} /></Field>
-                <Field label="Subject Position Label"><input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} /></Field>
+                <Field label="Class Teacher Label">
+                  <input
+                    value={form.classTeacherLabel}
+                    onChange={(event) =>
+                      updateField("classTeacherLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Headteacher Label">
+                  <input
+                    value={form.headTeacherLabel}
+                    onChange={(event) =>
+                      updateField("headTeacherLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Parent Label">
+                  <input
+                    value={form.parentLabel}
+                    onChange={(event) =>
+                      updateField("parentLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Principal Label">
+                  <input
+                    value={form.principalLabel}
+                    onChange={(event) =>
+                      updateField("principalLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Current Period End Label">
+                  <input
+                    value={form.currentAcademicPeriodEndLabel}
+                    onChange={(event) =>
+                      updateField(
+                        "currentAcademicPeriodEndLabel",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Next Period Label">
+                  <input
+                    value={form.nextAcademicPeriodLabel}
+                    onChange={(event) =>
+                      updateField("nextAcademicPeriodLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Number On Roll Label">
+                  <input
+                    value={form.numberOnRollLabel}
+                    onChange={(event) =>
+                      updateField("numberOnRollLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Class Position Label">
+                  <input
+                    value={form.classPositionLabel}
+                    onChange={(event) =>
+                      updateField("classPositionLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Subject Position Label">
+                  <input
+                    value={form.subjectPositionLabel}
+                    onChange={(event) =>
+                      updateField("subjectPositionLabel", event.target.value)
+                    }
+                  />
+                </Field>
               </>
             )}
 
             {activeReportType === "cumulative_book" && (
               <>
-                <Field label="Book Title"><input value={form.bookTitleLabel} onChange={(event) => updateField("bookTitleLabel", event.target.value)} /></Field>
-                <Field label="Book Subtitle"><input value={form.bookSubtitleLabel} onChange={(event) => updateField("bookSubtitleLabel", event.target.value)} /></Field>
-                <Field label="Student Label"><input value={form.studentNameLabel} onChange={(event) => updateField("studentNameLabel", event.target.value)} /></Field>
-                <Field label="Admission / Student ID Label"><input value={form.admissionNumberLabel} onChange={(event) => updateField("admissionNumberLabel", event.target.value)} /></Field>
-                <Field label="Academic Period Label"><input value={form.academicPeriodLabel} onChange={(event) => updateField("academicPeriodLabel", event.target.value)} /></Field>
-                <Field label="Average Label"><input value={form.averageLabel} onChange={(event) => updateField("averageLabel", event.target.value)} /></Field>
-                <Field label="GPA Label"><input value={form.gpaLabel} onChange={(event) => updateField("gpaLabel", event.target.value)} /></Field>
+                <Field label="Book Title">
+                  <input
+                    value={form.bookTitleLabel}
+                    onChange={(event) =>
+                      updateField("bookTitleLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Book Subtitle">
+                  <input
+                    value={form.bookSubtitleLabel}
+                    onChange={(event) =>
+                      updateField("bookSubtitleLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Student Label">
+                  <input
+                    value={form.studentNameLabel}
+                    onChange={(event) =>
+                      updateField("studentNameLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Admission / Student ID Label">
+                  <input
+                    value={form.admissionNumberLabel}
+                    onChange={(event) =>
+                      updateField("admissionNumberLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Academic Period Label">
+                  <input
+                    value={form.academicPeriodLabel}
+                    onChange={(event) =>
+                      updateField("academicPeriodLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Average Label">
+                  <input
+                    value={form.averageLabel}
+                    onChange={(event) =>
+                      updateField("averageLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="GPA Label">
+                  <input
+                    value={form.gpaLabel}
+                    onChange={(event) =>
+                      updateField("gpaLabel", event.target.value)
+                    }
+                  />
+                </Field>
               </>
             )}
 
             {activeReportType === "cumulative_transcript" && (
               <>
-                <Field label="Student Label"><input value={form.studentNameLabel} onChange={(event) => updateField("studentNameLabel", event.target.value)} /></Field>
-                <Field label="Student ID Label"><input value={form.admissionNumberLabel} onChange={(event) => updateField("admissionNumberLabel", event.target.value)} /></Field>
-                <Field label="Programme / Class Label"><input value={form.classLabel} onChange={(event) => updateField("classLabel", event.target.value)} /></Field>
-                <Field label="Academic Period Label"><input value={form.academicPeriodLabel} onChange={(event) => updateField("academicPeriodLabel", event.target.value)} /></Field>
-                <Field label="Course / Subject Label"><input value={form.subjectLabel} onChange={(event) => updateField("subjectLabel", event.target.value)} /></Field>
-                <Field label="Score / Total Label"><input value={form.totalLabel} onChange={(event) => updateField("totalLabel", event.target.value)} /></Field>
-                <Field label="Average Label"><input value={form.averageLabel} onChange={(event) => updateField("averageLabel", event.target.value)} /></Field>
-                <Field label="Grade Label"><input value={form.gradeLabel} onChange={(event) => updateField("gradeLabel", event.target.value)} /></Field>
-                <Field label="GPA Label"><input value={form.gpaLabel} onChange={(event) => updateField("gpaLabel", event.target.value)} /></Field>
-                <Field label="Position / Rank Label"><input value={form.subjectPositionLabel} onChange={(event) => updateField("subjectPositionLabel", event.target.value)} /></Field>
+                <Field label="Student Label">
+                  <input
+                    value={form.studentNameLabel}
+                    onChange={(event) =>
+                      updateField("studentNameLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Student ID Label">
+                  <input
+                    value={form.admissionNumberLabel}
+                    onChange={(event) =>
+                      updateField("admissionNumberLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Programme / Class Label">
+                  <input
+                    value={form.classLabel}
+                    onChange={(event) =>
+                      updateField("classLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Academic Period Label">
+                  <input
+                    value={form.academicPeriodLabel}
+                    onChange={(event) =>
+                      updateField("academicPeriodLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Course / Subject Label">
+                  <input
+                    value={form.subjectLabel}
+                    onChange={(event) =>
+                      updateField("subjectLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Score / Total Label">
+                  <input
+                    value={form.totalLabel}
+                    onChange={(event) =>
+                      updateField("totalLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Average Label">
+                  <input
+                    value={form.averageLabel}
+                    onChange={(event) =>
+                      updateField("averageLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Grade Label">
+                  <input
+                    value={form.gradeLabel}
+                    onChange={(event) =>
+                      updateField("gradeLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="GPA Label">
+                  <input
+                    value={form.gpaLabel}
+                    onChange={(event) =>
+                      updateField("gpaLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Position / Rank Label">
+                  <input
+                    value={form.subjectPositionLabel}
+                    onChange={(event) =>
+                      updateField("subjectPositionLabel", event.target.value)
+                    }
+                  />
+                </Field>
               </>
             )}
 
             {isBroadsheetType && (
               <>
-                <Field label="Broadsheet Title"><input value={form.broadsheetTitleLabel} onChange={(event) => updateField("broadsheetTitleLabel", event.target.value)} /></Field>
-                <Field label="Student Column"><input value={form.studentColumnLabel} onChange={(event) => updateField("studentColumnLabel", event.target.value)} /></Field>
-                <Field label="Admission Number Column"><input value={form.admissionNumberColumnLabel} onChange={(event) => updateField("admissionNumberColumnLabel", event.target.value)} /></Field>
-                <Field label="Position Column"><input value={form.positionColumnLabel} onChange={(event) => updateField("positionColumnLabel", event.target.value)} /></Field>
-                <Field label="Grade Column"><input value={form.gradeColumnLabel} onChange={(event) => updateField("gradeColumnLabel", event.target.value)} /></Field>
-                <Field label="Remark Column"><input value={form.remarkColumnLabel} onChange={(event) => updateField("remarkColumnLabel", event.target.value)} /></Field>
-                <Field label="Generated Date Label"><input value={form.broadsheetGeneratedDateLabel} onChange={(event) => updateField("broadsheetGeneratedDateLabel", event.target.value)} /></Field>
-                <Field label="Broadsheet Footer"><input value={form.broadsheetFooterText} onChange={(event) => updateField("broadsheetFooterText", event.target.value)} /></Field>
+                <Field label="Broadsheet Title">
+                  <input
+                    value={form.broadsheetTitleLabel}
+                    onChange={(event) =>
+                      updateField("broadsheetTitleLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Student Column">
+                  <input
+                    value={form.studentColumnLabel}
+                    onChange={(event) =>
+                      updateField("studentColumnLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Admission Number Column">
+                  <input
+                    value={form.admissionNumberColumnLabel}
+                    onChange={(event) =>
+                      updateField(
+                        "admissionNumberColumnLabel",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Position Column">
+                  <input
+                    value={form.positionColumnLabel}
+                    onChange={(event) =>
+                      updateField("positionColumnLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Grade Column">
+                  <input
+                    value={form.gradeColumnLabel}
+                    onChange={(event) =>
+                      updateField("gradeColumnLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Remark Column">
+                  <input
+                    value={form.remarkColumnLabel}
+                    onChange={(event) =>
+                      updateField("remarkColumnLabel", event.target.value)
+                    }
+                  />
+                </Field>
+                <Field label="Generated Date Label">
+                  <input
+                    value={form.broadsheetGeneratedDateLabel}
+                    onChange={(event) =>
+                      updateField(
+                        "broadsheetGeneratedDateLabel",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </Field>
+                <Field label="Broadsheet Footer">
+                  <input
+                    value={form.broadsheetFooterText}
+                    onChange={(event) =>
+                      updateField("broadsheetFooterText", event.target.value)
+                    }
+                  />
+                </Field>
               </>
             )}
 
-            {!isBroadsheetType && <Field label="Generated Date Label">
-              <select
-                value={generatedDateLabelOptions.includes(form.generatedDateLabel) ? form.generatedDateLabel : "__custom__"}
-                onChange={(event) => {
-                  if (event.target.value === "__custom__") return;
-                  updateField("generatedDateLabel", event.target.value);
-                }}
-              >
-                {generatedDateLabelOptions.map((label) => <option key={label} value={label}>{label}</option>)}
-                <option value="__custom__">Custom label...</option>
-              </select>
-            </Field>}
+            {!isBroadsheetType && (
+              <Field label="Generated Date Label">
+                <select
+                  value={
+                    generatedDateLabelOptions.includes(form.generatedDateLabel)
+                      ? form.generatedDateLabel
+                      : "__custom__"
+                  }
+                  onChange={(event) => {
+                    if (event.target.value === "__custom__") return;
+                    updateField("generatedDateLabel", event.target.value);
+                  }}
+                >
+                  {generatedDateLabelOptions.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value="__custom__">Custom label...</option>
+                </select>
+              </Field>
+            )}
 
             {!isBroadsheetType && (
               <>
                 <Field label="Custom Generated Date Label">
-                  <input value={form.generatedDateLabel} onChange={(event) => updateField("generatedDateLabel", event.target.value)} placeholder="Generated" />
+                  <input
+                    value={form.generatedDateLabel}
+                    onChange={(event) =>
+                      updateField("generatedDateLabel", event.target.value)
+                    }
+                    placeholder="Generated"
+                  />
                 </Field>
                 <Field label="Footer Text">
-                  <input value={form.footerText} onChange={(event) => updateField("footerText", event.target.value)} placeholder="Official academic document generated by Eleeveon Schools." />
+                  <input
+                    value={form.footerText}
+                    onChange={(event) =>
+                      updateField("footerText", event.target.value)
+                    }
+                    placeholder="Official academic document generated by Eleeveon Schools."
+                  />
                 </Field>
               </>
             )}
@@ -5065,7 +7187,9 @@ function ReportTemplateSheet({
         </section>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
           <button
             type="button"
             className="primary"
@@ -5095,7 +7219,6 @@ function ReportTemplateSheet({
   );
 }
 
-
 function MediaSheet({
   title,
   text,
@@ -5123,7 +7246,9 @@ function MediaSheet({
             <h2>{title}</h2>
             <p>{text}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label={`Close ${title}`}>✕</button>
+          <button type="button" onClick={onClose} aria-label={`Close ${title}`}>
+            ✕
+          </button>
         </div>
 
         <div className="branch-media-grid">
@@ -5141,7 +7266,9 @@ function MediaSheet({
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" className="primary" onClick={onClose}>Done</button>
+          <button type="button" className="primary" onClick={onClose}>
+            Done
+          </button>
         </div>
       </section>
     </div>
@@ -5165,15 +7292,25 @@ function GallerySheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Gallery</h2>
-            <p>Images stored on this branch settings row for dashboards and future experiences.</p>
+            <p>
+              Images stored on this branch settings row for dashboards and
+              future experiences.
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close gallery">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close gallery">
+            ✕
+          </button>
         </div>
 
         <div className="branch-media-block">
           <div className="branch-media-title">Gallery Images</div>
           <p>Used to bring the selected school branch into the app.</p>
-          <input type="file" accept="image/*" multiple onChange={(event) => handleGalleryUpload(event.target.files)} />
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(event) => handleGalleryUpload(event.target.files)}
+          />
         </div>
 
         {!!images?.length && (
@@ -5181,14 +7318,18 @@ function GallerySheet({
             {images.map((image, index) => (
               <div key={`${image}-${index}`} className="branch-gallery-item">
                 <img src={image} alt={`Gallery ${index + 1}`} />
-                <button type="button" onClick={() => removeGalleryImage(index)}>×</button>
+                <button type="button" onClick={() => removeGalleryImage(index)}>
+                  ×
+                </button>
               </div>
             ))}
           </div>
         )}
 
         <div className="ba-sheet-actions">
-          <button type="button" className="primary" onClick={onClose}>Done</button>
+          <button type="button" className="primary" onClick={onClose}>
+            Done
+          </button>
         </div>
       </section>
     </div>

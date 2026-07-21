@@ -3,10 +3,7 @@
 /**
  * app/hooks/useBranchWorkspaceScope.ts
  * --------------------------------------------------------------------------
- * One authoritative Branch Admin workspace scope.
- *
- * Pages should consume this hook instead of independently combining contexts,
- * membership aliases, and localStorage values.
+ * One authoritative Branch Admin workspace scope using permanent string IDs.
  */
 
 import { useMemo } from "react";
@@ -14,13 +11,12 @@ import { useMemo } from "react";
 import { useAccount } from "../context/account-context";
 import { useActiveBranch } from "../context/active-branch-context";
 import { useActiveMembership } from "../context/active-membership-context";
-
 import type { UserMembership } from "../lib/auth/roleRedirect";
 
 export type BranchWorkspaceScope = {
   accountId: string | null;
-  schoolId: number | null;
-  branchId: number | null;
+  schoolId: string | null;
+  branchId: string | null;
   membership: UserMembership | null;
   role: string | null;
   ready: boolean;
@@ -40,29 +36,24 @@ const BRANCH_ROLES = new Set([
   "accountant",
 ]);
 
-function cleanString(value: unknown) {
-  const text = String(value ?? "").trim();
-  return text || null;
+function cleanId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = String(value).trim();
+  return id || null;
 }
 
-function positiveNumber(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function normalizeRole(value: unknown) {
+function normalizeRole(value: unknown): string {
   return String(value || "")
     .trim()
     .toLowerCase()
     .replace(/-/g, "_");
 }
 
-function firstNumber(...values: unknown[]) {
+function firstId(...values: unknown[]): string | null {
   for (const value of values) {
-    const parsed = positiveNumber(value);
-    if (parsed) return parsed;
+    const id = cleanId(value);
+    if (id) return id;
   }
-
   return null;
 }
 
@@ -90,19 +81,12 @@ export function useBranchWorkspaceScope(): BranchWorkspaceScope {
 
   return useMemo(() => {
     const membership = activeMembership;
-    const role = normalizeRole(
-      activeRole || membership?.role,
-    );
+    const role = normalizeRole(activeRole || membership?.role);
 
-    const membershipAccountId = cleanString(
-      membership?.accountId,
-    );
+    const membershipAccountId = cleanId(membership?.accountId);
+    const accountId = cleanId(accountContextId) || membershipAccountId;
 
-    const accountId =
-      cleanString(accountContextId) ||
-      membershipAccountId;
-
-    const schoolId = firstNumber(
+    const schoolId = firstId(
       membership?.schoolId,
       (membership as any)?.school?.id,
       (membership as any)?.activeSchoolId,
@@ -110,7 +94,7 @@ export function useBranchWorkspaceScope(): BranchWorkspaceScope {
       activeSchool?.id,
     );
 
-    const branchId = firstNumber(
+    const branchId = firstId(
       membership?.branchId,
       (membership as any)?.schoolBranchId,
       (membership as any)?.branch?.id,
@@ -124,24 +108,17 @@ export function useBranchWorkspaceScope(): BranchWorkspaceScope {
     if (
       accountContextId &&
       membershipAccountId &&
-      accountContextId !== membershipAccountId
+      String(accountContextId) !== membershipAccountId
     ) {
-      error =
-        "The active membership belongs to a different account.";
-    } else if (
-      role &&
-      BRANCH_ROLES.has(role) &&
-      !branchId
-    ) {
-      error =
-        "The selected role requires an active branch.";
+      error = "The active membership belongs to a different account.";
+    } else if (role && BRANCH_ROLES.has(role) && !branchId) {
+      error = "The selected role requires an active branch.";
     } else if (
       role &&
       !["developer", "platform_team"].includes(role) &&
       !schoolId
     ) {
-      error =
-        "The selected role requires an active school.";
+      error = "The selected role requires an active school.";
     }
 
     const ready = Boolean(

@@ -77,7 +77,7 @@ export function average(values: number[]): number {
 }
 
 export function isActive<T extends { isDeleted?: boolean; active?: boolean }>(
-  row: T
+  row: T,
 ): boolean {
   return !row.isDeleted && row.active !== false;
 }
@@ -88,14 +88,14 @@ export function byName<T extends { name?: string }>(a: T, b: T): number {
 
 export function byStudentName(
   a: { studentName: string },
-  b: { studentName: string }
+  b: { studentName: string },
 ): number {
   return a.studentName.localeCompare(b.studentName);
 }
 
 export function byAdmissionNumber(
   a: { admissionNumber?: string },
-  b: { admissionNumber?: string }
+  b: { admissionNumber?: string },
 ): number {
   return (a.admissionNumber || "").localeCompare(b.admissionNumber || "");
 }
@@ -106,25 +106,31 @@ export function byAdmissionNumber(
 
 export function buildLookups(dataset: ReportEngineDataset) {
   return {
-    schoolMap: new Map(dataset.schools.map(item => [item.id, item])),
-    branchMap: new Map(dataset.branches.map(item => [item.id, item])),
+    schoolMap: new Map(dataset.schools.map((item) => [item.id, item])),
+    branchMap: new Map(dataset.branches.map((item) => [item.id, item])),
     schoolBranchSettingsMap: new Map(
-      (dataset.schoolBranchSettings || []).map(item => [item.branchId, item])
+      (dataset.schoolBranchSettings || []).map((item) => [item.branchId, item]),
     ),
 
     academicStructureMap: new Map(
-      dataset.academicStructures.map(item => [item.id, item])
+      dataset.academicStructures.map((item) => [item.id, item]),
     ),
-    academicPeriodMap: new Map(dataset.academicPeriods.map(item => [item.id, item])),
+    academicPeriodMap: new Map(
+      dataset.academicPeriods.map((item) => [item.id, item]),
+    ),
 
-    studentMap: new Map(dataset.students.map(item => [item.id, item])),
-    teacherMap: new Map(dataset.teachers.map(item => [item.id, item])),
-    classMap: new Map(dataset.classes.map(item => [item.id, item])),
-    subjectMap: new Map(dataset.subjects.map(item => [item.id, item])),
-    classSubjectMap: new Map(dataset.classSubjects.map(item => [item.id, item])),
-    gradingSystemMap: new Map(dataset.gradingSystems.map(item => [item.id, item])),
+    studentMap: new Map(dataset.students.map((item) => [item.id, item])),
+    teacherMap: new Map(dataset.teachers.map((item) => [item.id, item])),
+    classMap: new Map(dataset.classes.map((item) => [item.id, item])),
+    subjectMap: new Map(dataset.subjects.map((item) => [item.id, item])),
+    classSubjectMap: new Map(
+      dataset.classSubjects.map((item) => [item.id, item]),
+    ),
+    gradingSystemMap: new Map(
+      dataset.gradingSystems.map((item) => [item.id, item]),
+    ),
     assessmentStructureMap: new Map(
-      dataset.assessmentStructures.map(item => [item.id, item])
+      dataset.assessmentStructures.map((item) => [item.id, item]),
     ),
   };
 }
@@ -137,14 +143,15 @@ export function buildLookups(dataset: ReportEngineDataset) {
 
 export function resolveNumberOnRollFromEnrollments(args: {
   studentEnrollments: any[];
-  branchId?: number;
-  classId?: number;
-  academicStructureId?: number;
-  academicPeriodId?: number;
+  branchId?: string;
+  classId?: string;
+  academicStructureId?: string;
+  academicPeriodId?: string;
 }) {
-  const sameId = (a: unknown, b: unknown) => String(a ?? "") === String(b ?? "");
+  const sameId = (a: unknown, b: unknown) =>
+    String(a ?? "") === String(b ?? "");
 
-  const studentIds = new Set<number>();
+  const studentIds = new Set<string>();
 
   args.studentEnrollments
     .filter((enrollment: any) => {
@@ -154,16 +161,26 @@ export function resolveNumberOnRollFromEnrollments(args: {
       const status = String(enrollment?.status || "active").toLowerCase();
       if (["withdrawn", "transferred"].includes(status)) return false;
 
-      if (args.branchId && !sameId(enrollment.branchId, args.branchId)) return false;
-      if (args.classId && !sameId(enrollment.classId, args.classId)) return false;
-      if (args.academicStructureId && !sameId(enrollment.academicStructureId, args.academicStructureId)) return false;
-      if (args.academicPeriodId && !sameId(enrollment.academicPeriodId, args.academicPeriodId)) return false;
+      if (args.branchId && !sameId(enrollment.branchId, args.branchId))
+        return false;
+      if (args.classId && !sameId(enrollment.classId, args.classId))
+        return false;
+      if (
+        args.academicStructureId &&
+        !sameId(enrollment.academicStructureId, args.academicStructureId)
+      )
+        return false;
+      if (
+        args.academicPeriodId &&
+        !sameId(enrollment.academicPeriodId, args.academicPeriodId)
+      )
+        return false;
 
       return true;
     })
     .forEach((enrollment: any) => {
-      const studentId = Number(enrollment?.studentId || 0);
-      if (studentId > 0) studentIds.add(studentId);
+      const studentId = String(enrollment?.studentId ?? "").trim();
+      if (studentId) studentIds.add(studentId);
     });
 
   return studentIds.size;
@@ -180,13 +197,16 @@ export function toISODate(value?: string | number | Date | null): string {
     return value;
   }
 
-  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  const time =
+    value instanceof Date ? value.getTime() : new Date(value).getTime();
   if (!Number.isFinite(time)) return "";
 
   return new Date(time).toISOString().slice(0, 10);
 }
 
-export function friendlyReportDate(value?: string | number | Date | null): string {
+export function friendlyReportDate(
+  value?: string | number | Date | null,
+): string {
   const iso = toISODate(value);
   if (!iso) return "";
 
@@ -203,10 +223,10 @@ export function friendlyReportDate(value?: string | number | Date | null): strin
 
 export function resolveNextAcademicPeriod(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): AcademicPeriod | undefined {
   const selectedPeriod = dataset.academicPeriods.find(
-    item => item.id === filters.academicPeriodId && !item.isDeleted
+    (item) => item.id === filters.academicPeriodId && !item.isDeleted,
   );
 
   if (!selectedPeriod) return undefined;
@@ -215,7 +235,7 @@ export function resolveNextAcademicPeriod(
     filters.academicStructureId || selectedPeriod.academicStructureId;
 
   const selectedStructure = dataset.academicStructures.find(
-    item => item.id === selectedStructureId && !item.isDeleted
+    (item) => item.id === selectedStructureId && !item.isDeleted,
   );
 
   const selectedOrder = safeNumber(selectedPeriod.order);
@@ -226,7 +246,8 @@ export function resolveNextAcademicPeriod(
     if (!isActive(period)) return false;
     if (period.id === selectedPeriod.id) return false;
     if (filters.branchId && period.branchId !== filters.branchId) return false;
-    if (selectedPeriod.schoolId && period.schoolId !== selectedPeriod.schoolId) return false;
+    if (selectedPeriod.schoolId && period.schoolId !== selectedPeriod.schoolId)
+      return false;
     return true;
   };
 
@@ -234,7 +255,9 @@ export function resolveNextAcademicPeriod(
     const orderDiff = safeNumber(a.order) - safeNumber(b.order);
     if (orderDiff !== 0) return orderDiff;
 
-    const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+    const startDiff = toISODate(a.startDate).localeCompare(
+      toISODate(b.startDate),
+    );
     if (startDiff !== 0) return startDiff;
 
     return String(a.name || "").localeCompare(String(b.name || ""));
@@ -242,16 +265,26 @@ export function resolveNextAcademicPeriod(
 
   // 1) Normal case: Term 1 -> Term 2 -> Term 3 inside the same academic structure/year.
   const sameStructureCandidates = dataset.academicPeriods
-    .filter(item => {
+    .filter((item) => {
       if (!sameTenant(item)) return false;
-      if (selectedStructureId && item.academicStructureId !== selectedStructureId) return false;
+      if (
+        selectedStructureId &&
+        item.academicStructureId !== selectedStructureId
+      )
+        return false;
 
       const itemOrder = safeNumber(item.order);
       const itemStartDate = toISODate(item.startDate);
 
       if (selectedOrder && itemOrder > selectedOrder) return true;
-      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate) return true;
-      if (selectedStartDate && itemStartDate && itemStartDate > selectedStartDate) return true;
+      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate)
+        return true;
+      if (
+        selectedStartDate &&
+        itemStartDate &&
+        itemStartDate > selectedStartDate
+      )
+        return true;
 
       return false;
     })
@@ -267,39 +300,66 @@ export function resolveNextAcademicPeriod(
   const selectedStructureStartDate = toISODate(selectedStructure?.startDate);
 
   const nextStructures = dataset.academicStructures
-    .filter(structure => {
+    .filter((structure) => {
       if (!isActive(structure)) return false;
       if (structure.id === selectedStructureId) return false;
-      if (filters.branchId && structure.branchId !== filters.branchId) return false;
-      if (selectedPeriod.schoolId && structure.schoolId !== selectedPeriod.schoolId) return false;
+      if (filters.branchId && structure.branchId !== filters.branchId)
+        return false;
+      if (
+        selectedPeriod.schoolId &&
+        structure.schoolId !== selectedPeriod.schoolId
+      )
+        return false;
 
       const structureStartDate = toISODate(structure.startDate);
       const structureEndDate = toISODate(structure.endDate);
 
-      if (selectedStructureEndDate && structureStartDate && structureStartDate > selectedStructureEndDate) {
+      if (
+        selectedStructureEndDate &&
+        structureStartDate &&
+        structureStartDate > selectedStructureEndDate
+      ) {
         return true;
       }
 
-      if (selectedStructureStartDate && structureStartDate && structureStartDate > selectedStructureStartDate) {
+      if (
+        selectedStructureStartDate &&
+        structureStartDate &&
+        structureStartDate > selectedStructureStartDate
+      ) {
         return true;
       }
 
-      if (selectedEndDate && structureStartDate && structureStartDate > selectedEndDate) {
+      if (
+        selectedEndDate &&
+        structureStartDate &&
+        structureStartDate > selectedEndDate
+      ) {
         return true;
       }
 
-      if (selectedStartDate && structureStartDate && structureStartDate > selectedStartDate) {
+      if (
+        selectedStartDate &&
+        structureStartDate &&
+        structureStartDate > selectedStartDate
+      ) {
         return true;
       }
 
-      if (selectedStructureEndDate && structureEndDate && structureEndDate > selectedStructureEndDate) {
+      if (
+        selectedStructureEndDate &&
+        structureEndDate &&
+        structureEndDate > selectedStructureEndDate
+      ) {
         return true;
       }
 
       return false;
     })
     .sort((a, b) => {
-      const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+      const startDiff = toISODate(a.startDate).localeCompare(
+        toISODate(b.startDate),
+      );
       if (startDiff !== 0) return startDiff;
 
       const endDiff = toISODate(a.endDate).localeCompare(toISODate(b.endDate));
@@ -310,7 +370,9 @@ export function resolveNextAcademicPeriod(
 
   for (const structure of nextStructures) {
     const firstPeriodInNextStructure = dataset.academicPeriods
-      .filter(item => sameTenant(item) && item.academicStructureId === structure.id)
+      .filter(
+        (item) => sameTenant(item) && item.academicStructureId === structure.id,
+      )
       .sort(sortPeriods)[0];
 
     if (firstPeriodInNextStructure) return firstPeriodInNextStructure;
@@ -319,23 +381,37 @@ export function resolveNextAcademicPeriod(
   // 3) Last fallback: if structures are not well dated, pick the earliest future
   // period in the same branch/school by startDate. This protects old/migrated data.
   const futureByDateCandidates = dataset.academicPeriods
-    .filter(item => {
+    .filter((item) => {
       if (!sameTenant(item)) return false;
 
       const itemStartDate = toISODate(item.startDate);
-      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate) return true;
-      if (selectedStartDate && itemStartDate && itemStartDate > selectedStartDate) return true;
+      if (selectedEndDate && itemStartDate && itemStartDate > selectedEndDate)
+        return true;
+      if (
+        selectedStartDate &&
+        itemStartDate &&
+        itemStartDate > selectedStartDate
+      )
+        return true;
 
       return false;
     })
     .sort((a, b) => {
-      const startDiff = toISODate(a.startDate).localeCompare(toISODate(b.startDate));
+      const startDiff = toISODate(a.startDate).localeCompare(
+        toISODate(b.startDate),
+      );
       if (startDiff !== 0) return startDiff;
 
-      const structureA = dataset.academicStructures.find(item => item.id === a.academicStructureId);
-      const structureB = dataset.academicStructures.find(item => item.id === b.academicStructureId);
+      const structureA = dataset.academicStructures.find(
+        (item) => item.id === a.academicStructureId,
+      );
+      const structureB = dataset.academicStructures.find(
+        (item) => item.id === b.academicStructureId,
+      );
 
-      const structureStartDiff = toISODate(structureA?.startDate).localeCompare(toISODate(structureB?.startDate));
+      const structureStartDiff = toISODate(structureA?.startDate).localeCompare(
+        toISODate(structureB?.startDate),
+      );
       if (structureStartDiff !== 0) return structureStartDiff;
 
       return sortPeriods(a, b);
@@ -344,13 +420,12 @@ export function resolveNextAcademicPeriod(
   return futureByDateCandidates[0];
 }
 
-
 export function buildCurrentAcademicPeriodSummary(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ) {
   const currentPeriod = dataset.academicPeriods.find(
-    item => item.id === filters.academicPeriodId && !item.isDeleted
+    (item) => item.id === filters.academicPeriodId && !item.isDeleted,
   );
 
   if (!currentPeriod) return undefined;
@@ -361,7 +436,7 @@ export function buildCurrentAcademicPeriodSummary(
   const formattedEndDate = friendlyReportDate(endDate);
 
   return {
-    id: currentPeriod.id || 0,
+    id: currentPeriod.id != null ? String(currentPeriod.id) : undefined,
     academicStructureId: currentPeriod.academicStructureId,
     name: currentPeriod.name,
     type: currentPeriod.type,
@@ -379,7 +454,7 @@ export function buildCurrentAcademicPeriodSummary(
 
 export function buildNextAcademicPeriodSummary(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ) {
   const nextPeriod = resolveNextAcademicPeriod(dataset, filters);
   if (!nextPeriod) return undefined;
@@ -388,7 +463,7 @@ export function buildNextAcademicPeriodSummary(
   const formattedStartDate = friendlyReportDate(startDate);
 
   return {
-    id: nextPeriod.id || 0,
+    id: nextPeriod.id != null ? String(nextPeriod.id) : undefined,
     academicStructureId: nextPeriod.academicStructureId,
     name: nextPeriod.name,
     type: nextPeriod.type,
@@ -409,44 +484,46 @@ export function buildNextAcademicPeriodSummary(
 
 export function buildReportHeader(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): ReportHeaderData {
-  const school = dataset.schools.find(item => !item.isDeleted);
+  const school = dataset.schools.find((item) => !item.isDeleted);
 
   const branch = dataset.branches.find(
-    item => item.id === filters.branchId && !item.isDeleted
+    (item) => item.id === filters.branchId && !item.isDeleted,
   );
 
   const schoolBranchSetting = (dataset.schoolBranchSettings || []).find(
-  item => item.branchId === filters.branchId && !item.isDeleted
-);
+    (item) => item.branchId === filters.branchId && !item.isDeleted,
+  );
 
   const academicStructure = dataset.academicStructures.find(
-    item => item.id === filters.academicStructureId && !item.isDeleted
+    (item) => item.id === filters.academicStructureId && !item.isDeleted,
   );
 
   const academicPeriod = dataset.academicPeriods.find(
-    item => item.id === filters.academicPeriodId && !item.isDeleted
+    (item) => item.id === filters.academicPeriodId && !item.isDeleted,
   );
 
   const classData = dataset.classes.find(
-    item => item.id === filters.classId && !item.isDeleted
+    (item) => item.id === filters.classId && !item.isDeleted,
   );
 
-  const currentAcademicPeriod = buildCurrentAcademicPeriodSummary(dataset, filters);
+  const currentAcademicPeriod = buildCurrentAcademicPeriodSummary(
+    dataset,
+    filters,
+  );
   const nextAcademicPeriod = buildNextAcademicPeriodSummary(dataset, filters);
 
   const branding = {
-    schoolName:
-       school?.name || branch?.name || "School Name",
+    schoolName: school?.name || branch?.name || "School Name",
     motto: school?.motto,
     logo: schoolBranchSetting?.logo || branch?.logo || school?.logo,
-    address: branch?.address || school?.address,
+    address: branch?.address ?? school?.address ?? undefined,
     phone: branch?.phone || school?.phone,
     email: branch?.email || school?.email,
     website: school?.website,
     branchName: branch?.name,
-    branchAddress: branch?.address,
+    branchAddress: branch?.address ?? undefined,
     primaryColor: schoolBranchSetting?.primaryColor || "var(--primary-color)",
     fontFamily: schoolBranchSetting?.fontFamily,
     reportCardBackgroundImage: schoolBranchSetting?.reportCardBackgroundImage,
@@ -463,7 +540,7 @@ export function buildReportHeader(
     schoolBranchSetting,
     branchId: branch?.id || filters.branchId,
     branchName: branch?.name,
-    branchAddress: branch?.address,
+    branchAddress: branch?.address ?? undefined,
     primaryColor: branding.primaryColor,
     currentAcademicPeriod,
     nextAcademicPeriod,
@@ -477,10 +554,10 @@ export function buildReportHeader(
 
 export function getClassSubjectsForReport(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): ClassSubject[] {
   return dataset.classSubjects
-    .filter(item => {
+    .filter((item) => {
       if (!isActive(item)) return false;
       if (filters.branchId && item.branchId !== filters.branchId) return false;
       if (filters.classId && item.classId !== filters.classId) return false;
@@ -496,17 +573,18 @@ export function getClassSubjectsForReport(
       ) {
         return false;
       }
-      if (filters.classSubjectId && item.id !== filters.classSubjectId) return false;
+      if (filters.classSubjectId && item.id !== filters.classSubjectId)
+        return false;
       return true;
     })
-    .sort((a, b) => a.subjectId - b.subjectId);
+    .sort((a, b) => String(a.subjectId).localeCompare(String(b.subjectId)));
 }
 
 export function getActiveEnrollmentsForReport(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): StudentEnrollment[] {
-  return dataset.studentEnrollments.filter(item => {
+  return dataset.studentEnrollments.filter((item) => {
     if (item.isDeleted) return false;
     if (item.status !== "active") return false;
     if (filters.branchId && item.branchId !== filters.branchId) return false;
@@ -517,7 +595,10 @@ export function getActiveEnrollmentsForReport(
     ) {
       return false;
     }
-    if (filters.academicPeriodId && item.academicPeriodId !== filters.academicPeriodId) {
+    if (
+      filters.academicPeriodId &&
+      item.academicPeriodId !== filters.academicPeriodId
+    ) {
       return false;
     }
     return true;
@@ -526,12 +607,14 @@ export function getActiveEnrollmentsForReport(
 
 export function getStudentsForReport(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): Student[] {
   const enrollments = getActiveEnrollmentsForReport(dataset, filters);
-  const enrollmentStudentIds = new Set(enrollments.map(item => item.studentId));
+  const enrollmentStudentIds = new Set(
+    enrollments.map((item) => item.studentId),
+  );
 
-  return dataset.students.filter(student => {
+  return dataset.students.filter((student) => {
     if (student.isDeleted) return false;
     if (filters.branchId && student.branchId !== filters.branchId) return false;
     if (filters.studentId && student.id !== filters.studentId) return false;
@@ -545,30 +628,30 @@ export function getStudentsForReport(
 
 export function getApplicabilityForClassSubject(
   dataset: ReportEngineDataset,
-  classSubjectId?: number
+  classSubjectId?: string,
 ): AssessmentApplicability | undefined {
   if (!classSubjectId) return undefined;
 
   return dataset.assessmentApplicabilities.find(
-    item => item.classSubjectId === classSubjectId && isActive(item)
+    (item) => item.classSubjectId === classSubjectId && isActive(item),
   );
 }
 
 export function getAssessmentColumns(
   dataset: ReportEngineDataset,
-  applicability?: AssessmentApplicability
+  applicability?: AssessmentApplicability,
 ): ReportAssessmentColumn[] {
   if (!applicability?.assessmentStructureId) return [];
 
   return dataset.assessmentStructureItems
     .filter(
-      item =>
+      (item) =>
         item.assessmentStructureId === applicability.assessmentStructureId &&
-        isActive(item)
+        isActive(item),
     )
     .sort((a, b) => a.order - b.order)
-    .map(item => ({
-      assessmentStructureItemId: item.id || 0,
+    .map((item) => ({
+      assessmentStructureItemId: String(item.id ?? ""),
       name: item.name,
       maxScore: safeNumber(item.maxScore),
       weight: safeNumber(item.weight),
@@ -578,15 +661,16 @@ export function getAssessmentColumns(
 
 export function getAssessmentEntriesForSubject(
   dataset: ReportEngineDataset,
-  studentId: number,
-  classSubjectId?: number,
-  academicPeriodId?: number
+  studentId: string,
+  classSubjectId?: string,
+  academicPeriodId?: string,
 ): AssessmentEntry[] {
-  return dataset.assessmentEntries.filter(item => {
+  return dataset.assessmentEntries.filter((item) => {
     if (item.isDeleted) return false;
     if (item.studentId !== studentId) return false;
     if (classSubjectId && item.classSubjectId !== classSubjectId) return false;
-    if (academicPeriodId && item.academicPeriodId !== academicPeriodId) return false;
+    if (academicPeriodId && item.academicPeriodId !== academicPeriodId)
+      return false;
     return true;
   });
 }
@@ -598,7 +682,7 @@ export function getAssessmentEntriesForSubject(
 export function resolveGrade(
   dataset: ReportEngineDataset,
   percentage: number,
-  gradingSystemId?: number
+  gradingSystemId?: string,
 ): GradeResolution {
   if (!gradingSystemId) {
     return {
@@ -609,12 +693,10 @@ export function resolveGrade(
 
   const rule = dataset.gradeRules
     .filter(
-      item =>
-        item.gradingSystemId === gradingSystemId &&
-        isActive(item)
+      (item) => item.gradingSystemId === gradingSystemId && isActive(item),
     )
     .sort((a, b) => b.minScore - a.minScore)
-    .find(item => percentage >= item.minScore && percentage <= item.maxScore);
+    .find((item) => percentage >= item.minScore && percentage <= item.maxScore);
 
   return {
     grade: rule?.grade || "N/A",
@@ -629,28 +711,36 @@ export function resolveGrade(
 // ======================================================
 
 export function computeAttendanceSummary(
-  attendanceRows: Attendance[]
+  attendanceRows: Attendance[],
 ): AttendanceSummary {
   const totalDays = attendanceRows.length;
-  const presentDays = attendanceRows.filter(item => item.status === "present").length;
-  const absentDays = attendanceRows.filter(item => item.status === "absent").length;
-  const lateDays = attendanceRows.filter(item => item.status === "late").length;
+  const presentDays = attendanceRows.filter(
+    (item) => item.status === "present",
+  ).length;
+  const absentDays = attendanceRows.filter(
+    (item) => item.status === "absent",
+  ).length;
+  const lateDays = attendanceRows.filter(
+    (item) => item.status === "late",
+  ).length;
 
   return {
     totalDays,
     presentDays,
     absentDays,
     lateDays,
-    attendancePercent: totalDays ? round((presentDays / totalDays) * 100, 1) : 0,
+    attendancePercent: totalDays
+      ? round((presentDays / totalDays) * 100, 1)
+      : 0,
   };
 }
 
 export function getStudentAttendance(
   dataset: ReportEngineDataset,
-  studentId: number,
-  filters: ReportFiltersState
+  studentId: string,
+  filters: ReportFiltersState,
 ): AttendanceSummary {
-  const rows = dataset.attendance.filter(item => {
+  const rows = dataset.attendance.filter((item) => {
     if (item.isDeleted) return false;
     if (item.studentId !== studentId) return false;
     if (filters.classId && item.classId !== filters.classId) return false;
@@ -660,7 +750,10 @@ export function getStudentAttendance(
     ) {
       return false;
     }
-    if (filters.academicPeriodId && item.academicPeriodId !== filters.academicPeriodId) {
+    if (
+      filters.academicPeriodId &&
+      item.academicPeriodId !== filters.academicPeriodId
+    ) {
       return false;
     }
     return true;
@@ -677,7 +770,7 @@ export function computeStudentSubjectResult(
   dataset: ReportEngineDataset,
   student: Student,
   classSubject: ClassSubject,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): StudentSubjectResult {
   const lookups = buildLookups(dataset);
   const subject = lookups.subjectMap.get(classSubject.subjectId);
@@ -685,13 +778,16 @@ export function computeStudentSubjectResult(
     ? lookups.teacherMap.get(classSubject.teacherId)
     : undefined;
 
-  const applicability = getApplicabilityForClassSubject(dataset, classSubject.id);
+  const applicability = getApplicabilityForClassSubject(
+    dataset,
+    classSubject.id != null ? String(classSubject.id) : undefined,
+  );
   const columns = getAssessmentColumns(dataset, applicability);
   const entries = getAssessmentEntriesForSubject(
     dataset,
-    student.id || 0,
-    classSubject.id,
-    filters.academicPeriodId || classSubject.academicPeriodId
+    String(student.id ?? ""),
+    classSubject.id != null ? String(classSubject.id) : undefined,
+    filters.academicPeriodId || classSubject.academicPeriodId,
   );
 
   let rawTotal = 0;
@@ -699,9 +795,10 @@ export function computeStudentSubjectResult(
   let weightedTotal = 0;
   let totalWeight = 0;
 
-  const breakdown: ReportBreakdownItem[] = columns.map(column => {
+  const breakdown: ReportBreakdownItem[] = columns.map((column) => {
     const entry = entries.find(
-      item => item.assessmentStructureItemId === column.assessmentStructureItemId
+      (item) =>
+        item.assessmentStructureItemId === column.assessmentStructureItemId,
     );
 
     const score = safeNumber(entry?.score);
@@ -722,10 +819,14 @@ export function computeStudentSubjectResult(
   });
 
   const percentage = totalWeight > 0 ? (weightedTotal / totalWeight) * 100 : 0;
-  const grade = resolveGrade(dataset, percentage, applicability?.gradingSystemId);
+  const grade = resolveGrade(
+    dataset,
+    percentage,
+    applicability?.gradingSystemId,
+  );
 
   return {
-    classSubjectId: classSubject.id || 0,
+    classSubjectId: String(classSubject.id ?? ""),
     subjectId: classSubject.subjectId,
     subjectName: classSubject.name || subject?.name || "Unknown Subject",
     subjectCode: classSubject.code || subject?.code,
@@ -761,20 +862,20 @@ export function buildStudentReport(
   dataset: ReportEngineDataset,
   student: Student,
   filters: ReportFiltersState,
-  classSubjects: ClassSubject[]
+  classSubjects: ClassSubject[],
 ): ComputedStudentReport {
   const lookups = buildLookups(dataset);
 
-  const subjectResults = classSubjects.map(classSubject =>
-    computeStudentSubjectResult(dataset, student, classSubject, filters)
+  const subjectResults = classSubjects.map((classSubject) =>
+    computeStudentSubjectResult(dataset, student, classSubject, filters),
   );
 
-  const percentages = subjectResults.map(item => item.percentage);
+  const percentages = subjectResults.map((item) => item.percentage);
   const gpas = subjectResults
-    .map(item => item.gpa)
+    .map((item) => item.gpa)
     .filter((item): item is number => item != null);
 
-  const classId = filters.classId || student.currentClassId || 0;
+  const classId = String(filters.classId ?? student.currentClassId ?? "");
 
   const numberOnRoll = resolveNumberOnRollFromEnrollments({
     studentEnrollments: dataset.studentEnrollments || [],
@@ -785,7 +886,7 @@ export function buildStudentReport(
   });
 
   return {
-    studentId: student.id || 0,
+    studentId: String(student.id ?? ""),
     studentName: student.fullName,
     admissionNumber: student.admissionNumber,
     gender: student.gender,
@@ -803,12 +904,15 @@ export function buildStudentReport(
 
     subjectResults,
 
-    total: round(percentages.reduce((sum, item) => sum + item, 0), 2),
+    total: round(
+      percentages.reduce((sum, item) => sum + item, 0),
+      2,
+    ),
     average: round(average(percentages), 2),
     overallGPA: gpas.length ? round(average(gpas), 2) : undefined,
     overallPosition: undefined,
 
-    attendance: getStudentAttendance(dataset, student.id || 0, filters),
+    attendance: getStudentAttendance(dataset, String(student.id ?? ""), filters),
 
     classTeacherRemark: "",
     headTeacherRemark: "",
@@ -836,12 +940,14 @@ export function applyOverallPositions(reports: ComputedStudentReport[]): void {
 
 export function applySubjectPositions(
   reports: ComputedStudentReport[],
-  classSubjects: ClassSubject[]
+  classSubjects: ClassSubject[],
 ): void {
-  classSubjects.forEach(classSubject => {
+  classSubjects.forEach((classSubject) => {
     const subjectRows = reports
-      .map(report =>
-        report.subjectResults.find(item => item.classSubjectId === classSubject.id)
+      .map((report) =>
+        report.subjectResults.find(
+          (item) => item.classSubjectId === classSubject.id,
+        ),
       )
       .filter((item): item is StudentSubjectResult => !!item)
       .sort((a, b) => b.percentage - a.percentage);
@@ -860,7 +966,7 @@ export function applySubjectPositions(
 
 export function sortReports(
   reports: ComputedStudentReport[],
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): ComputedStudentReport[] {
   const sorted = [...reports];
 
@@ -872,7 +978,9 @@ export function sortReports(
     case "average":
     case "position":
     default:
-      return sorted.sort((a, b) => (a.overallPosition || 9999) - (b.overallPosition || 9999));
+      return sorted.sort(
+        (a, b) => (a.overallPosition || 9999) - (b.overallPosition || 9999),
+      );
   }
 }
 
@@ -882,7 +990,7 @@ export function sortReports(
 
 export function buildClassReports(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): ComputedStudentReport[] {
   const students = getStudentsForReport(dataset, filters);
   const classSubjects = getClassSubjectsForReport(dataset, {
@@ -890,8 +998,8 @@ export function buildClassReports(
     classSubjectId: undefined,
   });
 
-  const reports = students.map(student =>
-    buildStudentReport(dataset, student, filters, classSubjects)
+  const reports = students.map((student) =>
+    buildStudentReport(dataset, student, filters, classSubjects),
   );
 
   applyOverallPositions(reports);
@@ -907,10 +1015,12 @@ export function buildClassReports(
 export function buildSubjectBroadsheet(
   dataset: ReportEngineDataset,
   filters: ReportFiltersState,
-  reports: ComputedStudentReport[]
+  reports: ComputedStudentReport[],
 ): ComputedSubjectBroadsheet | undefined {
   const lookups = buildLookups(dataset);
-  const classSubject = lookups.classSubjectMap.get(filters.classSubjectId);
+  const classSubject = filters.classSubjectId
+    ? lookups.classSubjectMap.get(filters.classSubjectId)
+    : undefined;
 
   if (!classSubject) return undefined;
 
@@ -922,7 +1032,7 @@ export function buildSubjectBroadsheet(
   const students: SubjectBroadsheetStudentRow[] = reports
     .reduce<SubjectBroadsheetStudentRow[]>((rows, report) => {
       const result = report.subjectResults.find(
-        item => item.classSubjectId === classSubject.id
+        (item) => item.classSubjectId === classSubject.id,
       );
 
       if (!result) {
@@ -944,17 +1054,16 @@ export function buildSubjectBroadsheet(
 
       return rows;
     }, [])
-    .sort(
-      (a, b) =>
-        (a.position || 9999) -
-        (b.position || 9999)
-    );
+    .sort((a, b) => (a.position || 9999) - (b.position || 9999));
 
-  const percentages = students.map(item => item.percentage);
-  const applicability = getApplicabilityForClassSubject(dataset, classSubject.id);
+  const percentages = students.map((item) => item.percentage);
+  const applicability = getApplicabilityForClassSubject(
+    dataset,
+    classSubject.id != null ? String(classSubject.id) : undefined,
+  );
 
   return {
-    classSubjectId: classSubject.id || 0,
+    classSubjectId: String(classSubject.id ?? ""),
     classId: classSubject.classId,
     className: lookups.classMap.get(classSubject.classId)?.name || "Class",
     subjectId: classSubject.subjectId,
@@ -976,7 +1085,7 @@ export function buildSubjectBroadsheet(
 export function buildClassBroadsheet(
   dataset: ReportEngineDataset,
   filters: ReportFiltersState,
-  reports: ComputedStudentReport[]
+  reports: ComputedStudentReport[],
 ): ComputedClassBroadsheet {
   const lookups = buildLookups(dataset);
   const classSubjects = getClassSubjectsForReport(dataset, {
@@ -984,31 +1093,34 @@ export function buildClassBroadsheet(
     classSubjectId: undefined,
   });
 
-  const subjectColumns = classSubjects.map(classSubject => {
+  const subjectColumns = classSubjects.map((classSubject) => {
     const subject = lookups.subjectMap.get(classSubject.subjectId);
 
     return {
-      classSubjectId: classSubject.id || 0,
+      classSubjectId: String(classSubject.id ?? ""),
       subjectId: classSubject.subjectId,
       subjectName: classSubject.name || subject?.name || "Subject",
       subjectCode: classSubject.code || subject?.code,
-      shortName: classSubject.code || subject?.code || subject?.name?.slice(0, 4),
+      shortName:
+        classSubject.code || subject?.code || subject?.name?.slice(0, 4),
     };
   });
 
-  const students: ClassBroadsheetStudentRow[] = reports.map(report => {
-    const subjects: ClassBroadsheetSubjectCell[] = report.subjectResults.map(result => ({
-      classSubjectId: result.classSubjectId,
-      subjectId: result.subjectId,
-      subjectName: result.subjectName,
-      subjectCode: result.subjectCode,
-      shortName: result.shortName,
-      percentage: result.percentage,
-      weightedTotal: result.weightedTotal,
-      grade: result.grade,
-      remark: result.remark,
-      position: result.subjectPosition,
-    }));
+  const students: ClassBroadsheetStudentRow[] = reports.map((report) => {
+    const subjects: ClassBroadsheetSubjectCell[] = report.subjectResults.map(
+      (result) => ({
+        classSubjectId: result.classSubjectId,
+        subjectId: result.subjectId,
+        subjectName: result.subjectName,
+        subjectCode: result.subjectCode,
+        shortName: result.shortName,
+        percentage: result.percentage,
+        weightedTotal: result.weightedTotal,
+        grade: result.grade,
+        remark: result.remark,
+        position: result.subjectPosition,
+      }),
+    );
 
     return {
       studentId: report.studentId,
@@ -1023,11 +1135,13 @@ export function buildClassBroadsheet(
     };
   });
 
-  const averages = students.map(item => item.average);
+  const averages = students.map((item) => item.average);
 
   return {
-    classId: filters.classId || 0,
-    className: lookups.classMap.get(filters.classId)?.name || "Class",
+    classId: String(filters.classId ?? ""),
+    className: filters.classId
+      ? lookups.classMap.get(filters.classId)?.name || "Class"
+      : "Class",
     subjectColumns,
     students,
     highestAverage: round(averages.length ? Math.max(...averages) : 0, 2),
@@ -1042,11 +1156,11 @@ export function buildClassBroadsheet(
 
 export function buildAnalytics(
   reports: ComputedStudentReport[],
-  classSubjects: ClassSubject[]
+  classSubjects: ClassSubject[],
 ) {
-  const averages = reports.map(item => item.average);
-  const allBreakdowns = reports.flatMap(report =>
-    report.subjectResults.flatMap(subject => subject.breakdown)
+  const averages = reports.map((item) => item.average);
+  const allBreakdowns = reports.flatMap((report) =>
+    report.subjectResults.flatMap((subject) => subject.breakdown),
   );
 
   return {
@@ -1068,7 +1182,7 @@ export function buildAnalytics(
 
 export function buildReportEngineOutput(
   dataset: ReportEngineDataset,
-  filters: ReportFiltersState
+  filters: ReportFiltersState,
 ): ReportEngineOutput {
   const header = buildReportHeader(dataset, filters);
   const generatedAt = new Date().toISOString();
@@ -1090,29 +1204,29 @@ export function buildReportEngineOutput(
   const classReports = buildClassReports(dataset, filters);
 
   const selectedReport = filters.studentId
-    ? classReports.find(item => item.studentId === filters.studentId)
+    ? classReports.find((item) => item.studentId === filters.studentId)
     : classReports[0];
 
   // ======================================================
   // SIGNATORY / RELATION HELPERS
   // ======================================================
 
-  const getClassTeacherName = (classId?: number) => {
+  const getClassTeacherName = (classId?: string) => {
     if (!classId) return undefined;
 
     const classTeacherRecord = dataset.classTeachers.find(
-      item =>
+      (item) =>
         item.classId === classId &&
         item.branchId === filters.branchId &&
-        !item.isDeleted
+        !item.isDeleted,
     );
 
     const classTeacher = classTeacherRecord
       ? dataset.teachers.find(
-          teacher =>
+          (teacher) =>
             teacher.id === classTeacherRecord.teacherId &&
             teacher.branchId === filters.branchId &&
-            !teacher.isDeleted
+            !teacher.isDeleted,
         )
       : undefined;
 
@@ -1121,10 +1235,10 @@ export function buildReportEngineOutput(
 
   const getHeadTeacherName = () => {
     const headTeacher = dataset.teachers.find(
-      teacher =>
+      (teacher) =>
         teacher.branchId === filters.branchId &&
         teacher.role === "head_teacher" &&
-        !teacher.isDeleted
+        !teacher.isDeleted,
     );
 
     return headTeacher?.fullName;
@@ -1132,31 +1246,31 @@ export function buildReportEngineOutput(
 
   const getPrincipalName = () => {
     const principal = dataset.teachers.find(
-      teacher =>
+      (teacher) =>
         teacher.branchId === filters.branchId &&
         teacher.role === "principal" &&
-        !teacher.isDeleted
+        !teacher.isDeleted,
     );
 
     return principal?.fullName;
   };
 
-  const getParentName = (studentId?: number) => {
+  const getParentName = (studentId?: string) => {
     if (!studentId) return undefined;
 
     const parentLink = dataset.studentParents.find(
-      item =>
+      (item) =>
         item.studentId === studentId &&
         item.branchId === filters.branchId &&
-        !item.isDeleted
+        !item.isDeleted,
     );
 
     const parent = parentLink
       ? dataset.parents.find(
-          item =>
+          (item) =>
             item.id === parentLink.parentId &&
             item.branchId === filters.branchId &&
-            !item.isDeleted
+            !item.isDeleted,
         )
       : undefined;
 
@@ -1167,20 +1281,22 @@ export function buildReportEngineOutput(
   const principalName = getPrincipalName();
 
   const buildStudentReportDataset = (
-    report: ComputedStudentReport
+    report: ComputedStudentReport,
   ): StudentReportCardDataset => {
-    const student = dataset.students.find(item => item.id === report.studentId);
+    const student = dataset.students.find(
+      (item) => item.id === report.studentId,
+    );
     const classTeacherName = getClassTeacherName(report.classId);
     const parentName = getParentName(report.studentId);
 
     const savedReportCard = dataset.reportCards.find(
-      item =>
+      (item) =>
         item.branchId === filters.branchId &&
         item.studentId === report.studentId &&
         item.classId === report.classId &&
         item.academicStructureId === report.academicStructureId &&
         item.academicPeriodId === report.academicPeriodId &&
-        !item.isDeleted
+        !item.isDeleted,
     );
 
     return {
@@ -1230,7 +1346,9 @@ export function buildReportEngineOutput(
   return {
     header,
     studentReport,
-    classReports: classReports.map(report => buildStudentReportDataset(report)),
+    classReports: classReports.map((report) =>
+      buildStudentReportDataset(report),
+    ),
     subjectBroadsheet,
     classBroadsheet,
     analytics,

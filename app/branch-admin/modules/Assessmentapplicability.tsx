@@ -65,7 +65,12 @@ import {
   type Teacher,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -75,15 +80,15 @@ type StatusFilter = "all" | "active" | "inactive";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type ApplicabilityForm = {
-  id?: number;
+  id?: string;
   classSubjectId: string;
   assessmentStructureId: string;
   gradingSystemId: string;
@@ -95,7 +100,7 @@ type ApplicabilityForm = {
 };
 
 type ClassSubjectOption = {
-  id: number;
+  id: string;
   row: ClassSubject;
   display: string;
   className: string;
@@ -103,13 +108,13 @@ type ClassSubjectOption = {
   teacherName: string;
   periodName: string;
   academicStructureName: string;
-  organizationId?: number;
+  organizationId?: string;
 };
 
 type ApplicabilityViewRow = {
-  id: number;
+  id: string;
   row: AssessmentApplicability;
-  classSubjectId: number;
+  classSubjectId: string;
   className: string;
   subjectName: string;
   teacherName: string;
@@ -127,7 +132,7 @@ type ApplicabilityViewRow = {
 };
 
 type ClassApplicabilityView = {
-  id: number;
+  id: string;
   row: Class;
   name: string;
   code: string;
@@ -148,10 +153,9 @@ const emptyForm = (): ApplicabilityForm => ({
   locked: false,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -160,11 +164,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -175,7 +179,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -200,13 +206,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -217,16 +223,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -238,9 +248,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -248,13 +262,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -290,7 +306,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -304,9 +328,19 @@ export default function Assessmentapplicability() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -339,17 +373,25 @@ export default function Assessmentapplicability() {
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [modalClassId, setModalClassId] = useState<string>("");
 
-  const [applicabilities, setApplicabilities] = useState<AssessmentApplicability[]>([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
   const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
   const [gradingSystems, setGradingSystems] = useState<GradingSystem[]>([]);
   const [gradeRules, setGradeRules] = useState<GradeRule[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
@@ -357,17 +399,30 @@ export default function Assessmentapplicability() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<ApplicabilityViewRow | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ApplicabilityViewRow | null>(
+    null,
+  );
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<ApplicabilityForm>(emptyForm());
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -377,7 +432,11 @@ export default function Assessmentapplicability() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -435,28 +494,86 @@ export default function Assessmentapplicability() {
         tableSafe("curriculumSubjects")?.toArray?.() || [],
         tableSafe("curriculums")?.toArray?.() || [],
         tableSafe("curriculumPathways")?.toArray?.() || [],
-        listActiveLocal("assessmentStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("gradingSystems", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("assessmentStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("gradingSystems", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("gradeRules")?.toArray?.() || [],
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("assessmentEntries")?.toArray?.() || [],
       ]);
 
-      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter((row) => sameTenant(row as TenantRow)));
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((row) => sameTenant(row as TenantRow)).filter(isActiveRow));
-      setClasses((classRows as Class[]).filter((row) => sameTenant(row as TenantRow)));
-      setSubjects((subjectRows as Subject[]).filter((row) => sameTenant(row as TenantRow)));
-      setTeachers((teacherRows as Teacher[]).filter((row) => sameTenant(row as TenantRow)));
-      setAcademicStructures((academicStructureRows as AcademicStructure[]).filter((row) => sameTenant(row as TenantRow)));
-      setPeriods((periodRows as AcademicPeriod[]).filter((row) => sameTenant(row as TenantRow)));
-      setCurriculumSubjects((curriculumSubjectRows as CurriculumSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setCurriculums((curriculumRows as Curriculum[]).filter((row) => sameTenant(row as TenantRow)));
-      setPathways((pathwayRows as CurriculumPathway[]).filter((row) => sameTenant(row as TenantRow)));
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[])
+          .filter((row) => sameTenant(row as TenantRow))
+          .filter(isActiveRow),
+      );
+      setClasses(
+        (classRows as Class[]).filter((row) => sameTenant(row as TenantRow)),
+      );
+      setSubjects(
+        (subjectRows as Subject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setTeachers(
+        (teacherRows as Teacher[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setAcademicStructures(
+        (academicStructureRows as AcademicStructure[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setPeriods(
+        (periodRows as AcademicPeriod[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setCurriculumSubjects(
+        (curriculumSubjectRows as CurriculumSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setCurriculums(
+        (curriculumRows as Curriculum[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setPathways(
+        (pathwayRows as CurriculumPathway[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
       setAssessmentStructures(assessmentStructureRows as AssessmentStructure[]);
       setGradingSystems(gradingSystemRows as GradingSystem[]);
-      setGradeRules((gradeRuleRows as GradeRule[]).filter((row) => sameTenant(row as TenantRow)).filter(isActiveRow));
+      setGradeRules(
+        (gradeRuleRows as GradeRule[])
+          .filter((row) => sameTenant(row as TenantRow))
+          .filter(isActiveRow),
+      );
       setOrganizations(organizationRows as Organization[]);
-      setEntries((entryRows as AssessmentEntry[]).filter((row) => sameTenant(row as TenantRow)));
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load assessment applicability:", error);
       clearData();
@@ -470,21 +587,61 @@ export default function Assessmentapplicability() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const classMap = useMemo(() => new Map(classes.map((row: any) => [idOf(row.id), row])), [classes]);
-  const subjectMap = useMemo(() => new Map(subjects.map((row: any) => [idOf(row.id), row])), [subjects]);
-  const teacherMap = useMemo(() => new Map(teachers.map((row: any) => [idOf(row.id), row])), [teachers]);
-  const academicStructureMap = useMemo(() => new Map(academicStructures.map((row: any) => [idOf(row.id), row])), [academicStructures]);
-  const periodMap = useMemo(() => new Map(periods.map((row: any) => [idOf(row.id), row])), [periods]);
-  const curriculumSubjectMap = useMemo(() => new Map(curriculumSubjects.map((row: any) => [idOf(row.id), row])), [curriculumSubjects]);
-  const curriculumMap = useMemo(() => new Map(curriculums.map((row: any) => [idOf(row.id), row])), [curriculums]);
-  const pathwayMap = useMemo(() => new Map(pathways.map((row: any) => [idOf(row.id), row])), [pathways]);
-  const assessmentStructureMap = useMemo(() => new Map(assessmentStructures.map((row: any) => [idOf(row.id), row])), [assessmentStructures]);
-  const gradingSystemMap = useMemo(() => new Map(gradingSystems.map((row: any) => [idOf(row.id), row])), [gradingSystems]);
-  const organizationMap = useMemo(() => new Map(organizations.map((row: any) => [idOf(row.id), row])), [organizations]);
+  const classMap = useMemo(
+    () => new Map(classes.map((row: any) => [idOf(row.id), row])),
+    [classes],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((row: any) => [idOf(row.id), row])),
+    [subjects],
+  );
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((row: any) => [idOf(row.id), row])),
+    [teachers],
+  );
+  const academicStructureMap = useMemo(
+    () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(periods.map((row: any) => [idOf(row.id), row])),
+    [periods],
+  );
+  const curriculumSubjectMap = useMemo(
+    () => new Map(curriculumSubjects.map((row: any) => [idOf(row.id), row])),
+    [curriculumSubjects],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((row: any) => [idOf(row.id), row])),
+    [curriculums],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((row: any) => [idOf(row.id), row])),
+    [pathways],
+  );
+  const assessmentStructureMap = useMemo(
+    () => new Map(assessmentStructures.map((row: any) => [idOf(row.id), row])),
+    [assessmentStructures],
+  );
+  const gradingSystemMap = useMemo(
+    () => new Map(gradingSystems.map((row: any) => [idOf(row.id), row])),
+    [gradingSystems],
+  );
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((row: any) => [idOf(row.id), row])),
+    [organizations],
+  );
 
   const classSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
     return classSubjects
@@ -492,18 +649,28 @@ export default function Assessmentapplicability() {
         const classRow = classMap.get(idOf(row.classId)) as any;
         const subject = subjectMap.get(idOf(row.subjectId)) as any;
         const teacher = teacherMap.get(idOf(row.teacherId)) as any;
-        const academicStructure = academicStructureMap.get(idOf(row.academicStructureId)) as any;
+        const academicStructure = academicStructureMap.get(
+          idOf(row.academicStructureId),
+        ) as any;
         const period = periodMap.get(idOf(row.academicPeriodId)) as any;
-        const curriculumSubject = curriculumSubjectMap.get(idOf(row.curriculumSubjectId)) as any;
-        const curriculum = curriculumSubject ? (curriculumMap.get(idOf(curriculumSubject.curriculumId)) as any) : undefined;
-        const pathway = curriculumSubject?.pathwayId ? (pathwayMap.get(idOf(curriculumSubject.pathwayId)) as any) : undefined;
+        const curriculumSubject = curriculumSubjectMap.get(
+          idOf(row.curriculumSubjectId),
+        ) as any;
+        const curriculum = curriculumSubject
+          ? (curriculumMap.get(idOf(curriculumSubject.curriculumId)) as any)
+          : undefined;
+        const pathway = curriculumSubject?.pathwayId
+          ? (pathwayMap.get(idOf(curriculumSubject.pathwayId)) as any)
+          : undefined;
 
         const className = classRow?.name || `Class ${row.classId || ""}`;
-        const subjectName = row.name || subject?.name || `Subject ${row.subjectId || ""}`;
+        const subjectName =
+          row.name || subject?.name || `Subject ${row.subjectId || ""}`;
         const subjectCode = row.code || subject?.code;
         const periodName = period?.name || "All periods";
         const teacherName = teacher?.fullName || teacher?.name || "No teacher";
-        const academicStructureName = academicStructure?.name || "No academic structure";
+        const academicStructureName =
+          academicStructure?.name || "No academic structure";
         const curriculumText = curriculum?.name ? ` • ${curriculum.name}` : "";
         const pathwayText = pathway?.name ? ` • ${pathway.name}` : "";
 
@@ -532,10 +699,13 @@ export default function Assessmentapplicability() {
     pathwayMap,
   ]);
 
-  const optionMap = useMemo(() => new Map(classSubjectOptions.map((row) => [row.id, row])), [classSubjectOptions]);
+  const optionMap = useMemo(
+    () => new Map(classSubjectOptions.map((row) => [row.id, row])),
+    [classSubjectOptions],
+  );
 
   const gradeRuleCount = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     gradeRules.forEach((rule: any) => {
       const id = idOf(rule.gradingSystemId);
       if (!id) return;
@@ -545,7 +715,7 @@ export default function Assessmentapplicability() {
   }, [gradeRules]);
 
   const entryCountByClassSubject = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
     entries.forEach((entry: any) => {
       const id = idOf(entry.classSubjectId);
       if (!id) return;
@@ -555,7 +725,11 @@ export default function Assessmentapplicability() {
   }, [entries]);
 
   const activeApplicabilityClassSubjectIds = useMemo(() => {
-    return new Set(applicabilities.filter(isActiveRow).map((row: any) => idOf(row.classSubjectId)));
+    return new Set(
+      applicabilities
+        .filter(isActiveRow)
+        .map((row: any) => idOf(row.classSubjectId)),
+    );
   }, [applicabilities]);
 
   const viewRows = useMemo<ApplicabilityViewRow[]>(() => {
@@ -563,7 +737,9 @@ export default function Assessmentapplicability() {
       const id = idOf(row.id);
       const classSubjectId = idOf(row.classSubjectId);
       const option = optionMap.get(classSubjectId);
-      const structure = assessmentStructureMap.get(idOf(row.assessmentStructureId)) as any;
+      const structure = assessmentStructureMap.get(
+        idOf(row.assessmentStructureId),
+      ) as any;
       const grading = gradingSystemMap.get(idOf(row.gradingSystemId)) as any;
       const organization = organizationMap.get(idOf(row.organizationId)) as any;
 
@@ -575,7 +751,8 @@ export default function Assessmentapplicability() {
         subjectName: option?.subjectName || "Unknown subject",
         teacherName: option?.teacherName || "No teacher",
         periodName: option?.periodName || "No period",
-        academicStructureName: option?.academicStructureName || "No academic structure",
+        academicStructureName:
+          option?.academicStructureName || "No academic structure",
         assessmentName: structure?.name || "Unknown assessment",
         gradingName: grading?.name || "No grading",
         organizationName: organization?.name || "No organization",
@@ -587,13 +764,27 @@ export default function Assessmentapplicability() {
         entryCount: entryCountByClassSubject.get(classSubjectId) || 0,
       };
     });
-  }, [applicabilities, assessmentStructureMap, entryCountByClassSubject, gradeRuleCount, gradingSystemMap, optionMap, organizationMap]);
+  }, [
+    applicabilities,
+    assessmentStructureMap,
+    entryCountByClassSubject,
+    gradeRuleCount,
+    gradingSystemMap,
+    optionMap,
+    organizationMap,
+  ]);
 
-  const selectedClass = useMemo(() => (selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null), [classMap, selectedClassId]);
+  const selectedClass = useMemo(
+    () =>
+      selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null,
+    [classMap, selectedClassId],
+  );
 
   const selectedClassSubjectOptions = useMemo(() => {
     if (!selectedClassId) return [];
-    return classSubjectOptions.filter((option) => sameId((option.row as any).classId, selectedClassId));
+    return classSubjectOptions.filter((option) =>
+      sameId((option.row as any).classId, selectedClassId),
+    );
   }, [classSubjectOptions, selectedClassId]);
 
   const classCards = useMemo<ClassApplicabilityView[]>(() => {
@@ -603,9 +794,13 @@ export default function Assessmentapplicability() {
       .filter(isActiveRow)
       .map((classRow: any) => {
         const id = idOf(classRow.id);
-        const options = classSubjectOptions.filter((option) => sameId((option.row as any).classId, id));
+        const options = classSubjectOptions.filter((option) =>
+          sameId((option.row as any).classId, id),
+        );
         const optionIds = new Set(options.map((option) => option.id));
-        const applicabilityRows = viewRows.filter((row) => optionIds.has(row.classSubjectId));
+        const applicabilityRows = viewRows.filter((row) =>
+          optionIds.has(row.classSubjectId),
+        );
         const activeRows = applicabilityRows.filter((row) => row.active);
 
         return {
@@ -621,7 +816,9 @@ export default function Assessmentapplicability() {
       })
       .filter((item) => {
         if (!term) return true;
-        return `${item.name} ${item.code} ${item.subjectCount} subjects`.toLowerCase().includes(term);
+        return `${item.name} ${item.code} ${item.subjectCount} subjects`
+          .toLowerCase()
+          .includes(term);
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [classSubjectOptions, classes, search, viewRows]);
@@ -652,29 +849,64 @@ export default function Assessmentapplicability() {
       const statusOk =
         statusFilter === "all" ||
         (statusFilter === "active" ? row.active : !row.active);
-      const structureOk = structureFilter === "all" || sameId((row.row as any).assessmentStructureId, structureFilter);
+      const structureOk =
+        structureFilter === "all" ||
+        sameId((row.row as any).assessmentStructureId, structureFilter);
 
       return searchOk && statusOk && structureOk;
     });
-  }, [optionMap, search, selectedClassId, statusFilter, structureFilter, viewRows]);
+  }, [
+    optionMap,
+    search,
+    selectedClassId,
+    statusFilter,
+    structureFilter,
+    viewRows,
+  ]);
 
-  const missingClassSubjects = selectedClassSubjectOptions.filter((option) => !activeApplicabilityClassSubjectIds.has(option.id));
+  const missingClassSubjects = selectedClassSubjectOptions.filter(
+    (option) => !activeApplicabilityClassSubjectIds.has(option.id),
+  );
 
-  const scopedViewRows = selectedClassId ? viewRows.filter((row) => sameId((optionMap.get(row.classSubjectId)?.row as any)?.classId, selectedClassId)) : [];
+  const scopedViewRows = selectedClassId
+    ? viewRows.filter((row) =>
+        sameId(
+          (optionMap.get(row.classSubjectId)?.row as any)?.classId,
+          selectedClassId,
+        ),
+      )
+    : [];
   const activeCount = scopedViewRows.filter((row) => row.active).length;
   const archivedCount = scopedViewRows.length - activeCount;
   const coverage = selectedClassSubjectOptions.length
-    ? Math.round(((selectedClassSubjectOptions.length - missingClassSubjects.length) / selectedClassSubjectOptions.length) * 100)
+    ? Math.round(
+        ((selectedClassSubjectOptions.length - missingClassSubjects.length) /
+          selectedClassSubjectOptions.length) *
+          100,
+      )
     : 0;
 
   const activeFilterCount = useMemo(
-    () => [structureFilter, statusFilter].filter((value) => value !== "all").length,
-    [structureFilter, statusFilter]
+    () =>
+      [structureFilter, statusFilter].filter((value) => value !== "all").length,
+    [structureFilter, statusFilter],
   );
 
-  const countsByAssessment = useMemo(() => groupedCounts(scopedViewRows, (row) => row.assessmentName), [scopedViewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(scopedViewRows, (row) => (row.active ? "Active" : "Inactive")), [scopedViewRows]);
-  const countsByAcademic = useMemo(() => groupedCounts(scopedViewRows, (row) => row.academicStructureName), [scopedViewRows]);
+  const countsByAssessment = useMemo(
+    () => groupedCounts(scopedViewRows, (row) => row.assessmentName),
+    [scopedViewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(scopedViewRows, (row) =>
+        row.active ? "Active" : "Inactive",
+      ),
+    [scopedViewRows],
+  );
+  const countsByAcademic = useMemo(
+    () => groupedCounts(scopedViewRows, (row) => row.academicStructureName),
+    [scopedViewRows],
+  );
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -689,12 +921,16 @@ export default function Assessmentapplicability() {
     setStatusFilter("all");
   };
 
-  const updateForm = (patch: Partial<ApplicabilityForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<ApplicabilityForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
   const openCreate = () => {
     if (!requireTenant()) return;
     if (!selectedClassId) {
-      showToast("info", "Select a class first, then add applicability for its class subjects.");
+      showToast(
+        "info",
+        "Select a class first, then add applicability for its class subjects.",
+      );
       return;
     }
 
@@ -707,16 +943,24 @@ export default function Assessmentapplicability() {
     setModalOpen(true);
   };
 
-  const openCreateForClassSubject = (classSubjectId: number) => {
+  const openCreateForClassSubject = (classSubjectId: string) => {
     if (!requireTenant()) return;
 
     setSelectedItem(null);
-    setModalClassId(String((optionMap.get(classSubjectId)?.row as any)?.classId || selectedClassId || ""));
+    setModalClassId(
+      String(
+        (optionMap.get(classSubjectId)?.row as any)?.classId ||
+          selectedClassId ||
+          "",
+      ),
+    );
     setForm({
       ...emptyForm(),
       classSubjectId: String(classSubjectId),
       assessmentStructureId: structureFilter !== "all" ? structureFilter : "",
-      organizationId: String(optionMap.get(classSubjectId)?.organizationId || ""),
+      organizationId: String(
+        optionMap.get(classSubjectId)?.organizationId || "",
+      ),
     });
     setModalOpen(true);
   };
@@ -725,7 +969,13 @@ export default function Assessmentapplicability() {
     const row: any = "row" in item ? item.row : item;
 
     setSelectedItem(null);
-    setModalClassId(String((optionMap.get(idOf(row.classSubjectId))?.row as any)?.classId || selectedClassId || ""));
+    setModalClassId(
+      String(
+        (optionMap.get(idOf(row.classSubjectId))?.row as any)?.classId ||
+          selectedClassId ||
+          "",
+      ),
+    );
     setForm({
       id: idOf(row.id),
       classSubjectId: String(row.classSubjectId || ""),
@@ -746,7 +996,9 @@ export default function Assessmentapplicability() {
 
     const duplicate = applicabilities.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
-      return sameId(row.classSubjectId, form.classSubjectId) && isActiveRow(row);
+      return (
+        sameId(row.classSubjectId, form.classSubjectId) && isActiveRow(row)
+      );
     });
 
     if (duplicate && form.active) {
@@ -771,16 +1023,21 @@ export default function Assessmentapplicability() {
       setSaving(true);
 
       const selectedOption = optionMap.get(idOf(form.classSubjectId));
-      const existing = form.id ? applicabilities.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? applicabilities.find((row: any) => sameId(row.id, form.id))
+        : undefined;
 
       const payload: Partial<AssessmentApplicability> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         classSubjectId: idOf(form.classSubjectId),
         assessmentStructureId: idOf(form.assessmentStructureId),
         gradingSystemId: idOf(form.gradingSystemId) || undefined,
-        organizationId: idOf(form.organizationId) || selectedOption?.organizationId || undefined,
+        organizationId:
+          idOf(form.organizationId) ||
+          selectedOption?.organizationId ||
+          undefined,
         groupCode: form.groupCode.trim() || undefined,
         isElective: form.isElective,
         active: form.active,
@@ -789,9 +1046,16 @@ export default function Assessmentapplicability() {
       } as Partial<AssessmentApplicability>;
 
       if (form.id && existing) {
-        await updateLocal("assessmentApplicabilities", Number(form.id), payload);
+        await updateLocal(
+          "assessmentApplicabilities",
+          String(form.id),
+          payload,
+        );
       } else {
-        await createLocal("assessmentApplicabilities", payload as AssessmentApplicability);
+        await createLocal(
+          "assessmentApplicabilities",
+          payload as AssessmentApplicability,
+        );
       }
 
       setModalOpen(false);
@@ -811,7 +1075,7 @@ export default function Assessmentapplicability() {
     const confirmed = window.confirm(
       entryCount
         ? `This class subject already has ${entryCount} score record(s). Archive anyway?`
-        : "Archive this applicability?"
+        : "Archive this applicability?",
     );
 
     if (!confirmed) return;
@@ -833,17 +1097,30 @@ export default function Assessmentapplicability() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing assessment applicability." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing assessment applicability."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Assessment applicability belongs to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -852,30 +1129,51 @@ export default function Assessmentapplicability() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Assessment applicability search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Assessment applicability search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder={selectedClassId ? "Search applicability..." : "Search classes..."}
-            aria-label={selectedClassId ? "Search assessment applicability" : "Search classes"}
+            placeholder={
+              selectedClassId ? "Search applicability..." : "Search classes..."
+            }
+            aria-label={
+              selectedClassId
+                ? "Search assessment applicability"
+                : "Search classes"
+            }
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add assessment applicability">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add assessment applicability"
+        >
           +
         </button>
 
@@ -890,23 +1188,41 @@ export default function Assessmentapplicability() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {!assessmentStructures.length && (
-        <section className="ba-warning">Create at least one assessment structure before assigning applicability.</section>
+        <section className="ba-warning">
+          Create at least one assessment structure before assigning
+          applicability.
+        </section>
       )}
 
       {!gradingSystems.length && (
-        <section className="ba-warning">No grading system found. Applicability can save without grading, but reports need grading rules.</section>
+        <section className="ba-warning">
+          No grading system found. Applicability can save without grading, but
+          reports need grading rules.
+        </section>
       )}
 
       {!selectedClassId ? (
         <section className="ba-list applicability-list">
           {classCards.map((item) => (
-            <ClassPickerRow key={String(item.id)} item={item} onOpen={() => { setSelectedClassId(String(item.id)); setSearch(""); }} />
+            <ClassPickerRow
+              key={String(item.id)}
+              item={item}
+              onOpen={() => {
+                setSelectedClassId(String(item.id));
+                setSearch("");
+              }}
+            />
           ))}
 
           {!classCards.length && (
@@ -919,79 +1235,126 @@ export default function Assessmentapplicability() {
         </section>
       ) : (
         <>
-          <section className="ba-filter-chips class-breadcrumb" aria-label="Selected class">
-            <button type="button" onClick={() => { setSelectedClassId(""); setSelectedItem(null); setSearch(""); }}>
+          <section
+            className="ba-filter-chips class-breadcrumb"
+            aria-label="Selected class"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedClassId("");
+                setSelectedItem(null);
+                setSearch("");
+              }}
+            >
               ← Classes
             </button>
             <button type="button" onClick={() => setFilterOpen(true)}>
-              {(selectedClass as any)?.name || "Selected class"} · {selectedClassSubjectOptions.length} class subject(s)
+              {(selectedClass as any)?.name || "Selected class"} ·{" "}
+              {selectedClassSubjectOptions.length} class subject(s)
             </button>
           </section>
 
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {structureFilter !== "all" && (
-            <button type="button" onClick={() => setStructureFilter("all")}>
-              Assessment: {(assessmentStructureMap.get(idOf(structureFilter)) as any)?.name || structureFilter} ×
-            </button>
-          )}
-          {statusFilter !== "all" && (
-            <button type="button" onClick={() => setStatusFilter("all")}>
-              Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
-            </button>
-          )}
-        </section>
-      )}
-
-      {viewMode === "summary" && (
-        <section className="ba-analysis-grid">
-          <AnalysisCard title="By Assessment" rows={countsByAssessment} total={scopedViewRows.length} />
-          <AnalysisCard title="By Academic Structure" rows={countsByAcademic} total={scopedViewRows.length} />
-          <AnalysisCard title="By Status" rows={countsByStatus} total={scopedViewRows.length} />
-          <article className="ba-analysis ba-current-filter">
-            <span>Coverage</span>
-            <strong>{coverage}%</strong>
-            <p>
-              {activeCount} active · {archivedCount} archived · {missingClassSubjects.length} missing · {entries.length} score records.
-            </p>
-          </article>
-        </section>
-      )}
-
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} archive={archive} />}
-
-      {viewMode === "cards" && (
-        <section className="ba-list applicability-list">
-          {filteredRows.map((row) => (
-            <ApplicabilityListRow key={String(row.id)} item={row} onOpen={() => setSelectedItem(row)} />
-          ))}
-
-          {!!missingClassSubjects.length && (
-            <button type="button" className="student-row missing-row" onClick={() => openCreateForClassSubject(missingClassSubjects[0].id)}>
-              <span className="app-icon warning">⚠️</span>
-              <span className="student-main">
-                <strong>{missingClassSubjects.length} class subject(s) need setup</strong>
-                <small>Tap to start with {missingClassSubjects[0]?.className} · {missingClassSubjects[0]?.subjectName}</small>
-                <em>Missing applicability prevents clean score entry.</em>
-              </span>
-              <span className="student-side">
-                <span className="status-dot-mini orange" />
-                <i>⋯</i>
-              </span>
-            </button>
+          {activeFilterCount > 0 && (
+            <section className="ba-filter-chips" aria-label="Active filters">
+              {structureFilter !== "all" && (
+                <button type="button" onClick={() => setStructureFilter("all")}>
+                  Assessment:{" "}
+                  {(assessmentStructureMap.get(idOf(structureFilter)) as any)
+                    ?.name || structureFilter}{" "}
+                  ×
+                </button>
+              )}
+              {statusFilter !== "all" && (
+                <button type="button" onClick={() => setStatusFilter("all")}>
+                  Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
+                </button>
+              )}
+            </section>
           )}
 
-          {!filteredRows.length && (
-            <Empty
-              icon="🔗"
-              title="No assessment applicability"
-              text="Connect a class subject to an assessment structure and grading system."
+          {viewMode === "summary" && (
+            <section className="ba-analysis-grid">
+              <AnalysisCard
+                title="By Assessment"
+                rows={countsByAssessment}
+                total={scopedViewRows.length}
+              />
+              <AnalysisCard
+                title="By Academic Structure"
+                rows={countsByAcademic}
+                total={scopedViewRows.length}
+              />
+              <AnalysisCard
+                title="By Status"
+                rows={countsByStatus}
+                total={scopedViewRows.length}
+              />
+              <article className="ba-analysis ba-current-filter">
+                <span>Coverage</span>
+                <strong>{coverage}%</strong>
+                <p>
+                  {activeCount} active · {archivedCount} archived ·{" "}
+                  {missingClassSubjects.length} missing · {entries.length} score
+                  records.
+                </p>
+              </article>
+            </section>
+          )}
+
+          {viewMode === "table" && (
+            <TableView
+              rows={filteredRows}
+              openEdit={openEdit}
+              archive={archive}
             />
           )}
-        </section>
-      )}
 
+          {viewMode === "cards" && (
+            <section className="ba-list applicability-list">
+              {filteredRows.map((row) => (
+                <ApplicabilityListRow
+                  key={String(row.id)}
+                  item={row}
+                  onOpen={() => setSelectedItem(row)}
+                />
+              ))}
 
+              {!!missingClassSubjects.length && (
+                <button
+                  type="button"
+                  className="student-row missing-row"
+                  onClick={() =>
+                    openCreateForClassSubject(missingClassSubjects[0].id)
+                  }
+                >
+                  <span className="app-icon warning">⚠️</span>
+                  <span className="student-main">
+                    <strong>
+                      {missingClassSubjects.length} class subject(s) need setup
+                    </strong>
+                    <small>
+                      Tap to start with {missingClassSubjects[0]?.className} ·{" "}
+                      {missingClassSubjects[0]?.subjectName}
+                    </small>
+                    <em>Missing applicability prevents clean score entry.</em>
+                  </span>
+                  <span className="student-side">
+                    <span className="status-dot-mini orange" />
+                    <i>⋯</i>
+                  </span>
+                </button>
+              )}
+
+              {!filteredRows.length && (
+                <Empty
+                  icon="🔗"
+                  title="No assessment applicability"
+                  text="Connect a class subject to an assessment structure and grading system."
+                />
+              )}
+            </section>
+          )}
         </>
       )}
 
@@ -1053,9 +1416,20 @@ export default function Assessmentapplicability() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1066,40 +1440,76 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function ClassPickerRow({ item, onOpen }: { item: ClassApplicabilityView; onOpen: () => void }) {
+function ClassPickerRow({
+  item,
+  onOpen,
+}: {
+  item: ClassApplicabilityView;
+  onOpen: () => void;
+}) {
   return (
-    <button type="button" className="student-row applicability-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row applicability-row"
+      onClick={onOpen}
+    >
       <span className="app-icon">🏫</span>
 
       <span className="student-main">
         <strong>{item.name}</strong>
         <small>
-          {item.subjectCount} class subject(s) · {item.activeCount} active setup(s)
+          {item.subjectCount} class subject(s) · {item.activeCount} active
+          setup(s)
         </small>
-        <em>{item.missingCount ? `${item.missingCount} missing applicability` : "Applicability complete"}</em>
+        <em>
+          {item.missingCount
+            ? `${item.missingCount} missing applicability`
+            : "Applicability complete"}
+        </em>
       </span>
 
       <span className="student-side">
-        <span className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`} />
+        <span
+          className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`}
+        />
         <i>›</i>
       </span>
     </button>
   );
 }
 
-function ApplicabilityListRow({ item, onOpen }: { item: ApplicabilityViewRow; onOpen: () => void }) {
+function ApplicabilityListRow({
+  item,
+  onOpen,
+}: {
+  item: ApplicabilityViewRow;
+  onOpen: () => void;
+}) {
   return (
-    <button type="button" className="student-row applicability-row" onClick={onOpen}>
+    <button
+      type="button"
+      className="student-row applicability-row"
+      onClick={onOpen}
+    >
       <span className="app-icon">🔗</span>
 
       <span className="student-main">
-        <strong>{item.className} · {item.subjectName}</strong>
-        <small>{item.assessmentName} · {item.gradingName}</small>
-        <em>{item.teacherName} · {item.periodName} · {item.entryCount} records</em>
+        <strong>
+          {item.className} · {item.subjectName}
+        </strong>
+        <small>
+          {item.assessmentName} · {item.gradingName}
+        </small>
+        <em>
+          {item.teacherName} · {item.periodName} · {item.entryCount} records
+        </em>
       </span>
 
       <span className="student-side">
-        <span className={`status-dot-mini ${item.active ? "green" : "gray"}`} title={item.active ? "Active" : "Inactive"} />
+        <span
+          className={`status-dot-mini ${item.active ? "green" : "gray"}`}
+          title={item.active ? "Active" : "Inactive"}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1152,7 +1562,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Assessment Structure</span>
-            <select value={structureFilter} onChange={(event) => setStructureFilter(event.target.value)}>
+            <select
+              value={structureFilter}
+              onChange={(event) => setStructureFilter(event.target.value)}
+            >
               <option value="all">All assessment structures</option>
               {assessmentStructures.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -1164,7 +1577,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / Archived</option>
@@ -1210,19 +1628,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact applicability cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Coverage and setup summaries</small>
@@ -1255,10 +1685,18 @@ function ActionSheet({
       <section className="ba-sheet small">
         <div className="ba-sheet-profile">
           <div>
-            <h2>{item.className} · {item.subjectName}</h2>
-            <p>{item.assessmentName} · {item.active ? "Active" : "Inactive"}</p>
+            <h2>
+              {item.className} · {item.subjectName}
+            </h2>
+            <p>
+              {item.assessmentName} · {item.active ? "Active" : "Inactive"}
+            </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close applicability actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close applicability actions"
+          >
             ✕
           </button>
         </div>
@@ -1285,7 +1723,11 @@ function ActionSheet({
             <small>Update assessment, grading, group, status and lock</small>
           </button>
 
-          <button type="button" className="danger" onClick={() => archive(item)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(item)}
+          >
             <span>⌫</span>
             <b>Archive</b>
             <small>Soft delete this applicability locally</small>
@@ -1327,13 +1769,19 @@ function TableView({
             {rows.map((row) => (
               <tr key={String(row.id)}>
                 <td>
-                  <strong>{row.className} · {row.subjectName}</strong>
-                  <span>{row.teacherName} · {row.periodName}</span>
+                  <strong>
+                    {row.className} · {row.subjectName}
+                  </strong>
+                  <span>
+                    {row.teacherName} · {row.periodName}
+                  </span>
                 </td>
                 <td>{row.assessmentName}</td>
                 <td>
                   {row.gradingName}
-                  {row.gradingName !== "No grading" ? <span>{row.gradeRuleCount} rule(s)</span> : null}
+                  {row.gradingName !== "No grading" ? (
+                    <span>{row.gradeRuleCount} rule(s)</span>
+                  ) : null}
                 </td>
                 <td>{row.organizationName}</td>
                 <td>
@@ -1343,17 +1791,27 @@ function TableView({
                 <td>{row.entryCount}</td>
                 <td>
                   <div className="ba-chip-row">
-                    <Chip tone={row.active ? "green" : "gray"}>{row.active ? "Active" : "Inactive"}</Chip>
+                    <Chip tone={row.active ? "green" : "gray"}>
+                      {row.active ? "Active" : "Inactive"}
+                    </Chip>
                     {row.locked && <Chip tone="purple">Locked</Chip>}
                   </div>
                 </td>
-                <td>{timeText((row.row as any).updatedAt || (row.row as any).createdAt)}</td>
+                <td>
+                  {timeText(
+                    (row.row as any).updatedAt || (row.row as any).createdAt,
+                  )}
+                </td>
                 <td>
                   <div className="ba-table-actions">
                     <button type="button" onClick={() => openEdit(row)}>
                       Edit
                     </button>
-                    <button type="button" className="ba-delete" onClick={() => archive(row)}>
+                    <button
+                      type="button"
+                      className="ba-delete"
+                      onClick={() => archive(row)}
+                    >
                       Archive
                     </button>
                   </div>
@@ -1363,7 +1821,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No applicability matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No applicability matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1394,23 +1856,37 @@ function ApplicabilityModal({
   assessmentStructures: AssessmentStructure[];
   gradingSystems: GradingSystem[];
   organizations: Organization[];
-  gradeRuleCount: Map<number, number>;
-  optionMap: Map<number, ClassSubjectOption>;
+  gradeRuleCount: Map<string, number>;
+  optionMap: Map<string, ClassSubjectOption>;
   updateForm: (patch: Partial<ApplicabilityForm>) => void;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
 }) {
-  const visibleClassSubjectOptions = classSubjectOptions.filter((option) => !modalClassId || sameId((option.row as any).classId, modalClassId));
+  const visibleClassSubjectOptions = classSubjectOptions.filter(
+    (option) =>
+      !modalClassId || sameId((option.row as any).classId, modalClassId),
+  );
 
   return (
     <div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
-            <h2>{form.id ? "Edit Assessment Applicability" : "New Assessment Applicability"}</h2>
-            <p>Activate assessment entry for one class subject. This is the source of truth for score entry.</p>
+            <h2>
+              {form.id
+                ? "Edit Assessment Applicability"
+                : "New Assessment Applicability"}
+            </h2>
+            <p>
+              Activate assessment entry for one class subject. This is the
+              source of truth for score entry.
+            </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close applicability form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close applicability form"
+          >
             ✕
           </button>
         </div>
@@ -1452,7 +1928,8 @@ function ApplicabilityModal({
                 <option value="">Select class subject</option>
                 {visibleClassSubjectOptions.map((option) => (
                   <option key={option.id} value={option.id}>
-                    {option.subjectName} · {option.teacherName} · {option.periodName}
+                    {option.subjectName} · {option.teacherName} ·{" "}
+                    {option.periodName}
                   </option>
                 ))}
               </select>
@@ -1460,7 +1937,12 @@ function ApplicabilityModal({
 
             <label>
               <span>Assessment Structure</span>
-              <select value={form.assessmentStructureId} onChange={(event) => updateForm({ assessmentStructureId: event.target.value })}>
+              <select
+                value={form.assessmentStructureId}
+                onChange={(event) =>
+                  updateForm({ assessmentStructureId: event.target.value })
+                }
+              >
                 <option value="">Select assessment</option>
                 {assessmentStructures.map((row: any) => (
                   <option key={String(row.id)} value={String(row.id)}>
@@ -1472,7 +1954,12 @@ function ApplicabilityModal({
 
             <label>
               <span>Grading System</span>
-              <select value={form.gradingSystemId} onChange={(event) => updateForm({ gradingSystemId: event.target.value })}>
+              <select
+                value={form.gradingSystemId}
+                onChange={(event) =>
+                  updateForm({ gradingSystemId: event.target.value })
+                }
+              >
                 <option value="">No grading system</option>
                 {gradingSystems.map((row: any) => (
                   <option key={String(row.id)} value={String(row.id)}>
@@ -1484,7 +1971,12 @@ function ApplicabilityModal({
 
             <label>
               <span>Organization</span>
-              <select value={form.organizationId} onChange={(event) => updateForm({ organizationId: event.target.value })}>
+              <select
+                value={form.organizationId}
+                onChange={(event) =>
+                  updateForm({ organizationId: event.target.value })
+                }
+              >
                 <option value="">No organization</option>
                 {organizations.map((row: any) => (
                   <option key={String(row.id)} value={String(row.id)}>
@@ -1498,14 +1990,21 @@ function ApplicabilityModal({
               <span>Group Code</span>
               <input
                 value={form.groupCode}
-                onChange={(event) => updateForm({ groupCode: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ groupCode: event.target.value })
+                }
                 placeholder="Core, Elective, Group A..."
               />
             </label>
 
             <label>
               <span>Elective</span>
-              <select value={form.isElective ? "yes" : "no"} onChange={(event) => updateForm({ isElective: event.target.value === "yes" })}>
+              <select
+                value={form.isElective ? "yes" : "no"}
+                onChange={(event) =>
+                  updateForm({ isElective: event.target.value === "yes" })
+                }
+              >
                 <option value="no">No</option>
                 <option value="yes">Yes</option>
               </select>
@@ -1513,7 +2012,12 @@ function ApplicabilityModal({
 
             <label>
               <span>Status</span>
-              <select value={form.active ? "active" : "inactive"} onChange={(event) => updateForm({ active: event.target.value === "active" })}>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
+              >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
@@ -1521,7 +2025,12 @@ function ApplicabilityModal({
 
             <label>
               <span>Lock</span>
-              <select value={form.locked ? "locked" : "open"} onChange={(event) => updateForm({ locked: event.target.value === "locked" })}>
+              <select
+                value={form.locked ? "locked" : "open"}
+                onChange={(event) =>
+                  updateForm({ locked: event.target.value === "locked" })
+                }
+              >
                 <option value="open">Open</option>
                 <option value="locked">Locked</option>
               </select>
@@ -1530,7 +2039,8 @@ function ApplicabilityModal({
         </section>
 
         <section className="ba-note">
-          <strong>Rule:</strong> One active applicability per class subject. Archive the old one before assigning another active setup.
+          <strong>Rule:</strong> One active applicability per class subject.
+          Archive the old one before assigning another active setup.
         </section>
 
         <div className="ba-modal-actions">
@@ -1538,7 +2048,11 @@ function ApplicabilityModal({
             Cancel
           </button>
           <button type="submit" disabled={saving}>
-            {saving ? "Saving..." : form.id ? "Save Changes" : "Create Applicability"}
+            {saving
+              ? "Saving..."
+              : form.id
+                ? "Save Changes"
+                : "Create Applicability"}
           </button>
         </div>
       </form>
@@ -1546,7 +2060,10 @@ function ApplicabilityModal({
   );
 }
 
-function groupedCounts(rows: ApplicabilityViewRow[], keyFn: (item: ApplicabilityViewRow) => string) {
+function groupedCounts(
+  rows: ApplicabilityViewRow[],
+  keyFn: (item: ApplicabilityViewRow) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1558,7 +2075,15 @@ function groupedCounts(rows: ApplicabilityViewRow[], keyFn: (item: Applicability
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

@@ -39,10 +39,12 @@ export type LocalPortalSettings = {
   reduceMotion: boolean;
 };
 
+export type LocalAppearanceId = string | number | null | undefined;
+
 export type LocalAppearanceContext = {
-  accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  accountId?: LocalAppearanceId;
+  schoolId?: LocalAppearanceId;
+  branchId?: LocalAppearanceId;
   roleKey?: string | null;
 };
 
@@ -320,20 +322,21 @@ export function resolveLocalAppearance(
   );
 }
 
+function normalizeStorageIdentity(
+  value: LocalAppearanceId,
+  fallback: string,
+) {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
 export function getLocalSettingsStorageKey(
   input: LocalAppearanceContext,
 ) {
-  const account =
-    input.accountId || "guest";
-
-  const school =
-    input.schoolId || "no-school";
-
-  const branch =
-    input.branchId || "no-branch";
-
-  const role =
-    input.roleKey || "portal";
+  const account = normalizeStorageIdentity(input.accountId, "guest");
+  const school = normalizeStorageIdentity(input.schoolId, "no-school");
+  const branch = normalizeStorageIdentity(input.branchId, "no-branch");
+  const role = normalizeStorageIdentity(input.roleKey, "portal");
 
   return [
     "eleeveon",

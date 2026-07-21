@@ -17,7 +17,13 @@
  * - preserve the same PDF-like mobile preview and print behavior
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   ReportAssessmentColumn,
@@ -72,15 +78,19 @@ export default function CompactPrintTemplate({
   const displayZoomPercent = Math.round(previewScale * 100);
   const ZOOM_STEP = 1.01;
 
-  const applyZoomStep = useCallback((direction: "in" | "out") => {
-    setZoomScale((prev) => {
-      const baseScale = expanded ? prev : fitScale;
-      const nextScale = direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
-      return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
-    });
+  const applyZoomStep = useCallback(
+    (direction: "in" | "out") => {
+      setZoomScale((prev) => {
+        const baseScale = expanded ? prev : fitScale;
+        const nextScale =
+          direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
+        return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
+      });
 
-    setExpanded(true);
-  }, [expanded, fitScale]);
+      setExpanded(true);
+    },
+    [expanded, fitScale],
+  );
 
   const stopZoomHold = useCallback(() => {
     if (holdTimerRef.current != null) {
@@ -94,16 +104,19 @@ export default function CompactPrintTemplate({
     }
   }, []);
 
-  const startZoomHold = useCallback((direction: "in" | "out") => {
-    stopZoomHold();
-    applyZoomStep(direction);
+  const startZoomHold = useCallback(
+    (direction: "in" | "out") => {
+      stopZoomHold();
+      applyZoomStep(direction);
 
-    holdTimerRef.current = window.setTimeout(() => {
-      holdIntervalRef.current = window.setInterval(() => {
-        applyZoomStep(direction);
-      }, 55);
-    }, 260);
-  }, [applyZoomStep, stopZoomHold]);
+      holdTimerRef.current = window.setTimeout(() => {
+        holdIntervalRef.current = window.setInterval(() => {
+          applyZoomStep(direction);
+        }, 55);
+      }, 260);
+    },
+    [applyZoomStep, stopZoomHold],
+  );
 
   const fitToScreen = () => {
     stopZoomHold();
@@ -132,7 +145,10 @@ export default function CompactPrintTemplate({
 
       const rect = frame.getBoundingClientRect();
       const availableWidth = Math.max(120, rect.width - SAFE_GAP);
-      const availableHeight = Math.max(180, window.innerHeight - rect.top - SAFE_GAP);
+      const availableHeight = Math.max(
+        180,
+        window.innerHeight - rect.top - SAFE_GAP,
+      );
       const widthScale = availableWidth / A4_WIDTH_PX;
       const heightScale = availableHeight / A4_HEIGHT_PX;
       const nextScale = Math.min(1, widthScale, heightScale);
@@ -168,7 +184,7 @@ export default function CompactPrintTemplate({
         density: "compact",
       },
       template || null,
-      null
+      null,
     );
 
   const normalized = normalizeStudentReportTemplateData({
@@ -182,7 +198,7 @@ export default function CompactPrintTemplate({
   const student = dataset?.student;
 
   const assessmentColumns = useMemo<ReportAssessmentColumn[]>(() => {
-    const map = new Map<number, ReportAssessmentColumn>();
+    const map = new Map<string, ReportAssessmentColumn>();
 
     report?.subjectResults?.forEach((subject) => {
       subject.breakdown?.forEach((item) => {
@@ -223,7 +239,10 @@ export default function CompactPrintTemplate({
   const fontFamily = branding.fontFamily || "Arial, sans-serif";
   const reportBackgroundImage = branding.reportCardBackgroundImage || "";
   const reportWatermark = branding.reportCardWatermark || branding.logo || "";
-  const reportSignatureImage = signatures.officialSignatureImage || branding.reportCardSignatureImage || "";
+  const reportSignatureImage =
+    signatures.officialSignatureImage ||
+    branding.reportCardSignatureImage ||
+    "";
   const studentPhoto = studentInfo.studentPhoto || "";
 
   const label: React.CSSProperties = {
@@ -276,15 +295,41 @@ export default function CompactPrintTemplate({
   };
 
   const visibleStudentInfoBoxes = [
-    { key: "studentName", label: "Student", value: report.studentName, span: 2, show: true },
-    { key: "admissionNumber", label: "Admission No.", value: report.admissionNumber || "-", show: true },
-    { key: "gender", label: "Gender", value: report.gender || student?.gender || "-", show: true },
+    {
+      key: "studentName",
+      label: "Student",
+      value: report.studentName,
+      span: 2,
+      show: true,
+    },
+    {
+      key: "admissionNumber",
+      label: "Admission No.",
+      value: report.admissionNumber || "-",
+      show: true,
+    },
+    {
+      key: "gender",
+      label: "Gender",
+      value: report.gender || student?.gender || "-",
+      show: true,
+    },
     { key: "class", label: "Class", value: report.className, show: true },
-    { key: "period", label: "Academic Period", value: header.academicPeriod?.name || "-", show: true },
+    {
+      key: "period",
+      label: "Academic Period",
+      value: header.academicPeriod?.name || "-",
+      show: true,
+    },
     {
       key: "numberOnRoll",
       label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value: studentInfo.numberOnRoll || (report as any).numberOnRoll || (report as any).classSize || (dataset as any)?.numberOnRoll || "-",
+      value:
+        studentInfo.numberOnRoll ||
+        (report as any).numberOnRoll ||
+        (report as any).classSize ||
+        (dataset as any)?.numberOnRoll ||
+        "-",
       show: resolvedSettings.showNumberOnRoll,
     },
     {
@@ -297,20 +342,51 @@ export default function CompactPrintTemplate({
       key: "attendancePercent",
       label: "Attendance %",
       value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show: resolvedSettings.showAttendance && resolvedSettings.showAttendancePercent,
+      show:
+        resolvedSettings.showAttendance &&
+        resolvedSettings.showAttendancePercent,
     },
   ].filter((item) => item.show);
 
   const summaryCards = [
-    { key: "total", label: "Total", value: formatNumber(report.total, 1), show: resolvedSettings.showTotal },
-    { key: "average", label: "Average", value: `${formatNumber(report.average, 1)}%`, show: resolvedSettings.showAverage },
-    { key: "classPosition", label: resolvedSettings.classPositionLabel || "Class Position", value: ordinal(report.overallPosition), show: resolvedSettings.showClassPosition },
-    { key: "gpa", label: "GPA", value: report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-", show: resolvedSettings.showGPA },
+    {
+      key: "total",
+      label: "Total",
+      value: formatNumber(report.total, 1),
+      show: resolvedSettings.showTotal,
+    },
+    {
+      key: "average",
+      label: "Average",
+      value: `${formatNumber(report.average, 1)}%`,
+      show: resolvedSettings.showAverage,
+    },
+    {
+      key: "classPosition",
+      label: resolvedSettings.classPositionLabel || "Class Position",
+      value: ordinal(report.overallPosition),
+      show: resolvedSettings.showClassPosition,
+    },
+    {
+      key: "gpa",
+      label: "GPA",
+      value:
+        report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-",
+      show: resolvedSettings.showGPA,
+    },
   ].filter((item) => item.show);
 
-  const currentPeriodEndLine = currentAcademicPeriodEndText(currentAcademicPeriod, resolvedSettings);
-  const nextPeriodLine = nextAcademicPeriodText(nextAcademicPeriod, resolvedSettings);
-  const generatedDateValue=(resolvedSettings as any).showGeneratedDate?friendlyReportDate((dataset as any)?.generatedAt):"";
+  const currentPeriodEndLine = currentAcademicPeriodEndText(
+    currentAcademicPeriod,
+    resolvedSettings,
+  );
+  const nextPeriodLine = nextAcademicPeriodText(
+    nextAcademicPeriod,
+    resolvedSettings,
+  );
+  const generatedDateValue = (resolvedSettings as any).showGeneratedDate
+    ? friendlyReportDate((dataset as any)?.generatedAt)
+    : "";
 
   const subjectTableColumnCount =
     1 +
@@ -404,21 +480,55 @@ export default function CompactPrintTemplate({
                 background: "#fff",
               }}
             >
-              <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              <img
+                src={branding.logo}
+                alt="School logo"
+                style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              />
             </div>
           )}
 
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 17.2, lineHeight: 1, fontWeight: 1000, textTransform: "uppercase", color: "#111827" }}>
+            <div
+              style={{
+                fontSize: 17.2,
+                lineHeight: 1,
+                fontWeight: 1000,
+                textTransform: "uppercase",
+                color: "#111827",
+              }}
+            >
               {branding.schoolName}
             </div>
             {branding.motto && (
-              <div style={{ marginTop: 2, fontSize: 8.6, fontWeight: 800, color: "#374151" }}>
+              <div
+                style={{
+                  marginTop: 2,
+                  fontSize: 8.6,
+                  fontWeight: 800,
+                  color: "#374151",
+                }}
+              >
                 {branding.motto}
               </div>
             )}
-            <div style={{ marginTop: 3, fontSize: 7.8, fontWeight: 750, color: "#4b5563", lineHeight: 1.25 }}>
-              {[branding.branchName, branding.address, branding.phone, branding.email].filter(Boolean).join(" · ")}
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 7.8,
+                fontWeight: 750,
+                color: "#4b5563",
+                lineHeight: 1.25,
+              }}
+            >
+              {[
+                branding.branchName,
+                branding.address,
+                branding.phone,
+                branding.email,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
           </div>
 
@@ -431,14 +541,14 @@ export default function CompactPrintTemplate({
               textAlign: "center",
               fontWeight: 1000,
               textTransform: "uppercase",
-              letterSpacing: .45,
+              letterSpacing: 0.45,
               fontSize: 9,
               lineHeight: 1.15,
               border: "1px solid #111827",
             }}
           >
             Compact Academic Report
-            <div style={{ marginTop: 2, fontSize: 7.4, opacity: .95 }}>
+            <div style={{ marginTop: 2, fontSize: 7.4, opacity: 0.95 }}>
               {header.academicStructure?.name || "Academic Year"}
             </div>
           </div>
@@ -447,7 +557,9 @@ export default function CompactPrintTemplate({
         <section
           style={{
             display: "grid",
-            gridTemplateColumns: resolvedSettings.showStudentPhoto ? "1fr 58px" : "1fr",
+            gridTemplateColumns: resolvedSettings.showStudentPhoto
+              ? "1fr 58px"
+              : "1fr",
             gap: 5,
             marginTop: 5,
           }}
@@ -460,9 +572,26 @@ export default function CompactPrintTemplate({
             }}
           >
             {visibleStudentInfoBoxes.map((box) => (
-              <div key={box.key} style={{ ...infoCell, gridColumn: (box as any).span ? `span ${(box as any).span}` : undefined }}>
+              <div
+                key={box.key}
+                style={{
+                  ...infoCell,
+                  gridColumn: (box as any).span
+                    ? `span ${(box as any).span}`
+                    : undefined,
+                }}
+              >
                 <div style={label}>{box.label}</div>
-                <div style={{ ...value, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{box.value}</div>
+                <div
+                  style={{
+                    ...value,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {box.value}
+                </div>
               </div>
             ))}
           </div>
@@ -480,9 +609,17 @@ export default function CompactPrintTemplate({
               }}
             >
               {studentPhoto ? (
-                <img src={studentPhoto} alt="Student" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img
+                  src={studentPhoto}
+                  alt="Student"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
               ) : (
-                <span style={{ fontSize: 7.4, fontWeight: 950, color: "#6b7280" }}>PHOTO</span>
+                <span
+                  style={{ fontSize: 7.4, fontWeight: 950, color: "#6b7280" }}
+                >
+                  PHOTO
+                </span>
               )}
             </div>
           )}
@@ -512,7 +649,11 @@ export default function CompactPrintTemplate({
                 }}
               >
                 <span style={label}>{card.label}</span>
-                <strong style={{ color: "#111827", fontSize: 11.2, lineHeight: 1 }}>{card.value}</strong>
+                <strong
+                  style={{ color: "#111827", fontSize: 11.2, lineHeight: 1 }}
+                >
+                  {card.value}
+                </strong>
               </div>
             ))}
           </section>
@@ -522,26 +663,52 @@ export default function CompactPrintTemplate({
           <table style={tableBase}>
             <thead>
               <tr>
-                <th data-report-color-block="true" style={{ ...th, textAlign: "left", minWidth: 88 }}>Subject</th>
+                <th
+                  data-report-color-block="true"
+                  style={{ ...th, textAlign: "left", minWidth: 88 }}
+                >
+                  Subject
+                </th>
 
                 {assessmentColumns.map((column) => (
-                  <th data-report-color-block="true" key={column.assessmentStructureItemId} style={th}>
+                  <th
+                    data-report-color-block="true"
+                    key={column.assessmentStructureItemId}
+                    style={th}
+                  >
                     {column.name}
-                    <div style={{ fontSize: 6.7, marginTop: 1, opacity: .95 }}>W:{formatNumber(column.weight, 0)}</div>
+                    <div style={{ fontSize: 6.7, marginTop: 1, opacity: 0.95 }}>
+                      W:{formatNumber(column.weight, 0)}
+                    </div>
                   </th>
                 ))}
 
-                <th data-report-color-block="true" style={th}>Weighted</th>
-                <th data-report-color-block="true" style={th}>%</th>
+                <th data-report-color-block="true" style={th}>
+                  Weighted
+                </th>
+                <th data-report-color-block="true" style={th}>
+                  %
+                </th>
 
-                {resolvedSettings.showGrade && <th data-report-color-block="true" style={th}>Grade</th>}
+                {resolvedSettings.showGrade && (
+                  <th data-report-color-block="true" style={th}>
+                    Grade
+                  </th>
+                )}
 
                 {resolvedSettings.showSubjectPosition && (
-                  <th data-report-color-block="true" style={th}>{resolvedSettings.subjectPositionLabel || "Pos."}</th>
+                  <th data-report-color-block="true" style={th}>
+                    {resolvedSettings.subjectPositionLabel || "Pos."}
+                  </th>
                 )}
 
                 {resolvedSettings.showSubjectRemarks && (
-                  <th data-report-color-block="true" style={{ ...th, minWidth: 76 }}>Remark</th>
+                  <th
+                    data-report-color-block="true"
+                    style={{ ...th, minWidth: 76 }}
+                  >
+                    Remark
+                  </th>
                 )}
               </tr>
             </thead>
@@ -551,41 +718,73 @@ export default function CompactPrintTemplate({
                 <tr key={subject.classSubjectId}>
                   <td style={{ ...td, fontWeight: 900, color: "#111827" }}>
                     {subject.subjectName}
-                    {resolvedSettings.showTeacherNames && subject.teacherName && (
-                      <div style={{ marginTop: 1, fontSize: 6.8, color: "#4b5563", fontWeight: 700 }}>
-                        {subject.teacherName}
-                      </div>
-                    )}
+                    {resolvedSettings.showTeacherNames &&
+                      subject.teacherName && (
+                        <div
+                          style={{
+                            marginTop: 1,
+                            fontSize: 6.8,
+                            color: "#4b5563",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {subject.teacherName}
+                        </div>
+                      )}
                   </td>
 
                   {assessmentColumns.map((column) => {
-                    const item = subject.breakdown.find((row) => row.assessmentStructureItemId === column.assessmentStructureItemId);
+                    const item = subject.breakdown.find(
+                      (row) =>
+                        row.assessmentStructureItemId ===
+                        column.assessmentStructureItemId,
+                    );
 
                     return (
-                      <td key={column.assessmentStructureItemId} style={{ ...td, textAlign: "center" }}>
-                        {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
+                      <td
+                        key={column.assessmentStructureItemId}
+                        style={{ ...td, textAlign: "center" }}
+                      >
+                        {item
+                          ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}`
+                          : "-"}
                       </td>
                     );
                   })}
 
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>{formatNumber(subject.weightedTotal, 1)}</td>
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>{formatPercent(subject.percentage, 1, "-")}</td>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
+                    {formatNumber(subject.weightedTotal, 1)}
+                  </td>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
+                    {formatPercent(subject.percentage, 1, "-")}
+                  </td>
 
                   {resolvedSettings.showGrade && (
-                    <td style={{ ...td, textAlign: "center", fontWeight: 1000 }}>{subject.grade}</td>
+                    <td
+                      style={{ ...td, textAlign: "center", fontWeight: 1000 }}
+                    >
+                      {subject.grade}
+                    </td>
                   )}
 
                   {resolvedSettings.showSubjectPosition && (
-                    <td style={{ ...td, textAlign: "center" }}>{ordinal(subject.subjectPosition)}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      {ordinal(subject.subjectPosition)}
+                    </td>
                   )}
 
-                  {resolvedSettings.showSubjectRemarks && <td style={td}>{subject.remark}</td>}
+                  {resolvedSettings.showSubjectRemarks && (
+                    <td style={td}>{subject.remark}</td>
+                  )}
                 </tr>
               ))}
 
               {!report.subjectResults.length && (
                 <tr>
-                  <td style={{ ...td, textAlign: "center", padding: 12 }} colSpan={subjectTableColumnCount}>
+                  <td
+                    style={{ ...td, textAlign: "center", padding: 12 }}
+                    colSpan={subjectTableColumnCount}
+                  >
                     No subject results available for this selected period.
                   </td>
                 </tr>
@@ -602,14 +801,50 @@ export default function CompactPrintTemplate({
             gap: 5,
           }}
         >
-          <div style={{ border: "1px solid #111827", minHeight: 42, padding: 5, background: "rgba(255,255,255,.97)" }}>
-            <div style={label}>{resolvedSettings.classTeacherLabel}'s Remark</div>
-            <div style={{ marginTop: 3, fontSize: 8.4, lineHeight: 1.18, color: "#111827" }}>{report.classTeacherRemark || ""}</div>
+          <div
+            style={{
+              border: "1px solid #111827",
+              minHeight: 42,
+              padding: 5,
+              background: "rgba(255,255,255,.97)",
+            }}
+          >
+            <div style={label}>
+              {resolvedSettings.classTeacherLabel}'s Remark
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 8.4,
+                lineHeight: 1.18,
+                color: "#111827",
+              }}
+            >
+              {report.classTeacherRemark || ""}
+            </div>
           </div>
 
-          <div style={{ border: "1px solid #111827", minHeight: 42, padding: 5, background: "rgba(255,255,255,.97)" }}>
-            <div style={label}>{resolvedSettings.headTeacherLabel}'s Remark</div>
-            <div style={{ marginTop: 3, fontSize: 8.4, lineHeight: 1.18, color: "#111827" }}>{report.headTeacherRemark || ""}</div>
+          <div
+            style={{
+              border: "1px solid #111827",
+              minHeight: 42,
+              padding: 5,
+              background: "rgba(255,255,255,.97)",
+            }}
+          >
+            <div style={label}>
+              {resolvedSettings.headTeacherLabel}'s Remark
+            </div>
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 8.4,
+                lineHeight: 1.18,
+                color: "#111827",
+              }}
+            >
+              {report.headTeacherRemark || ""}
+            </div>
           </div>
         </section>
 
@@ -618,33 +853,100 @@ export default function CompactPrintTemplate({
             style={{
               marginTop: 5,
               display: "grid",
-              gridTemplateColumns:[currentPeriodEndLine,nextPeriodLine,generatedDateValue].filter(Boolean).length>=3?"repeat(3,minmax(0,1fr))":[currentPeriodEndLine,nextPeriodLine,generatedDateValue].filter(Boolean).length===2?"repeat(2,minmax(0,1fr))":"1fr",
+              gridTemplateColumns:
+                [
+                  currentPeriodEndLine,
+                  nextPeriodLine,
+                  generatedDateValue,
+                ].filter(Boolean).length >= 3
+                  ? "repeat(3,minmax(0,1fr))"
+                  : [
+                        currentPeriodEndLine,
+                        nextPeriodLine,
+                        generatedDateValue,
+                      ].filter(Boolean).length === 2
+                    ? "repeat(2,minmax(0,1fr))"
+                    : "1fr",
               gap: 5,
             }}
           >
             {currentPeriodEndLine && (
-              <div style={{ border: "1px solid #111827", borderLeft: `5px solid ${primary}`, padding: "4px 6px", background: "rgba(255,255,255,.97)" }}>
+              <div
+                style={{
+                  border: "1px solid #111827",
+                  borderLeft: `5px solid ${primary}`,
+                  padding: "4px 6px",
+                  background: "rgba(255,255,255,.97)",
+                }}
+              >
                 <div style={label}>This Academic Period</div>
-                <div style={{ ...value, display: "flex", justifyContent: "space-between", gap: 7 }}>
-                  <span>{currentAcademicPeriod?.name || header.academicPeriod?.name || "Current Period"}</span>
-                  <span>{currentAcademicPeriod?.formattedEndDate || currentPeriodEndLine.replace(/^.*?:\s*/i, "")}</span>
+                <div
+                  style={{
+                    ...value,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 7,
+                  }}
+                >
+                  <span>
+                    {currentAcademicPeriod?.name ||
+                      header.academicPeriod?.name ||
+                      "Current Period"}
+                  </span>
+                  <span>
+                    {currentAcademicPeriod?.formattedEndDate ||
+                      currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
+                  </span>
                 </div>
               </div>
             )}
 
             {nextPeriodLine && (
-              <div style={{ border: "1px solid #111827", borderLeft: `5px solid ${primary}`, padding: "4px 6px", background: "rgba(255,255,255,.97)" }}>
+              <div
+                style={{
+                  border: "1px solid #111827",
+                  borderLeft: `5px solid ${primary}`,
+                  padding: "4px 6px",
+                  background: "rgba(255,255,255,.97)",
+                }}
+              >
                 <div style={label}>Next Academic Period</div>
-                <div style={{ ...value, display: "flex", justifyContent: "space-between", gap: 7 }}>
+                <div
+                  style={{
+                    ...value,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 7,
+                  }}
+                >
                   <span>{nextAcademicPeriod?.name || "Next Period"}</span>
-                  <span>{nextAcademicPeriod?.formattedStartDate || nextPeriodLine.replace(/^.*?:\s*/i, "")}</span>
+                  <span>
+                    {nextAcademicPeriod?.formattedStartDate ||
+                      nextPeriodLine.replace(/^.*?:\s*/i, "")}
+                  </span>
                 </div>
               </div>
             )}
             {generatedDateValue && (
-              <div style={{ border: "1px solid #111827", borderLeft: `5px solid ${primary}`, padding: "4px 6px", background: "rgba(255,255,255,.97)" }}>
-                <div style={label}>{(resolvedSettings as any).generatedDateLabel || "Generated"}</div>
-                <div style={{ ...value, display:"flex", justifyContent:"space-between", gap:7 }}>
+              <div
+                style={{
+                  border: "1px solid #111827",
+                  borderLeft: `5px solid ${primary}`,
+                  padding: "4px 6px",
+                  background: "rgba(255,255,255,.97)",
+                }}
+              >
+                <div style={label}>
+                  {(resolvedSettings as any).generatedDateLabel || "Generated"}
+                </div>
+                <div
+                  style={{
+                    ...value,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 7,
+                  }}
+                >
                   <span>Report Card</span>
                   <span>{generatedDateValue}</span>
                 </div>
@@ -657,7 +959,9 @@ export default function CompactPrintTemplate({
           style={{
             marginTop: 13,
             display: "grid",
-            gridTemplateColumns: resolvedSettings.showParentSignature ? "repeat(3, minmax(0, 1fr))" : "repeat(2, minmax(0, 1fr))",
+            gridTemplateColumns: resolvedSettings.showParentSignature
+              ? "repeat(3, minmax(0, 1fr))"
+              : "repeat(2, minmax(0, 1fr))",
             gap: 16,
             alignItems: "end",
           }}
@@ -669,10 +973,17 @@ export default function CompactPrintTemplate({
 
           <div style={{ textAlign: "center" }}>
             {reportSignatureImage && (
-              <img src={reportSignatureImage} alt="Official signature" style={{ height: 23, objectFit: "contain", marginBottom: 1 }} />
+              <img
+                src={reportSignatureImage}
+                alt="Official signature"
+                style={{ height: 23, objectFit: "contain", marginBottom: 1 }}
+              />
             )}
             <CompactSignature
-              name={firstText(signatures.headTeacherName, signatures.principalName)}
+              name={firstText(
+                signatures.headTeacherName,
+                signatures.principalName,
+              )}
               label={resolvedSettings.headTeacherLabel}
               inline
             />
@@ -699,7 +1010,9 @@ export default function CompactPrintTemplate({
             fontWeight: 700,
           }}
         >
-          <span>Official academic report generated for {branding.schoolName}</span>
+          <span>
+            Official academic report generated for {branding.schoolName}
+          </span>
           <span>Powered by Eleeveon School Management System</span>
         </footer>
       </div>
@@ -715,7 +1028,10 @@ export default function CompactPrintTemplate({
       <div className="src-mobile-toolbar report-no-print">
         <div>
           <strong>{report.studentName}</strong>
-          <span>{report.className} · {header.academicPeriod?.name || "Academic Period"}</span>
+          <span>
+            {report.className} ·{" "}
+            {header.academicPeriod?.name || "Academic Period"}
+          </span>
         </div>
 
         <div className="src-zoom-controls" aria-label="Report zoom controls">
@@ -733,7 +1049,13 @@ export default function CompactPrintTemplate({
             −
           </button>
 
-          <button type="button" className="src-zoom-fit-button" onClick={fitToScreen} aria-label="Fit to screen" title="Fit to screen">
+          <button
+            type="button"
+            className="src-zoom-fit-button"
+            onClick={fitToScreen}
+            aria-label="Fit to screen"
+            title="Fit to screen"
+          >
             Fit
           </button>
 
@@ -786,7 +1108,9 @@ export default function CompactPrintTemplate({
       <div
         ref={previewFrameRef}
         className="src-preview-scroll report-screen-scroll"
-        style={{ "--report-preview-scale": previewScale } as React.CSSProperties}
+        style={
+          { "--report-preview-scale": previewScale } as React.CSSProperties
+        }
       >
         <div className="src-preview-center">
           <div className="src-preview-scale">{reportPage}</div>
@@ -796,20 +1120,68 @@ export default function CompactPrintTemplate({
   );
 }
 
-function CompactSignature({ name, label, inline = false }: { name?: string; label: string; inline?: boolean }) {
+function CompactSignature({
+  name,
+  label,
+  inline = false,
+}: {
+  name?: string;
+  label: string;
+  inline?: boolean;
+}) {
   if (inline) {
     return (
       <>
-        <div style={{ minHeight: 13, marginBottom: 2, fontSize: 8.2, fontWeight: 900, color: "#111827" }}>{name || ""}</div>
-        <div style={{ borderTop: "1px solid #111827", paddingTop: 3, fontSize: 8.1, fontWeight: 900, color: "#111827" }}>{label}</div>
+        <div
+          style={{
+            minHeight: 13,
+            marginBottom: 2,
+            fontSize: 8.2,
+            fontWeight: 900,
+            color: "#111827",
+          }}
+        >
+          {name || ""}
+        </div>
+        <div
+          style={{
+            borderTop: "1px solid #111827",
+            paddingTop: 3,
+            fontSize: 8.1,
+            fontWeight: 900,
+            color: "#111827",
+          }}
+        >
+          {label}
+        </div>
       </>
     );
   }
 
   return (
     <div style={{ textAlign: "center" }}>
-      <div style={{ minHeight: 13, marginBottom: 2, fontSize: 8.2, fontWeight: 900, color: "#111827" }}>{name || ""}</div>
-      <div style={{ borderTop: "1px solid #111827", paddingTop: 3, fontSize: 8.1, fontWeight: 900, color: "#111827" }}>{label}</div>
+      <div
+        style={{
+          minHeight: 13,
+          marginBottom: 2,
+          fontSize: 8.2,
+          fontWeight: 900,
+          color: "#111827",
+        }}
+      >
+        {name || ""}
+      </div>
+      <div
+        style={{
+          borderTop: "1px solid #111827",
+          paddingTop: 3,
+          fontSize: 8.1,
+          fontWeight: 900,
+          color: "#111827",
+        }}
+      >
+        {label}
+      </div>
     </div>
   );
 }

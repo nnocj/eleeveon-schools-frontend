@@ -539,7 +539,9 @@ function SubjectMode({
           <tbody>
             {dataset.students.map((student, index) => (
               <tr key={student.studentId}>
-                <td style={{ ...styles.td, textAlign: "center" }}>{index + 1}</td>
+                <td style={{ ...styles.td, textAlign: "center" }}>
+                  {index + 1}
+                </td>
                 <td style={styles.td}>
                   <StudentIdentityCell
                     student={student}
@@ -568,17 +570,35 @@ function SubjectMode({
                   })}
 
                 {settings.showBroadsheetWeightedTotal !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 850 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                    }}
+                  >
                     {formatNumber(student.weightedTotal, 1)}
                   </td>
                 )}
                 {settings.showBroadsheetPercentage !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 850 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                    }}
+                  >
                     {formatPercent(student.percentage, 1)}
                   </td>
                 )}
                 {settings.showBroadsheetGrade !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 900 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 900,
+                    }}
+                  >
                     {student.grade || "-"}
                   </td>
                 )}
@@ -593,7 +613,9 @@ function SubjectMode({
                   </td>
                 )}
                 {settings.showBroadsheetRemark !== false && (
-                  <td style={{ ...styles.td, whiteSpace: "normal", minWidth: 80 }}>
+                  <td
+                    style={{ ...styles.td, whiteSpace: "normal", minWidth: 80 }}
+                  >
                     {student.remark || "-"}
                   </td>
                 )}
@@ -659,7 +681,9 @@ function ClassMode({
               {settings.showBroadsheetSubjectScores !== false &&
                 dataset.subjectColumns.map((subject) => (
                   <th key={subject.classSubjectId} style={styles.th}>
-                    {subject.shortName || subject.subjectCode || subject.subjectName}
+                    {subject.shortName ||
+                      subject.subjectCode ||
+                      subject.subjectName}
                     <div
                       style={{
                         marginTop: 1,
@@ -695,7 +719,9 @@ function ClassMode({
           <tbody>
             {dataset.students.map((student, index) => (
               <tr key={student.studentId}>
-                <td style={{ ...styles.td, textAlign: "center" }}>{index + 1}</td>
+                <td style={{ ...styles.td, textAlign: "center" }}>
+                  {index + 1}
+                </td>
                 <td style={styles.td}>
                   <StudentIdentityCell
                     student={student}
@@ -707,7 +733,8 @@ function ClassMode({
                 {settings.showBroadsheetSubjectScores !== false &&
                   dataset.subjectColumns.map((subject) => {
                     const cell = student.subjects.find(
-                      (entry) => entry.classSubjectId === subject.classSubjectId,
+                      (entry) =>
+                        entry.classSubjectId === subject.classSubjectId,
                     );
                     return (
                       <td
@@ -731,12 +758,24 @@ function ClassMode({
                   })}
 
                 {settings.showBroadsheetTotal !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 850 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                    }}
+                  >
                     {formatNumber(student.total, 1)}
                   </td>
                 )}
                 {settings.showBroadsheetAverage !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 900 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 900,
+                    }}
+                  >
                     {formatPercent(student.average, 1)}
                   </td>
                 )}
@@ -836,8 +875,13 @@ function AnnualMode({
               </th>
 
               {dataset.subjectColumns.map((subject) => (
-                <th key={`${subject.subjectId || subject.subjectName}`} style={styles.th}>
-                  {subject.shortName || subject.subjectCode || subject.subjectName}
+                <th
+                  key={`${subject.subjectId || subject.subjectName}`}
+                  style={styles.th}
+                >
+                  {subject.shortName ||
+                    subject.subjectCode ||
+                    subject.subjectName}
                   <div
                     style={{
                       marginTop: 1,
@@ -870,7 +914,9 @@ function AnnualMode({
           <tbody>
             {dataset.students.map((student, index) => (
               <tr key={student.studentId}>
-                <td style={{ ...styles.td, textAlign: "center" }}>{index + 1}</td>
+                <td style={{ ...styles.td, textAlign: "center" }}>
+                  {index + 1}
+                </td>
                 <td style={styles.td}>
                   <AnnualStudentIdentityCell
                     student={student}
@@ -882,7 +928,8 @@ function AnnualMode({
                 {dataset.subjectColumns.map((subject) => {
                   const cell = student.subjects.find(
                     (entry) =>
-                      (subject.subjectId && entry.subjectId === subject.subjectId) ||
+                      (subject.subjectId &&
+                        entry.subjectId === subject.subjectId) ||
                       entry.subjectName === subject.subjectName,
                   );
                   return (
@@ -904,8 +951,9 @@ function AnnualMode({
                                 }}
                               >
                                 {cell.periodScores
-                                  .map((period) =>
-                                    `${period.academicPeriodName}: ${formatNumber(period.percentage, 0)}`,
+                                  .map(
+                                    (period) =>
+                                      `${period.academicPeriodName}: ${formatNumber(period.percentage, 0)}`,
                                   )
                                   .join(" · ")}
                               </div>
@@ -919,7 +967,13 @@ function AnnualMode({
                 })}
 
                 {settings.showBroadsheetAnnualAverage !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 900 }}>
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 900,
+                    }}
+                  >
                     {formatPercent(student.average, 1)}
                   </td>
                 )}
@@ -934,8 +988,16 @@ function AnnualMode({
                   </td>
                 )}
                 {settings.showBroadsheetPromotionDecision !== false && (
-                  <td style={{ ...styles.td, textAlign: "center", fontWeight: 850 }}>
-                    {decisionLabel(student.finalDecision || student.recommendation)}
+                  <td
+                    style={{
+                      ...styles.td,
+                      textAlign: "center",
+                      fontWeight: 850,
+                    }}
+                  >
+                    {decisionLabel(
+                      student.finalDecision || student.recommendation,
+                    )}
                   </td>
                 )}
               </tr>

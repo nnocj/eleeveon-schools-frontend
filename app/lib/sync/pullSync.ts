@@ -3,6 +3,11 @@
  * --------------------------------------------------------------------------
  * Pulls cloud SyncRecord changes into Dexie.
  *
+ * UUID transport contract:
+ * - backend `localId` is the permanent Dexie entity UUID;
+ * - backend `cloudId` is the Prisma SyncRecord UUID;
+ * - pulled records never replace the permanent local entity `id` with `cloudId`.
+ *
  * Phase 4:
  * - uses the stable compound cursor: updatedAt + id;
  * - repeatedly requests pages until hasMore === false;
@@ -73,7 +78,7 @@ export type PullSyncResult = {
 
 function cleanIncomingPayload(
   payload: Record<string, any>,
-  localId?: number,
+  localId?: string,
 ) {
   const copy = { ...(payload || {}) };
 
@@ -129,30 +134,30 @@ function normalizeCursor(
   };
 }
 
-async function findByCloudId(
+async function findById(
   table: any,
-  cloudId?: string | null,
+  id?: string | null,
 ) {
-  if (!hasValue(cloudId)) return null;
+  if (!hasValue(id)) return null;
 
-  const cleanCloudId = String(cloudId);
+  const cleanId = String(id);
 
   try {
     const indexed = await table
-      .where("cloudId")
-      .equals(cleanCloudId)
+      .where("id")
+      .equals(cleanId)
       .first();
 
     if (indexed) return indexed;
   } catch {
-    // Some legacy stores may not index cloudId.
+    // Some legacy stores may not index id.
   }
 
   const rows = await table.toArray();
 
   return (
     rows.find((row: any) =>
-      sameValue(row.cloudId, cleanCloudId),
+      sameValue(row.id, cleanId),
     ) || null
   );
 }
@@ -162,10 +167,10 @@ async function findExistingMediaAsset(
   record: any,
 ) {
   const payload = record.payload || {};
-  const cloudId = record.cloudId || payload.cloudId;
+  const localId = record.localId || payload.id;
 
-  const byCloudId = await findByCloudId(table, cloudId);
-  if (byCloudId) return byCloudId;
+  const byId = await findById(table, localId);
+  if (byId) return byId;
 
   const rows = await table.toArray();
 
@@ -177,9 +182,7 @@ async function findExistingMediaAsset(
   const ownerTable = payload.ownerTable;
   const fieldKey = payload.fieldKey;
   const ownerTempKey = payload.ownerTempKey;
-  const ownerCloudId = payload.ownerCloudId;
-  const ownerLocalId =
-    payload.ownerLocalId ?? record.localId;
+  const ownerId = payload.ownerId ?? record.localId;
 
   if (hasValue(ownerTempKey)) {
     const match = activeRows.find(
@@ -196,7 +199,7 @@ async function findExistingMediaAsset(
     if (match) return match;
   }
 
-  if (hasValue(ownerCloudId)) {
+  if (hasValue(ownerId)) {
     const match = activeRows.find(
       (row: any) =>
         (!hasValue(accountId) ||
@@ -205,14 +208,14 @@ async function findExistingMediaAsset(
           sameValue(row.ownerTable, ownerTable)) &&
         (!hasValue(fieldKey) ||
           sameValue(row.fieldKey, fieldKey)) &&
-        sameValue(row.ownerCloudId, ownerCloudId),
+        sameValue(row.ownerId, ownerId),
     );
 
     if (match) return match;
   }
 
   if (
-    hasValue(ownerLocalId) &&
+    hasValue(ownerId) &&
     hasValue(ownerTable) &&
     hasValue(fieldKey)
   ) {
@@ -222,7 +225,7 @@ async function findExistingMediaAsset(
           sameValue(row.accountId, accountId)) &&
         sameValue(row.ownerTable, ownerTable) &&
         sameValue(row.fieldKey, fieldKey) &&
-        sameValue(row.ownerLocalId, ownerLocalId),
+        sameValue(row.ownerId, ownerId),
     );
 
     if (match) return match;
@@ -237,8 +240,8 @@ async function findExistingMediaAsset(
 
     if (
       candidate &&
-      hasValue(cloudId) &&
-      sameValue(candidate.cloudId, cloudId)
+      hasValue(localId) &&
+      sameValue(candidate.id, localId)
     ) {
       return candidate;
     }
@@ -281,10 +284,16 @@ async function findExistingRecordForPull(
   }
 
   return findExistingLocalRecord(table, {
-    cloudId: record.cloudId,
+    // Current UUID-native contract.
     localId: record.localId,
+    cloudId: record.cloudId,
+
+    // Temporary aliases for an older syncUtils.ts implementation.
+    id: record.cloudId,
+    entityId: record.localId,
+
     payload: record.payload,
-  });
+  } as any);
 }
 
 async function applyPulledRecord(input: {
@@ -307,7 +316,13 @@ async function applyPulledRecord(input: {
 
   const integrity =
     validatePullRecord(
-      record,
+      {
+        ...record,
+
+        // Temporary aliases for an older syncIntegrity.ts implementation.
+        entityId: record.localId,
+        id: record.cloudId,
+      } as any,
       accountId,
     );
 
@@ -324,9 +339,9 @@ async function applyPulledRecord(input: {
         accountId,
       tableName:
         record?.tableName,
-      localId:
+      entityId:
         record?.localId,
-      cloudId:
+      id:
         record?.cloudId,
       reason,
       payload: record,
@@ -436,14 +451,38 @@ async function applyPulledRecord(input: {
 
     const existingId =
       existing?.id ??
-      existing?.localId ??
       undefined;
 
+    const permanentLocalId =
+      String(
+        record.localId ||
+          existingId ||
+          payload.id ||
+          "",
+      ).trim();
+
+    if (!permanentLocalId) {
+      throw new Error(
+        `${record.tableName}: pulled record is missing localId.`,
+      );
+    }
+
     const incoming: any = {
-      ...cleanIncomingPayload(payload, existingId),
+      ...cleanIncomingPayload(
+        payload,
+        permanentLocalId,
+      ),
+
+      // Permanent Dexie entity UUID.
+      id: permanentLocalId,
+
+      // Prisma SyncRecord UUID.
       cloudId:
         record.cloudId ||
-        payload.cloudId,
+        payload.cloudId ||
+        existing?.cloudId ||
+        undefined,
+
       accountId,
       deviceId:
         record.deviceId ||
@@ -479,12 +518,20 @@ async function applyPulledRecord(input: {
 
       await table.update(existingId, {
         ...winner,
+
+        // Preserve the permanent Dexie entity UUID.
         id: existingId,
+
+        // Preserve or update the Prisma SyncRecord UUID separately.
+        cloudId:
+          incoming.cloudId ||
+          existing.cloudId ||
+          undefined,
+
         accountId,
         synced: SYNC_STATUS_VALUE.SYNCED,
       });
     } else {
-      delete incoming.id;
       await table.add(incoming);
     }
 
@@ -601,11 +648,11 @@ export async function pullSync(options?: {
             accountId,
           tableName:
             malformed?.record?.tableName,
-          localId:
+          entityId:
             malformed?.record?.localId,
-          cloudId:
+          id:
             malformed?.record?.cloudId ||
-            malformed?.record?.id,
+            undefined,
           reason:
             malformed?.reason ||
             "The backend identified a malformed synchronization record.",

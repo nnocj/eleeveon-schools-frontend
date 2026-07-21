@@ -56,7 +56,12 @@ import {
   type Program,
   type StudentCurriculum,
 } from "../../lib/db/db";
-import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
@@ -68,9 +73,6 @@ import {
   commitMediaAssetsToOwner,
   createMediaSessionKey,
   saveImageAsset,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 
 type ViewMode = "cards" | "table" | "summary";
@@ -78,15 +80,15 @@ type ToastTone = "success" | "error" | "info";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type CurriculumView = {
-  id: number;
+  id: string;
   row: Curriculum;
   academicStructureName: string;
   programName: string;
@@ -99,7 +101,7 @@ type CurriculumView = {
 };
 
 type FormState = {
-  id?: number;
+  id?: string;
   academicStructureId: string;
   programId: string;
   organizationId: string;
@@ -112,9 +114,9 @@ type FormState = {
   effectiveFrom: string;
   effectiveTo: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerImageMediaId?: number;
+  bannerImageMediaId?: string;
   active: boolean;
   locked: boolean;
 };
@@ -143,14 +145,14 @@ const emptyForm: FormState = {
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "").trim();
-  if (!media || media.startsWith("blob:") || media.startsWith("data:")) return undefined;
+  if (!media || media.startsWith("blob:") || media.startsWith("data:"))
+    return undefined;
   return media;
 };
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -159,11 +161,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -174,7 +176,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -199,13 +203,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -216,7 +220,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -225,7 +233,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -237,7 +245,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -247,20 +259,23 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
   const status = safeLower(row?.status);
   if (row?.isDeleted) return false;
   if (row?.active === false) return false;
-  if (["inactive", "deleted", "archived", "suspended"].includes(status)) return false;
+  if (["inactive", "deleted", "archived", "suspended"].includes(status))
+    return false;
   return true;
 };
 
@@ -269,7 +284,11 @@ const timeText = (value?: string | number | null) => {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -281,7 +300,13 @@ const periodText = (from?: string, to?: string) => {
   return from ? `From ${timeText(from)}` : `Until ${timeText(to)}`;
 };
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
@@ -298,7 +323,15 @@ function SliderIcon() {
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -318,8 +351,20 @@ function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function Curriculumsetup() {
-  const dataRevision = useBranchTableRevision(["curriculums", "academicStructures", "programs", "organizations", "curriculumPathways", "curriculumSubjects", "studentCurriculums", "mediaAssets", "mediaBlobs"]);
-  const mediaSessionKeyRef = useRef(createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE));
+  const dataRevision = useBranchTableRevision([
+    "curriculums",
+    "academicStructures",
+    "programs",
+    "organizations",
+    "curriculumPathways",
+    "curriculumSubjects",
+    "studentCurriculums",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
+  const mediaSessionKeyRef = useRef(
+    createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE),
+  );
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -349,32 +394,52 @@ export default function Curriculumsetup() {
       { fieldKey: "bannerImage", mediaIdKey: "bannerImageMediaId" },
     ],
   });
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
-  const [curriculumSubjects, setCurriculumSubjects] = useState<CurriculumSubject[]>([]);
-  const [studentCurriculums, setStudentCurriculums] = useState<StudentCurriculum[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
+  const [studentCurriculums, setStudentCurriculums] = useState<
+    StudentCurriculum[]
+  >([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
-  const [filterAcademicStructureId, setFilterAcademicStructureId] = useState("all");
+  const [filterAcademicStructureId, setFilterAcademicStructureId] =
+    useState("all");
   const [filterProgramId, setFilterProgramId] = useState("all");
   const [filterOrganizationId, setFilterOrganizationId] = useState("all");
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "inactive" | "locked">("active");
+  const [filterStatus, setFilterStatus] = useState<
+    "all" | "active" | "inactive" | "locked"
+  >("active");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<CurriculumView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -384,7 +449,11 @@ export default function Curriculumsetup() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -406,23 +475,73 @@ export default function Curriculumsetup() {
 
     try {
       setLoading(true);
-      const [curriculumRows, academicStructureRows, programRows, organizationRows, pathwayRows, curriculumSubjectRows, studentCurriculumRows] = await Promise.all([
+      const [
+        curriculumRows,
+        academicStructureRows,
+        programRows,
+        organizationRows,
+        pathwayRows,
+        curriculumSubjectRows,
+        studentCurriculumRows,
+      ] = await Promise.all([
         tableSafe("curriculums")?.toArray?.() || [],
-        listActiveLocal("academicStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("programs", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("academicStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("programs", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("curriculumPathways")?.toArray?.() || [],
         tableSafe("curriculumSubjects")?.toArray?.() || [],
         tableSafe("studentCurriculums")?.toArray?.() || [],
       ]);
 
-      setRows((curriculumRows as Curriculum[]).filter((row) => sameTenant(row as TenantRow)).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setAcademicStructures((academicStructureRows as AcademicStructure[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setPrograms((programRows as Program[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setOrganizations((organizationRows as Organization[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setPathways((pathwayRows as CurriculumPathway[]).filter((row) => sameTenant(row as TenantRow)));
-      setCurriculumSubjects((curriculumSubjectRows as CurriculumSubject[]).filter((row) => sameTenant(row as TenantRow)));
-      setStudentCurriculums((studentCurriculumRows as StudentCurriculum[]).filter((row) => sameTenant(row as TenantRow)));
+      setRows(
+        (curriculumRows as Curriculum[])
+          .filter((row) => sameTenant(row as TenantRow))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+      setAcademicStructures(
+        (academicStructureRows as AcademicStructure[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setPrograms(
+        (programRows as Program[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setOrganizations(
+        (organizationRows as Organization[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setPathways(
+        (pathwayRows as CurriculumPathway[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setCurriculumSubjects(
+        (curriculumSubjectRows as CurriculumSubject[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
+      setStudentCurriculums(
+        (studentCurriculumRows as StudentCurriculum[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error(error);
       clearData();
@@ -436,18 +555,34 @@ export default function Curriculumsetup() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
-  const academicStructureMap = useMemo(() => new Map(academicStructures.map((row: any) => [idOf(row.id), row])), [academicStructures]);
-  const programMap = useMemo(() => new Map(programs.map((row: any) => [idOf(row.id), row])), [programs]);
-  const organizationMap = useMemo(() => new Map(organizations.map((row: any) => [idOf(row.id), row])), [organizations]);
+  const academicStructureMap = useMemo(
+    () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
+    [academicStructures],
+  );
+  const programMap = useMemo(
+    () => new Map(programs.map((row: any) => [idOf(row.id), row])),
+    [programs],
+  );
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((row: any) => [idOf(row.id), row])),
+    [organizations],
+  );
 
   const usage = useMemo(() => {
-    const pathwayMap = new Map<number, number>();
-    const subjectMap = new Map<number, number>();
-    const studentMap = new Map<number, number>();
+    const pathwayMap = new Map<string, number>();
+    const subjectMap = new Map<string, number>();
+    const studentMap = new Map<string, number>();
 
     pathways.forEach((row: any) => {
       const id = idOf(row.curriculumId);
@@ -467,70 +602,137 @@ export default function Curriculumsetup() {
     return { pathwayMap, subjectMap, studentMap };
   }, [curriculumSubjects, pathways, studentCurriculums]);
 
-  const viewRows = useMemo<CurriculumView[]>(() => rows.map((row: any) => {
-    const id = idOf(row.id);
-    const academicStructure = academicStructureMap.get(idOf(row.academicStructureId));
-    const program = programMap.get(idOf(row.programId));
-    const organization = organizationMap.get(idOf(row.organizationId));
+  const viewRows = useMemo<CurriculumView[]>(
+    () =>
+      rows.map((row: any) => {
+        const id = idOf(row.id);
+        const academicStructure = academicStructureMap.get(
+          idOf(row.academicStructureId),
+        );
+        const program = programMap.get(idOf(row.programId));
+        const organization = organizationMap.get(idOf(row.organizationId));
 
-    return {
-      id,
-      row,
-      academicStructureName: academicStructure?.name || "No academic structure",
-      programName: program?.name || "No program",
-      organizationName: organization?.name || "No organization",
-      pathwayCount: usage.pathwayMap.get(id) || 0,
-      subjectCount: usage.subjectMap.get(id) || 0,
-      studentCount: usage.studentMap.get(id) || 0,
-      active: isActiveRow(row),
-      locked: row.locked === true,
-    };
-  }), [academicStructureMap, organizationMap, programMap, rows, usage]);
+        return {
+          id,
+          row,
+          academicStructureName:
+            academicStructure?.name || "No academic structure",
+          programName: program?.name || "No program",
+          organizationName: organization?.name || "No organization",
+          pathwayCount: usage.pathwayMap.get(id) || 0,
+          subjectCount: usage.subjectMap.get(id) || 0,
+          studentCount: usage.studentMap.get(id) || 0,
+          active: isActiveRow(row),
+          locked: row.locked === true,
+        };
+      }),
+    [academicStructureMap, organizationMap, programMap, rows, usage],
+  );
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return viewRows.filter((item) => {
-      const row: any = item.row;
-      if (filterAcademicStructureId !== "all" && !sameId(row.academicStructureId, filterAcademicStructureId)) return false;
-      if (filterProgramId !== "all" && !sameId(row.programId, filterProgramId)) return false;
-      if (filterOrganizationId !== "all" && !sameId(row.organizationId, filterOrganizationId)) return false;
-      if (filterStatus === "active" && !item.active) return false;
-      if (filterStatus === "inactive" && item.active) return false;
-      if (filterStatus === "locked" && !item.locked) return false;
-      if (!term) return true;
-      return `${row.name} ${row.code || ""} ${row.description || ""} ${row.curriculumVersion || ""} ${item.academicStructureName} ${item.programName} ${item.organizationName}`.toLowerCase().includes(term);
-    }).sort((a, b) => String((a.row as any).name || "").localeCompare(String((b.row as any).name || "")));
-  }, [filterAcademicStructureId, filterOrganizationId, filterProgramId, filterStatus, search, viewRows]);
+    return viewRows
+      .filter((item) => {
+        const row: any = item.row;
+        if (
+          filterAcademicStructureId !== "all" &&
+          !sameId(row.academicStructureId, filterAcademicStructureId)
+        )
+          return false;
+        if (
+          filterProgramId !== "all" &&
+          !sameId(row.programId, filterProgramId)
+        )
+          return false;
+        if (
+          filterOrganizationId !== "all" &&
+          !sameId(row.organizationId, filterOrganizationId)
+        )
+          return false;
+        if (filterStatus === "active" && !item.active) return false;
+        if (filterStatus === "inactive" && item.active) return false;
+        if (filterStatus === "locked" && !item.locked) return false;
+        if (!term) return true;
+        return `${row.name} ${row.code || ""} ${row.description || ""} ${row.curriculumVersion || ""} ${item.academicStructureName} ${item.programName} ${item.organizationName}`
+          .toLowerCase()
+          .includes(term);
+      })
+      .sort((a, b) =>
+        String((a.row as any).name || "").localeCompare(
+          String((b.row as any).name || ""),
+        ),
+      );
+  }, [
+    filterAcademicStructureId,
+    filterOrganizationId,
+    filterProgramId,
+    filterStatus,
+    search,
+    viewRows,
+  ]);
 
-  const summary = useMemo(() => ({
-    total: viewRows.length,
-    active: viewRows.filter((item) => item.active).length,
-    inactive: viewRows.filter((item) => !item.active).length,
-    locked: viewRows.filter((item) => item.locked).length,
-    pathways: viewRows.reduce((sum, item) => sum + item.pathwayCount, 0),
-    subjects: viewRows.reduce((sum, item) => sum + item.subjectCount, 0),
-    students: viewRows.reduce((sum, item) => sum + item.studentCount, 0),
-    showing: filteredRows.length,
-  }), [filteredRows.length, viewRows]);
+  const summary = useMemo(
+    () => ({
+      total: viewRows.length,
+      active: viewRows.filter((item) => item.active).length,
+      inactive: viewRows.filter((item) => !item.active).length,
+      locked: viewRows.filter((item) => item.locked).length,
+      pathways: viewRows.reduce((sum, item) => sum + item.pathwayCount, 0),
+      subjects: viewRows.reduce((sum, item) => sum + item.subjectCount, 0),
+      students: viewRows.reduce((sum, item) => sum + item.studentCount, 0),
+      showing: filteredRows.length,
+    }),
+    [filteredRows.length, viewRows],
+  );
 
-  const activeFilterCount = useMemo(() => [filterAcademicStructureId, filterProgramId, filterOrganizationId, filterStatus].filter((value) => value !== "all" && value !== "active").length, [filterAcademicStructureId, filterOrganizationId, filterProgramId, filterStatus]);
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        filterAcademicStructureId,
+        filterProgramId,
+        filterOrganizationId,
+        filterStatus,
+      ].filter((value) => value !== "all" && value !== "active").length,
+    [
+      filterAcademicStructureId,
+      filterOrganizationId,
+      filterProgramId,
+      filterStatus,
+    ],
+  );
 
-  const countsByAcademicStructure = useMemo(() => groupedCounts(viewRows, (item) => item.academicStructureName), [viewRows]);
-  const countsByProgram = useMemo(() => groupedCounts(viewRows, (item) => item.programName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (item) => item.locked ? "Locked" : item.active ? "Active" : "Inactive"), [viewRows]);
+  const countsByAcademicStructure = useMemo(
+    () => groupedCounts(viewRows, (item) => item.academicStructureName),
+    [viewRows],
+  );
+  const countsByProgram = useMemo(
+    () => groupedCounts(viewRows, (item) => item.programName),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (item) =>
+        item.locked ? "Locked" : item.active ? "Active" : "Inactive",
+      ),
+    [viewRows],
+  );
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const handleImageUpload = async (field: "photo" | "bannerImage", file?: File) => {
+  const handleImageUpload = async (
+    field: "photo" | "bannerImage",
+    file?: File,
+  ) => {
     if (!file || !accountId || !schoolId || !branchId) return;
 
     try {
       const result = await saveImageAsset(file, {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: CURRICULUM_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKeyRef.current,
         fieldKey: field,
         variant: field === "photo" ? "avatar" : "cover",
@@ -539,10 +741,14 @@ export default function Curriculumsetup() {
 
       updateForm({
         [field]: result.previewUrl,
-        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]: result.assetId,
+        [field === "photo" ? "photoMediaId" : "bannerImageMediaId"]:
+          result.assetId,
       } as Partial<FormState>);
 
-      showToast("info", `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`);
+      showToast(
+        "info",
+        `${field === "photo" ? "Photo" : "Banner"} prepared. Save to attach and upload it.`,
+      );
     } catch (error: any) {
       showToast("error", error?.message || "Failed to process image.");
     }
@@ -565,13 +771,21 @@ export default function Curriculumsetup() {
 
   const openCreate = () => {
     if (!requireTenant()) return;
-    mediaSessionKeyRef.current = createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE);
+    mediaSessionKeyRef.current = createMediaSessionKey(
+      CURRICULUM_MEDIA_OWNER_TABLE,
+    );
     setSelectedItem(null);
     setForm({
       ...emptyForm,
-      academicStructureId: filterAcademicStructureId !== "all" ? filterAcademicStructureId : academicStructures[0]?.id ? String(academicStructures[0].id) : "",
+      academicStructureId:
+        filterAcademicStructureId !== "all"
+          ? filterAcademicStructureId
+          : academicStructures[0]?.id
+            ? String(academicStructures[0].id)
+            : "",
       programId: filterProgramId !== "all" ? filterProgramId : "",
-      organizationId: filterOrganizationId !== "all" ? filterOrganizationId : "",
+      organizationId:
+        filterOrganizationId !== "all" ? filterOrganizationId : "",
     });
     setModalOpen(true);
   };
@@ -581,7 +795,9 @@ export default function Curriculumsetup() {
     setSelectedItem(null);
     setForm({
       id: item.id,
-      academicStructureId: row.academicStructureId ? String(row.academicStructureId) : "",
+      academicStructureId: row.academicStructureId
+        ? String(row.academicStructureId)
+        : "",
       programId: row.programId ? String(row.programId) : "",
       organizationId: row.organizationId ? String(row.organizationId) : "",
       name: row.name || "",
@@ -589,13 +805,16 @@ export default function Curriculumsetup() {
       description: row.description || "",
       curriculumVersion: row.curriculumVersion || "",
       totalCredits: row.totalCredits == null ? "" : String(row.totalCredits),
-      durationPeriods: row.durationPeriods == null ? "" : String(row.durationPeriods),
+      durationPeriods:
+        row.durationPeriods == null ? "" : String(row.durationPeriods),
       effectiveFrom: row.effectiveFrom || "",
       effectiveTo: row.effectiveTo || "",
       photo: row.photo || "",
-      photoMediaId: row.photoMediaId ? Number(row.photoMediaId) : undefined,
+      photoMediaId: row.photoMediaId ? String(row.photoMediaId) : undefined,
       bannerImage: row.bannerImage || "",
-      bannerImageMediaId: row.bannerImageMediaId ? Number(row.bannerImageMediaId) : undefined,
+      bannerImageMediaId: row.bannerImageMediaId
+        ? String(row.bannerImageMediaId)
+        : undefined,
       active: item.active,
       locked: item.locked,
     });
@@ -612,11 +831,13 @@ export default function Curriculumsetup() {
       if (form.id && sameId(row.id, form.id)) return false;
       if (row.isDeleted) return false;
       const sameName = safeLower(row.name) === safeLower(form.name);
-      const sameCode = !!form.code.trim() && safeLower(row.code) === safeLower(form.code);
+      const sameCode =
+        !!form.code.trim() && safeLower(row.code) === safeLower(form.code);
       return sameName || sameCode;
     });
 
-    if (duplicate) return "A curriculum with this name or code already exists in this branch.";
+    if (duplicate)
+      return "A curriculum with this name or code already exists in this branch.";
     return "";
   };
 
@@ -630,20 +851,28 @@ export default function Curriculumsetup() {
 
     try {
       setSaving(true);
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<Curriculum> = {
         accountId: String(accountId),
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         academicStructureId: idOf(form.academicStructureId),
         programId: form.programId ? idOf(form.programId) : undefined,
-        organizationId: form.organizationId ? idOf(form.organizationId) : undefined,
+        organizationId: form.organizationId
+          ? idOf(form.organizationId)
+          : undefined,
         name: form.name.trim(),
         code: form.code.trim() || undefined,
         description: form.description.trim() || undefined,
         curriculumVersion: form.curriculumVersion.trim() || undefined,
-        totalCredits: form.totalCredits === "" ? undefined : Number(form.totalCredits),
-        durationPeriods: form.durationPeriods === "" ? undefined : Number(form.durationPeriods),
+        totalCredits:
+          form.totalCredits === "" ? undefined : Number(form.totalCredits),
+        durationPeriods:
+          form.durationPeriods === ""
+            ? undefined
+            : Number(form.durationPeriods),
         effectiveFrom: form.effectiveFrom || undefined,
         effectiveTo: form.effectiveTo || undefined,
         photo: safeRecordMediaValue(form.photo),
@@ -657,17 +886,19 @@ export default function Curriculumsetup() {
 
       const savedCurriculum =
         form.id && existing
-          ? await updateLocal("curriculums", Number(form.id), payload)
+          ? await updateLocal("curriculums", String(form.id), payload)
           : await createLocal("curriculums", payload as Curriculum);
 
-      const savedCurriculumId = Number((savedCurriculum as any)?.id || form.id || 0);
+      const savedCurriculumId = idOf(
+        (savedCurriculum as any)?.id || form.id || 0,
+      );
 
       if (savedCurriculumId) {
         await commitMediaAssetsToOwner({
           accountId: String(accountId),
           ownerTable: CURRICULUM_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedCurriculumId,
-          ownerCloudId: (savedCurriculum as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedCurriculumId,
+
           ownerTempKey: mediaSessionKeyRef.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: "photo" },
@@ -676,7 +907,9 @@ export default function Curriculumsetup() {
         });
       }
 
-      mediaSessionKeyRef.current = createMediaSessionKey(CURRICULUM_MEDIA_OWNER_TABLE);
+      mediaSessionKeyRef.current = createMediaSessionKey(
+        CURRICULUM_MEDIA_OWNER_TABLE,
+      );
       setModalOpen(false);
       showToast("success", "Curriculum saved.");
       await load();
@@ -691,9 +924,15 @@ export default function Curriculumsetup() {
   const toggleActive = async (item: CurriculumView) => {
     if (!item.id) return;
     try {
-      await updateLocal("curriculums", item.id, { active: !item.active, isDeleted: false } as Partial<Curriculum>);
+      await updateLocal("curriculums", item.id, {
+        active: !item.active,
+        isDeleted: false,
+      } as Partial<Curriculum>);
       setSelectedItem(null);
-      showToast("success", item.active ? "Curriculum deactivated." : "Curriculum activated.");
+      showToast(
+        "success",
+        item.active ? "Curriculum deactivated." : "Curriculum activated.",
+      );
       await load();
     } catch (error) {
       console.error(error);
@@ -704,9 +943,15 @@ export default function Curriculumsetup() {
   const toggleLocked = async (item: CurriculumView) => {
     if (!item.id) return;
     try {
-      await updateLocal("curriculums", item.id, { locked: !item.locked, isDeleted: false } as Partial<Curriculum>);
+      await updateLocal("curriculums", item.id, {
+        locked: !item.locked,
+        isDeleted: false,
+      } as Partial<Curriculum>);
       setSelectedItem(null);
-      showToast("success", item.locked ? "Curriculum unlocked." : "Curriculum locked.");
+      showToast(
+        "success",
+        item.locked ? "Curriculum unlocked." : "Curriculum locked.",
+      );
       await load();
     } catch (error) {
       console.error(error);
@@ -715,29 +960,27 @@ export default function Curriculumsetup() {
   };
 
   const remove = async (item: CurriculumView) => {
-    const totalUsage = item.pathwayCount + item.subjectCount + item.studentCount;
-    const ok = window.confirm(totalUsage ? `"${(item.row as any).name}" has ${totalUsage} linked record(s). Delete anyway?` : `Delete "${(item.row as any).name}"?`);
+    const totalUsage =
+      item.pathwayCount + item.subjectCount + item.studentCount;
+    const ok = window.confirm(
+      totalUsage
+        ? `"${(item.row as any).name}" has ${totalUsage} linked record(s). Delete anyway?`
+        : `Delete "${(item.row as any).name}"?`,
+    );
     if (!ok) return;
     try {
-
       await Promise.all(
-
         ["photo", "bannerImage"].map((fieldKey) =>
-
           softDeleteOwnerFieldAssets({
-
             accountId: String(accountId),
 
             ownerTable: "curriculums",
 
-            ownerLocalId: Number(item.id),
+            ownerId: idOf(item.id) || undefined,
 
             fieldKey,
-
           }),
-
         ),
-
       );
 
       await softDeleteLocal("curriculums", item.id);
@@ -751,111 +994,344 @@ export default function Curriculumsetup() {
   };
 
   if (accountLoading || settingsLoading || contextLoading || loading) {
-    return <State primary={primary} title="Opening Curriculum Setup..." text="Checking branch context, academic structures, programs, organizations, and curriculums." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Curriculum Setup..."
+        text="Checking branch context, academic structures, programs, organizations, and curriculums."
+      />
+    );
   }
 
-  if (!authenticated || !accountId) return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing curriculums." />;
+  if (!authenticated || !accountId)
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing curriculums."
+      />
+    );
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Curriculums belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {toast && <section className={`ba-toast ${toast.tone}`}>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button></section>}
+      {toast && (
+        <section className={`ba-toast ${toast.tone}`}>
+          {toast.message}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
+        </section>
+      )}
 
-      <section className="ba-search-card" aria-label="Curriculum search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Curriculum search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search curriculums..." aria-label="Search curriculums" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search curriculums..."
+            aria-label="Search curriculums"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add curriculum">+</button>
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add curriculum"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {filterAcademicStructureId !== "all" && <button type="button" onClick={() => setFilterAcademicStructureId("all")}>Structure: {(academicStructureMap.get(idOf(filterAcademicStructureId)) as any)?.name || filterAcademicStructureId} ×</button>}
-          {filterProgramId !== "all" && <button type="button" onClick={() => setFilterProgramId("all")}>Program: {(programMap.get(idOf(filterProgramId)) as any)?.name || filterProgramId} ×</button>}
-          {filterOrganizationId !== "all" && <button type="button" onClick={() => setFilterOrganizationId("all")}>Organization: {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name || filterOrganizationId} ×</button>}
-          {filterStatus !== "active" && <button type="button" onClick={() => setFilterStatus("active")}>Status: {filterStatus} ×</button>}
+          {filterAcademicStructureId !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilterAcademicStructureId("all")}
+            >
+              Structure:{" "}
+              {(
+                academicStructureMap.get(idOf(filterAcademicStructureId)) as any
+              )?.name || filterAcademicStructureId}{" "}
+              ×
+            </button>
+          )}
+          {filterProgramId !== "all" && (
+            <button type="button" onClick={() => setFilterProgramId("all")}>
+              Program:{" "}
+              {(programMap.get(idOf(filterProgramId)) as any)?.name ||
+                filterProgramId}{" "}
+              ×
+            </button>
+          )}
+          {filterOrganizationId !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilterOrganizationId("all")}
+            >
+              Organization:{" "}
+              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
+                filterOrganizationId}{" "}
+              ×
+            </button>
+          )}
+          {filterStatus !== "active" && (
+            <button type="button" onClick={() => setFilterStatus("active")}>
+              Status: {filterStatus} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Curriculums by Academic Structure" rows={countsByAcademicStructure} total={summary.total} />
-          <AnalysisCard title="Curriculums by Program" rows={countsByProgram} total={summary.total} />
-          <AnalysisCard title="Curriculums by Status" rows={countsByStatus} total={summary.total} />
-          <article className="ba-analysis ba-current-filter"><span>Current Filter</span><strong>{summary.showing}</strong><p>Curriculum record(s) currently match your search and filters.</p></article>
-          <article className="ba-analysis"><span>Links</span><strong>{summary.pathways + summary.subjects + summary.students}</strong><p>{summary.pathways} pathway links · {summary.subjects} subject links · {summary.students} student links.</p></article>
+          <AnalysisCard
+            title="Curriculums by Academic Structure"
+            rows={countsByAcademicStructure}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Curriculums by Program"
+            rows={countsByProgram}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Curriculums by Status"
+            rows={countsByStatus}
+            total={summary.total}
+          />
+          <article className="ba-analysis ba-current-filter">
+            <span>Current Filter</span>
+            <strong>{summary.showing}</strong>
+            <p>Curriculum record(s) currently match your search and filters.</p>
+          </article>
+          <article className="ba-analysis">
+            <span>Links</span>
+            <strong>
+              {summary.pathways + summary.subjects + summary.students}
+            </strong>
+            <p>
+              {summary.pathways} pathway links · {summary.subjects} subject
+              links · {summary.students} student links.
+            </p>
+          </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} toggleActive={toggleActive} toggleLocked={toggleLocked} remove={remove} />}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          toggleActive={toggleActive}
+          toggleLocked={toggleLocked}
+          remove={remove}
+        />
+      )}
 
       {viewMode === "cards" && (
         <section className="ba-grid">
-          {filteredRows.map((item) => <CurriculumCard key={String(item.id)} item={item} onOpen={() => setSelectedItem(item)} />)}
-          {!filteredRows.length && <Empty icon="📚" title="No curriculums found" text="Create curriculum frameworks for this branch, then manage pathways on the separate pathways page." />}
+          {filteredRows.map((item) => (
+            <CurriculumCard
+              key={String(item.id)}
+              item={item}
+              onOpen={() => setSelectedItem(item)}
+            />
+          ))}
+          {!filteredRows.length && (
+            <Empty
+              icon="📚"
+              title="No curriculums found"
+              text="Create curriculum frameworks for this branch, then manage pathways on the separate pathways page."
+            />
+          )}
         </section>
       )}
 
-      {filterOpen && <FilterSheet academicStructures={academicStructures} programs={programs} organizations={organizations} filterAcademicStructureId={filterAcademicStructureId} filterProgramId={filterProgramId} filterOrganizationId={filterOrganizationId} filterStatus={filterStatus} setFilterAcademicStructureId={setFilterAcademicStructureId} setFilterProgramId={setFilterProgramId} setFilterOrganizationId={setFilterOrganizationId} setFilterStatus={setFilterStatus} clearFilters={clearFilters} onClose={() => setFilterOpen(false)} />}
+      {filterOpen && (
+        <FilterSheet
+          academicStructures={academicStructures}
+          programs={programs}
+          organizations={organizations}
+          filterAcademicStructureId={filterAcademicStructureId}
+          filterProgramId={filterProgramId}
+          filterOrganizationId={filterOrganizationId}
+          filterStatus={filterStatus}
+          setFilterAcademicStructureId={setFilterAcademicStructureId}
+          setFilterProgramId={setFilterProgramId}
+          setFilterOrganizationId={setFilterOrganizationId}
+          setFilterStatus={setFilterStatus}
+          clearFilters={clearFilters}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
 
-      {moreOpen && <MoreSheet viewMode={viewMode} setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
+      {moreOpen && (
+        <MoreSheet
+          viewMode={viewMode}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
 
-      {selectedItem && <ActionSheet item={selectedItem} openEdit={openEdit} toggleActive={toggleActive} toggleLocked={toggleLocked} remove={remove} onClose={() => setSelectedItem(null)} />}
+      {selectedItem && (
+        <ActionSheet
+          item={selectedItem}
+          openEdit={openEdit}
+          toggleActive={toggleActive}
+          toggleLocked={toggleLocked}
+          remove={remove}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
 
-      {modalOpen && <CurriculumModal form={form} saving={saving} academicStructures={academicStructures} programs={programs} organizations={organizations} updateForm={updateForm} handleImageUpload={handleImageUpload} setModalOpen={setModalOpen} save={save} />}
+      {modalOpen && (
+        <CurriculumModal
+          form={form}
+          saving={saving}
+          academicStructures={academicStructures}
+          programs={programs}
+          organizations={organizations}
+          updateForm={updateForm}
+          handleImageUpload={handleImageUpload}
+          setModalOpen={setModalOpen}
+          save={save}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
-      <section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
     </main>
   );
 }
 
-function CurriculumCard({ item, onOpen }: { item: CurriculumView; onOpen: () => void }) {
+function CurriculumCard({
+  item,
+  onOpen,
+}: {
+  item: CurriculumView;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
   return (
     <button type="button" className="curriculum-row" onClick={onOpen}>
       <span className="curriculum-icon">📚</span>
       <span className="curriculum-main">
         <strong>{row.name || "Unnamed curriculum"}</strong>
-        <small>{item.academicStructureName}{row.code ? ` · ${row.code}` : ""}</small>
-        <em>{item.pathwayCount} pathways · {item.subjectCount} subjects · {item.studentCount} students</em>
+        <small>
+          {item.academicStructureName}
+          {row.code ? ` · ${row.code}` : ""}
+        </small>
+        <em>
+          {item.pathwayCount} pathways · {item.subjectCount} subjects ·{" "}
+          {item.studentCount} students
+        </em>
       </span>
       <span className="curriculum-side">
-        <span className={`status-dot-mini ${item.locked ? "orange" : item.active ? "green" : "gray"}`} title={item.locked ? "Locked" : item.active ? "Active" : "Inactive"} />
+        <span
+          className={`status-dot-mini ${item.locked ? "orange" : item.active ? "green" : "gray"}`}
+          title={item.locked ? "Locked" : item.active ? "Active" : "Inactive"}
+        />
         <i>⋯</i>
       </span>
     </button>
   );
 }
 
-function TableView({ rows, openEdit, toggleActive, toggleLocked, remove }: { rows: CurriculumView[]; openEdit: (item: CurriculumView) => void; toggleActive: (item: CurriculumView) => void; toggleLocked: (item: CurriculumView) => void; remove: (item: CurriculumView) => void }) {
+function TableView({
+  rows,
+  openEdit,
+  toggleActive,
+  toggleLocked,
+  remove,
+}: {
+  rows: CurriculumView[];
+  openEdit: (item: CurriculumView) => void;
+  toggleActive: (item: CurriculumView) => void;
+  toggleLocked: (item: CurriculumView) => void;
+  remove: (item: CurriculumView) => void;
+}) {
   return (
     <section className="ba-table-card">
       <div className="ba-table-scroll">
@@ -880,22 +1356,59 @@ function TableView({ rows, openEdit, toggleActive, toggleLocked, remove }: { row
               const row: any = item.row;
               return (
                 <tr key={String(item.id)}>
-                  <td><strong>{row.name}</strong><span>{row.description || periodText(row.effectiveFrom, row.effectiveTo)}</span></td>
+                  <td>
+                    <strong>{row.name}</strong>
+                    <span>
+                      {row.description ||
+                        periodText(row.effectiveFrom, row.effectiveTo)}
+                    </span>
+                  </td>
                   <td>{row.code || "—"}</td>
                   <td>{item.academicStructureName}</td>
                   <td>{item.programName}</td>
                   <td>{item.organizationName}</td>
                   <td>{row.curriculumVersion || "—"}</td>
-                  <td>{row.durationPeriods ? `${row.durationPeriods} period(s)` : "—"}</td>
-                  <td>{item.pathwayCount} P · {item.subjectCount} S · {item.studentCount} St</td>
-                  <td><Chip tone={item.locked ? "orange" : item.active ? "green" : "gray"}>{item.locked ? "Locked" : item.active ? "Active" : "Inactive"}</Chip></td>
+                  <td>
+                    {row.durationPeriods
+                      ? `${row.durationPeriods} period(s)`
+                      : "—"}
+                  </td>
+                  <td>
+                    {item.pathwayCount} P · {item.subjectCount} S ·{" "}
+                    {item.studentCount} St
+                  </td>
+                  <td>
+                    <Chip
+                      tone={
+                        item.locked ? "orange" : item.active ? "green" : "gray"
+                      }
+                    >
+                      {item.locked
+                        ? "Locked"
+                        : item.active
+                          ? "Active"
+                          : "Inactive"}
+                    </Chip>
+                  </td>
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
-                      <button type="button" onClick={() => openEdit(item)}>Edit</button>
-                      <button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button>
-                      <button type="button" onClick={() => toggleLocked(item)}>{item.locked ? "Unlock" : "Lock"}</button>
-                      <button type="button" className="ba-delete" onClick={() => remove(item)}>Delete</button>
+                      <button type="button" onClick={() => openEdit(item)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => toggleActive(item)}>
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button type="button" onClick={() => toggleLocked(item)}>
+                        {item.locked ? "Unlock" : "Lock"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(item)}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -903,7 +1416,11 @@ function TableView({ rows, openEdit, toggleActive, toggleLocked, remove }: { row
             })}
           </tbody>
         </table>
-        {!rows.length && <div className="ba-empty-table">No curriculum matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No curriculum matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -927,93 +1444,494 @@ function FilterSheet(props: {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
-        <div className="ba-sheet-head"><div><h2>Filters</h2><p>Choose only what you need. The page updates after applying.</p></div><button type="button" onClick={props.onClose}>✕</button></div>
-        <div className="ba-form compact">
-          <label><span>Academic Structure</span><select value={props.filterAcademicStructureId} onChange={(e) => props.setFilterAcademicStructureId(e.target.value)}><option value="all">All structures</option>{props.academicStructures.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Program</span><select value={props.filterProgramId} onChange={(e) => props.setFilterProgramId(e.target.value)}><option value="all">All programs</option>{props.programs.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Organization</span><select value={props.filterOrganizationId} onChange={(e) => props.setFilterOrganizationId(e.target.value)}><option value="all">All organizations</option>{props.organizations.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Status</span><select value={props.filterStatus} onChange={(e) => props.setFilterStatus(e.target.value as any)}><option value="active">Active</option><option value="all">All</option><option value="inactive">Inactive</option><option value="locked">Locked</option></select></label>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Choose only what you need. The page updates after applying.</p>
+          </div>
+          <button type="button" onClick={props.onClose}>
+            ✕
+          </button>
         </div>
-        <div className="ba-sheet-actions"><button type="button" onClick={props.clearFilters}>Clear</button><button type="button" className="primary" onClick={props.onClose}>Apply</button></div>
+        <div className="ba-form compact">
+          <label>
+            <span>Academic Structure</span>
+            <select
+              value={props.filterAcademicStructureId}
+              onChange={(e) =>
+                props.setFilterAcademicStructureId(e.target.value)
+              }
+            >
+              <option value="all">All structures</option>
+              {props.academicStructures.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Program</span>
+            <select
+              value={props.filterProgramId}
+              onChange={(e) => props.setFilterProgramId(e.target.value)}
+            >
+              <option value="all">All programs</option>
+              {props.programs.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Organization</span>
+            <select
+              value={props.filterOrganizationId}
+              onChange={(e) => props.setFilterOrganizationId(e.target.value)}
+            >
+              <option value="all">All organizations</option>
+              {props.organizations.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={props.filterStatus}
+              onChange={(e) => props.setFilterStatus(e.target.value as any)}
+            >
+              <option value="active">Active</option>
+              <option value="all">All</option>
+              <option value="inactive">Inactive</option>
+              <option value="locked">Locked</option>
+            </select>
+          </label>
+        </div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={props.clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={props.onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ viewMode, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-head"><div><h2>More</h2><p>Advanced views are here so the main page stays simple.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Advanced views are here so the main page stays simple.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>List view</b><small>Compact curriculum cards</small></button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Dense laptop work view</small></button>
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Structure, program and status summary</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch records</small></button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact curriculum cards</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense laptop work view</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Structure, program and status summary</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch records</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function ActionSheet({ item, openEdit, toggleActive, toggleLocked, remove, onClose }: { item: CurriculumView; openEdit: (item: CurriculumView) => void; toggleActive: (item: CurriculumView) => void; toggleLocked: (item: CurriculumView) => void; remove: (item: CurriculumView) => void; onClose: () => void }) {
+function ActionSheet({
+  item,
+  openEdit,
+  toggleActive,
+  toggleLocked,
+  remove,
+  onClose,
+}: {
+  item: CurriculumView;
+  openEdit: (item: CurriculumView) => void;
+  toggleActive: (item: CurriculumView) => void;
+  toggleLocked: (item: CurriculumView) => void;
+  remove: (item: CurriculumView) => void;
+  onClose: () => void;
+}) {
   const row: any = item.row;
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-profile"><div><h2>{row.name || "Curriculum"}</h2><p>{item.academicStructureName} · {item.active ? "Active" : "Inactive"}</p></div><button type="button" onClick={onClose}>✕</button></div>
-        <div className="student-detail-strip"><span><b>Pathways</b>{item.pathwayCount}</span><span><b>Subjects</b>{item.subjectCount}</span><span><b>Students</b>{item.studentCount}</span></div>
+        <div className="ba-sheet-profile">
+          <div>
+            <h2>{row.name || "Curriculum"}</h2>
+            <p>
+              {item.academicStructureName} ·{" "}
+              {item.active ? "Active" : "Inactive"}
+            </p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div className="student-detail-strip">
+          <span>
+            <b>Pathways</b>
+            {item.pathwayCount}
+          </span>
+          <span>
+            <b>Subjects</b>
+            {item.subjectCount}
+          </span>
+          <span>
+            <b>Students</b>
+            {item.studentCount}
+          </span>
+        </div>
         <div className="ba-menu-list">
-          <button type="button" onClick={() => openEdit(item)}><span>✎</span><b>Edit curriculum</b><small>Update academic structure, name, dates and settings</small></button>
-          <button type="button" onClick={() => toggleActive(item)}><span>{item.active ? "⏸" : "✓"}</span><b>{item.active ? "Deactivate" : "Activate"}</b><small>Change active status</small></button>
-          <button type="button" onClick={() => toggleLocked(item)}><span>{item.locked ? "🔓" : "🔒"}</span><b>{item.locked ? "Unlock" : "Lock"}</b><small>Protect or allow edits</small></button>
-          <button type="button" className="danger" onClick={() => remove(item)}><span>⌫</span><b>Delete</b><small>Soft delete this curriculum locally</small></button>
+          <button type="button" onClick={() => openEdit(item)}>
+            <span>✎</span>
+            <b>Edit curriculum</b>
+            <small>Update academic structure, name, dates and settings</small>
+          </button>
+          <button type="button" onClick={() => toggleActive(item)}>
+            <span>{item.active ? "⏸" : "✓"}</span>
+            <b>{item.active ? "Deactivate" : "Activate"}</b>
+            <small>Change active status</small>
+          </button>
+          <button type="button" onClick={() => toggleLocked(item)}>
+            <span>{item.locked ? "🔓" : "🔒"}</span>
+            <b>{item.locked ? "Unlock" : "Lock"}</b>
+            <small>Protect or allow edits</small>
+          </button>
+          <button type="button" className="danger" onClick={() => remove(item)}>
+            <span>⌫</span>
+            <b>Delete</b>
+            <small>Soft delete this curriculum locally</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function CurriculumModal({ form, saving, academicStructures, programs, organizations, updateForm, handleImageUpload, setModalOpen, save }: { form: FormState; saving: boolean; academicStructures: AcademicStructure[]; programs: Program[]; organizations: Organization[]; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: "photo" | "bannerImage", file?: File) => void | Promise<void>; setModalOpen: (open: boolean) => void; save: (event?: React.FormEvent) => void }) {
+function CurriculumModal({
+  form,
+  saving,
+  academicStructures,
+  programs,
+  organizations,
+  updateForm,
+  handleImageUpload,
+  setModalOpen,
+  save,
+}: {
+  form: FormState;
+  saving: boolean;
+  academicStructures: AcademicStructure[];
+  programs: Program[];
+  organizations: Organization[];
+  updateForm: (patch: Partial<FormState>) => void;
+  handleImageUpload: (
+    field: "photo" | "bannerImage",
+    file?: File,
+  ) => void | Promise<void>;
+  setModalOpen: (open: boolean) => void;
+  save: (event?: React.FormEvent) => void;
+}) {
   return (
     <div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
-        <div className="ba-modal-head"><div><h2>{form.id ? "Edit Curriculum" : "Add Curriculum"}</h2><p>Curriculums are branch academic frameworks. Manage pathways separately.</p></div><button type="button" onClick={() => setModalOpen(false)}>✕</button></div>
-        <section className="ba-form-section"><h3>Curriculum</h3><div className="ba-form">
-          <label><span>Name</span><input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} placeholder="e.g. GES JHS Curriculum" /></label>
-          <label><span>Code</span><input value={form.code} onChange={(e) => updateForm({ code: e.target.value })} placeholder="e.g. GES-JHS" /></label>
-          <label><span>Version</span><input value={form.curriculumVersion} onChange={(e) => updateForm({ curriculumVersion: e.target.value })} placeholder="e.g. 2026" /></label>
-          <label><span>Academic Structure</span><select value={form.academicStructureId} onChange={(e) => updateForm({ academicStructureId: e.target.value })}><option value="">Select structure</option>{academicStructures.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Program</span><select value={form.programId} onChange={(e) => updateForm({ programId: e.target.value })}><option value="">No program</option>{programs.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Organization</span><select value={form.organizationId} onChange={(e) => updateForm({ organizationId: e.target.value })}><option value="">No organization</option>{organizations.map((row: any) => <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}</select></label>
-          <label><span>Total Credits</span><input type="number" value={form.totalCredits} onChange={(e) => updateForm({ totalCredits: e.target.value })} /></label>
-          <label><span>Duration Periods</span><input type="number" value={form.durationPeriods} onChange={(e) => updateForm({ durationPeriods: e.target.value })} /></label>
-          <label><span>Effective From</span><input type="date" value={form.effectiveFrom} onChange={(e) => updateForm({ effectiveFrom: e.target.value })} /></label>
-          <label><span>Effective To</span><input type="date" value={form.effectiveTo} onChange={(e) => updateForm({ effectiveTo: e.target.value })} /></label>
-          <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-          <label><span>Lock</span><select value={form.locked ? "locked" : "open"} onChange={(e) => updateForm({ locked: e.target.value === "locked" })}><option value="open">Open</option><option value="locked">Locked</option></select></label>
-          <label><span>Curriculum Photo</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("photo", e.target.files?.[0])} />{form.photo && <img src={form.photo} alt="Curriculum preview" className="ba-media-preview" />}</label>
-          <label><span>Banner Image</span><input type="file" accept="image/*" onChange={(e) => handleImageUpload("bannerImage", e.target.files?.[0])} />{form.bannerImage && <img src={form.bannerImage} alt="Curriculum banner preview" className="ba-media-preview banner" />}</label>
-          <label className="wide"><span>Description</span><textarea value={form.description} onChange={(e) => updateForm({ description: e.target.value })} placeholder="Describe this curriculum." /></label>
-        </div></section>
-        <div className="ba-modal-actions"><button type="button" onClick={() => setModalOpen(false)}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Add Curriculum"}</button></div>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{form.id ? "Edit Curriculum" : "Add Curriculum"}</h2>
+            <p>
+              Curriculums are branch academic frameworks. Manage pathways
+              separately.
+            </p>
+          </div>
+          <button type="button" onClick={() => setModalOpen(false)}>
+            ✕
+          </button>
+        </div>
+        <section className="ba-form-section">
+          <h3>Curriculum</h3>
+          <div className="ba-form">
+            <label>
+              <span>Name</span>
+              <input
+                value={form.name}
+                onChange={(e) => updateForm({ name: e.target.value })}
+                placeholder="e.g. GES JHS Curriculum"
+              />
+            </label>
+            <label>
+              <span>Code</span>
+              <input
+                value={form.code}
+                onChange={(e) => updateForm({ code: e.target.value })}
+                placeholder="e.g. GES-JHS"
+              />
+            </label>
+            <label>
+              <span>Version</span>
+              <input
+                value={form.curriculumVersion}
+                onChange={(e) =>
+                  updateForm({ curriculumVersion: e.target.value })
+                }
+                placeholder="e.g. 2026"
+              />
+            </label>
+            <label>
+              <span>Academic Structure</span>
+              <select
+                value={form.academicStructureId}
+                onChange={(e) =>
+                  updateForm({ academicStructureId: e.target.value })
+                }
+              >
+                <option value="">Select structure</option>
+                {academicStructures.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Program</span>
+              <select
+                value={form.programId}
+                onChange={(e) => updateForm({ programId: e.target.value })}
+              >
+                <option value="">No program</option>
+                {programs.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Organization</span>
+              <select
+                value={form.organizationId}
+                onChange={(e) => updateForm({ organizationId: e.target.value })}
+              >
+                <option value="">No organization</option>
+                {organizations.map((row: any) => (
+                  <option key={String(row.id)} value={String(row.id)}>
+                    {row.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Total Credits</span>
+              <input
+                type="number"
+                value={form.totalCredits}
+                onChange={(e) => updateForm({ totalCredits: e.target.value })}
+              />
+            </label>
+            <label>
+              <span>Duration Periods</span>
+              <input
+                type="number"
+                value={form.durationPeriods}
+                onChange={(e) =>
+                  updateForm({ durationPeriods: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Effective From</span>
+              <input
+                type="date"
+                value={form.effectiveFrom}
+                onChange={(e) => updateForm({ effectiveFrom: e.target.value })}
+              />
+            </label>
+            <label>
+              <span>Effective To</span>
+              <input
+                type="date"
+                value={form.effectiveTo}
+                onChange={(e) => updateForm({ effectiveTo: e.target.value })}
+              />
+            </label>
+            <label>
+              <span>Status</span>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(e) =>
+                  updateForm({ active: e.target.value === "active" })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
+            <label>
+              <span>Lock</span>
+              <select
+                value={form.locked ? "locked" : "open"}
+                onChange={(e) =>
+                  updateForm({ locked: e.target.value === "locked" })
+                }
+              >
+                <option value="open">Open</option>
+                <option value="locked">Locked</option>
+              </select>
+            </label>
+            <label>
+              <span>Curriculum Photo</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) =>
+                  handleImageUpload("photo", e.target.files?.[0])
+                }
+              />
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Curriculum preview"
+                  className="ba-media-preview"
+                />
+              )}
+            </label>
+            <label>
+              <span>Banner Image</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) =>
+                  handleImageUpload("bannerImage", e.target.files?.[0])
+                }
+              />
+              {form.bannerImage && (
+                <img
+                  src={form.bannerImage}
+                  alt="Curriculum banner preview"
+                  className="ba-media-preview banner"
+                />
+              )}
+            </label>
+            <label className="wide">
+              <span>Description</span>
+              <textarea
+                value={form.description}
+                onChange={(e) => updateForm({ description: e.target.value })}
+                placeholder="Describe this curriculum."
+              />
+            </label>
+          </div>
+        </section>
+        <div className="ba-modal-actions">
+          <button type="button" onClick={() => setModalOpen(false)}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : form.id ? "Save Changes" : "Add Curriculum"}
+          </button>
+        </div>
       </form>
     </div>
   );
 }
 
-function groupedCounts(rows: CurriculumView[], keyFn: (item: CurriculumView) => string) {
+function groupedCounts(
+  rows: CurriculumView[],
+  keyFn: (item: CurriculumView) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
     map.set(key, (map.get(key) || 0) + 1);
   });
-  return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  return Array.from(map.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
-    <article className="ba-analysis"><span>{title}</span><strong>{rows.reduce((sum, row) => sum + row.value, 0)}</strong><div className="ba-analysis-list">{rows.slice(0, 8).map((row) => { const share = total ? Math.round((row.value / total) * 100) : 0; return <section key={row.label}><div><b>{row.label}</b><small>{row.value} · {share}%</small></div><div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div></section>; })}{!rows.length && <p>No data available.</p>}</div></article>
+    <article className="ba-analysis">
+      <span>{title}</span>
+      <strong>{rows.reduce((sum, row) => sum + row.value, 0)}</strong>
+      <div className="ba-analysis-list">
+        {rows.slice(0, 8).map((row) => {
+          const share = total ? Math.round((row.value / total) * 100) : 0;
+          return (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
+            </section>
+          );
+        })}
+        {!rows.length && <p>No data available.</p>}
+      </div>
+    </article>
   );
 }
 

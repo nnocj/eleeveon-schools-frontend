@@ -46,7 +46,11 @@ import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
 import { db, type Message, type MessageThread } from "../../lib/db/db";
-import { createLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -63,13 +67,13 @@ function n(value: any) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId;
+function idOf(row?: AnyRow): string {
+  return cleanId(row?.id ?? row?.payload?.id);
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: any): string {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 }
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -78,11 +82,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -93,7 +97,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -118,13 +124,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = cleanId(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -135,7 +141,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -144,7 +154,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -156,7 +166,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -166,10 +180,9 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
-
 
 function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
@@ -180,21 +193,34 @@ function sameId(a: any, b: any) {
 }
 
 function schoolIdOf(row: AnyRow) {
-  return cleanId(row?.schoolId ?? row?.schoolLocalId ?? row?.payload?.schoolId);
+  return cleanId(row?.schoolId ?? row?.schoolId ?? row?.payload?.schoolId);
 }
 
 function branchIdOf(row: AnyRow) {
-  return cleanId(row?.branchId ?? row?.branchLocalId ?? row?.payload?.branchId);
+  return cleanId(row?.branchId ?? row?.branchId ?? row?.payload?.branchId);
 }
 
-function isBranchRow(row: AnyRow, accountId?: string | null, schoolId?: number | null, branchId?: number | null) {
+function isBranchRow(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+  branchId?: string | null,
+) {
   if (!row || row.isDeleted) return false;
-  const sameAccount = !row.accountId || !accountId || row.accountId === accountId;
-  return sameAccount && schoolIdOf(row) === Number(schoolId || 0) && branchIdOf(row) === Number(branchId || 0);
+  const sameAccount =
+    !row.accountId || !accountId || row.accountId === accountId;
+  return (
+    sameAccount &&
+    sameId(schoolIdOf(row), schoolId) &&
+    sameId(branchIdOf(row), branchId)
+  );
 }
 
 function rowName(row?: AnyRow) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function dateLabel(value?: number | string | null) {
@@ -202,7 +228,13 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -219,7 +251,8 @@ function threadTitle(thread: AnyRow) {
 
 function folderOf(thread: AnyRow): FolderFilter {
   const folder = String(thread.folder || "inbox").toLowerCase();
-  if (["inbox", "sent", "archived"].includes(folder)) return folder as FolderFilter;
+  if (["inbox", "sent", "archived"].includes(folder))
+    return folder as FolderFilter;
   return "inbox";
 }
 
@@ -238,11 +271,23 @@ function folderTone(folder: FolderFilter): Tone {
   return "gray";
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function EmptyCard({ title = "No messages", text: body }: { title?: string; text: string }) {
+function EmptyCard({
+  title = "No messages",
+  text: body,
+}: {
+  title?: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div>💬</div>
@@ -271,7 +316,13 @@ export default function Messages() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -309,8 +360,15 @@ export default function Messages() {
   const [selectedThread, setSelectedThread] = useState<AnyRow | null>(null);
   const [activeThread, setActiveThread] = useState<AnyRow | null>(null);
   const [messageText, setMessageText] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
-  const [form, setForm] = useState({ subject: "", body: "", recipientUserId: "" });
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
+  const [form, setForm] = useState({
+    subject: "",
+    body: "",
+    recipientUserId: "",
+  });
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -319,7 +377,11 @@ export default function Messages() {
 
   function showToast(tone: ToastTone, message: string) {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   }
 
   async function load() {
@@ -333,17 +395,34 @@ export default function Messages() {
     setLoading(true);
 
     try {
-      const [threadRows, messageRows, userRows, membershipRows] = await Promise.all([
-        safeArray("messageThreads"),
-        safeArray("messages"),
-        safeArray("users").then(async (rows) => (rows.length ? rows : safeArray("accountUsers"))),
-        safeArray("userMemberships").then(async (rows) => (rows.length ? rows : safeArray("memberships"))),
-      ]);
+      const [threadRows, messageRows, userRows, membershipRows] =
+        await Promise.all([
+          safeArray("messageThreads"),
+          safeArray("messages"),
+          safeArray("users").then(async (rows) =>
+            rows.length ? rows : safeArray("accountUsers"),
+          ),
+          safeArray("userMemberships").then(async (rows) =>
+            rows.length ? rows : safeArray("memberships"),
+          ),
+        ]);
 
-      setThreads((threadRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId)));
-      setMessages((messageRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId)));
+      setThreads(
+        (threadRows as AnyRow[]).filter((row) =>
+          isBranchRow(row, accountId, schoolId, branchId),
+        ),
+      );
+      setMessages(
+        (messageRows as AnyRow[]).filter((row) =>
+          isBranchRow(row, accountId, schoolId, branchId),
+        ),
+      );
       setUsers(userRows as AnyRow[]);
-      setMemberships((membershipRows as AnyRow[]).filter((row) => isBranchRow(row, accountId, schoolId, branchId)));
+      setMemberships(
+        (membershipRows as AnyRow[]).filter((row) =>
+          isBranchRow(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load messages:", error);
       showToast("error", "Failed to load messages.");
@@ -355,19 +434,34 @@ export default function Messages() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [accountId, schoolId, branchId, dataRevision]);
 
   const contacts = useMemo(() => {
     return memberships
       .map((membership) => {
         const user =
-          users.find((item) => sameId(item.id || item.localId, membership.userId || membership.userLocalId || membership.accountUserId)) ||
-          users.find((item) => item.email && membership.email && String(item.email).toLowerCase() === String(membership.email).toLowerCase());
+          users.find((item) =>
+            sameId(
+              item.id,
+              membership.userId ||
+                membership.userId ||
+                membership.accountUserId,
+            ),
+          ) ||
+          users.find(
+            (item) =>
+              item.email &&
+              membership.email &&
+              String(item.email).toLowerCase() ===
+                String(membership.email).toLowerCase(),
+          );
 
         return {
-          id: user?.id || user?.localId || membership.userId || membership.userLocalId || membership.accountUserId,
+          id:
+            user?.id ||
+            membership.userId ||
+            membership.userId ||
+            membership.accountUserId,
           name: rowName(user || membership),
           role: membership.role || user?.role || "user",
           email: user?.email || membership.email,
@@ -383,7 +477,16 @@ export default function Messages() {
       .filter((thread) => folder === "all" || folderOf(thread) === folder)
       .filter((thread) => {
         if (!q) return true;
-        return [thread.subject, thread.title, thread.lastMessage, thread.status, thread.folder].join(" ").toLowerCase().includes(q);
+        return [
+          thread.subject,
+          thread.title,
+          thread.lastMessage,
+          thread.status,
+          thread.folder,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       })
       .sort((a, b) => latestTime(b) - latestTime(a));
   }, [folder, query, threads]);
@@ -391,7 +494,7 @@ export default function Messages() {
   const threadMessages = useMemo(() => {
     if (!activeThread?.id) return [];
     return messages
-      .filter((message) => Number(message.threadId) === Number(activeThread.id))
+      .filter((message) => String(message.threadId) === String(activeThread.id))
       .sort((a, b) => n(a.createdAt || a.sentAt) - n(b.createdAt || b.sentAt));
   }, [activeThread, messages]);
 
@@ -400,21 +503,31 @@ export default function Messages() {
       threads: threads.length,
       inbox: threads.filter((thread) => folderOf(thread) === "inbox").length,
       sent: threads.filter((thread) => folderOf(thread) === "sent").length,
-      unread: messages.filter((message) => !message.readAt && message.direction === "inbound").length,
-      archived: threads.filter((thread) => folderOf(thread) === "archived").length,
+      unread: messages.filter(
+        (message) => !message.readAt && message.direction === "inbound",
+      ).length,
+      archived: threads.filter((thread) => folderOf(thread) === "archived")
+        .length,
       contacts: contacts.length,
       showing: threadRows.length,
     }),
-    [contacts.length, messages, threadRows.length, threads]
+    [contacts.length, messages, threadRows.length, threads],
   );
 
-  const activeFilterCount = useMemo(() => (folder !== "inbox" ? 1 : 0), [folder]);
+  const activeFilterCount = useMemo(
+    () => (folder !== "inbox" ? 1 : 0),
+    [folder],
+  );
 
   async function sendNew() {
-    if (!accountId || !schoolId || !branchId) return showToast("error", "Assigned branch context is required.");
-    if (!form.subject.trim() || !form.body.trim() || !form.recipientUserId) return showToast("error", "Subject, message and recipient are required.");
+    if (!accountId || !schoolId || !branchId)
+      return showToast("error", "Assigned branch context is required.");
+    if (!form.subject.trim() || !form.body.trim() || !form.recipientUserId)
+      return showToast("error", "Subject, message and recipient are required.");
 
-    const recipient = contacts.find((contact) => String(contact.id) === String(form.recipientUserId));
+    const recipient = contacts.find(
+      (contact) => String(contact.id) === String(form.recipientUserId),
+    );
     if (!recipient) return showToast("error", "Select a valid recipient.");
 
     setSaving(true);
@@ -423,8 +536,8 @@ export default function Messages() {
       const safeAccountId = String(accountId);
       const createdThread = (await createLocal("messageThreads", {
         accountId: safeAccountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         subject: form.subject.trim(),
         participantUserIds: [String(form.recipientUserId)],
         participantRoles: [recipient.role],
@@ -441,8 +554,8 @@ export default function Messages() {
 
       await createLocal("messages", {
         accountId: safeAccountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         threadId,
         senderRole: "branch_admin",
         recipientUserId: String(form.recipientUserId),
@@ -468,7 +581,8 @@ export default function Messages() {
   }
 
   async function reply() {
-    if (!accountId || !schoolId || !branchId) return showToast("error", "Assigned branch context is required.");
+    if (!accountId || !schoolId || !branchId)
+      return showToast("error", "Assigned branch context is required.");
     if (!activeThread?.id || !messageText.trim()) return;
 
     const threadId = cleanId(activeThread.id);
@@ -480,8 +594,8 @@ export default function Messages() {
       const safeAccountId = String(accountId);
       await createLocal("messages", {
         accountId: safeAccountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         threadId,
         senderRole: "branch_admin",
         body: messageText.trim(),
@@ -511,10 +625,12 @@ export default function Messages() {
   }
 
   async function archiveThread(thread: AnyRow) {
-    const id = cleanId(thread.id || thread.localId);
+    const id = cleanId(thread.id);
     if (!id) return;
     try {
-      await updateLocal("messageThreads", id, { folder: "archived" } as Partial<MessageThread>);
+      await updateLocal("messageThreads", id, {
+        folder: "archived",
+      } as Partial<MessageThread>);
       setSelectedThread(null);
       await load();
       showToast("success", "Thread archived.");
@@ -524,10 +640,12 @@ export default function Messages() {
   }
 
   async function restoreThread(thread: AnyRow) {
-    const id = cleanId(thread.id || thread.localId);
+    const id = cleanId(thread.id);
     if (!id) return;
     try {
-      await updateLocal("messageThreads", id, { folder: "inbox" } as Partial<MessageThread>);
+      await updateLocal("messageThreads", id, {
+        folder: "inbox",
+      } as Partial<MessageThread>);
       setSelectedThread(null);
       await load();
       showToast("success", "Thread restored.");
@@ -537,17 +655,22 @@ export default function Messages() {
   }
 
   async function deleteThread(thread: AnyRow) {
-    const id = cleanId(thread.id || thread.localId);
+    const id = cleanId(thread.id);
     if (!id) return;
-    const ok = window.confirm(`Delete "${threadTitle(thread)}"? This will sync as a soft delete.`);
+    const ok = window.confirm(
+      `Delete "${threadTitle(thread)}"? This will sync as a soft delete.`,
+    );
     if (!ok) return;
     try {
       await softDeleteLocal("messageThreads", id);
-      for (const message of messages.filter((item) => Number(item.threadId) === Number(id))) {
-        const messageId = cleanId(message.id || message.localId);
+      for (const message of messages.filter(
+        (item) => String(item.threadId) === String(id),
+      )) {
+        const messageId = cleanId(message.id);
         if (messageId) await softDeleteLocal("messages", messageId);
       }
-      if (activeThread && cleanId(activeThread.id) === id) setActiveThread(null);
+      if (activeThread && cleanId(activeThread.id) === id)
+        setActiveThread(null);
       setSelectedThread(null);
       await load();
       showToast("success", "Thread deleted.");
@@ -558,67 +681,154 @@ export default function Messages() {
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
-        <section className="ba-state"><div className="ba-spinner" /><h2>Opening messages...</h2><p>Loading conversations, branch contacts and message history.</p></section>
+        <section className="ba-state">
+          <div className="ba-spinner" />
+          <h2>Opening messages...</h2>
+          <p>Loading conversations, branch contacts and message history.</p>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      {toast ? <section className={`ba-toast ${toast.tone}`}>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button></section> : null}
+      {toast ? (
+        <section className={`ba-toast ${toast.tone}`}>
+          {toast.message}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
+        </section>
+      ) : null}
 
-      <section className="ba-search-card" aria-label="Messages search and actions">
-        <span className={`status-dot-mini ${summary.unread ? "orange" : summary.threads ? "green" : "gray"}`} title={`${summary.threads} thread(s)`} />
+      <section
+        className="ba-search-card"
+        aria-label="Messages search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.unread ? "orange" : summary.threads ? "green" : "gray"}`}
+          title={`${summary.threads} thread(s)`}
+        />
 
         <label className="ba-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search messages..." aria-label="Search messages" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search messages..."
+            aria-label="Search messages"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={() => setDrawer(true)} aria-label="Compose message">+</button>
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={() => setDrawer(true)}
+          aria-label="Compose message"
+        >
+          +
+        </button>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(folder !== "inbox" || query.trim()) && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {folder !== "inbox" && <button type="button" onClick={() => setFolder("inbox")}>Folder: {folder} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {folder !== "inbox" && (
+            <button type="button" onClick={() => setFolder("inbox")}>
+              Folder: {folder} ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
-      {view === "analytics" ? <AnalyticsView summary={summary} threads={threads} /> : null}
+      {view === "analytics" ? (
+        <AnalyticsView summary={summary} threads={threads} />
+      ) : null}
 
       {view === "table" ? (
-        <TableView rows={threadRows} openThread={setActiveThread} selectThread={setSelectedThread} archiveThread={archiveThread} restoreThread={restoreThread} deleteThread={deleteThread} />
+        <TableView
+          rows={threadRows}
+          openThread={setActiveThread}
+          selectThread={setSelectedThread}
+          archiveThread={archiveThread}
+          restoreThread={restoreThread}
+          deleteThread={deleteThread}
+        />
       ) : null}
 
       {view === "cards" ? (
         <section className="ba-list">
           {threadRows.map((thread) => (
-            <ThreadListItem key={String(idOf(thread))} thread={thread} onOpen={() => setSelectedThread(thread)} />
+            <ThreadListItem
+              key={String(idOf(thread))}
+              thread={thread}
+              onOpen={() => setSelectedThread(thread)}
+            />
           ))}
-          {!threadRows.length ? <EmptyCard text="No message threads found." /> : null}
+          {!threadRows.length ? (
+            <EmptyCard text="No message threads found." />
+          ) : null}
         </section>
       ) : null}
 
-      {filterOpen ? <FilterSheet folder={folder} setFolder={setFolder} onClose={() => setFilterOpen(false)} /> : null}
+      {filterOpen ? (
+        <FilterSheet
+          folder={folder}
+          setFolder={setFolder}
+          onClose={() => setFilterOpen(false)}
+        />
+      ) : null}
 
       {moreOpen ? (
         <MoreSheet
           view={view}
-          setView={(mode) => { setView(mode); setMoreOpen(false); }}
+          setView={(mode) => {
+            setView(mode);
+            setMoreOpen(false);
+          }}
           summary={summary}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       ) : null}
@@ -626,7 +836,10 @@ export default function Messages() {
       {selectedThread ? (
         <ActionSheet
           thread={selectedThread}
-          openThread={(thread) => { setActiveThread(thread); setSelectedThread(null); }}
+          openThread={(thread) => {
+            setActiveThread(thread);
+            setSelectedThread(null);
+          }}
           archiveThread={archiveThread}
           restoreThread={restoreThread}
           deleteThread={deleteThread}
@@ -661,7 +874,13 @@ export default function Messages() {
   );
 }
 
-function ThreadListItem({ thread, onOpen }: { thread: AnyRow; onOpen: () => void }) {
+function ThreadListItem({
+  thread,
+  onOpen,
+}: {
+  thread: AnyRow;
+  onOpen: () => void;
+}) {
   const folder = folderOf(thread);
   return (
     <button type="button" className="thread-row" onClick={onOpen}>
@@ -669,7 +888,11 @@ function ThreadListItem({ thread, onOpen }: { thread: AnyRow; onOpen: () => void
       <span className="thread-main">
         <strong>{threadTitle(thread)}</strong>
         <small>{messagePreview(thread.lastMessage)}</small>
-        <em>{dateLabel(thread.lastMessageAt || thread.updatedAt || thread.createdAt)}</em>
+        <em>
+          {dateLabel(
+            thread.lastMessageAt || thread.updatedAt || thread.createdAt,
+          )}
+        </em>
       </span>
       <span className="thread-side">
         <Chip tone={folderTone(folder)}>{folder}</Chip>
@@ -679,122 +902,528 @@ function ThreadListItem({ thread, onOpen }: { thread: AnyRow; onOpen: () => void
   );
 }
 
-function FilterSheet({ folder, setFolder, onClose }: { folder: FolderFilter; setFolder: (value: FolderFilter) => void; onClose: () => void }) {
+function FilterSheet({
+  folder,
+  setFolder,
+  onClose,
+}: {
+  folder: FolderFilter;
+  setFolder: (value: FolderFilter) => void;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-head"><div><h2>Filters</h2><p>Choose which message folder to show.</p></div><button type="button" onClick={onClose} aria-label="Close filters">✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Choose which message folder to show.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
+        </div>
         <div className="ba-form compact">
-          <label><span>Folder</span><select value={folder} onChange={(event) => setFolder(event.target.value as FolderFilter)}><option value="inbox">Inbox</option><option value="sent">Sent</option><option value="archived">Archived</option><option value="all">All</option></select></label>
+          <label>
+            <span>Folder</span>
+            <select
+              value={folder}
+              onChange={(event) =>
+                setFolder(event.target.value as FolderFilter)
+              }
+            >
+              <option value="inbox">Inbox</option>
+              <option value="sent">Sent</option>
+              <option value="archived">Archived</option>
+              <option value="all">All</option>
+            </select>
+          </label>
         </div>
-        <div className="ba-sheet-actions"><button type="button" onClick={() => setFolder("inbox")}>Reset</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={() => setFolder("inbox")}>
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, onRefresh, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  onRefresh,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-head"><div><h2>More</h2><p>Advanced views stay here so the main inbox remains clean.</p></div><button type="button" onClick={onClose} aria-label="Close menu">✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Advanced views stay here so the main inbox remains clean.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
+        </div>
         <div className="ba-menu-list">
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>List view</b><small>Compact message threads</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table view</b><small>Dense laptop-friendly thread list</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{summary.threads} thread(s), {summary.unread} unread</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch messages</small></button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact message threads</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense laptop-friendly thread list</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>
+              {summary.threads} thread(s), {summary.unread} unread
+            </small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch messages</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function ActionSheet({ thread, openThread, archiveThread, restoreThread, deleteThread, onClose }: { thread: AnyRow; openThread: (thread: AnyRow) => void; archiveThread: (thread: AnyRow) => void; restoreThread: (thread: AnyRow) => void; deleteThread: (thread: AnyRow) => void; onClose: () => void }) {
+function ActionSheet({
+  thread,
+  openThread,
+  archiveThread,
+  restoreThread,
+  deleteThread,
+  onClose,
+}: {
+  thread: AnyRow;
+  openThread: (thread: AnyRow) => void;
+  archiveThread: (thread: AnyRow) => void;
+  restoreThread: (thread: AnyRow) => void;
+  deleteThread: (thread: AnyRow) => void;
+  onClose: () => void;
+}) {
   const folder = folderOf(thread);
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-profile"><div><h2>{threadTitle(thread)}</h2><p>{dateLabel(thread.lastMessageAt || thread.updatedAt || thread.createdAt)} · {folder}</p></div><button type="button" onClick={onClose} aria-label="Close thread actions">✕</button></div>
+        <div className="ba-sheet-profile">
+          <div>
+            <h2>{threadTitle(thread)}</h2>
+            <p>
+              {dateLabel(
+                thread.lastMessageAt || thread.updatedAt || thread.createdAt,
+              )}{" "}
+              · {folder}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close thread actions"
+          >
+            ✕
+          </button>
+        </div>
         <p className="thread-preview">{messagePreview(thread.lastMessage)}</p>
         <div className="ba-menu-list">
-          <button type="button" onClick={() => openThread(thread)}><span>↗</span><b>Open conversation</b><small>Read messages and reply</small></button>
-          {folder === "archived" ? <button type="button" onClick={() => restoreThread(thread)}><span>↩</span><b>Restore</b><small>Move this thread back to inbox</small></button> : <button type="button" onClick={() => archiveThread(thread)}><span>🗄</span><b>Archive</b><small>Move this thread out of inbox</small></button>}
-          <button type="button" className="danger" onClick={() => deleteThread(thread)}><span>⌫</span><b>Delete</b><small>Soft delete this thread and messages</small></button>
+          <button type="button" onClick={() => openThread(thread)}>
+            <span>↗</span>
+            <b>Open conversation</b>
+            <small>Read messages and reply</small>
+          </button>
+          {folder === "archived" ? (
+            <button type="button" onClick={() => restoreThread(thread)}>
+              <span>↩</span>
+              <b>Restore</b>
+              <small>Move this thread back to inbox</small>
+            </button>
+          ) : (
+            <button type="button" onClick={() => archiveThread(thread)}>
+              <span>🗄</span>
+              <b>Archive</b>
+              <small>Move this thread out of inbox</small>
+            </button>
+          )}
+          <button
+            type="button"
+            className="danger"
+            onClick={() => deleteThread(thread)}
+          >
+            <span>⌫</span>
+            <b>Delete</b>
+            <small>Soft delete this thread and messages</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function TableView({ rows, openThread, selectThread, archiveThread, restoreThread, deleteThread }: { rows: AnyRow[]; openThread: (thread: AnyRow) => void; selectThread: (thread: AnyRow) => void; archiveThread: (thread: AnyRow) => void; restoreThread: (thread: AnyRow) => void; deleteThread: (thread: AnyRow) => void }) {
+function TableView({
+  rows,
+  openThread,
+  selectThread,
+  archiveThread,
+  restoreThread,
+  deleteThread,
+}: {
+  rows: AnyRow[];
+  openThread: (thread: AnyRow) => void;
+  selectThread: (thread: AnyRow) => void;
+  archiveThread: (thread: AnyRow) => void;
+  restoreThread: (thread: AnyRow) => void;
+  deleteThread: (thread: AnyRow) => void;
+}) {
   return (
     <section className="ba-table-card">
       <div className="ba-table-scroll">
         <table>
-          <thead><tr><th>Messages ({rows.length})</th><th>Updated</th><th>Folder</th><th>Status</th><th>Last Message</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Messages ({rows.length})</th>
+              <th>Updated</th>
+              <th>Folder</th>
+              <th>Status</th>
+              <th>Last Message</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((thread) => {
               const folder = folderOf(thread);
               return (
                 <tr key={String(idOf(thread))}>
-                  <td><strong>{threadTitle(thread)}</strong><span>{messagePreview(thread.lastMessage).slice(0, 70)}</span></td>
-                  <td>{dateLabel(thread.lastMessageAt || thread.updatedAt || thread.createdAt)}</td>
-                  <td><Chip tone={folderTone(folder)}>{folder}</Chip></td>
-                  <td><Chip>{thread.status || "open"}</Chip></td>
+                  <td>
+                    <strong>{threadTitle(thread)}</strong>
+                    <span>
+                      {messagePreview(thread.lastMessage).slice(0, 70)}
+                    </span>
+                  </td>
+                  <td>
+                    {dateLabel(
+                      thread.lastMessageAt ||
+                        thread.updatedAt ||
+                        thread.createdAt,
+                    )}
+                  </td>
+                  <td>
+                    <Chip tone={folderTone(folder)}>{folder}</Chip>
+                  </td>
+                  <td>
+                    <Chip>{thread.status || "open"}</Chip>
+                  </td>
                   <td>{messagePreview(thread.lastMessage).slice(0, 120)}</td>
-                  <td><div className="ba-table-actions"><button type="button" onClick={() => openThread(thread)}>Open</button><button type="button" onClick={() => selectThread(thread)}>More</button>{folder === "archived" ? <button type="button" onClick={() => restoreThread(thread)}>Restore</button> : <button type="button" onClick={() => archiveThread(thread)}>Archive</button>}<button type="button" className="ba-delete" onClick={() => deleteThread(thread)}>Delete</button></div></td>
+                  <td>
+                    <div className="ba-table-actions">
+                      <button type="button" onClick={() => openThread(thread)}>
+                        Open
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectThread(thread)}
+                      >
+                        More
+                      </button>
+                      {folder === "archived" ? (
+                        <button
+                          type="button"
+                          onClick={() => restoreThread(thread)}
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => archiveThread(thread)}
+                        >
+                          Archive
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => deleteThread(thread)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!rows.length ? <div className="ba-empty-table">No message thread matches your search/filter.</div> : null}
+        {!rows.length ? (
+          <div className="ba-empty-table">
+            No message thread matches your search/filter.
+          </div>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function AnalyticsView({ summary, threads }: { summary: AnyRow; threads: AnyRow[] }) {
+function AnalyticsView({
+  summary,
+  threads,
+}: {
+  summary: AnyRow;
+  threads: AnyRow[];
+}) {
   const folders: FolderFilter[] = ["inbox", "sent", "archived"];
   return (
     <section className="ba-analysis-grid">
-      <article className="ba-analysis"><span>Threads</span><strong>{summary.threads}</strong><p>Total branch-scoped message thread(s).</p></article>
-      <article className="ba-analysis"><span>Unread</span><strong>{summary.unread}</strong><p>Inbound message(s) not marked as read.</p></article>
-      <article className="ba-analysis"><span>Contacts</span><strong>{summary.contacts}</strong><p>Available branch users you can message.</p></article>
-      <article className="ba-analysis"><span>Visible</span><strong>{summary.showing}</strong><p>Thread(s) matching the current search and folder filter.</p></article>
+      <article className="ba-analysis">
+        <span>Threads</span>
+        <strong>{summary.threads}</strong>
+        <p>Total branch-scoped message thread(s).</p>
+      </article>
+      <article className="ba-analysis">
+        <span>Unread</span>
+        <strong>{summary.unread}</strong>
+        <p>Inbound message(s) not marked as read.</p>
+      </article>
+      <article className="ba-analysis">
+        <span>Contacts</span>
+        <strong>{summary.contacts}</strong>
+        <p>Available branch users you can message.</p>
+      </article>
+      <article className="ba-analysis">
+        <span>Visible</span>
+        <strong>{summary.showing}</strong>
+        <p>Thread(s) matching the current search and folder filter.</p>
+      </article>
       {folders.map((name) => {
-        const count = threads.filter((thread) => folderOf(thread) === name).length;
-        const percent = threads.length ? Math.round((count / threads.length) * 100) : 0;
-        return <article className="ba-analysis" key={name}><span>{name}</span><strong>{count}</strong><div className="ba-progress"><i style={{ width: `${Math.max(4, percent)}%` }} /></div><p>{percent}% of all message threads.</p></article>;
+        const count = threads.filter(
+          (thread) => folderOf(thread) === name,
+        ).length;
+        const percent = threads.length
+          ? Math.round((count / threads.length) * 100)
+          : 0;
+        return (
+          <article className="ba-analysis" key={name}>
+            <span>{name}</span>
+            <strong>{count}</strong>
+            <div className="ba-progress">
+              <i style={{ width: `${Math.max(4, percent)}%` }} />
+            </div>
+            <p>{percent}% of all message threads.</p>
+          </article>
+        );
       })}
     </section>
   );
 }
 
-function ConversationDrawer({ thread, threadMessages, messageText, setMessageText, saving, reply, close }: { thread: AnyRow; threadMessages: AnyRow[]; messageText: string; setMessageText: (value: string) => void; saving: boolean; reply: () => void | Promise<void>; close: () => void }) {
+function ConversationDrawer({
+  thread,
+  threadMessages,
+  messageText,
+  setMessageText,
+  saving,
+  reply,
+  close,
+}: {
+  thread: AnyRow;
+  threadMessages: AnyRow[];
+  messageText: string;
+  setMessageText: (value: string) => void;
+  saving: boolean;
+  reply: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
     <div className="ba-drawer-layer">
-      <button className="ba-drawer-overlay" type="button" onClick={close} aria-label="Close conversation" />
+      <button
+        className="ba-drawer-overlay"
+        type="button"
+        onClick={close}
+        aria-label="Close conversation"
+      />
       <aside className="ba-drawer">
-        <div className="ba-drawer-head"><div><p>Conversation</p><h2>{threadTitle(thread)}</h2><span>{threadMessages.length} message(s)</span></div><button type="button" onClick={close}>✕</button></div>
+        <div className="ba-drawer-head">
+          <div>
+            <p>Conversation</p>
+            <h2>{threadTitle(thread)}</h2>
+            <span>{threadMessages.length} message(s)</span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
         <section className="ba-list">
-          {threadMessages.map((message) => <article key={String(idOf(message))} className={`message-bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`}><div className="ba-chip-row"><Chip tone={message.direction === "outbound" ? "green" : "blue"}>{message.direction || "message"}</Chip><Chip>{dateLabel(message.sentAt || message.createdAt)}</Chip></div><p>{message.body}</p></article>)}
-          {!threadMessages.length ? <EmptyCard text="No messages in this thread." /> : null}
+          {threadMessages.map((message) => (
+            <article
+              key={String(idOf(message))}
+              className={`message-bubble ${message.direction === "outbound" ? "outbound" : "inbound"}`}
+            >
+              <div className="ba-chip-row">
+                <Chip
+                  tone={message.direction === "outbound" ? "green" : "blue"}
+                >
+                  {message.direction || "message"}
+                </Chip>
+                <Chip>{dateLabel(message.sentAt || message.createdAt)}</Chip>
+              </div>
+              <p>{message.body}</p>
+            </article>
+          ))}
+          {!threadMessages.length ? (
+            <EmptyCard text="No messages in this thread." />
+          ) : null}
         </section>
-        <section className="ba-form-card"><textarea value={messageText} onChange={(event) => setMessageText(event.target.value)} placeholder="Write a reply..." /><div className="ba-drawer-actions"><button className="ba-btn" type="button" onClick={close}>Close</button><button className="ba-primary" type="button" disabled={saving || !messageText.trim()} onClick={reply}>{saving ? "Sending..." : "Send Reply"}</button></div></section>
+        <section className="ba-form-card">
+          <textarea
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
+            placeholder="Write a reply..."
+          />
+          <div className="ba-drawer-actions">
+            <button className="ba-btn" type="button" onClick={close}>
+              Close
+            </button>
+            <button
+              className="ba-primary"
+              type="button"
+              disabled={saving || !messageText.trim()}
+              onClick={reply}
+            >
+              {saving ? "Sending..." : "Send Reply"}
+            </button>
+          </div>
+        </section>
       </aside>
     </div>
   );
 }
 
-function ComposeDrawer({ activeBranchName, contacts, form, setForm, saving, sendNew, close }: { activeBranchName: string; contacts: AnyRow[]; form: { subject: string; body: string; recipientUserId: string }; setForm: (value: { subject: string; body: string; recipientUserId: string }) => void; saving: boolean; sendNew: () => void | Promise<void>; close: () => void }) {
+function ComposeDrawer({
+  activeBranchName,
+  contacts,
+  form,
+  setForm,
+  saving,
+  sendNew,
+  close,
+}: {
+  activeBranchName: string;
+  contacts: AnyRow[];
+  form: { subject: string; body: string; recipientUserId: string };
+  setForm: (value: {
+    subject: string;
+    body: string;
+    recipientUserId: string;
+  }) => void;
+  saving: boolean;
+  sendNew: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
     <div className="ba-drawer-layer">
-      <button className="ba-drawer-overlay" type="button" onClick={close} aria-label="Close compose" />
+      <button
+        className="ba-drawer-overlay"
+        type="button"
+        onClick={close}
+        aria-label="Close compose"
+      />
       <aside className="ba-drawer">
-        <div className="ba-drawer-head"><div><p>Compose</p><h2>New Message</h2><span>{activeBranchName}</span></div><button type="button" onClick={close}>✕</button></div>
-        <section className="ba-form-card"><div className="ba-form-grid"><label><span>Recipient</span><select value={form.recipientUserId} onChange={(event) => setForm({ ...form, recipientUserId: event.target.value })}><option value="">Select recipient</option>{contacts.map((contact) => <option key={`${contact.role}-${contact.id}`} value={String(contact.id)}>{contact.name} · {contact.role}</option>)}</select></label><label><span>Subject</span><input value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} placeholder="Message subject" /></label><label className="wide"><span>Message</span><textarea value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} placeholder="Write your message..." /></label></div></section>
-        <div className="ba-drawer-actions"><button className="ba-btn" type="button" onClick={close}>Cancel</button><button className="ba-primary" type="button" disabled={saving} onClick={sendNew}>{saving ? "Sending..." : "Send"}</button></div>
+        <div className="ba-drawer-head">
+          <div>
+            <p>Compose</p>
+            <h2>New Message</h2>
+            <span>{activeBranchName}</span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        <section className="ba-form-card">
+          <div className="ba-form-grid">
+            <label>
+              <span>Recipient</span>
+              <select
+                value={form.recipientUserId}
+                onChange={(event) =>
+                  setForm({ ...form, recipientUserId: event.target.value })
+                }
+              >
+                <option value="">Select recipient</option>
+                {contacts.map((contact) => (
+                  <option
+                    key={`${contact.role}-${contact.id}`}
+                    value={String(contact.id)}
+                  >
+                    {contact.name} · {contact.role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Subject</span>
+              <input
+                value={form.subject}
+                onChange={(event) =>
+                  setForm({ ...form, subject: event.target.value })
+                }
+                placeholder="Message subject"
+              />
+            </label>
+            <label className="wide">
+              <span>Message</span>
+              <textarea
+                value={form.body}
+                onChange={(event) =>
+                  setForm({ ...form, body: event.target.value })
+                }
+                placeholder="Write your message..."
+              />
+            </label>
+          </div>
+        </section>
+        <div className="ba-drawer-actions">
+          <button className="ba-btn" type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            className="ba-primary"
+            type="button"
+            disabled={saving}
+            onClick={sendNew}
+          >
+            {saving ? "Sending..." : "Send"}
+          </button>
+        </div>
       </aside>
     </div>
   );

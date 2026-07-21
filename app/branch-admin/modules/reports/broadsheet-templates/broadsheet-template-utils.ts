@@ -138,14 +138,19 @@ export function broadsheetTitleForKind(kind: BroadsheetKind): string {
 export function isSubjectBroadsheetDataset(
   dataset?: BroadsheetDataset | null,
 ): dataset is ComputedSubjectBroadsheet {
-  return !!dataset && "assessmentColumns" in dataset && "subjectName" in dataset;
+  return (
+    !!dataset && "assessmentColumns" in dataset && "subjectName" in dataset
+  );
 }
 
 export function isClassBroadsheetDataset(
   dataset?: BroadsheetDataset | null,
 ): dataset is ComputedClassBroadsheet {
-  return !!dataset && "subjectColumns" in dataset && "students" in dataset && !(
-    "periodNames" in dataset
+  return (
+    !!dataset &&
+    "subjectColumns" in dataset &&
+    "students" in dataset &&
+    !("periodNames" in dataset)
   );
 }
 
@@ -167,7 +172,11 @@ export function datasetMatchesBroadsheetKind(
 export function broadsheetDatasetIsEmpty(
   dataset?: BroadsheetDataset | null,
 ): boolean {
-  return !dataset || !Array.isArray((dataset as any).students) || !(dataset as any).students.length;
+  return (
+    !dataset ||
+    !Array.isArray((dataset as any).students) ||
+    !(dataset as any).students.length
+  );
 }
 
 // ======================================================
@@ -234,12 +243,11 @@ export function resolveBroadsheetTemplateSettings(args: {
     paperSize:
       firstText(settings?.paperSize, (template as any)?.paperSize, "A4") ||
       "A4",
-    orientation:
-      (firstText(
-        settings?.orientation,
-        (template as any)?.orientation,
-        "landscape",
-      ) || "landscape") as "portrait" | "landscape",
+    orientation: (firstText(
+      settings?.orientation,
+      (template as any)?.orientation,
+      "landscape",
+    ) || "landscape") as "portrait" | "landscape",
     density:
       firstText(settings?.density, (template as any)?.density, "compact") ||
       "compact",
@@ -262,8 +270,7 @@ export function resolveBroadsheetTemplateSettings(args: {
       "Admission No.",
     positionColumnLabel:
       firstText(settings?.positionColumnLabel, "Position") || "Position",
-    gradeColumnLabel:
-      firstText(settings?.gradeColumnLabel, "Grade") || "Grade",
+    gradeColumnLabel: firstText(settings?.gradeColumnLabel, "Grade") || "Grade",
     remarkColumnLabel:
       firstText(settings?.remarkColumnLabel, "Remark") || "Remark",
   } as ResolvedBroadsheetTemplateSettings;
@@ -339,21 +346,22 @@ export function resolveBroadsheetBranding(
         "#2563eb",
       ) || "#2563eb",
     fontFamily:
-      firstText(branding.fontFamily, settings.fontFamily, "Arial, sans-serif") ||
-      "Arial, sans-serif",
+      firstText(
+        branding.fontFamily,
+        settings.fontFamily,
+        "Arial, sans-serif",
+      ) || "Arial, sans-serif",
   };
 }
 
-export function resolveBroadsheetStudentPhoto(row?: {
-  resolvedStudentPhotoUrl?: string;
-  studentPhoto?: string;
-  photo?: string;
-} | null): string {
-  return firstText(
-    row?.resolvedStudentPhotoUrl,
-    row?.studentPhoto,
-    row?.photo,
-  );
+export function resolveBroadsheetStudentPhoto(
+  row?: {
+    resolvedStudentPhotoUrl?: string;
+    studentPhoto?: string;
+    photo?: string;
+  } | null,
+): string {
+  return firstText(row?.resolvedStudentPhotoUrl, row?.studentPhoto, row?.photo);
 }
 
 // ======================================================
@@ -452,14 +460,14 @@ export function computeBroadsheetSummary(
 
 export function subjectCellForStudent(
   row: ClassBroadsheetStudentRow,
-  subjectId: number,
+  subjectId: string,
 ) {
   return row.subjects.find((subject) => subject.subjectId === subjectId);
 }
 
 export function annualSubjectCellForStudent(
   row: AnnualBroadsheetStudentRow,
-  subjectId?: number,
+  subjectId?: string,
   subjectName?: string,
 ) {
   return row.subjects.find(
@@ -471,7 +479,7 @@ export function annualSubjectCellForStudent(
 
 export function annualPeriodScore(
   cell: AnnualBroadsheetStudentRow["subjects"][number] | undefined,
-  academicPeriodId: number,
+  academicPeriodId: string,
 ) {
   return cell?.periodScores.find(
     (period) => period.academicPeriodId === academicPeriodId,
@@ -511,11 +519,17 @@ export function broadsheetPageStyle(args: {
   };
 }
 
-export function getContrastTextColor(value?: string | null): "#111827" | "#fff" {
+export function getContrastTextColor(
+  value?: string | null,
+): "#111827" | "#fff" {
   const color = firstText(value, "#2563eb");
   if (!color.startsWith("#")) return "#fff";
   let hex = color.slice(1);
-  if (hex.length === 3) hex = hex.split("").map((char) => `${char}${char}`).join("");
+  if (hex.length === 3)
+    hex = hex
+      .split("")
+      .map((char) => `${char}${char}`)
+      .join("");
   const parsed = Number.parseInt(hex, 16);
   if (!Number.isFinite(parsed)) return "#fff";
   const red = (parsed >> 16) & 255;

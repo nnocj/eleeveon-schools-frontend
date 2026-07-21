@@ -86,12 +86,12 @@ export type ReportOrientation = "portrait" | "landscape";
 // ======================================================
 
 export interface ReportFiltersState {
-  branchId?: number;
-  academicStructureId?: number;
-  academicPeriodId?: number;
-  classId?: number;
-  classSubjectId?: number;
-  studentId?: number;
+  branchId?: string;
+  academicStructureId?: string;
+  academicPeriodId?: string;
+  classId?: string;
+  classSubjectId?: string;
+  studentId?: string;
   sortMode: ReportSortMode;
 }
 
@@ -156,7 +156,7 @@ export interface ReportHeaderData {
    * These keep display components pure and prevent ReportHeader,
    * broadsheets, cards or transcripts from guessing the active branch.
    */
-  branchId?: number;
+  branchId?: string;
   branchName?: string;
   branchLabel?: string;
   campusName?: string;
@@ -215,7 +215,7 @@ export interface ReportEngineDataset {
 // ======================================================
 
 export interface ReportAssessmentColumn {
-  assessmentStructureItemId: number;
+  assessmentStructureItemId: string;
   name: string;
   weight: number;
   maxScore: number;
@@ -248,8 +248,8 @@ export interface AttendanceSummary {
  * before the next academic period opening line.
  */
 export interface CurrentAcademicPeriodInfo {
-  id?: number;
-  academicStructureId?: number;
+  id?: string;
+  academicStructureId?: string;
   name: string;
   type?: string;
   startDate?: string;
@@ -264,8 +264,8 @@ export interface CurrentAcademicPeriodInfo {
  * This should normally be the next active period in the same academic structure.
  */
 export interface NextAcademicPeriodInfo {
-  id?: number;
-  academicStructureId?: number;
+  id?: string;
+  academicStructureId?: string;
   name: string;
   type?: string;
   startDate: string;
@@ -280,16 +280,16 @@ export interface NextAcademicPeriodInfo {
 // ======================================================
 
 export interface StudentSubjectResult {
-  classSubjectId: number;
-  subjectId: number;
+  classSubjectId: string;
+  subjectId: string;
   subjectName: string;
   subjectCode?: string;
   shortName?: string;
-  teacherId?: number;
+  teacherId?: string;
   teacherName?: string;
 
-  assessmentStructureId?: number;
-  gradingSystemId?: number;
+  assessmentStructureId?: string;
+  gradingSystemId?: string;
 
   breakdown: ReportBreakdownItem[];
 
@@ -312,17 +312,17 @@ export interface StudentSubjectResult {
 // ======================================================
 
 export interface ComputedStudentReport {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   gender?: string;
   studentPhoto?: string;
   resolvedStudentPhotoUrl?: string;
 
-  classId: number;
+  classId: string;
   className: string;
-  academicStructureId?: number;
-  academicPeriodId?: number;
+  academicStructureId?: string;
+  academicPeriodId?: string;
   currentAcademicPeriod?: CurrentAcademicPeriodInfo;
   nextAcademicPeriod?: NextAcademicPeriodInfo;
 
@@ -344,7 +344,7 @@ export interface ComputedStudentReport {
   guardianName?: string;
   promoted?: boolean;
 
-  branchId?: number;
+  branchId?: string;
   branchName?: string;
   branchLabel?: string;
   campusName?: string;
@@ -379,7 +379,7 @@ export interface StudentReportCardDataset {
   resolvedReportCardWatermarkUrl?: string;
   resolvedReportCardSignatureImageUrl?: string;
 
-  branchId?: number;
+  branchId?: string;
   branchName?: string;
   branchLabel?: string;
   campusName?: string;
@@ -393,7 +393,7 @@ export interface StudentReportCardDataset {
 // ======================================================
 
 export interface SubjectBroadsheetStudentRow {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   resolvedStudentPhotoUrl?: string;
@@ -408,10 +408,10 @@ export interface SubjectBroadsheetStudentRow {
 }
 
 export interface ComputedSubjectBroadsheet {
-  classSubjectId: number;
-  classId: number;
+  classSubjectId: string;
+  classId: string;
   className: string;
-  subjectId: number;
+  subjectId: string;
   subjectName: string;
   subjectCode?: string;
   teacherName?: string;
@@ -429,8 +429,8 @@ export interface ComputedSubjectBroadsheet {
 // ======================================================
 
 export interface ClassBroadsheetSubjectCell {
-  classSubjectId: number;
-  subjectId: number;
+  classSubjectId: string;
+  subjectId: string;
   subjectName: string;
   subjectCode?: string;
   shortName?: string;
@@ -442,7 +442,7 @@ export interface ClassBroadsheetSubjectCell {
 }
 
 export interface ClassBroadsheetStudentRow {
-  studentId: number;
+  studentId: string;
   studentName: string;
   admissionNumber?: string;
   resolvedStudentPhotoUrl?: string;
@@ -457,12 +457,12 @@ export interface ClassBroadsheetStudentRow {
 }
 
 export interface ComputedClassBroadsheet {
-  classId: number;
+  classId: string;
   className: string;
 
   subjectColumns: {
-    classSubjectId: number;
-    subjectId: number;
+    classSubjectId: string;
+    subjectId: string;
     subjectName: string;
     subjectCode?: string;
     shortName?: string;
@@ -525,7 +525,6 @@ export interface ReportPrintButton {
   mode: ReportPrintMode;
   orientation: ReportOrientation;
 }
-
 
 // ======================================================
 // 1) reports/engine/report-types.ts

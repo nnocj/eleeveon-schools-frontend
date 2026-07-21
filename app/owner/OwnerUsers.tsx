@@ -16,6 +16,8 @@
  * - AppUser/UserMembership access records are backend-owned.
  * - Writes go to backend first through account/membership endpoints.
  * - Dexie is updated only as local cache after backend success.
+ * - Membership removal uses DELETE when supported and PATCH soft-delete
+ *   compatibility when the backend has no DELETE membership route.
  *
  * Workspace-session aligned:
  * - Resolves account from eleeveon_open_workspace first.
@@ -51,8 +53,8 @@ type RoleFilter = "all" | OwnerAssignableRole;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
 };
@@ -247,14 +249,13 @@ function selectedWorkspaceAccountId(args: {
 }
 
 function idOf(value: unknown) {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
-function num(value?: string | number | null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+function optionalId(value?: string | number | null) {
+  const id = idOf(value);
+  return id || undefined;
 }
 
 function normalizeEmail(email?: string) {
@@ -275,16 +276,16 @@ function sameAccount(row: TenantRow, accountId?: string | null) {
   return !row.accountId || row.accountId === accountId;
 }
 
-function sameSchool(row: TenantRow, accountId?: string | null, schoolId?: number | null) {
+function sameSchool(row: TenantRow, accountId?: string | null, schoolId?: string | null) {
   if (!sameAccount(row, accountId)) return false;
   if (!schoolId) return true;
-  return Number(row.schoolId || 0) === Number(schoolId);
+  return idOf(row.schoolId) === idOf(schoolId);
 }
 
-function sameBranch(row: TenantRow, accountId?: string | null, schoolId?: number | null, branchId?: number | null) {
+function sameBranch(row: TenantRow, accountId?: string | null, schoolId?: string | null, branchId?: string | null) {
   if (!sameSchool(row, accountId, schoolId)) return false;
   if (!branchId) return true;
-  return Number(row.branchId || 0) === Number(branchId);
+  return idOf(row.branchId) === idOf(branchId);
 }
 
 function roleLabel(role?: string) {
@@ -523,10 +524,10 @@ function dedupeMemberships(rows: UserMembership[]) {
 function membershipMatchesForm(membership: Partial<UserMembership>, form: FormState, userId: string) {
   if (!membership || membership.role !== form.role) return false;
   if (String(membershipUserId(membership as UserMembership) || membership.userId || "") !== String(userId)) return false;
-  if (Number(membership.schoolId) !== Number(form.schoolId || 0)) return false;
+  if (idOf(membership.schoolId) !== idOf(form.schoolId)) return false;
 
   const roleRequiresBranch = ROLES.find((role) => role.value === form.role)?.branchRequired;
-  if (roleRequiresBranch && Number(membership.branchId) !== Number(form.branchId || 0)) return false;
+  if (roleRequiresBranch && idOf(membership.branchId) !== idOf(form.branchId)) return false;
 
   return normalizeEmail(membership.email) === normalizeEmail(form.email) || Boolean(userId);
 }
@@ -610,7 +611,7 @@ function extractBackendUsersAndMemberships(remote: any) {
   };
 }
 
-async function fetchBackendOwnerUsers(args: { schoolId?: number; branchId?: number }) {
+async function fetchBackendOwnerUsers(args: { schoolId?: string; branchId?: string }) {
   const params = new URLSearchParams();
 
   if (args.schoolId) params.set("schoolId", String(args.schoolId));
@@ -632,8 +633,8 @@ function cleanCreateAccountUserDto(form: FormState) {
     phone: normalizePhone(form.phone) || undefined,
     password: form.temporaryPassword.trim(),
     role: form.role,
-    schoolId: Number(form.schoolId),
-    branchId: form.branchId ? Number(form.branchId) : undefined,
+    schoolId: form.schoolId,
+    branchId: form.branchId || undefined,
   };
 }
 
@@ -649,8 +650,8 @@ function cleanMembershipDto(form: FormState, userId: string) {
   return {
     userId,
     role: form.role,
-    schoolId: Number(form.schoolId),
-    branchId: form.branchId ? Number(form.branchId) : null,
+    schoolId: form.schoolId,
+    branchId: form.branchId || null,
     active: form.active,
   };
 }
@@ -696,8 +697,8 @@ async function saveBackendOwnerAccess(args: {
       if (!message.includes("already registered") && !message.includes("already exists")) throw error;
 
       const remote = await fetchBackendOwnerUsers({
-        schoolId: num(args.form.schoolId),
-        branchId: num(args.form.branchId),
+        schoolId: optionalId(args.form.schoolId),
+        branchId: optionalId(args.form.branchId),
       });
 
       const normalized = extractBackendUsersAndMemberships(remote);
@@ -772,8 +773,8 @@ async function cacheAuthUserLocally(args: { user: AppUser; form: FormState; acco
     ...args.user,
     id,
     accountId: args.accountId,
-    schoolId: Number(args.form.schoolId),
-    branchId: args.form.branchId ? Number(args.form.branchId) : null,
+    schoolId: args.form.schoolId,
+    branchId: args.form.branchId || null,
     title: args.form.title.trim() || args.user.title,
     fullName: args.form.fullName.trim(),
     name: args.form.fullName.trim(),
@@ -818,8 +819,8 @@ async function cacheAuthMembershipLocally(args: {
     ...args.membership,
     id,
     accountId: args.accountId,
-    schoolId: Number(args.form.schoolId),
-    branchId: args.form.branchId ? Number(args.form.branchId) : null,
+    schoolId: args.form.schoolId,
+    branchId: args.form.branchId || null,
     userId,
     userLocalId: null,
     accountUserId: null,
@@ -851,12 +852,63 @@ async function deleteBackendMembership(candidate: Candidate) {
   const membershipId = String(authTableId(candidate.membership) || "").trim();
   if (!membershipId) throw new Error("Missing membership id for this access role.");
 
-  return firstWorkingAuthCall<any>([
-    { endpoint: `/memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/user-memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/accounts/memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/accounts/user-memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-  ]);
+  const encodedMembershipId = encodeURIComponent(membershipId);
+
+  try {
+    return await firstWorkingAuthCall<any>([
+      { endpoint: `/memberships/${encodedMembershipId}`, method: "DELETE" },
+      { endpoint: `/user-memberships/${encodedMembershipId}`, method: "DELETE" },
+      { endpoint: `/accounts/memberships/${encodedMembershipId}`, method: "DELETE" },
+      { endpoint: `/accounts/user-memberships/${encodedMembershipId}`, method: "DELETE" },
+    ]);
+  } catch (deleteError: any) {
+    /*
+     * Some backend versions expose PATCH for memberships but no DELETE route.
+     * In that case, perform a backend soft delete instead of failing after the
+     * final "Cannot DELETE ..." response. The local cache is removed only
+     * after this backend operation succeeds.
+     */
+    if (!isEndpointMissing(deleteError)) throw deleteError;
+
+    return firstWorkingAuthCall<any>([
+      {
+        endpoint: `/memberships/${encodedMembershipId}`,
+        method: "PATCH",
+        body: {
+          active: false,
+          status: "inactive",
+          isDeleted: true,
+        },
+      },
+      {
+        endpoint: `/user-memberships/${encodedMembershipId}`,
+        method: "PATCH",
+        body: {
+          active: false,
+          status: "inactive",
+          isDeleted: true,
+        },
+      },
+      {
+        endpoint: `/accounts/memberships/${encodedMembershipId}`,
+        method: "PATCH",
+        body: {
+          active: false,
+          status: "inactive",
+          isDeleted: true,
+        },
+      },
+      {
+        endpoint: `/accounts/user-memberships/${encodedMembershipId}`,
+        method: "PATCH",
+        body: {
+          active: false,
+          status: "inactive",
+          isDeleted: true,
+        },
+      },
+    ]);
+  }
 }
 
 async function removeAuthAccessLocally(candidate: Candidate) {
@@ -931,13 +983,13 @@ export default function OwnerUsers() {
     if (!authenticated || !selectedAccountId) router.replace("/login");
   }, [accountLoading, authenticated, selectedAccountId, router]);
 
-  const schoolMap = useMemo(() => new Map(schools.map((school) => [Number(school.id), school])), [schools]);
-  const branchMap = useMemo(() => new Map(branches.map((branch) => [Number(branch.id), branch])), [branches]);
+  const schoolMap = useMemo(() => new Map(schools.map((school) => [idOf(school.id), school])), [schools]);
+  const branchMap = useMemo(() => new Map(branches.map((branch) => [idOf(branch.id), branch])), [branches]);
 
   const branchesForFormSchool = useMemo(() => {
-    const selectedSchoolId = Number(form.schoolId || 0);
+    const selectedSchoolId = idOf(form.schoolId);
     if (!selectedSchoolId) return [];
-    return branches.filter((branch) => Number(branch.schoolId) === selectedSchoolId);
+    return branches.filter((branch) => idOf(branch.schoolId) === selectedSchoolId);
   }, [branches, form.schoolId]);
 
   const clearData = () => {
@@ -1080,8 +1132,8 @@ export default function OwnerUsers() {
         users.find((row) => String(userIdOf(row) || "") === membershipUserId(membership)) ||
         users.find((row) => Boolean(row.email && membership.email && normalizeEmail(row.email) === normalizeEmail(membership.email)));
 
-      const school = membership.schoolId ? schoolMap.get(Number(membership.schoolId)) : undefined;
-      const branch = membership.branchId ? branchMap.get(Number(membership.branchId)) : undefined;
+      const school = membership.schoolId ? schoolMap.get(idOf(membership.schoolId)) : undefined;
+      const branch = membership.branchId ? branchMap.get(idOf(membership.branchId)) : undefined;
       const email = normalizeEmail(user?.email || membership.email);
       const fullName = respectfulName({
         title: user?.title || membership.title,
@@ -1119,8 +1171,8 @@ export default function OwnerUsers() {
       if (roleFilter !== "all" && candidate.role !== roleFilter) return false;
       if (accessFilter === "enabled" && !candidate.enabled) return false;
       if (accessFilter === "inactive" && !candidate.inactive) return false;
-      if (schoolFilter !== "all" && Number(candidate.membership?.schoolId || 0) !== Number(schoolFilter)) return false;
-      if (branchFilter !== "all" && Number(candidate.membership?.branchId || 0) !== Number(branchFilter)) return false;
+      if (schoolFilter !== "all" && idOf(candidate.membership?.schoolId) !== idOf(schoolFilter)) return false;
+      if (branchFilter !== "all" && idOf(candidate.membership?.branchId) !== idOf(branchFilter)) return false;
 
       if (!query) return true;
 
@@ -1167,7 +1219,7 @@ export default function OwnerUsers() {
 
       if (key === "schoolId") {
         const branchBelongsToSchool = branches.some(
-          (branch) => Number(branch.id) === Number(current.branchId) && Number(branch.schoolId) === Number(value)
+          (branch) => idOf(branch.id) === idOf(current.branchId) && idOf(branch.schoolId) === idOf(value)
         );
         if (!branchBelongsToSchool) next.branchId = "";
       }
@@ -1400,8 +1452,8 @@ export default function OwnerUsers() {
         <section className="ba-filter-chips" aria-label="Active owner user filters">
           {roleFilter !== "all" && <button type="button" onClick={() => setRoleFilter("all")}>Role: {roleLabel(roleFilter)} ×</button>}
           {accessFilter !== "all" && <button type="button" onClick={() => setAccessFilter("all")}>Access: {accessFilter} ×</button>}
-          {schoolFilter !== "all" && <button type="button" onClick={() => setSchoolFilter("all")}>School: {schoolMap.get(Number(schoolFilter))?.name || schoolFilter} ×</button>}
-          {branchFilter !== "all" && <button type="button" onClick={() => setBranchFilter("all")}>Branch: {branchMap.get(Number(branchFilter))?.name || branchFilter} ×</button>}
+          {schoolFilter !== "all" && <button type="button" onClick={() => setSchoolFilter("all")}>School: {schoolMap.get(idOf(schoolFilter))?.name || schoolFilter} ×</button>}
+          {branchFilter !== "all" && <button type="button" onClick={() => setBranchFilter("all")}>Branch: {branchMap.get(idOf(branchFilter))?.name || branchFilter} ×</button>}
         </section>
       )}
 
@@ -1525,7 +1577,7 @@ export default function OwnerUsers() {
             <div className="ba-sheet-head">
               <div>
                 <h2>{form.membershipId ? "Edit Access" : "Create Access"}</h2>
-                <p>{roleLabel(form.role)} · {form.schoolId ? schoolMap.get(Number(form.schoolId))?.name || "Selected school" : "Select school"}</p>
+                <p>{roleLabel(form.role)} · {form.schoolId ? schoolMap.get(idOf(form.schoolId))?.name || "Selected school" : "Select school"}</p>
               </div>
               <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Close access form">✕</button>
             </div>
@@ -1650,7 +1702,7 @@ function FilterSheet({
   setBranchFilter: (value: string) => void;
   onClose: () => void;
 }) {
-  const scopedBranches = schoolFilter === "all" ? branches : branches.filter((branch) => Number(branch.schoolId) === Number(schoolFilter));
+  const scopedBranches = schoolFilter === "all" ? branches : branches.filter((branch) => idOf(branch.schoolId) === idOf(schoolFilter));
 
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">

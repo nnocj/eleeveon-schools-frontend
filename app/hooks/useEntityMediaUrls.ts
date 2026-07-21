@@ -3,10 +3,7 @@
 /**
  * app/hooks/useEntityMediaUrls.ts
  * --------------------------------------------------------------------------
- * Resolves synchronized mediaAssets for a collection of local-first rows.
- *
- * This keeps entity pages small and ensures list cards/edit forms prefer:
- *   exact owner field -> remote URL -> local mediaBlob -> legacy URL fallback.
+ * Resolves synchronized mediaAssets by permanent owner ID.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -18,18 +15,17 @@ export type EntityMediaField = {
   fallbackKey?: string;
 };
 
-export type EntityMediaUrls = Record<number, Record<string, string>>;
+export type EntityMediaUrls = Record<string, Record<string, string>>;
 
-function localId(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = String(value).trim();
+  return id || null;
 }
 
-function safeLegacyUrl(value: unknown) {
+function safeLegacyUrl(value: unknown): string {
   const text = String(value || "").trim();
-  if (!text) return "";
-  if (text.startsWith("data:")) return "";
-  if (text.startsWith("blob:")) return "";
+  if (!text || text.startsWith("data:") || text.startsWith("blob:")) return "";
   return text;
 }
 
@@ -50,7 +46,6 @@ export function useEntityMediaUrls<T extends Record<string, any>>(input: {
 
   const stableFields = useMemo(
     () => fields.map((field) => ({ ...field })),
-    // The caller may create the fields array inline; the semantic signature is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fieldSignature],
   );
@@ -61,8 +56,8 @@ export function useEntityMediaUrls<T extends Record<string, any>>(input: {
         .map((row) =>
           [
             row.id,
-            row.cloudId,
             row.updatedAt,
+            row.isDeleted,
             ...stableFields.flatMap((field) => [
               row[field.mediaIdKey || `${field.fieldKey}MediaId`],
               row[field.fallbackKey || field.fieldKey],
@@ -86,8 +81,8 @@ export function useEntityMediaUrls<T extends Record<string, any>>(input: {
 
       await Promise.all(
         rows.map(async (row) => {
-          const id = localId(row.id);
-          if (!id || row.isDeleted) return;
+          const ownerId = cleanId(row.id);
+          if (!ownerId || row.isDeleted) return;
 
           const fieldUrls: Record<string, string> = {};
 
@@ -95,14 +90,14 @@ export function useEntityMediaUrls<T extends Record<string, any>>(input: {
             stableFields.map(async (field) => {
               const mediaIdKey = field.mediaIdKey || `${field.fieldKey}MediaId`;
               const fallbackKey = field.fallbackKey || field.fieldKey;
+              const fallbackAssetId = cleanId(row[mediaIdKey]);
 
               const resolved = await resolveOwnerMediaUrl({
                 accountId,
                 ownerTable,
-                ownerLocalId: id,
-                ownerCloudId: row.cloudId || undefined,
+                ownerId,
                 fieldKey: field.fieldKey,
-                fallbackAssetId: row[mediaIdKey],
+                fallbackAssetId,
               }).catch(() => "");
 
               fieldUrls[field.fieldKey] =
@@ -110,7 +105,7 @@ export function useEntityMediaUrls<T extends Record<string, any>>(input: {
             }),
           );
 
-          next[id] = fieldUrls;
+          next[ownerId] = fieldUrls;
         }),
       );
 

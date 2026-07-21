@@ -10,14 +10,14 @@ export type AppRole =
   | "parent";
 
 export type UserMembership = {
-  id?: string | number;
+  id?: string;
   role: AppRole;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  schoolBranchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  schoolBranchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   active?: boolean;
   isActive?: boolean;
   disabled?: boolean;
@@ -101,10 +101,10 @@ function asArray<T = any>(value: any): T[] {
   return [value];
 }
 
-function numberOrNull(value: any): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function stringOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function membershipIsActive(membership: any) {
@@ -154,15 +154,15 @@ function membershipBranchId(membership: any) {
 }
 
 function contextMatches(args: {
-  expectedSchoolId?: number | null;
-  expectedBranchId?: number | null;
+  expectedSchoolId?: string | null;
+  expectedBranchId?: string | null;
   membership?: any;
 }) {
-  const expectedSchoolId = numberOrNull(args.expectedSchoolId);
-  const expectedBranchId = numberOrNull(args.expectedBranchId);
+  const expectedSchoolId = stringOrNull(args.expectedSchoolId);
+  const expectedBranchId = stringOrNull(args.expectedBranchId);
 
-  const memberSchoolId = numberOrNull(membershipSchoolId(args.membership));
-  const memberBranchId = numberOrNull(membershipBranchId(args.membership));
+  const memberSchoolId = stringOrNull(membershipSchoolId(args.membership));
+  const memberBranchId = stringOrNull(membershipBranchId(args.membership));
 
   const schoolMatches =
     !expectedSchoolId || !memberSchoolId || expectedSchoolId === memberSchoolId;
@@ -192,11 +192,11 @@ export function normalizeMembership(membership: any): UserMembership | null {
   return {
     ...membership,
     role,
-    schoolId: numberOrNull(membershipSchoolId(membership)),
-    branchId: numberOrNull(membershipBranchId(membership)),
-    teacherLocalId: numberOrNull(membership.teacherLocalId),
-    studentLocalId: numberOrNull(membership.studentLocalId),
-    parentLocalId: numberOrNull(membership.parentLocalId),
+    schoolId: stringOrNull(membershipSchoolId(membership)),
+    branchId: stringOrNull(membershipBranchId(membership)),
+    teacherId: stringOrNull(membership.teacherId),
+    studentId: stringOrNull(membership.studentId),
+    parentId: stringOrNull(membership.parentId),
     active: true,
   };
 }
@@ -301,8 +301,8 @@ export function roleCanAccess(
 export function pickAccessibleMembership(args: {
   memberships?: any[] | null;
   allowedRoles: AppRole[];
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 }) {
   const memberships = normalizeMemberships(args.memberships);
 
@@ -324,8 +324,8 @@ export function membershipCanAccess(args: {
   memberships?: any[] | null;
   selectedMembership?: any | null;
   allowedRoles: AppRole[];
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
 }) {
   const selected = normalizeMembership(args.selectedMembership);
 

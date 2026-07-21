@@ -42,22 +42,23 @@ export default function BorderedTraditionalHeader({
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -69,7 +70,9 @@ export default function BorderedTraditionalHeader({
     .filter(Boolean)
     .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
   const logoSize = compact ? 52 : 62;
 
   const metaItems = [
@@ -88,7 +91,10 @@ export default function BorderedTraditionalHeader({
     <header
       className="bordered-traditional-report-header"
       style={{
-        fontFamily: fontFamily || branding.fontFamily || "Georgia, 'Times New Roman', serif",
+        fontFamily:
+          fontFamily ||
+          branding.fontFamily ||
+          "Georgia, 'Times New Roman', serif",
         color: "#111827",
         background: "#fffdf7",
         border: "2px double #111827",
@@ -149,7 +155,9 @@ export default function BorderedTraditionalHeader({
                   textTransform: "uppercase",
                 }}
               >
-                School<br />Crest
+                School
+                <br />
+                Crest
               </span>
             )}
           </div>

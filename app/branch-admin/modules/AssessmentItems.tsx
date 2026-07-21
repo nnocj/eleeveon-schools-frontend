@@ -49,7 +49,12 @@ import {
   type AssessmentStructureItem,
 } from "../../lib/db/db";
 
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -59,15 +64,15 @@ type StatusFilter = "all" | "active" | "inactive";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
 };
 
 type ItemForm = {
-  id?: number;
+  id?: string;
   assessmentStructureId: string;
   name: string;
   weight: string;
@@ -78,12 +83,12 @@ type ItemForm = {
 };
 
 type ItemViewRow = {
-  id: number;
+  id: string;
   row: AssessmentStructureItem;
   name: string;
   structureName: string;
   academicStructureName: string;
-  assessmentStructureId: number;
+  assessmentStructureId: string;
   weight: number;
   maxScore: number;
   order: number;
@@ -105,10 +110,9 @@ const emptyForm = (): ItemForm => ({
   active: true,
 });
 
-const idOf = (value: any) => {
-  if (value === undefined || value === null || value === "") return 0;
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
+const idOf = (value: any): string => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -117,11 +121,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -132,7 +136,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -157,13 +163,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -174,16 +180,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -195,9 +205,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -205,13 +219,15 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (value: any) => String(value || "").toLowerCase().trim();
+const safeLower = (value: any) =>
+  String(value || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
 
 const isActiveRow = (row: any) => {
@@ -259,7 +275,15 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -273,9 +297,19 @@ export default function AssessmentItems() {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount() as any;
+  const {
+    accountId,
+    authenticated,
+    loading: accountLoading,
+  } = useAccount() as any;
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership();
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -306,8 +340,12 @@ export default function AssessmentItems() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [structureFilter, setStructureFilter] = useState("all");
 
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [items, setItems] = useState<AssessmentStructureItem[]>([]);
   const [entries, setEntries] = useState<AssessmentEntry[]>([]);
 
@@ -318,13 +356,24 @@ export default function AssessmentItems() {
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<ItemForm>(emptyForm());
 
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -334,7 +383,11 @@ export default function AssessmentItems() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   };
 
   const clearData = () => {
@@ -354,36 +407,53 @@ export default function AssessmentItems() {
     try {
       setLoading(true);
 
-      const [structureRows, academicStructureRows, itemRows, entryRows] = await Promise.all([
-        listActiveLocal("assessmentStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        listActiveLocal("academicStructures", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
-        tableSafe("assessmentStructureItems")?.toArray?.() || [],
-        tableSafe("assessmentEntries")?.toArray?.() || [],
-      ]);
+      const [structureRows, academicStructureRows, itemRows, entryRows] =
+        await Promise.all([
+          listActiveLocal("assessmentStructures", {
+            accountId,
+            schoolId: schoolId,
+            branchId: branchId,
+          } as any),
+          listActiveLocal("academicStructures", {
+            accountId,
+            schoolId: schoolId,
+            branchId: branchId,
+          } as any),
+          tableSafe("assessmentStructureItems")?.toArray?.() || [],
+          tableSafe("assessmentEntries")?.toArray?.() || [],
+        ]);
 
       setAssessmentStructures(
         (structureRows as AssessmentStructure[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setAcademicStructures(
         (academicStructureRows as AcademicStructure[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || ""))
-        )
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
       );
 
       setItems(
         (itemRows as AssessmentStructureItem[])
           .filter((row) => sameTenant(row as TenantRow))
           .sort((a: any, b: any) => {
-            const aStructure = Number(a.assessmentStructureId || 0);
-            const bStructure = Number(b.assessmentStructureId || 0);
-            return aStructure - bStructure || Number(a.order || 0) - Number(b.order || 0);
-          })
+            const structureOrder = idOf(a.assessmentStructureId).localeCompare(
+              idOf(b.assessmentStructureId),
+            );
+            return (
+              structureOrder ||
+              Number(a.order || 0) - Number(b.order || 0)
+            );
+          }),
       );
 
-      setEntries((entryRows as AssessmentEntry[]).filter((row) => sameTenant(row as TenantRow)));
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter((row) =>
+          sameTenant(row as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load assessment items:", error);
       clearData();
@@ -397,22 +467,29 @@ export default function AssessmentItems() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
   const assessmentStructureMap = useMemo(
     () => new Map(assessmentStructures.map((row: any) => [idOf(row.id), row])),
-    [assessmentStructures]
+    [assessmentStructures],
   );
 
   const academicStructureMap = useMemo(
     () => new Map(academicStructures.map((row: any) => [idOf(row.id), row])),
-    [academicStructures]
+    [academicStructures],
   );
 
   const itemsByStructure = useMemo(() => {
-    const map = new Map<number, AssessmentStructureItem[]>();
+    const map = new Map<string, AssessmentStructureItem[]>();
 
     items.forEach((item: any) => {
       const id = idOf(item.assessmentStructureId);
@@ -425,7 +502,7 @@ export default function AssessmentItems() {
   }, [items]);
 
   const activeWeightByStructure = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     items.forEach((item: any) => {
       if (!isActiveRow(item)) return;
@@ -438,7 +515,7 @@ export default function AssessmentItems() {
   }, [items]);
 
   const entryCountByItem = useMemo(() => {
-    const map = new Map<number, number>();
+    const map = new Map<string, number>();
 
     entries.forEach((entry: any) => {
       const id = idOf(entry.assessmentStructureItemId);
@@ -452,9 +529,14 @@ export default function AssessmentItems() {
   const viewRows = useMemo<ItemViewRow[]>(() => {
     return items.map((item: any) => {
       const id = idOf(item.id);
-      const structure = assessmentStructureMap.get(idOf(item.assessmentStructureId)) as any;
-      const academic = academicStructureMap.get(idOf(structure?.academicStructureId)) as any;
-      const structureWeight = activeWeightByStructure.get(idOf(item.assessmentStructureId)) || 0;
+      const structure = assessmentStructureMap.get(
+        idOf(item.assessmentStructureId),
+      ) as any;
+      const academic = academicStructureMap.get(
+        idOf(structure?.academicStructureId),
+      ) as any;
+      const structureWeight =
+        activeWeightByStructure.get(idOf(item.assessmentStructureId)) || 0;
 
       return {
         id,
@@ -474,7 +556,13 @@ export default function AssessmentItems() {
         structureLocked: !!structure?.locked,
       };
     });
-  }, [academicStructureMap, activeWeightByStructure, assessmentStructureMap, entryCountByItem, items]);
+  }, [
+    academicStructureMap,
+    activeWeightByStructure,
+    assessmentStructureMap,
+    entryCountByItem,
+    items,
+  ]);
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -496,7 +584,8 @@ export default function AssessmentItems() {
         statusFilter === "all" ||
         (statusFilter === "active" ? item.active : !item.active);
       const structureOk =
-        structureFilter === "all" || sameId(item.assessmentStructureId, structureFilter);
+        structureFilter === "all" ||
+        sameId(item.assessmentStructureId, structureFilter);
 
       return searchOk && statusOk && structureOk;
     });
@@ -505,21 +594,37 @@ export default function AssessmentItems() {
   const activeItems = viewRows.filter((item) => item.active);
   const archivedItems = viewRows.length - activeItems.length;
   const completeStructures = assessmentStructures.filter(
-    (row: any) => (activeWeightByStructure.get(idOf(row.id)) || 0) === 100
+    (row: any) => (activeWeightByStructure.get(idOf(row.id)) || 0) === 100,
   ).length;
   const incompleteStructures = assessmentStructures.length - completeStructures;
 
   const selectedStructure =
-    structureFilter !== "all" ? assessmentStructureMap.get(idOf(structureFilter)) : undefined;
+    structureFilter !== "all"
+      ? assessmentStructureMap.get(idOf(structureFilter))
+      : undefined;
 
   const activeFilterCount = useMemo(
-    () => [structureFilter, statusFilter].filter((value) => value !== "all").length,
-    [structureFilter, statusFilter]
+    () =>
+      [structureFilter, statusFilter].filter((value) => value !== "all").length,
+    [structureFilter, statusFilter],
   );
 
-  const countsByStructure = useMemo(() => groupedCounts(viewRows, (row) => row.structureName), [viewRows]);
-  const countsByStatus = useMemo(() => groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")), [viewRows]);
-  const countsByCompulsory = useMemo(() => groupedCounts(viewRows, (row) => (row.compulsory ? "Compulsory" : "Optional")), [viewRows]);
+  const countsByStructure = useMemo(
+    () => groupedCounts(viewRows, (row) => row.structureName),
+    [viewRows],
+  );
+  const countsByStatus = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) => (row.active ? "Active" : "Inactive")),
+    [viewRows],
+  );
+  const countsByCompulsory = useMemo(
+    () =>
+      groupedCounts(viewRows, (row) =>
+        row.compulsory ? "Compulsory" : "Optional",
+      ),
+    [viewRows],
+  );
 
   const requireTenant = () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -529,7 +634,7 @@ export default function AssessmentItems() {
     return true;
   };
 
-  const nextOrderForStructure = (assessmentStructureId: number) =>
+  const nextOrderForStructure = (assessmentStructureId: string) =>
     (itemsByStructure.get(assessmentStructureId)?.length || 0) + 1;
 
   const clearFilters = () => {
@@ -537,20 +642,25 @@ export default function AssessmentItems() {
     setStatusFilter("all");
   };
 
-  const updateForm = (patch: Partial<ItemForm>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<ItemForm>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const openCreate = (assessmentStructureId?: number) => {
+  const openCreate = (assessmentStructureId?: string) => {
     if (!requireTenant()) return;
 
     const targetStructureId =
       assessmentStructureId ||
-      (structureFilter !== "all" ? idOf(structureFilter) : idOf((assessmentStructures[0] as any)?.id));
+      (structureFilter !== "all"
+        ? idOf(structureFilter)
+        : idOf((assessmentStructures[0] as any)?.id));
 
     setSelectedItem(null);
     setForm({
       ...emptyForm(),
       assessmentStructureId: targetStructureId ? String(targetStructureId) : "",
-      order: String(targetStructureId ? nextOrderForStructure(targetStructureId) : 1),
+      order: String(
+        targetStructureId ? nextOrderForStructure(targetStructureId) : 1,
+      ),
     });
     setModalOpen(true);
   };
@@ -580,9 +690,12 @@ export default function AssessmentItems() {
     const maxScore = Number(form.maxScore || 0);
     const order = Number(form.order || 0);
 
-    if (!Number.isFinite(weight) || weight < 0 || weight > 100) return "Weight must be between 0 and 100.";
-    if (!Number.isFinite(maxScore) || maxScore <= 0) return "Max score must be greater than 0.";
-    if (!Number.isFinite(order) || order <= 0) return "Order must be greater than 0.";
+    if (!Number.isFinite(weight) || weight < 0 || weight > 100)
+      return "Weight must be between 0 and 100.";
+    if (!Number.isFinite(maxScore) || maxScore <= 0)
+      return "Max score must be greater than 0.";
+    if (!Number.isFinite(order) || order <= 0)
+      return "Order must be greater than 0.";
 
     const duplicate = items.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
@@ -594,7 +707,8 @@ export default function AssessmentItems() {
       );
     });
 
-    if (duplicate) return "An item with this name already exists under the selected assessment structure.";
+    if (duplicate)
+      return "An item with this name already exists under the selected assessment structure.";
 
     const structureId = idOf(form.assessmentStructureId);
     const otherActiveWeight = items
@@ -624,11 +738,13 @@ export default function AssessmentItems() {
     try {
       setSaving(true);
 
-      const existing = form.id ? items.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? items.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<AssessmentStructureItem> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         assessmentStructureId: idOf(form.assessmentStructureId),
         name: form.name.trim(),
         weight: Number(form.weight || 0),
@@ -640,13 +756,19 @@ export default function AssessmentItems() {
       } as Partial<AssessmentStructureItem>;
 
       if (form.id && existing) {
-        await updateLocal("assessmentStructureItems", Number(form.id), payload);
+        await updateLocal("assessmentStructureItems", String(form.id), payload);
       } else {
-        await createLocal("assessmentStructureItems", payload as AssessmentStructureItem);
+        await createLocal(
+          "assessmentStructureItems",
+          payload as AssessmentStructureItem,
+        );
       }
 
       setModalOpen(false);
-      showToast("success", form.id ? "Assessment item updated." : "Assessment item created.");
+      showToast(
+        "success",
+        form.id ? "Assessment item updated." : "Assessment item created.",
+      );
       await load();
     } catch (error) {
       console.error("Failed to save assessment item:", error);
@@ -662,7 +784,7 @@ export default function AssessmentItems() {
     const confirmed = window.confirm(
       entryCount
         ? `"${row.name}" has ${entryCount} score record(s). Archive anyway?`
-        : `Archive "${row.name}"?`
+        : `Archive "${row.name}"?`,
     );
 
     if (!confirmed) return;
@@ -679,8 +801,8 @@ export default function AssessmentItems() {
     try {
       await createLocal("assessmentStructureItems", {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         assessmentStructureId: row.assessmentStructureId,
         name: `${row.name || "Item"} Copy`,
         weight: 0,
@@ -711,17 +833,30 @@ export default function AssessmentItems() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing assessment items." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing assessment items."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Select a branch first</h2>
           <p>Assessment items belong to one active school branch.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/account")}>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
             Go to Account Setup
           </button>
         </section>
@@ -730,19 +865,29 @@ export default function AssessmentItems() {
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
             ✕
           </button>
         </section>
       )}
 
-      <section className="ba-search-card" aria-label="Assessment item search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Assessment item search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -753,7 +898,12 @@ export default function AssessmentItems() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={() => openCreate()} aria-label="Add assessment item">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={() => openCreate()}
+          aria-label="Add assessment item"
+        >
           +
         </button>
 
@@ -768,14 +918,20 @@ export default function AssessmentItems() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {!assessmentStructures.length && (
         <section className="ba-warning">
-          Create at least one assessment structure first. Items must belong to a structure.
+          Create at least one assessment structure first. Items must belong to a
+          structure.
         </section>
       )}
 
@@ -783,7 +939,10 @@ export default function AssessmentItems() {
         <section className="ba-filter-chips" aria-label="Active filters">
           {structureFilter !== "all" && (
             <button type="button" onClick={() => setStructureFilter("all")}>
-              Structure: {(assessmentStructureMap.get(idOf(structureFilter)) as any)?.name || structureFilter} ×
+              Structure:{" "}
+              {(assessmentStructureMap.get(idOf(structureFilter)) as any)
+                ?.name || structureFilter}{" "}
+              ×
             </button>
           )}
           {statusFilter !== "all" && (
@@ -800,39 +959,80 @@ export default function AssessmentItems() {
             <span>Selected assessment structure</span>
             <strong>{(selectedStructure as any).name}</strong>
             <p>
-              Total active weight: {activeWeightByStructure.get(idOf((selectedStructure as any).id)) || 0}% ·{" "}
-              {itemsByStructure.get(idOf((selectedStructure as any).id))?.length || 0} item(s)
+              Total active weight:{" "}
+              {activeWeightByStructure.get(
+                idOf((selectedStructure as any).id),
+              ) || 0}
+              % ·{" "}
+              {itemsByStructure.get(idOf((selectedStructure as any).id))
+                ?.length || 0}{" "}
+              item(s)
             </p>
           </div>
-          <Chip tone={(activeWeightByStructure.get(idOf((selectedStructure as any).id)) || 0) === 100 ? "green" : "orange"}>
-            {(activeWeightByStructure.get(idOf((selectedStructure as any).id)) || 0) === 100 ? "Ready" : "Incomplete"}
+          <Chip
+            tone={
+              (activeWeightByStructure.get(
+                idOf((selectedStructure as any).id),
+              ) || 0) === 100
+                ? "green"
+                : "orange"
+            }
+          >
+            {(activeWeightByStructure.get(
+              idOf((selectedStructure as any).id),
+            ) || 0) === 100
+              ? "Ready"
+              : "Incomplete"}
           </Chip>
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Items by Structure" rows={countsByStructure} total={viewRows.length} />
-          <AnalysisCard title="Items by Status" rows={countsByStatus} total={viewRows.length} />
-          <AnalysisCard title="Items by Rule" rows={countsByCompulsory} total={viewRows.length} />
+          <AnalysisCard
+            title="Items by Structure"
+            rows={countsByStructure}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Items by Status"
+            rows={countsByStatus}
+            total={viewRows.length}
+          />
+          <AnalysisCard
+            title="Items by Rule"
+            rows={countsByCompulsory}
+            total={viewRows.length}
+          />
           <article className="ba-analysis ba-current-filter">
             <span>Current Filter</span>
             <strong>{filteredRows.length}</strong>
             <p>
-              {activeItems.length} active · {archivedItems} archived · {completeStructures} complete structures · {incompleteStructures} incomplete.
+              {activeItems.length} active · {archivedItems} archived ·{" "}
+              {completeStructures} complete structures · {incompleteStructures}{" "}
+              incomplete.
             </p>
           </article>
         </section>
       )}
 
       {viewMode === "table" && (
-        <TableView rows={filteredRows} openEdit={openEdit} duplicateItem={duplicateItem} archive={archive} />
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          duplicateItem={duplicateItem}
+          archive={archive}
+        />
       )}
 
       {viewMode === "cards" && (
         <section className="ba-list item-list">
           {filteredRows.map((item) => (
-            <ItemListRow key={String(item.id)} item={item} onOpen={() => setSelectedItem(item)} />
+            <ItemListRow
+              key={String(item.id)}
+              item={item}
+              onOpen={() => setSelectedItem(item)}
+            />
           ))}
 
           {!filteredRows.length && (
@@ -899,9 +1099,20 @@ export default function AssessmentItems() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -912,7 +1123,13 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function ItemListRow({ item, onOpen }: { item: ItemViewRow; onOpen: () => void }) {
+function ItemListRow({
+  item,
+  onOpen,
+}: {
+  item: ItemViewRow;
+  onOpen: () => void;
+}) {
   return (
     <button type="button" className="student-row item-row" onClick={onOpen}>
       <span className="item-icon">🧩</span>
@@ -923,7 +1140,8 @@ function ItemListRow({ item, onOpen }: { item: ItemViewRow; onOpen: () => void }
           {item.structureName} · {item.weight}% / {item.maxScore}
         </small>
         <em>
-          Order {item.order} · {item.compulsory ? "Compulsory" : "Optional"} · {item.usageCount} records
+          Order {item.order} · {item.compulsory ? "Compulsory" : "Optional"} ·{" "}
+          {item.usageCount} records
         </em>
       </span>
 
@@ -963,7 +1181,7 @@ function FilterSheet({
   onClose,
 }: {
   assessmentStructures: AssessmentStructure[];
-  activeWeightByStructure: Map<number, number>;
+  activeWeightByStructure: Map<string, number>;
   structureFilter: string;
   statusFilter: StatusFilter;
   setStructureFilter: (value: string) => void;
@@ -987,7 +1205,10 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Assessment Structure</span>
-            <select value={structureFilter} onChange={(event) => setStructureFilter(event.target.value)}>
+            <select
+              value={structureFilter}
+              onChange={(event) => setStructureFilter(event.target.value)}
+            >
               <option value="all">All assessment structures</option>
               {assessmentStructures.map((row: any) => (
                 <option key={String(row.id)} value={String(row.id)}>
@@ -999,7 +1220,12 @@ function FilterSheet({
 
           <label>
             <span>Status</span>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+            >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
               <option value="inactive">Inactive / Archived</option>
@@ -1045,19 +1271,31 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
             <span>☰</span>
             <b>List view</b>
             <small>Compact assessment item cards</small>
           </button>
 
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
             <span>☷</span>
             <b>Table view</b>
             <small>Dense records for laptop work</small>
           </button>
 
-          <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
             <span>◔</span>
             <b>Analytics</b>
             <small>Structure, status and compulsory summaries</small>
@@ -1097,7 +1335,11 @@ function ActionSheet({
               {item.structureName} · {item.weight}% weight
             </p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close item actions">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close item actions"
+          >
             ✕
           </button>
         </div>
@@ -1130,7 +1372,11 @@ function ActionSheet({
             <small>Create a copy with 0% weight</small>
           </button>
 
-          <button type="button" className="danger" onClick={() => archive(item)}>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => archive(item)}
+          >
             <span>⌫</span>
             <b>Archive</b>
             <small>Soft delete this assessment item locally</small>
@@ -1179,7 +1425,9 @@ function TableView({
                 <tr key={String(item.id)}>
                   <td>
                     <strong>{item.name}</strong>
-                    <span>{item.compulsory ? "Compulsory item" : "Optional item"}</span>
+                    <span>
+                      {item.compulsory ? "Compulsory item" : "Optional item"}
+                    </span>
                   </td>
                   <td>
                     {item.structureName}
@@ -1187,14 +1435,18 @@ function TableView({
                   </td>
                   <td>{item.academicStructureName}</td>
                   <td>
-                    <Chip tone={item.weight > 0 ? "blue" : "orange"}>{numberText(item.weight)}%</Chip>
+                    <Chip tone={item.weight > 0 ? "blue" : "orange"}>
+                      {numberText(item.weight)}%
+                    </Chip>
                   </td>
                   <td>{numberText(item.maxScore)}</td>
                   <td>{item.order || "—"}</td>
                   <td>{item.usageCount}</td>
                   <td>
                     <div className="ba-chip-row">
-                      <Chip tone={item.active ? "green" : "gray"}>{item.active ? "Active" : "Inactive"}</Chip>
+                      <Chip tone={item.active ? "green" : "gray"}>
+                        {item.active ? "Active" : "Inactive"}
+                      </Chip>
                       {item.compulsory && <Chip tone="purple">Compulsory</Chip>}
                     </div>
                   </td>
@@ -1207,7 +1459,11 @@ function TableView({
                       <button type="button" onClick={() => duplicateItem(item)}>
                         Duplicate
                       </button>
-                      <button type="button" className="ba-delete" onClick={() => archive(item)}>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => archive(item)}
+                      >
                         Archive
                       </button>
                     </div>
@@ -1218,7 +1474,11 @@ function TableView({
           </tbody>
         </table>
 
-        {!rows.length && <div className="ba-empty-table">No assessment item matches your filters.</div>}
+        {!rows.length && (
+          <div className="ba-empty-table">
+            No assessment item matches your filters.
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1237,8 +1497,8 @@ function ItemModal({
   form: ItemForm;
   saving: boolean;
   assessmentStructures: AssessmentStructure[];
-  activeWeightByStructure: Map<number, number>;
-  itemsByStructure: Map<number, AssessmentStructureItem[]>;
+  activeWeightByStructure: Map<string, number>;
+  itemsByStructure: Map<string, AssessmentStructureItem[]>;
   updateForm: (patch: Partial<ItemForm>) => void;
   setModalOpen: (open: boolean) => void;
   save: (event?: React.FormEvent) => void;
@@ -1250,10 +1510,16 @@ function ItemModal({
           <div>
             <h2>{form.id ? "Edit Assessment Item" : "New Assessment Item"}</h2>
             <p>
-              Assessment items are the weighted parts of an assessment structure. Active item weights under one structure should total 100%.
+              Assessment items are the weighted parts of an assessment
+              structure. Active item weights under one structure should total
+              100%.
             </p>
           </div>
-          <button type="button" onClick={() => setModalOpen(false)} aria-label="Close item form">
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close item form"
+          >
             ✕
           </button>
         </div>
@@ -1269,14 +1535,19 @@ function ItemModal({
                   const structureId = idOf(event.target.value);
                   updateForm({
                     assessmentStructureId: event.target.value,
-                    order: form.id ? form.order : String((itemsByStructure.get(structureId)?.length || 0) + 1),
+                    order: form.id
+                      ? form.order
+                      : String(
+                          (itemsByStructure.get(structureId)?.length || 0) + 1,
+                        ),
                   });
                 }}
               >
                 <option value="">Select assessment structure</option>
                 {assessmentStructures.map((row: any) => (
                   <option key={String(row.id)} value={String(row.id)}>
-                    {row.name} · active weight {activeWeightByStructure.get(idOf(row.id)) || 0}%
+                    {row.name} · active weight{" "}
+                    {activeWeightByStructure.get(idOf(row.id)) || 0}%
                   </option>
                 ))}
               </select>
@@ -1310,7 +1581,9 @@ function ItemModal({
                 min="1"
                 step="0.01"
                 value={form.maxScore}
-                onChange={(event) => updateForm({ maxScore: event.target.value })}
+                onChange={(event) =>
+                  updateForm({ maxScore: event.target.value })
+                }
               />
             </label>
 
@@ -1328,7 +1601,9 @@ function ItemModal({
               <span>Compulsory</span>
               <select
                 value={form.compulsory ? "yes" : "no"}
-                onChange={(event) => updateForm({ compulsory: event.target.value === "yes" })}
+                onChange={(event) =>
+                  updateForm({ compulsory: event.target.value === "yes" })
+                }
               >
                 <option value="yes">Yes</option>
                 <option value="no">No</option>
@@ -1339,7 +1614,9 @@ function ItemModal({
               <span>Status</span>
               <select
                 value={form.active ? "active" : "inactive"}
-                onChange={(event) => updateForm({ active: event.target.value === "active" })}
+                onChange={(event) =>
+                  updateForm({ active: event.target.value === "active" })
+                }
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -1349,7 +1626,8 @@ function ItemModal({
         </section>
 
         <section className="ba-note">
-          <strong>Tip:</strong> Keep active item weights under each assessment structure at exactly 100% for clean report computation.
+          <strong>Tip:</strong> Keep active item weights under each assessment
+          structure at exactly 100% for clean report computation.
         </section>
 
         <div className="ba-modal-actions">
@@ -1365,7 +1643,10 @@ function ItemModal({
   );
 }
 
-function groupedCounts(rows: ItemViewRow[], keyFn: (item: ItemViewRow) => string) {
+function groupedCounts(
+  rows: ItemViewRow[],
+  keyFn: (item: ItemViewRow) => string,
+) {
   const map = new Map<string, number>();
   rows.forEach((row) => {
     const key = keyFn(row) || "Unknown";
@@ -1377,7 +1658,15 @@ function groupedCounts(rows: ItemViewRow[], keyFn: (item: ItemViewRow) => string
     .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
     <article className="ba-analysis">
       <span>{title}</span>

@@ -14,90 +14,98 @@
   --ba-bg: var(--bg, #f7f8fb);
   --ba-text: var(--text, #111827);
   --ba-muted: var(--muted, #64748b);
-  --ba-border: var(--border, rgba(15, 23, 42, 0.10));
+  --ba-border: var(--border, rgba(15, 23, 42, 0.1));
   min-height: 100dvh;
   width: 100%;
   color: var(--ba-text);
   background: var(--ba-bg);
 }
 
-.branch-admin-theme :where(
-  .ba-page,
-  .bd-page,
-  .ap-page,
-  .ae-page,
-  .wallet-page,
-  .ex-page,
-  .bf-page,
-  .bi-page,
-  .pr-page,
-  .ps-page,
-  .wm-page
-) {
+.branch-admin-theme
+  :where(
+    .ba-page,
+    .bd-page,
+    .ap-page,
+    .ae-page,
+    .wallet-page,
+    .ex-page,
+    .bf-page,
+    .bi-page,
+    .pr-page,
+    .ps-page,
+    .wm-page
+  ) {
   --ba-primary: var(--primary-color, #2563eb);
   color: var(--ba-text);
-  background:
-    radial-gradient(
+  background: radial-gradient(
       circle at top left,
       color-mix(in srgb, var(--ba-primary) 9%, transparent),
       transparent 30rem
     ),
     var(--ba-bg) !important;
-  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-family: var(
+    --font-family,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif
+  );
 }
 
 /* Shared surface treatment for old and new page families. */
-.branch-admin-theme :where(
-  .ba-search-card,
-  .ba-card,
-  .ba-state,
-  .ba-empty,
-  .ba-analysis,
-  .ba-table-card,
-  .bd-search-card,
-  .bd-state,
-  .bd-empty,
-  .branch-row,
-  .recent-row,
-  .ap-search-card,
-  .ap-state-card,
-  .ap-progress-card,
-  .ap-detail-card,
-  .ae-search-card,
-  .ae-state,
-  .ae-session-strip,
-  .student-row,
-  .wallet-search-card,
-  .wallet-state,
-  .wallet-card,
-  .wallet-table-card,
-  .ex-search-card,
-  .ex-state,
-  .expense-row,
-  .ex-table-card,
-  .bf-search-card,
-  .bf-state,
-  .fee-row,
-  .invoice-row,
-  .bf-table-card,
-  .bi-search-card,
-  .bi-state,
-  .income-row,
-  .bi-table-card,
-  .pr-search-card,
-  .pr-state,
-  .pay-row,
-  .pr-table-card,
-  .ps-search-card,
-  .ps-state,
-  .ps-form-card,
-  .ps-sheet,
-  .wallet-sheet,
-  .wm-search-card,
-  .wm-state,
-  .wm-row,
-  .wm-table-card
-) {
+.branch-admin-theme
+  :where(
+    .ba-search-card,
+    .ba-card,
+    .ba-state,
+    .ba-empty,
+    .ba-analysis,
+    .ba-table-card,
+    .bd-search-card,
+    .bd-state,
+    .bd-empty,
+    .branch-row,
+    .recent-row,
+    .ap-search-card,
+    .ap-state-card,
+    .ap-progress-card,
+    .ap-detail-card,
+    .ae-search-card,
+    .ae-state,
+    .ae-session-strip,
+    .student-row,
+    .wallet-search-card,
+    .wallet-state,
+    .wallet-card,
+    .wallet-table-card,
+    .ex-search-card,
+    .ex-state,
+    .expense-row,
+    .ex-table-card,
+    .bf-search-card,
+    .bf-state,
+    .fee-row,
+    .invoice-row,
+    .bf-table-card,
+    .bi-search-card,
+    .bi-state,
+    .income-row,
+    .bi-table-card,
+    .pr-search-card,
+    .pr-state,
+    .pay-row,
+    .pr-table-card,
+    .ps-search-card,
+    .ps-state,
+    .ps-form-card,
+    .ps-sheet,
+    .wallet-sheet,
+    .wm-search-card,
+    .wm-state,
+    .wm-row,
+    .wm-table-card
+  ) {
   background: var(--ba-surface) !important;
   border-color: var(--ba-border) !important;
   color: var(--ba-text) !important;
@@ -105,48 +113,54 @@
 }
 
 /* Search inputs and form controls. */
-.branch-admin-theme :where(
-  .ba-search,
-  .bd-search,
-  .ap-search,
-  .ae-search,
-  .wallet-search,
-  .ex-search,
-  .bf-search,
-  .bi-search,
-  .pr-search,
-  .ps-search,
-  .wm-search
-) {
+.branch-admin-theme
+  :where(
+    .ba-search,
+    .bd-search,
+    .ap-search,
+    .ae-search,
+    .wallet-search,
+    .ex-search,
+    .bf-search,
+    .bi-search,
+    .pr-search,
+    .ps-search,
+    .wm-search
+  ) {
   background: color-mix(in srgb, var(--ba-muted) 7%, transparent) !important;
 }
 
 .branch-admin-theme :where(input, select, textarea):focus {
-  border-color: color-mix(in srgb, var(--ba-primary) 58%, var(--ba-border)) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--ba-primary) 58%,
+    var(--ba-border)
+  ) !important;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--ba-primary) 13%, transparent) !important;
   outline: none;
 }
 
 /* Add and explicit primary actions use the branch primary colour. */
-.branch-admin-theme :where(
-  .ba-add-inline,
-  .bd-add-inline,
-  .ap-add-inline,
-  .wallet-add-inline,
-  .ex-add-inline,
-  .bf-add-inline,
-  .bi-add-inline,
-  .pr-add-inline,
-  .ps-add-inline,
-  .wm-add-inline,
-  .ba-state-button,
-  .ap-primary-btn,
-  .ae-state-button,
-  button.primary,
-  .ba-modal-actions button:last-child,
-  .ba-sheet-actions button.primary,
-  .ps-actions button:last-child
-) {
+.branch-admin-theme
+  :where(
+    .ba-add-inline,
+    .bd-add-inline,
+    .ap-add-inline,
+    .wallet-add-inline,
+    .ex-add-inline,
+    .bf-add-inline,
+    .bi-add-inline,
+    .pr-add-inline,
+    .ps-add-inline,
+    .wm-add-inline,
+    .ba-state-button,
+    .ap-primary-btn,
+    .ae-state-button,
+    button.primary,
+    .ba-modal-actions button:last-child,
+    .ba-sheet-actions button.primary,
+    .ps-actions button:last-child
+  ) {
   background: var(--ba-primary) !important;
   border-color: var(--ba-primary) !important;
   color: #ffffff !important;
@@ -154,124 +168,147 @@
 }
 
 /* Compact icon/filter controls follow Branchsettings. */
-.branch-admin-theme :where(
-  .ba-filter-button,
-  .bd-icon-button,
-  .ap-icon-button,
-  .ae-icon-button,
-  .wallet-filter-button,
-  .wallet-icon-button,
-  .ex-icon-button,
-  .bf-icon-button,
-  .bi-icon-button,
-  .pr-icon-button,
-  .ps-filter-button,
-  .ps-icon-button,
-  .wm-icon-button
-) {
+.branch-admin-theme
+  :where(
+    .ba-filter-button,
+    .bd-icon-button,
+    .ap-icon-button,
+    .ae-icon-button,
+    .wallet-filter-button,
+    .wallet-icon-button,
+    .ex-icon-button,
+    .bf-icon-button,
+    .bi-icon-button,
+    .pr-icon-button,
+    .ps-filter-button,
+    .ps-icon-button,
+    .wm-icon-button
+  ) {
   border-color: var(--ba-border) !important;
-  background: color-mix(in srgb, var(--ba-primary) 8%, var(--ba-surface)) !important;
+  background: color-mix(
+    in srgb,
+    var(--ba-primary) 8%,
+    var(--ba-surface)
+  ) !important;
   color: var(--ba-primary) !important;
 }
 
-.branch-admin-theme :where(
-  .ba-filter-button.active,
-  .bd-icon-button.active,
-  .ap-icon-button.active,
-  .ae-icon-button.active,
-  .wallet-filter-button.active,
-  .ex-icon-button.active,
-  .bf-icon-button.active,
-  .bi-icon-button.active,
-  .pr-icon-button.active,
-  .ps-filter-button.active,
-  .wm-icon-button.active
-) {
+.branch-admin-theme
+  :where(
+    .ba-filter-button.active,
+    .bd-icon-button.active,
+    .ap-icon-button.active,
+    .ae-icon-button.active,
+    .wallet-filter-button.active,
+    .ex-icon-button.active,
+    .bf-icon-button.active,
+    .bi-icon-button.active,
+    .pr-icon-button.active,
+    .ps-filter-button.active,
+    .wm-icon-button.active
+  ) {
   background: var(--ba-primary) !important;
   border-color: var(--ba-primary) !important;
   color: #ffffff !important;
 }
 
 /* Chips/tabs selected state. */
-.branch-admin-theme :where(
-  .ba-filter-chips button,
-  .bd-filter-chips button,
-  .ap-filter-chips button,
-  .ae-filter-chips button,
-  .wallet-filter-chips button,
-  .wallet-section-tabs button,
-  .ex-filter-chips button,
-  .bf-filter-chips button,
-  .bf-section-tabs button,
-  .bi-filter-chips button,
-  .pr-filter-chips button,
-  .ps-method-toggle button,
-  .wm-filter-chips button
-) {
+.branch-admin-theme
+  :where(
+    .ba-filter-chips button,
+    .bd-filter-chips button,
+    .ap-filter-chips button,
+    .ae-filter-chips button,
+    .wallet-filter-chips button,
+    .wallet-section-tabs button,
+    .ex-filter-chips button,
+    .bf-filter-chips button,
+    .bf-section-tabs button,
+    .bi-filter-chips button,
+    .pr-filter-chips button,
+    .ps-method-toggle button,
+    .wm-filter-chips button
+  ) {
   background: color-mix(in srgb, var(--ba-primary) 11%, transparent) !important;
   color: var(--ba-primary) !important;
-  border-color: color-mix(in srgb, var(--ba-primary) 18%, var(--ba-border)) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--ba-primary) 18%,
+    var(--ba-border)
+  ) !important;
 }
 
-.branch-admin-theme :where(
-  .ba-filter-chips button.active,
-  .bd-filter-chips button.active,
-  .ap-filter-chips button.active,
-  .ae-filter-chips button.active,
-  .wallet-filter-chips button.active,
-  .wallet-section-tabs button.active,
-  .ex-filter-chips button.active,
-  .bf-filter-chips button.active,
-  .bf-section-tabs button.active,
-  .bi-filter-chips button.active,
-  .pr-filter-chips button.active,
-  .ps-method-toggle button.active,
-  .wm-filter-chips button.active
-) {
+.branch-admin-theme
+  :where(
+    .ba-filter-chips button.active,
+    .bd-filter-chips button.active,
+    .ap-filter-chips button.active,
+    .ae-filter-chips button.active,
+    .wallet-filter-chips button.active,
+    .wallet-section-tabs button.active,
+    .ex-filter-chips button.active,
+    .bf-filter-chips button.active,
+    .bf-section-tabs button.active,
+    .bi-filter-chips button.active,
+    .pr-filter-chips button.active,
+    .ps-method-toggle button.active,
+    .wm-filter-chips button.active
+  ) {
   background: var(--ba-primary) !important;
   color: #ffffff !important;
   border-color: var(--ba-primary) !important;
 }
 
 /* Avatars/icons use the active branch colour unless showing a real image. */
-.branch-admin-theme :where(
-  .branch-avatar,
-  .wallet-avatar,
-  .expense-avatar,
-  .invoice-avatar,
-  .income-avatar,
-  .pay-avatar,
-  .wm-avatar,
-  .curriculum-icon,
-  .ba-empty-icon
-) {
-  background: color-mix(in srgb, var(--ba-primary) 13%, var(--ba-surface)) !important;
+.branch-admin-theme
+  :where(
+    .branch-avatar,
+    .wallet-avatar,
+    .expense-avatar,
+    .invoice-avatar,
+    .income-avatar,
+    .pay-avatar,
+    .wm-avatar,
+    .curriculum-icon,
+    .ba-empty-icon
+  ) {
+  background: color-mix(
+    in srgb,
+    var(--ba-primary) 13%,
+    var(--ba-surface)
+  ) !important;
   color: var(--ba-primary) !important;
 }
 
 /* Tables. */
-.branch-admin-theme :where(
-  .ba-table-scroll th,
-  .wallet-table-scroll th,
-  .ex-table-scroll th,
-  .bf-table-scroll th,
-  .bi-table-scroll th,
-  .pr-table-scroll th,
-  .wm-table-scroll th
-) {
-  background: color-mix(in srgb, var(--ba-primary) 7%, var(--ba-surface)) !important;
+.branch-admin-theme
+  :where(
+    .ba-table-scroll th,
+    .wallet-table-scroll th,
+    .ex-table-scroll th,
+    .bf-table-scroll th,
+    .bi-table-scroll th,
+    .pr-table-scroll th,
+    .wm-table-scroll th
+  ) {
+  background: color-mix(
+    in srgb,
+    var(--ba-primary) 7%,
+    var(--ba-surface)
+  ) !important;
   color: var(--ba-muted) !important;
 }
 
-.branch-admin-theme :where(
-  .ba-table-actions button:first-child,
-  .wallet-table-actions button:first-child,
-  .ex-table-actions button:first-child,
-  .bf-table-actions button:first-child,
-  .bi-table-actions button:first-child,
-  .pr-table-actions button:first-child,
-  .wm-table-actions button:first-child
-) {
+.branch-admin-theme
+  :where(
+    .ba-table-actions button:first-child,
+    .wallet-table-actions button:first-child,
+    .ex-table-actions button:first-child,
+    .bf-table-actions button:first-child,
+    .bi-table-actions button:first-child,
+    .pr-table-actions button:first-child,
+    .wm-table-actions button:first-child
+  ) {
   background: var(--ba-primary) !important;
   color: #ffffff !important;
 }

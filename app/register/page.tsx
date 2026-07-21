@@ -20,6 +20,32 @@ import type {
   UserMembership,
 } from "../lib/auth/roleRedirect";
 
+function stringIdOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = String(value).trim();
+  return parsed || null;
+}
+
+function normalizeRegistrationMembership(value: UserMembership): UserMembership {
+  const source = value as any;
+  const branchId = stringIdOrNull(
+    source.branchId || source.schoolBranchId || source.branch?.id,
+  );
+
+  return {
+    ...value,
+    id: stringIdOrNull(source.id) || `membership-${source.role}-${Date.now()}`,
+    accountId: stringIdOrNull(source.accountId),
+    schoolId: stringIdOrNull(source.schoolId || source.school?.id),
+    branchId,
+    schoolBranchId: branchId,
+    teacherId: stringIdOrNull(source.teacherId || source.teacher?.id),
+    studentId: stringIdOrNull(source.studentId || source.student?.id),
+    parentId: stringIdOrNull(source.parentId || source.parent?.id),
+    active: source.active !== false,
+  };
+}
+
 export default function RegisterPage() {
   const router = useRouter();
 
@@ -86,16 +112,13 @@ export default function RegisterPage() {
       saveAuthToken(token);
       setAccountId(res.user.accountId);
 
-      const memberships =
-        (
-          res.user.memberships ||
-          res.memberships ||
-          []
-        ).filter(
-          (membership) =>
-            membership.active !==
-            false,
-        );
+      const memberships = (
+        res.user.memberships ||
+        res.memberships ||
+        []
+      )
+        .filter((membership) => membership.active !== false)
+        .map(normalizeRegistrationMembership);
 
       const userToStore = {
         ...res.user,

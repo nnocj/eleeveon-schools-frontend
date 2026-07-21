@@ -46,7 +46,12 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  listActiveLocal,
+  softDeleteLocal,
+  updateLocal,
+} from "../../lib/sync/syncUtils";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -55,10 +60,19 @@ type ViewMode = "cards" | "table" | "analytics";
 type ToastTone = "success" | "error" | "info";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 type MethodFilter = "all" | "cash" | "momo" | "bank" | "card";
-type SourceFilter = "all" | "fees_related" | "donation" | "admission" | "service" | "canteen" | "transport" | "uniform" | "other";
+type SourceFilter =
+  | "all"
+  | "fees_related"
+  | "donation"
+  | "admission"
+  | "service"
+  | "canteen"
+  | "transport"
+  | "uniform"
+  | "other";
 
 type IncomeForm = {
-  id: number;
+  id: string;
   title: string;
   description: string;
   amount: string;
@@ -74,7 +88,7 @@ type IncomeForm = {
 };
 
 const emptyIncomeForm: IncomeForm = {
-  id: 0,
+  id: "",
   title: "",
   description: "",
   amount: "",
@@ -95,8 +109,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -104,7 +118,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -134,25 +150,35 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+function idOf(row?: AnyRow | null): string {
+  return cleanId(row?.id ?? row?.payload?.id);
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: any): string {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && String(row.schoolId ?? "") !== String(schoolId ?? ""))
+    return false;
+  if (branchId && String(row.branchId ?? "") !== String(branchId ?? ""))
+    return false;
   return true;
 }
 
 function rowName(row?: AnyRow | null) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function today() {
@@ -164,7 +190,11 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -173,7 +203,11 @@ function dateLabel(value?: number | string | null) {
 function money(value: any, currency = "GHS") {
   const amount = n(value);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "GHS", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GHS",
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
     return `${currency || "GHS"} ${amount.toLocaleString()}`;
   }
@@ -195,7 +229,13 @@ function sourceLabel(value?: string) {
 }
 
 function methodLabel(value?: string) {
-  const map: Record<string, string> = { cash: "Cash", momo: "Momo", bank: "Bank", card: "Card", all: "All methods" };
+  const map: Record<string, string> = {
+    cash: "Cash",
+    momo: "Momo",
+    bank: "Bank",
+    card: "Card",
+    all: "All methods",
+  };
   return map[String(value || "cash")] || text(value, "Cash");
 }
 
@@ -212,7 +252,13 @@ function generateReceipt() {
   return `INC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`bi-chip ${tone}`}>{children}</span>;
 }
 
@@ -246,7 +292,8 @@ export default function IncomesPage() {
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -271,7 +318,7 @@ export default function IncomesPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -298,7 +345,7 @@ export default function IncomesPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const { loading, setLoading } = useBackgroundLoader();
@@ -314,7 +361,10 @@ export default function IncomesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedIncome, setSelectedIncome] = useState<AnyRow | null>(null);
   const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const [organizations, setOrganizations] = useState<AnyRow[]>([]);
   const [currencySettings, setCurrencySettings] = useState<AnyRow[]>([]);
@@ -328,7 +378,11 @@ export default function IncomesPage() {
 
   function showToast(tone: ToastTone, message: string) {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) => (current?.message === message ? null : current)),
+      4200,
+    );
   }
 
   async function load() {
@@ -345,9 +399,21 @@ export default function IncomesPage() {
         listActiveLocal<AnyRow>("schoolCurrencySettings" as any),
       ]);
 
-      setIncomes(incomeRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setOrganizations(organizationRows.filter((row) => sameScope(row, accountId, schoolId, branchId)).sort((a, b) => rowName(a).localeCompare(rowName(b))));
-      setCurrencySettings(currencyRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
+      setIncomes(
+        incomeRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
+      setOrganizations(
+        organizationRows
+          .filter((row) => sameScope(row, accountId, schoolId, branchId))
+          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
+      );
+      setCurrencySettings(
+        currencyRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load branch incomes:", error);
       showToast("error", "Failed to load incomes.");
@@ -377,7 +443,10 @@ export default function IncomesPage() {
   ]);
 
   const currency = useMemo(() => {
-    const preferred = currencySettings.find((row) => row.defaultForIncomeExpense || row.active !== false) || currencySettings[0];
+    const preferred =
+      currencySettings.find(
+        (row) => row.defaultForIncomeExpense || row.active !== false,
+      ) || currencySettings[0];
     return {
       code: text(preferred?.currencyCode || incomes[0]?.currencyCode, "GHS"),
       symbol: text(preferred?.currencySymbol, "₵"),
@@ -385,14 +454,32 @@ export default function IncomesPage() {
     };
   }, [currencySettings, incomes]);
 
-  const organizationMap = useMemo(() => new Map(organizations.map((item) => [Number(idOf(item)), rowName(item)])), [organizations]);
+  const organizationMap = useMemo(
+    () =>
+      new Map<string, string>(
+        organizations.map((item) => [idOf(item), rowName(item)]),
+      ),
+    [organizations],
+  );
 
   const incomeRows = useMemo(() => {
     const q = query.toLowerCase().trim();
     return incomes
-      .filter((row) => methodFilter === "all" || String(row.paymentMethod || "") === methodFilter)
-      .filter((row) => sourceFilter === "all" || String(row.source || "other") === sourceFilter)
-      .filter((row) => organizationFilter === "all" || String(row.organizationId || "") === organizationFilter)
+      .filter(
+        (row) =>
+          methodFilter === "all" ||
+          String(row.paymentMethod || "") === methodFilter,
+      )
+      .filter(
+        (row) =>
+          sourceFilter === "all" ||
+          String(row.source || "other") === sourceFilter,
+      )
+      .filter(
+        (row) =>
+          organizationFilter === "all" ||
+          String(row.organizationId || "") === organizationFilter,
+      )
       .filter((row) => {
         if (!q) return true;
         return [
@@ -403,21 +490,40 @@ export default function IncomesPage() {
           row.receivedBy,
           row.referenceNumber,
           row.receiptNumber,
-          organizationMap.get(Number(row.organizationId)),
+          organizationMap.get(String(row.organizationId)),
         ]
           .join(" ")
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => n(b.date || b.updatedAt || b.createdAt) - n(a.date || a.updatedAt || a.createdAt));
-  }, [incomes, methodFilter, organizationFilter, organizationMap, query, sourceFilter]);
+      .sort(
+        (a, b) =>
+          n(b.date || b.updatedAt || b.createdAt) -
+          n(a.date || a.updatedAt || a.createdAt),
+      );
+  }, [
+    incomes,
+    methodFilter,
+    organizationFilter,
+    organizationMap,
+    query,
+    sourceFilter,
+  ]);
 
   const summary = useMemo(() => {
     const total = incomeRows.reduce((sum, row) => sum + n(row.amount), 0);
-    const cash = incomeRows.filter((row) => String(row.paymentMethod) === "cash").reduce((sum, row) => sum + n(row.amount), 0);
-    const momo = incomeRows.filter((row) => String(row.paymentMethod) === "momo").reduce((sum, row) => sum + n(row.amount), 0);
-    const bank = incomeRows.filter((row) => String(row.paymentMethod) === "bank").reduce((sum, row) => sum + n(row.amount), 0);
-    const card = incomeRows.filter((row) => String(row.paymentMethod) === "card").reduce((sum, row) => sum + n(row.amount), 0);
+    const cash = incomeRows
+      .filter((row) => String(row.paymentMethod) === "cash")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const momo = incomeRows
+      .filter((row) => String(row.paymentMethod) === "momo")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const bank = incomeRows
+      .filter((row) => String(row.paymentMethod) === "bank")
+      .reduce((sum, row) => sum + n(row.amount), 0);
+    const card = incomeRows
+      .filter((row) => String(row.paymentMethod) === "card")
+      .reduce((sum, row) => sum + n(row.amount), 0);
     return {
       shown: incomeRows.length,
       all: incomes.length,
@@ -426,7 +532,9 @@ export default function IncomesPage() {
       momo,
       bank,
       card,
-      today: incomeRows.filter((row) => String(row.date || "").slice(0, 10) === today()).reduce((sum, row) => sum + n(row.amount), 0),
+      today: incomeRows
+        .filter((row) => String(row.date || "").slice(0, 10) === today())
+        .reduce((sum, row) => sum + n(row.amount), 0),
     };
   }, [incomeRows, incomes.length]);
 
@@ -436,10 +544,20 @@ export default function IncomesPage() {
       const key = sourceLabel(row.source);
       map.set(key, (map.get(key) || 0) + n(row.amount));
     });
-    return Array.from(map.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+    return Array.from(map.entries())
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value);
   }, [incomeRows]);
 
-  const activeFilterCount = useMemo(() => [methodFilter !== "all", sourceFilter !== "all", organizationFilter !== "all"].filter(Boolean).length, [methodFilter, organizationFilter, sourceFilter]);
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        methodFilter !== "all",
+        sourceFilter !== "all",
+        organizationFilter !== "all",
+      ].filter(Boolean).length,
+    [methodFilter, organizationFilter, sourceFilter],
+  );
 
   function openDrawer(existing?: AnyRow) {
     setMessage("");
@@ -450,10 +568,13 @@ export default function IncomesPage() {
             title: text(existing.title),
             description: text(existing.description),
             amount: String(n(existing.amount) || ""),
-            paymentMethod: (existing.paymentMethod || "cash") as IncomeForm["paymentMethod"],
+            paymentMethod: (existing.paymentMethod ||
+              "cash") as IncomeForm["paymentMethod"],
             date: text(existing.date, today()),
             source: (existing.source || "other") as SourceFilter,
-            organizationId: existing.organizationId ? String(existing.organizationId) : "",
+            organizationId: existing.organizationId
+              ? String(existing.organizationId)
+              : "",
             receivedBy: text(existing.receivedBy),
             referenceNumber: text(existing.referenceNumber),
             receiptNumber: text(existing.receiptNumber),
@@ -466,13 +587,14 @@ export default function IncomesPage() {
             currencyCode: currency.code,
             currencySymbol: currency.symbol,
             receiptNumber: generateReceipt(),
-          }
+          },
     );
     setDrawerOpen(true);
   }
 
   async function saveIncome() {
-    if (!accountId || !schoolId || !branchId) return setMessage("Select a school and branch before saving income.");
+    if (!accountId || !schoolId || !branchId)
+      return setMessage("Select a school and branch before saving income.");
     if (!form.title.trim()) return setMessage("Enter income title.");
     if (n(form.amount) <= 0) return setMessage("Enter a valid amount.");
     if (!form.date) return setMessage("Select income date.");
@@ -528,58 +650,153 @@ export default function IncomesPage() {
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening incomes..." text="Loading branch income records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening incomes..."
+        text="Loading branch income records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing branch incomes." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing branch incomes."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Incomes are branch-scoped. Choose an active school and branch before continuing." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Incomes are branch-scoped. Choose an active school and branch before continuing."
+      />
+    );
   }
 
   return (
-    <main className="bi-page" style={{ "--bi-primary": primary } as React.CSSProperties}>
+    <main
+      className="bi-page"
+      style={{ "--bi-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`bi-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
-      <section className="bi-search-card" aria-label="Income search and actions">
-        <span className={`status-dot-mini ${summary.shown ? "green" : "gray"}`} title={`${summary.shown} income record(s)`} />
+      <section
+        className="bi-search-card"
+        aria-label="Income search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.shown ? "green" : "gray"}`}
+          title={`${summary.shown} income record(s)`}
+        />
 
         <label className="bi-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search incomes..." aria-label="Search incomes" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search incomes..."
+            aria-label="Search incomes"
+          />
         </label>
 
-        <button type="button" className="bi-add-inline" onClick={() => openDrawer()} aria-label="Add income">+</button>
+        <button
+          type="button"
+          className="bi-add-inline"
+          onClick={() => openDrawer()}
+          aria-label="Add income"
+        >
+          +
+        </button>
 
-        <button type="button" className={`bi-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`bi-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="bi-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="bi-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
-      {(methodFilter !== "all" || sourceFilter !== "all" || organizationFilter !== "all" || query.trim()) && (
+      {(methodFilter !== "all" ||
+        sourceFilter !== "all" ||
+        organizationFilter !== "all" ||
+        query.trim()) && (
         <section className="bi-filter-chips" aria-label="Active filters">
-          {methodFilter !== "all" && <button type="button" onClick={() => setMethodFilter("all")}>Method: {methodLabel(methodFilter)} ×</button>}
-          {sourceFilter !== "all" && <button type="button" onClick={() => setSourceFilter("all")}>Source: {sourceLabel(sourceFilter)} ×</button>}
-          {organizationFilter !== "all" && <button type="button" onClick={() => setOrganizationFilter("all")}>Org: {organizationMap.get(Number(organizationFilter)) || organizationFilter} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {methodFilter !== "all" && (
+            <button type="button" onClick={() => setMethodFilter("all")}>
+              Method: {methodLabel(methodFilter)} ×
+            </button>
+          )}
+          {sourceFilter !== "all" && (
+            <button type="button" onClick={() => setSourceFilter("all")}>
+              Source: {sourceLabel(sourceFilter)} ×
+            </button>
+          )}
+          {organizationFilter !== "all" && (
+            <button type="button" onClick={() => setOrganizationFilter("all")}>
+              Org:{" "}
+              {organizationMap.get(organizationFilter) ||
+                organizationFilter}{" "}
+              ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
-      {view === "analytics" && <AnalyticsView summary={summary} sourceRows={sourceRows} currency={currency.code} />}
+      {view === "analytics" && (
+        <AnalyticsView
+          summary={summary}
+          sourceRows={sourceRows}
+          currency={currency.code}
+        />
+      )}
 
-      {view === "table" && <TableView rows={incomeRows} organizationMap={organizationMap} currency={currency.code} openDrawer={openDrawer} setSelectedIncome={setSelectedIncome} deleteIncome={deleteIncome} />}
+      {view === "table" && (
+        <TableView
+          rows={incomeRows}
+          organizationMap={organizationMap}
+          currency={currency.code}
+          openDrawer={openDrawer}
+          setSelectedIncome={setSelectedIncome}
+          deleteIncome={deleteIncome}
+        />
+      )}
 
       {view === "cards" && (
         <section className="bi-list">
@@ -587,7 +804,10 @@ export default function IncomesPage() {
             <IncomeCard
               key={String(idOf(income))}
               income={income}
-              organizationName={organizationMap.get(Number(income.organizationId)) || "No organization"}
+              organizationName={
+                organizationMap.get(String(income.organizationId)) ||
+                "No organization"
+              }
               currency={income.currencyCode || currency.code}
               openDrawer={openDrawer}
               setSelectedIncome={setSelectedIncome}
@@ -595,7 +815,12 @@ export default function IncomesPage() {
             />
           ))}
 
-          {!incomeRows.length && <Empty title="No income records" text="Record branch income such as donations, forms, services, canteen or other non-fee income." />}
+          {!incomeRows.length && (
+            <Empty
+              title="No income records"
+              text="Record branch income such as donations, forms, services, canteen or other non-fee income."
+            />
+          )}
         </section>
       )}
 
@@ -615,25 +840,67 @@ export default function IncomesPage() {
       {moreOpen && (
         <MoreSheet
           view={view}
-          setView={(mode) => { setView(mode); setMoreOpen(false); }}
+          setView={(mode) => {
+            setView(mode);
+            setMoreOpen(false);
+          }}
           summary={summary}
           currency={currency.code}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
-          onAdd={() => { setMoreOpen(false); openDrawer(); }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onAdd={() => {
+            setMoreOpen(false);
+            openDrawer();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       )}
 
-      {drawerOpen && <IncomeDrawer form={form} setForm={setForm} organizations={organizations} message={message} saving={saving} save={saveIncome} close={() => setDrawerOpen(false)} />}
+      {drawerOpen && (
+        <IncomeDrawer
+          form={form}
+          setForm={setForm}
+          organizations={organizations}
+          message={message}
+          saving={saving}
+          save={saveIncome}
+          close={() => setDrawerOpen(false)}
+        />
+      )}
 
-      {selectedIncome && <IncomeSheet income={selectedIncome} organizationName={organizationMap.get(Number(selectedIncome.organizationId)) || "No organization"} currency={selectedIncome.currencyCode || currency.code} openDrawer={openDrawer} deleteIncome={deleteIncome} close={() => setSelectedIncome(null)} />}
+      {selectedIncome && (
+        <IncomeSheet
+          income={selectedIncome}
+          organizationName={
+            organizationMap.get(String(selectedIncome.organizationId)) ||
+            "No organization"
+          }
+          currency={selectedIncome.currencyCode || currency.code}
+          openDrawer={openDrawer}
+          deleteIncome={deleteIncome}
+          close={() => setSelectedIncome(null)}
+        />
+      )}
     </main>
   );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="bi-page" style={{ "--bi-primary": primary } as React.CSSProperties}>
+    <main
+      className="bi-page"
+      style={{ "--bi-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="bi-state">
         <div className="bi-spinner" />
@@ -644,120 +911,599 @@ function State({ primary, title, text: body }: { primary: string; title: string;
   );
 }
 
-function IncomeCard({ income, organizationName, currency, openDrawer, setSelectedIncome, deleteIncome }: { income: AnyRow; organizationName: string; currency: string; openDrawer: (income: AnyRow) => void; setSelectedIncome: (income: AnyRow) => void; deleteIncome: (income: AnyRow) => void }) {
+function IncomeCard({
+  income,
+  organizationName,
+  currency,
+  openDrawer,
+  setSelectedIncome,
+  deleteIncome,
+}: {
+  income: AnyRow;
+  organizationName: string;
+  currency: string;
+  openDrawer: (income: AnyRow) => void;
+  setSelectedIncome: (income: AnyRow) => void;
+  deleteIncome: (income: AnyRow) => void;
+}) {
   return (
     <article className="income-row">
       <span className="income-avatar">💰</span>
       <span className="income-main">
         <strong>{income.title || "Income"}</strong>
-        <small>{sourceLabel(income.source)} · {organizationName}</small>
-        <em>{money(income.amount, currency)} · {methodLabel(income.paymentMethod)} · {dateLabel(income.date)}</em>
+        <small>
+          {sourceLabel(income.source)} · {organizationName}
+        </small>
+        <em>
+          {money(income.amount, currency)} · {methodLabel(income.paymentMethod)}{" "}
+          · {dateLabel(income.date)}
+        </em>
       </span>
       <span className="income-side">
-        <Chip tone={methodTone(income.paymentMethod)}>{methodLabel(income.paymentMethod)}</Chip>
-        <button type="button" onClick={() => setSelectedIncome(income)}>View</button>
-        <button type="button" onClick={() => openDrawer(income)}>Edit</button>
-        <button type="button" className="danger" onClick={() => deleteIncome(income)}>⌫</button>
+        <Chip tone={methodTone(income.paymentMethod)}>
+          {methodLabel(income.paymentMethod)}
+        </Chip>
+        <button type="button" onClick={() => setSelectedIncome(income)}>
+          View
+        </button>
+        <button type="button" onClick={() => openDrawer(income)}>
+          Edit
+        </button>
+        <button
+          type="button"
+          className="danger"
+          onClick={() => deleteIncome(income)}
+        >
+          ⌫
+        </button>
       </span>
     </article>
   );
 }
 
-function TableView({ rows, organizationMap, currency, openDrawer, setSelectedIncome, deleteIncome }: { rows: AnyRow[]; organizationMap: Map<number, string>; currency: string; openDrawer: (income: AnyRow) => void; setSelectedIncome: (income: AnyRow) => void; deleteIncome: (income: AnyRow) => void }) {
+function TableView({
+  rows,
+  organizationMap,
+  currency,
+  openDrawer,
+  setSelectedIncome,
+  deleteIncome,
+}: {
+  rows: AnyRow[];
+  organizationMap: Map<string, string>;
+  currency: string;
+  openDrawer: (income: AnyRow) => void;
+  setSelectedIncome: (income: AnyRow) => void;
+  deleteIncome: (income: AnyRow) => void;
+}) {
   return (
     <section className="bi-table-card">
       <div className="bi-table-scroll">
         <table>
-          <thead><tr><th>Incomes ({rows.length})</th><th>Source</th><th>Organization</th><th>Amount</th><th>Method</th><th>Date</th><th>Receipt</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Incomes ({rows.length})</th>
+              <th>Source</th>
+              <th>Organization</th>
+              <th>Amount</th>
+              <th>Method</th>
+              <th>Date</th>
+              <th>Receipt</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((income) => (
               <tr key={String(idOf(income))}>
-                <td><strong>{income.title || "Income"}</strong><span>{income.description || income.receivedBy || "No description"}</span></td>
+                <td>
+                  <strong>{income.title || "Income"}</strong>
+                  <span>
+                    {income.description ||
+                      income.receivedBy ||
+                      "No description"}
+                  </span>
+                </td>
                 <td>{sourceLabel(income.source)}</td>
-                <td>{organizationMap.get(Number(income.organizationId)) || "No organization"}</td>
+                <td>
+                  {organizationMap.get(String(income.organizationId)) ||
+                    "No organization"}
+                </td>
                 <td>{money(income.amount, income.currencyCode || currency)}</td>
-                <td><Chip tone={methodTone(income.paymentMethod)}>{methodLabel(income.paymentMethod)}</Chip></td>
+                <td>
+                  <Chip tone={methodTone(income.paymentMethod)}>
+                    {methodLabel(income.paymentMethod)}
+                  </Chip>
+                </td>
                 <td>{dateLabel(income.date)}</td>
                 <td>{income.receiptNumber || income.referenceNumber || "—"}</td>
-                <td><div className="bi-table-actions"><button type="button" onClick={() => setSelectedIncome(income)}>View</button><button type="button" onClick={() => openDrawer(income)}>Edit</button><button type="button" className="danger" onClick={() => deleteIncome(income)}>Delete</button></div></td>
+                <td>
+                  <div className="bi-table-actions">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedIncome(income)}
+                    >
+                      View
+                    </button>
+                    <button type="button" onClick={() => openDrawer(income)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => deleteIncome(income)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!rows.length && <div className="bi-empty-table">No income matches your filters.</div>}
+        {!rows.length && (
+          <div className="bi-empty-table">No income matches your filters.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function FilterSheet({ methodFilter, setMethodFilter, sourceFilter, setSourceFilter, organizationFilter, setOrganizationFilter, organizations, onClose }: { methodFilter: MethodFilter; setMethodFilter: (value: MethodFilter) => void; sourceFilter: SourceFilter; setSourceFilter: (value: SourceFilter) => void; organizationFilter: string; setOrganizationFilter: (value: string) => void; organizations: AnyRow[]; onClose: () => void }) {
+function FilterSheet({
+  methodFilter,
+  setMethodFilter,
+  sourceFilter,
+  setSourceFilter,
+  organizationFilter,
+  setOrganizationFilter,
+  organizations,
+  onClose,
+}: {
+  methodFilter: MethodFilter;
+  setMethodFilter: (value: MethodFilter) => void;
+  sourceFilter: SourceFilter;
+  setSourceFilter: (value: SourceFilter) => void;
+  organizationFilter: string;
+  setOrganizationFilter: (value: string) => void;
+  organizations: AnyRow[];
+  onClose: () => void;
+}) {
   return (
     <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bi-sheet small">
-        <div className="bi-sheet-head"><div><h2>Filters</h2><p>Filter branch income by source, payment method and organization.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="bi-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>
+              Filter branch income by source, payment method and organization.
+            </p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="bi-form compact">
-          <label><span>Source</span><select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as SourceFilter)}><option value="all">All sources</option><option value="fees_related">Fees Related</option><option value="donation">Donation</option><option value="admission">Admission</option><option value="service">Service</option><option value="canteen">Canteen</option><option value="transport">Transport</option><option value="uniform">Uniform</option><option value="other">Other</option></select></label>
-          <label><span>Payment Method</span><select value={methodFilter} onChange={(event) => setMethodFilter(event.target.value as MethodFilter)}><option value="all">All methods</option><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option></select></label>
-          <label><span>Organization</span><select value={organizationFilter} onChange={(event) => setOrganizationFilter(event.target.value)}><option value="all">All organizations</option>{organizations.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
+          <label>
+            <span>Source</span>
+            <select
+              value={sourceFilter}
+              onChange={(event) =>
+                setSourceFilter(event.target.value as SourceFilter)
+              }
+            >
+              <option value="all">All sources</option>
+              <option value="fees_related">Fees Related</option>
+              <option value="donation">Donation</option>
+              <option value="admission">Admission</option>
+              <option value="service">Service</option>
+              <option value="canteen">Canteen</option>
+              <option value="transport">Transport</option>
+              <option value="uniform">Uniform</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span>Payment Method</span>
+            <select
+              value={methodFilter}
+              onChange={(event) =>
+                setMethodFilter(event.target.value as MethodFilter)
+              }
+            >
+              <option value="all">All methods</option>
+              <option value="cash">Cash</option>
+              <option value="momo">Momo</option>
+              <option value="bank">Bank</option>
+              <option value="card">Card</option>
+            </select>
+          </label>
+          <label>
+            <span>Organization</span>
+            <select
+              value={organizationFilter}
+              onChange={(event) => setOrganizationFilter(event.target.value)}
+            >
+              <option value="all">All organizations</option>
+              {organizations.map((item) => (
+                <option key={String(idOf(item))} value={String(idOf(item))}>
+                  {rowName(item)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <div className="bi-sheet-actions"><button type="button" onClick={() => { setSourceFilter("all"); setMethodFilter("all"); setOrganizationFilter("all"); }}>Reset</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="bi-sheet-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setSourceFilter("all");
+              setMethodFilter("all");
+              setOrganizationFilter("all");
+            }}
+          >
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, currency, onRefresh, onAdd, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; currency: string; onRefresh: () => void | Promise<void>; onAdd: () => void; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  currency,
+  onRefresh,
+  onAdd,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  currency: string;
+  onRefresh: () => void | Promise<void>;
+  onAdd: () => void;
+  onClose: () => void;
+}) {
   return (
     <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bi-sheet small">
-        <div className="bi-sheet-head"><div><h2>More</h2><p>Views and income actions are kept here to save space.</p></div><button type="button" onClick={onClose}>✕</button></div>
+        <div className="bi-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>Views and income actions are kept here to save space.</p>
+          </div>
+          <button type="button" onClick={onClose}>
+            ✕
+          </button>
+        </div>
         <div className="bi-menu-list">
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>Cards view</b><small>{summary.shown} income record(s)</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table view</b><small>Dense income records</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{money(summary.total, currency)} shown</small></button>
-          <button type="button" onClick={onAdd}><span>💰</span><b>Record income</b><small>Add cash, momo, bank or card income</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch incomes</small></button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>Cards view</b>
+            <small>{summary.shown} income record(s)</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense income records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>{money(summary.total, currency)} shown</small>
+          </button>
+          <button type="button" onClick={onAdd}>
+            <span>💰</span>
+            <b>Record income</b>
+            <small>Add cash, momo, bank or card income</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch incomes</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function IncomeDrawer({ form, setForm, organizations, message, saving, save, close }: { form: IncomeForm; setForm: React.Dispatch<React.SetStateAction<IncomeForm>>; organizations: AnyRow[]; message: string; saving: boolean; save: () => void | Promise<void>; close: () => void }) {
+function IncomeDrawer({
+  form,
+  setForm,
+  organizations,
+  message,
+  saving,
+  save,
+  close,
+}: {
+  form: IncomeForm;
+  setForm: React.Dispatch<React.SetStateAction<IncomeForm>>;
+  organizations: AnyRow[];
+  message: string;
+  saving: boolean;
+  save: () => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <div className="bi-drawer-layer" role="dialog" aria-modal="true"><button className="bi-drawer-overlay" type="button" onClick={close} /><aside className="bi-drawer">
-      <div className="bi-drawer-head"><div><p>{form.id ? "Edit Income" : "New Income"}</p><h2>Branch Income</h2><span>{form.amount ? money(form.amount, form.currencyCode) : "Record non-fee income"}</span></div><button type="button" onClick={close}>✕</button></div>
-      {message && <section className="bi-inline-error">{message}</section>}
-      <section className="bi-form-card"><div className="bi-form-grid">
-        <label><span>Title</span><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Donation, Admission forms, Canteen..." /></label>
-        <label><span>Amount</span><input type="number" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="0" /></label>
-        <label><span>Source</span><select value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value as SourceFilter })}><option value="fees_related">Fees Related</option><option value="donation">Donation</option><option value="admission">Admission</option><option value="service">Service</option><option value="canteen">Canteen</option><option value="transport">Transport</option><option value="uniform">Uniform</option><option value="other">Other</option></select></label>
-        <label><span>Method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value as IncomeForm["paymentMethod"] })}><option value="cash">Cash</option><option value="momo">Momo</option><option value="bank">Bank</option><option value="card">Card</option></select></label>
-        <label><span>Date</span><input type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
-        <label><span>Organization</span><select value={form.organizationId} onChange={(event) => setForm({ ...form, organizationId: event.target.value })}><option value="">No organization</option>{organizations.map((item) => <option key={String(idOf(item))} value={String(idOf(item))}>{rowName(item)}</option>)}</select></label>
-        <label><span>Received By</span><input value={form.receivedBy} onChange={(event) => setForm({ ...form, receivedBy: event.target.value })} /></label>
-        <label><span>Reference No.</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} /></label>
-        <label><span>Receipt No.</span><input value={form.receiptNumber} onChange={(event) => setForm({ ...form, receiptNumber: event.target.value })} /></label>
-        <label><span>Currency</span><input value={form.currencyCode} onChange={(event) => setForm({ ...form, currencyCode: event.target.value.toUpperCase() })} /></label>
-        <label className="wide"><span>Description</span><textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Optional notes about this income" /></label>
-      </div></section>
-      <div className="bi-drawer-actions"><button type="button" onClick={close}>Cancel</button><button type="button" className="primary" disabled={saving} onClick={save}>{saving ? "Saving..." : "Save Income"}</button></div>
-    </aside></div>
+    <div className="bi-drawer-layer" role="dialog" aria-modal="true">
+      <button className="bi-drawer-overlay" type="button" onClick={close} />
+      <aside className="bi-drawer">
+        <div className="bi-drawer-head">
+          <div>
+            <p>{form.id ? "Edit Income" : "New Income"}</p>
+            <h2>Branch Income</h2>
+            <span>
+              {form.amount
+                ? money(form.amount, form.currencyCode)
+                : "Record non-fee income"}
+            </span>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        {message && <section className="bi-inline-error">{message}</section>}
+        <section className="bi-form-card">
+          <div className="bi-form-grid">
+            <label>
+              <span>Title</span>
+              <input
+                value={form.title}
+                onChange={(event) =>
+                  setForm({ ...form, title: event.target.value })
+                }
+                placeholder="Donation, Admission forms, Canteen..."
+              />
+            </label>
+            <label>
+              <span>Amount</span>
+              <input
+                type="number"
+                value={form.amount}
+                onChange={(event) =>
+                  setForm({ ...form, amount: event.target.value })
+                }
+                placeholder="0"
+              />
+            </label>
+            <label>
+              <span>Source</span>
+              <select
+                value={form.source}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    source: event.target.value as SourceFilter,
+                  })
+                }
+              >
+                <option value="fees_related">Fees Related</option>
+                <option value="donation">Donation</option>
+                <option value="admission">Admission</option>
+                <option value="service">Service</option>
+                <option value="canteen">Canteen</option>
+                <option value="transport">Transport</option>
+                <option value="uniform">Uniform</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              <span>Method</span>
+              <select
+                value={form.paymentMethod}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    paymentMethod: event.target
+                      .value as IncomeForm["paymentMethod"],
+                  })
+                }
+              >
+                <option value="cash">Cash</option>
+                <option value="momo">Momo</option>
+                <option value="bank">Bank</option>
+                <option value="card">Card</option>
+              </select>
+            </label>
+            <label>
+              <span>Date</span>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(event) =>
+                  setForm({ ...form, date: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Organization</span>
+              <select
+                value={form.organizationId}
+                onChange={(event) =>
+                  setForm({ ...form, organizationId: event.target.value })
+                }
+              >
+                <option value="">No organization</option>
+                {organizations.map((item) => (
+                  <option key={String(idOf(item))} value={String(idOf(item))}>
+                    {rowName(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Received By</span>
+              <input
+                value={form.receivedBy}
+                onChange={(event) =>
+                  setForm({ ...form, receivedBy: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Reference No.</span>
+              <input
+                value={form.referenceNumber}
+                onChange={(event) =>
+                  setForm({ ...form, referenceNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Receipt No.</span>
+              <input
+                value={form.receiptNumber}
+                onChange={(event) =>
+                  setForm({ ...form, receiptNumber: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>Currency</span>
+              <input
+                value={form.currencyCode}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    currencyCode: event.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </label>
+            <label className="wide">
+              <span>Description</span>
+              <textarea
+                value={form.description}
+                onChange={(event) =>
+                  setForm({ ...form, description: event.target.value })
+                }
+                placeholder="Optional notes about this income"
+              />
+            </label>
+          </div>
+        </section>
+        <div className="bi-drawer-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={saving}
+            onClick={save}
+          >
+            {saving ? "Saving..." : "Save Income"}
+          </button>
+        </div>
+      </aside>
+    </div>
   );
 }
 
-function IncomeSheet({ income, organizationName, currency, openDrawer, deleteIncome, close }: { income: AnyRow; organizationName: string; currency: string; openDrawer: (income: AnyRow) => void; deleteIncome: (income: AnyRow) => void; close: () => void }) {
+function IncomeSheet({
+  income,
+  organizationName,
+  currency,
+  openDrawer,
+  deleteIncome,
+  close,
+}: {
+  income: AnyRow;
+  organizationName: string;
+  currency: string;
+  openDrawer: (income: AnyRow) => void;
+  deleteIncome: (income: AnyRow) => void;
+  close: () => void;
+}) {
   return (
-    <div className="bi-sheet-backdrop" role="dialog" aria-modal="true"><section className="bi-sheet">
-      <div className="bi-sheet-head"><div><h2>{income.title || "Income"}</h2><p>{sourceLabel(income.source)} · {organizationName} · {dateLabel(income.date)}</p></div><button type="button" onClick={close}>✕</button></div>
-      <div className="bi-detail-grid"><article><span>Amount</span><b>{money(income.amount, currency)}</b></article><article><span>Method</span><b>{methodLabel(income.paymentMethod)}</b></article><article><span>Receipt</span><b>{income.receiptNumber || "Not set"}</b></article></div>
-      <div className="bi-info-list"><article><span>Reference</span><b>{income.referenceNumber || "Not set"}</b></article><article><span>Received By</span><b>{income.receivedBy || "Not set"}</b></article><article><span>Description</span><b>{income.description || "No description"}</b></article></div>
-      <div className="bi-sheet-actions"><button type="button" onClick={close}>Close</button><button type="button" onClick={() => openDrawer(income)}>Edit</button><button type="button" className="danger" onClick={() => deleteIncome(income)}>Delete</button></div>
-    </section></div>
+    <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="bi-sheet">
+        <div className="bi-sheet-head">
+          <div>
+            <h2>{income.title || "Income"}</h2>
+            <p>
+              {sourceLabel(income.source)} · {organizationName} ·{" "}
+              {dateLabel(income.date)}
+            </p>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
+        <div className="bi-detail-grid">
+          <article>
+            <span>Amount</span>
+            <b>{money(income.amount, currency)}</b>
+          </article>
+          <article>
+            <span>Method</span>
+            <b>{methodLabel(income.paymentMethod)}</b>
+          </article>
+          <article>
+            <span>Receipt</span>
+            <b>{income.receiptNumber || "Not set"}</b>
+          </article>
+        </div>
+        <div className="bi-info-list">
+          <article>
+            <span>Reference</span>
+            <b>{income.referenceNumber || "Not set"}</b>
+          </article>
+          <article>
+            <span>Received By</span>
+            <b>{income.receivedBy || "Not set"}</b>
+          </article>
+          <article>
+            <span>Description</span>
+            <b>{income.description || "No description"}</b>
+          </article>
+        </div>
+        <div className="bi-sheet-actions">
+          <button type="button" onClick={close}>
+            Close
+          </button>
+          <button type="button" onClick={() => openDrawer(income)}>
+            Edit
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => deleteIncome(income)}
+          >
+            Delete
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function AnalyticsView({ summary, sourceRows, currency }: { summary: AnyRow; sourceRows: { label: string; value: number }[]; currency: string }) {
+function AnalyticsView({
+  summary,
+  sourceRows,
+  currency,
+}: {
+  summary: AnyRow;
+  sourceRows: { label: string; value: number }[];
+  currency: string;
+}) {
   const methodRows = [
     { label: "Cash", value: summary.cash },
     { label: "Momo", value: summary.momo },
@@ -766,12 +1512,70 @@ function AnalyticsView({ summary, sourceRows, currency }: { summary: AnyRow; sou
   ];
   return (
     <section className="bi-analysis-grid">
-      <article className="bi-analysis"><span>Total Income</span><strong>{money(summary.total, currency)}</strong><p>{summary.shown} income record(s) currently shown.</p></article>
-      <article className="bi-analysis"><span>Today</span><strong>{money(summary.today, currency)}</strong><p>Income recorded for today.</p></article>
-      <article className="bi-analysis"><span>Cash</span><strong>{money(summary.cash, currency)}</strong><p>Cash income in current filter.</p></article>
-      <article className="bi-analysis"><span>Digital</span><strong>{money(summary.momo + summary.bank + summary.card, currency)}</strong><p>Momo, bank and card income.</p></article>
-      <article className="bi-analysis wide"><span>By Method</span><strong>{money(summary.total, currency)}</strong><div className="bi-analysis-list">{methodRows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{money(row.value, currency)}</small></div><div className="bi-progress"><i style={{ width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%` }} /></div></section>)}</div></article>
-      <article className="bi-analysis wide"><span>By Source</span><strong>{sourceRows.length}</strong><div className="bi-analysis-list">{sourceRows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{money(row.value, currency)}</small></div><div className="bi-progress"><i style={{ width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%` }} /></div></section>)}</div></article>
+      <article className="bi-analysis">
+        <span>Total Income</span>
+        <strong>{money(summary.total, currency)}</strong>
+        <p>{summary.shown} income record(s) currently shown.</p>
+      </article>
+      <article className="bi-analysis">
+        <span>Today</span>
+        <strong>{money(summary.today, currency)}</strong>
+        <p>Income recorded for today.</p>
+      </article>
+      <article className="bi-analysis">
+        <span>Cash</span>
+        <strong>{money(summary.cash, currency)}</strong>
+        <p>Cash income in current filter.</p>
+      </article>
+      <article className="bi-analysis">
+        <span>Digital</span>
+        <strong>
+          {money(summary.momo + summary.bank + summary.card, currency)}
+        </strong>
+        <p>Momo, bank and card income.</p>
+      </article>
+      <article className="bi-analysis wide">
+        <span>By Method</span>
+        <strong>{money(summary.total, currency)}</strong>
+        <div className="bi-analysis-list">
+          {methodRows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{money(row.value, currency)}</small>
+              </div>
+              <div className="bi-progress">
+                <i
+                  style={{
+                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
+      <article className="bi-analysis wide">
+        <span>By Source</span>
+        <strong>{sourceRows.length}</strong>
+        <div className="bi-analysis-list">
+          {sourceRows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{money(row.value, currency)}</small>
+              </div>
+              <div className="bi-progress">
+                <i
+                  style={{
+                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }

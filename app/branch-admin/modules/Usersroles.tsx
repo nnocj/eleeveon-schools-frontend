@@ -39,6 +39,8 @@ import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 // TYPES
 // ======================================================
 
+type EntityId = string | number;
+
 type ViewMode = "cards" | "table";
 type AccessFilter = "all" | "enabled" | "notEnabled" | "inactive";
 type BranchAssignableRole = "accountant" | "teacher" | "student" | "parent";
@@ -46,8 +48,8 @@ type RoleFilter = "all" | BranchAssignableRole;
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
+  schoolId?: EntityId | null;
+  branchId?: EntityId | null;
   isDeleted?: boolean;
   active?: boolean;
 };
@@ -56,11 +58,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: EntityId | null;
+  branchId?: EntityId | null;
+  teacherId?: EntityId | null;
+  studentId?: EntityId | null;
+  parentId?: EntityId | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -69,7 +71,7 @@ type OpenWorkspaceSession = {
 
 type AppUser = TenantRow & {
   id?: string | number;
-  localId?: string | number;
+
   title?: string;
   fullName?: string;
   name?: string;
@@ -89,18 +91,17 @@ type AppUser = TenantRow & {
 
 type UserMembership = TenantRow & {
   id?: string | number;
-  localId?: string | number;
-  userId?: number | string | null;
-  userLocalId?: string | number | null;
-  accountUserId?: string | number | null;
+
+  userId?: EntityId | null;
+  accountUserId?: EntityId | null;
   title?: string;
   email?: string;
   fullName?: string;
   role?: string;
   status?: string;
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
+  teacherId?: EntityId | null;
+  studentId?: EntityId | null;
+  parentId?: EntityId | null;
   mustChangePassword?: boolean;
   createdAt?: number;
   updatedAt?: number;
@@ -114,7 +115,7 @@ type Candidate = {
   key: string;
   source: CandidateSource;
   role: BranchAssignableRole;
-  profileId?: number;
+  profileId?: EntityId;
   user?: AppUser;
   membership?: UserMembership;
   title?: string;
@@ -141,23 +142,62 @@ type FormState = {
   role: BranchAssignableRole;
   active: boolean;
   temporaryPassword: string;
-  teacherLocalId: string;
-  studentLocalId: string;
-  parentLocalId: string;
+  teacherId: string;
+  studentId: string;
+  parentId: string;
 };
 
 // ======================================================
 // CONSTANTS
 // ======================================================
 
-const ROLES: { value: BranchAssignableRole; label: string; icon: string; helper: string }[] = [
-  { value: "accountant", label: "Accountant", icon: "💰", helper: "Finance, fees, expenses and payroll access." },
-  { value: "teacher", label: "Teacher", icon: "👨‍🏫", helper: "Teacher portal access linked to a teacher profile." },
-  { value: "student", label: "Student", icon: "🧑‍🎓", helper: "Student portal access linked to a student profile." },
-  { value: "parent", label: "Parent", icon: "👨‍👩‍👧", helper: "Parent portal access linked to a parent profile." },
+const ROLES: {
+  value: BranchAssignableRole;
+  label: string;
+  icon: string;
+  helper: string;
+}[] = [
+  {
+    value: "accountant",
+    label: "Accountant",
+    icon: "💰",
+    helper: "Finance, fees, expenses and payroll access.",
+  },
+  {
+    value: "teacher",
+    label: "Teacher",
+    icon: "👨‍🏫",
+    helper: "Teacher portal access linked to a teacher profile.",
+  },
+  {
+    value: "student",
+    label: "Student",
+    icon: "🧑‍🎓",
+    helper: "Student portal access linked to a student profile.",
+  },
+  {
+    value: "parent",
+    label: "Parent",
+    icon: "👨‍👩‍👧",
+    helper: "Parent portal access linked to a parent profile.",
+  },
 ];
 
-const TITLES = ["", "Mr.", "Mrs.", "Miss", "Ms.", "Dr.", "Prof.", "Rev.", "Pastor", "Imam", "Alhaji", "Hajia", "Nana"];
+const TITLES = [
+  "",
+  "Mr.",
+  "Mrs.",
+  "Miss",
+  "Ms.",
+  "Dr.",
+  "Prof.",
+  "Rev.",
+  "Pastor",
+  "Imam",
+  "Alhaji",
+  "Hajia",
+  "Nana",
+];
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
@@ -171,9 +211,9 @@ const DEFAULT_FORM: FormState = {
   role: "accountant",
   active: true,
   temporaryPassword: "",
-  teacherLocalId: "",
-  studentLocalId: "",
-  parentLocalId: "",
+  teacherId: "",
+  studentId: "",
+  parentId: "",
 };
 
 // ======================================================
@@ -192,7 +232,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -234,7 +276,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -243,7 +289,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -255,7 +301,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -265,7 +315,7 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
@@ -285,15 +335,21 @@ async function tableToArray<T = any>(...names: string[]): Promise<T[]> {
 }
 
 function normalizeEmail(email?: string) {
-  return String(email || "").trim().toLowerCase();
+  return String(email || "")
+    .trim()
+    .toLowerCase();
 }
 
 function normalizePhone(phone?: string) {
-  return String(phone || "").trim().replace(/\s+/g, " ");
+  return String(phone || "")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function tempPasswordFromEmail(email: string) {
-  const prefix = normalizeEmail(email).split("@")[0].replace(/[^a-zA-Z0-9._-]/g, "");
+  const prefix = normalizeEmail(email)
+    .split("@")[0]
+    .replace(/[^a-zA-Z0-9._-]/g, "");
   return `${prefix || "user"}@123`;
 }
 
@@ -302,24 +358,34 @@ function num(value?: string | number | null) {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-function sameTenant(row: TenantRow, accountId?: string | null, schoolId?: number | null, branchId?: number | null) {
+function sameTenant(
+  row: TenantRow,
+  accountId?: string | null,
+  schoolId?: EntityId | null,
+  branchId?: EntityId | null,
+) {
   if (!row || row.isDeleted) return false;
   return (
     (row.accountId || accountId) === accountId &&
-    Number(row.schoolId ?? schoolId) === Number(schoolId) &&
-    Number(row.branchId ?? branchId) === Number(branchId)
+    String(row.schoolId ?? schoolId ?? "") === String(schoolId ?? "") &&
+    String(row.branchId ?? branchId ?? "") === String(branchId ?? "")
   );
 }
 
 function roleLabel(role?: string) {
-  return ROLES.find((item) => item.value === role)?.label || String(role || "No role").replaceAll("_", " ");
+  return (
+    ROLES.find((item) => item.value === role)?.label ||
+    String(role || "No role").replaceAll("_", " ")
+  );
 }
 
 function roleIcon(role?: string) {
   return ROLES.find((item) => item.value === role)?.icon || "👤";
 }
 
-function roleTone(role?: string): "green" | "blue" | "orange" | "gray" | "red" | "purple" {
+function roleTone(
+  role?: string,
+): "green" | "blue" | "orange" | "gray" | "red" | "purple" {
   if (role === "accountant") return "green";
   if (role === "teacher") return "blue";
   if (role === "student") return "orange";
@@ -328,37 +394,52 @@ function roleTone(role?: string): "green" | "blue" | "orange" | "gray" | "red" |
 }
 
 function initials(name: string) {
-  return String(name || "User")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "U";
+  return (
+    String(name || "User")
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "U"
+  );
 }
 
-function respectfulName(input: { title?: string; fullName?: string; name?: string; email?: string }) {
+function respectfulName(input: {
+  title?: string;
+  fullName?: string;
+  name?: string;
+  email?: string;
+}) {
   const title = String(input.title || "").trim();
-  const name = String(input.fullName || input.name || input.email || "User").trim();
+  const name = String(
+    input.fullName || input.name || input.email || "User",
+  ).trim();
   if (!title) return name;
 
   const normalizedTitle = title.replace(/\.$/, "").toLowerCase();
   const lowerName = name.toLowerCase();
 
-  if (lowerName.startsWith(`${normalizedTitle} `) || lowerName.startsWith(`${normalizedTitle}. `)) return name;
+  if (
+    lowerName.startsWith(`${normalizedTitle} `) ||
+    lowerName.startsWith(`${normalizedTitle}. `)
+  )
+    return name;
   return `${title} ${name}`;
 }
 
 function userIdOf(user?: AppUser) {
-  return user?.id || user?.localId;
+  return user?.id;
 }
 
 function membershipUserId(membership?: UserMembership) {
-  return String(membership?.userLocalId || membership?.userId || membership?.accountUserId || "");
+  return String(
+    membership?.userId || membership?.userId || membership?.accountUserId || "",
+  );
 }
 
 function findUserAndMembership(input: {
   role: BranchAssignableRole;
-  profileId?: number;
+  profileId?: EntityId;
   email?: string;
   users: AppUser[];
   memberships: UserMembership[];
@@ -368,27 +449,48 @@ function findUserAndMembership(input: {
   const membership = input.memberships.find((row) => {
     if (row.role !== input.role) return false;
 
-    if (input.role === "teacher" && input.profileId && row.teacherLocalId === input.profileId) return true;
-    if (input.role === "student" && input.profileId && row.studentLocalId === input.profileId) return true;
-    if (input.role === "parent" && input.profileId && row.parentLocalId === input.profileId) return true;
+    if (
+      input.role === "teacher" &&
+      input.profileId &&
+      row.teacherId === input.profileId
+    )
+      return true;
+    if (
+      input.role === "student" &&
+      input.profileId &&
+      row.studentId === input.profileId
+    )
+      return true;
+    if (
+      input.role === "parent" &&
+      input.profileId &&
+      row.parentId === input.profileId
+    )
+      return true;
 
     return Boolean(email && row.email?.toLowerCase() === email);
   });
 
   const user =
-    input.users.find((row) => String(userIdOf(row) || "") === membershipUserId(membership)) ||
-    input.users.find((row) => Boolean(email && row.email?.toLowerCase() === email)) ||
+    input.users.find(
+      (row) => String(userIdOf(row) || "") === membershipUserId(membership),
+    ) ||
+    input.users.find((row) =>
+      Boolean(email && row.email?.toLowerCase() === email),
+    ) ||
     undefined;
 
   return { user, membership };
 }
 
 function accessState(user?: AppUser, membership?: UserMembership) {
-  const hasLogin = Boolean(user?.id || user?.localId || user?.email);
-  const hasMembership = Boolean(membership?.id || membership?.localId || membership?.role);
+  const hasLogin = Boolean(user?.id || user?.email);
+  const hasMembership = Boolean(membership?.id || membership?.role);
   const userInactive = user?.active === false || user?.status === "inactive";
-  const membershipInactive = membership?.active === false || membership?.status === "inactive";
-  const inactive = (hasLogin && userInactive) || (hasMembership && membershipInactive);
+  const membershipInactive =
+    membership?.active === false || membership?.status === "inactive";
+  const inactive =
+    (hasLogin && userInactive) || (hasMembership && membershipInactive);
   const enabled = hasLogin && hasMembership && !inactive;
 
   return {
@@ -396,10 +498,11 @@ function accessState(user?: AppUser, membership?: UserMembership) {
     hasMembership,
     inactive,
     enabled,
-    mustChangePassword: Boolean(user?.mustChangePassword || membership?.mustChangePassword),
+    mustChangePassword: Boolean(
+      user?.mustChangePassword || membership?.mustChangePassword,
+    ),
   };
 }
-
 
 function isStringPrimaryKeyTable(table: any) {
   const primaryKey = table?.schema?.primKey;
@@ -420,17 +523,18 @@ function dateishNowForAuthTable(table: any) {
 }
 
 function authTableId(row?: any) {
-  return row?.id ?? row?.localId;
+  return row?.id;
 }
 
 async function authApi<T = any>(
   endpoint: string,
-  options: { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; body?: any }
+  options: { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; body?: any },
 ): Promise<T> {
   try {
     return await apiRequest<T>(endpoint, {
       method: options.method,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined ? undefined : JSON.stringify(options.body),
     } as any);
   } catch (error: any) {
     const message = String(error?.message || error || "Request failed");
@@ -455,12 +559,19 @@ function isEndpointMissing(error: any) {
 }
 
 async function firstWorkingAuthCall<T = any>(
-  attempts: Array<{ endpoint: string; method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; body?: any }>
+  attempts: Array<{
+    endpoint: string;
+    method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+    body?: any;
+  }>,
 ): Promise<T> {
   let lastError: any = null;
   for (const attempt of attempts) {
     try {
-      return await authApi<T>(attempt.endpoint, { method: attempt.method, body: attempt.body });
+      return await authApi<T>(attempt.endpoint, {
+        method: attempt.method,
+        body: attempt.body,
+      });
     } catch (error: any) {
       lastError = error;
       if (!isEndpointMissing(error)) break;
@@ -479,9 +590,12 @@ function arrayFromAny(value: any): any[] {
 }
 
 function membershipProfileKey(membership: Partial<UserMembership>) {
-  if (membership.role === "teacher" && membership.teacherLocalId) return `teacher:${membership.teacherLocalId}`;
-  if (membership.role === "student" && membership.studentLocalId) return `student:${membership.studentLocalId}`;
-  if (membership.role === "parent" && membership.parentLocalId) return `parent:${membership.parentLocalId}`;
+  if (membership.role === "teacher" && membership.teacherId)
+    return `teacher:${membership.teacherId}`;
+  if (membership.role === "student" && membership.studentId)
+    return `student:${membership.studentId}`;
+  if (membership.role === "parent" && membership.parentId)
+    return `parent:${membership.parentId}`;
   return `email:${normalizeEmail(membership.email)}`;
 }
 
@@ -491,7 +605,9 @@ function membershipLogicalKey(membership: Partial<UserMembership>) {
     String(membership.schoolId || ""),
     String(membership.branchId || ""),
     String(membership.role || ""),
-    String(membership.userId || membership.userLocalId || membership.accountUserId || ""),
+    String(
+      membership.userId || membership.userId || membership.accountUserId || "",
+    ),
     membershipProfileKey(membership),
   ].join("|");
 }
@@ -516,7 +632,10 @@ function dedupeMemberships(rows: UserMembership[]) {
 
   [...byExactId.values(), ...withoutRealId].forEach((row) => {
     const id = String(authTableId(row) || "").trim();
-    const key = id && !id.startsWith("membership_") ? `id:${id}` : `logical:${membershipLogicalKey(row)}`;
+    const key =
+      id && !id.startsWith("membership_")
+        ? `id:${id}`
+        : `logical:${membershipLogicalKey(row)}`;
     const existing = finalRows.get(key);
 
     // Prefer real backend rows, then active rows, then the latest updated record.
@@ -527,14 +646,18 @@ function dedupeMemberships(rows: UserMembership[]) {
 
     const existingId = String(authTableId(existing) || "");
     const rowHasRealId = id && !id.startsWith("membership_");
-    const existingHasRealId = existingId && !existingId.startsWith("membership_");
+    const existingHasRealId =
+      existingId && !existingId.startsWith("membership_");
 
     if (rowHasRealId && !existingHasRealId) {
       finalRows.set(key, row);
       return;
     }
 
-    if ((row.active !== false && existing.active === false) || Number(row.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+    if (
+      (row.active !== false && existing.active === false) ||
+      Number(row.updatedAt || 0) >= Number(existing.updatedAt || 0)
+    ) {
       finalRows.set(key, { ...existing, ...row });
     }
   });
@@ -554,26 +677,57 @@ function dedupeMemberships(rows: UserMembership[]) {
     const rowId = String(authTableId(row) || "");
     const existingId = String(authTableId(existing) || "");
     const rowHasRealId = rowId && !rowId.startsWith("membership_");
-    const existingHasRealId = existingId && !existingId.startsWith("membership_");
+    const existingHasRealId =
+      existingId && !existingId.startsWith("membership_");
 
     if (rowHasRealId && !existingHasRealId) logicalRows.set(key, row);
-    else if (!existingHasRealId || Number(row.updatedAt || 0) >= Number(existing.updatedAt || 0)) logicalRows.set(key, { ...existing, ...row });
+    else if (
+      !existingHasRealId ||
+      Number(row.updatedAt || 0) >= Number(existing.updatedAt || 0)
+    )
+      logicalRows.set(key, { ...existing, ...row });
   });
 
   return [...logicalRows.values()];
 }
 
-function membershipMatchesForm(membership: Partial<UserMembership>, form: FormState, userId: string, schoolId: number, branchId: number) {
+function membershipMatchesForm(
+  membership: Partial<UserMembership>,
+  form: FormState,
+  userId: string,
+  schoolId: EntityId,
+  branchId: EntityId,
+) {
   if (!membership || membership.role !== form.role) return false;
-  if (String(membershipUserId(membership as UserMembership) || membership.userId || "") !== String(userId)) return false;
-  if (Number(membership.schoolId) !== Number(schoolId)) return false;
-  if (Number(membership.branchId) !== Number(branchId)) return false;
+  if (
+    String(
+      membershipUserId(membership as UserMembership) || membership.userId || "",
+    ) !== String(userId)
+  )
+    return false;
+  if (String(membership.schoolId ?? "") !== String(schoolId ?? "")) return false;
+  if (String(membership.branchId ?? "") !== String(branchId ?? "")) return false;
 
-  if (form.role === "teacher") return Number(membership.teacherLocalId || 0) === Number(form.teacherLocalId || 0);
-  if (form.role === "student") return Number(membership.studentLocalId || 0) === Number(form.studentLocalId || 0);
-  if (form.role === "parent") return Number(membership.parentLocalId || 0) === Number(form.parentLocalId || 0);
+  if (form.role === "teacher")
+    return (
+      String((membership.teacherId || 0) ?? "") ===
+      String((form.teacherId || 0) ?? "")
+    );
+  if (form.role === "student")
+    return (
+      String((membership.studentId || 0) ?? "") ===
+      String((form.studentId || 0) ?? "")
+    );
+  if (form.role === "parent")
+    return (
+      String((membership.parentId || 0) ?? "") ===
+      String((form.parentId || 0) ?? "")
+    );
 
-  return normalizeEmail(membership.email) === normalizeEmail(form.email) || Boolean(userId);
+  return (
+    normalizeEmail(membership.email) === normalizeEmail(form.email) ||
+    Boolean(userId)
+  );
 }
 
 function extractBackendUsersAndMemberships(remote: any) {
@@ -591,14 +745,18 @@ function extractBackendUsersAndMemberships(remote: any) {
     remote,
   ];
 
-  const users = userCandidates.flatMap(arrayFromAny).filter(Boolean) as AppUser[];
+  const users = userCandidates
+    .flatMap(arrayFromAny)
+    .filter(Boolean) as AppUser[];
 
   const topLevelMemberships = [
     remote?.memberships,
     remote?.userMemberships,
     remote?.data?.memberships,
     remote?.data?.userMemberships,
-  ].flatMap(arrayFromAny).filter(Boolean) as UserMembership[];
+  ]
+    .flatMap(arrayFromAny)
+    .filter(Boolean) as UserMembership[];
 
   const nestedMemberships = users.flatMap((user: any) => {
     const nested = [
@@ -619,7 +777,8 @@ function extractBackendUsersAndMemberships(remote: any) {
       branchId: membership?.branchId ?? user?.branchId,
       active: membership?.active ?? user?.active,
       status: membership?.status || user?.status,
-      mustChangePassword: membership?.mustChangePassword ?? user?.mustChangePassword,
+      mustChangePassword:
+        membership?.mustChangePassword ?? user?.mustChangePassword,
     })) as UserMembership[];
   });
 
@@ -627,12 +786,17 @@ function extractBackendUsersAndMemberships(remote: any) {
     .filter((user: any) => {
       const role = String(user?.role || "").toLowerCase();
       const hasNested = nestedMemberships.some(
-        (membership) => String(membership.userId || "") === String(userIdOf(user) || "") && String(membership.role || "") === role
+        (membership) =>
+          String(membership.userId || "") === String(userIdOf(user) || "") &&
+          String(membership.role || "") === role,
       );
       return ROLES.some((item) => item.value === role) && !hasNested;
     })
     .map((user: any) => ({
-      id: user?.membershipId || user?.userMembershipId || `membership_${userIdOf(user) || user.email || Math.random()}`,
+      id:
+        user?.membershipId ||
+        user?.userMembershipId ||
+        `membership_${userIdOf(user) || user.email || Math.random()}`,
       accountId: user?.accountId,
       schoolId: user?.schoolId,
       branchId: user?.branchId,
@@ -642,29 +806,52 @@ function extractBackendUsersAndMemberships(remote: any) {
       email: user?.email,
       role: user?.role,
       active: user?.active !== false && user?.status !== "inactive",
-      status: user?.active === false || user?.status === "inactive" ? "inactive" : "active",
+      status:
+        user?.active === false || user?.status === "inactive"
+          ? "inactive"
+          : "active",
       mustChangePassword: Boolean(user?.mustChangePassword),
       isDeleted: Boolean(user?.isDeleted),
     })) as UserMembership[];
 
-  return { users, memberships: dedupeMemberships([...topLevelMemberships, ...nestedMemberships, ...syntheticMemberships]) };
+  return {
+    users,
+    memberships: dedupeMemberships([
+      ...topLevelMemberships,
+      ...nestedMemberships,
+      ...syntheticMemberships,
+    ]),
+  };
 }
 
-async function fetchBackendBranchUsers(args: { schoolId: number; branchId: number }) {
-  return authApi<any>(`/accounts/me/users?schoolId=${args.schoolId}&branchId=${args.branchId}`, {
-    method: "GET",
-  });
+async function fetchBackendBranchUsers(args: {
+  schoolId: EntityId;
+  branchId: EntityId;
+}) {
+  return authApi<any>(
+    `/accounts/me/users?schoolId=${encodeURIComponent(String(args.schoolId))}&branchId=${encodeURIComponent(String(args.branchId))}`,
+    {
+      method: "GET",
+    },
+  );
 }
 
 function profileLocalFields(form: FormState) {
   return {
-    teacherLocalId: form.role === "teacher" ? num(form.teacherLocalId) || undefined : undefined,
-    studentLocalId: form.role === "student" ? num(form.studentLocalId) || undefined : undefined,
-    parentLocalId: form.role === "parent" ? num(form.parentLocalId) || undefined : undefined,
+    teacherId:
+      form.role === "teacher" ? num(form.teacherId) || undefined : undefined,
+    studentId:
+      form.role === "student" ? num(form.studentId) || undefined : undefined,
+    parentId:
+      form.role === "parent" ? num(form.parentId) || undefined : undefined,
   };
 }
 
-function cleanCreateAccountUserDto(form: FormState, schoolId: number, branchId: number) {
+function cleanCreateAccountUserDto(
+  form: FormState,
+  schoolId: EntityId,
+  branchId: EntityId,
+) {
   return {
     fullName: form.fullName.trim(),
     email: normalizeEmail(form.email),
@@ -685,25 +872,29 @@ function cleanUpdateAccountUserDto(form: FormState) {
   };
 }
 
-function cleanMembershipDto(form: FormState, userId: string, schoolId: number, branchId: number) {
+function cleanMembershipDto(
+  form: FormState,
+  userId: string,
+  schoolId: EntityId,
+  branchId: EntityId,
+) {
   return {
     userId,
     role: form.role,
     schoolId,
     branchId,
     active: form.active,
-    teacherLocalId: form.role === "teacher" ? num(form.teacherLocalId) || null : null,
-    studentLocalId: form.role === "student" ? num(form.studentLocalId) || null : null,
-    parentLocalId: form.role === "parent" ? num(form.parentLocalId) || null : null,
+    teacherId: form.role === "teacher" ? num(form.teacherId) || null : null,
+    studentId: form.role === "student" ? num(form.studentId) || null : null,
+    parentId: form.role === "parent" ? num(form.parentId) || null : null,
   };
 }
-
 
 async function updateLinkedProfileContactLocally(args: {
   form: FormState;
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: EntityId;
+  branchId: EntityId;
 }) {
   // PROFILE DATA FIX:
   // Teacher/student/parent records are normal school operational data.
@@ -725,17 +916,17 @@ async function updateLinkedProfileContactLocally(args: {
 
   if (role === "teacher") {
     table = (db as any).teachers;
-    id = num(args.form.teacherLocalId);
+    id = num(args.form.teacherId);
   }
 
   if (role === "student") {
     table = (db as any).students;
-    id = num(args.form.studentLocalId);
+    id = num(args.form.studentId);
   }
 
   if (role === "parent") {
     table = (db as any).parents;
-    id = num(args.form.parentLocalId);
+    id = num(args.form.parentId);
   }
 
   if (!table?.get || !table?.update || !id) return;
@@ -767,7 +958,8 @@ async function updateLinkedProfileContactLocally(args: {
 
   // Preserve names by default. Only fill common name fields if they already exist.
   if (args.form.fullName.trim()) {
-    if ("fullName" in existing) profilePatch.fullName = args.form.fullName.trim();
+    if ("fullName" in existing)
+      profilePatch.fullName = args.form.fullName.trim();
     if ("name" in existing) profilePatch.name = args.form.fullName.trim();
   }
 
@@ -780,40 +972,62 @@ async function saveBackendBranchAccess(args: {
   users: AppUser[];
   memberships: UserMembership[];
   accountId: string;
-  schoolId: number;
-  branchId: number;
+  schoolId: EntityId;
+  branchId: EntityId;
 }) {
   const email = normalizeEmail(args.form.email);
   let user =
-    (args.form.userId ? args.users.find((row) => String(userIdOf(row) || "") === String(args.form.userId)) : undefined) ||
+    (args.form.userId
+      ? args.users.find(
+          (row) => String(userIdOf(row) || "") === String(args.form.userId),
+        )
+      : undefined) ||
     args.users.find((row) => normalizeEmail(row.email) === email);
 
   let membershipsFromCreatedUser: UserMembership[] = [];
 
   if (user && userIdOf(user)) {
-    user = await authApi<AppUser>(`/accounts/users/${encodeURIComponent(String(userIdOf(user)))}`, {
-      method: "PATCH",
-      body: cleanUpdateAccountUserDto(args.form),
-    });
-    membershipsFromCreatedUser = extractBackendUsersAndMemberships(user).memberships;
+    user = await authApi<AppUser>(
+      `/accounts/users/${encodeURIComponent(String(userIdOf(user)))}`,
+      {
+        method: "PATCH",
+        body: cleanUpdateAccountUserDto(args.form),
+      },
+    );
+    membershipsFromCreatedUser =
+      extractBackendUsersAndMemberships(user).memberships;
   } else {
     try {
       user = await authApi<AppUser>("/accounts/me/users", {
         method: "POST",
-        body: cleanCreateAccountUserDto(args.form, args.schoolId, args.branchId),
+        body: cleanCreateAccountUserDto(
+          args.form,
+          args.schoolId,
+          args.branchId,
+        ),
       });
 
       // DUPLICATE PREVENTION:
       // AccountsService.createUser already creates AppUser + UserMembership in one transaction.
       // Reuse the membership returned inside the created user instead of calling POST /memberships again.
-      membershipsFromCreatedUser = extractBackendUsersAndMemberships(user).memberships;
+      membershipsFromCreatedUser =
+        extractBackendUsersAndMemberships(user).memberships;
     } catch (error: any) {
       const message = endpointErrorMessage(error).toLowerCase();
-      if (!message.includes("already registered") && !message.includes("already exists")) throw error;
+      if (
+        !message.includes("already registered") &&
+        !message.includes("already exists")
+      )
+        throw error;
 
-      const remote = await fetchBackendBranchUsers({ schoolId: args.schoolId, branchId: args.branchId });
+      const remote = await fetchBackendBranchUsers({
+        schoolId: args.schoolId,
+        branchId: args.branchId,
+      });
       const normalized = extractBackendUsersAndMemberships(remote);
-      user = normalized.users.find((row) => normalizeEmail(row.email) === email);
+      user = normalized.users.find(
+        (row) => normalizeEmail(row.email) === email,
+      );
       membershipsFromCreatedUser = normalized.memberships;
       if (!user) throw error;
     }
@@ -830,17 +1044,37 @@ async function saveBackendBranchAccess(args: {
 
   const matchingMembership =
     (args.form.membershipId
-      ? allKnownMemberships.find((membership) => String(authTableId(membership) || "") === String(args.form.membershipId))
+      ? allKnownMemberships.find(
+          (membership) =>
+            String(authTableId(membership) || "") ===
+            String(args.form.membershipId),
+        )
       : undefined) ||
-    allKnownMemberships.find((membership) => membershipMatchesForm(membership, args.form, userId, args.schoolId, args.branchId));
+    allKnownMemberships.find((membership) =>
+      membershipMatchesForm(
+        membership,
+        args.form,
+        userId,
+        args.schoolId,
+        args.branchId,
+      ),
+    );
 
   let membership: UserMembership;
-  if (matchingMembership?.id || matchingMembership?.localId) {
+  if (matchingMembership?.id) {
     // If the create-user endpoint already returned the exact membership, update it instead of creating another one.
-    membership = await authApi<UserMembership>(`/memberships/${encodeURIComponent(String(authTableId(matchingMembership)))}`, {
-      method: "PATCH",
-      body: cleanMembershipDto(args.form, userId, args.schoolId, args.branchId),
-    });
+    membership = await authApi<UserMembership>(
+      `/memberships/${encodeURIComponent(String(authTableId(matchingMembership)))}`,
+      {
+        method: "PATCH",
+        body: cleanMembershipDto(
+          args.form,
+          userId,
+          args.schoolId,
+          args.branchId,
+        ),
+      },
+    );
   } else {
     membership = await authApi<UserMembership>("/memberships", {
       method: "POST",
@@ -849,16 +1083,25 @@ async function saveBackendBranchAccess(args: {
   }
 
   if (args.form.active === false && membership?.id) {
-    membership = await authApi<UserMembership>(`/memberships/${encodeURIComponent(String(membership.id))}`, {
-      method: "PATCH",
-      body: { active: false },
-    });
+    membership = await authApi<UserMembership>(
+      `/memberships/${encodeURIComponent(String(membership.id))}`,
+      {
+        method: "PATCH",
+        body: { active: false },
+      },
+    );
   }
 
   return { user, membership };
 }
 
-async function cacheAuthUserLocally(args: { user: AppUser; form: FormState; accountId: string; schoolId: number; branchId: number }) {
+async function cacheAuthUserLocally(args: {
+  user: AppUser;
+  form: FormState;
+  accountId: string;
+  schoolId: EntityId;
+  branchId: EntityId;
+}) {
   const table = getTable<AppUser>("appUsers", "accountUsers", "users");
   if (!table) return;
 
@@ -887,21 +1130,43 @@ async function cacheAuthUserLocally(args: { user: AppUser; form: FormState; acco
 
   const existing =
     (await table.get(id).catch(() => undefined)) ||
-    (await table.where?.("email")?.equals?.(payload.email)?.first?.().catch(() => undefined));
+    (await table
+      .where?.("email")
+      ?.equals?.(payload.email)
+      ?.first?.()
+      .catch(() => undefined));
 
-  if (existing?.id || existing?.localId) {
-    await table.update(authTableId(existing), { ...payload, version: Number(existing.version || 0) + 1 });
+  if (existing?.id) {
+    await table.update(authTableId(existing), {
+      ...payload,
+      version: Number(existing.version || 0) + 1,
+    });
     return;
   }
 
-  await table.add({ ...(isStringPrimaryKeyTable(table) ? { id } : {}), ...payload, createdAt: timestamp as any, version: 1 });
+  await table.add({
+    ...(isStringPrimaryKeyTable(table) ? { id } : {}),
+    ...payload,
+    createdAt: timestamp as any,
+    version: 1,
+  });
 }
 
-async function cacheAuthMembershipLocally(args: { membership: UserMembership; user: AppUser; form: FormState; accountId: string; schoolId: number; branchId: number }) {
+async function cacheAuthMembershipLocally(args: {
+  membership: UserMembership;
+  user: AppUser;
+  form: FormState;
+  accountId: string;
+  schoolId: EntityId;
+  branchId: EntityId;
+}) {
   const table = getTable<UserMembership>("userMemberships", "memberships");
   if (!table) return;
 
-  const id = authTableId(args.membership) || args.form.membershipId || makeLocalAuthId("membership");
+  const id =
+    authTableId(args.membership) ||
+    args.form.membershipId ||
+    makeLocalAuthId("membership");
   const userId = String(userIdOf(args.user) || args.membership.userId || "");
   const timestamp = dateishNowForAuthTable(table);
   const payload: Partial<UserMembership> = {
@@ -911,7 +1176,6 @@ async function cacheAuthMembershipLocally(args: { membership: UserMembership; us
     schoolId: args.schoolId,
     branchId: args.branchId,
     userId,
-    userLocalId: null,
     accountUserId: null,
     title: args.form.title.trim() || undefined,
     fullName: args.form.fullName.trim(),
@@ -919,84 +1183,150 @@ async function cacheAuthMembershipLocally(args: { membership: UserMembership; us
     role: args.form.role,
     active: args.form.active,
     status: args.form.active ? "active" : "inactive",
-    teacherLocalId: args.form.role === "teacher" ? num(args.form.teacherLocalId) || null : null,
-    studentLocalId: args.form.role === "student" ? num(args.form.studentLocalId) || null : null,
-    parentLocalId: args.form.role === "parent" ? num(args.form.parentLocalId) || null : null,
+    teacherId:
+      args.form.role === "teacher" ? num(args.form.teacherId) || null : null,
+    studentId:
+      args.form.role === "student" ? num(args.form.studentId) || null : null,
+    parentId:
+      args.form.role === "parent" ? num(args.form.parentId) || null : null,
     mustChangePassword: true,
     isDeleted: false,
     updatedAt: timestamp as any,
   };
 
-  const allLocalRows: UserMembership[] = table?.toArray ? await table.toArray().catch(() => []) : [];
+  const allLocalRows: UserMembership[] = table?.toArray
+    ? await table.toArray().catch(() => [])
+    : [];
   const existing =
     (await table.get(id).catch(() => undefined)) ||
-    allLocalRows.find((membership) => membershipMatchesForm(membership, args.form, userId, args.schoolId, args.branchId));
+    allLocalRows.find((membership) =>
+      membershipMatchesForm(
+        membership,
+        args.form,
+        userId,
+        args.schoolId,
+        args.branchId,
+      ),
+    );
 
-  if (existing?.id || existing?.localId) {
-    await table.update(authTableId(existing), { ...payload, id: authTableId(existing), version: Number(existing.version || 0) + 1 });
+  if (existing?.id) {
+    await table.update(authTableId(existing), {
+      ...payload,
+      id: authTableId(existing),
+      version: Number(existing.version || 0) + 1,
+    });
     return;
   }
 
-  await table.add({ ...(isStringPrimaryKeyTable(table) ? { id } : {}), ...payload, createdAt: timestamp as any, version: 1 });
+  await table.add({
+    ...(isStringPrimaryKeyTable(table) ? { id } : {}),
+    ...payload,
+    createdAt: timestamp as any,
+    version: 1,
+  });
 }
 
 async function deleteBackendMembership(candidate: Candidate) {
   const membershipId = String(authTableId(candidate.membership) || "").trim();
-  if (!membershipId) throw new Error("Missing membership id for this access role.");
+  if (!membershipId)
+    throw new Error("Missing membership id for this access role.");
 
   // Requires the HARD DELETE backend fix where MembershipsService.remove()
   // uses prisma.userMembership.delete({ where: { id } }) instead of update(active:false).
   return firstWorkingAuthCall<any>([
-    { endpoint: `/memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/user-memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/accounts/memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
-    { endpoint: `/accounts/user-memberships/${encodeURIComponent(membershipId)}`, method: "DELETE" },
+    {
+      endpoint: `/memberships/${encodeURIComponent(membershipId)}`,
+      method: "DELETE",
+    },
+    {
+      endpoint: `/user-memberships/${encodeURIComponent(membershipId)}`,
+      method: "DELETE",
+    },
+    {
+      endpoint: `/accounts/memberships/${encodeURIComponent(membershipId)}`,
+      method: "DELETE",
+    },
+    {
+      endpoint: `/accounts/user-memberships/${encodeURIComponent(membershipId)}`,
+      method: "DELETE",
+    },
   ]);
 }
 
 async function removeAuthAccessLocally(candidate: Candidate) {
-  const membershipTable = getTable<UserMembership>("userMemberships", "memberships");
+  const membershipTable = getTable<UserMembership>(
+    "userMemberships",
+    "memberships",
+  );
   const userTable = getTable<AppUser>("appUsers", "accountUsers", "users");
   const membershipId = authTableId(candidate.membership);
-  const userId = userIdOf(candidate.user) || membershipUserId(candidate.membership);
+  const userId =
+    userIdOf(candidate.user) || membershipUserId(candidate.membership);
 
   if (membershipTable && membershipId) {
-    await membershipTable.delete(membershipId).catch((error: any) => console.warn("Failed to remove local membership cache:", error));
+    await membershipTable
+      .delete(membershipId)
+      .catch((error: any) =>
+        console.warn("Failed to remove local membership cache:", error),
+      );
   }
 
   if (userTable && userId && membershipTable?.toArray) {
     const remaining = await membershipTable.toArray();
     const hasOtherRole = remaining.some((membership: UserMembership) => {
       const sameUser = String(membershipUserId(membership)) === String(userId);
-      const sameMembership = String(authTableId(membership) || "") === String(membershipId || "");
+      const sameMembership =
+        String(authTableId(membership) || "") === String(membershipId || "");
       return sameUser && !sameMembership && membership.isDeleted !== true;
     });
 
     if (!hasOtherRole) {
-      await userTable.delete(userId).catch((error: any) => console.warn("Failed to remove local user cache:", error));
+      await userTable
+        .delete(userId)
+        .catch((error: any) =>
+          console.warn("Failed to remove local user cache:", error),
+        );
     }
   }
 }
 
-function profileEmail(role: BranchAssignableRole, item: Teacher | Student | Parent) {
+function profileEmail(
+  role: BranchAssignableRole,
+  item: Teacher | Student | Parent,
+) {
   if (role === "teacher") return normalizeEmail((item as Teacher).email);
   if (role === "parent") return normalizeEmail((item as Parent).email);
   const student = item as any;
   return normalizeEmail(student.email || student.studentEmail || "");
 }
 
-function profilePhone(role: BranchAssignableRole, item: Teacher | Student | Parent) {
+function profilePhone(
+  role: BranchAssignableRole,
+  item: Teacher | Student | Parent,
+) {
   if (role === "teacher") return normalizePhone((item as Teacher).phone);
   if (role === "parent") return normalizePhone((item as Parent).phone);
   const student = item as Student;
   return normalizePhone((student as any).phone || student.parentPhone);
 }
 
-function profileSub(role: BranchAssignableRole, item: Teacher | Student | Parent) {
-  if (role === "teacher") return (item as Teacher).email || (item as Teacher).phone || "Teacher profile";
-  if (role === "parent") return (item as Parent).email || (item as Parent).phone || "Parent profile";
+function profileSub(
+  role: BranchAssignableRole,
+  item: Teacher | Student | Parent,
+) {
+  if (role === "teacher")
+    return (
+      (item as Teacher).email || (item as Teacher).phone || "Teacher profile"
+    );
+  if (role === "parent")
+    return (item as Parent).email || (item as Parent).phone || "Parent profile";
   const student = item as Student;
-  return student.admissionNumber || (student as any).studentCode || student.parentPhone || "Student profile";
+  return (
+    student.admissionNumber ||
+    (student as any).studentCode ||
+    student.parentPhone ||
+    "Student profile"
+  );
 }
 
 // ======================================================
@@ -1009,7 +1339,13 @@ export default function Usersroles() {
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchool, activeSchoolId, activeBranch, activeBranchId, loading: contextLoading } = useActiveBranch();
+  const {
+    activeSchool,
+    activeSchoolId,
+    activeBranch,
+    activeBranchId,
+    loading: contextLoading,
+  } = useActiveBranch();
   const { activeMembership } = useActiveMembership() as any;
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -1041,7 +1377,9 @@ export default function Usersroles() {
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(
+    null,
+  );
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [memberships, setMemberships] = useState<UserMembership[]>([]);
@@ -1057,7 +1395,15 @@ export default function Usersroles() {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/select-role");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const load = async () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -1087,8 +1433,8 @@ export default function Usersroles() {
         // Auth/access data comes from the backend AppUser/UserMembership tables.
         // Dexie is only a local read cache, not the source of truth.
         const remote = await fetchBackendBranchUsers({
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
         });
 
         const normalized = extractBackendUsersAndMemberships(remote);
@@ -1098,11 +1444,21 @@ export default function Usersroles() {
         // Cache only the returned branch-scoped auth data locally.
         for (const membership of membershipRows) {
           if (!ROLES.some((role) => role.value === membership.role)) continue;
-          if (!sameTenant(membership, accountId, Number(schoolId), Number(branchId))) continue;
+          if (!sameTenant(membership, accountId, schoolId, branchId)) continue;
 
           const user =
-            userRows.find((row) => String(userIdOf(row) || "") === String(membership.userId || "")) ||
-            userRows.find((row) => Boolean(row.email && membership.email && normalizeEmail(row.email) === normalizeEmail(membership.email)));
+            userRows.find(
+              (row) =>
+                String(userIdOf(row) || "") === String(membership.userId || ""),
+            ) ||
+            userRows.find((row) =>
+              Boolean(
+                row.email &&
+                  membership.email &&
+                  normalizeEmail(row.email) ===
+                    normalizeEmail(membership.email),
+              ),
+            );
 
           if (!user) continue;
 
@@ -1111,22 +1467,49 @@ export default function Usersroles() {
             membershipId: authTableId(membership),
             userId: String(userIdOf(user) || ""),
             title: membership.title || user.title || "",
-            fullName: membership.fullName || user.fullName || user.name || membership.email || "Portal User",
+            fullName:
+              membership.fullName ||
+              user.fullName ||
+              user.name ||
+              membership.email ||
+              "Portal User",
             email: normalizeEmail(membership.email || user.email),
             phone: normalizePhone(user.phone),
             role: membership.role as BranchAssignableRole,
-            active: membership.active !== false && membership.status !== "inactive" && user.active !== false && user.status !== "inactive",
-            temporaryPassword: user.temporaryPassword || tempPasswordFromEmail(membership.email || user.email || ""),
-            teacherLocalId: membership.teacherLocalId ? String(membership.teacherLocalId) : "",
-            studentLocalId: membership.studentLocalId ? String(membership.studentLocalId) : "",
-            parentLocalId: membership.parentLocalId ? String(membership.parentLocalId) : "",
+            active:
+              membership.active !== false &&
+              membership.status !== "inactive" &&
+              user.active !== false &&
+              user.status !== "inactive",
+            temporaryPassword:
+              user.temporaryPassword ||
+              tempPasswordFromEmail(membership.email || user.email || ""),
+            teacherId: membership.teacherId ? String(membership.teacherId) : "",
+            studentId: membership.studentId ? String(membership.studentId) : "",
+            parentId: membership.parentId ? String(membership.parentId) : "",
           };
 
-          await cacheAuthUserLocally({ user, form: cacheForm, accountId, schoolId: Number(schoolId), branchId: Number(branchId) });
-          await cacheAuthMembershipLocally({ membership, user, form: cacheForm, accountId, schoolId: Number(schoolId), branchId: Number(branchId) });
+          await cacheAuthUserLocally({
+            user,
+            form: cacheForm,
+            accountId,
+            schoolId: schoolId,
+            branchId: branchId,
+          });
+          await cacheAuthMembershipLocally({
+            membership,
+            user,
+            form: cacheForm,
+            accountId,
+            schoolId: schoolId,
+            branchId: branchId,
+          });
         }
       } catch (remoteError) {
-        console.warn("Backend auth user load failed; using local auth cache fallback:", remoteError);
+        console.warn(
+          "Backend auth user load failed; using local auth cache fallback:",
+          remoteError,
+        );
         [userRows, membershipRows] = await Promise.all([
           tableToArray<AppUser>("appUsers", "accountUsers", "users"),
           tableToArray<UserMembership>("userMemberships", "memberships"),
@@ -1136,23 +1519,38 @@ export default function Usersroles() {
       const scopedMemberships = dedupeMemberships(membershipRows)
         .map((membership) => {
           const linkedUser =
-            userRows.find((user) => String(userIdOf(user) || "") === membershipUserId(membership)) ||
-            userRows.find((user) => Boolean(user.email && membership.email && normalizeEmail(user.email) === normalizeEmail(membership.email)));
+            userRows.find(
+              (user) =>
+                String(userIdOf(user) || "") === membershipUserId(membership),
+            ) ||
+            userRows.find((user) =>
+              Boolean(
+                user.email &&
+                  membership.email &&
+                  normalizeEmail(user.email) ===
+                    normalizeEmail(membership.email),
+              ),
+            );
 
           return {
             ...membership,
-            accountId: membership.accountId || linkedUser?.accountId || accountId,
-            schoolId: membership.schoolId ?? linkedUser?.schoolId ?? Number(schoolId),
-            branchId: membership.branchId ?? linkedUser?.branchId ?? Number(branchId),
+            accountId:
+              membership.accountId || linkedUser?.accountId || accountId,
+            schoolId: membership.schoolId ?? linkedUser?.schoolId ?? schoolId,
+            branchId: membership.branchId ?? linkedUser?.branchId ?? branchId,
             email: membership.email || linkedUser?.email,
-            fullName: membership.fullName || linkedUser?.fullName || linkedUser?.name,
+            fullName:
+              membership.fullName || linkedUser?.fullName || linkedUser?.name,
             active: membership.active ?? linkedUser?.active,
             status: membership.status || linkedUser?.status,
-            mustChangePassword: membership.mustChangePassword ?? linkedUser?.mustChangePassword,
+            mustChangePassword:
+              membership.mustChangePassword ?? linkedUser?.mustChangePassword,
           } as UserMembership;
         })
         .filter(
-          (row) => sameTenant(row, accountId, Number(schoolId), Number(branchId)) && ROLES.some((role) => role.value === row.role)
+          (row) =>
+            sameTenant(row, accountId, schoolId, branchId) &&
+            ROLES.some((role) => role.value === row.role),
         );
 
       const scopedUsers = userRows.filter((row) => {
@@ -1160,21 +1558,37 @@ export default function Usersroles() {
         if (row.accountId && row.accountId !== accountId) return false;
 
         if (row.schoolId || row.branchId) {
-          return sameTenant(row, accountId, Number(schoolId), Number(branchId));
+          return sameTenant(row, accountId, schoolId, branchId);
         }
 
         return scopedMemberships.some(
           (membership) =>
             String(userIdOf(row) || "") === membershipUserId(membership) ||
-            Boolean(row.email && membership.email && normalizeEmail(row.email) === normalizeEmail(membership.email))
+            Boolean(
+              row.email &&
+                membership.email &&
+                normalizeEmail(row.email) === normalizeEmail(membership.email),
+            ),
         );
       });
 
       setUsers(scopedUsers);
       setMemberships(scopedMemberships);
-      setTeachers(teacherRows.filter((row) => sameTenant(row, accountId, Number(schoolId), Number(branchId))));
-      setStudents(studentRows.filter((row) => sameTenant(row, accountId, Number(schoolId), Number(branchId))));
-      setParents(parentRows.filter((row) => sameTenant(row, accountId, Number(schoolId), Number(branchId))));
+      setTeachers(
+        teacherRows.filter((row) =>
+          sameTenant(row, accountId, schoolId, branchId),
+        ),
+      );
+      setStudents(
+        studentRows.filter((row) =>
+          sameTenant(row, accountId, schoolId, branchId),
+        ),
+      );
+      setParents(
+        parentRows.filter((row) =>
+          sameTenant(row, accountId, schoolId, branchId),
+        ),
+      );
     } catch (error) {
       console.error("Failed to load users and roles:", error);
       alert("Failed to load users and roles.");
@@ -1186,19 +1600,26 @@ export default function Usersroles() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [authenticated, accountId, schoolId, branchId, dataRevision]);
 
   const candidates = useMemo<Candidate[]>(() => {
     const list: Candidate[] = [];
 
-    const addProfileCandidate = (role: Exclude<BranchAssignableRole, "accountant">, item: Teacher | Student | Parent) => {
+    const addProfileCandidate = (
+      role: Exclude<BranchAssignableRole, "accountant">,
+      item: Teacher | Student | Parent,
+    ) => {
       const profileId = item.id;
       const email = profileEmail(role, item);
       const phone = profilePhone(role, item);
       const fullName = respectfulName(item as any);
-      const match = findUserAndMembership({ role, profileId, email, users, memberships });
+      const match = findUserAndMembership({
+        role,
+        profileId,
+        email,
+        users,
+        memberships,
+      });
       const state = accessState(match.user, match.membership);
 
       list.push({
@@ -1226,8 +1647,17 @@ export default function Usersroles() {
       .filter((membership) => membership.role === "accountant")
       .forEach((membership) => {
         const user =
-          users.find((row) => String(userIdOf(row) || "") === membershipUserId(membership)) ||
-          users.find((row) => Boolean(row.email && membership.email && row.email.toLowerCase() === membership.email.toLowerCase()));
+          users.find(
+            (row) =>
+              String(userIdOf(row) || "") === membershipUserId(membership),
+          ) ||
+          users.find((row) =>
+            Boolean(
+              row.email &&
+                membership.email &&
+                row.email.toLowerCase() === membership.email.toLowerCase(),
+            ),
+          );
 
         const fullName = respectfulName({
           title: user?.title || membership.title,
@@ -1254,8 +1684,15 @@ export default function Usersroles() {
       });
 
     return list.sort((a, b) => {
-      const order: Record<BranchAssignableRole, number> = { accountant: 1, teacher: 2, student: 3, parent: 4 };
-      return order[a.role] - order[b.role] || a.fullName.localeCompare(b.fullName);
+      const order: Record<BranchAssignableRole, number> = {
+        accountant: 1,
+        teacher: 2,
+        student: 3,
+        parent: 4,
+      };
+      return (
+        order[a.role] - order[b.role] || a.fullName.localeCompare(b.fullName)
+      );
     });
   }, [teachers, students, parents, users, memberships]);
 
@@ -1265,7 +1702,11 @@ export default function Usersroles() {
     return candidates.filter((candidate) => {
       if (roleFilter !== "all" && candidate.role !== roleFilter) return false;
       if (accessFilter === "enabled" && !candidate.enabled) return false;
-      if (accessFilter === "notEnabled" && (candidate.enabled || candidate.inactive)) return false;
+      if (
+        accessFilter === "notEnabled" &&
+        (candidate.enabled || candidate.inactive)
+      )
+        return false;
       if (accessFilter === "inactive" && !candidate.inactive) return false;
 
       if (!query) return true;
@@ -1282,30 +1723,38 @@ export default function Usersroles() {
       teachers: candidates.filter((item) => item.role === "teacher").length,
       students: candidates.filter((item) => item.role === "student").length,
       parents: candidates.filter((item) => item.role === "parent").length,
-      accountants: candidates.filter((item) => item.role === "accountant").length,
+      accountants: candidates.filter((item) => item.role === "accountant")
+        .length,
       enabled: candidates.filter((item) => item.enabled).length,
-      notEnabled: candidates.filter((item) => !item.enabled && !item.inactive).length,
+      notEnabled: candidates.filter((item) => !item.enabled && !item.inactive)
+        .length,
       inactive: candidates.filter((item) => item.inactive).length,
       temporary: candidates.filter((item) => item.mustChangePassword).length,
     };
   }, [candidates]);
 
-  const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+  const updateForm = <K extends keyof FormState>(
+    key: K,
+    value: FormState[K],
+  ) => {
     setForm((current) => {
       const next = { ...current, [key]: value };
 
       if (key === "email") {
         const email = normalizeEmail(String(value));
         next.email = email;
-        if (!current.temporaryPassword || current.temporaryPassword === tempPasswordFromEmail(current.email)) {
+        if (
+          !current.temporaryPassword ||
+          current.temporaryPassword === tempPasswordFromEmail(current.email)
+        ) {
           next.temporaryPassword = tempPasswordFromEmail(email);
         }
       }
 
       if (key === "role") {
-        next.teacherLocalId = value === "teacher" ? current.teacherLocalId : "";
-        next.studentLocalId = value === "student" ? current.studentLocalId : "";
-        next.parentLocalId = value === "parent" ? current.parentLocalId : "";
+        next.teacherId = value === "teacher" ? current.teacherId : "";
+        next.studentId = value === "student" ? current.studentId : "";
+        next.parentId = value === "parent" ? current.parentId : "";
       }
 
       return next;
@@ -1325,29 +1774,48 @@ export default function Usersroles() {
       membershipId: candidate.membership?.id,
       userId: String(userIdOf(candidate.user) || ""),
       title: candidate.title || candidate.user?.title || "",
-      fullName: candidate.user?.fullName || candidate.user?.name || candidate.fullName,
+      fullName:
+        candidate.user?.fullName || candidate.user?.name || candidate.fullName,
       email: candidate.email,
       phone: candidate.user?.phone || candidate.phone,
       role: candidate.role,
       active: !candidate.inactive,
-      temporaryPassword: candidate.user?.temporaryPassword || tempPasswordFromEmail(candidate.email),
-      teacherLocalId: candidate.role === "teacher" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.teacherLocalId || ""),
-      studentLocalId: candidate.role === "student" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.studentLocalId || ""),
-      parentLocalId: candidate.role === "parent" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.parentLocalId || ""),
+      temporaryPassword:
+        candidate.user?.temporaryPassword ||
+        tempPasswordFromEmail(candidate.email),
+      teacherId:
+        candidate.role === "teacher" && candidate.profileId
+          ? String(candidate.profileId)
+          : String(candidate.membership?.teacherId || ""),
+      studentId:
+        candidate.role === "student" && candidate.profileId
+          ? String(candidate.profileId)
+          : String(candidate.membership?.studentId || ""),
+      parentId:
+        candidate.role === "parent" && candidate.profileId
+          ? String(candidate.profileId)
+          : String(candidate.membership?.parentId || ""),
     });
     setMessage("");
     setDrawerOpen(true);
   };
 
   const validate = () => {
-    if (!form.email.trim()) return "Email is required because portal users sign in with email and password.";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) return "Please enter a valid email address.";
+    if (!form.email.trim())
+      return "Email is required because portal users sign in with email and password.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
+      return "Please enter a valid email address.";
     if (!form.fullName.trim()) return "Full name is required.";
-    if (!ROLES.some((role) => role.value === form.role)) return "Branch admin can assign only accountant, teacher, student, or parent.";
-    if (!form.temporaryPassword.trim()) return "Temporary password is required.";
-    if (form.role === "teacher" && !form.teacherLocalId) return "Teacher role must be linked to a teacher profile.";
-    if (form.role === "student" && !form.studentLocalId) return "Student role must be linked to a student profile.";
-    if (form.role === "parent" && !form.parentLocalId) return "Parent role must be linked to a parent profile.";
+    if (!ROLES.some((role) => role.value === form.role))
+      return "Branch admin can assign only accountant, teacher, student, or parent.";
+    if (!form.temporaryPassword.trim())
+      return "Temporary password is required.";
+    if (form.role === "teacher" && !form.teacherId)
+      return "Teacher role must be linked to a teacher profile.";
+    if (form.role === "student" && !form.studentId)
+      return "Student role must be linked to a student profile.";
+    if (form.role === "parent" && !form.parentId)
+      return "Parent role must be linked to a parent profile.";
     return "";
   };
 
@@ -1369,16 +1837,16 @@ export default function Usersroles() {
         users,
         memberships,
         accountId: accountId!,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
       });
 
       await cacheAuthUserLocally({
         user: response.user,
         form,
         accountId: accountId!,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
       });
 
       await cacheAuthMembershipLocally({
@@ -1386,15 +1854,15 @@ export default function Usersroles() {
         user: response.user,
         form,
         accountId: accountId!,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
       });
 
       await updateLinkedProfileContactLocally({
         form,
         accountId: accountId!,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
       });
 
       setDrawerOpen(false);
@@ -1403,7 +1871,7 @@ export default function Usersroles() {
       console.error("Failed to save access through backend auth:", error);
       setMessage(
         error?.message ||
-          "Failed to save access. Make sure the backend user and membership routes are running."
+          "Failed to save access. Make sure the backend user and membership routes are running.",
       );
     } finally {
       setSaving(false);
@@ -1411,7 +1879,7 @@ export default function Usersroles() {
   };
 
   const toggleAccess = async (candidate: Candidate) => {
-    if (!candidate.membership?.id && !candidate.membership?.localId) {
+    if (!candidate.membership?.id) {
       openCandidate(candidate);
       setMessage("Create portal access first.");
       return;
@@ -1425,25 +1893,49 @@ export default function Usersroles() {
       // Membership status controls access for this branch role.
       // Do not deactivate the whole AppUser because the same person may have another role.
       const membershipId = String(authTableId(candidate.membership));
-      const membership = await authApi<UserMembership>(`/memberships/${encodeURIComponent(membershipId)}`, {
-        method: "PATCH",
-        body: { active: nextActive, status: nextActive ? "active" : "inactive" },
-      });
+      const membership = await authApi<UserMembership>(
+        `/memberships/${encodeURIComponent(membershipId)}`,
+        {
+          method: "PATCH",
+          body: {
+            active: nextActive,
+            status: nextActive ? "active" : "inactive",
+          },
+        },
+      );
 
       const cacheForm: FormState = {
         mode: candidate.role === "accountant" ? "manual" : "profile",
         membershipId: authTableId(candidate.membership),
-        userId: String(userIdOf(candidate.user) || membershipUserId(candidate.membership) || ""),
+        userId: String(
+          userIdOf(candidate.user) ||
+            membershipUserId(candidate.membership) ||
+            "",
+        ),
         title: candidate.title || candidate.user?.title || "",
-        fullName: candidate.user?.fullName || candidate.user?.name || candidate.fullName,
+        fullName:
+          candidate.user?.fullName ||
+          candidate.user?.name ||
+          candidate.fullName,
         email: candidate.email,
         phone: candidate.user?.phone || candidate.phone,
         role: candidate.role,
         active: nextActive,
-        temporaryPassword: candidate.user?.temporaryPassword || tempPasswordFromEmail(candidate.email),
-        teacherLocalId: candidate.role === "teacher" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.teacherLocalId || ""),
-        studentLocalId: candidate.role === "student" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.studentLocalId || ""),
-        parentLocalId: candidate.role === "parent" && candidate.profileId ? String(candidate.profileId) : String(candidate.membership?.parentLocalId || ""),
+        temporaryPassword:
+          candidate.user?.temporaryPassword ||
+          tempPasswordFromEmail(candidate.email),
+        teacherId:
+          candidate.role === "teacher" && candidate.profileId
+            ? String(candidate.profileId)
+            : String(candidate.membership?.teacherId || ""),
+        studentId:
+          candidate.role === "student" && candidate.profileId
+            ? String(candidate.profileId)
+            : String(candidate.membership?.studentId || ""),
+        parentId:
+          candidate.role === "parent" && candidate.profileId
+            ? String(candidate.profileId)
+            : String(candidate.membership?.parentId || ""),
       };
 
       if (candidate.user) {
@@ -1451,18 +1943,20 @@ export default function Usersroles() {
           user: candidate.user,
           form: cacheForm,
           accountId: accountId!,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
         });
       }
 
       await cacheAuthMembershipLocally({
         membership,
-        user: candidate.user || ({ id: membership.userId, email: candidate.email } as AppUser),
+        user:
+          candidate.user ||
+          ({ id: membership.userId, email: candidate.email } as AppUser),
         form: cacheForm,
         accountId: accountId!,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
       });
 
       await load();
@@ -1475,13 +1969,13 @@ export default function Usersroles() {
   };
 
   const deleteAccess = async (candidate: Candidate) => {
-    if (!candidate.membership?.id && !candidate.membership?.localId) {
+    if (!candidate.membership?.id) {
       alert("No membership exists for this access record yet.");
       return;
     }
 
     const confirmed = window.confirm(
-      `Delete ${roleLabel(candidate.role)} access for ${candidate.fullName}?\n\nThis removes the role/membership from the backend database. It does not just deactivate it.`
+      `Delete ${roleLabel(candidate.role)} access for ${candidate.fullName}?\n\nThis removes the role/membership from the backend database. It does not just deactivate it.`,
     );
 
     if (!confirmed) return;
@@ -1496,55 +1990,116 @@ export default function Usersroles() {
       console.error("Failed to delete access through backend auth:", error);
       alert(
         error?.message ||
-          "Failed to delete this access role. Make sure MembershipsService.remove() performs a real prisma.userMembership.delete()."
+          "Failed to delete this access role. Make sure MembershipsService.remove() performs a real prisma.userMembership.delete().",
       );
     } finally {
       setSaving(false);
     }
   };
 
-
   const activeFilterCount = useMemo(
-    () => [roleFilter !== "all" ? roleFilter : undefined, accessFilter !== "all" ? accessFilter : undefined].filter(Boolean).length,
-    [roleFilter, accessFilter]
+    () =>
+      [
+        roleFilter !== "all" ? roleFilter : undefined,
+        accessFilter !== "all" ? accessFilter : undefined,
+      ].filter(Boolean).length,
+    [roleFilter, accessFilter],
   );
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Users & Roles..." text="Loading teachers, students, parents and portal access." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Users & Roles..."
+        text="Loading teachers, students, parents and portal access."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing users and roles." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing users and roles."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Assigned branch required" text="Users and roles are locked to your active school branch." />;
+    return (
+      <State
+        primary={primary}
+        title="Assigned branch required"
+        text="Users and roles are locked to your active school branch."
+      />
+    );
   }
 
   return (
-    <main className="ba-page usersroles-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page usersroles-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card" aria-label="Users and roles search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Users and roles search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input placeholder="Search users..." value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search users and roles" />
+          <input
+            placeholder="Search users..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            aria-label="Search users and roles"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openManual} aria-label="Add accountant" title="Add accountant">+</button>
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openManual}
+          aria-label="Add accountant"
+          title="Add accountant"
+        >
+          +
+        </button>
 
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active user filters">
-          {roleFilter !== "all" && <button type="button" onClick={() => setRoleFilter("all")}>Role: {roleLabel(roleFilter)} ×</button>}
-          {accessFilter !== "all" && <button type="button" onClick={() => setAccessFilter("all")}>Access: {accessFilter} ×</button>}
+          {roleFilter !== "all" && (
+            <button type="button" onClick={() => setRoleFilter("all")}>
+              Role: {roleLabel(roleFilter)} ×
+            </button>
+          )}
+          {accessFilter !== "all" && (
+            <button type="button" onClick={() => setAccessFilter("all")}>
+              Access: {accessFilter} ×
+            </button>
+          )}
         </section>
       )}
 
@@ -1566,24 +2121,91 @@ export default function Usersroles() {
               <tbody>
                 {filteredCandidates.map((candidate) => (
                   <tr key={candidate.key}>
-                    <td><strong>{candidate.fullName}</strong><span>{candidate.phone || candidate.subLabel}</span></td>
-                    <td><Chip tone={roleTone(candidate.role)}>{roleIcon(candidate.role)} {roleLabel(candidate.role)}</Chip></td>
-                    <td>{candidate.email || <span className="usersroles-warn">Email needed</span>}</td>
+                    <td>
+                      <strong>{candidate.fullName}</strong>
+                      <span>{candidate.phone || candidate.subLabel}</span>
+                    </td>
+                    <td>
+                      <Chip tone={roleTone(candidate.role)}>
+                        {roleIcon(candidate.role)} {roleLabel(candidate.role)}
+                      </Chip>
+                    </td>
+                    <td>
+                      {candidate.email || (
+                        <span className="usersroles-warn">Email needed</span>
+                      )}
+                    </td>
                     <td>{candidate.source}</td>
-                    <td><Chip tone={candidate.enabled ? "green" : candidate.inactive ? "red" : "orange"}>{candidate.enabled ? "Enabled" : candidate.inactive ? "Inactive" : "Not Enabled"}</Chip></td>
-                    <td><Chip tone={candidate.mustChangePassword ? "orange" : candidate.hasLogin ? "green" : "gray"}>{candidate.mustChangePassword ? "Temporary" : candidate.hasLogin ? "Changed" : "No login"}</Chip></td>
+                    <td>
+                      <Chip
+                        tone={
+                          candidate.enabled
+                            ? "green"
+                            : candidate.inactive
+                              ? "red"
+                              : "orange"
+                        }
+                      >
+                        {candidate.enabled
+                          ? "Enabled"
+                          : candidate.inactive
+                            ? "Inactive"
+                            : "Not Enabled"}
+                      </Chip>
+                    </td>
+                    <td>
+                      <Chip
+                        tone={
+                          candidate.mustChangePassword
+                            ? "orange"
+                            : candidate.hasLogin
+                              ? "green"
+                              : "gray"
+                        }
+                      >
+                        {candidate.mustChangePassword
+                          ? "Temporary"
+                          : candidate.hasLogin
+                            ? "Changed"
+                            : "No login"}
+                      </Chip>
+                    </td>
                     <td>
                       <div className="ba-table-actions">
-                        <button type="button" onClick={() => openCandidate(candidate)}>{candidate.hasMembership ? "Edit" : "Create"}</button>
-                        {candidate.hasMembership && <button type="button" onClick={() => toggleAccess(candidate)}>{candidate.enabled ? "Deactivate" : "Activate"}</button>}
-                        {candidate.hasMembership && <button type="button" className="ba-delete" onClick={() => deleteAccess(candidate)}>Delete</button>}
+                        <button
+                          type="button"
+                          onClick={() => openCandidate(candidate)}
+                        >
+                          {candidate.hasMembership ? "Edit" : "Create"}
+                        </button>
+                        {candidate.hasMembership && (
+                          <button
+                            type="button"
+                            onClick={() => toggleAccess(candidate)}
+                          >
+                            {candidate.enabled ? "Deactivate" : "Activate"}
+                          </button>
+                        )}
+                        {candidate.hasMembership && (
+                          <button
+                            type="button"
+                            className="ba-delete"
+                            onClick={() => deleteAccess(candidate)}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!filteredCandidates.length && <div className="ba-empty-table">No people or access records match the selected filters.</div>}
+            {!filteredCandidates.length && (
+              <div className="ba-empty-table">
+                No people or access records match the selected filters.
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -1591,20 +2213,42 @@ export default function Usersroles() {
       {viewMode === "cards" && (
         <section className="ba-list usersroles-list">
           {filteredCandidates.map((candidate) => (
-            <button key={candidate.key} type="button" className="student-row usersroles-row" onClick={() => setSelectedCandidate(candidate)}>
-              <span className="usersroles-avatar">{candidate.photo ? <img src={candidate.photo} alt={candidate.fullName} /> : initials(candidate.fullName)}</span>
+            <button
+              key={candidate.key}
+              type="button"
+              className="student-row usersroles-row"
+              onClick={() => setSelectedCandidate(candidate)}
+            >
+              <span className="usersroles-avatar">
+                {candidate.photo ? (
+                  <img src={candidate.photo} alt={candidate.fullName} />
+                ) : (
+                  initials(candidate.fullName)
+                )}
+              </span>
               <span className="student-main">
                 <strong>{candidate.fullName}</strong>
-                <small>{roleIcon(candidate.role)} {roleLabel(candidate.role)} · {candidate.email || "Email needed"}</small>
+                <small>
+                  {roleIcon(candidate.role)} {roleLabel(candidate.role)} ·{" "}
+                  {candidate.email || "Email needed"}
+                </small>
                 <em>{candidate.phone || candidate.subLabel}</em>
               </span>
               <span className="student-side">
-                <span className={`status-dot-mini ${candidate.enabled ? "green" : candidate.inactive ? "red" : "orange"}`} />
+                <span
+                  className={`status-dot-mini ${candidate.enabled ? "green" : candidate.inactive ? "red" : "orange"}`}
+                />
                 <i>⋯</i>
               </span>
             </button>
           ))}
-          {!filteredCandidates.length && <Empty icon="🔐" title="No records found" text="No people or access records match the selected filters." />}
+          {!filteredCandidates.length && (
+            <Empty
+              icon="🔐"
+              title="No records found"
+              text="No people or access records match the selected filters."
+            />
+          )}
         </section>
       )}
 
@@ -1648,44 +2292,182 @@ export default function Usersroles() {
       )}
 
       {drawerOpen && (
-        <div className="ba-sheet-backdrop usersroles-drawer-layer" role="dialog" aria-modal="true">
+        <div
+          className="ba-sheet-backdrop usersroles-drawer-layer"
+          role="dialog"
+          aria-modal="true"
+        >
           <aside className="ba-sheet usersroles-drawer">
             <div className="ba-sheet-head">
               <div>
                 <h2>{form.membershipId ? "Edit Access" : "Create Access"}</h2>
-                <p>{form.mode === "manual" ? "Manual Accountant Access" : "Profile Portal Access"}</p>
+                <p>
+                  {form.mode === "manual"
+                    ? "Manual Accountant Access"
+                    : "Profile Portal Access"}
+                </p>
               </div>
-              <button type="button" onClick={() => setDrawerOpen(false)} aria-label="Close access form">✕</button>
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                aria-label="Close access form"
+              >
+                ✕
+              </button>
             </div>
 
-            {message && <section className="ba-warning usersroles-message">{message}</section>}
+            {message && (
+              <section className="ba-warning usersroles-message">
+                {message}
+              </section>
+            )}
 
             <section className="usersroles-note">
               <strong>Temporary password rule</strong>
-              <span>Password is generated from the email prefix plus @123. The user must change it after login.</span>
+              <span>
+                Password is generated from the email prefix plus @123. The user
+                must change it after login.
+              </span>
             </section>
 
             <div className="ba-form compact">
-              <label><span>Title</span><select value={form.title} onChange={(event) => updateForm("title", event.target.value)}>{TITLES.map((title) => <option key={title || "none"} value={title}>{title || "No title"}</option>)}</select></label>
-              <label><span>Role</span><select value={form.role} disabled={form.mode === "profile"} onChange={(event) => updateForm("role", event.target.value as BranchAssignableRole)}>{ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
-              <label><span>Full Name</span><input value={form.fullName} onChange={(event) => updateForm("fullName", event.target.value)} /></label>
-              <label><span>Email</span><input value={form.email} onChange={(event) => updateForm("email", event.target.value)} placeholder="user@example.com" /></label>
-              <label><span>Phone</span><input value={form.phone} onChange={(event) => updateForm("phone", event.target.value)} /></label>
-              <label><span>Temporary Password</span><input value={form.temporaryPassword} onChange={(event) => updateForm("temporaryPassword", event.target.value)} /></label>
+              <label>
+                <span>Title</span>
+                <select
+                  value={form.title}
+                  onChange={(event) => updateForm("title", event.target.value)}
+                >
+                  {TITLES.map((title) => (
+                    <option key={title || "none"} value={title}>
+                      {title || "No title"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Role</span>
+                <select
+                  value={form.role}
+                  disabled={form.mode === "profile"}
+                  onChange={(event) =>
+                    updateForm(
+                      "role",
+                      event.target.value as BranchAssignableRole,
+                    )
+                  }
+                >
+                  {ROLES.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Full Name</span>
+                <input
+                  value={form.fullName}
+                  onChange={(event) =>
+                    updateForm("fullName", event.target.value)
+                  }
+                />
+              </label>
+              <label>
+                <span>Email</span>
+                <input
+                  value={form.email}
+                  onChange={(event) => updateForm("email", event.target.value)}
+                  placeholder="user@example.com"
+                />
+              </label>
+              <label>
+                <span>Phone</span>
+                <input
+                  value={form.phone}
+                  onChange={(event) => updateForm("phone", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Temporary Password</span>
+                <input
+                  value={form.temporaryPassword}
+                  onChange={(event) =>
+                    updateForm("temporaryPassword", event.target.value)
+                  }
+                />
+              </label>
             </div>
 
-            {form.role === "teacher" && <ProfileSelect label="Teacher Profile" value={form.teacherLocalId} disabled={form.mode === "profile"} onChange={(value) => updateForm("teacherLocalId", value)} options={teachers.map((item) => ({ value: String(item.id || ""), label: respectfulName(item as any), sub: item.email || item.phone || "" }))} />}
-            {form.role === "student" && <ProfileSelect label="Student Profile" value={form.studentLocalId} disabled={form.mode === "profile"} onChange={(value) => updateForm("studentLocalId", value)} options={students.map((item) => ({ value: String(item.id || ""), label: respectfulName(item as any), sub: item.admissionNumber || item.parentPhone || "" }))} />}
-            {form.role === "parent" && <ProfileSelect label="Parent Profile" value={form.parentLocalId} disabled={form.mode === "profile"} onChange={(value) => updateForm("parentLocalId", value)} options={parents.map((item) => ({ value: String(item.id || ""), label: respectfulName(item as any), sub: item.email || item.phone || "" }))} />}
+            {form.role === "teacher" && (
+              <ProfileSelect
+                label="Teacher Profile"
+                value={form.teacherId}
+                disabled={form.mode === "profile"}
+                onChange={(value) => updateForm("teacherId", value)}
+                options={teachers.map((item) => ({
+                  value: String(item.id || ""),
+                  label: respectfulName(item as any),
+                  sub: item.email || item.phone || "",
+                }))}
+              />
+            )}
+            {form.role === "student" && (
+              <ProfileSelect
+                label="Student Profile"
+                value={form.studentId}
+                disabled={form.mode === "profile"}
+                onChange={(value) => updateForm("studentId", value)}
+                options={students.map((item) => ({
+                  value: String(item.id || ""),
+                  label: respectfulName(item as any),
+                  sub: item.admissionNumber || item.parentPhone || "",
+                }))}
+              />
+            )}
+            {form.role === "parent" && (
+              <ProfileSelect
+                label="Parent Profile"
+                value={form.parentId}
+                disabled={form.mode === "profile"}
+                onChange={(value) => updateForm("parentId", value)}
+                options={parents.map((item) => ({
+                  value: String(item.id || ""),
+                  label: respectfulName(item as any),
+                  sub: item.email || item.phone || "",
+                }))}
+              />
+            )}
 
             <label className="usersroles-switch-row">
-              <div><strong>Active access</strong><span>Inactive users remain recorded but cannot use this branch role.</span></div>
-              <button type="button" className={`usersroles-switch ${form.active ? "on" : ""}`} onClick={() => updateForm("active", !form.active)} aria-pressed={form.active}><span /></button>
+              <div>
+                <strong>Active access</strong>
+                <span>
+                  Inactive users remain recorded but cannot use this branch
+                  role.
+                </span>
+              </div>
+              <button
+                type="button"
+                className={`usersroles-switch ${form.active ? "on" : ""}`}
+                onClick={() => updateForm("active", !form.active)}
+                aria-pressed={form.active}
+              >
+                <span />
+              </button>
             </label>
 
             <div className="ba-sheet-actions">
-              <button type="button" onClick={() => setDrawerOpen(false)}>Cancel</button>
-              <button type="button" className="primary" disabled={saving} onClick={saveAccess}>{saving ? "Saving..." : "Save Access"}</button>
+              <button type="button" onClick={() => setDrawerOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={saving}
+                onClick={saveAccess}
+              >
+                {saving ? "Saving..." : "Save Access"}
+              </button>
             </div>
           </aside>
         </div>
@@ -1694,11 +2476,26 @@ export default function Usersroles() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page usersroles-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page usersroles-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
-      <section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
     </main>
   );
 }
@@ -1706,70 +2503,332 @@ function State({ primary, title, text }: { primary: string; title: string; text:
 function SliderIcon() {
   return (
     <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" /><path d="M17 7h3" /><circle cx="15" cy="7" r="2" /><path d="M4 17h3" /><path d="M11 17h9" /><circle cx="9" cy="17" r="2" />
+      <path d="M4 7h9" />
+      <path d="M17 7h3" />
+      <circle cx="15" cy="7" r="2" />
+      <path d="M4 17h3" />
+      <path d="M11 17h9" />
+      <circle cx="9" cy="17" r="2" />
     </svg>
   );
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
-  return <section className="ba-empty"><div className="ba-empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p></section>;
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
+  return (
+    <section className="ba-empty">
+      <div className="ba-empty-icon">{icon}</div>
+      <h3>{title}</h3>
+      <p>{text}</p>
+    </section>
+  );
 }
 
-function FilterSheet({ roleFilter, accessFilter, setRoleFilter, setAccessFilter, onClose }: { roleFilter: RoleFilter; accessFilter: AccessFilter; setRoleFilter: (value: RoleFilter) => void; setAccessFilter: (value: AccessFilter) => void; onClose: () => void }) {
+function FilterSheet({
+  roleFilter,
+  accessFilter,
+  setRoleFilter,
+  setAccessFilter,
+  onClose,
+}: {
+  roleFilter: RoleFilter;
+  accessFilter: AccessFilter;
+  setRoleFilter: (value: RoleFilter) => void;
+  setAccessFilter: (value: AccessFilter) => void;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
-        <div className="ba-sheet-head"><div><h2>Filters</h2><p>Filter people by role and portal access state.</p></div><button type="button" onClick={onClose} aria-label="Close filters">✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Filter people by role and portal access state.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
+        </div>
         <div className="ba-form compact">
-          <label><span>Role</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as RoleFilter)}><option value="all">All Roles</option>{ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}</select></label>
-          <label><span>Access</span><select value={accessFilter} onChange={(event) => setAccessFilter(event.target.value as AccessFilter)}><option value="all">All Access</option><option value="enabled">Access Enabled</option><option value="notEnabled">Not Enabled</option><option value="inactive">Inactive</option></select></label>
+          <label>
+            <span>Role</span>
+            <select
+              value={roleFilter}
+              onChange={(event) =>
+                setRoleFilter(event.target.value as RoleFilter)
+              }
+            >
+              <option value="all">All Roles</option>
+              {ROLES.map((role) => (
+                <option key={role.value} value={role.value}>
+                  {role.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Access</span>
+            <select
+              value={accessFilter}
+              onChange={(event) =>
+                setAccessFilter(event.target.value as AccessFilter)
+              }
+            >
+              <option value="all">All Access</option>
+              <option value="enabled">Access Enabled</option>
+              <option value="notEnabled">Not Enabled</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
         </div>
-        <div className="ba-sheet-actions"><button type="button" onClick={() => { setRoleFilter("all"); setAccessFilter("all"); }}>Clear</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
+        <div className="ba-sheet-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setRoleFilter("all");
+              setAccessFilter("all");
+            }}
+          >
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ viewMode, setViewMode, onAdd, onRefresh, onClose }: { viewMode: ViewMode; setViewMode: (mode: ViewMode) => void; onAdd: () => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  setViewMode,
+  onAdd,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onAdd: () => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-head"><div><h2>More</h2><p>View and quick actions.</p></div><button type="button" onClick={onClose} aria-label="Close menu">✕</button></div>
+        <div className="ba-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>View and quick actions.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
+        </div>
         <div className="ba-menu-list">
-          <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => { setViewMode("cards"); onClose(); }}><span>☰</span><b>Cards view</b><small>Compact people-first cards</small></button>
-          <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => { setViewMode("table"); onClose(); }}><span>☷</span><b>Table view</b><small>Dense access register</small></button>
-          <button type="button" onClick={() => { onAdd(); onClose(); }}><span>+</span><b>Add accountant</b><small>Create manual accountant portal access</small></button>
-          <button type="button" onClick={() => { onRefresh(); onClose(); }}><span>↻</span><b>Refresh</b><small>Reload backend and local cache</small></button>
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => {
+              setViewMode("cards");
+              onClose();
+            }}
+          >
+            <span>☰</span>
+            <b>Cards view</b>
+            <small>Compact people-first cards</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => {
+              setViewMode("table");
+              onClose();
+            }}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense access register</small>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onAdd();
+              onClose();
+            }}
+          >
+            <span>+</span>
+            <b>Add accountant</b>
+            <small>Create manual accountant portal access</small>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onRefresh();
+              onClose();
+            }}
+          >
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload backend and local cache</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function CandidateSheet({ candidate, openCandidate, toggleAccess, deleteAccess, onClose }: { candidate: Candidate; openCandidate: (candidate: Candidate) => void; toggleAccess: (candidate: Candidate) => void | Promise<void>; deleteAccess: (candidate: Candidate) => void | Promise<void>; onClose: () => void }) {
+function CandidateSheet({
+  candidate,
+  openCandidate,
+  toggleAccess,
+  deleteAccess,
+  onClose,
+}: {
+  candidate: Candidate;
+  openCandidate: (candidate: Candidate) => void;
+  toggleAccess: (candidate: Candidate) => void | Promise<void>;
+  deleteAccess: (candidate: Candidate) => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
-        <div className="ba-sheet-profile"><div><h2>{candidate.fullName}</h2><p>{roleIcon(candidate.role)} {roleLabel(candidate.role)} · {candidate.email || "Email needed"}</p></div><button type="button" onClick={onClose} aria-label="Close user actions">✕</button></div>
-        <div className="student-detail-strip"><span><b>Source</b>{candidate.source}</span><span><b>Access</b>{candidate.enabled ? "Enabled" : candidate.inactive ? "Inactive" : "Not enabled"}</span><span><b>Password</b>{candidate.mustChangePassword ? "Temporary" : candidate.hasLogin ? "Changed" : "No login"}</span></div>
+        <div className="ba-sheet-profile">
+          <div>
+            <h2>{candidate.fullName}</h2>
+            <p>
+              {roleIcon(candidate.role)} {roleLabel(candidate.role)} ·{" "}
+              {candidate.email || "Email needed"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close user actions"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="student-detail-strip">
+          <span>
+            <b>Source</b>
+            {candidate.source}
+          </span>
+          <span>
+            <b>Access</b>
+            {candidate.enabled
+              ? "Enabled"
+              : candidate.inactive
+                ? "Inactive"
+                : "Not enabled"}
+          </span>
+          <span>
+            <b>Password</b>
+            {candidate.mustChangePassword
+              ? "Temporary"
+              : candidate.hasLogin
+                ? "Changed"
+                : "No login"}
+          </span>
+        </div>
         <div className="ba-menu-list">
-          <button type="button" onClick={() => { openCandidate(candidate); onClose(); }}><span>✎</span><b>{candidate.hasMembership ? "Edit access" : "Prepare access"}</b><small>Update login, membership and linked profile details</small></button>
-          {candidate.hasMembership && <button type="button" onClick={() => { toggleAccess(candidate); onClose(); }}><span>{candidate.enabled ? "⏸" : "✓"}</span><b>{candidate.enabled ? "Deactivate" : "Activate"}</b><small>{candidate.enabled ? "Pause this branch role" : "Restore this branch role"}</small></button>}
-          {candidate.hasMembership && <button type="button" className="danger" onClick={() => { deleteAccess(candidate); onClose(); }}><span>⌫</span><b>Delete role</b><small>Remove this backend membership role</small></button>}
+          <button
+            type="button"
+            onClick={() => {
+              openCandidate(candidate);
+              onClose();
+            }}
+          >
+            <span>✎</span>
+            <b>{candidate.hasMembership ? "Edit access" : "Prepare access"}</b>
+            <small>Update login, membership and linked profile details</small>
+          </button>
+          {candidate.hasMembership && (
+            <button
+              type="button"
+              onClick={() => {
+                toggleAccess(candidate);
+                onClose();
+              }}
+            >
+              <span>{candidate.enabled ? "⏸" : "✓"}</span>
+              <b>{candidate.enabled ? "Deactivate" : "Activate"}</b>
+              <small>
+                {candidate.enabled
+                  ? "Pause this branch role"
+                  : "Restore this branch role"}
+              </small>
+            </button>
+          )}
+          {candidate.hasMembership && (
+            <button
+              type="button"
+              className="danger"
+              onClick={() => {
+                deleteAccess(candidate);
+                onClose();
+              }}
+            >
+              <span>⌫</span>
+              <b>Delete role</b>
+              <small>Remove this backend membership role</small>
+            </button>
+          )}
         </div>
       </section>
     </div>
   );
 }
 
-function ProfileSelect({ label, value, onChange, options, disabled = false }: { label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string; sub?: string }[]; disabled?: boolean }) {
+function ProfileSelect({
+  label,
+  value,
+  onChange,
+  options,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string; sub?: string }[];
+  disabled?: boolean;
+}) {
   return (
     <section className="usersroles-profile-select">
-      <label><span>{label}</span><select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}><option value="">Select profile</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}{option.sub ? ` · ${option.sub}` : ""}</option>)}</select></label>
+      <label>
+        <span>{label}</span>
+        <select
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          <option value="">Select profile</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+              {option.sub ? ` · ${option.sub}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
     </section>
   );
 }

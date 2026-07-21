@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -34,22 +33,23 @@ export default function UniversityTranscriptHeader({
 }: ReportTemplateHeaderProps) {
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -57,9 +57,13 @@ export default function UniversityTranscriptHeader({
     branding.phone ? `Tel: ${branding.phone}` : "",
     branding.email,
     branding.website,
-  ].filter(Boolean).join("  •  ");
+  ]
+    .filter(Boolean)
+    .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
   const logoSize = compact ? 38 : 44;
 
   const metaItems = [
@@ -124,11 +128,28 @@ export default function UniversityTranscriptHeader({
             <img
               src={branding.logo}
               alt="School logo"
-              style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                padding: 4,
+                boxSizing: "border-box",
+              }}
             />
           ) : (
-            <span style={{ fontSize: compact ? 6.4 : 7, fontWeight: 900, color: "#4b5563", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
-              School<br />Logo
+            <span
+              style={{
+                fontSize: compact ? 6.4 : 7,
+                fontWeight: 900,
+                color: "#4b5563",
+                textAlign: "center",
+                lineHeight: 1.05,
+                textTransform: "uppercase",
+              }}
+            >
+              School
+              <br />
+              Logo
             </span>
           )}
         </div>
@@ -173,7 +194,9 @@ export default function UniversityTranscriptHeader({
                 overflowWrap: "anywhere",
               }}
             >
-              {[branding.motto, contactLine, branchLine].filter(Boolean).join("  •  ")}
+              {[branding.motto, contactLine, branchLine]
+                .filter(Boolean)
+                .join("  •  ")}
             </div>
           )}
         </div>
@@ -195,19 +218,56 @@ export default function UniversityTranscriptHeader({
           }}
         >
           {title}
-          <div style={{ marginTop: 2, fontSize: compact ? 6.3 : 7, color: "#4b5563", fontWeight: 820 }}>
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: compact ? 6.3 : 7,
+              color: "#4b5563",
+              fontWeight: 820,
+            }}
+          >
             transcript of academic record
           </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", background: "#ffffff", borderBottom: "1px solid #d1d5db" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          background: "#ffffff",
+          borderBottom: "1px solid #d1d5db",
+        }}
+      >
         {metaItems.map((item, index) => (
-          <div key={item.label} style={{ minWidth: 0, padding: compact ? "5px 8px" : "6px 9px", borderLeft: index === 0 ? "0" : "1px solid #d1d5db" }}>
-            <div style={{ fontSize: compact ? 6.3 : 6.9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.24, color: "#4b5563" }}>
+          <div
+            key={item.label}
+            style={{
+              minWidth: 0,
+              padding: compact ? "5px 8px" : "6px 9px",
+              borderLeft: index === 0 ? "0" : "1px solid #d1d5db",
+            }}
+          >
+            <div
+              style={{
+                fontSize: compact ? 6.3 : 6.9,
+                fontWeight: 950,
+                textTransform: "uppercase",
+                letterSpacing: 0.24,
+                color: "#4b5563",
+              }}
+            >
               {item.label}
             </div>
-            <div style={{ marginTop: 1, fontSize: compact ? 7.7 : 8.5, fontWeight: 900, color: "#111827", overflowWrap: "anywhere" }}>
+            <div
+              style={{
+                marginTop: 1,
+                fontSize: compact ? 7.7 : 8.5,
+                fontWeight: 900,
+                color: "#111827",
+                overflowWrap: "anywhere",
+              }}
+            >
               {item.value}
             </div>
           </div>

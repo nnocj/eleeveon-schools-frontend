@@ -46,11 +46,17 @@ import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 type AnyRow = Record<string, any>;
 type ViewMode = "cards" | "table" | "analytics";
-type StatusFilter = "all" | "requested" | "processing" | "paid" | "failed" | "rejected";
+type StatusFilter =
+  | "all"
+  | "requested"
+  | "processing"
+  | "paid"
+  | "failed"
+  | "rejected";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 
 type PayoutSetting = {
-  id?: number;
+  id?: string;
   preferredMethod?: "bank" | "momo" | string;
   bankName?: string;
   bankCode?: string;
@@ -72,8 +78,8 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   openedAt?: number;
 };
 
@@ -81,7 +87,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -112,19 +120,30 @@ function text(value: any, fallback = "") {
 }
 
 function idOf(row?: AnyRow | null) {
-  return row?.id ?? row?.localId ?? row?.cloudRecordId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+  return row?.id ?? row?.payload?.id;
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  const normalized = String(value).trim();
+  if (!normalized || normalized === "0" || normalized === "undefined") return "";
+
+  return normalized;
 }
 
-function sameScope(row: AnyRow, accountId?: string | null, schoolId?: number, branchId?: number) {
+function sameScope(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string,
+  branchId?: string,
+) {
   if (!row || row.isDeleted === true) return false;
   if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && Number(row.schoolId || 0) !== Number(schoolId)) return false;
-  if (branchId && Number(row.branchId || 0) !== Number(branchId)) return false;
+  if (schoolId && String(row.schoolId ?? "") !== String(schoolId ?? ""))
+    return false;
+  if (branchId && String(row.branchId ?? "") !== String(branchId ?? ""))
+    return false;
   return true;
 }
 
@@ -133,7 +152,11 @@ function dateLabel(value?: number | string | null) {
   const time = typeof value === "number" ? value : new Date(value).getTime();
   if (!Number.isFinite(time)) return "Not set";
   try {
-    return new Intl.DateTimeFormat(undefined, { month: "short", day: "2-digit", year: "numeric" }).format(new Date(time));
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(time));
   } catch {
     return "Not set";
   }
@@ -142,7 +165,11 @@ function dateLabel(value?: number | string | null) {
 function money(value: any, currency = "GHS") {
   const amount = n(value);
   try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency: currency || "GHS", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "GHS",
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
     return `${currency || "GHS"} ${amount.toLocaleString()}`;
   }
@@ -150,9 +177,11 @@ function money(value: any, currency = "GHS") {
 
 function statusTone(status?: string): Tone {
   const value = String(status || "").toLowerCase();
-  if (["paid", "approved", "settled", "success", "succeeded"].includes(value)) return "green";
+  if (["paid", "approved", "settled", "success", "succeeded"].includes(value))
+    return "green";
   if (["failed", "rejected", "cancelled"].includes(value)) return "red";
-  if (["pending", "requested", "processing", "review"].includes(value)) return "orange";
+  if (["pending", "requested", "processing", "review"].includes(value))
+    return "orange";
   return "gray";
 }
 
@@ -163,20 +192,38 @@ function hasValidDestination(setting?: PayoutSetting | null) {
     return !!(setting.momoNetwork && setting.momoName && setting.momoNumber);
   }
 
-  return !!(setting.bankAccountName && setting.bankAccountNumber && (setting.bankName || setting.bankCode));
+  return !!(
+    setting.bankAccountName &&
+    setting.bankAccountNumber &&
+    (setting.bankName || setting.bankCode)
+  );
 }
 
 function destinationText(setting?: PayoutSetting | null) {
   if (!setting) return "No payout settings";
 
   if (setting.preferredMethod === "momo") {
-    return [setting.momoNetwork?.toUpperCase(), setting.momoName, setting.momoNumber].filter(Boolean).join(" · ") || "Momo payout not set";
+    return (
+      [setting.momoNetwork?.toUpperCase(), setting.momoName, setting.momoNumber]
+        .filter(Boolean)
+        .join(" · ") || "Momo payout not set"
+    );
   }
 
-  return [setting.bankName, setting.bankAccountName, setting.bankAccountNumber].filter(Boolean).join(" · ") || "Bank payout not set";
+  return (
+    [setting.bankName, setting.bankAccountName, setting.bankAccountNumber]
+      .filter(Boolean)
+      .join(" · ") || "Bank payout not set"
+  );
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`wm-chip ${tone}`}>{children}</span>;
 }
 
@@ -193,9 +240,20 @@ function SliderIcon() {
   );
 }
 
-function State({primary, title, text: body,}: { primary: string; title: string; text: string;}) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="wm-page" style={{ "--wm-primary": primary } as React.CSSProperties}>
+    <main
+      className="wm-page"
+      style={{ "--wm-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="wm-state">
         <div className="wm-spinner" />
@@ -214,7 +272,8 @@ export default function WithdrawMoneyPage() {
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
 
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
@@ -239,7 +298,7 @@ export default function WithdrawMoneyPage() {
       openWorkspace?.membership?.schoolId,
       openWorkspace?.schoolId,
       settings?.schoolId,
-    ]
+    ],
   );
 
   const branchId = useMemo(
@@ -266,7 +325,7 @@ export default function WithdrawMoneyPage() {
       openWorkspace?.membership?.branchId,
       openWorkspace?.membership?.schoolBranchId,
       settings?.branchId,
-    ]
+    ],
   );
 
   const { loading, setLoading } = useBackgroundLoader();
@@ -314,9 +373,17 @@ export default function WithdrawMoneyPage() {
         safeList("schoolPayoutSettings"),
       ]);
 
-      setTransactions(txRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setWithdrawals(wdRows.filter((row) => sameScope(row, accountId, schoolId, branchId)));
-      setPayoutSettings(payoutRows.filter((row) => sameScope(row, accountId, schoolId, branchId)) as PayoutSetting[]);
+      setTransactions(
+        txRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setWithdrawals(
+        wdRows.filter((row) => sameScope(row, accountId, schoolId, branchId)),
+      );
+      setPayoutSettings(
+        payoutRows.filter((row) =>
+          sameScope(row, accountId, schoolId, branchId),
+        ) as PayoutSetting[],
+      );
     } catch (err: any) {
       setError(err?.message || "Unable to load withdrawal records.");
     } finally {
@@ -345,18 +412,41 @@ export default function WithdrawMoneyPage() {
   ]);
 
   const payoutSetting = useMemo(
-    () => payoutSettings.find((row) => row.active !== false) || payoutSettings[0] || null,
-    [payoutSettings]
+    () =>
+      payoutSettings.find((row) => row.active !== false) ||
+      payoutSettings[0] ||
+      null,
+    [payoutSettings],
   );
 
-  const currency = text(transactions[0]?.currencyCode || withdrawals[0]?.currencyCode || settings?.currencyCode, "GHS");
+  const currency = text(
+    transactions[0]?.currencyCode ||
+      withdrawals[0]?.currencyCode ||
+      (settings as AnyRow | null | undefined)?.currencyCode,
+    "GHS",
+  );
 
   const summary = useMemo(() => {
-    const paidStatuses = new Set(["paid", "success", "succeeded", "approved", "settled"]);
-    const pendingStatuses = new Set(["pending", "requested", "processing", "review"]);
+    const paidStatuses = new Set([
+      "paid",
+      "success",
+      "succeeded",
+      "approved",
+      "settled",
+    ]);
+    const pendingStatuses = new Set([
+      "pending",
+      "requested",
+      "processing",
+      "review",
+    ]);
 
     const inflow = transactions
-      .filter((row) => row.direction === "inflow" && paidStatuses.has(String(row.status || "").toLowerCase()))
+      .filter(
+        (row) =>
+          row.direction === "inflow" &&
+          paidStatuses.has(String(row.status || "").toLowerCase()),
+      )
       .reduce((sum, row) => sum + n(row.amount), 0);
 
     const paidOut = withdrawals
@@ -364,7 +454,9 @@ export default function WithdrawMoneyPage() {
       .reduce((sum, row) => sum + n(row.amount), 0);
 
     const pending = withdrawals
-      .filter((row) => pendingStatuses.has(String(row.status || "").toLowerCase()))
+      .filter((row) =>
+        pendingStatuses.has(String(row.status || "").toLowerCase()),
+      )
       .reduce((sum, row) => sum + n(row.amount), 0);
 
     return {
@@ -380,7 +472,11 @@ export default function WithdrawMoneyPage() {
     const q = query.trim().toLowerCase();
 
     return withdrawals
-      .filter((row) => status === "all" || String(row.status || "requested").toLowerCase() === status)
+      .filter(
+        (row) =>
+          status === "all" ||
+          String(row.status || "requested").toLowerCase() === status,
+      )
       .filter((row) => {
         if (!q) return true;
         return [
@@ -398,7 +494,11 @@ export default function WithdrawMoneyPage() {
           .toLowerCase()
           .includes(q);
       })
-      .sort((a, b) => n(b.requestedAt || b.paidAt || b.updatedAt || b.createdAt) - n(a.requestedAt || a.paidAt || a.updatedAt || a.createdAt));
+      .sort(
+        (a, b) =>
+          n(b.requestedAt || b.paidAt || b.updatedAt || b.createdAt) -
+          n(a.requestedAt || a.paidAt || a.updatedAt || a.createdAt),
+      );
   }, [query, status, withdrawals]);
 
   const destinationReady = hasValidDestination(payoutSetting);
@@ -413,13 +513,16 @@ export default function WithdrawMoneyPage() {
   }
 
   async function submitWithdraw() {
-    if (!payoutSetting) return setError("Set payout settings before withdrawing.");
+    if (!payoutSetting)
+      return setError("Set payout settings before withdrawing.");
 
     const value = n(amount);
 
     if (value <= 0) return setError("Enter a valid withdrawal amount.");
-    if (value > summary.available) return setError("Amount cannot exceed available balance.");
-    if (!hasValidDestination(payoutSetting)) return setError("Complete payout settings before withdrawing.");
+    if (value > summary.available)
+      return setError("Amount cannot exceed available balance.");
+    if (!hasValidDestination(payoutSetting))
+      return setError("Complete payout settings before withdrawing.");
 
     setWithdrawing(true);
     setError("");
@@ -442,7 +545,11 @@ export default function WithdrawMoneyPage() {
       } as any);
 
       setWithdrawOpen(false);
-      setNotice(result?.ok ? "Withdrawal started." : "Withdrawal request saved for processing.");
+      setNotice(
+        result?.ok
+          ? "Withdrawal started."
+          : "Withdrawal request saved for processing.",
+      );
       await load();
     } catch (err: any) {
       setError(err?.message || "Unable to start withdrawal.");
@@ -466,19 +573,36 @@ export default function WithdrawMoneyPage() {
   const activeFilterCount = status !== "all" ? 1 : 0;
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening withdrawals..." text="Loading branch wallet and payout destination." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening withdrawals..."
+        text="Loading branch wallet and payout destination."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting..." text="Sign in first." />;
+    return (
+      <State primary={primary} title="Redirecting..." text="Sign in first." />
+    );
   }
 
   if (!schoolId || !branchId) {
-    return <State primary={primary} title="Select branch context" text="Withdraw money is branch-scoped." />;
+    return (
+      <State
+        primary={primary}
+        title="Select branch context"
+        text="Withdraw money is branch-scoped."
+      />
+    );
   }
 
   return (
-    <main className="wm-page" style={{ "--wm-primary": primary } as React.CSSProperties}>
+    <main
+      className="wm-page"
+      style={{ "--wm-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       <section className="wm-search-card" aria-label="Withdraw money actions">
@@ -486,45 +610,93 @@ export default function WithdrawMoneyPage() {
 
         <label className="wm-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search withdrawals..." />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search withdrawals..."
+          />
         </label>
 
-        <button type="button" className="wm-add-inline" onClick={openWithdraw} disabled={!canWithdraw}>
+        <button
+          type="button"
+          className="wm-add-inline"
+          onClick={openWithdraw}
+          disabled={!canWithdraw}
+        >
           Withdraw
         </button>
 
-        <button type="button" className={`wm-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)}>
+        <button
+          type="button"
+          className={`wm-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="wm-icon-button" onClick={() => setMoreOpen(true)}>
+        <button
+          type="button"
+          className="wm-icon-button"
+          onClick={() => setMoreOpen(true)}
+        >
           ⋯
         </button>
       </section>
 
       <section className="wm-compact-line">
         <b>{money(summary.available, currency)} available</b>
-        <Chip tone={destinationReady ? "green" : "orange"}>{destinationReady ? "ready" : "setup needed"}</Chip>
+        <Chip tone={destinationReady ? "green" : "orange"}>
+          {destinationReady ? "ready" : "setup needed"}
+        </Chip>
         <small>{destinationText(payoutSetting)}</small>
       </section>
 
       {status !== "all" || query.trim() ? (
         <section className="wm-filter-chips">
-          {status !== "all" && <button type="button" onClick={() => setStatus("all")}>Status: {status} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {status !== "all" && (
+            <button type="button" onClick={() => setStatus("all")}>
+              Status: {status} ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       ) : null}
 
       {notice ? <Notice tone="green">{notice}</Notice> : null}
       {error ? <Notice tone="red">{error}</Notice> : null}
 
-      {view === "analytics" && <Analytics summary={summary} currency={currency} payoutSetting={payoutSetting} />}
-      {view === "table" && <Table rows={rows} currency={currency} markLocalPaid={markLocalPaid} />}
+      {view === "analytics" && (
+        <Analytics
+          summary={summary}
+          currency={currency}
+          payoutSetting={payoutSetting}
+        />
+      )}
+      {view === "table" && (
+        <Table rows={rows} currency={currency} markLocalPaid={markLocalPaid} />
+      )}
       {view === "cards" && (
         <section className="wm-list">
-          {rows.map((row) => <WithdrawalRow key={String(idOf(row))} row={row} currency={currency} markLocalPaid={markLocalPaid} />)}
-          {!rows.length && <CompactEmpty canWithdraw={canWithdraw} openWithdraw={openWithdraw} destinationReady={destinationReady} />}
+          {rows.map((row) => (
+            <WithdrawalRow
+              key={String(idOf(row))}
+              row={row}
+              currency={currency}
+              markLocalPaid={markLocalPaid}
+            />
+          ))}
+          {!rows.length && (
+            <CompactEmpty
+              canWithdraw={canWithdraw}
+              openWithdraw={openWithdraw}
+              destinationReady={destinationReady}
+            />
+          )}
         </section>
       )}
 
@@ -544,7 +716,13 @@ export default function WithdrawMoneyPage() {
         />
       )}
 
-      {filterOpen && <FilterSheet status={status} setStatus={setStatus} close={() => setFilterOpen(false)} />}
+      {filterOpen && (
+        <FilterSheet
+          status={status}
+          setStatus={setStatus}
+          close={() => setFilterOpen(false)}
+        />
+      )}
 
       {moreOpen && (
         <MoreSheet
@@ -571,7 +749,13 @@ export default function WithdrawMoneyPage() {
   );
 }
 
-function Notice({ tone, children }: { tone: "green" | "red"; children: React.ReactNode }) {
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "green" | "red";
+  children: React.ReactNode;
+}) {
   return (
     <section className={`wm-notice ${tone}`}>
       <span className={`status-dot-mini ${tone}`} />
@@ -580,18 +764,42 @@ function Notice({ tone, children }: { tone: "green" | "red"; children: React.Rea
   );
 }
 
-function CompactEmpty({ canWithdraw, openWithdraw, destinationReady }: { canWithdraw: boolean; openWithdraw: () => void; destinationReady: boolean }) {
+function CompactEmpty({
+  canWithdraw,
+  openWithdraw,
+  destinationReady,
+}: {
+  canWithdraw: boolean;
+  openWithdraw: () => void;
+  destinationReady: boolean;
+}) {
   return (
     <section className="wm-empty-compact">
       <span>🏧</span>
       <b>No withdrawals</b>
-      <small>{destinationReady ? "Withdraw when money is available." : "Complete payout settings first."}</small>
-      {canWithdraw && <button type="button" onClick={openWithdraw}>Withdraw</button>}
+      <small>
+        {destinationReady
+          ? "Withdraw when money is available."
+          : "Complete payout settings first."}
+      </small>
+      {canWithdraw && (
+        <button type="button" onClick={openWithdraw}>
+          Withdraw
+        </button>
+      )}
     </section>
   );
 }
 
-function WithdrawalRow({ row, currency, markLocalPaid }: { row: AnyRow; currency: string; markLocalPaid: (row: AnyRow) => void }) {
+function WithdrawalRow({
+  row,
+  currency,
+  markLocalPaid,
+}: {
+  row: AnyRow;
+  currency: string;
+  markLocalPaid: (row: AnyRow) => void;
+}) {
   const status = String(row.status || "requested").toLowerCase();
   const canMarkPaid = ["requested", "pending", "processing"].includes(status);
 
@@ -600,17 +808,32 @@ function WithdrawalRow({ row, currency, markLocalPaid }: { row: AnyRow; currency
       <span className="wm-avatar">🏧</span>
       <span className="wm-main">
         <strong>{money(row.amount, currency)}</strong>
-        <small>{row.accountName || row.method || "Withdrawal"} · {dateLabel(row.requestedAt || row.paidAt || row.createdAt)}</small>
+        <small>
+          {row.accountName || row.method || "Withdrawal"} ·{" "}
+          {dateLabel(row.requestedAt || row.paidAt || row.createdAt)}
+        </small>
       </span>
       <span className="wm-side">
         <Chip tone={statusTone(row.status)}>{row.status || "requested"}</Chip>
-        {canMarkPaid ? <button type="button" onClick={() => markLocalPaid(row)}>Paid</button> : null}
+        {canMarkPaid ? (
+          <button type="button" onClick={() => markLocalPaid(row)}>
+            Paid
+          </button>
+        ) : null}
       </span>
     </article>
   );
 }
 
-function Table({ rows, currency, markLocalPaid }: { rows: AnyRow[]; currency: string; markLocalPaid: (row: AnyRow) => void }) {
+function Table({
+  rows,
+  currency,
+  markLocalPaid,
+}: {
+  rows: AnyRow[];
+  currency: string;
+  markLocalPaid: (row: AnyRow) => void;
+}) {
   return (
     <section className="wm-table-card">
       <div className="wm-table-scroll">
@@ -632,15 +855,35 @@ function Table({ rows, currency, markLocalPaid }: { rows: AnyRow[]; currency: st
               const status = String(row.status || "requested").toLowerCase();
               return (
                 <tr key={String(idOf(row))}>
-                  <td><strong>{row.method || "bank"}</strong><span>{row.note || "No note"}</span></td>
+                  <td>
+                    <strong>{row.method || "bank"}</strong>
+                    <span>{row.note || "No note"}</span>
+                  </td>
                   <td>{money(row.amount, currency)}</td>
-                  <td>{row.accountName || "—"} · {row.accountNumber || "—"}</td>
-                  <td><Chip tone={statusTone(row.status)}>{row.status || "requested"}</Chip></td>
+                  <td>
+                    {row.accountName || "—"} · {row.accountNumber || "—"}
+                  </td>
+                  <td>
+                    <Chip tone={statusTone(row.status)}>
+                      {row.status || "requested"}
+                    </Chip>
+                  </td>
                   <td>{row.referenceNumber || row.providerReference || "—"}</td>
-                  <td>{dateLabel(row.requestedAt || row.paidAt || row.createdAt)}</td>
+                  <td>
+                    {dateLabel(row.requestedAt || row.paidAt || row.createdAt)}
+                  </td>
                   <td>
                     <div className="wm-table-actions">
-                      {["requested", "pending", "processing"].includes(status) ? <button type="button" onClick={() => markLocalPaid(row)}>Paid</button> : null}
+                      {["requested", "pending", "processing"].includes(
+                        status,
+                      ) ? (
+                        <button
+                          type="button"
+                          onClick={() => markLocalPaid(row)}
+                        >
+                          Paid
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -649,19 +892,45 @@ function Table({ rows, currency, markLocalPaid }: { rows: AnyRow[]; currency: st
           </tbody>
         </table>
 
-        {!rows.length && <div className="wm-empty-table">No withdrawal matches.</div>}
+        {!rows.length && (
+          <div className="wm-empty-table">No withdrawal matches.</div>
+        )}
       </div>
     </section>
   );
 }
 
-function Analytics({ summary, currency, payoutSetting }: { summary: AnyRow; currency: string; payoutSetting: PayoutSetting | null }) {
+function Analytics({
+  summary,
+  currency,
+  payoutSetting,
+}: {
+  summary: AnyRow;
+  currency: string;
+  payoutSetting: PayoutSetting | null;
+}) {
   return (
     <section className="wm-analysis-grid">
-      <article className="wm-analysis"><span>Available</span><strong>{money(summary.available, currency)}</strong><p>Ready for withdrawal.</p></article>
-      <article className="wm-analysis"><span>Pending</span><strong>{money(summary.pending, currency)}</strong><p>Requested or processing.</p></article>
-      <article className="wm-analysis"><span>Withdrawn</span><strong>{money(summary.paidOut, currency)}</strong><p>Paid/settled withdrawals.</p></article>
-      <article className="wm-analysis"><span>Destination</span><strong>{payoutSetting?.preferredMethod || "none"}</strong><p>{destinationText(payoutSetting)}</p></article>
+      <article className="wm-analysis">
+        <span>Available</span>
+        <strong>{money(summary.available, currency)}</strong>
+        <p>Ready for withdrawal.</p>
+      </article>
+      <article className="wm-analysis">
+        <span>Pending</span>
+        <strong>{money(summary.pending, currency)}</strong>
+        <p>Requested or processing.</p>
+      </article>
+      <article className="wm-analysis">
+        <span>Withdrawn</span>
+        <strong>{money(summary.paidOut, currency)}</strong>
+        <p>Paid/settled withdrawals.</p>
+      </article>
+      <article className="wm-analysis">
+        <span>Destination</span>
+        <strong>{payoutSetting?.preferredMethod || "none"}</strong>
+        <p>{destinationText(payoutSetting)}</p>
+      </article>
     </section>
   );
 }
@@ -701,32 +970,59 @@ function WithdrawSheet({
             <h2>Withdraw Money</h2>
             <p>{money(available, currency)} available</p>
           </div>
-          <button type="button" onClick={close}>✕</button>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
         </div>
 
         {error ? <section className="wm-inline-error">{error}</section> : null}
 
         <section className="wm-destination">
           <span>{payoutSetting?.preferredMethod === "momo" ? "📱" : "🏦"}</span>
-          <b>{ready ? destinationText(payoutSetting) : "Set payout settings first"}</b>
-          <small>{payoutSetting?.settlementMode === "direct_subaccount" ? "Direct subaccount" : "Platform wallet"} · {payoutSetting?.settlementSchedule || "manual"}</small>
+          <b>
+            {ready
+              ? destinationText(payoutSetting)
+              : "Set payout settings first"}
+          </b>
+          <small>
+            {payoutSetting?.settlementMode === "direct_subaccount"
+              ? "Direct subaccount"
+              : "Platform wallet"}{" "}
+            · {payoutSetting?.settlementSchedule || "manual"}
+          </small>
         </section>
 
         <div className="wm-form-grid">
           <label>
             <span>Amount</span>
-            <input type="number" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" />
+            <input
+              type="number"
+              value={amount}
+              onChange={(event) => setAmount(event.target.value)}
+              placeholder="0.00"
+            />
           </label>
 
           <label className="wide">
             <span>Reason</span>
-            <textarea value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Optional reason" />
+            <textarea
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Optional reason"
+            />
           </label>
         </div>
 
         <div className="wm-sheet-actions">
-          <button type="button" onClick={close}>Cancel</button>
-          <button type="button" className="primary" disabled={withdrawing || !ready} onClick={submitWithdraw}>
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={withdrawing || !ready}
+            onClick={submitWithdraw}
+          >
             {withdrawing ? "Processing..." : "Withdraw"}
           </button>
         </div>
@@ -735,15 +1031,53 @@ function WithdrawSheet({
   );
 }
 
-function FilterSheet({ status, setStatus, close }: { status: StatusFilter; setStatus: (value: StatusFilter) => void; close: () => void }) {
+function FilterSheet({
+  status,
+  setStatus,
+  close,
+}: {
+  status: StatusFilter;
+  setStatus: (value: StatusFilter) => void;
+  close: () => void;
+}) {
   return (
     <div className="wm-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="wm-sheet small">
-        <div className="wm-sheet-head"><div><h2>Filters</h2><p>Filter withdrawal status.</p></div><button type="button" onClick={close}>✕</button></div>
-        <div className="wm-form-grid">
-          <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}><option value="all">All</option><option value="requested">Requested</option><option value="processing">Processing</option><option value="paid">Paid</option><option value="failed">Failed</option><option value="rejected">Rejected</option></select></label>
+        <div className="wm-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>Filter withdrawal status.</p>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
         </div>
-        <div className="wm-sheet-actions"><button type="button" onClick={() => setStatus("all")}>Reset</button><button type="button" className="primary" onClick={close}>Apply</button></div>
+        <div className="wm-form-grid">
+          <label>
+            <span>Status</span>
+            <select
+              value={status}
+              onChange={(event) =>
+                setStatus(event.target.value as StatusFilter)
+              }
+            >
+              <option value="all">All</option>
+              <option value="requested">Requested</option>
+              <option value="processing">Processing</option>
+              <option value="paid">Paid</option>
+              <option value="failed">Failed</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </label>
+        </div>
+        <div className="wm-sheet-actions">
+          <button type="button" onClick={() => setStatus("all")}>
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={close}>
+            Apply
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -768,18 +1102,59 @@ function MoreSheet({
   openWithdraw: () => void;
   close: () => void;
 }) {
-  const canWithdraw = hasValidDestination(payoutSetting) && summary.available > 0;
+  const canWithdraw =
+    hasValidDestination(payoutSetting) && summary.available > 0;
 
   return (
     <div className="wm-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="wm-sheet small">
-        <div className="wm-sheet-head"><div><h2>More</h2><p>{money(summary.available, currency)} available.</p></div><button type="button" onClick={close}>✕</button></div>
+        <div className="wm-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>{money(summary.available, currency)} available.</p>
+          </div>
+          <button type="button" onClick={close}>
+            ✕
+          </button>
+        </div>
         <div className="wm-menu-list">
-          <button type="button" onClick={openWithdraw} disabled={!canWithdraw}><span>🏧</span><b>Withdraw</b><small>{destinationText(payoutSetting)}</small></button>
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>Cards</b><small>Compact withdrawals</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table</b><small>Dense records</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>Balance and payout</small></button>
-          <button type="button" onClick={refresh}><span>↻</span><b>Refresh</b><small>Reload wallet</small></button>
+          <button type="button" onClick={openWithdraw} disabled={!canWithdraw}>
+            <span>🏧</span>
+            <b>Withdraw</b>
+            <small>{destinationText(payoutSetting)}</small>
+          </button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>Cards</b>
+            <small>Compact withdrawals</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table</b>
+            <small>Dense records</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Balance and payout</small>
+          </button>
+          <button type="button" onClick={refresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload wallet</small>
+          </button>
         </div>
       </section>
     </div>

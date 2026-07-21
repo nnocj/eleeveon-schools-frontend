@@ -45,16 +45,16 @@ import {
 // ======================================================
 
 export type ActiveInstitutionContextType = {
-  activeSchoolId: number | null;
+  activeSchoolId: string | null;
   activeSchool: School | null;
   schools: School[];
-  setActiveSchoolId: (id: number | null) => Promise<void>;
+  setActiveSchoolId: (id: string | null) => Promise<void>;
 
-  activeBranchId: number | null;
+  activeBranchId: string | null;
   activeBranch: Branch | null;
   branches: Branch[];
   allBranches: Branch[];
-  setActiveBranchId: (id: number | null) => Promise<void>;
+  setActiveBranchId: (id: string | null) => Promise<void>;
 
   loading: boolean;
   refreshInstitution: () => Promise<void>;
@@ -63,8 +63,8 @@ export type ActiveInstitutionContextType = {
 export type ActiveBranchContextType = ActiveInstitutionContextType;
 
 type SettingsLike = {
-  schoolId?: number;
-  branchId?: number;
+  schoolId?: string;
+  branchId?: string;
 };
 
 // ======================================================
@@ -92,44 +92,40 @@ function sameBranchList(a: Branch[], b: Branch[]) {
   return a.every((row, index) => row.id === b[index]?.id && row.updatedAt === b[index]?.updatedAt);
 }
 
-function readStorageNumber(key: string) {
-  if (typeof window === "undefined") return null;
-
-  const raw = window.localStorage.getItem(key);
-  if (!raw) return null;
-
-  const value = Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : null;
+function cleanId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = String(value).trim();
+  return id || null;
 }
 
-function writeStorageNumber(key: string, value: number | null) {
-  if (typeof window === "undefined") return;
+function readStorageId(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  return cleanId(window.localStorage.getItem(key) || window.sessionStorage.getItem(key));
+}
 
+function writeStorageId(key: string, value: string | null) {
+  if (typeof window === "undefined") return;
   if (value) {
-    window.localStorage.setItem(key, String(value));
+    try { window.localStorage.setItem(key, value); } catch {}
+    try { window.sessionStorage.setItem(key, value); } catch {}
   } else {
-    window.localStorage.removeItem(key);
+    try { window.localStorage.removeItem(key); } catch {}
+    try { window.sessionStorage.removeItem(key); } catch {}
   }
 }
 
-function normalizeId(value?: number | null) {
-  return Number(value || 0);
+function normalizeId(value?: unknown): string | null {
+  return cleanId(value);
 }
 
-function readSettingsId(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+function readSettingsId(value: unknown): string | undefined {
+  return cleanId(value) || undefined;
 }
 
 function canPersistBranchSettings() {
   const membership = getStoredActiveMembership();
   if (!membership) return false;
-
-  return (
-    appearanceScopeForRole(
-      normalizeAppearanceRole(membership.role),
-    ) === "branch"
-  );
+  return appearanceScopeForRole(normalizeAppearanceRole(membership.role)) === "branch";
 }
 
 // ======================================================
@@ -144,13 +140,13 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   const refreshRunningRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const initialSchoolId = readStorageNumber(SCHOOL_STORAGE_KEY);
-  const initialBranchId = readStorageNumber(BRANCH_STORAGE_KEY);
+  const initialSchoolId = readStorageId(SCHOOL_STORAGE_KEY);
+  const initialBranchId = readStorageId(BRANCH_STORAGE_KEY);
 
   const [activeSchoolId, setActiveSchoolIdState] =
-    useState<number | null>(initialSchoolId);
+    useState<string | null>(initialSchoolId);
   const [activeBranchId, setActiveBranchIdState] =
-    useState<number | null>(initialBranchId);
+    useState<string | null>(initialBranchId);
 
   const [schools, setSchools] = useState<School[]>([]);
   const [allBranches, setAllBranches] = useState<Branch[]>([]);
@@ -179,11 +175,11 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   // SAFE STATE HELPERS
   // ======================================================
 
-  const setSchoolIdSafely = useCallback((next: number | null) => {
+  const setSchoolIdSafely = useCallback((next: string | null) => {
     setActiveSchoolIdState((prev) => (prev === next ? prev : next));
   }, []);
 
-  const setBranchIdSafely = useCallback((next: number | null) => {
+  const setBranchIdSafely = useCallback((next: string | null) => {
     setActiveBranchIdState((prev) => (prev === next ? prev : next));
   }, []);
 
@@ -205,8 +201,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
     setSchoolsSafely([]);
     setBranchesSafely([]);
 
-    writeStorageNumber(SCHOOL_STORAGE_KEY, null);
-    writeStorageNumber(BRANCH_STORAGE_KEY, null);
+    writeStorageId(SCHOOL_STORAGE_KEY, null);
+    writeStorageId(BRANCH_STORAGE_KEY, null);
 
     const currentSchoolId = normalizeId(settingsRef.current.schoolId);
     const currentBranchId = normalizeId(settingsRef.current.branchId);
@@ -269,10 +265,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
       setSchoolsSafely(activeSchools);
       setBranchesSafely(activeBranches);
 
-      const storedSchoolId = readStorageNumber(SCHOOL_STORAGE_KEY);
-      const settingsSchoolId = settingsRef.current.schoolId
-        ? Number(settingsRef.current.schoolId)
-        : null;
+      const storedSchoolId = readStorageId(SCHOOL_STORAGE_KEY);
+      const settingsSchoolId = cleanId(settingsRef.current.schoolId);
 
       const storedSchoolExists = storedSchoolId
         ? activeSchools.some((school) => school.id === storedSchoolId)
@@ -292,10 +286,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
         ? activeBranches.filter((branch) => branch.schoolId === resolvedSchoolId)
         : [];
 
-      const storedBranchId = readStorageNumber(BRANCH_STORAGE_KEY);
-      const settingsBranchId = settingsRef.current.branchId
-        ? Number(settingsRef.current.branchId)
-        : null;
+      const storedBranchId = readStorageId(BRANCH_STORAGE_KEY);
+      const settingsBranchId = cleanId(settingsRef.current.branchId);
 
       const storedBranchExists = storedBranchId
         ? branchesForSchool.some((branch) => branch.id === storedBranchId)
@@ -314,8 +306,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
       setSchoolIdSafely(resolvedSchoolId);
       setBranchIdSafely(resolvedBranchId);
 
-      writeStorageNumber(SCHOOL_STORAGE_KEY, resolvedSchoolId);
-      writeStorageNumber(BRANCH_STORAGE_KEY, resolvedBranchId);
+      writeStorageId(SCHOOL_STORAGE_KEY, resolvedSchoolId);
+      writeStorageId(BRANCH_STORAGE_KEY, resolvedBranchId);
 
       const currentSchoolId = normalizeId(settingsRef.current.schoolId);
       const currentBranchId = normalizeId(settingsRef.current.branchId);
@@ -362,8 +354,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
     setSchoolsSafely([]);
     setBranchesSafely([]);
     setLoading(false);
-    writeStorageNumber(SCHOOL_STORAGE_KEY, null);
-    writeStorageNumber(BRANCH_STORAGE_KEY, null);
+    writeStorageId(SCHOOL_STORAGE_KEY, null);
+    writeStorageId(BRANCH_STORAGE_KEY, null);
   }), [setSchoolIdSafely, setBranchIdSafely, setSchoolsSafely, setBranchesSafely]);
 
   // ======================================================
@@ -409,7 +401,7 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   // ======================================================
 
   const setActiveSchoolId = useCallback(
-    async (id: number | null) => {
+    async (id: string | null) => {
       if (!accountId) {
         await clearInstitutionContext();
         return;
@@ -438,8 +430,8 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
       setSchoolIdSafely(nextSchoolId);
       setBranchIdSafely(nextBranchId);
 
-      writeStorageNumber(SCHOOL_STORAGE_KEY, nextSchoolId);
-      writeStorageNumber(BRANCH_STORAGE_KEY, nextBranchId);
+      writeStorageId(SCHOOL_STORAGE_KEY, nextSchoolId);
+      writeStorageId(BRANCH_STORAGE_KEY, nextBranchId);
 
       const currentSchoolId = normalizeId(settingsRef.current.schoolId);
       const currentBranchId = normalizeId(settingsRef.current.branchId);
@@ -481,7 +473,7 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
   // ======================================================
 
   const setActiveBranchId = useCallback(
-    async (id: number | null) => {
+    async (id: string | null) => {
       if (!accountId) {
         await clearInstitutionContext();
         return;
@@ -496,7 +488,7 @@ export function ActiveBranchProvider({ children }: { children: React.ReactNode }
       if (!branchBelongsToSchool) return;
 
       setBranchIdSafely(nextBranchId);
-      writeStorageNumber(BRANCH_STORAGE_KEY, nextBranchId);
+      writeStorageId(BRANCH_STORAGE_KEY, nextBranchId);
 
       const currentSchoolId = normalizeId(settingsRef.current.schoolId);
       const currentBranchId = normalizeId(settingsRef.current.branchId);

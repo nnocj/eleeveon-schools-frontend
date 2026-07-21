@@ -42,23 +42,24 @@ export default function SideProfileHeader({
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
   const contrast = getContrastTextColor(primary);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -66,9 +67,13 @@ export default function SideProfileHeader({
     branding.phone ? `Tel: ${branding.phone}` : "",
     branding.email,
     branding.website,
-  ].filter(Boolean).join("  •  ");
+  ]
+    .filter(Boolean)
+    .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
 
   const metaItems = [
     { label: "Structure", value: academicStructureName || "-" },
@@ -126,7 +131,9 @@ export default function SideProfileHeader({
                 overflowWrap: "anywhere",
               }}
             >
-              {[branding.motto, contactLine, branchLine].filter(Boolean).join("  •  ")}
+              {[branding.motto, contactLine, branchLine]
+                .filter(Boolean)
+                .join("  •  ")}
             </div>
           )}
         </div>

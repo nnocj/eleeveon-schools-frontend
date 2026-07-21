@@ -73,7 +73,9 @@ export default function BroadsheetExecutiveHeader({
       : "";
 
   const metadata = [
-    academicStructureName ? { label: "Structure", value: academicStructureName } : null,
+    academicStructureName
+      ? { label: "Structure", value: academicStructureName }
+      : null,
     academicPeriodName ? { label: "Period", value: academicPeriodName } : null,
     academicYear ? { label: "Year", value: academicYear } : null,
     className ? { label: "Class", value: className } : null,
@@ -227,7 +229,8 @@ export default function BroadsheetExecutiveHeader({
                 fontWeight: 760,
               }}
             >
-              {settings.broadsheetGeneratedDateLabel || "Generated"}: {generated}
+              {settings.broadsheetGeneratedDateLabel || "Generated"}:{" "}
+              {generated}
             </div>
           )}
         </div>

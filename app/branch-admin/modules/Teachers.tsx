@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -53,7 +52,12 @@ import {
   type Teacher,
   type TeacherAttendance,
 } from "../../lib/db/db";
-import { createLocal, updateLocal, softDeleteLocal, listActiveLocal } from "../../lib/sync/syncUtils";
+import {
+  createLocal,
+  updateLocal,
+  softDeleteLocal,
+  listActiveLocal,
+} from "../../lib/sync/syncUtils";
 import {
   softDeleteOwnerFieldAssets,
   MediaOwners,
@@ -70,9 +74,6 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
-
-
-
 } from "../../lib/media/mediaAssetUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
@@ -87,8 +88,8 @@ type CameraField = "photo" | "coverPhoto" | "signature";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -100,11 +101,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -115,7 +116,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -140,13 +143,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -157,7 +160,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -166,7 +173,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -178,7 +185,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -188,21 +199,20 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 type FormState = {
-  id?: number;
+  id?: string;
   organizationId: string;
   fullName: string;
   gender: string;
   age: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   email: string;
   phone: string;
   relativePhone: string;
@@ -211,12 +221,12 @@ type FormState = {
   role: TeacherRole;
   qualification: string;
   signature: string;
-  signatureMediaId?: number;
+  signatureMediaId?: string;
   active: boolean;
 };
 
 type TeacherView = {
-  id: number;
+  id: string;
   row: Teacher;
   photoUrl?: string;
   coverPhotoUrl?: string;
@@ -251,16 +261,26 @@ const emptyForm: FormState = {
   active: true,
 };
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+const idOf = (v: any): string => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+};
+
+const cleanId = (value: unknown): string => {
+  const normalized = idOf(value);
+  return normalized && normalized !== "0" ? normalized : "";
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
-const safeLower = (v: any) => String(v || "").toLowerCase().trim();
+const safeLower = (v: any) =>
+  String(v || "")
+    .toLowerCase()
+    .trim();
 const tableSafe = (name: string) => (db as any)[name];
-const isActiveRow = (row: any) => !row?.isDeleted && row?.active !== false && !["inactive", "deleted", "archived"].includes(safeLower(row?.status));
+const isActiveRow = (row: any) =>
+  !row?.isDeleted &&
+  row?.active !== false &&
+  !["inactive", "deleted", "archived"].includes(safeLower(row?.status));
 
 function roleLabel(role?: TeacherRole | string) {
   if (role === "head_teacher") return "Head Teacher";
@@ -269,7 +289,9 @@ function roleLabel(role?: TeacherRole | string) {
   return "Teacher";
 }
 
-function roleTone(role?: TeacherRole | string): "green" | "blue" | "purple" | "orange" | "gray" {
+function roleTone(
+  role?: TeacherRole | string,
+): "green" | "blue" | "purple" | "orange" | "gray" {
   if (role === "principal") return "purple";
   if (role === "head_teacher") return "orange";
   if (role === "lecturer") return "blue";
@@ -277,7 +299,9 @@ function roleTone(role?: TeacherRole | string): "green" | "blue" | "purple" | "o
   return "gray";
 }
 
-function statusTone(active: boolean): "green" | "red" | "blue" | "orange" | "gray" {
+function statusTone(
+  active: boolean,
+): "green" | "red" | "blue" | "orange" | "gray" {
   return active ? "green" : "red";
 }
 
@@ -286,7 +310,11 @@ const timeText = (v?: string | number | null) => {
   const t = typeof v === "number" ? v : new Date(v).getTime();
   if (!Number.isFinite(t)) return "Not set";
   try {
-    return new Intl.DateTimeFormat("en-GH", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(t));
+    return new Intl.DateTimeFormat("en-GH", {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    }).format(new Date(t));
   } catch {
     return "Not set";
   }
@@ -296,13 +324,20 @@ const moneyText = (v?: string | number | null) => {
   const amount = Number(v || 0);
   if (!Number.isFinite(amount) || amount <= 0) return "Not set";
   try {
-    return new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", maximumFractionDigits: 2 }).format(amount);
+    return new Intl.NumberFormat("en-GH", {
+      style: "currency",
+      currency: "GHS",
+      maximumFractionDigits: 2,
+    }).format(amount);
   } catch {
     return `GHS ${amount}`;
   }
 };
 
-const mediaKey = (teacherId: number, field: "photo" | "coverPhoto" | "signature") => `teachers:${teacherId}:${field}`;
+const mediaKey = (
+  teacherId: string,
+  field: "photo" | "coverPhoto" | "signature",
+) => `teachers:${teacherId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
   const media = String(value || "");
@@ -315,26 +350,54 @@ const safeRecordMediaValue = (value?: string) => {
 const TEACHER_MEDIA_OWNER_TABLE = MediaOwners.TEACHERS;
 const TEACHER_MEDIA_ENTITY_LABEL = "Teacher";
 
-const makeMediaSessionKey = () => createMediaSessionKey(TEACHER_MEDIA_OWNER_TABLE);
+const makeMediaSessionKey = () =>
+  createMediaSessionKey(TEACHER_MEDIA_OWNER_TABLE);
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple" }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function Avatar({ name, photo, primary }: { name: string; photo?: string; primary: string }) {
+function Avatar({
+  name,
+  photo,
+  primary,
+}: {
+  name: string;
+  photo?: string;
+  primary: string;
+}) {
   return (
     <div
       className="ba-avatar"
       style={{
-        background: photo ? `url(${photo}) center/cover` : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
+        background: photo
+          ? `url(${photo}) center/cover`
+          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
       }}
     >
-      {!photo && String(name || "T").slice(0, 1).toUpperCase()}
+      {!photo &&
+        String(name || "T")
+          .slice(0, 1)
+          .toUpperCase()}
     </div>
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -345,7 +408,16 @@ function Empty({ icon, title, text }: { icon: string; title: string; text: strin
 }
 
 export default function TeachersPage() {
-  const dataRevision = useBranchTableRevision(["teachers", "organizations", "assignments", "classSubjects", "classTeachers", "teacherAttendance", "mediaAssets", "mediaBlobs"]);
+  const dataRevision = useBranchTableRevision([
+    "teachers",
+    "organizations",
+    "assignments",
+    "classSubjects",
+    "classTeachers",
+    "teacherAttendance",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
   const workspace = useBranchWorkspaceScope();
@@ -380,8 +452,12 @@ export default function TeachersPage() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
   const [classTeachers, setClassTeachers] = useState<ClassTeacher[]>([]);
-  const [teacherAttendance, setTeacherAttendance] = useState<TeacherAttendance[]>([]);
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
+  const [teacherAttendance, setTeacherAttendance] = useState<
+    TeacherAttendance[]
+  >([]);
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
@@ -396,14 +472,18 @@ export default function TeachersPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
   const mediaSessionKey = useRef(makeMediaSessionKey());
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("photo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
   const [signaturePadOpen, setSignaturePadOpen] = useState(false);
@@ -412,7 +492,15 @@ export default function TeachersPage() {
     if (accountLoading || contextLoading) return;
     if (!authenticated || !accountId) router.replace("/login");
     else if (!schoolId || !branchId) router.replace("/account");
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   const sameTenant = (row: TenantRow) =>
     (!row.accountId || row.accountId === accountId) &&
@@ -422,7 +510,10 @@ export default function TeachersPage() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((c) => (c?.message === message ? null : c)), 4200);
+    window.setTimeout(
+      () => setToast((c) => (c?.message === message ? null : c)),
+      4200,
+    );
   };
 
   const stopCurrentCamera = () => {
@@ -470,8 +561,18 @@ export default function TeachersPage() {
         fileName: `teacher-${cameraField}-${Date.now()}.jpg`,
         mimeType: cameraField === "signature" ? "image/png" : "image/jpeg",
         quality: cameraField === "signature" ? 0.92 : 0.88,
-        maxWidth: cameraField === "photo" ? 900 : cameraField === "coverPhoto" ? 1440 : 1000,
-        maxHeight: cameraField === "photo" ? 900 : cameraField === "coverPhoto" ? 900 : 420,
+        maxWidth:
+          cameraField === "photo"
+            ? 900
+            : cameraField === "coverPhoto"
+              ? 1440
+              : 1000,
+        maxHeight:
+          cameraField === "photo"
+            ? 900
+            : cameraField === "coverPhoto"
+              ? 900
+              : 420,
       });
 
       await handleImageUpload(cameraField, file);
@@ -507,8 +608,8 @@ export default function TeachersPage() {
           const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-            ownerLocalId: teacherId,
-            ownerCloudId: teacher.cloudId || undefined,
+            ownerId: teacherId,
+
             fieldKey: MediaFieldKeys.PHOTO,
             fallbackAssetId: teacher.photoMediaId,
           });
@@ -517,26 +618,28 @@ export default function TeachersPage() {
           const coverPhotoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-            ownerLocalId: teacherId,
-            ownerCloudId: teacher.cloudId || undefined,
+            ownerId: teacherId,
+
             fieldKey: MediaFieldKeys.COVER_PHOTO,
             fallbackAssetId: teacher.coverPhotoMediaId,
           });
-          if (coverPhotoUrl) next[mediaKey(teacherId, "coverPhoto")] = coverPhotoUrl;
+          if (coverPhotoUrl)
+            next[mediaKey(teacherId, "coverPhoto")] = coverPhotoUrl;
 
           const signatureUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-            ownerLocalId: teacherId,
-            ownerCloudId: teacher.cloudId || undefined,
+            ownerId: teacherId,
+
             fieldKey: MediaFieldKeys.SIGNATURE,
             fallbackAssetId: teacher.signatureMediaId,
           });
-          if (signatureUrl) next[mediaKey(teacherId, "signature")] = signatureUrl;
+          if (signatureUrl)
+            next[mediaKey(teacherId, "signature")] = signatureUrl;
         } catch (error) {
           console.error("Failed resolving teacher media:", teacherId, error);
         }
-      })
+      }),
     );
 
     // Do not revoke list preview URLs during a reload. The shared media utility
@@ -555,9 +658,20 @@ export default function TeachersPage() {
 
     try {
       setLoading(true);
-      const [teacherRows, organizationRows, assignmentRows, classSubjectRows, classTeacherRows, attendanceRows] = await Promise.all([
+      const [
+        teacherRows,
+        organizationRows,
+        assignmentRows,
+        classSubjectRows,
+        classTeacherRows,
+        attendanceRows,
+      ] = await Promise.all([
         tableSafe("teachers")?.toArray?.() || [],
-        listActiveLocal("organizations", { accountId, schoolId: Number(schoolId), branchId: Number(branchId) } as any),
+        listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
         tableSafe("assignments")?.toArray?.() || [],
         tableSafe("classSubjects")?.toArray?.() || [],
         tableSafe("classTeachers")?.toArray?.() || [],
@@ -566,15 +680,37 @@ export default function TeachersPage() {
 
       const scopedTeachers = (teacherRows as Teacher[])
         .filter((r) => sameTenant(r as TenantRow))
-        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")));
+        .sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")),
+        );
 
       setRows(scopedTeachers);
       await resolveTeacherMediaUrls(scopedTeachers);
-      setOrganizations((organizationRows as Organization[]).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
-      setAssignments((assignmentRows as Assignment[]).filter((r) => sameTenant(r as TenantRow)));
-      setClassSubjects((classSubjectRows as ClassSubject[]).filter((r) => sameTenant(r as TenantRow)));
-      setClassTeachers((classTeacherRows as ClassTeacher[]).filter((r) => sameTenant(r as TenantRow)));
-      setTeacherAttendance((attendanceRows as TeacherAttendance[]).filter((r) => sameTenant(r as TenantRow)));
+      setOrganizations(
+        (organizationRows as Organization[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setAssignments(
+        (assignmentRows as Assignment[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
+      setClassTeachers(
+        (classTeacherRows as ClassTeacher[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
+      setTeacherAttendance(
+        (attendanceRows as TeacherAttendance[]).filter((r) =>
+          sameTenant(r as TenantRow),
+        ),
+      );
     } catch (error) {
       console.error(error);
       clearData();
@@ -588,7 +724,14 @@ export default function TeachersPage() {
     if (accountLoading || settingsLoading || contextLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading, contextLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
     dataRevision,
   ]);
 
@@ -642,83 +785,188 @@ export default function TeachersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraOpen, cameraFacing]);
 
-  const organizationMap = useMemo(() => new Map(organizations.map((r: any) => [idOf(r.id), r])), [organizations]);
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
+    [organizations],
+  );
 
   const usageMaps = useMemo(() => {
-    const assignmentMap = new Map<number, number>();
-    const classSubjectMap = new Map<number, number>();
-    const classTeacherMap = new Map<number, number>();
-    const attendanceMap = new Map<number, number>();
+    const assignmentMap = new Map<string, number>();
+    const classSubjectMap = new Map<string, number>();
+    const classTeacherMap = new Map<string, number>();
+    const attendanceMap = new Map<string, number>();
 
-    assignments.forEach((row: any) => { const teacherId = idOf(row.teacherId); if (teacherId) assignmentMap.set(teacherId, (assignmentMap.get(teacherId) || 0) + 1); });
-    classSubjects.forEach((row: any) => { const teacherId = idOf(row.teacherId); if (teacherId) classSubjectMap.set(teacherId, (classSubjectMap.get(teacherId) || 0) + 1); });
-    classTeachers.forEach((row: any) => { const teacherId = idOf(row.teacherId); if (teacherId) classTeacherMap.set(teacherId, (classTeacherMap.get(teacherId) || 0) + 1); });
-    teacherAttendance.forEach((row: any) => { const teacherId = idOf(row.teacherId); if (teacherId) attendanceMap.set(teacherId, (attendanceMap.get(teacherId) || 0) + 1); });
+    assignments.forEach((row: any) => {
+      const teacherId = idOf(row.teacherId);
+      if (teacherId)
+        assignmentMap.set(teacherId, (assignmentMap.get(teacherId) || 0) + 1);
+    });
+    classSubjects.forEach((row: any) => {
+      const teacherId = idOf(row.teacherId);
+      if (teacherId)
+        classSubjectMap.set(
+          teacherId,
+          (classSubjectMap.get(teacherId) || 0) + 1,
+        );
+    });
+    classTeachers.forEach((row: any) => {
+      const teacherId = idOf(row.teacherId);
+      if (teacherId)
+        classTeacherMap.set(
+          teacherId,
+          (classTeacherMap.get(teacherId) || 0) + 1,
+        );
+    });
+    teacherAttendance.forEach((row: any) => {
+      const teacherId = idOf(row.teacherId);
+      if (teacherId)
+        attendanceMap.set(teacherId, (attendanceMap.get(teacherId) || 0) + 1);
+    });
 
     return { assignmentMap, classSubjectMap, classTeacherMap, attendanceMap };
   }, [assignments, classSubjects, classTeachers, teacherAttendance]);
 
-  const viewRows = useMemo<TeacherView[]>(() => rows.map((row: any) => {
-    const id = idOf(row.id);
-    const organization: any = row.organizationId ? organizationMap.get(idOf(row.organizationId)) : undefined;
-    const assignmentCount = usageMaps.assignmentMap.get(id) || 0;
-    const classSubjectCount = usageMaps.classSubjectMap.get(id) || 0;
-    const classTeacherCount = usageMaps.classTeacherMap.get(id) || 0;
-    const attendanceCount = usageMaps.attendanceMap.get(id) || 0;
+  const viewRows = useMemo<TeacherView[]>(
+    () =>
+      rows.map((row: any) => {
+        const id = idOf(row.id);
+        const organization: any = row.organizationId
+          ? organizationMap.get(idOf(row.organizationId))
+          : undefined;
+        const assignmentCount = usageMaps.assignmentMap.get(id) || 0;
+        const classSubjectCount = usageMaps.classSubjectMap.get(id) || 0;
+        const classTeacherCount = usageMaps.classTeacherMap.get(id) || 0;
+        const attendanceCount = usageMaps.attendanceMap.get(id) || 0;
 
-    return {
-      id,
-      row,
-      photoUrl: resolvedMediaById[id]?.photo || mediaPreviewUrls[mediaKey(id, "photo")] || safeRecordMediaValue(row.photo),
-      coverPhotoUrl: resolvedMediaById[id]?.coverPhoto || mediaPreviewUrls[mediaKey(id, "coverPhoto")] || safeRecordMediaValue(row.coverPhoto),
-      signatureUrl: resolvedMediaById[id]?.signature || mediaPreviewUrls[mediaKey(id, "signature")] || safeRecordMediaValue(row.signature),
-      organizationName: organization?.name || "No organization",
-      assignmentCount,
-      classSubjectCount,
-      classTeacherCount,
-      attendanceCount,
-      totalUsage: assignmentCount + classSubjectCount + classTeacherCount + attendanceCount,
-      active: isActiveRow(row),
-    };
-  }), [mediaPreviewUrls, organizationMap, rows, usageMaps]);
+        return {
+          id,
+          row,
+          photoUrl:
+            resolvedMediaById[id]?.photo ||
+            mediaPreviewUrls[mediaKey(id, "photo")] ||
+            safeRecordMediaValue(row.photo),
+          coverPhotoUrl:
+            resolvedMediaById[id]?.coverPhoto ||
+            mediaPreviewUrls[mediaKey(id, "coverPhoto")] ||
+            safeRecordMediaValue(row.coverPhoto),
+          signatureUrl:
+            resolvedMediaById[id]?.signature ||
+            mediaPreviewUrls[mediaKey(id, "signature")] ||
+            safeRecordMediaValue(row.signature),
+          organizationName: organization?.name || "No organization",
+          assignmentCount,
+          classSubjectCount,
+          classTeacherCount,
+          attendanceCount,
+          totalUsage:
+            assignmentCount +
+            classSubjectCount +
+            classTeacherCount +
+            attendanceCount,
+          active: isActiveRow(row),
+        };
+      }),
+    [mediaPreviewUrls, organizationMap, rows, usageMaps],
+  );
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return viewRows.filter((item) => {
-      const row: any = item.row;
-      if (filterOrganizationId !== "all" && !sameId(row.organizationId, filterOrganizationId)) return false;
-      if (filterRole !== "all" && row.role !== filterRole) return false;
-      if (filterStatus === "active" && !item.active) return false;
-      if (filterStatus === "inactive" && item.active) return false;
-      if (filterGender !== "all" && row.gender !== filterGender) return false;
-      if (!q) return true;
-      return `${row.fullName} ${row.gender || ""} ${row.email || ""} ${row.phone || ""} ${row.relativePhone || ""} ${row.role || ""} ${row.qualification || ""} ${row.salary || ""} ${item.organizationName}`.toLowerCase().includes(q);
-    }).sort((a, b) => String((a.row as any).fullName || "").localeCompare(String((b.row as any).fullName || "")));
-  }, [filterGender, filterOrganizationId, filterRole, filterStatus, search, viewRows]);
+    return viewRows
+      .filter((item) => {
+        const row: any = item.row;
+        if (
+          filterOrganizationId !== "all" &&
+          !sameId(row.organizationId, filterOrganizationId)
+        )
+          return false;
+        if (filterRole !== "all" && row.role !== filterRole) return false;
+        if (filterStatus === "active" && !item.active) return false;
+        if (filterStatus === "inactive" && item.active) return false;
+        if (filterGender !== "all" && row.gender !== filterGender) return false;
+        if (!q) return true;
+        return `${row.fullName} ${row.gender || ""} ${row.email || ""} ${row.phone || ""} ${row.relativePhone || ""} ${row.role || ""} ${row.qualification || ""} ${row.salary || ""} ${item.organizationName}`
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) =>
+        String((a.row as any).fullName || "").localeCompare(
+          String((b.row as any).fullName || ""),
+        ),
+      );
+  }, [
+    filterGender,
+    filterOrganizationId,
+    filterRole,
+    filterStatus,
+    search,
+    viewRows,
+  ]);
 
-  const summary = useMemo(() => ({
-    total: rows.length,
-    active: viewRows.filter((r) => r.active).length,
-    inactive: viewRows.filter((r) => !r.active).length,
-    teachers: rows.filter((r: any) => r.role === "teacher").length,
-    leaders: rows.filter((r: any) => r.role === "head_teacher" || r.role === "principal").length,
-    attendanceRecords: teacherAttendance.length,
-    showing: filteredRows.length,
-  }), [filteredRows.length, rows, teacherAttendance.length, viewRows]);
+  const summary = useMemo(
+    () => ({
+      total: rows.length,
+      active: viewRows.filter((r) => r.active).length,
+      inactive: viewRows.filter((r) => !r.active).length,
+      teachers: rows.filter((r: any) => r.role === "teacher").length,
+      leaders: rows.filter(
+        (r: any) => r.role === "head_teacher" || r.role === "principal",
+      ).length,
+      attendanceRecords: teacherAttendance.length,
+      showing: filteredRows.length,
+    }),
+    [filteredRows.length, rows, teacherAttendance.length, viewRows],
+  );
 
   const activeFilterCount = useMemo(() => {
-    return [filterOrganizationId, filterRole, filterStatus, filterGender].filter((value) => value !== "all").length;
+    return [
+      filterOrganizationId,
+      filterRole,
+      filterStatus,
+      filterGender,
+    ].filter((value) => value !== "all").length;
   }, [filterGender, filterOrganizationId, filterRole, filterStatus]);
 
-  const genderOptions = useMemo(() => Array.from(new Set(rows.map((r: any) => r.gender).filter(Boolean))) as string[], [rows]);
-  const countsByOrganization = useMemo(() => groupedCounts(viewRows, (i) => i.organizationName), [viewRows]);
-  const countsByRole = useMemo(() => groupedCounts(viewRows, (i) => roleLabel((i.row as any).role)), [viewRows]);
-  const countsByGender = useMemo(() => groupedCounts(viewRows, (i) => String((i.row as any).gender || "Not set")), [viewRows]);
-  const countsByUsage = useMemo(() => viewRows.map((item) => ({ label: (item.row as any).fullName || "Teacher", value: item.totalUsage })).filter((item) => item.value > 0).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)), [viewRows]);
+  const genderOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(rows.map((r: any) => r.gender).filter(Boolean)),
+      ) as string[],
+    [rows],
+  );
+  const countsByOrganization = useMemo(
+    () => groupedCounts(viewRows, (i) => i.organizationName),
+    [viewRows],
+  );
+  const countsByRole = useMemo(
+    () => groupedCounts(viewRows, (i) => roleLabel((i.row as any).role)),
+    [viewRows],
+  );
+  const countsByGender = useMemo(
+    () =>
+      groupedCounts(viewRows, (i) =>
+        String((i.row as any).gender || "Not set"),
+      ),
+    [viewRows],
+  );
+  const countsByUsage = useMemo(
+    () =>
+      viewRows
+        .map((item) => ({
+          label: (item.row as any).fullName || "Teacher",
+          value: item.totalUsage,
+        }))
+        .filter((item) => item.value > 0)
+        .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+    [viewRows],
+  );
 
-  const updateForm = (patch: Partial<FormState>) => setForm((current) => ({ ...current, ...patch }));
+  const updateForm = (patch: Partial<FormState>) =>
+    setForm((current) => ({ ...current, ...patch }));
 
-  const handleImageUpload = async (field: "photo" | "coverPhoto" | "signature", file?: File) => {
+  const handleImageUpload = async (
+    field: "photo" | "coverPhoto" | "signature",
+    file?: File,
+  ) => {
     if (!file) return;
 
     if (!authenticated || !accountId || !schoolId || !branchId) {
@@ -729,10 +977,10 @@ export default function TeachersPage() {
     try {
       const result = await saveImageAsset(file, {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
+        ownerId: form.id || undefined,
         ownerTempKey: form.id ? undefined : mediaSessionKey.current,
         fieldKey:
           field === "photo"
@@ -740,7 +988,12 @@ export default function TeachersPage() {
             : field === "coverPhoto"
               ? MediaFieldKeys.COVER_PHOTO
               : MediaFieldKeys.SIGNATURE,
-        variant: field === "photo" ? "avatar" : field === "coverPhoto" ? "cover" : "signature",
+        variant:
+          field === "photo"
+            ? "avatar"
+            : field === "coverPhoto"
+              ? "cover"
+              : "signature",
         replaceExisting: true,
       });
 
@@ -751,7 +1004,11 @@ export default function TeachersPage() {
 
       showToast(
         "success",
-        field === "photo" ? "Teacher photo optimized." : field === "coverPhoto" ? "Cover photo optimized." : "Signature optimized."
+        field === "photo"
+          ? "Teacher photo optimized."
+          : field === "coverPhoto"
+            ? "Cover photo optimized."
+            : "Signature optimized.",
       );
     } catch (error: any) {
       console.error("Failed to process teacher image:", error);
@@ -765,10 +1022,14 @@ export default function TeachersPage() {
     const signatureFile =
       file.type === "image/png" && file.name
         ? file
-        : new File([file], `teacher-signature-${form.id || "new"}-${Date.now()}.png`, {
-            type: "image/png",
-            lastModified: Date.now(),
-          });
+        : new File(
+            [file],
+            `teacher-signature-${form.id || "new"}-${Date.now()}.png`,
+            {
+              type: "image/png",
+              lastModified: Date.now(),
+            },
+          );
 
     await handleImageUpload("signature", signatureFile);
     setSignaturePadOpen(false);
@@ -787,7 +1048,8 @@ export default function TeachersPage() {
     mediaSessionKey.current = makeMediaSessionKey();
     setForm({
       ...emptyForm,
-      organizationId: filterOrganizationId !== "all" ? filterOrganizationId : "",
+      organizationId:
+        filterOrganizationId !== "all" ? filterOrganizationId : "",
       role: filterRole !== "all" ? filterRole : "teacher",
       active: filterStatus === "inactive" ? false : true,
     });
@@ -804,10 +1066,18 @@ export default function TeachersPage() {
       fullName: t.fullName || "",
       gender: t.gender || "",
       age: t.age == null ? "" : String(t.age),
-      photo: mediaPreviewUrls[mediaKey(idOf(t.id), "photo")] || safeRecordMediaValue(t.photo) || "",
-      photoMediaId: t.photoMediaId ? Number(t.photoMediaId) : undefined,
-      coverPhoto: mediaPreviewUrls[mediaKey(idOf(t.id), "coverPhoto")] || safeRecordMediaValue(t.coverPhoto) || "",
-      coverPhotoMediaId: t.coverPhotoMediaId ? Number(t.coverPhotoMediaId) : undefined,
+      photo:
+        mediaPreviewUrls[mediaKey(idOf(t.id), "photo")] ||
+        safeRecordMediaValue(t.photo) ||
+        "",
+      photoMediaId: t.photoMediaId ? String(t.photoMediaId) : undefined,
+      coverPhoto:
+        mediaPreviewUrls[mediaKey(idOf(t.id), "coverPhoto")] ||
+        safeRecordMediaValue(t.coverPhoto) ||
+        "",
+      coverPhotoMediaId: t.coverPhotoMediaId
+        ? String(t.coverPhotoMediaId)
+        : undefined,
       email: t.email || "",
       phone: t.phone || "",
       relativePhone: t.relativePhone || "",
@@ -815,8 +1085,13 @@ export default function TeachersPage() {
       salary: t.salary == null ? "" : String(t.salary),
       role: t.role || "teacher",
       qualification: t.qualification || "",
-      signature: mediaPreviewUrls[mediaKey(idOf(t.id), "signature")] || safeRecordMediaValue(t.signature) || "",
-      signatureMediaId: t.signatureMediaId ? Number(t.signatureMediaId) : undefined,
+      signature:
+        mediaPreviewUrls[mediaKey(idOf(t.id), "signature")] ||
+        safeRecordMediaValue(t.signature) ||
+        "",
+      signatureMediaId: t.signatureMediaId
+        ? String(t.signatureMediaId)
+        : undefined,
       active: isActiveRow(t),
     });
     setModalOpen(true);
@@ -835,34 +1110,47 @@ export default function TeachersPage() {
     if (!branchId) return "Select a branch first.";
     if (!form.fullName.trim()) return "Enter teacher full name.";
     if (!form.role) return "Select teacher role.";
-    if (form.age !== "" && Number(form.age) < 0) return "Age cannot be negative.";
-    if (form.salary !== "" && Number(form.salary) < 0) return "Salary cannot be negative.";
-    if (form.organizationId && !organizationMap.get(idOf(form.organizationId))) return "Selected organization is not in this branch.";
+    if (form.age !== "" && Number(form.age) < 0)
+      return "Age cannot be negative.";
+    if (form.salary !== "" && Number(form.salary) < 0)
+      return "Salary cannot be negative.";
+    if (form.organizationId && !organizationMap.get(idOf(form.organizationId)))
+      return "Selected organization is not in this branch.";
 
     const duplicate = rows.find((row: any) => {
       if (form.id && sameId(row.id, form.id)) return false;
-      const sameEmail = form.email.trim() && safeLower(row.email) === safeLower(form.email);
-      const samePhone = form.phone.trim() && safeLower(row.phone) === safeLower(form.phone);
+      const sameEmail =
+        form.email.trim() && safeLower(row.email) === safeLower(form.email);
+      const samePhone =
+        form.phone.trim() && safeLower(row.phone) === safeLower(form.phone);
       return (sameEmail || samePhone) && !row.isDeleted;
     });
-    if (duplicate) return "A teacher with this email or phone already exists in this branch.";
+    if (duplicate)
+      return "A teacher with this email or phone already exists in this branch.";
     return "";
   };
 
   const save = async (event?: React.FormEvent) => {
     event?.preventDefault();
     const error = validate();
-    if (error) { showToast("error", error); return; }
+    if (error) {
+      showToast("error", error);
+      return;
+    }
     if (!authenticated || !accountId || !schoolId || !branchId) return;
 
     try {
       setSaving(true);
-      const existing = form.id ? rows.find((row: any) => sameId(row.id, form.id)) : undefined;
+      const existing = form.id
+        ? rows.find((row: any) => sameId(row.id, form.id))
+        : undefined;
       const payload: Partial<Teacher> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
-        organizationId: form.organizationId ? Number(form.organizationId) : undefined,
+        schoolId: schoolId,
+        branchId: branchId,
+        organizationId: form.organizationId
+          ? String(form.organizationId)
+          : undefined,
         fullName: form.fullName.trim(),
         gender: form.gender.trim() || undefined,
         age: form.age === "" ? undefined : Number(form.age),
@@ -884,25 +1172,34 @@ export default function TeachersPage() {
         isDeleted: false,
       } as Partial<Teacher>;
 
-      const savedTeacher = form.id && existing
-        ? await updateLocal("teachers", Number(form.id), payload)
-        : await createLocal("teachers", payload as unknown as Teacher);
+      const savedTeacher =
+        form.id && existing
+          ? await updateLocal("teachers", String(form.id), payload)
+          : await createLocal("teachers", payload as unknown as Teacher);
 
-      const savedTeacherId = Number(
-        typeof savedTeacher === "number" ? savedTeacher : (savedTeacher as any)?.id || form.id || 0
+      const savedTeacherId = idOf(
+        typeof savedTeacher === "number"
+          ? savedTeacher
+          : (savedTeacher as any)?.id || form.id || 0,
       );
 
       if (savedTeacherId) {
         await commitMediaAssetsToOwner({
           accountId,
           ownerTable: TEACHER_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedTeacherId,
-          ownerCloudId: (savedTeacher as any)?.cloudId || (existing as any)?.cloudId,
+          ownerId: savedTeacherId,
+
           ownerTempKey: mediaSessionKey.current,
           assets: [
             { assetId: form.photoMediaId, fieldKey: MediaFieldKeys.PHOTO },
-            { assetId: form.coverPhotoMediaId, fieldKey: MediaFieldKeys.COVER_PHOTO },
-            { assetId: form.signatureMediaId, fieldKey: MediaFieldKeys.SIGNATURE },
+            {
+              assetId: form.coverPhotoMediaId,
+              fieldKey: MediaFieldKeys.COVER_PHOTO,
+            },
+            {
+              assetId: form.signatureMediaId,
+              fieldKey: MediaFieldKeys.SIGNATURE,
+            },
           ],
         });
       }
@@ -923,30 +1220,28 @@ export default function TeachersPage() {
     const row: any = item.row;
     const id = idOf(row.id);
     if (!id) return;
-    const ok = window.confirm(item.totalUsage ? `"${row.fullName}" has ${item.totalUsage} related record(s). Delete anyway?` : `Delete "${row.fullName}"?`);
+    const ok = window.confirm(
+      item.totalUsage
+        ? `"${row.fullName}" has ${item.totalUsage} related record(s). Delete anyway?`
+        : `Delete "${row.fullName}"?`,
+    );
     if (!ok) return;
 
     await Promise.all(
-
       ["photo", "coverPhoto", "signature"].map((fieldKey) =>
-
         softDeleteOwnerFieldAssets({
-
           accountId: String(accountId),
 
           ownerTable: "teachers",
 
-          ownerLocalId: Number(id),
+          ownerId: cleanId(id) || undefined,
 
           fieldKey,
-
         }),
-
       ),
-
     );
 
-    await softDeleteLocal("teachers", Number(id));
+    await softDeleteLocal("teachers", String(id));
     setSelectedItem(null);
     showToast("success", "Teacher deleted.");
     await load();
@@ -955,60 +1250,267 @@ export default function TeachersPage() {
   const toggleActive = async (item: TeacherView) => {
     const id = idOf((item.row as any).id);
     if (!id) return;
-    await updateLocal("teachers", id, { active: !item.active, status: !item.active ? "active" : "inactive", isDeleted: false } as unknown as Partial<Teacher>);
+    await updateLocal("teachers", id, {
+      active: !item.active,
+      status: !item.active ? "active" : "inactive",
+      isDeleted: false,
+    } as unknown as Partial<Teacher>);
     setSelectedItem(null);
-    showToast("success", item.active ? "Teacher deactivated." : "Teacher activated.");
+    showToast(
+      "success",
+      item.active ? "Teacher deactivated." : "Teacher activated.",
+    );
     await load();
   };
 
-  if (accountLoading || contextLoading || settingsLoading || loading) return <State primary={primary} title="Opening Teachers..." text="Checking account, branch, organizations, class links, attendance and teacher records." />;
-  if (!authenticated || !accountId) return <State primary={primary} title="Redirecting to login..." text="You must sign in before managing teachers." />;
-  if (!schoolId || !branchId) return <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}><style>{css}</style><section className="ba-state"><h2>No branch workspace selected</h2><p>Teachers belong to the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p><button type="button" className="ba-state-button" onClick={() => router.push("/account")}>Go to Account Setup</button></section></main>;
+  if (accountLoading || contextLoading || settingsLoading || loading)
+    return (
+      <State
+        primary={primary}
+        title="Opening Teachers..."
+        text="Checking account, branch, organizations, class links, attendance and teacher records."
+      />
+    );
+  if (!authenticated || !accountId)
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before managing teachers."
+      />
+    );
+  if (!schoolId || !branchId)
+    return (
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
+        <style>{css}</style>
+        <section className="ba-state">
+          <h2>No branch workspace selected</h2>
+          <p>
+            Teachers belong to the selected branch-admin workspace. Use Select
+            Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/account")}
+          >
+            Go to Account Setup
+          </button>
+        </section>
+      </main>
+    );
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
-      {toast && <section className={`ba-toast ${toast.tone}`}>{toast.message}<button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button></section>}
+      {toast && (
+        <section className={`ba-toast ${toast.tone}`}>
+          {toast.message}
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
+        </section>
+      )}
 
-      <section className="ba-search-card" aria-label="Teacher search and actions">
+      <section
+        className="ba-search-card"
+        aria-label="Teacher search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search teachers..." aria-label="Search teachers" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search teachers..."
+            aria-label="Search teachers"
+          />
         </label>
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add teacher">+</button>
-        <button type="button" className={`ba-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add teacher"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active filters">
-          {filterOrganizationId !== "all" && <button type="button" onClick={() => setFilterOrganizationId("all")}>Organization: {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name || filterOrganizationId} ×</button>}
-          {filterRole !== "all" && <button type="button" onClick={() => setFilterRole("all")}>Role: {roleLabel(filterRole)} ×</button>}
-          {filterStatus !== "all" && <button type="button" onClick={() => setFilterStatus("all")}>Status: {filterStatus} ×</button>}
-          {filterGender !== "all" && <button type="button" onClick={() => setFilterGender("all")}>Gender: {filterGender} ×</button>}
+          {filterOrganizationId !== "all" && (
+            <button
+              type="button"
+              onClick={() => setFilterOrganizationId("all")}
+            >
+              Organization:{" "}
+              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
+                filterOrganizationId}{" "}
+              ×
+            </button>
+          )}
+          {filterRole !== "all" && (
+            <button type="button" onClick={() => setFilterRole("all")}>
+              Role: {roleLabel(filterRole)} ×
+            </button>
+          )}
+          {filterStatus !== "all" && (
+            <button type="button" onClick={() => setFilterStatus("all")}>
+              Status: {filterStatus} ×
+            </button>
+          )}
+          {filterGender !== "all" && (
+            <button type="button" onClick={() => setFilterGender("all")}>
+              Gender: {filterGender} ×
+            </button>
+          )}
         </section>
       )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
-          <AnalysisCard title="Teachers by Organization" rows={countsByOrganization} total={summary.total} />
-          <AnalysisCard title="Teachers by Role" rows={countsByRole} total={summary.total} />
-          <AnalysisCard title="Teachers by Gender" rows={countsByGender} total={summary.total} />
-          <AnalysisCard title="Most Linked Teachers" rows={countsByUsage} total={Math.max(1, countsByUsage.reduce((s, r) => s + r.value, 0))} />
-          <article className="ba-analysis"><span>Current Filter</span><strong>{summary.showing}</strong><p>Teacher record(s) currently match your search and filter conditions.</p></article>
+          <AnalysisCard
+            title="Teachers by Organization"
+            rows={countsByOrganization}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Teachers by Role"
+            rows={countsByRole}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Teachers by Gender"
+            rows={countsByGender}
+            total={summary.total}
+          />
+          <AnalysisCard
+            title="Most Linked Teachers"
+            rows={countsByUsage}
+            total={Math.max(
+              1,
+              countsByUsage.reduce((s, r) => s + r.value, 0),
+            )}
+          />
+          <article className="ba-analysis">
+            <span>Current Filter</span>
+            <strong>{summary.showing}</strong>
+            <p>
+              Teacher record(s) currently match your search and filter
+              conditions.
+            </p>
+          </article>
         </section>
       )}
 
-      {viewMode === "table" && <TableView rows={filteredRows} openEdit={openEdit} remove={remove} toggleActive={toggleActive} />}
-      {viewMode === "cards" && <section className="ba-list">{filteredRows.map((item) => <TeacherListItem key={String(item.id)} item={item} primary={primary} onOpen={() => setSelectedItem(item)} />)}{!filteredRows.length && <Empty icon="👩‍🏫" title="No teachers found" text="Add teachers for this branch, assign departments, connect class subjects, and track attendance links." />}</section>}
+      {viewMode === "table" && (
+        <TableView
+          rows={filteredRows}
+          openEdit={openEdit}
+          remove={remove}
+          toggleActive={toggleActive}
+        />
+      )}
+      {viewMode === "cards" && (
+        <section className="ba-list">
+          {filteredRows.map((item) => (
+            <TeacherListItem
+              key={String(item.id)}
+              item={item}
+              primary={primary}
+              onOpen={() => setSelectedItem(item)}
+            />
+          ))}
+          {!filteredRows.length && (
+            <Empty
+              icon="👩‍🏫"
+              title="No teachers found"
+              text="Add teachers for this branch, assign departments, connect class subjects, and track attendance links."
+            />
+          )}
+        </section>
+      )}
 
-      {filterOpen && <FilterSheet organizations={organizations} genderOptions={genderOptions} filterOrganizationId={filterOrganizationId} filterRole={filterRole} filterStatus={filterStatus} filterGender={filterGender} setFilterOrganizationId={setFilterOrganizationId} setFilterRole={setFilterRole} setFilterStatus={setFilterStatus} setFilterGender={setFilterGender} clearFilters={clearFilters} onClose={() => setFilterOpen(false)} />}
-      {moreOpen && <MoreSheet viewMode={viewMode} summary={summary} setViewMode={(mode) => { setViewMode(mode); setMoreOpen(false); }} onRefresh={async () => { setMoreOpen(false); await load(); }} onClose={() => setMoreOpen(false)} />}
-      {selectedItem && <ActionSheet item={selectedItem} openEdit={openEdit} remove={remove} toggleActive={toggleActive} onClose={() => setSelectedItem(null)} />}
-      {modalOpen && <TeacherModal form={form} saving={saving} organizations={organizations} setModalOpen={setModalOpen} updateForm={updateForm} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} openSignaturePad={openSignaturePad} save={save} />}
+      {filterOpen && (
+        <FilterSheet
+          organizations={organizations}
+          genderOptions={genderOptions}
+          filterOrganizationId={filterOrganizationId}
+          filterRole={filterRole}
+          filterStatus={filterStatus}
+          filterGender={filterGender}
+          setFilterOrganizationId={setFilterOrganizationId}
+          setFilterRole={setFilterRole}
+          setFilterStatus={setFilterStatus}
+          setFilterGender={setFilterGender}
+          clearFilters={clearFilters}
+          onClose={() => setFilterOpen(false)}
+        />
+      )}
+      {moreOpen && (
+        <MoreSheet
+          viewMode={viewMode}
+          summary={summary}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
+          }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
+          onClose={() => setMoreOpen(false)}
+        />
+      )}
+      {selectedItem && (
+        <ActionSheet
+          item={selectedItem}
+          openEdit={openEdit}
+          remove={remove}
+          toggleActive={toggleActive}
+          onClose={() => setSelectedItem(null)}
+        />
+      )}
+      {modalOpen && (
+        <TeacherModal
+          form={form}
+          saving={saving}
+          organizations={organizations}
+          setModalOpen={setModalOpen}
+          updateForm={updateForm}
+          handleImageUpload={handleImageUpload}
+          openCameraForField={openCameraForField}
+          openSignaturePad={openSignaturePad}
+          save={save}
+        />
+      )}
 
       <SignaturePadModal
         open={signaturePadOpen}
@@ -1037,22 +1539,66 @@ export default function TeachersPage() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
-  return <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}><style>{css}</style><section className="ba-state"><div className="ba-spinner" /><h2>{title}</h2><p>{text}</p></section></main>;
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
+  return (
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
+      <style>{css}</style>
+      <section className="ba-state">
+        <div className="ba-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </section>
+    </main>
+  );
 }
 
-function TeacherListItem({ item, primary, onOpen }: { item: TeacherView; primary: string; onOpen: () => void }) {
+function TeacherListItem({
+  item,
+  primary,
+  onOpen,
+}: {
+  item: TeacherView;
+  primary: string;
+  onOpen: () => void;
+}) {
   const row: any = item.row;
   return (
     <button type="button" className="student-row" onClick={onOpen}>
-      <Avatar name={row.fullName} photo={item.photoUrl || safeRecordMediaValue(row.photo)} primary={primary} />
+      <Avatar
+        name={row.fullName}
+        photo={item.photoUrl || safeRecordMediaValue(row.photo)}
+        primary={primary}
+      />
       <span className="student-main">
         <strong>{row.fullName || "Unnamed teacher"}</strong>
-        <small>{roleLabel(row.role)} · {item.organizationName}</small>
-        <em>{row.phone ? `Phone: ${row.phone}` : row.email ? `Email: ${row.email}` : row.qualification || moneyText(row.salary)}</em>
+        <small>
+          {roleLabel(row.role)} · {item.organizationName}
+        </small>
+        <em>
+          {row.phone
+            ? `Phone: ${row.phone}`
+            : row.email
+              ? `Email: ${row.email}`
+              : row.qualification || moneyText(row.salary)}
+        </em>
       </span>
       <span className="student-side">
-        <span className={`status-dot-mini ${statusTone(item.active)}`} title={item.active ? "Active" : "Inactive"} aria-label={item.active ? "Active" : "Inactive"} />
+        <span
+          className={`status-dot-mini ${statusTone(item.active)}`}
+          title={item.active ? "Active" : "Inactive"}
+          aria-label={item.active ? "Active" : "Inactive"}
+        />
         <i>⋯</i>
       </span>
     </button>
@@ -1062,137 +1608,657 @@ function TeacherListItem({ item, primary, onOpen }: { item: TeacherView; primary
 function SliderIcon() {
   return (
     <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" /><path d="M17 7h3" /><circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" /><path d="M11 17h9" /><circle cx="9" cy="17" r="2" />
+      <path d="M4 7h9" />
+      <path d="M17 7h3" />
+      <circle cx="15" cy="7" r="2" />
+      <path d="M4 17h3" />
+      <path d="M11 17h9" />
+      <circle cx="9" cy="17" r="2" />
     </svg>
   );
 }
 
-function FilterSheet({ organizations, genderOptions, filterOrganizationId, filterRole, filterStatus, filterGender, setFilterOrganizationId, setFilterRole, setFilterStatus, setFilterGender, clearFilters, onClose }: {
-  organizations: Organization[]; genderOptions: string[]; filterOrganizationId: string; filterRole: "all" | TeacherRole; filterStatus: TeacherStatusFilter; filterGender: string;
-  setFilterOrganizationId: (value: string) => void; setFilterRole: (value: "all" | TeacherRole) => void; setFilterStatus: (value: TeacherStatusFilter) => void; setFilterGender: (value: string) => void; clearFilters: () => void; onClose: () => void;
+function FilterSheet({
+  organizations,
+  genderOptions,
+  filterOrganizationId,
+  filterRole,
+  filterStatus,
+  filterGender,
+  setFilterOrganizationId,
+  setFilterRole,
+  setFilterStatus,
+  setFilterGender,
+  clearFilters,
+  onClose,
+}: {
+  organizations: Organization[];
+  genderOptions: string[];
+  filterOrganizationId: string;
+  filterRole: "all" | TeacherRole;
+  filterStatus: TeacherStatusFilter;
+  filterGender: string;
+  setFilterOrganizationId: (value: string) => void;
+  setFilterRole: (value: "all" | TeacherRole) => void;
+  setFilterStatus: (value: TeacherStatusFilter) => void;
+  setFilterGender: (value: string) => void;
+  clearFilters: () => void;
+  onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet">
-      <div className="ba-sheet-head"><div><h2>Filters</h2><p>Choose only what you need. The teacher list updates after applying.</p></div><button type="button" onClick={onClose} aria-label="Close filters">✕</button></div>
-      <div className="ba-form compact">
-        <label><span>Organization</span><select value={filterOrganizationId} onChange={(e) => setFilterOrganizationId(e.target.value)}><option value="all">All organizations</option>{organizations.map((r: any) => <option key={String(r.id)} value={String(r.id)}>{r.name}{r.type ? ` · ${r.type}` : ""}</option>)}</select></label>
-        <label><span>Role</span><select value={filterRole} onChange={(e) => setFilterRole(e.target.value as "all" | TeacherRole)}><option value="all">All roles</option><option value="teacher">Teacher</option><option value="head_teacher">Head Teacher</option><option value="lecturer">Lecturer</option><option value="principal">Principal</option></select></label>
-        <label><span>Status</span><select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as TeacherStatusFilter)}><option value="all">All status</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-        <label><span>Gender</span><select value={filterGender} onChange={(e) => setFilterGender(e.target.value)}><option value="all">All gender</option>{genderOptions.map((g) => <option key={g} value={g}>{g}</option>)}</select></label>
-      </div>
-      <div className="ba-sheet-actions"><button type="button" onClick={clearFilters}>Clear</button><button type="button" className="primary" onClick={onClose}>Apply</button></div>
-    </section></div>
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>Filters</h2>
+            <p>
+              Choose only what you need. The teacher list updates after
+              applying.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
+        </div>
+        <div className="ba-form compact">
+          <label>
+            <span>Organization</span>
+            <select
+              value={filterOrganizationId}
+              onChange={(e) => setFilterOrganizationId(e.target.value)}
+            >
+              <option value="all">All organizations</option>
+              {organizations.map((r: any) => (
+                <option key={String(r.id)} value={String(r.id)}>
+                  {r.name}
+                  {r.type ? ` · ${r.type}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Role</span>
+            <select
+              value={filterRole}
+              onChange={(e) =>
+                setFilterRole(e.target.value as "all" | TeacherRole)
+              }
+            >
+              <option value="all">All roles</option>
+              <option value="teacher">Teacher</option>
+              <option value="head_teacher">Head Teacher</option>
+              <option value="lecturer">Lecturer</option>
+              <option value="principal">Principal</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select
+              value={filterStatus}
+              onChange={(e) =>
+                setFilterStatus(e.target.value as TeacherStatusFilter)
+              }
+            >
+              <option value="all">All status</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </label>
+          <label>
+            <span>Gender</span>
+            <select
+              value={filterGender}
+              onChange={(e) => setFilterGender(e.target.value)}
+            >
+              <option value="all">All gender</option>
+              {genderOptions.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="ba-sheet-actions">
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function MoreSheet({ viewMode, summary, setViewMode, onRefresh, onClose }: { viewMode: ViewMode; summary: { total: number; active: number; inactive: number; teachers: number; leaders: number; attendanceRecords: number; showing: number }; setViewMode: (mode: ViewMode) => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  viewMode,
+  summary,
+  setViewMode,
+  onRefresh,
+  onClose,
+}: {
+  viewMode: ViewMode;
+  summary: {
+    total: number;
+    active: number;
+    inactive: number;
+    teachers: number;
+    leaders: number;
+    attendanceRecords: number;
+    showing: number;
+  };
+  setViewMode: (mode: ViewMode) => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
-      <div className="ba-sheet-head"><div><h2>More</h2><p>{summary.showing} of {summary.total} teacher record(s) shown.</p></div><button type="button" onClick={onClose} aria-label="Close menu">✕</button></div>
-      <div className="ba-menu-list">
-        <button type="button" className={viewMode === "cards" ? "active" : ""} onClick={() => setViewMode("cards")}><span>☰</span><b>List view</b><small>Simple teacher records</small></button>
-        <button type="button" className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}><span>☷</span><b>Table view</b><small>Dense records for laptop work</small></button>
-        <button type="button" className={viewMode === "summary" ? "active" : ""} onClick={() => setViewMode("summary")}><span>◔</span><b>Analytics</b><small>Organization, role, gender and usage summaries</small></button>
-        <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch records</small></button>
-      </div>
-    </section></div>
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet small">
+        <div className="ba-sheet-head">
+          <div>
+            <h2>More</h2>
+            <p>
+              {summary.showing} of {summary.total} teacher record(s) shown.
+            </p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
+        </div>
+        <div className="ba-menu-list">
+          <button
+            type="button"
+            className={viewMode === "cards" ? "active" : ""}
+            onClick={() => setViewMode("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Simple teacher records</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "table" ? "active" : ""}
+            onClick={() => setViewMode("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense records for laptop work</small>
+          </button>
+          <button
+            type="button"
+            className={viewMode === "summary" ? "active" : ""}
+            onClick={() => setViewMode("summary")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Organization, role, gender and usage summaries</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch records</small>
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function ActionSheet({ item, openEdit, remove, toggleActive, onClose }: { item: TeacherView; openEdit: (row: Teacher) => void; remove: (item: TeacherView) => void; toggleActive: (item: TeacherView) => void; onClose: () => void }) {
+function ActionSheet({
+  item,
+  openEdit,
+  remove,
+  toggleActive,
+  onClose,
+}: {
+  item: TeacherView;
+  openEdit: (row: Teacher) => void;
+  remove: (item: TeacherView) => void;
+  toggleActive: (item: TeacherView) => void;
+  onClose: () => void;
+}) {
   const row: any = item.row;
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
-      <div className="ba-sheet-profile"><div><h2>{row.fullName || "Teacher"}</h2><p>{roleLabel(row.role)} · {item.active ? "Active" : "Inactive"}</p></div><button type="button" onClick={onClose} aria-label="Close teacher actions">✕</button></div>
-      <div className="student-detail-strip"><span><b>Assignments</b>{item.assignmentCount}</span><span><b>Class Subjects</b>{item.classSubjectCount}</span><span><b>Attendance</b>{item.attendanceCount}</span></div>
-      <div className="ba-menu-list">
-        <button type="button" onClick={() => openEdit(item.row)}><span>✎</span><b>Edit teacher</b><small>Update profile, organization, salary, photos and signature</small></button>
-        <button type="button" onClick={() => toggleActive(item)}><span>{item.active ? "⏸" : "✓"}</span><b>{item.active ? "Deactivate" : "Activate"}</b><small>{item.active ? "Mark this teacher as inactive" : "Restore this teacher as active"}</small></button>
-        <button type="button" className="danger" onClick={() => remove(item)}><span>⌫</span><b>Delete</b><small>Soft delete this teacher locally</small></button>
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+      <section className="ba-sheet small">
+        <div className="ba-sheet-profile">
+          <div>
+            <h2>{row.fullName || "Teacher"}</h2>
+            <p>
+              {roleLabel(row.role)} · {item.active ? "Active" : "Inactive"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close teacher actions"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="student-detail-strip">
+          <span>
+            <b>Assignments</b>
+            {item.assignmentCount}
+          </span>
+          <span>
+            <b>Class Subjects</b>
+            {item.classSubjectCount}
+          </span>
+          <span>
+            <b>Attendance</b>
+            {item.attendanceCount}
+          </span>
+        </div>
+        <div className="ba-menu-list">
+          <button type="button" onClick={() => openEdit(item.row)}>
+            <span>✎</span>
+            <b>Edit teacher</b>
+            <small>
+              Update profile, organization, salary, photos and signature
+            </small>
+          </button>
+          <button type="button" onClick={() => toggleActive(item)}>
+            <span>{item.active ? "⏸" : "✓"}</span>
+            <b>{item.active ? "Deactivate" : "Activate"}</b>
+            <small>
+              {item.active
+                ? "Mark this teacher as inactive"
+                : "Restore this teacher as active"}
+            </small>
+          </button>
+          <button type="button" className="danger" onClick={() => remove(item)}>
+            <span>⌫</span>
+            <b>Delete</b>
+            <small>Soft delete this teacher locally</small>
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TableView({
+  rows,
+  openEdit,
+  remove,
+  toggleActive,
+}: {
+  rows: TeacherView[];
+  openEdit: (row: Teacher) => void;
+  remove: (item: TeacherView) => void;
+  toggleActive: (item: TeacherView) => void;
+}) {
+  return (
+    <section className="ba-table-card">
+      <div className="ba-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Teachers ({rows.length})</th>
+              <th>Role</th>
+              <th>Organization</th>
+              <th>Contact</th>
+              <th>Qualification</th>
+              <th>Salary</th>
+              <th>Assignments</th>
+              <th>Class Subjects</th>
+              <th>Class Teacher</th>
+              <th>Attendance</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item) => {
+              const row: any = item.row;
+              return (
+                <tr key={String(item.id)}>
+                  <td>
+                    <strong>{row.fullName}</strong>
+                    <span>{row.gender || "No gender set"}</span>
+                  </td>
+                  <td>
+                    <Chip tone={roleTone(row.role)}>{roleLabel(row.role)}</Chip>
+                  </td>
+                  <td>{item.organizationName}</td>
+                  <td>
+                    <strong>{row.phone || "—"}</strong>
+                    <span>{row.email || "No email"}</span>
+                  </td>
+                  <td>{row.qualification || "—"}</td>
+                  <td>{moneyText(row.salary)}</td>
+                  <td>{item.assignmentCount}</td>
+                  <td>{item.classSubjectCount}</td>
+                  <td>{item.classTeacherCount}</td>
+                  <td>{item.attendanceCount}</td>
+                  <td>
+                    <Chip tone={item.active ? "green" : "red"}>
+                      {item.active ? "Active" : "Inactive"}
+                    </Chip>
+                  </td>
+                  <td>{timeText(row.updatedAt || row.createdAt)}</td>
+                  <td>
+                    <div className="ba-table-actions">
+                      <button type="button" onClick={() => openEdit(item.row)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => toggleActive(item)}>
+                        {item.active ? "Deactivate" : "Activate"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ba-delete"
+                        onClick={() => remove(item)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!rows.length && (
+          <div className="ba-empty-table">No teacher matches your filters.</div>
+        )}
       </div>
-    </section></div>
+    </section>
   );
 }
 
-function TableView({ rows, openEdit, remove, toggleActive }: { rows: TeacherView[]; openEdit: (row: Teacher) => void; remove: (item: TeacherView) => void; toggleActive: (item: TeacherView) => void }) {
+function TeacherModal({
+  form,
+  saving,
+  organizations,
+  setModalOpen,
+  updateForm,
+  handleImageUpload,
+  openCameraForField,
+  openSignaturePad,
+  save,
+}: {
+  form: FormState;
+  saving: boolean;
+  organizations: Organization[];
+  setModalOpen: (open: boolean) => void;
+  updateForm: (patch: Partial<FormState>) => void;
+  handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>;
+  openCameraForField: (field: CameraField) => void;
+  openSignaturePad: () => void;
+  save: (event?: React.FormEvent) => void;
+}) {
   return (
-    <section className="ba-table-card"><div className="ba-table-scroll"><table><thead><tr><th>Teachers ({rows.length})</th><th>Role</th><th>Organization</th><th>Contact</th><th>Qualification</th><th>Salary</th><th>Assignments</th><th>Class Subjects</th><th>Class Teacher</th><th>Attendance</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
-      {rows.map((item) => { const row: any = item.row; return (
-        <tr key={String(item.id)}><td><strong>{row.fullName}</strong><span>{row.gender || "No gender set"}</span></td><td><Chip tone={roleTone(row.role)}>{roleLabel(row.role)}</Chip></td><td>{item.organizationName}</td><td><strong>{row.phone || "—"}</strong><span>{row.email || "No email"}</span></td><td>{row.qualification || "—"}</td><td>{moneyText(row.salary)}</td><td>{item.assignmentCount}</td><td>{item.classSubjectCount}</td><td>{item.classTeacherCount}</td><td>{item.attendanceCount}</td><td><Chip tone={item.active ? "green" : "red"}>{item.active ? "Active" : "Inactive"}</Chip></td><td>{timeText(row.updatedAt || row.createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={() => openEdit(item.row)}>Edit</button><button type="button" onClick={() => toggleActive(item)}>{item.active ? "Deactivate" : "Activate"}</button><button type="button" className="ba-delete" onClick={() => remove(item)}>Delete</button></div></td></tr>
-      ); })}
-    </tbody></table>{!rows.length && <div className="ba-empty-table">No teacher matches your filters.</div>}</div></section>
-  );
-}
-
-function TeacherModal({ form, saving, organizations, setModalOpen, updateForm, handleImageUpload, openCameraForField, openSignaturePad, save }: { form: FormState; saving: boolean; organizations: Organization[]; setModalOpen: (open: boolean) => void; updateForm: (patch: Partial<FormState>) => void; handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>; openCameraForField: (field: CameraField) => void; openSignaturePad: () => void; save: (event?: React.FormEvent) => void }) {
-  return (
-    <div className="ba-modal-backdrop"><form className="ba-modal" onSubmit={save}>
-      <div className="ba-modal-head"><div><h2>{form.id ? "Edit Teacher" : "Add Teacher"}</h2><p>Teacher will be saved under the selected school branch.</p></div><button type="button" onClick={() => setModalOpen(false)} aria-label="Close teacher form">✕</button></div>
-      <section className="ba-form-section"><h3>Teacher</h3><div className="ba-form">
-        <label><span>Full Name</span><input value={form.fullName} onChange={(e) => updateForm({ fullName: e.target.value })} placeholder="Teacher full name" /></label>
-        <label><span>Gender</span><select value={form.gender} onChange={(e) => updateForm({ gender: e.target.value })}><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></label>
-        <label><span>Age</span><input type="number" value={form.age} onChange={(e) => updateForm({ age: e.target.value })} placeholder="Age" /></label>
-        <label><span>Role</span><select value={form.role} onChange={(e) => updateForm({ role: e.target.value as TeacherRole })}><option value="teacher">Teacher</option><option value="head_teacher">Head Teacher</option><option value="lecturer">Lecturer</option><option value="principal">Principal</option></select></label>
-        <label><span>Status</span><select value={form.active ? "active" : "inactive"} onChange={(e) => updateForm({ active: e.target.value === "active" })}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-      </div></section>
-      <section className="ba-form-section"><h3>Work Details</h3><div className="ba-form">
-        <label><span>Organization / Department</span><select value={form.organizationId} onChange={(e) => updateForm({ organizationId: e.target.value })}><option value="">No organization</option>{organizations.map((r: any) => <option key={String(r.id)} value={String(r.id)}>{r.name}{r.type ? ` · ${r.type}` : ""}</option>)}</select></label>
-        <label><span>Qualification</span><input value={form.qualification} onChange={(e) => updateForm({ qualification: e.target.value })} placeholder="Qualification" /></label>
-        <label><span>Employment Date</span><input type="date" value={form.employmentDate} onChange={(e) => updateForm({ employmentDate: e.target.value })} /></label>
-        <label><span>Salary</span><input type="number" value={form.salary} onChange={(e) => updateForm({ salary: e.target.value })} placeholder="Salary" /></label>
-      </div></section>
-      <section className="ba-form-section"><h3>Contact</h3><div className="ba-form">
-        <label><span>Email</span><input value={form.email} onChange={(e) => updateForm({ email: e.target.value })} placeholder="Email address" /></label>
-        <label><span>Phone</span><input value={form.phone} onChange={(e) => updateForm({ phone: e.target.value })} placeholder="Phone number" /></label>
-        <label><span>Relative Phone</span><input value={form.relativePhone} onChange={(e) => updateForm({ relativePhone: e.target.value })} placeholder="Emergency / relative phone" /></label>
-      </div></section>
-      <section className="ba-form-section"><h3>Photos</h3><div className="ba-form two">
-        <label>
-          <span>Teacher Photo</span>
-          <div className="ba-media-actions">
-            <label className="ba-media-button">
-              Upload Photo
-              <input type="file" accept="image/*" onChange={(e) => handleImageUpload("photo", e.target.files?.[0])} hidden />
-            </label>
-            <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("photo")}>
-              Take Photo
-            </button>
+    <div className="ba-modal-backdrop">
+      <form className="ba-modal" onSubmit={save}>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{form.id ? "Edit Teacher" : "Add Teacher"}</h2>
+            <p>Teacher will be saved under the selected school branch.</p>
           </div>
-          <small className="ba-media-hint">Upload from files or take a quick camera photo. The image is optimized and saved as a media asset.</small>
-          {form.photo && <img src={form.photo} alt="Teacher preview" className="ba-preview-photo" />}
-        </label>
-        <label>
-          <span>Cover Photo</span>
-          <div className="ba-media-actions">
-            <label className="ba-media-button">
-              Upload Cover
-              <input type="file" accept="image/*" onChange={(e) => handleImageUpload("coverPhoto", e.target.files?.[0])} hidden />
+          <button
+            type="button"
+            onClick={() => setModalOpen(false)}
+            aria-label="Close teacher form"
+          >
+            ✕
+          </button>
+        </div>
+        <section className="ba-form-section">
+          <h3>Teacher</h3>
+          <div className="ba-form">
+            <label>
+              <span>Full Name</span>
+              <input
+                value={form.fullName}
+                onChange={(e) => updateForm({ fullName: e.target.value })}
+                placeholder="Teacher full name"
+              />
             </label>
-            <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField("coverPhoto")}>
-              Take Photo
-            </button>
-          </div>
-          <small className="ba-media-hint">Upload from files or use the camera. The cover is compressed separately so sync records stay small.</small>
-          {form.coverPhoto && <img src={form.coverPhoto} alt="Teacher cover preview" className="ba-preview-banner" />}
-        </label>
-        <label>
-          <span>Signature</span>
-          <div className="ba-media-actions">
-            <label className="ba-media-button">
-              Upload Signature
-              <input type="file" accept="image/*" onChange={(e) => handleImageUpload("signature", e.target.files?.[0])} hidden />
+            <label>
+              <span>Gender</span>
+              <select
+                value={form.gender}
+                onChange={(e) => updateForm({ gender: e.target.value })}
+              >
+                <option value="">Select gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
             </label>
-            <button type="button" className="ba-media-button secondary" onClick={openSignaturePad}>
-              Draw Signature
-            </button>
+            <label>
+              <span>Age</span>
+              <input
+                type="number"
+                value={form.age}
+                onChange={(e) => updateForm({ age: e.target.value })}
+                placeholder="Age"
+              />
+            </label>
+            <label>
+              <span>Role</span>
+              <select
+                value={form.role}
+                onChange={(e) =>
+                  updateForm({ role: e.target.value as TeacherRole })
+                }
+              >
+                <option value="teacher">Teacher</option>
+                <option value="head_teacher">Head Teacher</option>
+                <option value="lecturer">Lecturer</option>
+                <option value="principal">Principal</option>
+              </select>
+            </label>
+            <label>
+              <span>Status</span>
+              <select
+                value={form.active ? "active" : "inactive"}
+                onChange={(e) =>
+                  updateForm({ active: e.target.value === "active" })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
           </div>
-          <small className="ba-media-hint">Upload or draw a signature image. It is stored as a compact signature media asset.</small>
-          {form.signature && <img src={form.signature} alt="Teacher signature preview" className="ba-preview-signature" />}
-        </label>
-      </div></section>
-      <div className="ba-modal-actions"><button type="button" onClick={() => setModalOpen(false)}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : form.id ? "Save Changes" : "Add Teacher"}</button></div>
-    </form></div>
+        </section>
+        <section className="ba-form-section">
+          <h3>Work Details</h3>
+          <div className="ba-form">
+            <label>
+              <span>Organization / Department</span>
+              <select
+                value={form.organizationId}
+                onChange={(e) => updateForm({ organizationId: e.target.value })}
+              >
+                <option value="">No organization</option>
+                {organizations.map((r: any) => (
+                  <option key={String(r.id)} value={String(r.id)}>
+                    {r.name}
+                    {r.type ? ` · ${r.type}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Qualification</span>
+              <input
+                value={form.qualification}
+                onChange={(e) => updateForm({ qualification: e.target.value })}
+                placeholder="Qualification"
+              />
+            </label>
+            <label>
+              <span>Employment Date</span>
+              <input
+                type="date"
+                value={form.employmentDate}
+                onChange={(e) => updateForm({ employmentDate: e.target.value })}
+              />
+            </label>
+            <label>
+              <span>Salary</span>
+              <input
+                type="number"
+                value={form.salary}
+                onChange={(e) => updateForm({ salary: e.target.value })}
+                placeholder="Salary"
+              />
+            </label>
+          </div>
+        </section>
+        <section className="ba-form-section">
+          <h3>Contact</h3>
+          <div className="ba-form">
+            <label>
+              <span>Email</span>
+              <input
+                value={form.email}
+                onChange={(e) => updateForm({ email: e.target.value })}
+                placeholder="Email address"
+              />
+            </label>
+            <label>
+              <span>Phone</span>
+              <input
+                value={form.phone}
+                onChange={(e) => updateForm({ phone: e.target.value })}
+                placeholder="Phone number"
+              />
+            </label>
+            <label>
+              <span>Relative Phone</span>
+              <input
+                value={form.relativePhone}
+                onChange={(e) => updateForm({ relativePhone: e.target.value })}
+                placeholder="Emergency / relative phone"
+              />
+            </label>
+          </div>
+        </section>
+        <section className="ba-form-section">
+          <h3>Photos</h3>
+          <div className="ba-form two">
+            <label>
+              <span>Teacher Photo</span>
+              <div className="ba-media-actions">
+                <label className="ba-media-button">
+                  Upload Photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      handleImageUpload("photo", e.target.files?.[0])
+                    }
+                    hidden
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("photo")}
+                >
+                  Take Photo
+                </button>
+              </div>
+              <small className="ba-media-hint">
+                Upload from files or take a quick camera photo. The image is
+                optimized and saved as a media asset.
+              </small>
+              {form.photo && (
+                <img
+                  src={form.photo}
+                  alt="Teacher preview"
+                  className="ba-preview-photo"
+                />
+              )}
+            </label>
+            <label>
+              <span>Cover Photo</span>
+              <div className="ba-media-actions">
+                <label className="ba-media-button">
+                  Upload Cover
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      handleImageUpload("coverPhoto", e.target.files?.[0])
+                    }
+                    hidden
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={() => openCameraForField("coverPhoto")}
+                >
+                  Take Photo
+                </button>
+              </div>
+              <small className="ba-media-hint">
+                Upload from files or use the camera. The cover is compressed
+                separately so sync records stay small.
+              </small>
+              {form.coverPhoto && (
+                <img
+                  src={form.coverPhoto}
+                  alt="Teacher cover preview"
+                  className="ba-preview-banner"
+                />
+              )}
+            </label>
+            <label>
+              <span>Signature</span>
+              <div className="ba-media-actions">
+                <label className="ba-media-button">
+                  Upload Signature
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) =>
+                      handleImageUpload("signature", e.target.files?.[0])
+                    }
+                    hidden
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="ba-media-button secondary"
+                  onClick={openSignaturePad}
+                >
+                  Draw Signature
+                </button>
+              </div>
+              <small className="ba-media-hint">
+                Upload or draw a signature image. It is stored as a compact
+                signature media asset.
+              </small>
+              {form.signature && (
+                <img
+                  src={form.signature}
+                  alt="Teacher signature preview"
+                  className="ba-preview-signature"
+                />
+              )}
+            </label>
+          </div>
+        </section>
+        <div className="ba-modal-actions">
+          <button type="button" onClick={() => setModalOpen(false)}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : form.id ? "Save Changes" : "Add Teacher"}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -1225,12 +2291,19 @@ function CameraCaptureModal({
         : `Capture ${entityLabel} Signature`;
 
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
-            <p>Use the live camera preview, then capture. The image will still be compressed and saved as a media asset.</p>
+            <p>
+              Use the live camera preview, then capture. The image will still be
+              compressed and saved as a media asset.
+            </p>
           </div>
           <button type="button" onClick={close} aria-label="Close camera">
             ✕
@@ -1239,23 +2312,41 @@ function CameraCaptureModal({
 
         <div className="ba-camera-preview">
           <video ref={videoRef} autoPlay muted playsInline />
-          {starting && <span className="ba-camera-loading">Opening camera...</span>}
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
         </div>
 
         <div className="ba-camera-actions">
           <button
             type="button"
             className="ba-camera-secondary"
-            onClick={() => setFacing(facing === "environment" ? "user" : "environment")}
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
             disabled={starting || capturing}
           >
             Switch Camera
           </button>
-          <button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
             Cancel
           </button>
-          <button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>
-            {capturing ? "Capturing..." : field === "signature" ? "Capture Signature" : "Capture Photo"}
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
+            {capturing
+              ? "Capturing..."
+              : field === "signature"
+                ? "Capture Signature"
+                : "Capture Photo"}
           </button>
         </div>
       </section>
@@ -1263,18 +2354,53 @@ function CameraCaptureModal({
   );
 }
 
-function groupedCounts(rows: TeacherView[], keyFn: (item: TeacherView) => string) {
+function groupedCounts(
+  rows: TeacherView[],
+  keyFn: (item: TeacherView) => string,
+) {
   const m = new Map<string, number>();
-  rows.forEach((r) => { const k = keyFn(r) || "Unknown"; m.set(k, (m.get(k) || 0) + 1); });
-  return Array.from(m.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  rows.forEach((r) => {
+    const k = keyFn(r) || "Unknown";
+    m.set(k, (m.get(k) || 0) + 1);
+  });
+  return Array.from(m.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 }
 
-function AnalysisCard({ title, rows, total }: { title: string; rows: { label: string; value: number }[]; total: number }) {
+function AnalysisCard({
+  title,
+  rows,
+  total,
+}: {
+  title: string;
+  rows: { label: string; value: number }[];
+  total: number;
+}) {
   return (
-    <article className="ba-analysis"><span>{title}</span><strong>{rows.reduce((s, r) => s + r.value, 0)}</strong><div className="ba-analysis-list">
-      {rows.slice(0, 8).map((row) => { const share = total ? Math.round((row.value / total) * 100) : 0; return <section key={row.label}><div><b>{row.label}</b><small>{row.value} · {share}%</small></div><div className="ba-progress"><i style={{ width: `${Math.max(4, share)}%` }} /></div></section>; })}
-      {!rows.length && <p>No data available.</p>}
-    </div></article>
+    <article className="ba-analysis">
+      <span>{title}</span>
+      <strong>{rows.reduce((s, r) => s + r.value, 0)}</strong>
+      <div className="ba-analysis-list">
+        {rows.slice(0, 8).map((row) => {
+          const share = total ? Math.round((row.value / total) * 100) : 0;
+          return (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>
+                  {row.value} · {share}%
+                </small>
+              </div>
+              <div className="ba-progress">
+                <i style={{ width: `${Math.max(4, share)}%` }} />
+              </div>
+            </section>
+          );
+        })}
+        {!rows.length && <p>No data available.</p>}
+      </div>
+    </article>
   );
 }
 

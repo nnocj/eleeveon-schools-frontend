@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -135,11 +134,11 @@ type OpenWorkspaceSession = {
   membership?: AnyRow | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -150,7 +149,9 @@ function safeRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -175,22 +176,24 @@ function readStoredActiveMembership(): AnyRow | null {
   return safeJson<AnyRow>("activeMembership");
 }
 
-function toPositiveNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function cleanId(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
 }
 
-function firstPositiveNumber(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string | null {
   for (const value of values) {
-    const parsed = toPositiveNumber(value);
+    const parsed = cleanId(value);
     if (parsed) return parsed;
   }
 
   return null;
 }
 
-function workspaceMembership(openWorkspace?: OpenWorkspaceSession | null, activeMembership?: AnyRow | null) {
+function workspaceMembership(
+  openWorkspace?: OpenWorkspaceSession | null,
+  activeMembership?: AnyRow | null,
+) {
   return (
     openWorkspace?.membership ||
     activeMembership ||
@@ -206,16 +209,19 @@ function selectedSchoolId(args: {
   activeSchool?: AnyRow | null;
   settings?: AnyRow | null;
 }) {
-  const membership = workspaceMembership(args.openWorkspace, args.activeMembership);
+  const membership = workspaceMembership(
+    args.openWorkspace,
+    args.activeMembership,
+  );
 
-  return firstPositiveNumber(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeRead("activeSchoolId")
+    safeRead("activeSchoolId"),
   );
 }
 
@@ -226,9 +232,12 @@ function selectedBranchId(args: {
   activeBranch?: AnyRow | null;
   settings?: AnyRow | null;
 }) {
-  const membership = workspaceMembership(args.openWorkspace, args.activeMembership);
+  const membership = workspaceMembership(
+    args.openWorkspace,
+    args.activeMembership,
+  );
 
-  return firstPositiveNumber(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -236,7 +245,7 @@ function selectedBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeRead("activeBranchId")
+    safeRead("activeBranchId"),
   );
 }
 
@@ -245,7 +254,10 @@ function selectedBranchName(args: {
   activeMembership?: AnyRow | null;
   activeBranch?: AnyRow | null;
 }) {
-  const membership = workspaceMembership(args.openWorkspace, args.activeMembership);
+  const membership = workspaceMembership(
+    args.openWorkspace,
+    args.activeMembership,
+  );
 
   return text(
     args.activeBranch?.name ||
@@ -254,7 +266,7 @@ function selectedBranchName(args: {
       args.openWorkspace?.userName ||
       membership?.branchName ||
       membership?.branch?.name,
-    "Active Branch"
+    "Active Branch",
   );
 }
 
@@ -267,30 +279,48 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId ?? row?.payload?.id ?? row?.payload?.localId;
+function idOf(row?: AnyRow): string {
+  return cleanId(row?.id ?? row?.payload?.id);
 }
 
 function sameAccount(row: AnyRow, accountId?: string | null) {
-  return row && row.isDeleted !== true && (!row.accountId || !accountId || row.accountId === accountId);
+  return (
+    row &&
+    row.isDeleted !== true &&
+    (!row.accountId || !accountId || row.accountId === accountId)
+  );
 }
 
-function branchScoped(row: AnyRow, accountId?: string | null, schoolId?: number | string | null, branchId?: number | string | null) {
+function branchScoped(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+  branchId?: string | null,
+) {
   if (!sameAccount(row, accountId)) return false;
-  const rowSchoolId = row.schoolId ?? row.schoolLocalId ?? row.payload?.schoolId;
-  const rowBranchId = row.branchId ?? row.branchLocalId ?? row.payload?.branchId;
-  if (schoolId && rowSchoolId && String(rowSchoolId) !== String(schoolId)) return false;
-  if (branchId && rowBranchId && String(rowBranchId) !== String(branchId)) return false;
+  const rowSchoolId = row.schoolId ?? row.payload?.schoolId;
+  const rowBranchId = row.branchId ?? row.payload?.branchId;
+  if (schoolId && rowSchoolId && String(rowSchoolId) !== String(schoolId))
+    return false;
+  if (branchId && rowBranchId && String(rowBranchId) !== String(branchId))
+    return false;
   return true;
 }
 
 function activeRow(row: AnyRow) {
   const status = String(row?.status || "").toLowerCase();
-  return row?.isDeleted !== true && row?.active !== false && !["deleted", "archived", "inactive", "disabled"].includes(status);
+  return (
+    row?.isDeleted !== true &&
+    row?.active !== false &&
+    !["deleted", "archived", "inactive", "disabled"].includes(status)
+  );
 }
 
 function rowName(row?: AnyRow) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function dateLabel(value?: number | string | null) {
@@ -338,12 +368,22 @@ async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
 }
 
 function areaFromSectionTitle(title: string): Exclude<AreaFilter, "all"> {
-  const value = String(title || "").toLowerCase().trim();
+  const value = String(title || "")
+    .toLowerCase()
+    .trim();
   if (value.includes("admin")) return "administration";
   if (value.includes("attendance")) return "attendance";
   if (value.includes("communication")) return "communication";
-  if (value.includes("calendar") || value.includes("timetable")) return "timetable";
-  if (value.includes("setup") || value.includes("academic") || value.includes("curriculum") || value.includes("assessment") || value.includes("grading")) return "setup";
+  if (value.includes("calendar") || value.includes("timetable"))
+    return "timetable";
+  if (
+    value.includes("setup") ||
+    value.includes("academic") ||
+    value.includes("curriculum") ||
+    value.includes("assessment") ||
+    value.includes("grading")
+  )
+    return "setup";
   if (value.includes("record")) return "records";
   if (value.includes("finance")) return "finance";
   if (value.includes("control") || value.includes("setting")) return "control";
@@ -352,10 +392,35 @@ function areaFromSectionTitle(title: string): Exclude<AreaFilter, "all"> {
 
 function statusTone(status?: string): Tone {
   const value = String(status || "").toLowerCase();
-  if (["active", "paid", "sent", "succeeded", "success", "synced", "present", "published"].includes(value)) return "green";
-  if (["failed", "overdue", "cancelled", "expired", "suspended", "absent", "withdrawn"].includes(value)) return "red";
-  if (["pending", "processing", "trial", "draft", "late"].includes(value)) return "orange";
-  if (["scheduled", "issued", "completed", "promoted"].includes(value)) return "blue";
+  if (
+    [
+      "active",
+      "paid",
+      "sent",
+      "succeeded",
+      "success",
+      "synced",
+      "present",
+      "published",
+    ].includes(value)
+  )
+    return "green";
+  if (
+    [
+      "failed",
+      "overdue",
+      "cancelled",
+      "expired",
+      "suspended",
+      "absent",
+      "withdrawn",
+    ].includes(value)
+  )
+    return "red";
+  if (["pending", "processing", "trial", "draft", "late"].includes(value))
+    return "orange";
+  if (["scheduled", "issued", "completed", "promoted"].includes(value))
+    return "blue";
   return "gray";
 }
 
@@ -375,7 +440,13 @@ function areaLabel(area: string) {
   return labels[area] || area;
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`bd-chip ${tone}`}>{children}</span>;
 }
 
@@ -407,42 +478,52 @@ function count(rows: AnyRow[]) {
 }
 
 function uniqueCount(rows: AnyRow[], key: string) {
-  return new Set(rows.filter(activeRow).map((row) => row[key]).filter((value) => value !== undefined && value !== null && value !== "")).size;
+  return new Set(
+    rows
+      .filter(activeRow)
+      .map((row) => row[key])
+      .filter((value) => value !== undefined && value !== null && value !== ""),
+  ).size;
 }
 
 function uniqueUsersRoleCount(rows: AnyRow[]) {
   const users = new Map<string, AnyRow>();
 
-  rows
-    .filter(activeRow)
-    .forEach((row) => {
-      const key = String(
-        row.userId ||
-          row.appUserId ||
-          row.user?.id ||
-          row.appUser?.id ||
-          row.email ||
-          row.userEmail ||
-          row.user?.email ||
-          row.appUser?.email ||
-          row.id ||
-          `${row.role || "user"}-${row.teacherLocalId || row.studentLocalId || row.parentLocalId || row.teacherId || row.studentId || row.parentId || ""}`
-      );
+  rows.filter(activeRow).forEach((row) => {
+    const key = String(
+      row.userId ||
+        row.appUserId ||
+        row.user?.id ||
+        row.appUser?.id ||
+        row.email ||
+        row.userEmail ||
+        row.user?.email ||
+        row.appUser?.email ||
+        row.id ||
+        `${row.role || "user"}-${row.teacherId || row.studentId || row.parentId || row.teacherId || row.studentId || row.parentId || ""}`,
+    );
 
-      if (key && key !== "undefined" && key !== "null") {
-        users.set(key, row);
-      }
-    });
+    if (key && key !== "undefined" && key !== "null") {
+      users.set(key, row);
+    }
+  });
 
   return users.size;
 }
 
 function sum(rows: AnyRow[], field: string) {
-  return rows.filter(activeRow).reduce((total, row) => total + n(row[field]), 0);
+  return rows
+    .filter(activeRow)
+    .reduce((total, row) => total + n(row[field]), 0);
 }
 
-function buildNavModules(navSections?: RoleNavSection[]): Omit<DashboardModule, "value" | "note" | "tone">[] {
-  const unique = new Map<string, Omit<DashboardModule, "value" | "note" | "tone">>();
+function buildNavModules(
+  navSections?: RoleNavSection[],
+): Omit<DashboardModule, "value" | "note" | "tone">[] {
+  const unique = new Map<
+    string,
+    Omit<DashboardModule, "value" | "note" | "tone">
+  >();
 
   (navSections || []).forEach((section) => {
     const area = areaFromSectionTitle(section.title);
@@ -464,56 +545,239 @@ function buildNavModules(navSections?: RoleNavSection[]): Omit<DashboardModule, 
   return [...unique.values()];
 }
 
-function metricFor(routeKey: string, rows: Record<string, AnyRow[]>, summary: AnyRow): CountMetric {
+function metricFor(
+  routeKey: string,
+  rows: Record<string, AnyRow[]>,
+  summary: AnyRow,
+): CountMetric {
   const metricMap: Record<string, CountMetric> = {
     students: {
       value: summary.students,
       note: `${summary.enrollments} enrollment record(s), ${summary.uniqueEnrolledStudents} unique enrolled student(s).`,
-      tone: summary.students ? "green" : summary.uniqueEnrolledStudents ? "orange" : "gray",
+      tone: summary.students
+        ? "green"
+        : summary.uniqueEnrolledStudents
+          ? "orange"
+          : "gray",
     },
-    teachers: { value: summary.teachers, note: "Branch teaching staff and profiles.", tone: summary.teachers ? "blue" : "orange" },
-    parents: { value: summary.parents, note: "Parent and guardian contacts linked to students.", tone: summary.parents ? "purple" : "gray" },
-    classes: { value: summary.classes, note: `${summary.classSubjects} class subject link(s).`, tone: summary.classes ? "blue" : "orange" },
-    classSubjects: { value: summary.classSubjects, note: "Connect classes, subjects, curriculum and teachers.", tone: summary.classSubjects ? "green" : "gray" },
-    studentEnrollments: { value: summary.enrollments, note: "Class placement and academic enrollment records.", tone: summary.enrollments ? "green" : "gray" },
-    studentAttendance: { value: summary.presentToday || summary.studentAttendance, note: `${summary.todayStudentAttendance} student attendance record(s) today.`, tone: summary.presentToday ? "green" : "orange" },
-    teacherAttendance: { value: summary.teacherPresentToday || summary.teacherAttendance, note: `${summary.todayTeacherAttendance} teacher attendance record(s) today.`, tone: summary.teacherPresentToday ? "green" : "orange" },
-    announcements: { value: summary.announcements, note: "Branch broadcasts to teachers, parents, students and accountants.", tone: summary.announcements ? "blue" : "gray" },
-    messages: { value: summary.messages, note: "Branch conversations and operational follow-ups.", tone: summary.messages ? "green" : "gray" },
-    calendar: { value: summary.events, note: "Branch events, reminders and academic dates.", tone: summary.events ? "blue" : "gray" },
-    branchTimetable: { value: summary.timetables, note: `${summary.sessions} timetable session(s) available.`, tone: summary.timetables ? "green" : "gray" },
-    classTimetable: { value: summary.sessions, note: "Class-level timetable sessions and lesson blocks.", tone: summary.sessions ? "blue" : "gray" },
-    teacherTimetable: { value: summary.teachers, note: "Teacher lesson allocation and schedule checks.", tone: summary.teachers ? "purple" : "gray" },
-    examTimetable: { value: summary.sessions || "Open", note: "Exam schedule, rooms, invigilators and conflicts.", tone: summary.sessions ? "blue" : "orange" },
-    resourceTimetable: { value: summary.resources || "Open", note: "Rooms, halls, resources and booking conflicts.", tone: summary.resources ? "green" : "blue" },
-    organizations: { value: summary.organizations, note: "Departments, houses, clubs and committees.", tone: summary.organizations ? "green" : "gray" },
-    curriculumSetup: { value: summary.curriculums, note: `${summary.pathways} pathway(s), ${summary.curriculumSubjects} curriculum subject(s).`, tone: summary.curriculums ? "green" : "orange" },
-    courseOutline: { value: "Open", note: "Visual course/subject outline connection.", tone: "blue" },
-    curriculumPathways: { value: summary.pathways, note: "Pathways under branch curriculums.", tone: summary.pathways ? "blue" : "gray" },
-    subjects: { value: summary.subjects, note: "Branch subjects with media and academic categorization.", tone: summary.subjects ? "green" : "orange" },
-    curriculumSubjects: { value: summary.curriculumSubjects, note: "Subject rules, credits and curriculum links.", tone: summary.curriculumSubjects ? "green" : "gray" },
-    academicStructures: { value: summary.academicStructures, note: "Levels, structures and academic organization.", tone: summary.academicStructures ? "blue" : "orange" },
-    academicPeriods: { value: summary.academicPeriods, note: "Terms, semesters and active school periods.", tone: summary.academicPeriods ? "blue" : "orange" },
-    assessmentStructure: { value: summary.assessmentStructures, note: `${summary.assessmentItems} assessment item(s).`, tone: summary.assessmentStructures ? "purple" : "gray" },
-    assessmentItems: { value: summary.assessmentItems, note: "Score items and weights under assessment structures.", tone: summary.assessmentItems ? "purple" : "gray" },
-    assessmentApplicability: { value: summary.assessmentApplicabilities, note: "Apply assessment systems to class subjects.", tone: summary.assessmentApplicabilities ? "green" : "gray" },
-    gradingSystems: { value: summary.gradingSystems, note: `${summary.gradingRules} grading rule(s).`, tone: summary.gradingSystems ? "purple" : "orange" },
-    gradingRules: { value: summary.gradingRules, note: "Grade bands, remarks and GPA rules.", tone: summary.gradingRules ? "purple" : "gray" },
-    studentReports: { value: summary.reports, note: "Published and draft student report cards.", tone: summary.reports ? "green" : "gray" },
-    broadsheets: { value: summary.broadsheets, note: "Computed result rows and class broadsheets.", tone: summary.broadsheets ? "blue" : "gray" },
-    promotion: { value: summary.promotions, note: "Promotion, repeat, graduate and cumulative decisions.", tone: summary.promotions ? "green" : "gray" },
-    cumulativeRecords: { value: summary.cumulativeRecords, note: "Long-term student academic records.", tone: summary.cumulativeRecords ? "blue" : "gray" },
-    fees: { value: summary.pendingFees || summary.fees, note: `${summary.fees} fee/invoice record(s), ${summary.pendingFees} pending.`, tone: summary.pendingFees ? "orange" : summary.fees ? "green" : "gray" },
-    incomes: { value: money(summary.incomeTotal), note: "Branch income records and revenue tracking.", tone: summary.incomeTotal ? "green" : "gray" },
-    expenses: { value: money(summary.expenseTotal), note: "Branch expenses, categories and vendors.", tone: summary.expenseTotal ? "orange" : "gray" },
-    payroll: { value: summary.payrollItems || summary.payrollProfiles || summary.teachers, note: "Staff pay profiles, runs, items and payouts.", tone: summary.payrollItems || summary.payrollProfiles ? "blue" : "gray" },
-    withdrawMoney: { value: summary.withdrawals || "Open", note: "Branch withdrawal requests and payout tracking.", tone: summary.withdrawals ? "orange" : "gray" },
-    schoolPayoutSettings: { value: summary.payoutSettings || "Open", note: "Branch payout method and settlement settings.", tone: summary.payoutSettings ? "green" : "purple" },
-    branchWallet: { value: money(summary.paymentTotal + summary.incomeTotal - summary.expenseTotal), note: "Estimated branch wallet movement from local records.", tone: summary.paymentTotal || summary.incomeTotal ? "green" : "gray" },
-    settlements: { value: summary.settlements, note: "Payment settlement history and reconciliation.", tone: summary.settlements ? "green" : "gray" },
-    branchSettings: { value: summary.settings || "Open", note: "Branch identity, branding and report settings.", tone: "purple" },
-    usersRoles: { value: summary.usersRoles, note: "Branch-scoped access under the owner/school line of authority.", tone: summary.usersRoles ? "green" : "orange" },
-    localSettings: { value: "Open", note: "Device display preferences only; branch branding stays protected.", tone: "gray" },
+    teachers: {
+      value: summary.teachers,
+      note: "Branch teaching staff and profiles.",
+      tone: summary.teachers ? "blue" : "orange",
+    },
+    parents: {
+      value: summary.parents,
+      note: "Parent and guardian contacts linked to students.",
+      tone: summary.parents ? "purple" : "gray",
+    },
+    classes: {
+      value: summary.classes,
+      note: `${summary.classSubjects} class subject link(s).`,
+      tone: summary.classes ? "blue" : "orange",
+    },
+    classSubjects: {
+      value: summary.classSubjects,
+      note: "Connect classes, subjects, curriculum and teachers.",
+      tone: summary.classSubjects ? "green" : "gray",
+    },
+    studentEnrollments: {
+      value: summary.enrollments,
+      note: "Class placement and academic enrollment records.",
+      tone: summary.enrollments ? "green" : "gray",
+    },
+    studentAttendance: {
+      value: summary.presentToday || summary.studentAttendance,
+      note: `${summary.todayStudentAttendance} student attendance record(s) today.`,
+      tone: summary.presentToday ? "green" : "orange",
+    },
+    teacherAttendance: {
+      value: summary.teacherPresentToday || summary.teacherAttendance,
+      note: `${summary.todayTeacherAttendance} teacher attendance record(s) today.`,
+      tone: summary.teacherPresentToday ? "green" : "orange",
+    },
+    announcements: {
+      value: summary.announcements,
+      note: "Branch broadcasts to teachers, parents, students and accountants.",
+      tone: summary.announcements ? "blue" : "gray",
+    },
+    messages: {
+      value: summary.messages,
+      note: "Branch conversations and operational follow-ups.",
+      tone: summary.messages ? "green" : "gray",
+    },
+    calendar: {
+      value: summary.events,
+      note: "Branch events, reminders and academic dates.",
+      tone: summary.events ? "blue" : "gray",
+    },
+    branchTimetable: {
+      value: summary.timetables,
+      note: `${summary.sessions} timetable session(s) available.`,
+      tone: summary.timetables ? "green" : "gray",
+    },
+    classTimetable: {
+      value: summary.sessions,
+      note: "Class-level timetable sessions and lesson blocks.",
+      tone: summary.sessions ? "blue" : "gray",
+    },
+    teacherTimetable: {
+      value: summary.teachers,
+      note: "Teacher lesson allocation and schedule checks.",
+      tone: summary.teachers ? "purple" : "gray",
+    },
+    examTimetable: {
+      value: summary.sessions || "Open",
+      note: "Exam schedule, rooms, invigilators and conflicts.",
+      tone: summary.sessions ? "blue" : "orange",
+    },
+    resourceTimetable: {
+      value: summary.resources || "Open",
+      note: "Rooms, halls, resources and booking conflicts.",
+      tone: summary.resources ? "green" : "blue",
+    },
+    organizations: {
+      value: summary.organizations,
+      note: "Departments, houses, clubs and committees.",
+      tone: summary.organizations ? "green" : "gray",
+    },
+    curriculumSetup: {
+      value: summary.curriculums,
+      note: `${summary.pathways} pathway(s), ${summary.curriculumSubjects} curriculum subject(s).`,
+      tone: summary.curriculums ? "green" : "orange",
+    },
+    courseOutline: {
+      value: "Open",
+      note: "Visual course/subject outline connection.",
+      tone: "blue",
+    },
+    curriculumPathways: {
+      value: summary.pathways,
+      note: "Pathways under branch curriculums.",
+      tone: summary.pathways ? "blue" : "gray",
+    },
+    subjects: {
+      value: summary.subjects,
+      note: "Branch subjects with media and academic categorization.",
+      tone: summary.subjects ? "green" : "orange",
+    },
+    curriculumSubjects: {
+      value: summary.curriculumSubjects,
+      note: "Subject rules, credits and curriculum links.",
+      tone: summary.curriculumSubjects ? "green" : "gray",
+    },
+    academicStructures: {
+      value: summary.academicStructures,
+      note: "Levels, structures and academic organization.",
+      tone: summary.academicStructures ? "blue" : "orange",
+    },
+    academicPeriods: {
+      value: summary.academicPeriods,
+      note: "Terms, semesters and active school periods.",
+      tone: summary.academicPeriods ? "blue" : "orange",
+    },
+    assessmentStructure: {
+      value: summary.assessmentStructures,
+      note: `${summary.assessmentItems} assessment item(s).`,
+      tone: summary.assessmentStructures ? "purple" : "gray",
+    },
+    assessmentItems: {
+      value: summary.assessmentItems,
+      note: "Score items and weights under assessment structures.",
+      tone: summary.assessmentItems ? "purple" : "gray",
+    },
+    assessmentApplicability: {
+      value: summary.assessmentApplicabilities,
+      note: "Apply assessment systems to class subjects.",
+      tone: summary.assessmentApplicabilities ? "green" : "gray",
+    },
+    gradingSystems: {
+      value: summary.gradingSystems,
+      note: `${summary.gradingRules} grading rule(s).`,
+      tone: summary.gradingSystems ? "purple" : "orange",
+    },
+    gradingRules: {
+      value: summary.gradingRules,
+      note: "Grade bands, remarks and GPA rules.",
+      tone: summary.gradingRules ? "purple" : "gray",
+    },
+    studentReports: {
+      value: summary.reports,
+      note: "Published and draft student report cards.",
+      tone: summary.reports ? "green" : "gray",
+    },
+    broadsheets: {
+      value: summary.broadsheets,
+      note: "Computed result rows and class broadsheets.",
+      tone: summary.broadsheets ? "blue" : "gray",
+    },
+    promotion: {
+      value: summary.promotions,
+      note: "Promotion, repeat, graduate and cumulative decisions.",
+      tone: summary.promotions ? "green" : "gray",
+    },
+    cumulativeRecords: {
+      value: summary.cumulativeRecords,
+      note: "Long-term student academic records.",
+      tone: summary.cumulativeRecords ? "blue" : "gray",
+    },
+    fees: {
+      value: summary.pendingFees || summary.fees,
+      note: `${summary.fees} fee/invoice record(s), ${summary.pendingFees} pending.`,
+      tone: summary.pendingFees ? "orange" : summary.fees ? "green" : "gray",
+    },
+    incomes: {
+      value: money(summary.incomeTotal),
+      note: "Branch income records and revenue tracking.",
+      tone: summary.incomeTotal ? "green" : "gray",
+    },
+    expenses: {
+      value: money(summary.expenseTotal),
+      note: "Branch expenses, categories and vendors.",
+      tone: summary.expenseTotal ? "orange" : "gray",
+    },
+    payroll: {
+      value:
+        summary.payrollItems || summary.payrollProfiles || summary.teachers,
+      note: "Staff pay profiles, runs, items and payouts.",
+      tone: summary.payrollItems || summary.payrollProfiles ? "blue" : "gray",
+    },
+    withdrawMoney: {
+      value: summary.withdrawals || "Open",
+      note: "Branch withdrawal requests and payout tracking.",
+      tone: summary.withdrawals ? "orange" : "gray",
+    },
+    schoolPayoutSettings: {
+      value: summary.payoutSettings || "Open",
+      note: "Branch payout method and settlement settings.",
+      tone: summary.payoutSettings ? "green" : "purple",
+    },
+    branchWallet: {
+      value: money(
+        summary.paymentTotal + summary.incomeTotal - summary.expenseTotal,
+      ),
+      note: "Estimated branch wallet movement from local records.",
+      tone: summary.paymentTotal || summary.incomeTotal ? "green" : "gray",
+    },
+    settlements: {
+      value: summary.settlements,
+      note: "Payment settlement history and reconciliation.",
+      tone: summary.settlements ? "green" : "gray",
+    },
+    branchSettings: {
+      value: summary.settings || "Open",
+      note: "Branch identity, branding and report settings.",
+      tone: "purple",
+    },
+    usersRoles: {
+      value: summary.usersRoles,
+      note: "Branch-scoped access under the owner/school line of authority.",
+      tone: summary.usersRoles ? "green" : "orange",
+    },
+    localSettings: {
+      value: "Open",
+      note: "Device display preferences only; branch branding stays protected.",
+      tone: "gray",
+    },
   };
 
   if (metricMap[routeKey]) return metricMap[routeKey];
@@ -535,13 +799,17 @@ function metricFor(routeKey: string, rows: Record<string, AnyRow[]>, summary: An
   };
 }
 
-export default function BranchAdminDashboard({ navigate, navSections }: RouteProps) {
+export default function BranchAdminDashboard({
+  navigate,
+  navSections,
+}: RouteProps) {
   const dataRevision = useDataRevision();
 
   const router = useRouter();
   const { accountId, authenticated, loading: accountLoading } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } = useActiveBranch();
+  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+    useActiveBranch();
   const { activeMembership } = useActiveMembership();
   const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
 
@@ -589,8 +857,13 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
       const loaded = await Promise.all(
         TABLE_NAMES.map(async (tableName) => {
           const rows = await safeArray(tableName);
-          return [tableName, rows.filter((row) => branchScoped(row, accountId, schoolId, branchId))] as const;
-        })
+          return [
+            tableName,
+            rows.filter((row) =>
+              branchScoped(row, accountId, schoolId, branchId),
+            ),
+          ] as const;
+        }),
       );
 
       setRowsByTable(Object.fromEntries(loaded));
@@ -605,7 +878,13 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     if (accountLoading || settingsLoading) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, accountLoading, settingsLoading,
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
     dataRevision,
   ]);
 
@@ -621,16 +900,39 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     const enrollments = rows.studentEnrollments || [];
     const studentAttendance = rows.attendance || [];
     const teacherAttendance = rows.teacherAttendance || [];
-    const fees = [...(rows.feeStructures || []), ...(rows.studentFeeInvoices || [])];
-    const payments = [...(rows.payments || []), ...(rows.studentFeePayments || []), ...(rows.paymentTransactions || [])];
+    const fees = [
+      ...(rows.feeStructures || []),
+      ...(rows.studentFeeInvoices || []),
+    ];
+    const payments = [
+      ...(rows.payments || []),
+      ...(rows.studentFeePayments || []),
+      ...(rows.paymentTransactions || []),
+    ];
     const memberships = (rows.userMemberships || []).filter(activeRow).length
       ? (rows.userMemberships || []).filter(activeRow)
       : (rows.memberships || []).filter(activeRow);
-    const todayStudentAttendance = studentAttendance.filter((row) => String(row.date || row.createdAt || "").startsWith(today));
-    const presentToday = todayStudentAttendance.filter((row) => String(row.status || "").toLowerCase() === "present").length;
-    const todayTeacherAttendance = teacherAttendance.filter((row) => String(row.date || row.createdAt || "").startsWith(today));
-    const teacherPresentToday = todayTeacherAttendance.filter((row) => String(row.status || row.clockIn || "").toLowerCase().includes("present") || row.clockIn).length;
-    const pendingFees = fees.filter((row) => !["paid", "void", "cancelled"].includes(String(row.status || "").toLowerCase())).length;
+    const todayStudentAttendance = studentAttendance.filter((row) =>
+      String(row.date || row.createdAt || "").startsWith(today),
+    );
+    const presentToday = todayStudentAttendance.filter(
+      (row) => String(row.status || "").toLowerCase() === "present",
+    ).length;
+    const todayTeacherAttendance = teacherAttendance.filter((row) =>
+      String(row.date || row.createdAt || "").startsWith(today),
+    );
+    const teacherPresentToday = todayTeacherAttendance.filter(
+      (row) =>
+        String(row.status || row.clockIn || "")
+          .toLowerCase()
+          .includes("present") || row.clockIn,
+    ).length;
+    const pendingFees = fees.filter(
+      (row) =>
+        !["paid", "void", "cancelled"].includes(
+          String(row.status || "").toLowerCase(),
+        ),
+    ).length;
 
     return {
       students: count(students),
@@ -667,10 +969,16 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
       reports: count(rows.reportCards || []),
       broadsheets: count(rows.computedResults || []),
       promotions: count(rows.studentPromotions || []),
-      cumulativeRecords: count([...(rows.studentReportSnapshots || []), ...(rows.computedResults || [])]),
+      cumulativeRecords: count([
+        ...(rows.studentReportSnapshots || []),
+        ...(rows.computedResults || []),
+      ]),
       incomeTotal: sum(rows.incomes || [], "amount"),
       expenseTotal: sum(rows.expenses || [], "amount"),
-      paymentTotal: payments.reduce((total, row) => total + n(row.amount || row.total), 0),
+      paymentTotal: payments.reduce(
+        (total, row) => total + n(row.amount || row.total),
+        0,
+      ),
       fees: count(fees),
       pendingFees,
       settlements: count(rows.paymentSettlements || []),
@@ -681,7 +989,11 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
       payrollItems: count(rows.payrollItems || []),
       usersRoles: uniqueUsersRoleCount(memberships),
       settings: count(rows.schoolBranchSettings || []),
-      branchName: selectedBranchName({ openWorkspace, activeMembership, activeBranch }),
+      branchName: selectedBranchName({
+        openWorkspace,
+        activeMembership,
+        activeBranch,
+      }),
     };
   }, [activeBranch, rows, openWorkspace, activeMembership]);
 
@@ -702,7 +1014,9 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     return modules.filter((item) => {
       if (area !== "all" && item.area !== area) return false;
       if (!q) return true;
-      return `${item.label} ${item.note} ${item.value} ${item.area}`.toLowerCase().includes(q);
+      return `${item.label} ${item.note} ${item.value} ${item.area}`
+        .toLowerCase()
+        .includes(q);
     });
   }, [area, modules, query]);
 
@@ -712,15 +1026,55 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     const classes = rows.classes || [];
     const announcements = rows.announcements || [];
     const threads = rows.messageThreads || [];
-    const payments = [...(rows.payments || []), ...(rows.studentFeePayments || []), ...(rows.paymentTransactions || [])];
+    const payments = [
+      ...(rows.payments || []),
+      ...(rows.studentFeePayments || []),
+      ...(rows.paymentTransactions || []),
+    ];
 
     const recentRows: AnyRow[] = [
-      ...students.map((row) => ({ ...row, _kind: "Student", _icon: "🧑‍🎓", _title: rowName(row), _date: row.updatedAt || row.createdAt })),
-      ...teachers.map((row) => ({ ...row, _kind: "Teacher", _icon: "👨‍🏫", _title: rowName(row), _date: row.updatedAt || row.createdAt })),
-      ...classes.map((row) => ({ ...row, _kind: "Class", _icon: "🏫", _title: rowName(row), _date: row.updatedAt || row.createdAt })),
-      ...announcements.map((row) => ({ ...row, _kind: "Announcement", _icon: "📣", _title: text(row.title, "Announcement"), _date: row.sentAt || row.publishAt || row.updatedAt || row.createdAt })),
-      ...threads.map((row) => ({ ...row, _kind: "Message", _icon: "💬", _title: text(row.subject || row.title, "Message thread"), _date: row.lastMessageAt || row.updatedAt || row.createdAt })),
-      ...payments.map((row) => ({ ...row, _kind: "Payment", _icon: "💰", _title: money(row.amount || row.total, row.currency || "GHS"), _date: row.paidAt || row.updatedAt || row.createdAt })),
+      ...students.map((row) => ({
+        ...row,
+        _kind: "Student",
+        _icon: "🧑‍🎓",
+        _title: rowName(row),
+        _date: row.updatedAt || row.createdAt,
+      })),
+      ...teachers.map((row) => ({
+        ...row,
+        _kind: "Teacher",
+        _icon: "👨‍🏫",
+        _title: rowName(row),
+        _date: row.updatedAt || row.createdAt,
+      })),
+      ...classes.map((row) => ({
+        ...row,
+        _kind: "Class",
+        _icon: "🏫",
+        _title: rowName(row),
+        _date: row.updatedAt || row.createdAt,
+      })),
+      ...announcements.map((row) => ({
+        ...row,
+        _kind: "Announcement",
+        _icon: "📣",
+        _title: text(row.title, "Announcement"),
+        _date: row.sentAt || row.publishAt || row.updatedAt || row.createdAt,
+      })),
+      ...threads.map((row) => ({
+        ...row,
+        _kind: "Message",
+        _icon: "💬",
+        _title: text(row.subject || row.title, "Message thread"),
+        _date: row.lastMessageAt || row.updatedAt || row.createdAt,
+      })),
+      ...payments.map((row) => ({
+        ...row,
+        _kind: "Payment",
+        _icon: "💰",
+        _title: money(row.amount || row.total, row.currency || "GHS"),
+        _date: row.paidAt || row.updatedAt || row.createdAt,
+      })),
     ];
 
     return recentRows.sort((a, b) => n(b._date) - n(a._date)).slice(0, 8);
@@ -735,59 +1089,129 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
     }
 
     try {
-      window.dispatchEvent(new CustomEvent("eleeveon:portal-route", { detail: { key: routeKey } }));
-      window.dispatchEvent(new CustomEvent("role-portal:navigate", { detail: { key: routeKey } }));
-      window.dispatchEvent(new CustomEvent("portal:navigate", { detail: routeKey }));
+      window.dispatchEvent(
+        new CustomEvent("eleeveon:portal-route", { detail: { key: routeKey } }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("role-portal:navigate", { detail: { key: routeKey } }),
+      );
+      window.dispatchEvent(
+        new CustomEvent("portal:navigate", { detail: routeKey }),
+      );
     } catch {
       // RolePortalShell navigation events are optional; the cards remain safe if unsupported.
     }
   }
 
   if (loading || accountLoading || settingsLoading) {
-    return <State primary={primary} title="Opening branch dashboard..." text="Loading branch students, staff, academics, finance and communication records." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening branch dashboard..."
+        text="Loading branch students, staff, academics, finance and communication records."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before viewing the branch dashboard." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing the branch dashboard."
+      />
+    );
   }
 
   return (
-    <main className="bd-page" style={{ "--bd-primary": primary } as React.CSSProperties}>
+    <main
+      className="bd-page"
+      style={{ "--bd-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="bd-search-card" aria-label="Branch dashboard search and actions">
-        <span className={`status-dot-mini ${summary.students || summary.classes ? "green" : "gray"}`} title={`${summary.branchName}: ${summary.students} student(s), ${summary.classes} class(es)`} />
+      <section
+        className="bd-search-card"
+        aria-label="Branch dashboard search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.students || summary.classes ? "green" : "gray"}`}
+          title={`${summary.branchName}: ${summary.students} student(s), ${summary.classes} class(es)`}
+        />
 
         <label className="bd-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search branch modules..." aria-label="Search branch dashboard" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search branch modules..."
+            aria-label="Search branch dashboard"
+          />
         </label>
 
-        <button type="button" className="bd-add-inline" onClick={load} aria-label="Refresh branch dashboard" title="Refresh">↻</button>
+        <button
+          type="button"
+          className="bd-add-inline"
+          onClick={load}
+          aria-label="Refresh branch dashboard"
+          title="Refresh"
+        >
+          ↻
+        </button>
 
-        <button type="button" className={`bd-filter-button ${activeFilterCount ? "active" : ""}`} onClick={() => setFilterOpen(true)} aria-label="Open filters" title="Filters">
+        <button
+          type="button"
+          className={`bd-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
+          aria-label="Open filters"
+          title="Filters"
+        >
           <SliderIcon />
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="bd-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">⋯</button>
+        <button
+          type="button"
+          className="bd-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
+          ⋯
+        </button>
       </section>
 
       {(area !== "all" || query.trim()) && (
         <section className="bd-filter-chips" aria-label="Active filters">
-          {area !== "all" && <button type="button" onClick={() => setArea("all")}>Area: {areaLabel(area)} ×</button>}
-          {query.trim() && <button type="button" onClick={() => setQuery("")}>Search: {query.trim()} ×</button>}
+          {area !== "all" && (
+            <button type="button" onClick={() => setArea("all")}>
+              Area: {areaLabel(area)} ×
+            </button>
+          )}
+          {query.trim() && (
+            <button type="button" onClick={() => setQuery("")}>
+              Search: {query.trim()} ×
+            </button>
+          )}
         </section>
       )}
 
-      {view === "analytics" ? <AnalyticsView summary={summary} modules={modules} recent={recent} /> : null}
+      {view === "analytics" ? (
+        <AnalyticsView summary={summary} modules={modules} recent={recent} />
+      ) : null}
 
-      {view === "table" ? <TableView modules={filteredModules} openRoute={openRoute} /> : null}
+      {view === "table" ? (
+        <TableView modules={filteredModules} openRoute={openRoute} />
+      ) : null}
 
       {view === "cards" ? (
         <section className="bd-list">
           {filteredModules.map((item) => (
-            <button key={item.key} type="button" className="branch-row" onClick={() => openRoute(item.routeKey)}>
+            <button
+              key={item.key}
+              type="button"
+              className="branch-row"
+              onClick={() => openRoute(item.routeKey)}
+            >
               <span className="branch-avatar">{item.icon}</span>
               <span className="branch-main">
                 <strong>{item.label}</strong>
@@ -801,7 +1225,12 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
             </button>
           ))}
 
-          {!filteredModules.length ? <Empty title="No matching branch modules" text="Clear filters or search to show your branch modules." /> : null}
+          {!filteredModules.length ? (
+            <Empty
+              title="No matching branch modules"
+              text="Clear filters or search to show your branch modules."
+            />
+          ) : null}
         </section>
       ) : null}
 
@@ -813,24 +1242,41 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
           </div>
           <div className="bd-recent-list">
             {recent.map((item, index) => (
-              <article key={`${item._kind}-${idOf(item) || index}`} className="recent-row">
+              <article
+                key={`${item._kind}-${idOf(item) || index}`}
+                className="recent-row"
+              >
                 <span>{item._icon}</span>
                 <b>{item._title}</b>
-                <small>{item._kind} · {dateLabel(item._date)}</small>
+                <small>
+                  {item._kind} · {dateLabel(item._date)}
+                </small>
               </article>
             ))}
           </div>
         </section>
       ) : null}
 
-      {filterOpen ? <FilterSheet area={area} setArea={setArea} onClose={() => setFilterOpen(false)} /> : null}
+      {filterOpen ? (
+        <FilterSheet
+          area={area}
+          setArea={setArea}
+          onClose={() => setFilterOpen(false)}
+        />
+      ) : null}
 
       {moreOpen ? (
         <MoreSheet
           view={view}
-          setView={(mode) => { setView(mode); setMoreOpen(false); }}
+          setView={(mode) => {
+            setView(mode);
+            setMoreOpen(false);
+          }}
           summary={summary}
-          onRefresh={async () => { setMoreOpen(false); await load(); }}
+          onRefresh={async () => {
+            setMoreOpen(false);
+            await load();
+          }}
           onClose={() => setMoreOpen(false)}
         />
       ) : null}
@@ -838,9 +1284,20 @@ export default function BranchAdminDashboard({ navigate, navSections }: RoutePro
   );
 }
 
-function State({ primary, title, text: body }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="bd-page" style={{ "--bd-primary": primary } as React.CSSProperties}>
+    <main
+      className="bd-page"
+      style={{ "--bd-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="bd-state">
         <div className="bd-spinner" />
@@ -851,7 +1308,15 @@ function State({ primary, title, text: body }: { primary: string; title: string;
   );
 }
 
-function FilterSheet({ area, setArea, onClose }: { area: AreaFilter; setArea: (value: AreaFilter) => void; onClose: () => void }) {
+function FilterSheet({
+  area,
+  setArea,
+  onClose,
+}: {
+  area: AreaFilter;
+  setArea: (value: AreaFilter) => void;
+  onClose: () => void;
+}) {
   return (
     <div className="bd-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bd-sheet small">
@@ -860,13 +1325,18 @@ function FilterSheet({ area, setArea, onClose }: { area: AreaFilter; setArea: (v
             <h2>Filters</h2>
             <p>Choose which branch area to show.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
 
         <div className="bd-form compact">
           <label>
             <span>Area</span>
-            <select value={area} onChange={(event) => setArea(event.target.value as AreaFilter)}>
+            <select
+              value={area}
+              onChange={(event) => setArea(event.target.value as AreaFilter)}
+            >
               <option value="all">All areas</option>
               <option value="administration">Administration</option>
               <option value="attendance">Attendance</option>
@@ -882,15 +1352,31 @@ function FilterSheet({ area, setArea, onClose }: { area: AreaFilter; setArea: (v
         </div>
 
         <div className="bd-sheet-actions">
-          <button type="button" onClick={() => setArea("all")}>Reset</button>
-          <button type="button" className="primary" onClick={onClose}>Apply</button>
+          <button type="button" onClick={() => setArea("all")}>
+            Reset
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function MoreSheet({ view, setView, summary, onRefresh, onClose }: { view: ViewMode; setView: (value: ViewMode) => void; summary: AnyRow; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  view,
+  setView,
+  summary,
+  onRefresh,
+  onClose,
+}: {
+  view: ViewMode;
+  setView: (value: ViewMode) => void;
+  summary: AnyRow;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="bd-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="bd-sheet small">
@@ -899,21 +1385,60 @@ function MoreSheet({ view, setView, summary, onRefresh, onClose }: { view: ViewM
             <h2>More</h2>
             <p>Advanced views stay here so the branch home remains compact.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="bd-menu-list">
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>☰</span><b>List view</b><small>Compact branch modules</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table view</b><small>Dense laptop-friendly module list</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>{summary.students} students · {summary.teachers} teachers · {summary.classes} classes</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch dashboard data</small></button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>☰</span>
+            <b>List view</b>
+            <small>Compact branch modules</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table view</b>
+            <small>Dense laptop-friendly module list</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>
+              {summary.students} students · {summary.teachers} teachers ·{" "}
+              {summary.classes} classes
+            </small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch dashboard data</small>
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function TableView({ modules, openRoute }: { modules: DashboardModule[]; openRoute: (routeKey: string) => void }) {
+function TableView({
+  modules,
+  openRoute,
+}: {
+  modules: DashboardModule[];
+  openRoute: (routeKey: string) => void;
+}) {
   return (
     <section className="bd-table-card">
       <div className="bd-table-scroll">
@@ -931,36 +1456,127 @@ function TableView({ modules, openRoute }: { modules: DashboardModule[]; openRou
           <tbody>
             {modules.map((item) => (
               <tr key={item.key}>
-                <td><strong>{item.icon} {item.label}</strong><span>{item.routeKey}</span></td>
+                <td>
+                  <strong>
+                    {item.icon} {item.label}
+                  </strong>
+                  <span>{item.routeKey}</span>
+                </td>
                 <td>{areaLabel(item.area)}</td>
                 <td>{item.value}</td>
-                <td><Chip tone={item.tone}>{item.tone}</Chip></td>
+                <td>
+                  <Chip tone={item.tone}>{item.tone}</Chip>
+                </td>
                 <td>{item.note}</td>
-                <td><div className="bd-table-actions"><button type="button" onClick={() => openRoute(item.routeKey)}>Open</button></div></td>
+                <td>
+                  <div className="bd-table-actions">
+                    <button
+                      type="button"
+                      onClick={() => openRoute(item.routeKey)}
+                    >
+                      Open
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {!modules.length ? <div className="bd-empty-table">No branch module matches your filters.</div> : null}
+        {!modules.length ? (
+          <div className="bd-empty-table">
+            No branch module matches your filters.
+          </div>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function AnalyticsView({ summary, modules, recent }: { summary: AnyRow; modules: DashboardModule[]; recent: AnyRow[] }) {
-  const areaRows = ["administration", "attendance", "communication", "timetable", "setup", "records", "finance", "control", "other"].map((area) => ({
-    label: areaLabel(area),
-    value: modules.filter((module) => module.area === area).length,
-  })).filter((row) => row.value > 0);
+function AnalyticsView({
+  summary,
+  modules,
+  recent,
+}: {
+  summary: AnyRow;
+  modules: DashboardModule[];
+  recent: AnyRow[];
+}) {
+  const areaRows = [
+    "administration",
+    "attendance",
+    "communication",
+    "timetable",
+    "setup",
+    "records",
+    "finance",
+    "control",
+    "other",
+  ]
+    .map((area) => ({
+      label: areaLabel(area),
+      value: modules.filter((module) => module.area === area).length,
+    }))
+    .filter((row) => row.value > 0);
 
   return (
     <section className="bd-analysis-grid">
-      <article className="bd-analysis"><span>Students</span><strong>{summary.students}</strong><p>{summary.classes} class(es), {summary.enrollments} enrollment record(s), {summary.uniqueEnrolledStudents} unique enrolled student(s).</p></article>
-      <article className="bd-analysis"><span>Staff</span><strong>{summary.teachers}</strong><p>{summary.todayTeacherAttendance} teacher attendance record(s) today.</p></article>
-      <article className="bd-analysis"><span>Attendance Today</span><strong>{summary.presentToday}</strong><p>{summary.todayStudentAttendance} student attendance record(s) today.</p></article>
-      <article className="bd-analysis"><span>Finance</span><strong>{money(summary.incomeTotal + summary.paymentTotal)}</strong><p>{summary.pendingFees} pending fee/invoice record(s).</p></article>
-      <article className="bd-analysis wide"><span>Module Areas</span><strong>{modules.length}</strong><div className="bd-analysis-list">{areaRows.map((row) => <section key={row.label}><div><b>{row.label}</b><small>{row.value}</small></div><div className="bd-progress"><i style={{ width: `${Math.max(6, Math.round((row.value / Math.max(1, modules.length)) * 100))}%` }} /></div></section>)}</div></article>
-      <article className="bd-analysis wide"><span>Recent Activity</span><strong>{recent.length}</strong><p>Recent records from students, teachers, classes, announcements, messages and payments.</p></article>
+      <article className="bd-analysis">
+        <span>Students</span>
+        <strong>{summary.students}</strong>
+        <p>
+          {summary.classes} class(es), {summary.enrollments} enrollment
+          record(s), {summary.uniqueEnrolledStudents} unique enrolled
+          student(s).
+        </p>
+      </article>
+      <article className="bd-analysis">
+        <span>Staff</span>
+        <strong>{summary.teachers}</strong>
+        <p>
+          {summary.todayTeacherAttendance} teacher attendance record(s) today.
+        </p>
+      </article>
+      <article className="bd-analysis">
+        <span>Attendance Today</span>
+        <strong>{summary.presentToday}</strong>
+        <p>
+          {summary.todayStudentAttendance} student attendance record(s) today.
+        </p>
+      </article>
+      <article className="bd-analysis">
+        <span>Finance</span>
+        <strong>{money(summary.incomeTotal + summary.paymentTotal)}</strong>
+        <p>{summary.pendingFees} pending fee/invoice record(s).</p>
+      </article>
+      <article className="bd-analysis wide">
+        <span>Module Areas</span>
+        <strong>{modules.length}</strong>
+        <div className="bd-analysis-list">
+          {areaRows.map((row) => (
+            <section key={row.label}>
+              <div>
+                <b>{row.label}</b>
+                <small>{row.value}</small>
+              </div>
+              <div className="bd-progress">
+                <i
+                  style={{
+                    width: `${Math.max(6, Math.round((row.value / Math.max(1, modules.length)) * 100))}%`,
+                  }}
+                />
+              </div>
+            </section>
+          ))}
+        </div>
+      </article>
+      <article className="bd-analysis wide">
+        <span>Recent Activity</span>
+        <strong>{recent.length}</strong>
+        <p>
+          Recent records from students, teachers, classes, announcements,
+          messages and payments.
+        </p>
+      </article>
     </section>
   );
 }

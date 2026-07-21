@@ -28,6 +28,16 @@
  * - Routine sync/account checks stay silent; only real applied data changes
  *   show the small nonblocking background indicator.
  * - Logout is atomic and preserves offline IndexedDB school data.
+ *
+ * Unified appearance ownership:
+ * - SettingsContext remains authoritative for branch colour and typography;
+ * - LocalAppearanceRuntime remains authoritative for the complete light/dark
+ *   surface palette;
+ * - this shell publishes branding variables only;
+ * - shell surfaces derive from the already-applied shared appearance variables;
+ * - the shell no longer overrides --bg, --surface, --card, --text, or --border;
+ * - Branch Settings Light/Dark and Local Settings Light/Dark therefore produce
+ *   the same visual palette throughout the portal.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -93,14 +103,14 @@ export type RolePortalRuntimeContext = {
   membership: UserMembership | null;
   memberships: UserMembership[];
   activeRole: string | null;
-  teacherLocalId: number | null;
-  studentLocalId: number | null;
-  parentLocalId: number | null;
+  teacherId: string | null;
+  studentId: string | null;
+  parentId: string | null;
 
-  schoolId: number | null;
+  schoolId: string | null;
   school: ReturnType<typeof useActiveBranch>["activeSchool"];
   schools: ReturnType<typeof useActiveBranch>["schools"];
-  branchId: number | null;
+  branchId: string | null;
   branch: ReturnType<typeof useActiveBranch>["activeBranch"];
   branches: ReturnType<typeof useActiveBranch>["branches"];
   allBranches: ReturnType<typeof useActiveBranch>["allBranches"];
@@ -157,11 +167,11 @@ type OpenWorkspaceSession = {
   membership?: UserMembership | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | null;
-  branchId?: number | null;
-  teacherLocalId?: number | null;
-  studentLocalId?: number | null;
-  parentLocalId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   openedAt?: number;
 };
 
@@ -188,15 +198,15 @@ function safeRemove(key: string) {
   try { window.sessionStorage.removeItem(key); } catch {}
 }
 
-function toPositiveNumber(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function toPermanentId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = String(value).trim();
+  return parsed || null;
 }
 
-function firstPositiveNumber(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]) {
   for (const value of values) {
-    const parsed = toPositiveNumber(value);
+    const parsed = toPermanentId(value);
     if (parsed) return parsed;
   }
   return null;
@@ -205,14 +215,14 @@ function firstPositiveNumber(...values: unknown[]) {
 function normalizeMembership(membership?: UserMembership | null): UserMembership | null {
   if (!membership) return null;
 
-  const schoolId = firstPositiveNumber(
+  const schoolId = firstPermanentId(
     membership.schoolId,
     membership.school?.id,
     membership.activeSchoolId,
     membership.contextSchoolId
   );
 
-  const branchId = firstPositiveNumber(
+  const branchId = firstPermanentId(
     membership.branchId,
     membership.schoolBranchId,
     membership.branch?.id,
@@ -220,29 +230,19 @@ function normalizeMembership(membership?: UserMembership | null): UserMembership
     membership.contextBranchId
   );
 
-  const teacherLocalId = firstPositiveNumber(
-    membership.teacherLocalId,
-    membership.localTeacherId,
+  const teacherId = firstPermanentId(
     membership.teacherId,
-    membership.teacher?.id,
-    membership.staffLocalId
+    membership.teacher?.id
   );
 
-  const studentLocalId = firstPositiveNumber(
-    membership.studentLocalId,
-    membership.localStudentId,
+  const studentId = firstPermanentId(
     membership.studentId,
-    membership.student?.id,
-    membership.learnerLocalId,
-    membership.pupilLocalId
+    membership.student?.id
   );
 
-  const parentLocalId = firstPositiveNumber(
-    membership.parentLocalId,
-    membership.localParentId,
+  const parentId = firstPermanentId(
     membership.parentId,
-    membership.parent?.id,
-    membership.guardianLocalId
+    membership.parent?.id
   );
 
   return {
@@ -250,9 +250,9 @@ function normalizeMembership(membership?: UserMembership | null): UserMembership
     schoolId,
     branchId,
     schoolBranchId: branchId,
-    teacherLocalId,
-    studentLocalId,
-    parentLocalId,
+    teacherId,
+    studentId,
+    parentId,
     active: membership.active !== false,
   };
 }
@@ -262,7 +262,7 @@ function membershipKey(membership?: UserMembership | null, fallback = "membershi
   return String(
     membership.id ??
       `${membership.role}-${membership.schoolId ?? "account"}-${membership.branchId ?? "root"}-${
-        membership.teacherLocalId ?? membership.studentLocalId ?? membership.parentLocalId ?? "portal"
+        membership.teacherId ?? membership.studentId ?? membership.parentId ?? "portal"
       }`
   );
 }
@@ -283,12 +283,12 @@ function membershipIsUsable(membership?: UserMembership | null) {
   return !["inactive", "disabled", "deleted", "blocked", "suspended"].includes(status);
 }
 
-function profileRoleHasLocalId(membership?: UserMembership | null) {
+function profileRoleHasPermanentId(membership?: UserMembership | null) {
   const normalized = normalizeMembership(membership);
   if (!normalized) return false;
-  if (normalized.role === "student") return Boolean(normalized.studentLocalId);
-  if (normalized.role === "teacher") return Boolean(normalized.teacherLocalId);
-  if (normalized.role === "parent") return Boolean(normalized.parentLocalId);
+  if (normalized.role === "student") return Boolean(normalized.studentId);
+  if (normalized.role === "teacher") return Boolean(normalized.teacherId);
+  if (normalized.role === "parent") return Boolean(normalized.parentId);
   return true;
 }
 
@@ -323,11 +323,11 @@ function writeWorkspaceSession(membership: UserMembership) {
   safeSet("activeMembershipId", id);
   safeSet("activeRole", normalized.role || "");
 
-  const schoolId = toPositiveNumber(normalized.schoolId);
-  const branchId = toPositiveNumber(normalized.branchId);
-  const teacherId = toPositiveNumber(normalized.teacherLocalId);
-  const studentId = toPositiveNumber(normalized.studentLocalId);
-  const parentId = toPositiveNumber(normalized.parentLocalId);
+  const schoolId = toPermanentId(normalized.schoolId);
+  const branchId = toPermanentId(normalized.branchId);
+  const teacherId = toPermanentId(normalized.teacherId);
+  const studentId = toPermanentId(normalized.studentId);
+  const parentId = toPermanentId(normalized.parentId);
 
   if (schoolId) safeSet("activeSchoolId", String(schoolId)); else safeRemove("activeSchoolId");
   if (branchId) safeSet("activeBranchId", String(branchId)); else safeRemove("activeBranchId");
@@ -343,9 +343,9 @@ function writeWorkspaceSession(membership: UserMembership) {
       role: normalized.role,
       schoolId,
       branchId,
-      teacherLocalId: teacherId,
-      studentLocalId: studentId,
-      parentLocalId: parentId,
+      teacherId: teacherId,
+      studentId: studentId,
+      parentId: parentId,
       openedAt: Date.now(),
     })
   );
@@ -353,9 +353,9 @@ function writeWorkspaceSession(membership: UserMembership) {
   return normalized;
 }
 
-function readStoredNumber(...keys: string[]) {
+function readStoredId(...keys: string[]) {
   for (const key of keys) {
-    const parsed = toPositiveNumber(safeRead(key));
+    const parsed = toPermanentId(safeRead(key));
     if (parsed) return parsed;
   }
   return null;
@@ -397,9 +397,9 @@ function roleScope(membership: UserMembership) {
 
 function roleDetail(membership: UserMembership) {
   const normalized = normalizeMembership(membership) || membership;
-  if (normalized.teacherLocalId) return `Teacher profile ${normalized.teacherLocalId}`;
-  if (normalized.studentLocalId) return `Student profile ${normalized.studentLocalId}`;
-  if (normalized.parentLocalId) return `Parent profile ${normalized.parentLocalId}`;
+  if (normalized.teacherId) return `Teacher profile ${normalized.teacherId}`;
+  if (normalized.studentId) return `Student profile ${normalized.studentId}`;
+  if (normalized.parentId) return `Parent profile ${normalized.parentId}`;
   return "Workspace access";
 }
 
@@ -439,12 +439,12 @@ function selectedMemberMeta(args: {
   const schoolId = workspace.schoolId ?? membership.schoolId;
   const branchId = workspace.branchId ?? membership.branchId;
   const profileId =
-    workspace.teacherLocalId ??
-    workspace.studentLocalId ??
-    workspace.parentLocalId ??
-    membership.teacherLocalId ??
-    membership.studentLocalId ??
-    membership.parentLocalId;
+    workspace.teacherId ??
+    workspace.studentId ??
+    workspace.parentId ??
+    membership.teacherId ??
+    membership.studentId ??
+    membership.parentId;
 
   const scope =
     schoolId && branchId
@@ -461,8 +461,8 @@ function selectedMemberMeta(args: {
 function pickMembership(args: {
   memberships: UserMembership[];
   allowedRoles: AppRole[];
-  activeSchoolId?: number | null;
-  activeBranchId?: number | null;
+  activeSchoolId?: string | null;
+  activeBranchId?: string | null;
 }) {
   return (
     args.memberships.find((membership) => {
@@ -470,9 +470,9 @@ function pickMembership(args: {
       if (!membershipIsUsable(membership)) return false;
 
       const schoolMatches =
-        !args.activeSchoolId || !membership.schoolId || Number(membership.schoolId) === Number(args.activeSchoolId);
+        !args.activeSchoolId || !membership.schoolId || String(membership.schoolId) === String(args.activeSchoolId);
       const branchMatches =
-        !args.activeBranchId || !membership.branchId || Number(membership.branchId) === Number(args.activeBranchId);
+        !args.activeBranchId || !membership.branchId || String(membership.branchId) === String(args.activeBranchId);
 
       return schoolMatches && branchMatches;
     }) ||
@@ -485,7 +485,7 @@ function protectedPortalCanAccess(selectedMembership: UserMembership | null, all
   if (!selectedMembership) return false;
   if (!roleAllowed(selectedMembership.role, allowedRoles)) return false;
   if (!membershipIsUsable(selectedMembership)) return false;
-  return profileRoleHasLocalId(selectedMembership);
+  return profileRoleHasPermanentId(selectedMembership);
 }
 
 
@@ -563,6 +563,71 @@ function RolePortalShellContent({
     refreshSettings,
   } = settingsContext;
 
+  /**
+   * Live appearance values
+   * ------------------------------------------------------------------------
+   * SettingsContext is the authoritative source for the currently selected
+   * school/branch. ThemeContext remains a safe fallback while settings are
+   * restoring, but it must never override a freshly saved branch appearance.
+   */
+  const resolvedPrimaryColor =
+    settings?.primaryColor ||
+    themeContext.primaryColor ||
+    "#2f6fed";
+
+  const resolvedFontFamily =
+    settings?.fontFamily ||
+    themeContext.fontFamily ||
+    "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+  const resolvedFontSize =
+    Number(settings?.fontSize) ||
+    themeContext.fontSize ||
+    16;
+
+  /**
+   * Publish branding variables at document level as well as at the shell root.
+   *
+   * Many existing and rebuilt portal modules consume global CSS variables
+   * directly. Keeping these variables synchronized means a Branch Settings
+   * save updates the sidebar, header, shared controls and active module without
+   * requiring a page reload or a role/workspace switch.
+   */
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const root = document.documentElement;
+
+    root.style.setProperty(
+      "--primary-color",
+      resolvedPrimaryColor,
+    );
+    root.style.setProperty(
+      "--dashboard-primary",
+      resolvedPrimaryColor,
+    );
+    root.style.setProperty(
+      "--branch-primary",
+      resolvedPrimaryColor,
+    );
+    root.style.setProperty(
+      "--accent-color",
+      resolvedPrimaryColor,
+    );
+    root.style.setProperty(
+      "--font-family",
+      resolvedFontFamily,
+    );
+    root.style.setProperty(
+      "--font-size",
+      `${resolvedFontSize}px`,
+    );
+  }, [
+    resolvedPrimaryColor,
+    resolvedFontFamily,
+    resolvedFontSize,
+  ]);
+
   const {
     activeSchoolId,
     activeSchool,
@@ -615,7 +680,7 @@ function RolePortalShellContent({
     return allMemberships.filter((membership) => {
       if (!roleAllowed(membership.role, allowedRoles)) return false;
       if (!membershipIsUsable(membership)) return false;
-      if (protectedProfilePortal && !profileRoleHasLocalId(membership)) return false;
+      if (protectedProfilePortal && !profileRoleHasPermanentId(membership)) return false;
       return true;
     });
   }, [allMemberships, allowedRoles, protectedProfilePortal]);
@@ -627,7 +692,7 @@ function RolePortalShellContent({
       normalizedActive &&
       roleAllowed(normalizedActive.role, allowedRoles) &&
       membershipIsUsable(normalizedActive) &&
-      (!protectedProfilePortal || profileRoleHasLocalId(normalizedActive))
+      (!protectedProfilePortal || profileRoleHasPermanentId(normalizedActive))
     ) {
       return normalizedActive;
     }
@@ -655,19 +720,19 @@ function RolePortalShellContent({
 
   const effectiveSchoolId = useMemo(
     () =>
-      toPositiveNumber(activeSchoolId) ||
-      toPositiveNumber(selectedMembership?.schoolId) ||
-      toPositiveNumber(openedWorkspace?.schoolId) ||
-      readStoredNumber("activeSchoolId"),
+      toPermanentId(activeSchoolId) ||
+      toPermanentId(selectedMembership?.schoolId) ||
+      toPermanentId(openedWorkspace?.schoolId) ||
+      readStoredId("activeSchoolId"),
     [activeSchoolId, selectedMembership?.schoolId, openedWorkspace]
   );
 
   const effectiveBranchId = useMemo(
     () =>
-      toPositiveNumber(activeBranchId) ||
-      toPositiveNumber(selectedMembership?.branchId) ||
-      toPositiveNumber(openedWorkspace?.branchId) ||
-      readStoredNumber("activeBranchId"),
+      toPermanentId(activeBranchId) ||
+      toPermanentId(selectedMembership?.branchId) ||
+      toPermanentId(openedWorkspace?.branchId) ||
+      readStoredId("activeBranchId"),
     [activeBranchId, selectedMembership?.branchId, openedWorkspace]
   );
 
@@ -965,12 +1030,12 @@ function RolePortalShellContent({
       membership: selectedMembership,
       memberships: switchableMemberships,
       activeRole: activeRole || selectedMembership?.role || null,
-      teacherLocalId:
-        activeTeacherId || toPositiveNumber(selectedMembership?.teacherLocalId),
-      studentLocalId:
-        activeStudentId || toPositiveNumber(selectedMembership?.studentLocalId),
-      parentLocalId:
-        activeParentId || toPositiveNumber(selectedMembership?.parentLocalId),
+      teacherId:
+        activeTeacherId || toPermanentId(selectedMembership?.teacherId),
+      studentId:
+        activeStudentId || toPermanentId(selectedMembership?.studentId),
+      parentId:
+        activeParentId || toPermanentId(selectedMembership?.parentId),
 
       schoolId: effectiveSchoolId,
       school: activeSchool,
@@ -1232,22 +1297,17 @@ function RolePortalShellContent({
         {
           "--sidebar-width": `${sidebarWidth}px`,
           "--primary-color":
-            themeContext.primaryColor ||
-            settings?.primaryColor ||
-            "#2f6fed",
+            resolvedPrimaryColor,
           "--dashboard-primary":
-            themeContext.primaryColor ||
-            settings?.primaryColor ||
-            "#2f6fed",
+            resolvedPrimaryColor,
+          "--branch-primary":
+            resolvedPrimaryColor,
+          "--accent-color":
+            resolvedPrimaryColor,
           "--font-family":
-            themeContext.fontFamily ||
-            settings?.fontFamily ||
-            "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-          "--font-size": `${
-            themeContext.fontSize ||
-            Number(settings?.fontSize) ||
-            16
-          }px`,
+            resolvedFontFamily,
+          "--font-size":
+            `${resolvedFontSize}px`,
         } as React.CSSProperties
       }
     >
@@ -1353,7 +1413,7 @@ function RolePortalShellContent({
           <label>School</label>
           <select
             value={activeSchoolId || effectiveSchoolId || ""}
-            onChange={(e) => setActiveSchoolId?.(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => setActiveSchoolId?.(e.target.value ? e.target.value : null)}
             disabled={(lockedContext && !hasMultipleMemberships) || !schools?.length}
           >
             <option value="">{schools?.length ? "Select school" : "No school found"}</option>
@@ -1370,7 +1430,7 @@ function RolePortalShellContent({
           <label>Branch</label>
           <select
             value={activeBranchId || effectiveBranchId || ""}
-            onChange={(e) => setActiveBranchId?.(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => setActiveBranchId?.(e.target.value ? e.target.value : null)}
             disabled={(lockedContext && !hasMultipleMemberships) || !(activeSchoolId || effectiveSchoolId) || !branches?.length}
           >
             <option value="">
@@ -1650,43 +1710,45 @@ const css = `
   pointer-events: none;
 }
 
-.role-shell {
+.role-shell,
+.center-page {
+  /*
+   * The shared appearance runtime owns the complete palette:
+   * --bg, --surface, --card, --card-bg, --input-bg, --text, --muted,
+   * --border and every related light/dark token.
+   *
+   * The shell only creates aliases from that palette. It must never redefine
+   * the source variables, otherwise Branch Settings and Local Settings produce
+   * different visual results.
+   */
   --shell-sidebar-bg: var(--surface, #ffffff);
-  --shell-header-bg: var(--surface, #ffffff);
+  --shell-header-bg: color-mix(
+    in srgb,
+    var(--surface, #ffffff) 92%,
+    transparent
+  );
   --shell-menu-bg: var(--surface, #ffffff);
-  --shell-section-bg: color-mix(in srgb, var(--bg, #f7f8fb) 78%, var(--surface, #ffffff));
-  --shell-hover-bg: color-mix(in srgb, var(--primary-color, #2f6fed) 8%, var(--surface, #ffffff));
+  --shell-section-bg: color-mix(
+    in srgb,
+    var(--bg, #f7f8fb) 76%,
+    var(--surface, #ffffff)
+  );
+  --shell-hover-bg: color-mix(
+    in srgb,
+    var(--primary-color, #2f6fed) 9%,
+    var(--surface, #ffffff)
+  );
+  --shell-active-bg: color-mix(
+    in srgb,
+    var(--primary-color, #2f6fed) 14%,
+    var(--surface, #ffffff)
+  );
+  --shell-soft-border: color-mix(
+    in srgb,
+    var(--border, rgba(0,0,0,.10)) 82%,
+    transparent
+  );
   --dashboard-primary: var(--primary-color, #2f6fed);
-}
-
-/* Keep light mode close to the old dashboard: clean white sidebar/header with soft contrast. */
-html[data-theme="light"] .role-shell,
-html[data-theme="light"] .center-page,
-html[data-eleeveon-resolved-mode="light"] .role-shell,
-html[data-eleeveon-resolved-mode="light"] .center-page {
-  --shell-sidebar-bg: #ffffff;
-  --shell-header-bg: rgba(255,255,255,.92);
-  --shell-menu-bg: #ffffff;
-  --shell-section-bg: #f7f8fb;
-  --shell-hover-bg: var(--shell-hover-bg, #f1f5f9);
-  --card: #ffffff;
-  --card-bg: #ffffff;
-  --surface: #ffffff;
-  --bg: #f7f8fb;
-  --text: #111111;
-  --border: rgba(0,0,0,.10);
-}
-
-/* Dark mode still follows the theme-context/local-settings dark variables. */
-html[data-theme="dark"] .role-shell,
-html[data-theme="dark"] .center-page,
-html[data-eleeveon-resolved-mode="dark"] .role-shell,
-html[data-eleeveon-resolved-mode="dark"] .center-page {
-  --shell-sidebar-bg: var(--surface);
-  --shell-header-bg: color-mix(in srgb, var(--surface) 88%, transparent);
-  --shell-menu-bg: var(--surface);
-  --shell-section-bg: rgba(255,255,255,.06);
-  --shell-hover-bg: rgba(255,255,255,.08);
 }
 
 html,

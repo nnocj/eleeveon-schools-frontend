@@ -3,15 +3,7 @@
 /**
  * app/hooks/useEntityMediaController.ts
  * --------------------------------------------------------------------------
- * Shared media lifecycle for Branch Admin forms.
- *
- * It wraps the current media foundation:
- * - local compression/blob save;
- * - preview;
- * - exact owner-field commit and verification;
- * - authenticated backend upload scheduling;
- * - exact owner-field removal;
- * - object-URL cleanup.
+ * Shared media lifecycle using permanent string owner and asset IDs.
  */
 
 import {
@@ -42,76 +34,56 @@ export type EntityMediaFieldConfig = {
 };
 
 export type EntityMediaDraft = {
-  assetId: number;
+  assetId: string;
   previewUrl: string;
   result: SavedMediaAssetResult;
 };
 
 export type EntityMediaCommitItem = {
   fieldKey: string;
-  assetId?: number | null;
+  assetId?: string | null;
   allowMultiple?: boolean;
 };
 
 export type EntityMediaOwner = {
   ownerTable: string;
-  ownerLocalId?: number | null;
-  ownerCloudId?: string | null;
+  ownerId?: string | null;
   ownerTempKey?: string | null;
 };
 
-function positiveNumber(value: unknown) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function cleanId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = String(value).trim();
+  return id || null;
 }
 
-export function useEntityMediaController(
-  ownerTable: string,
-) {
-  const {
-    accountId,
-    schoolId,
-    branchId,
-  } = useBranchWorkspaceScope();
+function createTempKey(ownerTable: string): string {
+  return `media-${ownerTable}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 9)}`;
+}
 
-  const [drafts, setDrafts] =
-    useState<Record<string, EntityMediaDraft>>({});
+export function useEntityMediaController(ownerTable: string) {
+  const { accountId, schoolId, branchId } = useBranchWorkspaceScope();
+  const [drafts, setDrafts] = useState<Record<string, EntityMediaDraft>>({});
+  const [busyField, setBusyField] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const tempKeyRef = useRef(createTempKey(ownerTable));
+  const previewUrlsRef = useRef(new Set<string>());
 
-  const [busyField, setBusyField] =
-    useState<string | null>(null);
+  const rememberPreview = useCallback((url?: string) => {
+    if (url?.startsWith("blob:")) previewUrlsRef.current.add(url);
+  }, []);
 
-  const [error, setError] =
-    useState<string | null>(null);
-
-  const tempKeyRef = useRef(
-    `media-${ownerTable}-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 9)}`,
-  );
-
-  const previewUrlsRef =
-    useRef(new Set<string>());
-
-  const rememberPreview =
-    useCallback((url?: string) => {
-      if (url?.startsWith("blob:")) {
-        previewUrlsRef.current.add(url);
-      }
-    }, []);
-
-  const releasePreview =
-    useCallback((url?: string) => {
-      if (!url) return;
-      revokeMediaObjectUrl(url);
-      previewUrlsRef.current.delete(url);
-    }, []);
+  const releasePreview = useCallback((url?: string) => {
+    if (!url) return;
+    revokeMediaObjectUrl(url);
+    previewUrlsRef.current.delete(url);
+  }, []);
 
   useEffect(() => {
     return () => {
-      for (const url of previewUrlsRef.current) {
-        revokeMediaObjectUrl(url);
-      }
-
+      for (const url of previewUrlsRef.current) revokeMediaObjectUrl(url);
       previewUrlsRef.current.clear();
     };
   }, []);
@@ -123,9 +95,7 @@ export function useEntityMediaController(
       owner?: Omit<EntityMediaOwner, "ownerTable">,
     ) => {
       if (!accountId) {
-        throw new Error(
-          "An active account is required before saving media.",
-        );
+        throw new Error("An active account is required before saving media.");
       }
 
       setBusyField(config.fieldKey);
@@ -133,31 +103,20 @@ export function useEntityMediaController(
 
       try {
         const previous = drafts[config.fieldKey];
-
         const result = await saveImageAsset(file, {
           accountId,
           schoolId,
           branchId,
           ownerTable: ownerTable as any,
-          ownerLocalId:
-            positiveNumber(owner?.ownerLocalId),
-          ownerCloudId:
-            owner?.ownerCloudId || undefined,
-          ownerTempKey:
-            owner?.ownerTempKey ||
-            tempKeyRef.current,
+          ownerId: cleanId(owner?.ownerId),
+          ownerTempKey: cleanId(owner?.ownerTempKey) || tempKeyRef.current,
           fieldKey: config.fieldKey,
           variant: config.variant,
           altText: config.altText,
-          replaceExisting:
-            config.replaceExisting ??
-            !config.allowMultiple,
+          replaceExisting: config.replaceExisting ?? !config.allowMultiple,
         });
 
-        if (previous?.previewUrl) {
-          releasePreview(previous.previewUrl);
-        }
-
+        if (previous?.previewUrl) releasePreview(previous.previewUrl);
         rememberPreview(result.previewUrl);
 
         const draft: EntityMediaDraft = {
@@ -166,17 +125,10 @@ export function useEntityMediaController(
           result,
         };
 
-        setDrafts((current) => ({
-          ...current,
-          [config.fieldKey]: draft,
-        }));
-
+        setDrafts((current) => ({ ...current, [config.fieldKey]: draft }));
         return draft;
       } catch (cause: any) {
-        const message =
-          cause?.message ||
-          "The image could not be prepared.";
-
+        const message = cause?.message || "The image could not be prepared.";
         setError(message);
         throw cause;
       } finally {
@@ -200,75 +152,54 @@ export function useEntityMediaController(
       items: readonly EntityMediaCommitItem[],
     ) => {
       if (!accountId) {
-        throw new Error(
-          "An active account is required before committing media.",
-        );
+        throw new Error("An active account is required before committing media.");
+      }
+
+      const ownerId = cleanId(owner.ownerId);
+      if (!ownerId) {
+        throw new Error("The owner record must have a permanent ID before media can be committed.");
       }
 
       setError(null);
 
-      const normalized = items
+      const assets = items
         .map((item) => ({
           fieldKey: item.fieldKey,
-          assetId: positiveNumber(
-            item.assetId ??
-              drafts[item.fieldKey]?.assetId,
-          ),
+          assetId: cleanId(item.assetId ?? drafts[item.fieldKey]?.assetId),
           allowMultiple: item.allowMultiple,
         }))
         .filter(
-          (
-            item,
-          ): item is {
+          (item): item is {
             fieldKey: string;
-            assetId: number;
+            assetId: string;
             allowMultiple: boolean | undefined;
-          } => item.assetId !== null,
+          } => Boolean(item.assetId),
         );
 
-      if (!normalized.length) {
-        return [];
-      }
+      if (!assets.length) return [];
 
       try {
-        const committed =
-          await commitMediaAssetsToOwner({
-            accountId,
-            ownerTable,
-            ownerLocalId:
-              positiveNumber(
-                owner.ownerLocalId,
-              ),
-            ownerCloudId:
-              owner.ownerCloudId || undefined,
-            ownerTempKey:
-              owner.ownerTempKey ||
-              tempKeyRef.current,
-            assets: normalized,
-          });
-
-        return committed;
+        return await commitMediaAssetsToOwner({
+          accountId,
+          ownerTable,
+          ownerId,
+          ownerTempKey: cleanId(owner.ownerTempKey) || tempKeyRef.current,
+          assets,
+        });
       } catch (cause: any) {
-        const message =
-          cause?.message ||
-          "The media could not be attached to the saved record.";
-
+        const message = cause?.message || "The media could not be attached to the saved record.";
         setError(message);
         throw cause;
       }
     },
-    [
-      accountId,
-      ownerTable,
-      drafts,
-    ],
+    [accountId, ownerTable, drafts],
   );
 
   const remove = useCallback(
     async (
       fieldKey: string,
       owner: Omit<EntityMediaOwner, "ownerTable">,
-      excludeAssetIds?: Array<number | string | null | undefined>,
+      excludeAssetIds?: Array<string | null | undefined>,
     ) => {
       if (!accountId) return;
 
@@ -279,24 +210,14 @@ export function useEntityMediaController(
         await softDeleteOwnerFieldAssets({
           accountId,
           ownerTable,
-          ownerLocalId:
-            positiveNumber(
-              owner.ownerLocalId,
-            ),
-          ownerCloudId:
-            owner.ownerCloudId || undefined,
-          ownerTempKey:
-            owner.ownerTempKey ||
-            tempKeyRef.current,
+          ownerId: cleanId(owner.ownerId),
+          ownerTempKey: cleanId(owner.ownerTempKey) || tempKeyRef.current,
           fieldKey,
           excludeAssetIds,
         });
 
         const draft = drafts[fieldKey];
-
-        if (draft?.previewUrl) {
-          releasePreview(draft.previewUrl);
-        }
+        if (draft?.previewUrl) releasePreview(draft.previewUrl);
 
         setDrafts((current) => {
           const next = { ...current };
@@ -304,31 +225,20 @@ export function useEntityMediaController(
           return next;
         });
       } catch (cause: any) {
-        const message =
-          cause?.message ||
-          "The media could not be removed.";
-
+        const message = cause?.message || "The media could not be removed.";
         setError(message);
         throw cause;
       } finally {
         setBusyField(null);
       }
     },
-    [
-      accountId,
-      ownerTable,
-      drafts,
-      releasePreview,
-    ],
+    [accountId, ownerTable, drafts, releasePreview],
   );
 
   const clearDraft = useCallback(
     (fieldKey: string) => {
       const draft = drafts[fieldKey];
-
-      if (draft?.previewUrl) {
-        releasePreview(draft.previewUrl);
-      }
+      if (draft?.previewUrl) releasePreview(draft.previewUrl);
 
       setDrafts((current) => {
         const next = { ...current };
@@ -340,17 +250,11 @@ export function useEntityMediaController(
   );
 
   const reset = useCallback(() => {
-    for (const draft of Object.values(drafts)) {
-      releasePreview(draft.previewUrl);
-    }
-
+    for (const draft of Object.values(drafts)) releasePreview(draft.previewUrl);
     setDrafts({});
     setError(null);
     setBusyField(null);
-    tempKeyRef.current =
-      `media-${ownerTable}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 9)}`;
+    tempKeyRef.current = createTempKey(ownerTable);
   }, [drafts, ownerTable, releasePreview]);
 
   return useMemo(
@@ -359,8 +263,7 @@ export function useEntityMediaController(
       schoolId,
       branchId,
       ownerTable,
-      ownerTempKey:
-        tempKeyRef.current,
+      ownerTempKey: tempKeyRef.current,
       drafts,
       busyField,
       error,

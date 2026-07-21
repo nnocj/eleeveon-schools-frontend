@@ -112,12 +112,10 @@ function asArray<T = any>(value: any): T[] {
   return [value];
 }
 
-function numberOrNull(value: any): number | null {
-  if (value === null || value === undefined || value === "") return null;
-
-  const parsed = Number(value);
-
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function stringIdOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const parsed = String(value).trim();
+  return parsed || null;
 }
 
 function membershipIsActive(value: any) {
@@ -128,12 +126,7 @@ function membershipIsActive(value: any) {
   if (value.isDeleted === true) return false;
 
   const status = String(value.status || "").trim().toLowerCase();
-
-  if (["inactive", "disabled", "deleted", "blocked", "suspended"].includes(status)) {
-    return false;
-  }
-
-  return true;
+  return !["inactive", "disabled", "deleted", "blocked", "suspended"].includes(status);
 }
 
 function normalizeMembershipForLogin(value: any): UserMembership | null {
@@ -144,37 +137,34 @@ function normalizeMembershipForLogin(value: any): UserMembership | null {
       value.membershipRole ||
       value.portalRole ||
       value.userRole ||
-      value.type
+      value.type,
   );
 
   if (!role) return null;
 
+  const branchId = stringIdOrNull(
+    value.branchId ||
+      value.schoolBranchId ||
+      value.branch?.id ||
+      value.activeBranchId ||
+      value.contextBranchId,
+  );
+
   return {
     ...value,
-    id: value.id,
+    id: stringIdOrNull(value.id) || `membership-${role}-${Date.now()}`,
     role,
-    schoolId: numberOrNull(
+    schoolId: stringIdOrNull(
       value.schoolId ||
         value.school?.id ||
         value.activeSchoolId ||
-        value.contextSchoolId
+        value.contextSchoolId,
     ),
-    branchId: numberOrNull(
-      value.branchId ||
-        value.schoolBranchId ||
-        value.branch?.id ||
-        value.activeBranchId ||
-        value.contextBranchId
-    ),
-    teacherLocalId: numberOrNull(
-      value.teacherLocalId || value.teacherId || value.teacher?.id
-    ),
-    studentLocalId: numberOrNull(
-      value.studentLocalId || value.studentId || value.student?.id
-    ),
-    parentLocalId: numberOrNull(
-      value.parentLocalId || value.parentId || value.parent?.id
-    ),
+    branchId,
+    schoolBranchId: branchId,
+    teacherId: stringIdOrNull(value.teacherId || value.teacher?.id),
+    studentId: stringIdOrNull(value.studentId || value.student?.id),
+    parentId: stringIdOrNull(value.parentId || value.parent?.id),
     active: true,
   };
 }
@@ -210,9 +200,9 @@ function collectMemberships(res: LoginResponse): UserMembership[] {
       `${membership.role}-${membership.schoolId || "school"}-${
         membership.branchId || "branch"
       }-${
-        membership.teacherLocalId ||
-        membership.studentLocalId ||
-        membership.parentLocalId ||
+        membership.teacherId ||
+        membership.studentId ||
+        membership.parentId ||
         index
       }`;
 
@@ -255,22 +245,18 @@ function saveLoginContext(res: LoginResponse, memberships: UserMembership[]) {
   sessionStorage.setItem(ACCOUNT_INFO_KEY, JSON.stringify(accountToStore));
   sessionStorage.setItem(MEMBERSHIP_BACKUP_KEY, JSON.stringify(memberships));
 
-  // Compatibility with older contexts/pages that may read these keys.
   localStorage.setItem("user", JSON.stringify(userToStore));
   localStorage.setItem("account", JSON.stringify(accountToStore));
 
-  if (normalizedRole) {
-    localStorage.setItem("activeRole", String(normalizedRole));
-  }
+  if (normalizedRole) localStorage.setItem("activeRole", String(normalizedRole));
 }
 
 function chooseSingleMembershipForRole(
   role: AppRole | undefined,
-  memberships: UserMembership[]
+  memberships: UserMembership[],
 ) {
   if (!memberships.length) return null;
   if (!role) return memberships[0];
-
   return memberships.find((membership) => membership.role === role) || memberships[0];
 }
 
@@ -280,18 +266,22 @@ function createFallbackMembership(args: {
 }): UserMembership | null {
   if (!args.role) return null;
 
+  const branchId = stringIdOrNull(
+    args.user?.branchId ||
+      args.user?.schoolBranchId ||
+      args.user?.activeBranchId,
+  );
+
   return {
     id: `direct-${args.role}-${args.user?.id || Date.now()}`,
+    accountId: stringIdOrNull(args.user?.accountId),
     role: args.role,
-    schoolId: numberOrNull(args.user?.schoolId || args.user?.activeSchoolId),
-    branchId: numberOrNull(
-      args.user?.branchId ||
-        args.user?.schoolBranchId ||
-        args.user?.activeBranchId
-    ),
-    teacherLocalId: numberOrNull(args.user?.teacherLocalId || args.user?.teacherId),
-    studentLocalId: numberOrNull(args.user?.studentLocalId || args.user?.studentId),
-    parentLocalId: numberOrNull(args.user?.parentLocalId || args.user?.parentId),
+    schoolId: stringIdOrNull(args.user?.schoolId || args.user?.activeSchoolId),
+    branchId,
+    schoolBranchId: branchId,
+    teacherId: stringIdOrNull(args.user?.teacherId),
+    studentId: stringIdOrNull(args.user?.studentId),
+    parentId: stringIdOrNull(args.user?.parentId),
     active: true,
   };
 }

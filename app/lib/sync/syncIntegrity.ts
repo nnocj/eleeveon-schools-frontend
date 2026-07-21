@@ -4,6 +4,12 @@
  * Phase 17 synchronization integrity checks and local quarantine.
  *
  * Invalid records are never written into normal application tables.
+ *
+ * UUID contract:
+ * - localId is the permanent client-generated entity UUID;
+ * - cloudId is the Prisma SyncRecord UUID;
+ * - accountId, schoolId, branchId and relationship IDs are string IDs;
+ * - quarantine preserves UUID strings without numeric coercion.
  */
 
 import { db } from "../db/db";
@@ -40,8 +46,23 @@ export type QuarantineInput = {
   source: SyncIntegritySource;
   accountId?: string | null;
   tableName?: string | null;
-  localId?: number | null;
+
+  /**
+   * Permanent UUID of the local-first entity.
+   */
+  localId?: string | null;
+
+  /**
+   * Prisma SyncRecord UUID.
+   */
   cloudId?: string | null;
+
+  /**
+   * Temporary compatibility aliases for callers not yet migrated.
+   */
+  entityId?: string | null;
+  id?: string | null;
+
   reason: string;
   payload?: unknown;
 };
@@ -107,9 +128,17 @@ const BRANCH_REQUIRED_TABLES = new Set([
   "schoolBranchSettings",
 ]);
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function cleanString(value: unknown) {
   const clean = String(value ?? "").trim();
   return clean || undefined;
+}
+
+function isUuid(value: unknown) {
+  const clean = cleanString(value);
+  return Boolean(clean && UUID_PATTERN.test(clean));
 }
 
 function validPositiveNumber(value: unknown) {
@@ -119,6 +148,7 @@ function validPositiveNumber(value: unknown) {
 
 function validTimestamp(value: unknown) {
   const number = Number(value);
+
   return (
     Number.isFinite(number) &&
     number > 0 &&
@@ -126,16 +156,30 @@ function validTimestamp(value: unknown) {
   );
 }
 
-function isPlainJsonObject(value: unknown): value is Record<string, any> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+function isPlainJsonObject(
+  value: unknown,
+): value is Record<string, any> {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
     return false;
   }
 
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
+  const prototype =
+    Object.getPrototypeOf(value);
+
+  return (
+    prototype === Object.prototype ||
+    prototype === null
+  );
 }
 
-function isJsonSafe(value: unknown, seen = new Set<object>()): boolean {
+function isJsonSafe(
+  value: unknown,
+  seen = new Set<object>(),
+): boolean {
   if (
     value === null ||
     typeof value === "string" ||
@@ -144,28 +188,61 @@ function isJsonSafe(value: unknown, seen = new Set<object>()): boolean {
     return true;
   }
 
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value === "undefined") return false;
-  if (typeof value === "bigint" || typeof value === "function" || typeof value === "symbol") {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === "undefined") {
     return false;
   }
 
-  if (typeof Blob !== "undefined" && value instanceof Blob) return false;
-  if (typeof File !== "undefined" && value instanceof File) return false;
-  if (value instanceof Date) return true;
+  if (
+    typeof value === "bigint" ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  ) {
+    return false;
+  }
+
+  if (
+    typeof Blob !== "undefined" &&
+    value instanceof Blob
+  ) {
+    return false;
+  }
+
+  if (
+    typeof File !== "undefined" &&
+    value instanceof File
+  ) {
+    return false;
+  }
+
+  if (value instanceof Date) {
+    return true;
+  }
 
   if (typeof value === "object") {
-    if (seen.has(value as object)) return false;
+    if (seen.has(value as object)) {
+      return false;
+    }
+
     seen.add(value as object);
 
     if (Array.isArray(value)) {
-      return value.every((item) => isJsonSafe(item, seen));
+      return value.every((item) =>
+        isJsonSafe(item, seen),
+      );
     }
 
-    if (!isPlainJsonObject(value)) return false;
+    if (!isPlainJsonObject(value)) {
+      return false;
+    }
 
     return Object.values(value).every(
-      (item) => item !== undefined && isJsonSafe(item, seen),
+      (item) =>
+        item !== undefined &&
+        isJsonSafe(item, seen),
     );
   }
 
@@ -183,7 +260,8 @@ function tenantIssues(
     issues.push({
       code: "PAYLOAD_ACCOUNT_MISMATCH",
       field: "payload.accountId",
-      message: "Payload accountId does not match the active account.",
+      message:
+        "Payload accountId does not match the active account.",
     });
   }
 
@@ -191,22 +269,27 @@ function tenantIssues(
     SCHOOL_REQUIRED_TABLES.has(tableName) ||
     BRANCH_REQUIRED_TABLES.has(tableName);
 
-  if (requiresSchool && !validPositiveNumber(payload.schoolId)) {
+  if (
+    requiresSchool &&
+    !isUuid(payload.schoolId)
+  ) {
     issues.push({
       code: "MISSING_SCHOOL_ID",
       field: "payload.schoolId",
-      message: `${tableName} requires a valid schoolId.`,
+      message:
+        `${tableName} requires a valid school UUID.`,
     });
   }
 
   if (
     BRANCH_REQUIRED_TABLES.has(tableName) &&
-    !validPositiveNumber(payload.branchId)
+    !isUuid(payload.branchId)
   ) {
     issues.push({
       code: "MISSING_BRANCH_ID",
       field: "payload.branchId",
-      message: `${tableName} requires a valid branchId.`,
+      message:
+        `${tableName} requires a valid branch UUID.`,
     });
   }
 
@@ -219,14 +302,20 @@ export function validatePushRecord(
 ): SyncIntegrityResult<SyncPushRecord> {
   const issues: SyncIntegrityIssue[] = [];
   const record = input as SyncPushRecord;
-  const tableName = cleanString(record?.tableName);
-  const accountId = cleanString(record?.accountId);
+  const tableName =
+    cleanString(record?.tableName);
+  const accountId =
+    cleanString(record?.accountId);
 
-  if (!tableName || !isPushSyncTable(tableName)) {
+  if (
+    !tableName ||
+    !isPushSyncTable(tableName)
+  ) {
     issues.push({
       code: "TABLE_NOT_PUSHABLE",
       field: "tableName",
-      message: `${tableName || "Unknown table"} is not browser-pushable.`,
+      message:
+        `${tableName || "Unknown table"} is not browser-pushable.`,
     });
   }
 
@@ -234,21 +323,37 @@ export function validatePushRecord(
     issues.push({
       code: "MISSING_ACCOUNT_ID",
       field: "accountId",
-      message: "The synchronization record has no accountId.",
+      message:
+        "The synchronization record has no accountId.",
     });
   } else if (accountId !== activeAccountId) {
     issues.push({
       code: "ACCOUNT_MISMATCH",
       field: "accountId",
-      message: "The synchronization record belongs to another account.",
+      message:
+        "The synchronization record belongs to another account.",
     });
   }
 
-  if (!validPositiveNumber(record?.localId)) {
+  if (!isUuid(record?.localId)) {
     issues.push({
       code: "INVALID_LOCAL_ID",
       field: "localId",
-      message: "The synchronization record has no valid local ID.",
+      message:
+        "The synchronization record has no valid permanent local UUID.",
+    });
+  }
+
+  if (
+    record?.cloudId != null &&
+    cleanString(record.cloudId) &&
+    !isUuid(record.cloudId)
+  ) {
+    issues.push({
+      code: "INVALID_CLOUD_ID",
+      field: "cloudId",
+      message:
+        "The synchronization record cloudId is not a valid UUID.",
     });
   }
 
@@ -256,7 +361,8 @@ export function validatePushRecord(
     issues.push({
       code: "INVALID_VERSION",
       field: "version",
-      message: "The synchronization version must be a positive number.",
+      message:
+        "The synchronization version must be a positive number.",
     });
   }
 
@@ -264,23 +370,37 @@ export function validatePushRecord(
     issues.push({
       code: "INVALID_TIMESTAMP",
       field: "updatedAt",
-      message: "The synchronization timestamp is missing or invalid.",
+      message:
+        "The synchronization timestamp is missing or invalid.",
     });
   }
 
-  if (!isPlainJsonObject(record?.payload) || !isJsonSafe(record.payload)) {
+  if (
+    !isPlainJsonObject(record?.payload) ||
+    !isJsonSafe(record.payload)
+  ) {
     issues.push({
       code: "INVALID_JSON_PAYLOAD",
       field: "payload",
-      message: "The synchronization payload is not a valid JSON object.",
+      message:
+        "The synchronization payload is not a valid JSON object.",
     });
   } else if (tableName && accountId) {
-    issues.push(...tenantIssues(tableName, record.payload, activeAccountId));
+    issues.push(
+      ...tenantIssues(
+        tableName,
+        record.payload,
+        activeAccountId,
+      ),
+    );
   }
 
   return {
     ok: issues.length === 0,
-    record: issues.length ? undefined : record,
+    record:
+      issues.length
+        ? undefined
+        : record,
     issues,
   };
 }
@@ -291,22 +411,50 @@ export function validatePullRecord(
 ): SyncIntegrityResult<SyncPullRecord> {
   const issues: SyncIntegrityIssue[] = [];
   const record = input as SyncPullRecord;
-  const tableName = cleanString(record?.tableName);
-  const accountId = cleanString(record?.accountId);
+  const tableName =
+    cleanString(record?.tableName);
+  const accountId =
+    cleanString(record?.accountId);
 
-  if (!tableName || !isPullSyncTable(tableName)) {
+  if (
+    !tableName ||
+    !isPullSyncTable(tableName)
+  ) {
     issues.push({
       code: "TABLE_NOT_PULLABLE",
       field: "tableName",
-      message: `${tableName || "Unknown table"} is not allowed in pull synchronization.`,
+      message:
+        `${tableName || "Unknown table"} is not allowed in pull synchronization.`,
     });
   }
 
-  if (!accountId || accountId !== activeAccountId) {
+  if (
+    !accountId ||
+    accountId !== activeAccountId
+  ) {
     issues.push({
       code: "ACCOUNT_MISMATCH",
       field: "accountId",
-      message: "Pulled record accountId does not match the active account.",
+      message:
+        "Pulled record accountId does not match the active account.",
+    });
+  }
+
+  if (!isUuid(record?.localId)) {
+    issues.push({
+      code: "INVALID_LOCAL_ID",
+      field: "localId",
+      message:
+        "Pulled record has no valid permanent local UUID.",
+    });
+  }
+
+  if (!isUuid(record?.cloudId)) {
+    issues.push({
+      code: "MISSING_CLOUD_ID",
+      field: "cloudId",
+      message:
+        "Pulled record has no valid stable cloud UUID.",
     });
   }
 
@@ -314,7 +462,8 @@ export function validatePullRecord(
     issues.push({
       code: "INVALID_VERSION",
       field: "version",
-      message: "Pulled record version is missing or invalid.",
+      message:
+        "Pulled record version is missing or invalid.",
     });
   }
 
@@ -322,63 +471,106 @@ export function validatePullRecord(
     issues.push({
       code: "INVALID_TIMESTAMP",
       field: "updatedAt",
-      message: "Pulled record timestamp is missing or invalid.",
+      message:
+        "Pulled record timestamp is missing or invalid.",
     });
   }
 
-  if (!cleanString(record?.cloudId)) {
-    issues.push({
-      code: "MISSING_CLOUD_ID",
-      field: "cloudId",
-      message: "Pulled record has no stable cloud ID.",
-    });
-  }
-
-  if (!isPlainJsonObject(record?.payload) || !isJsonSafe(record.payload)) {
+  if (
+    !isPlainJsonObject(record?.payload) ||
+    !isJsonSafe(record.payload)
+  ) {
     issues.push({
       code: "INVALID_JSON_PAYLOAD",
       field: "payload",
-      message: "Pulled payload is not a valid JSON object.",
+      message:
+        "Pulled payload is not a valid JSON object.",
     });
   } else if (tableName && accountId) {
-    issues.push(...tenantIssues(tableName, record.payload, activeAccountId));
+    issues.push(
+      ...tenantIssues(
+        tableName,
+        record.payload,
+        activeAccountId,
+      ),
+    );
   }
 
   return {
     ok: issues.length === 0,
-    record: issues.length ? undefined : record,
+    record:
+      issues.length
+        ? undefined
+        : record,
     issues,
   };
 }
 
-export function integrityReason(issues: readonly SyncIntegrityIssue[]) {
+export function integrityReason(
+  issues: readonly SyncIntegrityIssue[],
+) {
   return issues
-    .map((issue) => `${issue.code}: ${issue.message}`)
+    .map(
+      (issue) =>
+        `${issue.code}: ${issue.message}`,
+    )
     .join(" | ");
 }
 
-export async function quarantineSyncRecord(input: QuarantineInput) {
-  const table = (db as any).syncQuarantine;
+export async function quarantineSyncRecord(
+  input: QuarantineInput,
+) {
+  const table =
+    (db as any).syncQuarantine;
 
   if (!table) {
     console.error(
       "[sync-integrity] syncQuarantine table is unavailable",
       input,
     );
+
     return undefined;
   }
 
+  const localId =
+    cleanString(
+      input.localId ??
+        input.entityId,
+    );
+
+  const cloudId =
+    cleanString(
+      input.cloudId ??
+        input.id,
+    );
+
   return table.add({
-    accountId: cleanString(input.accountId),
-    tableName: cleanString(input.tableName) || "unknown",
-    localId:
-      validPositiveNumber(input.localId)
-        ? Number(input.localId)
-        : undefined,
-    cloudId: cleanString(input.cloudId),
-    reason: input.reason,
-    payload: input.payload,
-    source: input.source,
-    quarantinedAt: Date.now(),
+    accountId:
+      cleanString(input.accountId),
+
+    tableName:
+      cleanString(input.tableName) ||
+      "unknown",
+
+    /**
+     * Keep both current names and compatibility aliases while older local
+     * databases or diagnostics pages may still read entityId/id.
+     */
+    localId,
+    cloudId,
+    entityId: localId,
+    id: cloudId,
+
+    reason:
+      input.reason,
+
+    payload:
+      input.payload,
+
+    source:
+      input.source,
+
+    quarantinedAt:
+      Date.now(),
   });
 }

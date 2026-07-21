@@ -18,9 +18,9 @@ export type DataChangeSource =
 
 export type DataChangeMetadata = {
   reason?: string;
-  schoolId?: number | null;
-  branchId?: number | null;
-  localId?: number | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  localId?: string | null;
   scheduleSync?: boolean;
   [key: string]: unknown;
 };

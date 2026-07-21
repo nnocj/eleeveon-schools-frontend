@@ -92,6 +92,7 @@ export default function PortalAppearanceRuntime({
   const requestRef = useRef(0);
   const lastReadyKeyRef = useRef<string | null>(null);
   const synchronizingKeyRef = useRef<string | null>(null);
+  const pendingRefreshRef = useRef(false);
 
   const expectedFor = useMemo(
     () =>
@@ -123,7 +124,10 @@ export default function PortalAppearanceRuntime({
       : "no-membership";
 
     // Prevent overlapping applications for the same role/workspace.
+    // Queue another pass instead of discarding refreshes triggered by
+    // Branch Settings saves.
     if (synchronizingKeyRef.current === synchronizationKey) {
+      pendingRefreshRef.current = true;
       return null;
     }
 
@@ -208,6 +212,13 @@ export default function PortalAppearanceRuntime({
     } finally {
       if (synchronizingKeyRef.current === synchronizationKey) {
         synchronizingKeyRef.current = null;
+      }
+
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        queueMicrotask(() => {
+          void synchronizeAppearance();
+        });
       }
     }
   }, [
@@ -299,7 +310,7 @@ export default function PortalAppearanceRuntime({
       if (
         expected.scope === "branch" &&
         detail.schoolId &&
-        Number(detail.schoolId) !== Number(expected.schoolId)
+        String(detail.schoolId) !== String(expected.schoolId)
       ) {
         return;
       }
@@ -307,7 +318,7 @@ export default function PortalAppearanceRuntime({
       if (
         expected.scope === "branch" &&
         detail.branchId &&
-        Number(detail.branchId) !== Number(expected.branchId)
+        String(detail.branchId) !== String(expected.branchId)
       ) {
         return;
       }

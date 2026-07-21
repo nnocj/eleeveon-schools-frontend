@@ -21,13 +21,15 @@
  * - saveImageAsset(...) for photos so large Base64 files are not stored inside student records
  * - photoMediaId / coverPhotoMediaId carry local media references for sync-safe records
  *
- * Media behavior rebuilt from the working Teachers.tsx pattern:
+ * Media behavior rebuilt from the shared local-first media system:
  * - selected images are compressed and stored once in mediaAssets/mediaBlobs
  * - student records save small media IDs instead of full image strings
  * - old photo/coverPhoto fields remain as backward-compatible fallbacks for list display only
- * - edit forms prefer resolved owned media and never reattach inherited/stale row media IDs
- * - ownerTempKey isolates unsaved form uploads so one student image cannot bleed into teachers/parents/classes or another student
- * - only newly uploaded media from the current create/edit session is attached after save
+ * - every create/edit upload is staged under one unique ownerTempKey until Save
+ * - createLocal string, number and object return shapes are all resolved safely
+ * - staged media is committed only after the permanent student ID is known
+ * - the student row is then updated with the exact committed photoMediaId/coverPhotoMediaId
+ * - edit uploads do not replace the currently saved student image before Save
  * - photo and cover fields support Upload and real Take Photo camera capture
  * - media owner/session keys use shared mediaAssetUtils helpers so this page cannot save under teacher/parent ownership
  *
@@ -96,8 +98,8 @@ type CameraField = "photo" | "coverPhoto";
 
 type TenantRow = {
   accountId?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
   isDeleted?: boolean;
   active?: boolean;
   status?: string;
@@ -109,11 +111,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -151,13 +153,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    if (parsed && parsed !== "0") return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -212,7 +214,7 @@ function selectedWorkspaceBranchId(args: {
 }
 
 type FormState = {
-  id?: number;
+  id?: string;
   organizationId: string;
   currentClassId: string;
   admissionNumber: string;
@@ -221,9 +223,9 @@ type FormState = {
   age: string;
   dateOfBirth: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   coverPhoto: string;
-  coverPhotoMediaId?: number;
+  coverPhotoMediaId?: string;
   parentName: string;
   parentPhone: string;
   parentEmail: string;
@@ -232,7 +234,7 @@ type FormState = {
 };
 
 type StudentView = {
-  id: number;
+  id: string;
   row: Student;
   photoUrl?: string;
   coverPhotoUrl?: string;
@@ -262,10 +264,47 @@ const emptyForm: FormState = {
   status: "active",
 };
 
-const idOf = (v: any) => {
-  if (v === undefined || v === null || v === "") return 0;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+const idOf = (v: any): string => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
+};
+
+/**
+ * syncUtils create/update helpers may return:
+ * - the permanent ID directly as a string;
+ * - a numeric ID;
+ * - the saved record;
+ * - an object containing id/localId.
+ *
+ * Media cannot be committed until this resolves to the real student ID.
+ */
+const savedEntityId = (
+  result: unknown,
+  fallback?: unknown,
+): string => {
+  if (
+    typeof result === "string" ||
+    typeof result === "number"
+  ) {
+    return cleanId(result);
+  }
+
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    return firstLocalId(
+      record.id,
+      record.localId,
+      record.studentId,
+      fallback,
+    );
+  }
+
+  return cleanId(fallback);
+};
+
+const cleanId = (value: unknown): string => {
+  const normalized = idOf(value);
+  return normalized && normalized !== "0" ? normalized : "";
 };
 
 const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
@@ -309,7 +348,7 @@ const timeText = (v?: string | number | null) => {
   }
 };
 
-const mediaKey = (studentId: number, field: "photo" | "coverPhoto") =>
+const mediaKey = (studentId: string, field: "photo" | "coverPhoto") =>
   `students:${studentId}:${field}`;
 
 const safeRecordMediaValue = (value?: string) => {
@@ -478,7 +517,7 @@ export default function StudentsPage() {
     message: string;
   } | null>(null);
   const mediaSessionKey = useRef(makeMediaSessionKey());
-  const uploadedMediaAssetIds = useRef<Partial<Record<CameraField, number>>>(
+  const uploadedMediaAssetIds = useRef<Partial<Record<CameraField, string>>>(
     {},
   );
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -593,8 +632,8 @@ export default function StudentsPage() {
           const photoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-            ownerLocalId: studentId,
-            ownerCloudId: student.cloudId || undefined,
+            ownerId: studentId,
+
             fieldKey: MediaFieldKeys.PHOTO,
             fallbackAssetId: student.photoMediaId,
           });
@@ -603,8 +642,8 @@ export default function StudentsPage() {
           const coverPhotoUrl = await resolveOwnerMediaUrl({
             accountId: accountId || undefined,
             ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-            ownerLocalId: studentId,
-            ownerCloudId: student.cloudId || undefined,
+            ownerId: studentId,
+
             fieldKey: MediaFieldKeys.COVER_PHOTO,
             fallbackAssetId: student.coverPhotoMediaId,
           });
@@ -638,13 +677,13 @@ export default function StudentsPage() {
           tableSafe("students")?.toArray?.() || [],
           listActiveLocal("classes", {
             accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId),
+            schoolId: schoolId,
+            branchId: branchId,
           } as any),
           listActiveLocal("organizations", {
             accountId,
-            schoolId: Number(schoolId),
-            branchId: Number(branchId),
+            schoolId: schoolId,
+            branchId: branchId,
           } as any),
           tableSafe("studentEnrollments")?.toArray?.() || [],
         ]);
@@ -759,7 +798,7 @@ export default function StudentsPage() {
   );
 
   const enrollmentMap = useMemo(() => {
-    const m = new Map<number, StudentEnrollment[]>();
+    const m = new Map<string, StudentEnrollment[]>();
     enrollments.forEach((r: any) => {
       const sid = idOf(r.studentId);
       if (!sid) return;
@@ -801,7 +840,14 @@ export default function StudentsPage() {
           active: isActiveRow(row),
         };
       }),
-    [classMap, enrollmentMap, mediaPreviewUrls, organizationMap, rows],
+    [
+      classMap,
+      enrollmentMap,
+      mediaPreviewUrls,
+      organizationMap,
+      resolvedMediaById,
+      rows,
+    ],
   );
 
   const filteredRows = useMemo(() => {
@@ -921,25 +967,38 @@ export default function StudentsPage() {
     try {
       const result = await saveImageAsset(file, {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-        ownerLocalId: form.id || undefined,
-        ownerTempKey: form.id ? undefined : mediaSessionKey.current,
+
+        /*
+         * Always stage under the form session. For edits this preserves the
+         * currently committed image until the user presses Save.
+         */
+        ownerId: undefined,
+        ownerTempKey: mediaSessionKey.current,
         fieldKey:
           field === "photo" ? MediaFieldKeys.PHOTO : MediaFieldKeys.COVER_PHOTO,
         variant: field === "photo" ? "avatar" : "cover",
         replaceExisting: true,
       });
 
+      const uploadedAssetId = cleanId(result.assetId);
+
+      if (!uploadedAssetId) {
+        throw new Error(
+          "The image was processed but no media asset ID was created.",
+        );
+      }
+
       uploadedMediaAssetIds.current = {
         ...uploadedMediaAssetIds.current,
-        [field]: result.assetId,
+        [field]: uploadedAssetId,
       };
 
       updateForm({
         [field]: result.previewUrl,
-        [`${field}MediaId`]: result.assetId,
+        [`${field}MediaId`]: uploadedAssetId,
       } as Partial<FormState>);
 
       showToast(
@@ -1007,10 +1066,10 @@ export default function StudentsPage() {
       // The list can still display legacy fallback, but edit/save should only use
       // media resolved by student owner + local id + field key or a new upload.
       photo: resolvedPhoto,
-      photoMediaId: s.photoMediaId ? Number(s.photoMediaId) : undefined,
+      photoMediaId: s.photoMediaId ? String(s.photoMediaId) : undefined,
       coverPhoto: resolvedCoverPhoto,
       coverPhotoMediaId: s.coverPhotoMediaId
-        ? Number(s.coverPhotoMediaId)
+        ? String(s.coverPhotoMediaId)
         : undefined,
       parentName: s.parentName || "",
       parentPhone: s.parentPhone || "",
@@ -1075,13 +1134,13 @@ export default function StudentsPage() {
 
       const payload: Partial<Student> = {
         accountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         organizationId: form.organizationId
-          ? Number(form.organizationId)
+          ? String(form.organizationId)
           : undefined,
         currentClassId: form.currentClassId
-          ? Number(form.currentClassId)
+          ? String(form.currentClassId)
           : undefined,
         admissionNumber: form.admissionNumber.trim() || undefined,
         fullName: form.fullName.trim(),
@@ -1103,33 +1162,115 @@ export default function StudentsPage() {
 
       const savedStudent =
         form.id && existing
-          ? await updateLocal("students", Number(form.id), payload)
-          : await createLocal("students", payload as unknown as Student);
+          ? await updateLocal(
+              "students",
+              String(form.id),
+              payload,
+            )
+          : await createLocal(
+              "students",
+              payload as unknown as Student,
+            );
 
-      const savedStudentId = Number(
-        typeof savedStudent === "number"
-          ? savedStudent
-          : (savedStudent as any)?.id || form.id || 0,
+      const savedStudentId = savedEntityId(
+        savedStudent,
+        form.id,
       );
-      if (savedStudentId) {
+
+      if (!savedStudentId) {
+        throw new Error(
+          "The student record was saved, but its permanent ID could not be resolved for image attachment.",
+        );
+      }
+
+      const stagedPhotoId =
+        cleanId(
+          uploadedMediaAssetIds.current.photo,
+        );
+
+      const stagedCoverPhotoId =
+        cleanId(
+          uploadedMediaAssetIds.current.coverPhoto,
+        );
+
+      const committedMedia =
         await commitMediaAssetsToOwner({
           accountId,
-          ownerTable: STUDENT_MEDIA_OWNER_TABLE,
-          ownerLocalId: savedStudentId,
-          ownerCloudId:
-            (savedStudent as any)?.cloudId || (existing as any)?.cloudId,
-          ownerTempKey: mediaSessionKey.current,
+          ownerTable:
+            STUDENT_MEDIA_OWNER_TABLE,
+          ownerId: savedStudentId,
+          ownerTempKey:
+            mediaSessionKey.current,
           assets: [
             {
-              assetId: uploadedMediaAssetIds.current.photo,
-              fieldKey: MediaFieldKeys.PHOTO,
+              assetId:
+                stagedPhotoId ||
+                undefined,
+              fieldKey:
+                MediaFieldKeys.PHOTO,
             },
             {
-              assetId: uploadedMediaAssetIds.current.coverPhoto,
-              fieldKey: MediaFieldKeys.COVER_PHOTO,
+              assetId:
+                stagedCoverPhotoId ||
+                undefined,
+              fieldKey:
+                MediaFieldKeys.COVER_PHOTO,
             },
           ],
         });
+
+      const committedPhotoId =
+        committedMedia.find(
+          (item) =>
+            item.fieldKey ===
+            MediaFieldKeys.PHOTO,
+        )?.assetId;
+
+      const committedCoverPhotoId =
+        committedMedia.find(
+          (item) =>
+            item.fieldKey ===
+            MediaFieldKeys.COVER_PHOTO,
+        )?.assetId;
+
+      /*
+       * Persist the exact committed media IDs back onto the student record.
+       * This is intentionally a second small local-first update because the
+       * owner ID does not exist until after createLocal() completes.
+       */
+      if (
+        committedPhotoId ||
+        committedCoverPhotoId
+      ) {
+        await updateLocal(
+          "students",
+          savedStudentId,
+          {
+            photoMediaId:
+              committedPhotoId ||
+              form.photoMediaId ||
+              existing?.photoMediaId ||
+              undefined,
+            coverPhotoMediaId:
+              committedCoverPhotoId ||
+              form.coverPhotoMediaId ||
+              existing?.coverPhotoMediaId ||
+              undefined,
+
+            /*
+             * New media is resolved from mediaAssets/mediaBlobs. Do not store
+             * data/blob preview strings in the student sync record.
+             */
+            photo:
+              safeRecordMediaValue(
+                existing?.photo,
+              ),
+            coverPhoto:
+              safeRecordMediaValue(
+                existing?.coverPhoto,
+              ),
+          } as Partial<Student>,
+        );
       }
 
       uploadedMediaAssetIds.current = {};
@@ -1137,9 +1278,16 @@ export default function StudentsPage() {
       setModalOpen(false);
       showToast("success", "Student saved.");
       await load();
-    } catch (error) {
-      console.error(error);
-      showToast("error", "Failed to save student.");
+    } catch (error: any) {
+      console.error(
+        "Failed to save student and media:",
+        error,
+      );
+      showToast(
+        "error",
+        error?.message ||
+          "Failed to save student.",
+      );
     } finally {
       setSaving(false);
     }
@@ -1165,14 +1313,14 @@ export default function StudentsPage() {
 
           ownerTable: "students",
 
-          ownerLocalId: Number(id),
+          ownerId: cleanId(id) || undefined,
 
           fieldKey,
         }),
       ),
     );
 
-    await softDeleteLocal("students", Number(id));
+    await softDeleteLocal("students", String(id));
     setSelectedItem(null);
     showToast("success", "Student deleted.");
     await load();

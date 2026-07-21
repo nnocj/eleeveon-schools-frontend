@@ -64,11 +64,12 @@ import UniversityTranscriptTemplate from "./UniversityTranscriptTemplate";
 // REGISTRY TYPES
 // ======================================================
 
-export type StudentReportTemplateRegistryItem = StudentReportTemplateDefinition & {
-  component: StudentReportTemplateComponent;
-  aliases?: string[];
-  fileName: string;
-};
+export type StudentReportTemplateRegistryItem =
+  StudentReportTemplateDefinition & {
+    component: StudentReportTemplateComponent;
+    aliases?: string[];
+    fileName: string;
+  };
 
 // ======================================================
 // DEFINITIONS
@@ -81,74 +82,100 @@ export const STUDENT_REPORT_TEMPLATE_DEFINITIONS: StudentReportTemplateDefinitio
 // REGISTRY
 // ======================================================
 
-export const STUDENT_REPORT_TEMPLATE_REGISTRY: StudentReportTemplateRegistryItem[] = [
-  {
-    ...getStudentReportTemplateDefinitionByCode("classic_formal"),
-    component: ClassicFormalTemplate,
-    fileName: "ClassicFormalTemplate.tsx",
-    aliases: ["classic", "classic_formal", "classic_ghana", "ghana", "formal", "default"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("modern_clean"),
-    component: ModernCleanTemplate,
-    fileName: "ModernCleanTemplate.tsx",
-    aliases: ["modern", "clean", "modern_clean", "premium_clean"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("compact_print"),
-    component: CompactPrintTemplate,
-    fileName: "CompactPrintTemplate.tsx",
-    aliases: ["compact", "print", "compact_print", "one_page", "space_saving"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("bordered_traditional"),
-    component: BorderedTraditionalTemplate,
-    fileName: "BorderedTraditionalTemplate.tsx",
-    aliases: ["bordered", "traditional", "bordered_traditional", "boxed"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("letterhead_premium"),
-    component: LetterHeadPremiumTemplate,
-    fileName: "LetterHeadPremiumTemplate.tsx",
-    aliases: ["letterhead", "premium", "letterhead_premium", "institutional"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("side_profile"),
-    component: SideProfileTemplate,
-    fileName: "SideProfileTemplate.tsx",
-    aliases: ["side", "profile", "side_profile", "identity", "student_profile"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("cambridge"),
-    component: CambridgeTemplate,
-    fileName: "CambridgeTemplate.tsx",
-    aliases: ["cambridge", "cambridge_report", "international_cambridge"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("ib"),
-    component: IBTemplate,
-    fileName: "IBTemplate.tsx",
-    aliases: ["ib", "international_baccalaureate", "baccalaureate"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("kindergarten"),
-    component: KindergartenTemplate,
-    fileName: "KindergartenTemplate.tsx",
-    aliases: ["kindergarten", "kg", "early_years", "nursery"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("montessori"),
-    component: MontessoriTemplate,
-    fileName: "MontessoriTemplate.tsx",
-    aliases: ["montessori", "montessori_report", "narrative"],
-  },
-  {
-    ...getStudentReportTemplateDefinitionByCode("university_transcript"),
-    component: UniversityTranscriptTemplate,
-    fileName: "UniversityTranscriptTemplate.tsx",
-    aliases: ["university", "transcript", "university_transcript", "academic_transcript", "record"],
-  },
-];
+export const STUDENT_REPORT_TEMPLATE_REGISTRY: StudentReportTemplateRegistryItem[] =
+  [
+    {
+      ...getStudentReportTemplateDefinitionByCode("classic_formal"),
+      component: ClassicFormalTemplate,
+      fileName: "ClassicFormalTemplate.tsx",
+      aliases: [
+        "classic",
+        "classic_formal",
+        "classic_ghana",
+        "ghana",
+        "formal",
+        "default",
+      ],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("modern_clean"),
+      component: ModernCleanTemplate,
+      fileName: "ModernCleanTemplate.tsx",
+      aliases: ["modern", "clean", "modern_clean", "premium_clean"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("compact_print"),
+      component: CompactPrintTemplate,
+      fileName: "CompactPrintTemplate.tsx",
+      aliases: [
+        "compact",
+        "print",
+        "compact_print",
+        "one_page",
+        "space_saving",
+      ],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("bordered_traditional"),
+      component: BorderedTraditionalTemplate,
+      fileName: "BorderedTraditionalTemplate.tsx",
+      aliases: ["bordered", "traditional", "bordered_traditional", "boxed"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("letterhead_premium"),
+      component: LetterHeadPremiumTemplate,
+      fileName: "LetterHeadPremiumTemplate.tsx",
+      aliases: ["letterhead", "premium", "letterhead_premium", "institutional"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("side_profile"),
+      component: SideProfileTemplate,
+      fileName: "SideProfileTemplate.tsx",
+      aliases: [
+        "side",
+        "profile",
+        "side_profile",
+        "identity",
+        "student_profile",
+      ],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("cambridge"),
+      component: CambridgeTemplate,
+      fileName: "CambridgeTemplate.tsx",
+      aliases: ["cambridge", "cambridge_report", "international_cambridge"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("ib"),
+      component: IBTemplate,
+      fileName: "IBTemplate.tsx",
+      aliases: ["ib", "international_baccalaureate", "baccalaureate"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("kindergarten"),
+      component: KindergartenTemplate,
+      fileName: "KindergartenTemplate.tsx",
+      aliases: ["kindergarten", "kg", "early_years", "nursery"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("montessori"),
+      component: MontessoriTemplate,
+      fileName: "MontessoriTemplate.tsx",
+      aliases: ["montessori", "montessori_report", "narrative"],
+    },
+    {
+      ...getStudentReportTemplateDefinitionByCode("university_transcript"),
+      component: UniversityTranscriptTemplate,
+      fileName: "UniversityTranscriptTemplate.tsx",
+      aliases: [
+        "university",
+        "transcript",
+        "university_transcript",
+        "academic_transcript",
+        "record",
+      ],
+    },
+  ];
 
 // ======================================================
 // RESOLVERS
@@ -159,9 +186,14 @@ function normalizeRegistryKey(value?: string | null) {
 }
 
 export function getStudentReportTemplateRegistryItem(
-  codeOrLayoutKey?: StudentReportTemplateCode | StudentReportTemplateLayoutKey | null
+  codeOrLayoutKey?:
+    | StudentReportTemplateCode
+    | StudentReportTemplateLayoutKey
+    | null,
 ): StudentReportTemplateRegistryItem {
-  const key = normalizeRegistryKey(codeOrLayoutKey || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE);
+  const key = normalizeRegistryKey(
+    codeOrLayoutKey || DEFAULT_STUDENT_REPORT_TEMPLATE_CODE,
+  );
 
   return (
     STUDENT_REPORT_TEMPLATE_REGISTRY.find((item) => {
@@ -175,13 +207,19 @@ export function getStudentReportTemplateRegistryItem(
 }
 
 export function getStudentReportTemplateComponent(
-  codeOrLayoutKey?: StudentReportTemplateCode | StudentReportTemplateLayoutKey | null
+  codeOrLayoutKey?:
+    | StudentReportTemplateCode
+    | StudentReportTemplateLayoutKey
+    | null,
 ): StudentReportTemplateComponent {
   return getStudentReportTemplateRegistryItem(codeOrLayoutKey).component;
 }
 
 export function getStudentReportTemplateDefinition(
-  codeOrLayoutKey?: StudentReportTemplateCode | StudentReportTemplateLayoutKey | null
+  codeOrLayoutKey?:
+    | StudentReportTemplateCode
+    | StudentReportTemplateLayoutKey
+    | null,
 ): StudentReportTemplateDefinition {
   const { component, aliases, fileName, ...definition } =
     getStudentReportTemplateRegistryItem(codeOrLayoutKey);
@@ -190,13 +228,19 @@ export function getStudentReportTemplateDefinition(
 }
 
 export function getStudentReportTemplateFileName(
-  codeOrLayoutKey?: StudentReportTemplateCode | StudentReportTemplateLayoutKey | null
+  codeOrLayoutKey?:
+    | StudentReportTemplateCode
+    | StudentReportTemplateLayoutKey
+    | null,
 ): string {
   return getStudentReportTemplateRegistryItem(codeOrLayoutKey).fileName;
 }
 
 export function isStudentReportTemplateAvailable(
-  codeOrLayoutKey?: StudentReportTemplateCode | StudentReportTemplateLayoutKey | null
+  codeOrLayoutKey?:
+    | StudentReportTemplateCode
+    | StudentReportTemplateLayoutKey
+    | null,
 ) {
   const key = normalizeRegistryKey(codeOrLayoutKey);
 
@@ -210,22 +254,26 @@ export function isStudentReportTemplateAvailable(
 }
 
 export function getImplementedStudentReportTemplates() {
-  return STUDENT_REPORT_TEMPLATE_REGISTRY.filter((item) => item.code === "classic_formal");
+  return STUDENT_REPORT_TEMPLATE_REGISTRY.filter(
+    (item) => item.code === "classic_formal",
+  );
 }
 
 export function getPendingStudentReportTemplates() {
-  return STUDENT_REPORT_TEMPLATE_REGISTRY.filter((item) => item.code !== "classic_formal");
+  return STUDENT_REPORT_TEMPLATE_REGISTRY.filter(
+    (item) => item.code !== "classic_formal",
+  );
 }
 
 export function getInternationalStudentReportTemplates() {
   return STUDENT_REPORT_TEMPLATE_REGISTRY.filter((item) =>
-    ["cambridge", "ib"].includes(String(item.code))
+    ["cambridge", "ib"].includes(String(item.code)),
   );
 }
 
 export function getEarlyYearsStudentReportTemplates() {
   return STUDENT_REPORT_TEMPLATE_REGISTRY.filter((item) =>
-    ["kindergarten", "montessori"].includes(String(item.code))
+    ["kindergarten", "montessori"].includes(String(item.code)),
   );
 }
 
@@ -234,7 +282,7 @@ export function getEarlyYearsStudentReportTemplates() {
 // ======================================================
 
 export function resolveStudentReportTemplateCodeFromProps(
-  props: StudentReportTemplateBaseProps
+  props: StudentReportTemplateBaseProps,
 ): StudentReportTemplateCode {
   const dynamicDataset = props.dataset as any;
 
@@ -251,7 +299,7 @@ export function resolveStudentReportTemplateCodeFromProps(
 }
 
 export function renderStudentReportTemplate(
-  props: StudentReportTemplateBaseProps
+  props: StudentReportTemplateBaseProps,
 ): React.ReactElement {
   const templateCode = resolveStudentReportTemplateCodeFromProps(props);
   const Template = getStudentReportTemplateComponent(templateCode);

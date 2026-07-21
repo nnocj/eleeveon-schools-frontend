@@ -48,7 +48,12 @@ import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import { db, type ScheduleConflict, type ScheduleSession, type ScheduleTimetable } from "../../lib/db/db";
+import {
+  db,
+  type ScheduleConflict,
+  type ScheduleSession,
+  type ScheduleTimetable,
+} from "../../lib/db/db";
 import {
   createLocal,
   getSyncTable,
@@ -67,7 +72,15 @@ type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 const MODE_LABEL = "Class Timetable";
 const MODE_ICON = "📚";
 
-const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+const DAYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
 const DAY_LABELS: Record<string, string> = {
   monday: "Monday",
   tuesday: "Tuesday",
@@ -90,8 +103,17 @@ const SHORT_DAY_LABELS: Record<string, string> = {
 const now = () => Date.now();
 
 function timeToMinute(value: string) {
-  const [hour, minute] = String(value || "00:00").split(":").map((part) => Number(part || 0));
-  return Math.max(0, Math.min(1439, (Number.isFinite(hour) ? hour : 0) * 60 + (Number.isFinite(minute) ? minute : 0)));
+  const [hour, minute] = String(value || "00:00")
+    .split(":")
+    .map((part) => Number(part || 0));
+  return Math.max(
+    0,
+    Math.min(
+      1439,
+      (Number.isFinite(hour) ? hour : 0) * 60 +
+        (Number.isFinite(minute) ? minute : 0),
+    ),
+  );
 }
 
 function minuteToTime(value: any) {
@@ -114,13 +136,14 @@ function text(value: any, fallback = "") {
   return String(value || "").trim() || fallback;
 }
 
-function idOf(row?: AnyRow) {
-  return row?.id ?? row?.localId ?? row?.cloudId;
+function idOf(value: any): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object") return String(value?.id ?? "").trim();
+  return String(value).trim();
 }
 
-function cleanId(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function cleanId(value: any): string {
+  return idOf(value);
 }
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
@@ -129,11 +152,11 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
@@ -144,7 +167,9 @@ function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -169,13 +194,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstPermanentId(...values: unknown[]): string {
   for (const value of values) {
     const parsed = cleanId(value);
-    if (parsed > 0) return parsed;
+    if (parsed) return parsed;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -186,16 +211,20 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.schoolId,
     membership?.schoolId,
     membership?.school?.id,
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -207,9 +236,13 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
-  return firstLocalId(
+  return firstPermanentId(
     args.openWorkspace?.branchId,
     membership?.branchId,
     membership?.schoolBranchId,
@@ -217,33 +250,45 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
 function sameAccount(row: AnyRow, accountId?: string | null) {
-  return row && row.isDeleted !== true && (!row.accountId || !accountId || row.accountId === accountId);
+  return (
+    row &&
+    row.isDeleted !== true &&
+    (!row.accountId || !accountId || row.accountId === accountId)
+  );
 }
 
 function schoolIdOf(row: AnyRow) {
-  return cleanId(row?.schoolId ?? row?.schoolLocalId ?? row?.payload?.schoolId);
+  return cleanId(row?.schoolId ?? row?.schoolId ?? row?.payload?.schoolId);
 }
 
 function branchIdOf(row: AnyRow) {
-  return cleanId(row?.branchId ?? row?.branchLocalId ?? row?.payload?.branchId);
+  return cleanId(row?.branchId ?? row?.branchId ?? row?.payload?.branchId);
 }
 
-function isBranchRow(row: AnyRow, accountId?: string | null, schoolId?: number | null, branchId?: number | null) {
+function isBranchRow(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+  branchId?: string | null,
+) {
   if (!sameAccount(row, accountId)) return false;
   const rowSchoolId = schoolIdOf(row);
   const rowBranchId = branchIdOf(row);
-  return rowSchoolId === Number(schoolId || 0) && rowBranchId === Number(branchId || 0);
+  return rowSchoolId === schoolId && rowBranchId === branchId;
 }
 
-function isSchoolLevelRow(row: AnyRow, accountId?: string | null, schoolId?: number | null) {
+function isSchoolLevelRow(
+  row: AnyRow,
+  accountId?: string | null,
+  schoolId?: string | null,
+) {
   if (!sameAccount(row, accountId)) return false;
-  return schoolIdOf(row) === Number(schoolId || 0) && !branchIdOf(row);
+  return schoolIdOf(row) === schoolId && !branchIdOf(row);
 }
 
 async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
@@ -252,11 +297,17 @@ async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
 }
 
 function rowName(row?: AnyRow) {
-  return text(row?.fullName || row?.name || row?.title || row?.label || row?.email, "Unnamed");
+  return text(
+    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    "Unnamed",
+  );
 }
 
 function sessionTitle(row: AnyRow) {
-  return text(row?.title || row?.sessionType || row?.type || row?.subjectName, "Timetable session");
+  return text(
+    row?.title || row?.sessionType || row?.type || row?.subjectName,
+    "Timetable session",
+  );
 }
 
 function normalizeDay(value: any) {
@@ -291,27 +342,38 @@ function sessionTime(row: AnyRow) {
 }
 
 function className(classes: AnyRow[], classId: any) {
-  const row = classes.find((item) => Number(idOf(item)) === Number(classId));
+  const row = classes.find(
+    (item) => String(idOf(item) ?? "") === String(classId ?? ""),
+  );
   return row?.name || row?.className || "No class";
 }
 
 function subjectName(subjects: AnyRow[], subjectId: any) {
-  const row = subjects.find((item) => Number(idOf(item)) === Number(subjectId));
+  const row = subjects.find(
+    (item) => String(idOf(item) ?? "") === String(subjectId ?? ""),
+  );
   return row?.name || row?.subjectName || "No subject";
 }
 
 function teacherName(teachers: AnyRow[], teacherId: any) {
-  const row = teachers.find((item) => Number(idOf(item)) === Number(teacherId));
+  const row = teachers.find(
+    (item) => String(idOf(item) ?? "") === String(teacherId ?? ""),
+  );
   return rowName(row || {});
 }
 
 function resourceName(resources: AnyRow[], session: AnyRow) {
-  const row = resources.find((item) => Number(idOf(item)) === Number(session.resourceId));
-  return row?.name || row?.roomName || session.roomName || session.room || "No room";
+  const row = resources.find(
+    (item) =>
+      idOf(item) === idOf(session.resourceId),
+  );
+  return (
+    row?.name || row?.roomName || session.roomName || session.room || "No room"
+  );
 }
 
 function sessionTeacherId(session: AnyRow) {
-  return cleanId(session.teacherLocalId ?? session.teacherId ?? session.staffId);
+  return cleanId(session.teacherId ?? session.teacherId ?? session.staffId);
 }
 
 function sessionClassId(session: AnyRow) {
@@ -338,7 +400,7 @@ function sessionRoomKey(session: AnyRow) {
 
 function sessionGroupKey(session: AnyRow) {
   return [
-    Number(session.timetableId || 0),
+    idOf(session.timetableId),
     sessionTypeOf(session),
     sessionTitle(session).toLowerCase(),
     startMinute(session),
@@ -365,9 +427,15 @@ function groupSessions(rows: AnyRow[]) {
       key,
       primary: sortSessions(groupRows)[0],
       rows: sortSessions(groupRows),
-      days: Array.from(new Set(groupRows.map((session) => sessionDay(session)))).sort((a, b) => dayIndex(a) - dayIndex(b)),
+      days: Array.from(
+        new Set(groupRows.map((session) => sessionDay(session))),
+      ).sort((a, b) => dayIndex(a) - dayIndex(b)),
     }))
-    .sort((a, b) => startMinute(a.primary) - startMinute(b.primary) || sessionTitle(a.primary).localeCompare(sessionTitle(b.primary)));
+    .sort(
+      (a, b) =>
+        startMinute(a.primary) - startMinute(b.primary) ||
+        sessionTitle(a.primary).localeCompare(sessionTitle(b.primary)),
+    );
 }
 
 function dayListLabel(days: string[]) {
@@ -384,7 +452,10 @@ function uniqueRows(rows: AnyRow[]) {
   const seen = new Set<string>();
 
   return rows.filter((row, index) => {
-    const key = String(idOf(row) || `${sessionDay(row)}-${startMinute(row)}-${sessionTitle(row)}-${index}`);
+    const key = String(
+      idOf(row) ||
+        `${sessionDay(row)}-${startMinute(row)}-${sessionTitle(row)}-${index}`,
+    );
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -401,12 +472,18 @@ function sortSessions(rows: AnyRow[]) {
   });
 }
 
-function minutesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+function minutesOverlap(
+  aStart: number,
+  aEnd: number,
+  bStart: number,
+  bEnd: number,
+) {
   return aStart < bEnd && aEnd > bStart;
 }
 
-function conflictKey(type: string, aId: number, bId: number) {
-  return `${type}-${Math.min(aId, bId)}-${Math.max(aId, bId)}`;
+function conflictKey(type: string, aId: string, bId: string) {
+  const [firstId, secondId] = [idOf(aId), idOf(bId)].sort();
+  return `${type}-${firstId}-${secondId}`;
 }
 
 function toneForConflict(severity?: string): Tone {
@@ -440,7 +517,9 @@ function SummaryCard({
   warning?: boolean;
 }) {
   return (
-    <article className={`ba-summary ${positive ? "positive" : ""} ${warning ? "warning" : ""}`}>
+    <article
+      className={`ba-summary ${positive ? "positive" : ""} ${warning ? "warning" : ""}`}
+    >
       <div>{icon}</div>
       <section>
         <strong>{value}</strong>
@@ -459,7 +538,13 @@ function MiniStat({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function EmptyCard({ title = "No records", text }: { title?: string; text: string }) {
+function EmptyCard({
+  title = "No records",
+  text,
+}: {
+  title?: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div>📌</div>
@@ -536,7 +621,6 @@ function TimetableModeSwitch({
   );
 }
 
-
 function SliderIcon() {
   return (
     <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -598,12 +682,14 @@ export default function ClassTimetable() {
   const [resources, setResources] = useState<AnyRow[]>([]);
   const [conflicts, setConflicts] = useState<AnyRow[]>([]);
   const [query, setQuery] = useState("");
-  const [selectedTimetableId, setSelectedTimetableId] = useState<number | "">("");
+  const [selectedTimetableId, setSelectedTimetableId] = useState<string | "">(
+    "",
+  );
   const [filterDay, setFilterDay] = useState("all");
-  const [filterClassId, setFilterClassId] = useState<number | "">("");
-  const [filterSubjectId, setFilterSubjectId] = useState<number | "">("");
-  const [filterTeacherId, setFilterTeacherId] = useState<number | "">("");
-  const [filterResourceId, setFilterResourceId] = useState<number | "">("");
+  const [filterClassId, setFilterClassId] = useState<string | "">("");
+  const [filterSubjectId, setFilterSubjectId] = useState<string | "">("");
+  const [filterTeacherId, setFilterTeacherId] = useState<string | "">("");
+  const [filterResourceId, setFilterResourceId] = useState<string | "">("");
   const [filterSessionType, setFilterSessionType] = useState("all");
   const [filterConflictFocus, setFilterConflictFocus] = useState("all");
   const [filterStartTime, setFilterStartTime] = useState("");
@@ -614,24 +700,41 @@ export default function ClassTimetable() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const emptyForm = {
-    id: 0,
+  type ClassTimetableForm = {
+    id: string;
+    timetableName: string;
+    timetableId: string;
+    dayOfWeek: string;
+    repeatDays: string[];
+    sessionType: string;
+    title: string;
+    startTime: string;
+    endTime: string;
+    classId: string;
+    subjectId: string;
+    teacherId: string;
+    resourceId: string;
+    roomName: string;
+  };
+
+  const emptyForm: ClassTimetableForm = {
+    id: "",
     timetableName: "",
     timetableId: "",
     dayOfWeek: "monday",
-    repeatDays: ["monday"] as string[],
+    repeatDays: ["monday"],
     sessionType: "lesson",
     title: "",
     startTime: "08:00",
     endTime: "09:00",
     classId: "",
     subjectId: "",
-    teacherLocalId: "",
+    teacherId: "",
     resourceId: "",
     roomName: "",
   };
 
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState<ClassTimetableForm>(emptyForm);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -651,7 +754,15 @@ export default function ClassTimetable() {
     setLoading(true);
 
     try {
-      const [timetableRows, sessionRows, classRows, subjectRows, teacherRows, resourceRows, conflictRows] = await Promise.all([
+      const [
+        timetableRows,
+        sessionRows,
+        classRows,
+        subjectRows,
+        teacherRows,
+        resourceRows,
+        conflictRows,
+      ] = await Promise.all([
         getSyncTable("scheduleTimetables").toArray(),
         getSyncTable("scheduleSessions").toArray(),
         safeArray<AnyRow>("classes"),
@@ -662,54 +773,83 @@ export default function ClassTimetable() {
       ]);
 
       const scopedTimetables = (timetableRows as AnyRow[])
-        .filter((row: AnyRow) => isBranchRow(row, accountId, schoolId, branchId))
+        .filter((row: AnyRow) =>
+          isBranchRow(row, accountId, schoolId, branchId),
+        )
         .filter((row: AnyRow) => row?.isDeleted !== true)
         .filter((row: AnyRow) => {
-          const type = String(row.timetableType || row.scopeType || "branch").toLowerCase();
-          return ["branch", "weekly", "general", "class", "teacher", "room", "resource"].includes(type);
+          const type = String(
+            row.timetableType || row.scopeType || "branch",
+          ).toLowerCase();
+          return [
+            "branch",
+            "weekly",
+            "general",
+            "class",
+            "teacher",
+            "room",
+            "resource",
+          ].includes(type);
         });
 
       setTimetables(scopedTimetables);
 
       setSessions(
         uniqueRows(sessionRows as AnyRow[])
-          .filter((row: AnyRow) => isBranchRow(row, accountId, schoolId, branchId))
-          .filter((row: AnyRow) => row?.isDeleted !== true)
+          .filter((row: AnyRow) =>
+            isBranchRow(row, accountId, schoolId, branchId),
+          )
+          .filter((row: AnyRow) => row?.isDeleted !== true),
       );
 
       setClasses(
-        (classRows as AnyRow[]).filter((row: AnyRow) =>
-          isBranchRow(row, accountId, schoolId, branchId) || isSchoolLevelRow(row, accountId, schoolId)
-        )
+        (classRows as AnyRow[]).filter(
+          (row: AnyRow) =>
+            isBranchRow(row, accountId, schoolId, branchId) ||
+            isSchoolLevelRow(row, accountId, schoolId),
+        ),
       );
 
       setSubjects(
-        (subjectRows as AnyRow[]).filter((row: AnyRow) =>
-          sameAccount(row, accountId) && (schoolIdOf(row) === schoolId || !schoolIdOf(row) || branchIdOf(row) === branchId)
-        )
+        (subjectRows as AnyRow[]).filter(
+          (row: AnyRow) =>
+            sameAccount(row, accountId) &&
+            (schoolIdOf(row) === schoolId ||
+              !schoolIdOf(row) ||
+              branchIdOf(row) === branchId),
+        ),
       );
 
       setTeachers(
-        (teacherRows as AnyRow[]).filter((row: AnyRow) =>
-          isBranchRow(row, accountId, schoolId, branchId) || isSchoolLevelRow(row, accountId, schoolId)
-        )
+        (teacherRows as AnyRow[]).filter(
+          (row: AnyRow) =>
+            isBranchRow(row, accountId, schoolId, branchId) ||
+            isSchoolLevelRow(row, accountId, schoolId),
+        ),
       );
 
       setResources(
         (resourceRows as AnyRow[])
-          .filter((row: AnyRow) => isBranchRow(row, accountId, schoolId, branchId))
-          .filter((row: AnyRow) => row?.isDeleted !== true)
+          .filter((row: AnyRow) =>
+            isBranchRow(row, accountId, schoolId, branchId),
+          )
+          .filter((row: AnyRow) => row?.isDeleted !== true),
       );
 
       setConflicts(
         (conflictRows as AnyRow[])
-          .filter((row: AnyRow) => isBranchRow(row, accountId, schoolId, branchId))
+          .filter((row: AnyRow) =>
+            isBranchRow(row, accountId, schoolId, branchId),
+          )
           .filter((row: AnyRow) => row?.isDeleted !== true)
-          .filter((row: AnyRow) => String(row.status || "open").toLowerCase() === "open")
+          .filter(
+            (row: AnyRow) =>
+              String(row.status || "open").toLowerCase() === "open",
+          ),
       );
 
       if (!selectedTimetableId && scopedTimetables[0]?.id) {
-        setSelectedTimetableId(Number(scopedTimetables[0].id));
+        setSelectedTimetableId(String(scopedTimetables[0].id));
       }
     } catch (error) {
       console.error("Failed to load timetable:", error);
@@ -722,9 +862,7 @@ export default function ClassTimetable() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [accountId, schoolId, branchId, dataRevision]);
 
   function resetForm() {
     setForm(emptyForm);
@@ -745,7 +883,7 @@ export default function ClassTimetable() {
   function openEdit(session: AnyRow) {
     setMessage("");
     setForm({
-      id: cleanId(session.id || session.localId),
+      id: cleanId(session.id),
       timetableName: "",
       timetableId: session.timetableId ? String(session.timetableId) : "",
       dayOfWeek: sessionDay(session),
@@ -755,9 +893,15 @@ export default function ClassTimetable() {
       startTime: minuteToTime(startMinute(session)),
       endTime: minuteToTime(endMinute(session)),
       classId: sessionClassId(session) ? String(sessionClassId(session)) : "",
-      subjectId: sessionSubjectId(session) ? String(sessionSubjectId(session)) : "",
-      teacherLocalId: sessionTeacherId(session) ? String(sessionTeacherId(session)) : "",
-      resourceId: sessionResourceId(session) ? String(sessionResourceId(session)) : "",
+      subjectId: sessionSubjectId(session)
+        ? String(sessionSubjectId(session))
+        : "",
+      teacherId: sessionTeacherId(session)
+        ? String(sessionTeacherId(session))
+        : "",
+      resourceId: sessionResourceId(session)
+        ? String(sessionResourceId(session))
+        : "",
       roomName: String(session.roomName || session.room || ""),
     });
     setDrawer(true);
@@ -765,10 +909,16 @@ export default function ClassTimetable() {
 
   function toggleRepeatDay(day: string) {
     setForm((current) => {
-      const existing = Array.isArray(current.repeatDays) ? current.repeatDays : [];
+      const existing = Array.isArray(current.repeatDays)
+        ? current.repeatDays
+        : [];
       const hasDay = existing.includes(day);
-      const nextDays = hasDay ? existing.filter((item) => item !== day) : [...existing, day];
-      const cleanDays = nextDays.length ? nextDays : [current.dayOfWeek || "monday"];
+      const nextDays = hasDay
+        ? existing.filter((item) => item !== day)
+        : [...existing, day];
+      const cleanDays = nextDays.length
+        ? nextDays
+        : [current.dayOfWeek || "monday"];
 
       return {
         ...current,
@@ -779,7 +929,7 @@ export default function ClassTimetable() {
   }
 
   const conflictSessionIds = useMemo(() => {
-    const ids = new Set<number>();
+    const ids = new Set<string>();
     conflicts.forEach((conflict: AnyRow) => {
       const a = cleanId(conflict.sessionIdA);
       const b = cleanId(conflict.sessionIdB);
@@ -796,13 +946,39 @@ export default function ClassTimetable() {
 
     return sortSessions(
       sessions
-        .filter((session: AnyRow) => !selectedTimetableId || Number(session.timetableId) === Number(selectedTimetableId))
-        .filter((session: AnyRow) => filterDay === "all" || sessionDay(session) === filterDay)
-        .filter((session: AnyRow) => !filterClassId || sessionClassId(session) === Number(filterClassId))
-        .filter((session: AnyRow) => !filterSubjectId || sessionSubjectId(session) === Number(filterSubjectId))
-        .filter((session: AnyRow) => !filterTeacherId || sessionTeacherId(session) === Number(filterTeacherId))
-        .filter((session: AnyRow) => !filterResourceId || sessionResourceId(session) === Number(filterResourceId))
-        .filter((session: AnyRow) => filterSessionType === "all" || sessionTypeOf(session) === filterSessionType)
+        .filter(
+          (session: AnyRow) =>
+            !selectedTimetableId ||
+            String(session.timetableId) === String(selectedTimetableId),
+        )
+        .filter(
+          (session: AnyRow) =>
+            filterDay === "all" || sessionDay(session) === filterDay,
+        )
+        .filter(
+          (session: AnyRow) =>
+            !filterClassId || sessionClassId(session) === String(filterClassId),
+        )
+        .filter(
+          (session: AnyRow) =>
+            !filterSubjectId ||
+            sessionSubjectId(session) === String(filterSubjectId),
+        )
+        .filter(
+          (session: AnyRow) =>
+            !filterTeacherId ||
+            sessionTeacherId(session) === String(filterTeacherId),
+        )
+        .filter(
+          (session: AnyRow) =>
+            !filterResourceId ||
+            sessionResourceId(session) === String(filterResourceId),
+        )
+        .filter(
+          (session: AnyRow) =>
+            filterSessionType === "all" ||
+            sessionTypeOf(session) === filterSessionType,
+        )
         .filter((session: AnyRow) => {
           if (startFilter === null && endFilter === null) return true;
           const sessionStart = startMinute(session);
@@ -813,9 +989,11 @@ export default function ClassTimetable() {
         })
         .filter((session: AnyRow) => {
           if (filterConflictFocus === "all") return true;
-          const id = cleanId(session.id || session.localId);
+          const id = cleanId(session.id);
           const hasConflict = id ? conflictSessionIds.has(id) : false;
-          return filterConflictFocus === "conflicts" ? hasConflict : !hasConflict;
+          return filterConflictFocus === "conflicts"
+            ? hasConflict
+            : !hasConflict;
         })
         .filter((session: AnyRow) => {
           if (!q) return true;
@@ -833,7 +1011,7 @@ export default function ClassTimetable() {
             .join(" ")
             .toLowerCase()
             .includes(q);
-        })
+        }),
     );
   }, [
     classes,
@@ -855,7 +1033,10 @@ export default function ClassTimetable() {
     teachers,
   ]);
 
-  const groupedVisibleSessions = useMemo(() => groupSessions(visibleSessions), [visibleSessions]);
+  const groupedVisibleSessions = useMemo(
+    () => groupSessions(visibleSessions),
+    [visibleSessions],
+  );
 
   const activeFilterCount = useMemo(() => {
     return [
@@ -904,39 +1085,70 @@ export default function ClassTimetable() {
       timetables: timetables.length,
       sessions: visibleSessions.length,
       groups: groupedVisibleSessions.length,
-      teachers: new Set(visibleSessions.map((session: AnyRow) => sessionTeacherId(session)).filter(Boolean)).size,
-      classes: new Set(visibleSessions.map((session: AnyRow) => sessionClassId(session)).filter(Boolean)).size,
-      resources: new Set(visibleSessions.map((session: AnyRow) => sessionResourceId(session) || text(session.roomName)).filter(Boolean)).size,
+      teachers: new Set(
+        visibleSessions
+          .map((session: AnyRow) => sessionTeacherId(session))
+          .filter(Boolean),
+      ).size,
+      classes: new Set(
+        visibleSessions
+          .map((session: AnyRow) => sessionClassId(session))
+          .filter(Boolean),
+      ).size,
+      resources: new Set(
+        visibleSessions
+          .map(
+            (session: AnyRow) =>
+              sessionResourceId(session) || text(session.roomName),
+          )
+          .filter(Boolean),
+      ).size,
       conflicts: conflicts.length,
     }),
-    [conflicts.length, groupedVisibleSessions.length, timetables.length, visibleSessions]
+    [
+      conflicts.length,
+      groupedVisibleSessions.length,
+      timetables.length,
+      visibleSessions,
+    ],
   );
 
-  const selectedTimetable = timetables.find((timetable: AnyRow) => Number(timetable.id) === Number(selectedTimetableId));
+  const selectedTimetable = timetables.find(
+    (timetable: AnyRow) => String(timetable.id) === String(selectedTimetableId),
+  );
 
   async function saveDetectedConflicts({
     savedSession,
     editingId,
   }: {
     savedSession: AnyRow;
-    editingId: number;
+    editingId: string;
   }) {
     const newConflicts: Partial<ScheduleConflict>[] = [];
     const related = sessions.filter((session: AnyRow) => {
-      const id = cleanId(session.id || session.localId);
+      const id = cleanId(session.id);
       if (!id || id === editingId) return false;
       if (sessionDay(session) !== sessionDay(savedSession)) return false;
-      return minutesOverlap(startMinute(savedSession), endMinute(savedSession), startMinute(session), endMinute(session));
+      return minutesOverlap(
+        startMinute(savedSession),
+        endMinute(savedSession),
+        startMinute(session),
+        endMinute(session),
+      );
     });
 
     const existingConflictKeys = new Set(
       conflicts.map((conflict: AnyRow) =>
-        conflictKey(String(conflict.conflictType || "custom"), cleanId(conflict.sessionIdA), cleanId(conflict.sessionIdB))
-      )
+        conflictKey(
+          String(conflict.conflictType || "custom"),
+          cleanId(conflict.sessionIdA),
+          cleanId(conflict.sessionIdB),
+        ),
+      ),
     );
 
     for (const session of related) {
-      const otherId = cleanId(session.id || session.localId);
+      const otherId = cleanId(session.id);
       const teacherId = sessionTeacherId(savedSession);
       const classId = sessionClassId(savedSession);
       const resourceId = sessionResourceId(savedSession);
@@ -950,7 +1162,7 @@ export default function ClassTimetable() {
           title: "Teacher double-booked",
           description: `${teacherName(teachers, teacherId)} has overlapping timetable sessions on ${DAY_LABELS[sessionDay(savedSession)]}.`,
           severity: "high",
-          teacherLocalId: teacherId,
+          teacherId: teacherId,
         },
         {
           active: classId && classId === sessionClassId(session),
@@ -969,7 +1181,8 @@ export default function ClassTimetable() {
           resourceId,
         },
         {
-          active: !resourceId && roomA && roomA.toLowerCase() === roomB.toLowerCase(),
+          active:
+            !resourceId && roomA && roomA.toLowerCase() === roomB.toLowerCase(),
           type: "room_double_booked",
           title: "Room double-booked",
           description: `${roomA} is assigned to overlapping sessions.`,
@@ -986,8 +1199,8 @@ export default function ClassTimetable() {
         const safeAccountId = String(accountId);
         newConflicts.push({
           accountId: safeAccountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           conflictType: item.type as ScheduleConflict["conflictType"],
           severity: item.severity as ScheduleConflict["severity"],
           status: "open",
@@ -996,10 +1209,13 @@ export default function ClassTimetable() {
           sessionIdA: editingId,
           sessionIdB: otherId,
           resourceId: (item as AnyRow).resourceId || undefined,
-          teacherLocalId: (item as AnyRow).teacherLocalId || undefined,
+          teacherId: (item as AnyRow).teacherId || undefined,
           classId: (item as AnyRow).classId || undefined,
           dayOfWeek: sessionDay(savedSession) as ScheduleConflict["dayOfWeek"],
-          startMinute: Math.max(startMinute(savedSession), startMinute(session)),
+          startMinute: Math.max(
+            startMinute(savedSession),
+            startMinute(session),
+          ),
           endMinute: Math.min(endMinute(savedSession), endMinute(session)),
           detectedAt: now(),
           isDeleted: false,
@@ -1036,20 +1252,20 @@ export default function ClassTimetable() {
     setSaving(true);
 
     try {
-      let timetableId = Number(form.timetableId || selectedTimetableId || 0);
+      let timetableId = idOf(form.timetableId || selectedTimetableId);
 
       if (!timetableId) {
         const safeAccountId = String(accountId);
         const created = (await createLocal("scheduleTimetables", {
           accountId: safeAccountId,
-          schoolId: Number(schoolId),
-          branchId: Number(branchId),
+          schoolId: schoolId,
+          branchId: branchId,
           name: form.timetableName.trim() || MODE_LABEL,
           timetableType: "class",
           scopeType: "class",
-          scopeId: Number(form.classId || 0) || Number(branchId),
-          classId: Number(form.classId || 0) || undefined,
-          teacherLocalId: Number(form.teacherLocalId || 0) || undefined,
+          scopeId: cleanId(form.classId) || branchId,
+          classId: cleanId(form.classId) || undefined,
+          teacherId: cleanId(form.teacherId) || undefined,
           status: "active",
           active: true,
           isDefault: !timetables.length,
@@ -1058,7 +1274,7 @@ export default function ClassTimetable() {
           isDeleted: false,
         } as ScheduleTimetable)) as ScheduleTimetable | undefined;
 
-        timetableId = Number((created as AnyRow)?.id || 0);
+        timetableId = idOf((created as AnyRow)?.id);
       }
 
       if (!timetableId) {
@@ -1068,7 +1284,13 @@ export default function ClassTimetable() {
 
       const editingId = cleanId(form.id);
       const safeAccountId = String(accountId);
-      const selectedDays = Array.from(new Set((form.repeatDays?.length ? form.repeatDays : [form.dayOfWeek]).map(normalizeDay)));
+      const selectedDays = Array.from(
+        new Set(
+          (form.repeatDays?.length ? form.repeatDays : [form.dayOfWeek]).map(
+            normalizeDay,
+          ),
+        ),
+      );
 
       if (!selectedDays.length) {
         setMessage("Select at least one day for this session.");
@@ -1076,25 +1298,27 @@ export default function ClassTimetable() {
       }
 
       const existingEditingSession = editingId
-        ? sessions.find((session: AnyRow) => cleanId(session.id || session.localId) === editingId)
+        ? sessions.find((session: AnyRow) => cleanId(session.id) === editingId)
         : null;
-      const originalEditingDay = existingEditingSession ? sessionDay(existingEditingSession) : normalizeDay(form.dayOfWeek);
+      const originalEditingDay = existingEditingSession
+        ? sessionDay(existingEditingSession)
+        : normalizeDay(form.dayOfWeek);
 
       const baseSessionPayload: Partial<ScheduleSession> = {
         accountId: safeAccountId,
-        schoolId: Number(schoolId),
-        branchId: Number(branchId),
+        schoolId: schoolId,
+        branchId: branchId,
         timetableId,
         sessionType: form.sessionType as ScheduleSession["sessionType"],
         startMinute: start,
         endMinute: end,
         title:
           form.title.trim() ||
-          `${subjects.find((subject: AnyRow) => Number(idOf(subject)) === Number(form.subjectId))?.name || "Session"}`,
-        classId: Number(form.classId || 0) || undefined,
-        subjectId: Number(form.subjectId || 0) || undefined,
-        teacherLocalId: Number(form.teacherLocalId || 0) || undefined,
-        resourceId: Number(form.resourceId || 0) || undefined,
+          `${subjects.find((subject: AnyRow) => idOf(subject) === idOf(form.subjectId))?.name || "Session"}`,
+        classId: cleanId(form.classId) || undefined,
+        subjectId: cleanId(form.subjectId) || undefined,
+        teacherId: cleanId(form.teacherId) || undefined,
+        resourceId: idOf(form.resourceId) || undefined,
         roomName: form.roomName.trim() || undefined,
         active: true,
         isDeleted: false,
@@ -1112,7 +1336,7 @@ export default function ClassTimetable() {
           const savedSession = (await updateLocal(
             "scheduleSessions",
             editingId,
-            sessionPayload as Partial<ScheduleSession>
+            sessionPayload as Partial<ScheduleSession>,
           )) as ScheduleSession | undefined;
 
           if (savedSession) savedSessions.push(savedSession);
@@ -1121,25 +1345,42 @@ export default function ClassTimetable() {
 
         const matchingExistingSession = editingId
           ? sessions.find((session: AnyRow) => {
-              const sessionId = cleanId(session.id || session.localId);
+              const sessionId = cleanId(session.id);
               if (!sessionId || sessionId === editingId) return false;
-              if (Number(session.timetableId || 0) !== Number(timetableId)) return false;
+              if (idOf(session.timetableId) !== timetableId)
+                return false;
               if (sessionDay(session) !== day) return false;
-              if (startMinute(session) !== start || endMinute(session) !== end) return false;
-              if (sessionTitle(session).toLowerCase() !== String(baseSessionPayload.title || "").toLowerCase()) return false;
-              if (sessionClassId(session) !== cleanId(baseSessionPayload.classId)) return false;
-              if (sessionSubjectId(session) !== cleanId(baseSessionPayload.subjectId)) return false;
-              if (sessionTeacherId(session) !== cleanId(baseSessionPayload.teacherLocalId)) return false;
+              if (startMinute(session) !== start || endMinute(session) !== end)
+                return false;
+              if (
+                sessionTitle(session).toLowerCase() !==
+                String(baseSessionPayload.title || "").toLowerCase()
+              )
+                return false;
+              if (
+                sessionClassId(session) !== cleanId(baseSessionPayload.classId)
+              )
+                return false;
+              if (
+                sessionSubjectId(session) !==
+                cleanId(baseSessionPayload.subjectId)
+              )
+                return false;
+              if (
+                sessionTeacherId(session) !==
+                cleanId(baseSessionPayload.teacherId)
+              )
+                return false;
               return true;
             })
           : null;
 
         if (matchingExistingSession) {
-          const existingId = cleanId(matchingExistingSession.id || matchingExistingSession.localId);
+          const existingId = cleanId(matchingExistingSession.id);
           const savedSession = (await updateLocal(
             "scheduleSessions",
             existingId,
-            sessionPayload as Partial<ScheduleSession>
+            sessionPayload as Partial<ScheduleSession>,
           )) as ScheduleSession | undefined;
 
           if (savedSession) savedSessions.push(savedSession);
@@ -1148,7 +1389,7 @@ export default function ClassTimetable() {
 
         const savedSession = (await createLocal(
           "scheduleSessions",
-          sessionPayload as ScheduleSession
+          sessionPayload as ScheduleSession,
         )) as ScheduleSession | undefined;
 
         if (savedSession) savedSessions.push(savedSession);
@@ -1176,10 +1417,12 @@ export default function ClassTimetable() {
   }
 
   async function deleteSession(session: AnyRow) {
-    const id = cleanId(session.id || session.localId);
+    const id = cleanId(session.id);
     if (!id) return;
 
-    const ok = window.confirm(`Delete "${sessionTitle(session)}"? This will soft-delete it locally and sync the deletion.`);
+    const ok = window.confirm(
+      `Delete "${sessionTitle(session)}"? This will soft-delete it locally and sync the deletion.`,
+    );
     if (!ok) return;
 
     try {
@@ -1192,7 +1435,7 @@ export default function ClassTimetable() {
   }
 
   async function resolveConflict(conflict: AnyRow) {
-    const id = cleanId(conflict.id || conflict.localId);
+    const id = cleanId(conflict.id);
     if (!id) return;
 
     try {
@@ -1211,22 +1454,37 @@ export default function ClassTimetable() {
 
   if (loading || accountLoading || settingsLoading || contextLoading) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Opening class timetable...</h2>
-          <p>Loading class timetable sessions, teachers, classes, resources and conflicts.</p>
+          <p>
+            Loading class timetable sessions, teachers, classes, resources and
+            conflicts.
+          </p>
         </section>
       </main>
     );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card" aria-label="Branch timetable search and actions">
-        <span className={`status-dot-mini ${summary.conflicts > 0 ? "orange" : summary.sessions ? "green" : "gray"}`} title={`${summary.sessions} session(s), ${summary.conflicts} conflict(s)`} />
+      <section
+        className="ba-search-card"
+        aria-label="Branch timetable search and actions"
+      >
+        <span
+          className={`status-dot-mini ${summary.conflicts > 0 ? "orange" : summary.sessions ? "green" : "gray"}`}
+          title={`${summary.sessions} session(s), ${summary.conflicts} conflict(s)`}
+        />
 
         <label className="ba-search">
           <span>⌕</span>
@@ -1238,7 +1496,12 @@ export default function ClassTimetable() {
           />
         </label>
 
-        <button type="button" className="ba-add-inline" onClick={openCreate} aria-label="Add timetable session">
+        <button
+          type="button"
+          className="ba-add-inline"
+          onClick={openCreate}
+          aria-label="Add timetable session"
+        >
           +
         </button>
 
@@ -1253,23 +1516,76 @@ export default function ClassTimetable() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 ? (
-        <section className="ba-filter-chips" aria-label="Active timetable filters">
-          {selectedTimetableId ? <button type="button" onClick={() => setSelectedTimetableId("")}>Timetable: {selectedTimetable?.name || selectedTimetableId} ×</button> : null}
-          {filterDay !== "all" ? <button type="button" onClick={() => setFilterDay("all")}>Day: {DAY_LABELS[filterDay]} ×</button> : null}
-          {filterSessionType !== "all" ? <button type="button" onClick={() => setFilterSessionType("all")}>Type: {filterSessionType} ×</button> : null}
-          {filterClassId ? <button type="button" onClick={() => setFilterClassId("")}>Class: {className(classes, filterClassId)} ×</button> : null}
-          {filterSubjectId ? <button type="button" onClick={() => setFilterSubjectId("")}>Subject: {subjectName(subjects, filterSubjectId)} ×</button> : null}
-          {filterTeacherId ? <button type="button" onClick={() => setFilterTeacherId("")}>Teacher: {teacherName(teachers, filterTeacherId)} ×</button> : null}
-          {filterResourceId ? <button type="button" onClick={() => setFilterResourceId("")}>Room: {resources.find((row) => Number(idOf(row)) === Number(filterResourceId))?.name || filterResourceId} ×</button> : null}
-          {filterConflictFocus !== "all" ? <button type="button" onClick={() => setFilterConflictFocus("all")}>Conflict: {filterConflictFocus} ×</button> : null}
-          {filterStartTime ? <button type="button" onClick={() => setFilterStartTime("")}>From: {filterStartTime} ×</button> : null}
-          {filterEndTime ? <button type="button" onClick={() => setFilterEndTime("")}>To: {filterEndTime} ×</button> : null}
+        <section
+          className="ba-filter-chips"
+          aria-label="Active timetable filters"
+        >
+          {selectedTimetableId ? (
+            <button type="button" onClick={() => setSelectedTimetableId("")}>
+              Timetable: {selectedTimetable?.name || selectedTimetableId} ×
+            </button>
+          ) : null}
+          {filterDay !== "all" ? (
+            <button type="button" onClick={() => setFilterDay("all")}>
+              Day: {DAY_LABELS[filterDay]} ×
+            </button>
+          ) : null}
+          {filterSessionType !== "all" ? (
+            <button type="button" onClick={() => setFilterSessionType("all")}>
+              Type: {filterSessionType} ×
+            </button>
+          ) : null}
+          {filterClassId ? (
+            <button type="button" onClick={() => setFilterClassId("")}>
+              Class: {className(classes, filterClassId)} ×
+            </button>
+          ) : null}
+          {filterSubjectId ? (
+            <button type="button" onClick={() => setFilterSubjectId("")}>
+              Subject: {subjectName(subjects, filterSubjectId)} ×
+            </button>
+          ) : null}
+          {filterTeacherId ? (
+            <button type="button" onClick={() => setFilterTeacherId("")}>
+              Teacher: {teacherName(teachers, filterTeacherId)} ×
+            </button>
+          ) : null}
+          {filterResourceId ? (
+            <button type="button" onClick={() => setFilterResourceId("")}>
+              Room:{" "}
+              {resources.find(
+                (row) =>
+                  idOf(row) === idOf(filterResourceId),
+              )?.name || filterResourceId}{" "}
+              ×
+            </button>
+          ) : null}
+          {filterConflictFocus !== "all" ? (
+            <button type="button" onClick={() => setFilterConflictFocus("all")}>
+              Conflict: {filterConflictFocus} ×
+            </button>
+          ) : null}
+          {filterStartTime ? (
+            <button type="button" onClick={() => setFilterStartTime("")}>
+              From: {filterStartTime} ×
+            </button>
+          ) : null}
+          {filterEndTime ? (
+            <button type="button" onClick={() => setFilterEndTime("")}>
+              To: {filterEndTime} ×
+            </button>
+          ) : null}
         </section>
       ) : null}
 
@@ -1285,16 +1601,27 @@ export default function ClassTimetable() {
 
           <div className="ba-list">
             {conflicts.slice(0, 4).map((conflict: AnyRow, index: number) => (
-              <article className="ba-card" key={String(idOf(conflict) || index)}>
+              <article
+                className="ba-card"
+                key={String(idOf(conflict) || index)}
+              >
                 <div className="ba-card-top">
                   <div className="ba-avatar">⚠️</div>
                   <div className="ba-card-main">
                     <h3>{conflict.title || "Schedule conflict"}</h3>
                     <p>{conflict.description || "Conflict detected"}</p>
                     <div className="ba-chip-row">
-                      <Chip tone={toneForConflict(conflict.severity)}>{conflict.severity || "warning"}</Chip>
-                      <Chip tone="orange">{conflict.conflictType || "conflict"}</Chip>
-                      <button className="ba-btn" type="button" onClick={() => resolveConflict(conflict)}>
+                      <Chip tone={toneForConflict(conflict.severity)}>
+                        {conflict.severity || "warning"}
+                      </Chip>
+                      <Chip tone="orange">
+                        {conflict.conflictType || "conflict"}
+                      </Chip>
+                      <button
+                        className="ba-btn"
+                        type="button"
+                        onClick={() => resolveConflict(conflict)}
+                      >
                         Resolve
                       </button>
                     </div>
@@ -1315,20 +1642,29 @@ export default function ClassTimetable() {
                 {timetableMode === "week"
                   ? "Weekly Timetable"
                   : timetableMode === "day"
-                  ? `${DAY_LABELS[selectedDay]} Timetable`
-                  : timetableMode === "teacher"
-                  ? "Teacher Timetables"
-                  : timetableMode === "class"
-                  ? "Class Timetables"
-                  : "Room Timetables"}
+                    ? `${DAY_LABELS[selectedDay]} Timetable`
+                    : timetableMode === "teacher"
+                      ? "Teacher Timetables"
+                      : timetableMode === "class"
+                        ? "Class Timetables"
+                        : "Room Timetables"}
               </h3>
             </div>
 
-            <TimetableModeSwitch mode={timetableMode} setMode={setTimetableMode} />
+            <TimetableModeSwitch
+              mode={timetableMode}
+              setMode={setTimetableMode}
+            />
           </div>
 
           {timetableMode === "week" ? (
-            <WeekTimetable sessions={visibleSessions} classes={classes} subjects={subjects} teachers={teachers} resources={resources} />
+            <WeekTimetable
+              sessions={visibleSessions}
+              classes={classes}
+              subjects={subjects}
+              teachers={teachers}
+              resources={resources}
+            />
           ) : null}
 
           {timetableMode === "day" ? (
@@ -1346,8 +1682,12 @@ export default function ClassTimetable() {
             <GroupedTimetable
               title="Teacher"
               sessions={visibleSessions}
-              getGroupKey={(session) => String(sessionTeacherId(session) || "none")}
-              getGroupLabel={(session) => teacherName(teachers, sessionTeacherId(session)) || "No teacher"}
+              getGroupKey={(session) =>
+                String(sessionTeacherId(session) || "none")
+              }
+              getGroupLabel={(session) =>
+                teacherName(teachers, sessionTeacherId(session)) || "No teacher"
+              }
               classes={classes}
               subjects={subjects}
               teachers={teachers}
@@ -1359,8 +1699,12 @@ export default function ClassTimetable() {
             <GroupedTimetable
               title="Class"
               sessions={visibleSessions}
-              getGroupKey={(session) => String(sessionClassId(session) || "none")}
-              getGroupLabel={(session) => className(classes, sessionClassId(session))}
+              getGroupKey={(session) =>
+                String(sessionClassId(session) || "none")
+              }
+              getGroupLabel={(session) =>
+                className(classes, sessionClassId(session))
+              }
               classes={classes}
               subjects={subjects}
               teachers={teachers}
@@ -1372,7 +1716,9 @@ export default function ClassTimetable() {
             <GroupedTimetable
               title="Room"
               sessions={visibleSessions}
-              getGroupKey={(session) => String(sessionResourceId(session) || session.roomName || "none")}
+              getGroupKey={(session) =>
+                String(sessionResourceId(session) || session.roomName || "none")
+              }
               getGroupLabel={(session) => resourceName(resources, session)}
               classes={classes}
               subjects={subjects}
@@ -1389,18 +1735,23 @@ export default function ClassTimetable() {
             title="Sessions by Day"
             rows={DAYS.map((day) => ({
               label: DAY_LABELS[day],
-              value: visibleSessions.filter((session: AnyRow) => sessionDay(session) === day).length,
+              value: visibleSessions.filter(
+                (session: AnyRow) => sessionDay(session) === day,
+              ).length,
             }))}
           />
 
           <AnalyticsCard
             title="Teacher Load"
             rows={Array.from(
-              visibleSessions.reduce((map: Map<string, number>, session: AnyRow) => {
-                const name = teacherName(teachers, sessionTeacherId(session));
-                map.set(name, (map.get(name) || 0) + 1);
-                return map;
-              }, new Map<string, number>())
+              visibleSessions.reduce(
+                (map: Map<string, number>, session: AnyRow) => {
+                  const name = teacherName(teachers, sessionTeacherId(session));
+                  map.set(name, (map.get(name) || 0) + 1);
+                  return map;
+                },
+                new Map<string, number>(),
+              ),
             )
               .map(([label, value]) => ({ label, value }))
               .sort((a, b) => b.value - a.value)}
@@ -1409,11 +1760,14 @@ export default function ClassTimetable() {
           <AnalyticsCard
             title="Class Load"
             rows={Array.from(
-              visibleSessions.reduce((map: Map<string, number>, session: AnyRow) => {
-                const name = className(classes, sessionClassId(session));
-                map.set(name, (map.get(name) || 0) + 1);
-                return map;
-              }, new Map<string, number>())
+              visibleSessions.reduce(
+                (map: Map<string, number>, session: AnyRow) => {
+                  const name = className(classes, sessionClassId(session));
+                  map.set(name, (map.get(name) || 0) + 1);
+                  return map;
+                },
+                new Map<string, number>(),
+              ),
             )
               .map(([label, value]) => ({ label, value }))
               .sort((a, b) => b.value - a.value)}
@@ -1422,11 +1776,14 @@ export default function ClassTimetable() {
           <AnalyticsCard
             title="Room Load"
             rows={Array.from(
-              visibleSessions.reduce((map: Map<string, number>, session: AnyRow) => {
-                const name = resourceName(resources, session);
-                map.set(name, (map.get(name) || 0) + 1);
-                return map;
-              }, new Map<string, number>())
+              visibleSessions.reduce(
+                (map: Map<string, number>, session: AnyRow) => {
+                  const name = resourceName(resources, session);
+                  map.set(name, (map.get(name) || 0) + 1);
+                  return map;
+                },
+                new Map<string, number>(),
+              ),
             )
               .map(([label, value]) => ({ label, value }))
               .sort((a, b) => b.value - a.value)}
@@ -1467,10 +1824,18 @@ export default function ClassTimetable() {
                     <td>{resourceName(resources, session)}</td>
                     <td>
                       <div className="ba-row-actions">
-                        <button className="ba-btn" type="button" onClick={() => openEdit(session)}>
+                        <button
+                          className="ba-btn"
+                          type="button"
+                          onClick={() => openEdit(session)}
+                        >
                           Edit
                         </button>
-                        <button className="ba-delete" type="button" onClick={() => deleteSession(session)}>
+                        <button
+                          className="ba-delete"
+                          type="button"
+                          onClick={() => deleteSession(session)}
+                        >
                           Delete
                         </button>
                       </div>
@@ -1498,7 +1863,10 @@ export default function ClassTimetable() {
               <p>{selectedTimetable?.name || MODE_LABEL}</p>
               <h3>Weekly sessions</h3>
             </div>
-            <Chip>{groupedVisibleSessions.length} card(s) · {visibleSessions.length} occurrence(s)</Chip>
+            <Chip>
+              {groupedVisibleSessions.length} card(s) · {visibleSessions.length}{" "}
+              occurrence(s)
+            </Chip>
           </div>
 
           <div className="ba-list">
@@ -1515,7 +1883,9 @@ export default function ClassTimetable() {
               />
             ))}
 
-            {!groupedVisibleSessions.length ? <EmptyCard text="No timetable sessions found." /> : null}
+            {!groupedVisibleSessions.length ? (
+              <EmptyCard text="No timetable sessions found." />
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1583,7 +1953,11 @@ export default function ClassTimetable() {
 
       {drawer ? (
         <div className="ba-drawer-layer">
-          <button className="ba-drawer-overlay" type="button" onClick={() => setDrawer(false)} />
+          <button
+            className="ba-drawer-overlay"
+            type="button"
+            onClick={() => setDrawer(false)}
+          />
 
           <aside className="ba-drawer">
             <div className="ba-drawer-head">
@@ -1610,10 +1984,18 @@ export default function ClassTimetable() {
               <div className="ba-form-grid">
                 <label className="wide">
                   <span>Use Existing Timetable</span>
-                  <select value={form.timetableId || selectedTimetableId} onChange={(event) => setForm({ ...form, timetableId: event.target.value })}>
+                  <select
+                    value={form.timetableId || selectedTimetableId}
+                    onChange={(event) =>
+                      setForm({ ...form, timetableId: event.target.value })
+                    }
+                  >
                     <option value="">Create / Use Default</option>
                     {timetables.map((timetable: AnyRow) => (
-                      <option key={String(idOf(timetable))} value={String(idOf(timetable))}>
+                      <option
+                        key={String(idOf(timetable))}
+                        value={String(idOf(timetable))}
+                      >
                         {timetable.name}
                       </option>
                     ))}
@@ -1624,7 +2006,9 @@ export default function ClassTimetable() {
                   <span>New Timetable Name if needed</span>
                   <input
                     value={form.timetableName}
-                    onChange={(event) => setForm({ ...form, timetableName: event.target.value })}
+                    onChange={(event) =>
+                      setForm({ ...form, timetableName: event.target.value })
+                    }
                     placeholder={`${MODE_LABEL} Timetable`}
                   />
                 </label>
@@ -1638,7 +2022,9 @@ export default function ClassTimetable() {
                       setForm({
                         ...form,
                         dayOfWeek: nextDay,
-                        repeatDays: Array.from(new Set([nextDay, ...(form.repeatDays || [])])),
+                        repeatDays: Array.from(
+                          new Set([nextDay, ...(form.repeatDays || [])]),
+                        ),
                       });
                     }}
                   >
@@ -1651,13 +2037,19 @@ export default function ClassTimetable() {
                 </label>
 
                 <label className="wide">
-                  <span>{form.id ? "Apply changes across days" : "Repeat / Span across days"}</span>
+                  <span>
+                    {form.id
+                      ? "Apply changes across days"
+                      : "Repeat / Span across days"}
+                  </span>
                   <div className="ba-day-picker">
                     {DAYS.map((day) => (
                       <button
                         key={day}
                         type="button"
-                        className={(form.repeatDays || []).includes(day) ? "active" : ""}
+                        className={
+                          (form.repeatDays || []).includes(day) ? "active" : ""
+                        }
                         onClick={() => toggleRepeatDay(day)}
                       >
                         {SHORT_DAY_LABELS[day]}
@@ -1665,13 +2057,22 @@ export default function ClassTimetable() {
                     ))}
                   </div>
                   <small className="ba-help-text">
-                    Select multiple days to {form.id ? "update this session and create or update matching sessions on the other selected days" : "create the same timetable session across those days"}, for example Assembly from Monday to Friday.
+                    Select multiple days to{" "}
+                    {form.id
+                      ? "update this session and create or update matching sessions on the other selected days"
+                      : "create the same timetable session across those days"}
+                    , for example Assembly from Monday to Friday.
                   </small>
                 </label>
 
                 <label>
                   <span>Session Type</span>
-                  <select value={form.sessionType} onChange={(event) => setForm({ ...form, sessionType: event.target.value })}>
+                  <select
+                    value={form.sessionType}
+                    onChange={(event) =>
+                      setForm({ ...form, sessionType: event.target.value })
+                    }
+                  >
                     <option value="lesson">Lesson</option>
                     <option value="exam">Exam</option>
                     <option value="meeting">Meeting</option>
@@ -1682,22 +2083,45 @@ export default function ClassTimetable() {
 
                 <label>
                   <span>Start</span>
-                  <input type="time" value={form.startTime} onChange={(event) => setForm({ ...form, startTime: event.target.value })} />
+                  <input
+                    type="time"
+                    value={form.startTime}
+                    onChange={(event) =>
+                      setForm({ ...form, startTime: event.target.value })
+                    }
+                  />
                 </label>
 
                 <label>
                   <span>End</span>
-                  <input type="time" value={form.endTime} onChange={(event) => setForm({ ...form, endTime: event.target.value })} />
+                  <input
+                    type="time"
+                    value={form.endTime}
+                    onChange={(event) =>
+                      setForm({ ...form, endTime: event.target.value })
+                    }
+                  />
                 </label>
 
                 <label className="wide">
                   <span>Title</span>
-                  <input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Optional custom title" />
+                  <input
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm({ ...form, title: event.target.value })
+                    }
+                    placeholder="Optional custom title"
+                  />
                 </label>
 
                 <label>
                   <span>Class</span>
-                  <select value={form.classId} onChange={(event) => setForm({ ...form, classId: event.target.value })}>
+                  <select
+                    value={form.classId}
+                    onChange={(event) =>
+                      setForm({ ...form, classId: event.target.value })
+                    }
+                  >
                     <option value="">No class</option>
                     {classes.map((row: AnyRow) => (
                       <option key={String(idOf(row))} value={String(idOf(row))}>
@@ -1709,7 +2133,12 @@ export default function ClassTimetable() {
 
                 <label>
                   <span>Subject</span>
-                  <select value={form.subjectId} onChange={(event) => setForm({ ...form, subjectId: event.target.value })}>
+                  <select
+                    value={form.subjectId}
+                    onChange={(event) =>
+                      setForm({ ...form, subjectId: event.target.value })
+                    }
+                  >
                     <option value="">No subject</option>
                     {subjects.map((row: AnyRow) => (
                       <option key={String(idOf(row))} value={String(idOf(row))}>
@@ -1721,7 +2150,12 @@ export default function ClassTimetable() {
 
                 <label>
                   <span>Teacher</span>
-                  <select value={form.teacherLocalId} onChange={(event) => setForm({ ...form, teacherLocalId: event.target.value })}>
+                  <select
+                    value={form.teacherId}
+                    onChange={(event) =>
+                      setForm({ ...form, teacherId: event.target.value })
+                    }
+                  >
                     <option value="">No teacher</option>
                     {teachers.map((row: AnyRow) => (
                       <option key={String(idOf(row))} value={String(idOf(row))}>
@@ -1733,7 +2167,12 @@ export default function ClassTimetable() {
 
                 <label>
                   <span>Resource</span>
-                  <select value={form.resourceId} onChange={(event) => setForm({ ...form, resourceId: event.target.value })}>
+                  <select
+                    value={form.resourceId}
+                    onChange={(event) =>
+                      setForm({ ...form, resourceId: event.target.value })
+                    }
+                  >
                     <option value="">No resource</option>
                     {resources.map((row: AnyRow) => (
                       <option key={String(idOf(row))} value={String(idOf(row))}>
@@ -1745,7 +2184,12 @@ export default function ClassTimetable() {
 
                 <label className="wide">
                   <span>Room name if no resource</span>
-                  <input value={form.roomName} onChange={(event) => setForm({ ...form, roomName: event.target.value })} />
+                  <input
+                    value={form.roomName}
+                    onChange={(event) =>
+                      setForm({ ...form, roomName: event.target.value })
+                    }
+                  />
                 </label>
               </div>
             </section>
@@ -1761,8 +2205,17 @@ export default function ClassTimetable() {
               >
                 Cancel
               </button>
-              <button className="ba-primary" type="button" disabled={saving} onClick={save}>
-                {saving ? "Saving..." : form.id ? "Save Changes" : "Save Session"}
+              <button
+                className="ba-primary"
+                type="button"
+                disabled={saving}
+                onClick={save}
+              >
+                {saving
+                  ? "Saving..."
+                  : form.id
+                    ? "Save Changes"
+                    : "Save Session"}
               </button>
             </div>
           </aside>
@@ -1771,7 +2224,6 @@ export default function ClassTimetable() {
     </main>
   );
 }
-
 
 function FilterSheet({
   timetables,
@@ -1807,22 +2259,22 @@ function FilterSheet({
   subjects: AnyRow[];
   teachers: AnyRow[];
   resources: AnyRow[];
-  selectedTimetableId: number | "";
+  selectedTimetableId: string | "";
   filterDay: string;
-  filterClassId: number | "";
-  filterSubjectId: number | "";
-  filterTeacherId: number | "";
-  filterResourceId: number | "";
+  filterClassId: string | "";
+  filterSubjectId: string | "";
+  filterTeacherId: string | "";
+  filterResourceId: string | "";
   filterSessionType: string;
   filterConflictFocus: string;
   filterStartTime: string;
   filterEndTime: string;
-  setSelectedTimetableId: (value: number | "") => void;
+  setSelectedTimetableId: (value: string | "") => void;
   setFilterDay: (value: string) => void;
-  setFilterClassId: (value: number | "") => void;
-  setFilterSubjectId: (value: number | "") => void;
-  setFilterTeacherId: (value: number | "") => void;
-  setFilterResourceId: (value: number | "") => void;
+  setFilterClassId: (value: string | "") => void;
+  setFilterSubjectId: (value: string | "") => void;
+  setFilterTeacherId: (value: string | "") => void;
+  setFilterResourceId: (value: string | "") => void;
   setFilterSessionType: (value: string) => void;
   setFilterConflictFocus: (value: string) => void;
   setFilterStartTime: (value: string) => void;
@@ -1838,31 +2290,55 @@ function FilterSheet({
             <h2>Timetable Filters</h2>
             <p>Select only what you need. Search stays on the main screen.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close filters">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close filters">
+            ✕
+          </button>
         </div>
 
         <div className="ba-form compact">
           <label>
             <span>Timetable</span>
-            <select value={selectedTimetableId} onChange={(event) => setSelectedTimetableId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={selectedTimetableId}
+              onChange={(event) =>
+                setSelectedTimetableId(
+                  event.target.value,
+                )
+              }
+            >
               <option value="">All Timetables</option>
               {timetables.map((timetable: AnyRow) => (
-                <option key={String(idOf(timetable))} value={String(idOf(timetable))}>{timetable.name}</option>
+                <option
+                  key={String(idOf(timetable))}
+                  value={String(idOf(timetable))}
+                >
+                  {timetable.name}
+                </option>
               ))}
             </select>
           </label>
 
           <label>
             <span>Day</span>
-            <select value={filterDay} onChange={(event) => setFilterDay(event.target.value)}>
+            <select
+              value={filterDay}
+              onChange={(event) => setFilterDay(event.target.value)}
+            >
               <option value="all">All Days</option>
-              {DAYS.map((day) => <option key={day} value={day}>{DAY_LABELS[day]}</option>)}
+              {DAYS.map((day) => (
+                <option key={day} value={day}>
+                  {DAY_LABELS[day]}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Session Type</span>
-            <select value={filterSessionType} onChange={(event) => setFilterSessionType(event.target.value)}>
+            <select
+              value={filterSessionType}
+              onChange={(event) => setFilterSessionType(event.target.value)}
+            >
               <option value="all">All Types</option>
               <option value="lesson">Lessons</option>
               <option value="exam">Exams</option>
@@ -1874,52 +2350,117 @@ function FilterSheet({
 
           <label>
             <span>Class</span>
-            <select value={filterClassId} onChange={(event) => setFilterClassId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={filterClassId}
+              onChange={(event) =>
+                setFilterClassId(
+                  event.target.value,
+                )
+              }
+            >
               <option value="">All Classes</option>
-              {classes.map((row: AnyRow) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.className || "Unnamed class"}</option>)}
+              {classes.map((row: AnyRow) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.className || "Unnamed class"}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Subject</span>
-            <select value={filterSubjectId} onChange={(event) => setFilterSubjectId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={filterSubjectId}
+              onChange={(event) =>
+                setFilterSubjectId(
+                  event.target.value,
+                )
+              }
+            >
               <option value="">All Subjects</option>
-              {subjects.map((row: AnyRow) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.subjectName || "Unnamed subject"}</option>)}
+              {subjects.map((row: AnyRow) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.subjectName || "Unnamed subject"}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Teacher</span>
-            <select value={filterTeacherId} onChange={(event) => setFilterTeacherId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={filterTeacherId}
+              onChange={(event) =>
+                setFilterTeacherId(
+                  event.target.value,
+                )
+              }
+            >
               <option value="">All Teachers</option>
-              {teachers.map((row: AnyRow) => <option key={String(idOf(row))} value={String(idOf(row))}>{rowName(row)}</option>)}
+              {teachers.map((row: AnyRow) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {rowName(row)}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Room / Resource</span>
-            <select value={filterResourceId} onChange={(event) => setFilterResourceId(event.target.value ? Number(event.target.value) : "")}>
+            <select
+              value={filterResourceId}
+              onChange={(event) =>
+                setFilterResourceId(
+                  event.target.value,
+                )
+              }
+            >
               <option value="">All Rooms/Resources</option>
-              {resources.map((row: AnyRow) => <option key={String(idOf(row))} value={String(idOf(row))}>{row.name || row.roomName || "Unnamed resource"}</option>)}
+              {resources.map((row: AnyRow) => (
+                <option key={String(idOf(row))} value={String(idOf(row))}>
+                  {row.name || row.roomName || "Unnamed resource"}
+                </option>
+              ))}
             </select>
           </label>
 
           <label>
             <span>Conflict Focus</span>
-            <select value={filterConflictFocus} onChange={(event) => setFilterConflictFocus(event.target.value)}>
+            <select
+              value={filterConflictFocus}
+              onChange={(event) => setFilterConflictFocus(event.target.value)}
+            >
               <option value="all">All Conflict Status</option>
               <option value="conflicts">Has Conflict</option>
               <option value="clear">No Conflict</option>
             </select>
           </label>
 
-          <label><span>From</span><input type="time" value={filterStartTime} onChange={(event) => setFilterStartTime(event.target.value)} /></label>
-          <label><span>To</span><input type="time" value={filterEndTime} onChange={(event) => setFilterEndTime(event.target.value)} /></label>
+          <label>
+            <span>From</span>
+            <input
+              type="time"
+              value={filterStartTime}
+              onChange={(event) => setFilterStartTime(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>To</span>
+            <input
+              type="time"
+              value={filterEndTime}
+              onChange={(event) => setFilterEndTime(event.target.value)}
+            />
+          </label>
         </div>
 
         <div className="ba-sheet-actions">
-          <button type="button" onClick={clearFilters}>Clear</button>
-          <button type="button" className="primary" onClick={onClose}>Apply</button>
+          <button type="button" onClick={clearFilters}>
+            Clear
+          </button>
+          <button type="button" className="primary" onClick={onClose}>
+            Apply
+          </button>
         </div>
       </section>
     </div>
@@ -1943,7 +2484,15 @@ function MoreSheet({
   setTimetableMode: (value: TimetableMode) => void;
   selectedDay: string;
   setSelectedDay: (value: string) => void;
-  summary: { timetables: number; sessions: number; groups: number; teachers: number; classes: number; resources: number; conflicts: number };
+  summary: {
+    timetables: number;
+    sessions: number;
+    groups: number;
+    teachers: number;
+    classes: number;
+    resources: number;
+    conflicts: number;
+  };
   onRefresh: () => void | Promise<void>;
   onClose: () => void;
 }) {
@@ -1955,30 +2504,86 @@ function MoreSheet({
             <h2>More</h2>
             <p>Views and timetable modes are here so the page stays compact.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
+          <button type="button" onClick={onClose} aria-label="Close menu">
+            ✕
+          </button>
         </div>
 
         <div className="ba-menu-list">
-          <button type="button" className={view === "timetable" ? "active" : ""} onClick={() => setView("timetable")}><span>🗓️</span><b>Timetable view</b><small>Week, day, teacher, class and room schedules</small></button>
-          <button type="button" className={view === "cards" ? "active" : ""} onClick={() => setView("cards")}><span>▦</span><b>Cards</b><small>{summary.groups} grouped routine card(s)</small></button>
-          <button type="button" className={view === "table" ? "active" : ""} onClick={() => setView("table")}><span>☷</span><b>Table</b><small>Dense laptop-friendly session table</small></button>
-          <button type="button" className={view === "analytics" ? "active" : ""} onClick={() => setView("analytics")}><span>◔</span><b>Analytics</b><small>Day, teacher, class and room load</small></button>
-          <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload local branch timetable data</small></button>
+          <button
+            type="button"
+            className={view === "timetable" ? "active" : ""}
+            onClick={() => setView("timetable")}
+          >
+            <span>🗓️</span>
+            <b>Timetable view</b>
+            <small>Week, day, teacher, class and room schedules</small>
+          </button>
+          <button
+            type="button"
+            className={view === "cards" ? "active" : ""}
+            onClick={() => setView("cards")}
+          >
+            <span>▦</span>
+            <b>Cards</b>
+            <small>{summary.groups} grouped routine card(s)</small>
+          </button>
+          <button
+            type="button"
+            className={view === "table" ? "active" : ""}
+            onClick={() => setView("table")}
+          >
+            <span>☷</span>
+            <b>Table</b>
+            <small>Dense laptop-friendly session table</small>
+          </button>
+          <button
+            type="button"
+            className={view === "analytics" ? "active" : ""}
+            onClick={() => setView("analytics")}
+          >
+            <span>◔</span>
+            <b>Analytics</b>
+            <small>Day, teacher, class and room load</small>
+          </button>
+          <button type="button" onClick={onRefresh}>
+            <span>↻</span>
+            <b>Refresh</b>
+            <small>Reload local branch timetable data</small>
+          </button>
         </div>
 
         <div className="ba-sheet-subhead">
           <span>Timetable mode</span>
         </div>
         <div className="ba-mode-grid">
-          {(["week", "day", "teacher", "class", "room"] as TimetableMode[]).map((mode) => (
-            <button key={mode} type="button" className={timetableMode === mode ? "active" : ""} onClick={() => setTimetableMode(mode)}>{mode}</button>
-          ))}
+          {(["week", "day", "teacher", "class", "room"] as TimetableMode[]).map(
+            (mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={timetableMode === mode ? "active" : ""}
+                onClick={() => setTimetableMode(mode)}
+              >
+                {mode}
+              </button>
+            ),
+          )}
         </div>
 
-        <div className="ba-sheet-subhead"><span>Selected day</span></div>
+        <div className="ba-sheet-subhead">
+          <span>Selected day</span>
+        </div>
         <div className="ba-day-picker menu-picker">
           {DAYS.map((day) => (
-            <button key={day} type="button" className={selectedDay === day ? "active" : ""} onClick={() => setSelectedDay(day)}>{SHORT_DAY_LABELS[day]}</button>
+            <button
+              key={day}
+              type="button"
+              className={selectedDay === day ? "active" : ""}
+              onClick={() => setSelectedDay(day)}
+            >
+              {SHORT_DAY_LABELS[day]}
+            </button>
           ))}
         </div>
       </section>
@@ -2019,14 +2624,19 @@ function SessionCard({
             <Chip tone="blue">{session.sessionType || "session"}</Chip>
             {routine ? <Chip tone="green">Grouped routine</Chip> : null}
             <Chip>{className(classes, sessionClassId(session))}</Chip>
-            <Chip tone="purple">{teacherName(teachers, sessionTeacherId(session))}</Chip>
+            <Chip tone="purple">
+              {teacherName(teachers, sessionTeacherId(session))}
+            </Chip>
           </div>
         </div>
       </div>
 
       <div className="ba-mini-grid">
         <MiniStat label="Days" value={dayListLabel(group.days)} />
-        <MiniStat label="Subject" value={subjectName(subjects, sessionSubjectId(session))} />
+        <MiniStat
+          label="Subject"
+          value={subjectName(subjects, sessionSubjectId(session))}
+        />
         <MiniStat label="Room" value={resourceName(resources, session)} />
       </div>
 
@@ -2039,10 +2649,18 @@ function SessionCard({
       ) : null}
 
       <div className="ba-row-actions">
-        <button className="ba-btn" type="button" onClick={() => onEdit(session)}>
+        <button
+          className="ba-btn"
+          type="button"
+          onClick={() => onEdit(session)}
+        >
           Edit
         </button>
-        <button className="ba-delete" type="button" onClick={() => onDelete(session)}>
+        <button
+          className="ba-delete"
+          type="button"
+          onClick={() => onDelete(session)}
+        >
           Delete
         </button>
       </div>
@@ -2067,13 +2685,19 @@ function SessionBlock({
 }) {
   return (
     <article className={`ba-session-block ${compact ? "compact" : ""}`}>
-      <strong>{compact ? sessionTitle(session) : `${sessionTime(session)} · ${sessionTitle(session)}`}</strong>
+      <strong>
+        {compact
+          ? sessionTitle(session)
+          : `${sessionTime(session)} · ${sessionTitle(session)}`}
+      </strong>
       <span>
-        {subjectName(subjects, sessionSubjectId(session))} · {className(classes, sessionClassId(session))}
+        {subjectName(subjects, sessionSubjectId(session))} ·{" "}
+        {className(classes, sessionClassId(session))}
       </span>
       {!compact ? (
         <small>
-          {teacherName(teachers, sessionTeacherId(session))} · {resourceName(resources, session)}
+          {teacherName(teachers, sessionTeacherId(session))} ·{" "}
+          {resourceName(resources, session)}
         </small>
       ) : null}
     </article>
@@ -2096,7 +2720,9 @@ function WeekTimetable({
   return (
     <section className="ba-week-grid">
       {DAYS.map((day) => {
-        const daySessions = sortSessions(sessions.filter((session: AnyRow) => sessionDay(session) === day));
+        const daySessions = sortSessions(
+          sessions.filter((session: AnyRow) => sessionDay(session) === day),
+        );
 
         return (
           <article key={day} className="ba-week-day">
@@ -2142,17 +2768,23 @@ function DayTimetable({
   teachers: AnyRow[];
   resources: AnyRow[];
 }) {
-  const daySessions = sortSessions(sessions.filter((session: AnyRow) => sessionDay(session) === day));
+  const daySessions = sortSessions(
+    sessions.filter((session: AnyRow) => sessionDay(session) === day),
+  );
 
   return (
     <section className="ba-day-view">
       {daySessions.map((session: AnyRow, index: number) => (
-        <article key={String(idOf(session) || index)} className="ba-day-session">
+        <article
+          key={String(idOf(session) || index)}
+          className="ba-day-session"
+        >
           <time>{sessionTime(session)}</time>
           <div>
             <h3>{sessionTitle(session)}</h3>
             <p>
-              {subjectName(subjects, sessionSubjectId(session))} · {className(classes, sessionClassId(session))} ·{" "}
+              {subjectName(subjects, sessionSubjectId(session))} ·{" "}
+              {className(classes, sessionClassId(session))} ·{" "}
               {teacherName(teachers, sessionTeacherId(session))}
             </p>
             <span>{resourceName(resources, session)}</span>
@@ -2160,7 +2792,11 @@ function DayTimetable({
         </article>
       ))}
 
-      {!daySessions.length ? <EmptyCard text={`No timetable sessions found for ${DAY_LABELS[day]}.`} /> : null}
+      {!daySessions.length ? (
+        <EmptyCard
+          text={`No timetable sessions found for ${DAY_LABELS[day]}.`}
+        />
+      ) : null}
     </section>
   );
 }
@@ -2195,7 +2831,9 @@ function GroupedTimetable({
       map.set(key, current);
     });
 
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return Array.from(map.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
   }, [getGroupKey, getGroupLabel, sessions]);
 
   return (
@@ -2212,7 +2850,11 @@ function GroupedTimetable({
 
           <div className="ba-group-days">
             {DAYS.map((day) => {
-              const dayRows = sortSessions(group.rows.filter((session: AnyRow) => sessionDay(session) === day));
+              const dayRows = sortSessions(
+                group.rows.filter(
+                  (session: AnyRow) => sessionDay(session) === day,
+                ),
+              );
 
               return (
                 <section key={day} className="ba-group-day">
@@ -2239,7 +2881,9 @@ function GroupedTimetable({
         </article>
       ))}
 
-      {!groups.length ? <EmptyCard text="No grouped timetable records found." /> : null}
+      {!groups.length ? (
+        <EmptyCard text="No grouped timetable records found." />
+      ) : null}
     </section>
   );
 }
@@ -2251,7 +2895,9 @@ function AnalyticsCard({
   title: string;
   rows: { label: string; value: number }[];
 }) {
-  const cleanRows = rows.filter((row) => row.value > 0).sort((a, b) => b.value - a.value);
+  const cleanRows = rows
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
   const max = Math.max(...cleanRows.map((row) => row.value), 1);
 
   return (

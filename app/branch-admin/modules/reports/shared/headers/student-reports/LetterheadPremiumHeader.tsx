@@ -43,23 +43,24 @@ export default function LetterHeadPremiumHeader({
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
-  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
+  const primary =
+    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
   const contrast = getContrastTextColor(primary);
 
   const academicStructureName = firstText(
     (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName
+    (resolvedHeader as any)?.academicStructureName,
   );
 
   const academicPeriodName = firstText(
     (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName
+    (resolvedHeader as any)?.academicPeriodName,
   );
 
   const className = firstText(
     (resolvedHeader as any)?.classData?.name,
     (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className
+    (dataset as any)?.report?.className,
   );
 
   const contactLine = [
@@ -71,7 +72,9 @@ export default function LetterHeadPremiumHeader({
     .filter(Boolean)
     .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress]
+    .filter(Boolean)
+    .join(" · ");
   const logoSize = compact ? 46 : 52;
 
   const metaItems = [
@@ -85,7 +88,10 @@ export default function LetterHeadPremiumHeader({
     <header
       className="letterhead-premium-report-header"
       style={{
-        fontFamily: fontFamily || branding.fontFamily || "Georgia, 'Times New Roman', serif",
+        fontFamily:
+          fontFamily ||
+          branding.fontFamily ||
+          "Georgia, 'Times New Roman', serif",
         color: "#111827",
         position: "relative",
         overflow: "hidden",
@@ -164,7 +170,9 @@ export default function LetterHeadPremiumHeader({
                 zIndex: 1,
               }}
             >
-              School<br />Crest
+              School
+              <br />
+              Crest
             </span>
           )}
         </div>
@@ -311,7 +319,8 @@ export default function LetterHeadPremiumHeader({
             style={{
               minWidth: 0,
               padding: compact ? "3px 7px" : "4px 8px",
-              borderLeft: index === 0 ? `3px solid ${primary}` : "1px solid #eadfbe",
+              borderLeft:
+                index === 0 ? `3px solid ${primary}` : "1px solid #eadfbe",
               background: index === 0 ? "#fffaf0" : "transparent",
             }}
           >

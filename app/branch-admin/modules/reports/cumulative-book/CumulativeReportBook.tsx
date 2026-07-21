@@ -33,12 +33,11 @@ import type {
   CumulativeReportBookSettings,
 } from "./cumulative-book-types";
 
-import {
-  computeBookSummary,
-  periodName,
-} from "./cumulative-book-utils";
+import { computeBookSummary, periodName } from "./cumulative-book-utils";
 
-function normalizeBookDataset(dataset?: CumulativeReportBookDataset | null): CumulativeReportBookDataset | null {
+function normalizeBookDataset(
+  dataset?: CumulativeReportBookDataset | null,
+): CumulativeReportBookDataset | null {
   if (!dataset) return null;
 
   const periods = Array.isArray(dataset.periods)
@@ -57,7 +56,10 @@ function normalizeBookDataset(dataset?: CumulativeReportBookDataset | null): Cum
   return normalized;
 }
 
-function resolvedSettings(settings?: CumulativeReportBookSettings | null, templateSettings?: CumulativeReportBookSettings | null): CumulativeReportBookSettings {
+function resolvedSettings(
+  settings?: CumulativeReportBookSettings | null,
+  templateSettings?: CumulativeReportBookSettings | null,
+): CumulativeReportBookSettings {
   return {
     showBookFrontCover: true,
     showBookStudentProfilePage: true,
@@ -84,22 +86,28 @@ export default function CumulativeReportBook({
   includeCovers = true,
 }: CumulativeReportBookProps) {
   const bookDataset = useMemo(() => normalizeBookDataset(dataset), [dataset]);
-  const bookSettings = useMemo(() => resolvedSettings(settings, templateSettings), [settings, templateSettings]);
+  const bookSettings = useMemo(
+    () => resolvedSettings(settings, templateSettings),
+    [settings, templateSettings],
+  );
 
   if (!bookDataset || !bookDataset.periods.length) {
     return (
       <div className="cumulative-book-empty-card">
         <style>{css}</style>
-        No published report snapshots are available for this cumulative report book.
+        No published report snapshots are available for this cumulative report
+        book.
       </div>
     );
   }
 
-  const showFrontCover = includeCovers && bookSettings.showBookFrontCover !== false;
+  const showFrontCover =
+    includeCovers && bookSettings.showBookFrontCover !== false;
   const showProfile = bookSettings.showBookStudentProfilePage !== false;
   const showJourney = bookSettings.showBookAcademicJourneyPage !== false;
   const showSummary = bookSettings.showBookSummaryPage !== false;
-  const showBackCover = includeCovers && bookSettings.showBookBackCover !== false;
+  const showBackCover =
+    includeCovers && bookSettings.showBookBackCover !== false;
 
   return (
     <div className="cumulative-book-root">
@@ -146,10 +154,15 @@ export default function CumulativeReportBook({
       )}
 
       {bookDataset.periods.map((period, index) => (
-        <div key={String(period.id || period.academicPeriodId || index)} className="cumulative-book-report-card-page">
+        <div
+          key={String(period.id || period.academicPeriodId || index)}
+          className="cumulative-book-report-card-page"
+        >
           <div className="report-no-print cumulative-book-period-label">
             <strong>{periodName(period)}</strong>
-            <span>Period {index + 1} of {bookDataset.periods.length}</span>
+            <span>
+              Period {index + 1} of {bookDataset.periods.length}
+            </span>
           </div>
 
           <StudentReportCard
@@ -158,7 +171,11 @@ export default function CumulativeReportBook({
             settings={bookSettings as any}
             compact={compact}
             showWatermark={showWatermark}
-            pageBreakAfter={pageBreakAfter || index < bookDataset.periods.length - 1 || showBackCover}
+            pageBreakAfter={
+              pageBreakAfter ||
+              index < bookDataset.periods.length - 1 ||
+              showBackCover
+            }
             mobilePreview={mobilePreview}
           />
         </div>

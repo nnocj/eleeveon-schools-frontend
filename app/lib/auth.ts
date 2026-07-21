@@ -3,7 +3,7 @@
 // =========================
 import { db } from "./db/db";
 
-export async function loginStudent(studentId: number) {
+export async function loginStudent(studentId: string) {
   const student = await db.students.get(studentId);
   if (!student) throw new Error("Student not found");
 

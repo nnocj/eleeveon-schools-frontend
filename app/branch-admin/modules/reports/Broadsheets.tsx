@@ -128,40 +128,46 @@ import { useDataRevision } from "../../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
 type BroadsheetMode = ReportMode | "annual-broadsheet";
 
+type EntityId = string | number;
+
 type TenantRow = {
-  accountId?: string;
-  schoolId?: number;
-  branchId?: number;
+  accountId?: EntityId;
+  schoolId?: EntityId;
+  branchId?: EntityId;
   isDeleted?: boolean;
 };
 
 type SchoolRow = {
-  accountId?: string;
-  id?: number;
+  accountId?: EntityId;
+  id?: EntityId;
   isDeleted?: boolean;
 };
 
 type BranchRow = {
-  accountId?: string;
-  schoolId?: number;
-  id?: number;
+  accountId?: EntityId;
+  schoolId?: EntityId;
+  id?: EntityId;
   isDeleted?: boolean;
 };
 
-function firstExistingId<T extends { id?: number }>(rows: T[]) {
-  return rows.find((row) => typeof row.id === "number")?.id;
+function firstExistingId<T extends { id?: EntityId }>(rows: T[]): string | undefined {
+  const id = rows.map((row) => idOf(row.id)).find(Boolean);
+  return id || undefined;
 }
-
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 const BROADSHEET_PRINT_ZONE_ID = "broadsheet-print-zone";
 
-const BROADSHEET_MEDIA_OWNER_SCHOOLS = String((MediaOwners as any).SCHOOLS || "schools");
-const BROADSHEET_MEDIA_OWNER_BRANCHES = String((MediaOwners as any).BRANCHES || "branches");
+const BROADSHEET_MEDIA_OWNER_SCHOOLS = String(
+  (MediaOwners as any).SCHOOLS || "schools",
+);
+const BROADSHEET_MEDIA_OWNER_BRANCHES = String(
+  (MediaOwners as any).BRANCHES || "branches",
+);
 const BROADSHEET_MEDIA_OWNER_SETTINGS = String(
   (MediaOwners as any).SCHOOL_BRANCH_SETTINGS ||
     (MediaOwners as any).SCHOOL_BRANCHES_SETTINGS ||
-    "schoolBranchSettings"
+    "schoolBranchSettings",
 );
 
 const BROADSHEET_FIELD_LOGO = String((MediaFieldKeys as any).LOGO || "logo");
@@ -169,7 +175,9 @@ const BROADSHEET_FIELD_PHOTO = String((MediaFieldKeys as any).PHOTO || "photo");
 const BROADSHEET_FIELD_REPORT_BACKGROUND = "reportCardBackgroundImage";
 const BROADSHEET_FIELD_REPORT_WATERMARK = "reportCardWatermark";
 const BROADSHEET_FIELD_REPORT_SIGNATURE = "reportCardSignatureImage";
-const BROADSHEET_MEDIA_OWNER_STUDENTS = String((MediaOwners as any).STUDENTS || "students");
+const BROADSHEET_MEDIA_OWNER_STUDENTS = String(
+  (MediaOwners as any).STUDENTS || "students",
+);
 
 function hasOwn(row: any, key: string) {
   return !!row && Object.prototype.hasOwnProperty.call(row, key);
@@ -183,10 +191,15 @@ function safeRecordMediaValue(value?: string | null) {
   return media;
 }
 
-function fallbackMediaValue(row: any, stringField: string, mediaIdField?: string) {
+function fallbackMediaValue(
+  row: any,
+  stringField: string,
+  mediaIdField?: string,
+) {
   if (!row) return "";
 
-  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField])) return "";
+  if (mediaIdField && hasOwn(row, mediaIdField) && !idOf(row[mediaIdField]))
+    return "";
 
   return safeRecordMediaValue(row[stringField]);
 }
@@ -195,28 +208,44 @@ type OpenWorkspaceSession = {
   membership?: Record<string, any> | null;
   membershipId?: string | null;
   role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  teacherId?: string | null;
+  studentId?: string | null;
+  parentId?: string | null;
   memberName?: string | null;
   fullName?: string | null;
   userName?: string | null;
   openedAt?: number;
 };
 
-function idOf(value: unknown) {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+function idOf(value: unknown): string {
+  if (value === null || value === undefined) return "";
+
+  const normalized = String(value).trim();
+  if (
+    !normalized ||
+    normalized === "0" ||
+    normalized === "undefined" ||
+    normalized === "null"
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
+function cleanId(value: unknown): string {
+  return idOf(value);
 }
 
 function safeStorageRead(key: string) {
   if (typeof window === "undefined") return null;
 
   try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
+    return (
+      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+    );
   } catch {
     return null;
   }
@@ -241,13 +270,13 @@ function readStoredActiveMembership() {
   return safeJsonRead<Record<string, any>>("activeMembership");
 }
 
-function firstLocalId(...values: unknown[]) {
+function firstLocalId(...values: unknown[]): string {
   for (const value of values) {
-    const parsed = idOf(value);
-    if (parsed > 0) return parsed;
+    const id = idOf(value);
+    if (id) return id;
   }
 
-  return 0;
+  return "";
 }
 
 function selectedWorkspaceSchoolId(args: {
@@ -258,7 +287,11 @@ function selectedWorkspaceSchoolId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.schoolId,
@@ -267,7 +300,7 @@ function selectedWorkspaceSchoolId(args: {
     args.activeSchoolId,
     args.activeSchool?.id,
     args.settings?.schoolId,
-    safeStorageRead("activeSchoolId")
+    safeStorageRead("activeSchoolId"),
   );
 }
 
@@ -279,7 +312,11 @@ function selectedWorkspaceBranchId(args: {
   settings?: Record<string, any> | null;
 }) {
   const storedMembership = readStoredActiveMembership();
-  const membership = args.openWorkspace?.membership || args.activeMembership || storedMembership || null;
+  const membership =
+    args.openWorkspace?.membership ||
+    args.activeMembership ||
+    storedMembership ||
+    null;
 
   return firstLocalId(
     args.openWorkspace?.branchId,
@@ -289,17 +326,18 @@ function selectedWorkspaceBranchId(args: {
     args.activeBranchId,
     args.activeBranch?.id,
     args.settings?.branchId,
-    safeStorageRead("activeBranchId")
+    safeStorageRead("activeBranchId"),
   );
 }
 
-
-
-function labelOf<T extends { id?: number; name?: string }>(rows: T[], id?: number) {
-  if (!id) return "Not selected";
-  return rows.find((row) => row.id === id)?.name || "Not found";
+function labelOf<T extends { id?: EntityId; name?: string }>(
+  rows: T[],
+  id?: EntityId,
+) {
+  const selectedId = idOf(id);
+  if (!selectedId) return "Not selected";
+  return rows.find((row) => idOf(row.id) === selectedId)?.name || "Not found";
 }
-
 
 function broadsheetKindFromMode(mode: BroadsheetMode): BroadsheetKind {
   if (mode === "class-broadsheet") return "class";
@@ -307,7 +345,9 @@ function broadsheetKindFromMode(mode: BroadsheetMode): BroadsheetKind {
   return "subject";
 }
 
-function broadsheetReportTypeFromMode(mode: BroadsheetMode): BroadsheetReportType {
+function broadsheetReportTypeFromMode(
+  mode: BroadsheetMode,
+): BroadsheetReportType {
   if (mode === "class-broadsheet") return "class_broadsheet";
   if (mode === "annual-broadsheet") return "annual_broadsheet";
   return "subject_broadsheet";
@@ -315,20 +355,20 @@ function broadsheetReportTypeFromMode(mode: BroadsheetMode): BroadsheetReportTyp
 
 function templateCodeOf(row?: Record<string, any> | null) {
   return String(
-    row?.code ||
-      row?.templateCode ||
-      row?.layoutKey ||
-      row?.templateKey ||
-      "",
+    row?.code || row?.templateCode || row?.layoutKey || row?.templateKey || "",
   ).trim();
 }
 
-function sameOptionalId(value: unknown, expected: number) {
+function sameOptionalId(value: unknown, expected: unknown) {
   const parsed = idOf(value);
-  return !parsed || parsed === expected;
+  const expectedId = idOf(expected);
+  return !parsed || (!!expectedId && parsed === expectedId);
 }
 
-function withBranchHeader<T extends Record<string, any>>(header: T | undefined, branch?: Branch): T | undefined {
+function withBranchHeader<T extends Record<string, any>>(
+  header: T | undefined,
+  branch?: Branch,
+): T | undefined {
   if (!header) return header;
 
   const branchName =
@@ -398,11 +438,7 @@ export default function Broadsheets() {
 
   const router = useRouter();
 
-  const {
-    accountId,
-    loading: accountLoading,
-    authenticated,
-  } = useAccount();
+  const { accountId, loading: accountLoading, authenticated } = useAccount();
 
   const { settings, loading: settingsLoading } = useSettings();
 
@@ -439,20 +475,21 @@ export default function Broadsheets() {
    * The settings context may return appearance-only settings, so academic IDs
    * must be normalized before they are used in ReportFiltersState.
    */
-  const currentAcademicStructureId: number | undefined =
+  const currentAcademicStructureId: string | undefined =
     idOf(settings?.currentAcademicStructureId) || undefined;
 
-  const currentAcademicPeriodId: number | undefined =
+  const currentAcademicPeriodId: string | undefined =
     idOf(settings?.currentAcademicPeriodId) || undefined;
 
-  const { loading: pageLoading, setLoading: setPageLoading } = useBackgroundLoader();
+  const { loading: pageLoading, setLoading: setPageLoading } =
+    useBackgroundLoader();
   const [mode, setMode] = useState<BroadsheetMode>("subject-broadsheet");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const [filters, setFilters] = useState<ReportFiltersState>({
-    branchId: branchId || 0,
+    branchId: branchId || undefined,
     academicStructureId: currentAcademicStructureId,
     academicPeriodId: currentAcademicPeriodId,
     classId: undefined,
@@ -463,8 +500,12 @@ export default function Broadsheets() {
 
   const [schools, setSchools] = useState<School[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [schoolBranchSettings, setSchoolBranchSettings] = useState<SchoolBranchSetting[]>([]);
-  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [schoolBranchSettings, setSchoolBranchSettings] = useState<
+    SchoolBranchSetting[]
+  >([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
   const [academicPeriods, setAcademicPeriods] = useState<AcademicPeriod[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -473,23 +514,42 @@ export default function Broadsheets() {
   const [classes, setClasses] = useState<Class[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
-  const [studentEnrollments, setStudentEnrollments] = useState<StudentEnrollment[]>([]);
+  const [studentEnrollments, setStudentEnrollments] = useState<
+    StudentEnrollment[]
+  >([]);
   const [studentParents, setStudentParents] = useState<StudentParent[]>([]);
-  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<AssessmentApplicability[]>([]);
-  const [assessmentStructures, setAssessmentStructures] = useState<AssessmentStructure[]>([]);
-  const [assessmentStructureItems, setAssessmentStructureItems] = useState<AssessmentStructureItem[]>([]);
-  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>([]);
+  const [assessmentApplicabilities, setAssessmentApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
+  const [assessmentStructures, setAssessmentStructures] = useState<
+    AssessmentStructure[]
+  >([]);
+  const [assessmentStructureItems, setAssessmentStructureItems] = useState<
+    AssessmentStructureItem[]
+  >([]);
+  const [assessmentEntries, setAssessmentEntries] = useState<AssessmentEntry[]>(
+    [],
+  );
   const [gradingSystems, setGradingSystems] = useState<GradingSystem[]>([]);
   const [gradeRules, setGradeRules] = useState<GradeRule[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [computedResults, setComputedResults] = useState<ComputedResult[]>([]);
   const [reportCards, setReportCards] = useState<ReportCard[]>([]);
   const [reportCardItems, setReportCardItems] = useState<ReportCardItem[]>([]);
-  const [studentReportSnapshots, setStudentReportSnapshots] = useState<StudentReportSnapshot[]>([]);
-  const [studentPromotions, setStudentPromotions] = useState<StudentPromotion[]>([]);
-  const [reportCardTemplates, setReportCardTemplates] = useState<BroadsheetTemplateRecord[]>([]);
-  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<BroadsheetTemplateSettings[]>([]);
-  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] = useState<Record<string, any>[]>([]);
+  const [studentReportSnapshots, setStudentReportSnapshots] = useState<
+    StudentReportSnapshot[]
+  >([]);
+  const [studentPromotions, setStudentPromotions] = useState<
+    StudentPromotion[]
+  >([]);
+  const [reportCardTemplates, setReportCardTemplates] = useState<
+    BroadsheetTemplateRecord[]
+  >([]);
+  const [reportCardTemplateSettings, setReportCardTemplateSettings] = useState<
+    BroadsheetTemplateSettings[]
+  >([]);
+  const [reportCardTemplateAssignments, setReportCardTemplateAssignments] =
+    useState<Record<string, any>[]>([]);
   const [broadsheetMediaUrls, setBroadsheetMediaUrls] = useState<string[]>([]);
 
   useEffect(() => {
@@ -501,8 +561,15 @@ export default function Broadsheets() {
     }
 
     // Missing branch workspace is handled locally so the selected-role flow is not broken.
-  }, [accountLoading, contextLoading, authenticated, accountId, schoolId, branchId, router]);
-
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -546,32 +613,34 @@ export default function Broadsheets() {
 
   const resolveBroadsheetMediaUrl = async ({
     ownerTable,
-    ownerLocalId,
-    ownerCloudId,
+    ownerId,
     fieldKey,
     fallbackMediaId,
     nextUrls,
   }: {
     ownerTable: string;
-    ownerLocalId?: number | string | null;
-    ownerCloudId?: string | null;
+    ownerId?: string | null;
     fieldKey: string;
-    fallbackMediaId?: number | string | null;
+    fallbackMediaId?: EntityId | null;
     nextUrls: string[];
   }) => {
-    const localId = idOf(ownerLocalId);
+    const ownerIdValue = cleanId(ownerId);
 
-    if (localId) {
+    if (ownerIdValue) {
       const ownedAsset = await getOwnerFieldMediaAsset({
         accountId: accountId || undefined,
         ownerTable,
-        ownerLocalId: localId,
-        ownerCloudId: ownerCloudId || undefined,
+        ownerId: ownerIdValue,
+
         fieldKey,
       });
 
-      if (ownedAsset?.id && !(ownedAsset as any).isDeleted && (ownedAsset as any).active !== false) {
-        const url = await getMediaObjectUrl(Number(ownedAsset.id));
+      if (
+        ownedAsset?.id &&
+        !(ownedAsset as any).isDeleted &&
+        (ownedAsset as any).active !== false
+      ) {
+        const url = await getMediaObjectUrl(String(ownedAsset.id));
         if (url) {
           nextUrls.push(url);
           return url;
@@ -590,7 +659,8 @@ export default function Broadsheets() {
       (!accountId || fallbackAsset.accountId === accountId) &&
       fallbackAsset.ownerTable === ownerTable &&
       fallbackAsset.fieldKey === fieldKey &&
-      (!localId || String(fallbackAsset.ownerLocalId || "") === String(localId));
+      (!ownerIdValue ||
+        String(fallbackAsset.ownerId || "") === String(ownerIdValue));
 
     if (!belongsToOwner) return "";
 
@@ -672,25 +742,26 @@ export default function Broadsheets() {
       ]);
 
       const sameSchool = (row: SchoolRow) =>
-        row.accountId === accountId &&
-        row.id === schoolId &&
-        !row.isDeleted;
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.id) === schoolId && !row.isDeleted;
 
       const sameBranch = (row: BranchRow) =>
-        row.accountId === accountId &&
-        row.schoolId === schoolId &&
-        row.id === branchId &&
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.schoolId) === schoolId &&
+        idOf(row.id) === branchId &&
         !row.isDeleted;
 
       const sameTenant = (row: TenantRow) =>
-        row.accountId === accountId &&
-        row.schoolId === schoolId &&
-        row.branchId === branchId &&
+        idOf(row.accountId) === idOf(accountId) &&
+        idOf(row.schoolId) === schoolId &&
+        idOf(row.branchId) === branchId &&
         !row.isDeleted;
 
       const currentSchool =
         schoolRows.find(sameSchool) ||
-        (activeSchool?.accountId === accountId && activeSchool?.id === schoolId ? activeSchool : undefined);
+        (activeSchool?.accountId === accountId && activeSchool?.id === schoolId
+          ? activeSchool
+          : undefined);
 
       const currentBranch =
         branchRows.find(sameBranch) ||
@@ -711,8 +782,8 @@ export default function Broadsheets() {
             logo:
               (await resolveBroadsheetMediaUrl({
                 ownerTable: BROADSHEET_MEDIA_OWNER_SCHOOLS,
-                ownerLocalId: currentSchool.id,
-                ownerCloudId: (currentSchool as any).cloudId,
+                ownerId: currentSchool.id,
+
                 fieldKey: BROADSHEET_FIELD_LOGO,
                 fallbackMediaId: (currentSchool as any).logoMediaId,
                 nextUrls: nextMediaUrls,
@@ -726,8 +797,8 @@ export default function Broadsheets() {
             logo:
               (await resolveBroadsheetMediaUrl({
                 ownerTable: BROADSHEET_MEDIA_OWNER_BRANCHES,
-                ownerLocalId: currentBranch.id,
-                ownerCloudId: (currentBranch as any).cloudId,
+                ownerId: currentBranch.id,
+
                 fieldKey: BROADSHEET_FIELD_LOGO,
                 fallbackMediaId: (currentBranch as any).logoMediaId,
                 nextUrls: nextMediaUrls,
@@ -741,8 +812,8 @@ export default function Broadsheets() {
           logo:
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: BROADSHEET_FIELD_LOGO,
               fallbackMediaId: row.logoMediaId,
               nextUrls: nextMediaUrls,
@@ -750,8 +821,8 @@ export default function Broadsheets() {
           reportCardBackgroundImage:
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: BROADSHEET_FIELD_REPORT_BACKGROUND,
               fallbackMediaId: row.reportCardBackgroundImageMediaId,
               nextUrls: nextMediaUrls,
@@ -764,8 +835,8 @@ export default function Broadsheets() {
           reportCardWatermark:
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: BROADSHEET_FIELD_REPORT_WATERMARK,
               fallbackMediaId: row.reportCardWatermarkMediaId,
               nextUrls: nextMediaUrls,
@@ -778,8 +849,8 @@ export default function Broadsheets() {
           reportCardSignatureImage:
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_SETTINGS,
-              ownerLocalId: row.id,
-              ownerCloudId: row.cloudId,
+              ownerId: row.id,
+
               fieldKey: BROADSHEET_FIELD_REPORT_SIGNATURE,
               fallbackMediaId: row.reportCardSignatureImageMediaId,
               nextUrls: nextMediaUrls,
@@ -797,8 +868,8 @@ export default function Broadsheets() {
           const photo =
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_STUDENTS,
-              ownerLocalId: student.id,
-              ownerCloudId: student.cloudId,
+              ownerId: student.id,
+
               fieldKey: BROADSHEET_FIELD_PHOTO,
               fallbackMediaId: student.photoMediaId,
               nextUrls: nextMediaUrls,
@@ -813,8 +884,12 @@ export default function Broadsheets() {
         }),
       );
 
-      const branchPeriodIds = new Set(scopedAcademicPeriods.map((row) => row.id).filter(Boolean) as number[]);
-      const branchReportCardIds = new Set(scopedReportCards.map((row) => row.id).filter(Boolean) as number[]);
+      const branchPeriodIds = new Set<string>(
+        scopedAcademicPeriods.map((row) => idOf(row.id)).filter(Boolean),
+      );
+      const branchReportCardIds = new Set<string>(
+        scopedReportCards.map((row) => idOf(row.id)).filter(Boolean),
+      );
 
       broadsheetMediaUrls.forEach((url) => {
         if (!nextMediaUrls.includes(url)) revokeMediaObjectUrl(url);
@@ -829,18 +904,40 @@ export default function Broadsheets() {
       setStudents(scopedStudentsWithMedia as Student[]);
       setParents(parentRows.filter(sameTenant));
       setTeachers(teacherRows.filter(sameTenant));
-      setClasses(classRows.filter((row) => sameTenant(row) && row.active !== false));
-      setSubjects(subjectRows.filter((row) => sameTenant(row) && row.active !== false));
-      setClassSubjects(classSubjectRows.filter((row) => sameTenant(row) && row.active !== false));
+      setClasses(
+        classRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setSubjects(
+        subjectRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setClassSubjects(
+        classSubjectRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
       setStudentParents(studentParentRows.filter(sameTenant));
       setStudentEnrollments(enrollmentRows.filter(sameTenant));
       setClassTeachers(classTeacherRows.filter(sameTenant));
-      setAssessmentApplicabilities(applicabilityRows.filter((row) => sameTenant(row) && row.active !== false));
-      setAssessmentStructures(structureRows.filter((row) => sameTenant(row) && row.active !== false));
-      setAssessmentStructureItems(structureItemRows.filter((row) => sameTenant(row) && row.active !== false));
+      setAssessmentApplicabilities(
+        applicabilityRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
+      setAssessmentStructures(
+        structureRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setAssessmentStructureItems(
+        structureItemRows.filter(
+          (row) => sameTenant(row) && row.active !== false,
+        ),
+      );
       setAssessmentEntries(entryRows.filter(sameTenant));
-      setGradingSystems(gradingRows.filter((row) => sameTenant(row) && row.active !== false));
-      setGradeRules(ruleRows.filter((row) => sameTenant(row) && row.active !== false));
+      setGradingSystems(
+        gradingRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
+      setGradeRules(
+        ruleRows.filter((row) => sameTenant(row) && row.active !== false),
+      );
       setAttendance(attendanceRows.filter(sameTenant));
       setComputedResults(computedRows.filter(sameTenant));
       setReportCards(scopedReportCards);
@@ -848,10 +945,18 @@ export default function Broadsheets() {
       setReportCardItems(
         reportCardItemRows.filter((row) => {
           if (!sameTenant(row)) return false;
-          if (row.reportCardId && !branchReportCardIds.has(row.reportCardId)) return false;
-          if (row.academicPeriodId && !branchPeriodIds.has(row.academicPeriodId)) return false;
+          if (
+            row.reportCardId &&
+            !branchReportCardIds.has(idOf(row.reportCardId))
+          )
+            return false;
+          if (
+            row.academicPeriodId &&
+            !branchPeriodIds.has(idOf(row.academicPeriodId))
+          )
+            return false;
           return true;
-        })
+        }),
       );
 
       setStudentReportSnapshots(
@@ -861,7 +966,7 @@ export default function Broadsheets() {
           if (row.schoolId !== schoolId) return false;
           if (row.branchId !== branchId) return false;
           return true;
-        })
+        }),
       );
 
       setStudentPromotions(
@@ -871,21 +976,31 @@ export default function Broadsheets() {
           if (row.schoolId && row.schoolId !== schoolId) return false;
           if (row.branchId && row.branchId !== branchId) return false;
           return true;
-        })
+        }),
       );
 
       setReportCardTemplates(
-        (reportCardTemplateRows as BroadsheetTemplateRecord[]).filter((row: any) => {
-          if (row.isDeleted || row.active === false) return false;
-          if (row.accountId && row.accountId !== accountId) return false;
-          if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-          if (row.branchId && Number(row.branchId) !== branchId) return false;
-          return [
-            "subject_broadsheet",
-            "class_broadsheet",
-            "annual_broadsheet",
-          ].includes(String(row.reportType || ""));
-        }),
+        (reportCardTemplateRows as BroadsheetTemplateRecord[]).filter(
+          (row: any) => {
+            if (row.isDeleted || row.active === false) return false;
+            if (row.accountId && row.accountId !== accountId) return false;
+            if (
+              row.schoolId &&
+              String(row.schoolId ?? "") !== String(schoolId ?? "")
+            )
+              return false;
+            if (
+              row.branchId &&
+              String(row.branchId ?? "") !== String(branchId ?? "")
+            )
+              return false;
+            return [
+              "subject_broadsheet",
+              "class_broadsheet",
+              "annual_broadsheet",
+            ].includes(String(row.reportType || ""));
+          },
+        ),
       );
 
       setReportCardTemplateSettings(
@@ -893,8 +1008,16 @@ export default function Broadsheets() {
           (row: any) => {
             if (row.isDeleted || row.active === false) return false;
             if (row.accountId && row.accountId !== accountId) return false;
-            if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-            if (row.branchId && Number(row.branchId) !== branchId) return false;
+            if (
+              row.schoolId &&
+              String(row.schoolId ?? "") !== String(schoolId ?? "")
+            )
+              return false;
+            if (
+              row.branchId &&
+              String(row.branchId ?? "") !== String(branchId ?? "")
+            )
+              return false;
             return [
               "subject_broadsheet",
               "class_broadsheet",
@@ -909,8 +1032,16 @@ export default function Broadsheets() {
           (row: any) => {
             if (row.isDeleted || row.active === false) return false;
             if (row.accountId && row.accountId !== accountId) return false;
-            if (row.schoolId && Number(row.schoolId) !== schoolId) return false;
-            if (row.branchId && Number(row.branchId) !== branchId) return false;
+            if (
+              row.schoolId &&
+              String(row.schoolId ?? "") !== String(schoolId ?? "")
+            )
+              return false;
+            if (
+              row.branchId &&
+              String(row.branchId ?? "") !== String(branchId ?? "")
+            )
+              return false;
             return [
               "subject_broadsheet",
               "class_broadsheet",
@@ -930,13 +1061,11 @@ export default function Broadsheets() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId,
-    dataRevision,
-  ]);
+  }, [authenticated, accountId, schoolId, branchId, dataRevision]);
 
   useEffect(() => {
     setFilters((prev) => {
-      const nextBranchId = branchId || 0;
+      const nextBranchId = branchId || undefined;
       const branchChanged = prev.branchId !== nextBranchId;
 
       return {
@@ -957,51 +1086,99 @@ export default function Broadsheets() {
 
   useEffect(() => {
     if (!filters.academicStructureId) {
-      const fallbackId = currentAcademicStructureId || firstExistingId(academicStructures);
-      if (fallbackId) setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
+      const fallbackId =
+        currentAcademicStructureId || firstExistingId(academicStructures);
+      if (fallbackId)
+        setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
     }
-  }, [filters.academicStructureId, currentAcademicStructureId, academicStructures]);
+  }, [
+    filters.academicStructureId,
+    currentAcademicStructureId,
+    academicStructures,
+  ]);
 
   useEffect(() => {
     if (!filters.academicPeriodId) {
-      const fallbackId = currentAcademicPeriodId || firstExistingId(academicPeriods);
-      if (fallbackId) setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
+      const fallbackId =
+        currentAcademicPeriodId || firstExistingId(academicPeriods);
+      if (fallbackId)
+        setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
     }
   }, [filters.academicPeriodId, currentAcademicPeriodId, academicPeriods]);
 
   const lockedBranches = useMemo(() => {
-    return activeBranch && activeBranch.id === branchId ? [activeBranch] : branches;
+    return activeBranch && activeBranch.id === branchId
+      ? [activeBranch]
+      : branches;
   }, [activeBranch, branchId, branches]);
 
   const filteredClasses = useMemo(() => {
-    const allowedClassIds = new Set<number>();
+    const allowedClassIds = new Set<string>();
 
     studentEnrollments.forEach((row) => {
       if (row.status !== "active") return;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
-      if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
-      allowedClassIds.add(row.classId);
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return;
+      allowedClassIds.add(idOf(row.classId));
     });
 
     classSubjects.forEach((row) => {
       if (row.active === false) return;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return;
-      if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return;
-      allowedClassIds.add(row.classId);
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return;
+      allowedClassIds.add(idOf(row.classId));
     });
 
-    if (!filters.academicStructureId && !filters.academicPeriodId) return classes;
-    return classes.filter((row) => row.id && allowedClassIds.has(row.id));
-  }, [classes, studentEnrollments, classSubjects, filters.academicStructureId, filters.academicPeriodId]);
+    if (!filters.academicStructureId && !filters.academicPeriodId)
+      return classes;
+    return classes.filter((row) => !!idOf(row.id) && allowedClassIds.has(idOf(row.id)));
+  }, [
+    classes,
+    studentEnrollments,
+    classSubjects,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const filteredClassSubjects = useMemo(() => {
     return classSubjects.filter((row) => {
       if (filters.classId && row.classId !== filters.classId) return false;
-      if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
-      if (filters.academicPeriodId && row.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
+      if (
+        filters.academicStructureId &&
+        row.academicStructureId !== filters.academicStructureId
+      )
+        return false;
+      if (
+        filters.academicPeriodId &&
+        row.academicPeriodId &&
+        row.academicPeriodId !== filters.academicPeriodId
+      )
+        return false;
       return true;
     });
-  }, [classSubjects, filters.classId, filters.academicStructureId, filters.academicPeriodId]);
+  }, [
+    classSubjects,
+    filters.classId,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const filteredStudents = useMemo(() => {
     if (!filters.classId && !filters.academicPeriodId) return students;
@@ -1011,15 +1188,30 @@ export default function Broadsheets() {
         .filter((row) => {
           if (row.status !== "active") return false;
           if (filters.classId && row.classId !== filters.classId) return false;
-          if (filters.academicStructureId && row.academicStructureId !== filters.academicStructureId) return false;
-          if (filters.academicPeriodId && row.academicPeriodId !== filters.academicPeriodId) return false;
+          if (
+            filters.academicStructureId &&
+            row.academicStructureId !== filters.academicStructureId
+          )
+            return false;
+          if (
+            filters.academicPeriodId &&
+            row.academicPeriodId !== filters.academicPeriodId
+          )
+            return false;
           return true;
         })
-        .map((row) => row.studentId)
+        .map((row) => idOf(row.studentId))
+        .filter(Boolean),
     );
 
-    return students.filter((row) => row.id && allowedStudentIds.has(row.id));
-  }, [students, studentEnrollments, filters.classId, filters.academicStructureId, filters.academicPeriodId]);
+    return students.filter((row) => !!idOf(row.id) && allowedStudentIds.has(idOf(row.id)));
+  }, [
+    students,
+    studentEnrollments,
+    filters.classId,
+    filters.academicStructureId,
+    filters.academicPeriodId,
+  ]);
 
   const dataset: ReportEngineDataset = useMemo(
     () => ({
@@ -1073,10 +1265,13 @@ export default function Broadsheets() {
       computedResults,
       reportCards,
       reportCardItems,
-    ]
+    ],
   );
 
-  const output = useMemo(() => buildReportEngineOutput(dataset, filters), [dataset, filters]);
+  const output = useMemo(
+    () => buildReportEngineOutput(dataset, filters),
+    [dataset, filters],
+  );
 
   const cumulativeDataset: CumulativeReportEngineDataset = useMemo(
     () => ({
@@ -1108,7 +1303,7 @@ export default function Broadsheets() {
       subjects,
       studentReportSnapshots,
       studentPromotions,
-    ]
+    ],
   );
 
   const cumulativeOutput = useMemo(() => {
@@ -1134,7 +1329,12 @@ export default function Broadsheets() {
     } as any);
   }, [cumulativeDataset, filters]);
 
-  const hasCoreSetup = Boolean(academicStructures.length && academicPeriods.length && classes.length && students.length);
+  const hasCoreSetup = Boolean(
+    academicStructures.length &&
+      academicPeriods.length &&
+      classes.length &&
+      students.length,
+  );
 
   const reportBranch = useMemo(() => {
     return (
@@ -1151,42 +1351,65 @@ export default function Broadsheets() {
   }, [output.header, reportBranch]);
 
   const annualBroadsheetHeader = useMemo(() => {
-    return withBranchHeader(cumulativeOutput.header as any, reportBranch) as any;
+    return withBranchHeader(
+      cumulativeOutput.header as any,
+      reportBranch,
+    ) as any;
   }, [cumulativeOutput.header, reportBranch]);
 
   const activeContextName = `${activeSchool?.name || schools[0]?.name || "Selected School"} · ${
-    reportBranch?.name || activeBranch?.name || branches[0]?.name || "Assigned Branch"
+    reportBranch?.name ||
+    activeBranch?.name ||
+    branches[0]?.name ||
+    "Assigned Branch"
   }`;
 
   const selectedClassName = labelOf(classes, filters.classId);
   const selectedPeriodName = labelOf(academicPeriods, filters.academicPeriodId);
-  const selectedStructureName = labelOf(academicStructures, filters.academicStructureId);
+  const selectedStructureName = labelOf(
+    academicStructures,
+    filters.academicStructureId,
+  );
 
   const searchTerm = search.trim().toLowerCase();
 
   const visibleClasses = useMemo(() => {
     if (!searchTerm) return filteredClasses;
 
-    return filteredClasses.filter((item: any) => `${item.name || ""} ${item.code || ""}`.toLowerCase().includes(searchTerm));
+    return filteredClasses.filter((item: any) =>
+      `${item.name || ""} ${item.code || ""}`
+        .toLowerCase()
+        .includes(searchTerm),
+    );
   }, [filteredClasses, searchTerm]);
 
   const visibleClassSubjects = useMemo(() => {
     if (!searchTerm) return filteredClassSubjects;
 
     return filteredClassSubjects.filter((item: any) => {
-      const subject = subjects.find((row) => row.id === (item as any).subjectId) as any;
-      const klass = classes.find((row) => row.id === (item as any).classId) as any;
-      return `${klass?.name || ""} ${subject?.name || ""} ${(item as any).name || ""}`.toLowerCase().includes(searchTerm);
+      const subject = subjects.find(
+        (row) => row.id === (item as any).subjectId,
+      ) as any;
+      const klass = classes.find(
+        (row) => row.id === (item as any).classId,
+      ) as any;
+      return `${klass?.name || ""} ${subject?.name || ""} ${(item as any).name || ""}`
+        .toLowerCase()
+        .includes(searchTerm);
     });
   }, [classes, filteredClassSubjects, searchTerm, subjects]);
 
   const selectedClassSubjectName = useMemo(() => {
     if (!filters.classSubjectId) return "Not selected";
 
-    const classSubject = classSubjects.find((row) => row.id === filters.classSubjectId) as any;
+    const classSubject = classSubjects.find(
+      (row) => row.id === filters.classSubjectId,
+    ) as any;
     if (!classSubject) return "Not found";
 
-    const subject = subjects.find((row) => row.id === classSubject.subjectId) as any;
+    const subject = subjects.find(
+      (row) => row.id === classSubject.subjectId,
+    ) as any;
     const klass = classes.find((row) => row.id === classSubject.classId) as any;
 
     return `${klass?.name || "Class"} · ${subject?.name || classSubject.name || "Subject"}`;
@@ -1198,10 +1421,19 @@ export default function Broadsheets() {
       filters.academicPeriodId,
       filters.classId,
       filters.classSubjectId,
-      filters.sortMode && filters.sortMode !== "position" ? filters.sortMode : undefined,
+      filters.sortMode && filters.sortMode !== "position"
+        ? filters.sortMode
+        : undefined,
       mode !== "subject-broadsheet" ? mode : undefined,
     ].filter(Boolean).length;
-  }, [filters.academicStructureId, filters.academicPeriodId, filters.classId, filters.classSubjectId, filters.sortMode, mode]);
+  }, [
+    filters.academicStructureId,
+    filters.academicPeriodId,
+    filters.classId,
+    filters.classSubjectId,
+    filters.sortMode,
+    mode,
+  ]);
 
   const canPrint =
     hasCoreSetup &&
@@ -1223,16 +1455,8 @@ export default function Broadsheets() {
         (!row.scopeType || row.scopeType === "branch"),
     );
 
-    return (
-      rows.find((row: any) => row.isDefault === true) ||
-      rows[0] ||
-      null
-    );
-  }, [
-    activeBroadsheetReportType,
-    branchId,
-    reportCardTemplateAssignments,
-  ]);
+    return rows.find((row: any) => row.isDefault === true) || rows[0] || null;
+  }, [activeBroadsheetReportType, branchId, reportCardTemplateAssignments]);
 
   const activeBroadsheetTemplate = useMemo(() => {
     const assignedTemplateId = idOf(activeBroadsheetAssignment?.templateId);
@@ -1247,12 +1471,11 @@ export default function Broadsheets() {
     return (
       scopedTemplates.find(
         (row: any) =>
-          assignedTemplateId > 0 && idOf(row.id) === assignedTemplateId,
+          Boolean(assignedTemplateId) && idOf(row.id) === assignedTemplateId,
       ) ||
       scopedTemplates.find(
         (row: any) =>
-          assignedTemplateCode &&
-          templateCodeOf(row) === assignedTemplateCode,
+          assignedTemplateCode && templateCodeOf(row) === assignedTemplateCode,
       ) ||
       scopedTemplates.find((row: any) => row.isDefault === true) ||
       scopedTemplates[0] ||
@@ -1280,16 +1503,15 @@ export default function Broadsheets() {
     return (
       scopedSettings.find(
         (row: any) =>
-          assignedSettingsId > 0 && idOf(row.id) === assignedSettingsId,
+          Boolean(assignedSettingsId) && idOf(row.id) === assignedSettingsId,
       ) ||
       scopedSettings.find(
         (row: any) =>
-          templateId > 0 && idOf(row.templateId) === templateId,
+          Boolean(templateId) && idOf(row.templateId) === templateId,
       ) ||
       scopedSettings.find(
         (row: any) =>
-          templateCode &&
-          templateCodeOf(row as any) === templateCode,
+          templateCode && templateCodeOf(row as any) === templateCode,
       ) ||
       scopedSettings[0] ||
       null
@@ -1316,7 +1538,7 @@ export default function Broadsheets() {
   );
 
   const studentPhotoById = useMemo(() => {
-    const map = new Map<number, string>();
+    const map = new Map<string, string>();
 
     students.forEach((student: any) => {
       const studentId = idOf(student.id);
@@ -1360,21 +1582,21 @@ export default function Broadsheets() {
   }
 
   const triggerBroadsheetPrint = () => {
-  if (!canPrint) return;
+    if (!canPrint) return;
 
-  printReportTarget({
-    targetId: BROADSHEET_PRINT_ZONE_ID,
-    mode: "current-view",
-    orientation: "landscape",
-    pageSize: "A4",
-    title:
-      mode === "annual-broadsheet"
-        ? "Annual Broadsheet"
-        : mode === "class-broadsheet"
-          ? "Class Broadsheet"
-          : "Subject Broadsheet",
-  });
-};
+    printReportTarget({
+      targetId: BROADSHEET_PRINT_ZONE_ID,
+      mode: "current-view",
+      orientation: "landscape",
+      pageSize: "A4",
+      title:
+        mode === "annual-broadsheet"
+          ? "Annual Broadsheet"
+          : mode === "class-broadsheet"
+            ? "Class Broadsheet"
+            : "Subject Broadsheet",
+    });
+  };
 
   const renderActiveReport = () => {
     if (!hasCoreSetup) {
@@ -1423,9 +1645,7 @@ export default function Broadsheets() {
       <ClassBroadsheet
         {...sharedProps}
         header={broadsheetHeader}
-        broadsheet={withResolvedStudentPhotos(
-          output.classBroadsheet as any,
-        )}
+        broadsheet={withResolvedStudentPhotos(output.classBroadsheet as any)}
       />
     );
   };
@@ -1441,17 +1661,33 @@ export default function Broadsheets() {
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before opening broadsheets." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before opening broadsheets."
+      />
+    );
   }
 
   if (!schoolId || !branchId) {
     return (
-      <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+      <main
+        className="ba-page"
+        style={{ "--ba-primary": primary } as React.CSSProperties}
+      >
         <style>{css}</style>
         <section className="ba-state">
           <h2>Branch workspace required</h2>
-          <p>Broadsheets are generated inside the selected branch-admin workspace. Use Select Role again if the wrong branch is active.</p>
-          <button type="button" className="ba-state-button" onClick={() => router.push("/select-role")}>
+          <p>
+            Broadsheets are generated inside the selected branch-admin
+            workspace. Use Select Role again if the wrong branch is active.
+          </p>
+          <button
+            type="button"
+            className="ba-state-button"
+            onClick={() => router.push("/select-role")}
+          >
             Go to Select Role
           </button>
         </section>
@@ -1460,10 +1696,16 @@ export default function Broadsheets() {
   }
 
   return (
-    <main className="ba-page student-reports-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page student-reports-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
-      <section className="ba-search-card report-no-print" aria-label="Broadsheet search and actions">
+      <section
+        className="ba-search-card report-no-print"
+        aria-label="Broadsheet search and actions"
+      >
         <label className="ba-search">
           <span>⌕</span>
           <input
@@ -1496,16 +1738,28 @@ export default function Broadsheets() {
           {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+        >
           ⋯
         </button>
       </section>
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips report-no-print" aria-label="Active broadsheet filters">
+        <section
+          className="ba-filter-chips report-no-print"
+          aria-label="Active broadsheet filters"
+        >
           {mode !== "subject-broadsheet" && (
             <button type="button" onClick={() => setMode("subject-broadsheet")}>
-              Mode: {mode === "annual-broadsheet" ? "Annual Broadsheet" : "Class Broadsheet"} ×
+              Mode:{" "}
+              {mode === "annual-broadsheet"
+                ? "Annual Broadsheet"
+                : "Class Broadsheet"}{" "}
+              ×
             </button>
           )}
           {filters.academicStructureId && (
@@ -1544,7 +1798,13 @@ export default function Broadsheets() {
           {filters.classId && (
             <button
               type="button"
-              onClick={() => setFilters((prev) => ({ ...prev, classId: undefined, classSubjectId: undefined }))}
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  classId: undefined,
+                  classSubjectId: undefined,
+                }))
+              }
             >
               Class: {selectedClassName} ×
             </button>
@@ -1552,7 +1812,9 @@ export default function Broadsheets() {
           {filters.classSubjectId && (
             <button
               type="button"
-              onClick={() => setFilters((prev) => ({ ...prev, classSubjectId: undefined }))}
+              onClick={() =>
+                setFilters((prev) => ({ ...prev, classSubjectId: undefined }))
+              }
             >
               Subject: {selectedClassSubjectName} ×
             </button>
@@ -1563,7 +1825,13 @@ export default function Broadsheets() {
       <section className="ba-print-card">
         <div className="ba-print-head report-no-print">
           <div>
-            <strong>{mode === "annual-broadsheet" ? "Annual Broadsheet" : mode === "class-broadsheet" ? "Class Broadsheet" : "Subject Broadsheet"}</strong>
+            <strong>
+              {mode === "annual-broadsheet"
+                ? "Annual Broadsheet"
+                : mode === "class-broadsheet"
+                  ? "Class Broadsheet"
+                  : "Subject Broadsheet"}
+            </strong>
             <p>
               {selectedStructureName} · {selectedPeriodName} ·{" "}
               {(activeBroadsheetTemplate as any)?.name || "Classic Broadsheet"}
@@ -1624,9 +1892,20 @@ export default function Broadsheets() {
   );
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -1637,7 +1916,15 @@ function State({ primary, title, text }: { primary: string; title: string; text:
   );
 }
 
-function Empty({ icon, title, text }: { icon: string; title: string; text: string }) {
+function Empty({
+  icon,
+  title,
+  text,
+}: {
+  icon: string;
+  title: string;
+  text: string;
+}) {
   return (
     <section className="ba-empty">
       <div className="ba-empty-icon">{icon}</div>
@@ -1686,12 +1973,19 @@ function FilterSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Choose the broadsheet scope. Branch stays locked to the assigned branch.</p>
+            <p>
+              Choose the broadsheet scope. Branch stays locked to the assigned
+              branch.
+            </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
@@ -1701,7 +1995,12 @@ function FilterSheet({
         <div className="ba-form compact">
           <label>
             <span>Broadsheet Mode</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value as BroadsheetMode)}>
+            <select
+              value={mode}
+              onChange={(event) =>
+                setMode(event.target.value as BroadsheetMode)
+              }
+            >
               <option value="subject-broadsheet">Subject Broadsheet</option>
               <option value="class-broadsheet">Class Broadsheet</option>
               <option value="annual-broadsheet">Annual Broadsheet</option>
@@ -1715,7 +2014,8 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  academicStructureId: Number(event.target.value) || undefined,
+                  academicStructureId:
+                    cleanId(event.target.value) || undefined,
                   academicPeriodId: undefined,
                   classId: undefined,
                   classSubjectId: undefined,
@@ -1725,7 +2025,9 @@ function FilterSheet({
             >
               <option value="">Select structure</option>
               {academicStructures.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1737,7 +2039,8 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  academicPeriodId: Number(event.target.value) || undefined,
+                  academicPeriodId:
+                    cleanId(event.target.value) || undefined,
                   classId: undefined,
                   classSubjectId: undefined,
                   studentId: undefined,
@@ -1746,7 +2049,9 @@ function FilterSheet({
             >
               <option value="">Select period</option>
               {academicPeriods.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1758,14 +2063,17 @@ function FilterSheet({
               onChange={(event) =>
                 setFilters((prev) => ({
                   ...prev,
-                  classId: Number(event.target.value) || undefined,
+                  classId:
+                    cleanId(event.target.value) || undefined,
                   classSubjectId: undefined,
                 }))
               }
             >
               <option value="">Select class</option>
               {filteredClasses.map((item: any) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
               ))}
             </select>
           </label>
@@ -1775,15 +2083,23 @@ function FilterSheet({
               <span>Class Subject</span>
               <select
                 value={filters.classSubjectId || ""}
-                onChange={(event) => setFilters((prev) => ({ ...prev, classSubjectId: Number(event.target.value) || undefined }))}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    classSubjectId: cleanId(event.target.value) || undefined,
+                  }))
+                }
               >
                 <option value="">Select class subject</option>
                 {filteredClassSubjects.map((item: any) => {
-                  const subject = subjects.find((row) => row.id === item.subjectId);
+                  const subject = subjects.find(
+                    (row) => row.id === item.subjectId,
+                  );
                   const klass = classes.find((row) => row.id === item.classId);
                   return (
                     <option key={item.id} value={item.id}>
-                      {klass?.name || "Class"} · {subject?.name || item.name || "Subject"}
+                      {klass?.name || "Class"} ·{" "}
+                      {subject?.name || item.name || "Subject"}
                     </option>
                   );
                 })}
@@ -1795,7 +2111,12 @@ function FilterSheet({
             <span>Sort Mode</span>
             <select
               value={filters.sortMode || "position"}
-              onChange={(event) => setFilters((prev) => ({ ...prev, sortMode: event.target.value as any }))}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  sortMode: event.target.value as any,
+                }))
+              }
             >
               <option value="position">Position</option>
               <option value="name">Name</option>
@@ -1843,14 +2164,38 @@ function MoreSheet({
   onPrint: () => void;
   onClose: () => void;
 }) {
-  const options: { mode: BroadsheetMode; icon: string; label: string; note: string }[] = [
-    { mode: "subject-broadsheet", icon: "☷", label: "Subject Broadsheet", note: "One subject across a class" },
-    { mode: "class-broadsheet", icon: "▦", label: "Class Broadsheet", note: "All subjects for one class" },
-    { mode: "annual-broadsheet", icon: "📊", label: "Annual Broadsheet", note: "Cumulative annual class view" },
+  const options: {
+    mode: BroadsheetMode;
+    icon: string;
+    label: string;
+    note: string;
+  }[] = [
+    {
+      mode: "subject-broadsheet",
+      icon: "☷",
+      label: "Subject Broadsheet",
+      note: "One subject across a class",
+    },
+    {
+      mode: "class-broadsheet",
+      icon: "▦",
+      label: "Class Broadsheet",
+      note: "All subjects for one class",
+    },
+    {
+      mode: "annual-broadsheet",
+      icon: "📊",
+      label: "Annual Broadsheet",
+      note: "Cumulative annual class view",
+    },
   ];
 
   return (
-    <div className="ba-sheet-backdrop report-no-print" role="dialog" aria-modal="true">
+    <div
+      className="ba-sheet-backdrop report-no-print"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
@@ -1864,7 +2209,12 @@ function MoreSheet({
 
         <div className="ba-menu-list">
           {options.map((option) => (
-            <button key={option.mode} type="button" className={mode === option.mode ? "active" : ""} onClick={() => setMode(option.mode)}>
+            <button
+              key={option.mode}
+              type="button"
+              className={mode === option.mode ? "active" : ""}
+              onClick={() => setMode(option.mode)}
+            >
               <span>{option.icon}</span>
               <b>{option.label}</b>
               <small>{option.note}</small>

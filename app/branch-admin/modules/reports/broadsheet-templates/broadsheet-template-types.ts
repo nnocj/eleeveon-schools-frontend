@@ -50,11 +50,7 @@ export type BroadsheetLayoutKey = BroadsheetTemplateCode;
 
 export type BroadsheetPaperSize = "A4" | "Letter" | string;
 export type BroadsheetOrientation = "portrait" | "landscape";
-export type BroadsheetDensity =
-  | "compact"
-  | "comfortable"
-  | "spacious"
-  | string;
+export type BroadsheetDensity = "compact" | "comfortable" | "spacious" | string;
 
 export type BroadsheetTemplateTone =
   | "classic"

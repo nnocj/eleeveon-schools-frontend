@@ -19,7 +19,13 @@
  * - it only renders data produced by reports/engine/report-engine.ts
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   ReportAssessmentColumn,
@@ -92,15 +98,19 @@ export default function SideProfileTemplate({
   const displayZoomPercent = Math.round(previewScale * 100);
   const ZOOM_STEP = 1.01;
 
-  const applyZoomStep = useCallback((direction: "in" | "out") => {
-    setZoomScale((prev) => {
-      const baseScale = expanded ? prev : fitScale;
-      const nextScale = direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
-      return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
-    });
+  const applyZoomStep = useCallback(
+    (direction: "in" | "out") => {
+      setZoomScale((prev) => {
+        const baseScale = expanded ? prev : fitScale;
+        const nextScale =
+          direction === "in" ? baseScale * ZOOM_STEP : baseScale / ZOOM_STEP;
+        return Math.min(2, Math.max(0.25, Number(nextScale.toFixed(4))));
+      });
 
-    setExpanded(true);
-  }, [expanded, fitScale]);
+      setExpanded(true);
+    },
+    [expanded, fitScale],
+  );
 
   const stopZoomHold = useCallback(() => {
     if (holdTimerRef.current != null) {
@@ -114,16 +124,19 @@ export default function SideProfileTemplate({
     }
   }, []);
 
-  const startZoomHold = useCallback((direction: "in" | "out") => {
-    stopZoomHold();
-    applyZoomStep(direction);
+  const startZoomHold = useCallback(
+    (direction: "in" | "out") => {
+      stopZoomHold();
+      applyZoomStep(direction);
 
-    holdTimerRef.current = window.setTimeout(() => {
-      holdIntervalRef.current = window.setInterval(() => {
-        applyZoomStep(direction);
-      }, 55);
-    }, 260);
-  }, [applyZoomStep, stopZoomHold]);
+      holdTimerRef.current = window.setTimeout(() => {
+        holdIntervalRef.current = window.setInterval(() => {
+          applyZoomStep(direction);
+        }, 55);
+      }, 260);
+    },
+    [applyZoomStep, stopZoomHold],
+  );
 
   const zoomOut = () => applyZoomStep("out");
   const zoomIn = () => applyZoomStep("in");
@@ -155,7 +168,10 @@ export default function SideProfileTemplate({
 
       const rect = frame.getBoundingClientRect();
       const availableWidth = Math.max(120, rect.width - SAFE_GAP);
-      const availableHeight = Math.max(180, window.innerHeight - rect.top - SAFE_GAP);
+      const availableHeight = Math.max(
+        180,
+        window.innerHeight - rect.top - SAFE_GAP,
+      );
       const widthScale = availableWidth / A4_WIDTH_PX;
       const heightScale = availableHeight / A4_HEIGHT_PX;
       const nextScale = Math.min(1, widthScale, heightScale);
@@ -191,7 +207,7 @@ export default function SideProfileTemplate({
         density: settings?.density || (compact ? "compact" : "comfortable"),
       },
       template || null,
-      null
+      null,
     );
 
   const normalized = normalizeStudentReportTemplateData({
@@ -205,7 +221,7 @@ export default function SideProfileTemplate({
   const student = dataset?.student;
 
   const assessmentColumns = useMemo<ReportAssessmentColumn[]>(() => {
-    const map = new Map<number, ReportAssessmentColumn>();
+    const map = new Map<string, ReportAssessmentColumn>();
 
     report?.subjectResults?.forEach((subject) => {
       subject.breakdown?.forEach((item) => {
@@ -245,7 +261,10 @@ export default function SideProfileTemplate({
   const fontFamily = branding.fontFamily || "Arial, sans-serif";
   const reportBackgroundImage = branding.reportCardBackgroundImage || "";
   const reportWatermark = branding.reportCardWatermark || branding.logo || "";
-  const reportSignatureImage = signatures.officialSignatureImage || branding.reportCardSignatureImage || "";
+  const reportSignatureImage =
+    signatures.officialSignatureImage ||
+    branding.reportCardSignatureImage ||
+    "";
   const studentPhoto = studentInfo.studentPhoto || "";
 
   const pageStyle = createReportPageStyle({
@@ -350,10 +369,30 @@ export default function SideProfileTemplate({
     : "";
 
   const sidebarItems: InfoChip[] = [
-    { key: "admissionNumber", label: "Admission No.", value: report.admissionNumber || "-", show: true },
-    { key: "gender", label: "Gender", value: report.gender || student?.gender || "-", show: true },
-    { key: "class", label: "Class", value: report.className || "-", show: true },
-    { key: "period", label: "Period", value: header.academicPeriod?.name || "-", show: true },
+    {
+      key: "admissionNumber",
+      label: "Admission No.",
+      value: report.admissionNumber || "-",
+      show: true,
+    },
+    {
+      key: "gender",
+      label: "Gender",
+      value: report.gender || student?.gender || "-",
+      show: true,
+    },
+    {
+      key: "class",
+      label: "Class",
+      value: report.className || "-",
+      show: true,
+    },
+    {
+      key: "period",
+      label: "Period",
+      value: header.academicPeriod?.name || "-",
+      show: true,
+    },
     {
       key: "numberOnRoll",
       label: resolvedSettings.numberOnRollLabel || "Number On Roll",
@@ -376,13 +415,25 @@ export default function SideProfileTemplate({
       key: "attendancePercent",
       label: "Attendance %",
       value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show: resolvedSettings.showAttendance && resolvedSettings.showAttendancePercent,
+      show:
+        resolvedSettings.showAttendance &&
+        resolvedSettings.showAttendancePercent,
     },
   ].filter((item) => item.show);
 
   const summaryCards = [
-    { key: "total", label: "Total", value: formatNumber(report.total, 1), show: resolvedSettings.showTotal },
-    { key: "average", label: "Average", value: `${formatNumber(report.average, 1)}%`, show: resolvedSettings.showAverage },
+    {
+      key: "total",
+      label: "Total",
+      value: formatNumber(report.total, 1),
+      show: resolvedSettings.showTotal,
+    },
+    {
+      key: "average",
+      label: "Average",
+      value: `${formatNumber(report.average, 1)}%`,
+      show: resolvedSettings.showAverage,
+    },
     {
       key: "classPosition",
       label: resolvedSettings.classPositionLabel || "Class Position",
@@ -392,13 +443,20 @@ export default function SideProfileTemplate({
     {
       key: "gpa",
       label: "GPA",
-      value: report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-",
+      value:
+        report.overallGPA != null ? formatNumber(report.overallGPA, 2) : "-",
       show: resolvedSettings.showGPA,
     },
   ].filter((item) => item.show);
 
-  const currentPeriodEndLine = currentAcademicPeriodEndText(currentAcademicPeriod, resolvedSettings);
-  const nextPeriodLine = nextAcademicPeriodText(nextAcademicPeriod, resolvedSettings);
+  const currentPeriodEndLine = currentAcademicPeriodEndText(
+    currentAcademicPeriod,
+    resolvedSettings,
+  );
+  const nextPeriodLine = nextAcademicPeriodText(
+    nextAcademicPeriod,
+    resolvedSettings,
+  );
 
   const subjectTableColumnCount =
     1 +
@@ -442,12 +500,23 @@ export default function SideProfileTemplate({
             zIndex: 0,
           }}
         >
-          <img src={reportWatermark} alt="Watermark" style={{ width: "48%", maxHeight: "48%", objectFit: "contain" }} />
+          <img
+            src={reportWatermark}
+            alt="Watermark"
+            style={{ width: "48%", maxHeight: "48%", objectFit: "contain" }}
+          />
         </div>
       )}
 
-      <div aria-hidden="true" className="side-profile-frame-line side-profile-frame-outer" style={{ borderColor: primary }} />
-      <div aria-hidden="true" className="side-profile-frame-line side-profile-frame-inner" />
+      <div
+        aria-hidden="true"
+        className="side-profile-frame-line side-profile-frame-outer"
+        style={{ borderColor: primary }}
+      />
+      <div
+        aria-hidden="true"
+        className="side-profile-frame-line side-profile-frame-inner"
+      />
 
       <div
         style={{
@@ -470,10 +539,16 @@ export default function SideProfileTemplate({
             display: "flex",
             flexDirection: "column",
             minHeight: "100%",
-            boxShadow: "inset 0 0 0 1px rgba(255,255,255,.14), 0 14px 32px rgba(15,23,42,.18)",
+            boxShadow:
+              "inset 0 0 0 1px rgba(255,255,255,.14), 0 14px 32px rgba(15,23,42,.18)",
           }}
         >
-          <div style={{ padding: compact ? 10 : 12, borderBottom: "1px solid rgba(255,255,255,.16)" }}>
+          <div
+            style={{
+              padding: compact ? 10 : 12,
+              borderBottom: "1px solid rgba(255,255,255,.16)",
+            }}
+          >
             <div
               style={{
                 width: compact ? 42 : 48,
@@ -488,18 +563,54 @@ export default function SideProfileTemplate({
               }}
             >
               {branding.logo ? (
-                <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }} />
+                <img
+                  src={branding.logo}
+                  alt="School logo"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    padding: 4,
+                    boxSizing: "border-box",
+                  }}
+                />
               ) : (
-                <span style={{ color: primary, fontSize: 7, fontWeight: 950, textAlign: "center", lineHeight: 1.05 }}>SCHOOL<br />LOGO</span>
+                <span
+                  style={{
+                    color: primary,
+                    fontSize: 7,
+                    fontWeight: 950,
+                    textAlign: "center",
+                    lineHeight: 1.05,
+                  }}
+                >
+                  SCHOOL
+                  <br />
+                  LOGO
+                </span>
               )}
             </div>
 
-            <div style={{ marginTop: 9, fontSize: compact ? 8 : 8.8, lineHeight: 1.18, fontWeight: 900, textTransform: "uppercase", overflowWrap: "anywhere" }}>
+            <div
+              style={{
+                marginTop: 9,
+                fontSize: compact ? 8 : 8.8,
+                lineHeight: 1.18,
+                fontWeight: 900,
+                textTransform: "uppercase",
+                overflowWrap: "anywhere",
+              }}
+            >
               {branding.schoolName}
             </div>
           </div>
 
-          <div style={{ padding: compact ? "10px 10px 8px" : "12px 12px 9px", textAlign: "center" }}>
+          <div
+            style={{
+              padding: compact ? "10px 10px 8px" : "12px 12px 9px",
+              textAlign: "center",
+            }}
+          >
             <div
               style={{
                 width: compact ? 82 : 92,
@@ -516,21 +627,56 @@ export default function SideProfileTemplate({
               }}
             >
               {studentPhoto ? (
-                <img src={studentPhoto} alt="Student" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <img
+                  src={studentPhoto}
+                  alt="Student"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
               ) : (
-                <span style={{ fontSize: 9, fontWeight: 950, color: "rgba(255,255,255,.78)" }}>PHOTO</span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 950,
+                    color: "rgba(255,255,255,.78)",
+                  }}
+                >
+                  PHOTO
+                </span>
               )}
             </div>
 
-            <div style={{ marginTop: 9, fontSize: compact ? 13 : 14.5, lineHeight: 1.05, fontWeight: 950, textTransform: "uppercase", overflowWrap: "anywhere" }}>
+            <div
+              style={{
+                marginTop: 9,
+                fontSize: compact ? 13 : 14.5,
+                lineHeight: 1.05,
+                fontWeight: 950,
+                textTransform: "uppercase",
+                overflowWrap: "anywhere",
+              }}
+            >
               {report.studentName}
             </div>
-            <div style={{ marginTop: 4, fontSize: compact ? 7.4 : 8, fontWeight: 850, color: "rgba(255,255,255,.76)", textTransform: "uppercase" }}>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: compact ? 7.4 : 8,
+                fontWeight: 850,
+                color: "rgba(255,255,255,.76)",
+                textTransform: "uppercase",
+              }}
+            >
               Student Profile
             </div>
           </div>
 
-          <div style={{ padding: compact ? "0 10px 8px" : "0 12px 10px", display: "grid", gap: 6 }}>
+          <div
+            style={{
+              padding: compact ? "0 10px 8px" : "0 12px 10px",
+              display: "grid",
+              gap: 6,
+            }}
+          >
             {sidebarItems.map((item) => (
               <div
                 key={item.key}
@@ -559,13 +705,35 @@ export default function SideProfileTemplate({
                   marginBottom: 8,
                 }}
               >
-                <div style={sidebarLabel}>{(resolvedSettings as any).generatedDateLabel || "Generated"}</div>
-                <div style={{ ...sidebarValue, fontSize: compact ? 8.8 : 9.8 }}>Report Card</div>
-                <div style={{ marginTop: 2, fontSize: compact ? 8 : 8.8, fontWeight: 950, color: "#fff" }}>{generatedDateValue}</div>
+                <div style={sidebarLabel}>
+                  {(resolvedSettings as any).generatedDateLabel || "Generated"}
+                </div>
+                <div style={{ ...sidebarValue, fontSize: compact ? 8.8 : 9.8 }}>
+                  Report Card
+                </div>
+                <div
+                  style={{
+                    marginTop: 2,
+                    fontSize: compact ? 8 : 8.8,
+                    fontWeight: 950,
+                    color: "#fff",
+                  }}
+                >
+                  {generatedDateValue}
+                </div>
               </div>
             )}
 
-            <div style={{ borderTop: "1px solid rgba(255,255,255,.22)", paddingTop: 7, fontSize: compact ? 6.8 : 7.4, lineHeight: 1.25, color: "rgba(255,255,255,.72)", fontWeight: 760 }}>
+            <div
+              style={{
+                borderTop: "1px solid rgba(255,255,255,.22)",
+                paddingTop: 7,
+                fontSize: compact ? 6.8 : 7.4,
+                lineHeight: 1.25,
+                color: "rgba(255,255,255,.72)",
+                fontWeight: 760,
+              }}
+            >
               Official academic report generated by Eleeveon Schools.
             </div>
           </div>
@@ -586,21 +754,53 @@ export default function SideProfileTemplate({
             <table style={tableStyles.table}>
               <thead>
                 <tr>
-                  <th data-report-color-block="true" style={{ ...tableStyles.th, textAlign: "left", minWidth: 92 }}>Subject</th>
+                  <th
+                    data-report-color-block="true"
+                    style={{
+                      ...tableStyles.th,
+                      textAlign: "left",
+                      minWidth: 92,
+                    }}
+                  >
+                    Subject
+                  </th>
                   {assessmentColumns.map((column) => (
-                    <th data-report-color-block="true" key={column.assessmentStructureItemId} style={tableStyles.th}>
+                    <th
+                      data-report-color-block="true"
+                      key={column.assessmentStructureItemId}
+                      style={tableStyles.th}
+                    >
                       {column.name}
-                      <div style={{ fontSize: 7.2, marginTop: 2, opacity: 0.88 }}>W:{formatNumber(column.weight, 0)}</div>
+                      <div
+                        style={{ fontSize: 7.2, marginTop: 2, opacity: 0.88 }}
+                      >
+                        W:{formatNumber(column.weight, 0)}
+                      </div>
                     </th>
                   ))}
-                  <th data-report-color-block="true" style={tableStyles.th}>Weighted</th>
-                  <th data-report-color-block="true" style={tableStyles.th}>%</th>
-                  {resolvedSettings.showGrade && <th data-report-color-block="true" style={tableStyles.th}>Grade</th>}
+                  <th data-report-color-block="true" style={tableStyles.th}>
+                    Weighted
+                  </th>
+                  <th data-report-color-block="true" style={tableStyles.th}>
+                    %
+                  </th>
+                  {resolvedSettings.showGrade && (
+                    <th data-report-color-block="true" style={tableStyles.th}>
+                      Grade
+                    </th>
+                  )}
                   {resolvedSettings.showSubjectPosition && (
-                    <th data-report-color-block="true" style={tableStyles.th}>{resolvedSettings.subjectPositionLabel || "Pos."}</th>
+                    <th data-report-color-block="true" style={tableStyles.th}>
+                      {resolvedSettings.subjectPositionLabel || "Pos."}
+                    </th>
                   )}
                   {resolvedSettings.showSubjectRemarks && (
-                    <th data-report-color-block="true" style={{ ...tableStyles.th, minWidth: 78 }}>Remark</th>
+                    <th
+                      data-report-color-block="true"
+                      style={{ ...tableStyles.th, minWidth: 78 }}
+                    >
+                      Remark
+                    </th>
                   )}
                 </tr>
               </thead>
@@ -608,42 +808,97 @@ export default function SideProfileTemplate({
               <tbody>
                 {report.subjectResults.map((subject, rowIndex) => (
                   <tr key={subject.classSubjectId}>
-                    <td style={{ ...tableStyles.td, fontWeight: 950, background: rowIndex % 2 === 0 ? "#f8fafc" : "#ffffff" }}>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        fontWeight: 950,
+                        background: rowIndex % 2 === 0 ? "#f8fafc" : "#ffffff",
+                      }}
+                    >
                       {subject.subjectName}
-                      {resolvedSettings.showTeacherNames && subject.teacherName && (
-                        <div style={{ marginTop: 2, fontSize: 7.4, opacity: 0.72, fontWeight: 700 }}>
-                          {subject.teacherName}
-                        </div>
-                      )}
+                      {resolvedSettings.showTeacherNames &&
+                        subject.teacherName && (
+                          <div
+                            style={{
+                              marginTop: 2,
+                              fontSize: 7.4,
+                              opacity: 0.72,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {subject.teacherName}
+                          </div>
+                        )}
                     </td>
 
                     {assessmentColumns.map((column) => {
                       const item = subject.breakdown.find(
-                        (row) => row.assessmentStructureItemId === column.assessmentStructureItemId
+                        (row) =>
+                          row.assessmentStructureItemId ===
+                          column.assessmentStructureItemId,
                       );
 
                       return (
-                        <td key={column.assessmentStructureItemId} style={{ ...tableStyles.td, textAlign: "center" }}>
-                          {item ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}` : "-"}
+                        <td
+                          key={column.assessmentStructureItemId}
+                          style={{ ...tableStyles.td, textAlign: "center" }}
+                        >
+                          {item
+                            ? `${formatNumber(item.score, 0)}/${formatNumber(item.maxScore, 0)}`
+                            : "-"}
                         </td>
                       );
                     })}
 
-                    <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 950 }}>{formatNumber(subject.weightedTotal, 1)}</td>
-                    <td style={{ ...tableStyles.td, textAlign: "center", fontWeight: 950 }}>{formatPercent(subject.percentage, 1, "-")}</td>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        textAlign: "center",
+                        fontWeight: 950,
+                      }}
+                    >
+                      {formatNumber(subject.weightedTotal, 1)}
+                    </td>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        textAlign: "center",
+                        fontWeight: 950,
+                      }}
+                    >
+                      {formatPercent(subject.percentage, 1, "-")}
+                    </td>
                     {resolvedSettings.showGrade && (
                       <td style={{ ...tableStyles.td, textAlign: "center" }}>
-                        <span className="side-profile-grade-pill" style={{ borderColor: primary, color: primary }}>{subject.grade}</span>
+                        <span
+                          className="side-profile-grade-pill"
+                          style={{ borderColor: primary, color: primary }}
+                        >
+                          {subject.grade}
+                        </span>
                       </td>
                     )}
-                    {resolvedSettings.showSubjectPosition && <td style={{ ...tableStyles.td, textAlign: "center" }}>{ordinal(subject.subjectPosition)}</td>}
-                    {resolvedSettings.showSubjectRemarks && <td style={tableStyles.td}>{subject.remark}</td>}
+                    {resolvedSettings.showSubjectPosition && (
+                      <td style={{ ...tableStyles.td, textAlign: "center" }}>
+                        {ordinal(subject.subjectPosition)}
+                      </td>
+                    )}
+                    {resolvedSettings.showSubjectRemarks && (
+                      <td style={tableStyles.td}>{subject.remark}</td>
+                    )}
                   </tr>
                 ))}
 
                 {!report.subjectResults.length && (
                   <tr>
-                    <td style={{ ...tableStyles.td, textAlign: "center", padding: 16 }} colSpan={subjectTableColumnCount}>
+                    <td
+                      style={{
+                        ...tableStyles.td,
+                        textAlign: "center",
+                        padding: 16,
+                      }}
+                      colSpan={subjectTableColumnCount}
+                    >
                       No subject results available for this selected period.
                     </td>
                   </tr>
@@ -664,7 +919,10 @@ export default function SideProfileTemplate({
                 background: "#ffffff",
               }}
             >
-              <div data-report-color-block="true" style={{ background: primary }} />
+              <div
+                data-report-color-block="true"
+                style={{ background: primary }}
+              />
               {summaryCards.map((card, index) => (
                 <div
                   key={card.key}
@@ -676,16 +934,38 @@ export default function SideProfileTemplate({
                   }}
                 >
                   <div style={smallLabel}>{card.label}</div>
-                  <div style={{ marginTop: 2, fontSize: compact ? 12.8 : 14.5, fontWeight: 950, color: "#0f172a" }}>{card.value}</div>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: compact ? 12.8 : 14.5,
+                      fontWeight: 950,
+                      color: "#0f172a",
+                    }}
+                  >
+                    {card.value}
+                  </div>
                 </div>
               ))}
             </section>
           )}
 
-          <section style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+          <section
+            style={{
+              marginTop: 8,
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 7,
+            }}
+          >
             {[
-              { label: `${resolvedSettings.classTeacherLabel}'s Remark`, value: report.classTeacherRemark || "" },
-              { label: `${resolvedSettings.headTeacherLabel}'s Remark`, value: report.headTeacherRemark || "" },
+              {
+                label: `${resolvedSettings.classTeacherLabel}'s Remark`,
+                value: report.classTeacherRemark || "",
+              },
+              {
+                label: `${resolvedSettings.headTeacherLabel}'s Remark`,
+                value: report.headTeacherRemark || "",
+              },
             ].map((remark) => (
               <div
                 key={remark.label}
@@ -699,9 +979,29 @@ export default function SideProfileTemplate({
                   overflow: "hidden",
                 }}
               >
-                <div aria-hidden="true" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: primary }} />
+                <div
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 4,
+                    background: primary,
+                  }}
+                />
                 <div style={smallLabel}>{remark.label}</div>
-                <div style={{ marginTop: 5, paddingLeft: 2, fontSize: compact ? 9 : 9.8, lineHeight: 1.32, color: "#111827" }}>{remark.value}</div>
+                <div
+                  style={{
+                    marginTop: 5,
+                    paddingLeft: 2,
+                    fontSize: compact ? 9 : 9.8,
+                    lineHeight: 1.32,
+                    color: "#111827",
+                  }}
+                >
+                  {remark.value}
+                </div>
               </div>
             ))}
           </section>
@@ -715,7 +1015,10 @@ export default function SideProfileTemplate({
                 padding: compact ? 6 : 7,
                 background: "#f8fafc",
                 display: "grid",
-                gridTemplateColumns: currentPeriodEndLine && nextPeriodLine ? "1fr 24px 1fr" : "1fr",
+                gridTemplateColumns:
+                  currentPeriodEndLine && nextPeriodLine
+                    ? "1fr 24px 1fr"
+                    : "1fr",
                 gap: 6,
                 alignItems: "center",
               }}
@@ -723,25 +1026,60 @@ export default function SideProfileTemplate({
               {currentPeriodEndLine && (
                 <div>
                   <div style={smallLabel}>Current Academic Period</div>
-                  <div style={strongValue}>{currentAcademicPeriod?.name || header.academicPeriod?.name || "Current Period"}</div>
-                  <div style={{ marginTop: 2, fontSize: compact ? 8.2 : 9, fontWeight: 900, color: primary }}>
-                    Ends: {currentAcademicPeriod?.formattedEndDate || currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
+                  <div style={strongValue}>
+                    {currentAcademicPeriod?.name ||
+                      header.academicPeriod?.name ||
+                      "Current Period"}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: compact ? 8.2 : 9,
+                      fontWeight: 900,
+                      color: primary,
+                    }}
+                  >
+                    Ends:{" "}
+                    {currentAcademicPeriod?.formattedEndDate ||
+                      currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
                   </div>
                 </div>
               )}
 
               {currentPeriodEndLine && nextPeriodLine && (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span className="side-profile-timeline-dot" style={{ borderColor: primary }} />
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <span
+                    className="side-profile-timeline-dot"
+                    style={{ borderColor: primary }}
+                  />
                 </div>
               )}
 
               {nextPeriodLine && (
-                <div style={{ textAlign: currentPeriodEndLine ? "right" : "left" }}>
+                <div
+                  style={{ textAlign: currentPeriodEndLine ? "right" : "left" }}
+                >
                   <div style={smallLabel}>Next Academic Period</div>
-                  <div style={strongValue}>{nextAcademicPeriod?.name || "Next Period"}</div>
-                  <div style={{ marginTop: 2, fontSize: compact ? 8.2 : 9, fontWeight: 900, color: primary }}>
-                    Begins: {nextAcademicPeriod?.formattedStartDate || nextPeriodLine.replace(/^.*?:\s*/i, "")}
+                  <div style={strongValue}>
+                    {nextAcademicPeriod?.name || "Next Period"}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: compact ? 8.2 : 9,
+                      fontWeight: 900,
+                      color: primary,
+                    }}
+                  >
+                    Begins:{" "}
+                    {nextAcademicPeriod?.formattedStartDate ||
+                      nextPeriodLine.replace(/^.*?:\s*/i, "")}
                   </div>
                 </div>
               )}
@@ -752,16 +1090,26 @@ export default function SideProfileTemplate({
             style={{
               marginTop: 13,
               display: "grid",
-              gridTemplateColumns: resolvedSettings.showParentSignature ? "repeat(3, minmax(0, 1fr))" : "repeat(2, minmax(0, 1fr))",
+              gridTemplateColumns: resolvedSettings.showParentSignature
+                ? "repeat(3, minmax(0, 1fr))"
+                : "repeat(2, minmax(0, 1fr))",
               gap: 16,
               alignItems: "end",
             }}
           >
             {[
-              { label: resolvedSettings.classTeacherLabel, name: signatures.classTeacherName || "", image: "", show: true },
+              {
+                label: resolvedSettings.classTeacherLabel,
+                name: signatures.classTeacherName || "",
+                image: "",
+                show: true,
+              },
               {
                 label: resolvedSettings.headTeacherLabel,
-                name: firstText(signatures.headTeacherName, signatures.principalName),
+                name: firstText(
+                  signatures.headTeacherName,
+                  signatures.principalName,
+                ),
                 image: reportSignatureImage,
                 show: true,
               },
@@ -771,13 +1119,44 @@ export default function SideProfileTemplate({
                 image: "",
                 show: resolvedSettings.showParentSignature,
               },
-            ].filter((item) => item.show).map((item) => (
-              <div key={item.label} style={{ textAlign: "center" }}>
-                {item.image && <img src={item.image} alt="Official signature" style={{ height: 28, objectFit: "contain", marginBottom: 2 }} />}
-                <div style={{ minHeight: 15, marginBottom: 3, fontSize: compact ? 8.6 : 9.5, fontWeight: 950, color: "#111827" }}>{item.name}</div>
-                <div style={{ borderTop: "1px solid #111", paddingTop: 5, fontSize: compact ? 8.5 : 9.3, fontWeight: 900 }}>{item.label}</div>
-              </div>
-            ))}
+            ]
+              .filter((item) => item.show)
+              .map((item) => (
+                <div key={item.label} style={{ textAlign: "center" }}>
+                  {item.image && (
+                    <img
+                      src={item.image}
+                      alt="Official signature"
+                      style={{
+                        height: 28,
+                        objectFit: "contain",
+                        marginBottom: 2,
+                      }}
+                    />
+                  )}
+                  <div
+                    style={{
+                      minHeight: 15,
+                      marginBottom: 3,
+                      fontSize: compact ? 8.6 : 9.5,
+                      fontWeight: 950,
+                      color: "#111827",
+                    }}
+                  >
+                    {item.name}
+                  </div>
+                  <div
+                    style={{
+                      borderTop: "1px solid #111",
+                      paddingTop: 5,
+                      fontSize: compact ? 8.5 : 9.3,
+                      fontWeight: 900,
+                    }}
+                  >
+                    {item.label}
+                  </div>
+                </div>
+              ))}
           </section>
 
           <footer
@@ -810,15 +1189,45 @@ export default function SideProfileTemplate({
       <div className="src-mobile-toolbar report-no-print">
         <div>
           <strong>{report.studentName}</strong>
-          <span>{report.className} · {header.academicPeriod?.name || "Academic Period"}</span>
+          <span>
+            {report.className} ·{" "}
+            {header.academicPeriod?.name || "Academic Period"}
+          </span>
         </div>
 
         <div className="src-zoom-controls" aria-label="Report zoom controls">
-          <button type="button" className="src-zoom-icon-button" onClick={zoomOut} onPointerDown={() => startZoomHold("out")} onPointerUp={stopZoomHold} onPointerCancel={stopZoomHold} onPointerLeave={stopZoomHold} aria-label="Zoom out" title="Click or hold to zoom out">−</button>
-          <button type="button" className="src-zoom-fit-button" onClick={fitToScreen} aria-label="Fit to screen" title="Fit to screen">Fit</button>
+          <button
+            type="button"
+            className="src-zoom-icon-button"
+            onClick={zoomOut}
+            onPointerDown={() => startZoomHold("out")}
+            onPointerUp={stopZoomHold}
+            onPointerCancel={stopZoomHold}
+            onPointerLeave={stopZoomHold}
+            aria-label="Zoom out"
+            title="Click or hold to zoom out"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="src-zoom-fit-button"
+            onClick={fitToScreen}
+            aria-label="Fit to screen"
+            title="Fit to screen"
+          >
+            Fit
+          </button>
 
           <div className="src-zoom-menu-wrap">
-            <button type="button" className="src-zoom-percent-button" onClick={() => setZoomMenuOpen((prev) => !prev)} aria-label="Choose zoom percentage" aria-expanded={zoomMenuOpen} title="Choose zoom percentage">
+            <button
+              type="button"
+              className="src-zoom-percent-button"
+              onClick={() => setZoomMenuOpen((prev) => !prev)}
+              aria-label="Choose zoom percentage"
+              aria-expanded={zoomMenuOpen}
+              title="Choose zoom percentage"
+            >
               <span>{displayZoomPercent}%</span>
               <span className="src-zoom-caret">▾</span>
             </button>
@@ -826,7 +1235,13 @@ export default function SideProfileTemplate({
             {zoomMenuOpen && (
               <div className="src-zoom-menu" role="menu">
                 {[30, 40, 50, 60, 70, 80, 90, 100].map((percent) => (
-                  <button key={percent} type="button" role="menuitem" onClick={() => selectZoomPercent(percent)} className={`src-zoom-menu-item ${Math.round(previewScale * 100) === percent ? "active" : ""}`}>
+                  <button
+                    key={percent}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => selectZoomPercent(percent)}
+                    className={`src-zoom-menu-item ${Math.round(previewScale * 100) === percent ? "active" : ""}`}
+                  >
                     {percent}%
                   </button>
                 ))}
@@ -834,11 +1249,29 @@ export default function SideProfileTemplate({
             )}
           </div>
 
-          <button type="button" className="src-zoom-icon-button" onClick={zoomIn} onPointerDown={() => startZoomHold("in")} onPointerUp={stopZoomHold} onPointerCancel={stopZoomHold} onPointerLeave={stopZoomHold} aria-label="Zoom in" title="Click or hold to zoom in">+</button>
+          <button
+            type="button"
+            className="src-zoom-icon-button"
+            onClick={zoomIn}
+            onPointerDown={() => startZoomHold("in")}
+            onPointerUp={stopZoomHold}
+            onPointerCancel={stopZoomHold}
+            onPointerLeave={stopZoomHold}
+            aria-label="Zoom in"
+            title="Click or hold to zoom in"
+          >
+            +
+          </button>
         </div>
       </div>
 
-      <div ref={previewFrameRef} className="src-preview-scroll report-screen-scroll" style={{ "--report-preview-scale": previewScale } as React.CSSProperties}>
+      <div
+        ref={previewFrameRef}
+        className="src-preview-scroll report-screen-scroll"
+        style={
+          { "--report-preview-scale": previewScale } as React.CSSProperties
+        }
+      >
         <div className="src-preview-center">
           <div className="src-preview-scale">{reportPage}</div>
         </div>

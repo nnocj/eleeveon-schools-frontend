@@ -6,8 +6,9 @@
  *
  * Drop-in replacement for the previous AccountProfile.tsx.
  * Existing account media, defaults, sync, protected billing and mobile-first
- * behavior are preserved, while login identity is now correctly separated
- * from the Account/workspace record.
+ * behavior are preserved. The owner identity now follows Eleeveon's actual
+ * model: Account is the owner/customer record and the owner is also an AppUser
+ * for authentication. Owner email and phone are synchronized across both.
  *
  * Backend contracts used:
  * - GET/PATCH /accounts/me                    -> Account workspace
@@ -115,6 +116,11 @@ type AccountData = {
 type MyProfileResponse = {
   user?: OwnerUser | null;
   account?: AccountData | null;
+  ownerIdentity?: {
+    ownerLevel?: boolean;
+    emailSynchronized?: boolean;
+    phoneSynchronized?: boolean;
+  };
 };
 
 type AccountSetting = {
@@ -137,8 +143,6 @@ type MyProfileForm = {
 
 type AccountProfileForm = {
   name: string;
-  email: string;
-  phone: string;
   website: string;
   address: string;
   description: string;
@@ -184,8 +188,6 @@ const emptyMyProfile: MyProfileForm = {
 
 const emptyAccountProfile: AccountProfileForm = {
   name: "",
-  email: "",
-  phone: "",
   website: "",
   address: "",
   description: "",
@@ -625,9 +627,22 @@ export default function AccountProfilePage() {
       setMyProfile(userToMyProfileForm(loadedUser));
       setAccountProfile(accountToProfileForm(loadedAccount, mediaPreviewUrls));
       setEmailForm({
-        newEmail: loadedUser?.email || "",
+        newEmail: loadedAccount?.email || loadedUser?.email || "",
         currentPassword: "",
       });
+
+      const accountEmail = loadedAccount?.email?.toLowerCase().trim() || "";
+      const userEmail = loadedUser?.email?.toLowerCase().trim() || "";
+      if (accountEmail && userEmail && accountEmail !== userEmail) {
+        setNotice((current) =>
+          [
+            current,
+            "Owner email is currently out of sync between the Account record and the owner login. Use Login & Security → Change Owner Email to repair both together.",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
       setAccountSettings(
         settingsArrayToForm(loadedSettings, {
           country: loadedAccount?.country || "GH",
@@ -705,6 +720,16 @@ export default function AccountProfilePage() {
       accountSettings.allowOwnerDataExport,
     ].filter(Boolean).length;
 
+    const ownerAccountEmail = account?.email?.toLowerCase().trim() || "";
+    const ownerLoginEmail = ownerUser?.email?.toLowerCase().trim() || "";
+    const ownerEmailSynchronized =
+      Boolean(ownerAccountEmail || ownerLoginEmail) &&
+      ownerAccountEmail === ownerLoginEmail;
+
+    const ownerAccountPhone = account?.phone?.trim() || "";
+    const ownerLoginPhone = ownerUser?.phone?.trim() || "";
+    const ownerPhoneSynchronized = ownerAccountPhone === ownerLoginPhone;
+
     return {
       accountStatus: account?.status || "active",
       plan: account?.subscription?.plan?.name || "No active plan",
@@ -716,8 +741,10 @@ export default function AccountProfilePage() {
       invoices: account?.invoices?.length || 0,
       payments: account?.payments?.length || 0,
       enabledSettings,
+      ownerEmailSynchronized,
+      ownerPhoneSynchronized,
     };
-  }, [account, accountSettings]);
+  }, [account, ownerUser, accountSettings]);
 
   const accountCloudId = account?.id || accountId || "";
   const bannerUrl =
@@ -759,7 +786,7 @@ export default function AccountProfilePage() {
 
   const openEmailSheet = () => {
     setEmailForm({
-      newEmail: ownerUser?.email || "",
+      newEmail: account?.email || ownerUser?.email || "",
       currentPassword: "",
     });
     setMessage("");
@@ -868,11 +895,6 @@ export default function AccountProfilePage() {
   const validateAccountProfile = () => {
     if (!accountProfile.name.trim()) return "Account name is required.";
     if (
-      accountProfile.email.trim() &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountProfile.email.trim())
-    )
-      return "Enter a valid account contact email address.";
-    if (
       accountProfile.website.trim() &&
       !/^https?:\/\/.+/i.test(accountProfile.website.trim()) &&
       !/^www\..+/i.test(accountProfile.website.trim())
@@ -900,7 +922,7 @@ export default function AccountProfilePage() {
 
     try {
       setSaving(true);
-      const updated = await apiRequest<OwnerUser>("/accounts/me/profile", {
+      const result = await apiRequest<MyProfileResponse>("/accounts/me/profile", {
         method: "PATCH",
         body: JSON.stringify({
           fullName: myProfile.fullName.trim(),
@@ -909,13 +931,25 @@ export default function AccountProfilePage() {
         }),
       } as any);
 
-      const merged = { ...(ownerUser || {}), ...updated };
-      setOwnerUser(merged);
-      refreshStoredUserCaches(merged);
+      const mergedUser = {
+        ...(ownerUser || {}),
+        ...(result?.user || {}),
+      };
+      const mergedAccount = {
+        ...(account || {}),
+        ...(result?.account || {}),
+      };
+
+      setOwnerUser(mergedUser);
+      setAccount(mergedAccount);
+      refreshStoredUserCaches(mergedUser);
+      refreshStoredAccountCaches(mergedAccount);
+      await cacheAccount(mergedAccount);
+
       setActiveSheet(null);
-      showToast("success", "Your profile was updated.");
+      showToast("success", "Owner profile updated and contact details synchronized.");
     } catch (error: any) {
-      setMessage(error?.message || "Your profile could not be saved.");
+      setMessage(error?.message || "Owner profile could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -933,8 +967,6 @@ export default function AccountProfilePage() {
       setSaving(true);
       const payload: Partial<AccountData> = {
         name: accountProfile.name.trim(),
-        email: accountProfile.email.trim() || undefined,
-        phone: accountProfile.phone.trim() || undefined,
         website: accountProfile.website.trim() || undefined,
         address: accountProfile.address.trim() || undefined,
         description: accountProfile.description.trim() || undefined,
@@ -1090,17 +1122,17 @@ export default function AccountProfilePage() {
     const nextEmail = emailForm.newEmail.trim().toLowerCase();
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
-      setMessage("Enter a valid new login email address.");
+      setMessage("Enter a valid owner email address.");
       return;
     }
     if (!emailForm.currentPassword) {
-      setMessage("Enter your current password to change your login email.");
+      setMessage("Enter your current password to change the owner email.");
       return;
     }
 
     try {
       setSaving(true);
-      const updated = await apiRequest<OwnerUser>("/accounts/me/email", {
+      const result = await apiRequest<MyProfileResponse>("/accounts/me/email", {
         method: "PATCH",
         body: JSON.stringify({
           newEmail: nextEmail,
@@ -1108,14 +1140,29 @@ export default function AccountProfilePage() {
         }),
       } as any);
 
-      const merged = { ...(ownerUser || {}), ...updated };
-      setOwnerUser(merged);
-      refreshStoredUserCaches(merged);
-      setEmailForm({ newEmail: merged.email || nextEmail, currentPassword: "" });
+      const mergedUser = {
+        ...(ownerUser || {}),
+        ...(result?.user || {}),
+      };
+      const mergedAccount = {
+        ...(account || {}),
+        ...(result?.account || {}),
+      };
+
+      setOwnerUser(mergedUser);
+      setAccount(mergedAccount);
+      refreshStoredUserCaches(mergedUser);
+      refreshStoredAccountCaches(mergedAccount);
+      await cacheAccount(mergedAccount);
+
+      setEmailForm({
+        newEmail: mergedAccount.email || mergedUser.email || nextEmail,
+        currentPassword: "",
+      });
       setActiveSheet("security");
-      showToast("success", "Login email changed.");
+      showToast("success", "Owner email changed and synchronized across Account and login.");
     } catch (error: any) {
-      setMessage(error?.message || "Login email could not be changed.");
+      setMessage(error?.message || "Owner email could not be changed.");
     } finally {
       setSaving(false);
     }
@@ -1284,8 +1331,8 @@ export default function AccountProfilePage() {
             className="ba-profile-detail"
             onClick={openAccountSheet}
           >
-            <b>Account</b>
-            <strong>{safeText(account?.email, "Contact email not set")}</strong>
+            <b>Owner Account</b>
+            <strong>{safeText(account?.email, "Owner email not set")}</strong>
             <small>{safeText(account?.website, "Website not set")}</small>
           </button>
 
@@ -1295,10 +1342,10 @@ export default function AccountProfilePage() {
             onClick={() => setActiveSheet("security")}
           >
             <b>Login & Security</b>
-            <strong>{safeText(ownerUser?.email, "No login email")}</strong>
-            <small>
-              Password changed {safeDate(ownerUser?.passwordChangedAt)}
-            </small>
+            <strong>
+              {summary.ownerEmailSynchronized ? "Owner identity synced" : "Owner email needs sync"}
+            </strong>
+            <small>{safeText(ownerUser?.email || account?.email, "No owner email")}</small>
           </button>
 
           <button
@@ -1361,9 +1408,9 @@ export default function AccountProfilePage() {
         </div>
 
         <p className="ba-profile-note">
-          Your personal login identity and the Account workspace are managed
-          separately here. Plan, subscription, invoices, payments and platform
-          capabilities remain protected backend values.
+          This page manages the owner across both records: Account is the top-level
+          owner/customer record, while the owner AppUser provides authentication.
+          Owner email and phone stay synchronized; password remains AppUser-only.
         </p>
       </section>
 
@@ -1531,8 +1578,6 @@ function accountToProfileForm(
   const cloudId = account?.id || "";
   return {
     name: account?.name || "",
-    email: account?.email || "",
-    phone: account?.phone || "",
     website: account?.website || "",
     address: account?.address || "",
     description: account?.description || "",
@@ -1632,13 +1677,13 @@ function MoreSheet({
           />
           <MenuButton
             icon="🏢"
-            title="Account"
-            note="Workspace identity, contact and branding"
+            title="Owner Account"
+            note="Account/workspace name, website and branding"
             onClick={onAccount}
           />
           <MenuButton
             icon="🔒"
-            title="Login & Security"
+            title="Owner Login & Security"
             note="Login email, password and access rules"
             onClick={onSecurity}
           />
@@ -1716,8 +1761,8 @@ function MyProfileSheet({
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
-            <h2>My Profile</h2>
-            <p>Update the personal details attached to your current login.</p>
+            <h2>Owner Profile</h2>
+            <p>Update the owner's personal identity. Phone is synchronized to the Account owner record.</p>
           </div>
           <button type="button" onClick={close} aria-label="Close my profile form">
             ✕
@@ -1751,7 +1796,7 @@ function MyProfileSheet({
             />
             <TextInput
               wide
-              label="Login Email"
+              label="Owner Email"
               value={user?.email || ""}
               onChange={() => undefined}
               readOnly
@@ -1759,8 +1804,9 @@ function MyProfileSheet({
             />
           </div>
           <p className="ba-inline-note">
-            Login email and password are protected security values. Use Login &amp;
-            Security to change them.
+            Owner email is shared by Account.email and the owner AppUser.email.
+            Change it from Login &amp; Security so both records update together.
+            Password remains only on the AppUser login.
           </p>
         </section>
 
@@ -1806,8 +1852,9 @@ function AccountProfileSheet({
           <div>
             <h2>Edit Account</h2>
             <p>
-              Update workspace identity, business contact details and account
-              branding. This does not change your login email.
+              Update the owner Account/workspace name, website, address and
+              branding. Owner email and phone are managed from Owner Profile and
+              Login & Security so Account + AppUser stay synchronized.
             </p>
           </div>
           <button type="button" onClick={close} aria-label="Close account form">
@@ -1825,20 +1872,6 @@ function AccountProfileSheet({
               value={profile.name}
               onChange={(value) => updateProfile({ name: value })}
               placeholder="Account name"
-            />
-            <TextInput
-              label="Account Contact Email"
-              value={profile.email}
-              onChange={(value) => updateProfile({ email: value })}
-              placeholder="admin@example.com"
-              autoComplete="email"
-            />
-            <TextInput
-              label="Account Phone"
-              value={profile.phone}
-              onChange={(value) => updateProfile({ phone: value })}
-              placeholder="Phone"
-              autoComplete="tel"
             />
             <TextInput
               wide
@@ -2003,7 +2036,7 @@ function SecuritySheet({
   return (
     <SettingsModal
       title="Login & Security"
-      text="Manage your login credentials and account-wide security preferences."
+      text="Manage the owner's synchronized email, password and account-wide security preferences."
       saving={saving}
       message={message}
       onSubmit={saveSettings}
@@ -2013,7 +2046,7 @@ function SecuritySheet({
       <div className="ba-security-actions">
         <button type="button" className="ba-security-action" onClick={openEmail}>
           <div>
-            <b>Login Email</b>
+            <b>Owner Email</b>
             <small>
               {safeText(user?.email, "No login email")} · {user?.emailVerifiedAt ? "verified" : "not verified"}
             </small>
@@ -2095,18 +2128,18 @@ function ChangeEmailSheet({
 }) {
   return (
     <SettingsModal
-      title="Change Login Email"
-      text="This changes the email used to sign in. Your current password is required."
+      title="Change Owner Email"
+      text="This changes the owner email on both the Account record and the owner AppUser login. Your current password is required."
       saving={saving}
       message={message}
       onSubmit={save}
       close={close}
-      submitLabel="Change Login Email"
+      submitLabel="Change Owner Email"
     >
       <div className="ba-form">
         <TextInput
           wide
-          label="New Login Email"
+          label="New Owner Email"
           value={form.newEmail}
           onChange={(value) => update({ newEmail: value })}
           placeholder="new@example.com"
@@ -2121,8 +2154,9 @@ function ChangeEmailSheet({
         />
       </div>
       <p className="ba-inline-note">
-        Account/business contact email is separate and can be changed from the
-        Account section.
+        School and branch contact emails do not count as registered owner logins.
+        If this email already belongs to another AppUser, the backend will identify
+        that separately because AppUser login emails must remain unique.
       </p>
     </SettingsModal>
   );

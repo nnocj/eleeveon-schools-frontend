@@ -15,6 +15,7 @@
  * - GET/PATCH /accounts/me/profile            -> current AppUser
  * - PATCH     /accounts/me/email              -> login email + current password
  * - PATCH     /accounts/me/password           -> password change
+ * - POST      /accounts/me/ownership/transfer -> complete owner transfer
  * - GET/PATCH /accounts/me/settings           -> AccountSystemSetting
  */
 
@@ -24,7 +25,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { db } from "../lib/db/db";
-import { apiRequest } from "../lib/platformApi";
+import { apiRequest, saveAuthToken } from "../lib/platformApi";
 import {
   MediaFieldKeys,
   attachCameraStreamToVideo,
@@ -54,6 +55,7 @@ type SheetKey =
   | "protected"
   | "email"
   | "password"
+  | "transfer"
   | null;
 
 type OwnerUser = {
@@ -178,6 +180,12 @@ type PasswordForm = {
   currentPassword: string;
   newPassword: string;
   confirmPassword: string;
+};
+
+type TransferOwnershipForm = {
+  targetUserId: string;
+  currentPassword: string;
+  confirmation: string;
 };
 
 const emptyMyProfile: MyProfileForm = {
@@ -401,6 +409,35 @@ function refreshStoredAccountCaches(account: AccountData) {
   mergeStoredJson(window.sessionStorage, "eleeveon_auth_account", patch);
 }
 
+function clearOwnerAuthAfterTransfer() {
+  if (typeof window === "undefined") return;
+
+  // platformApi owns the actual token storage contract. An empty token prevents
+  // this former-owner tab from continuing with stale owner claims.
+  try {
+    saveAuthToken("");
+  } catch {
+    // Continue clearing the compatibility caches below.
+  }
+
+  const keys = [
+    "eleeveon_auth_user",
+    "eleeveon_auth_account",
+    "eleeveon_account_user",
+    "eleeveon_account_info",
+    "eleeveon_user_memberships",
+    "eleeveon_active_membership",
+    "activeMembership",
+    "user",
+    "account",
+  ];
+
+  for (const key of keys) {
+    try { window.localStorage.removeItem(key); } catch {}
+    try { window.sessionStorage.removeItem(key); } catch {}
+  }
+}
+
 function Chip({
   children,
   tone = "gray",
@@ -435,6 +472,12 @@ export default function AccountProfilePage() {
     newPassword: "",
     confirmPassword: "",
   });
+  const [transferForm, setTransferForm] = useState<TransferOwnershipForm>({
+    targetUserId: "",
+    currentPassword: "",
+    confirmation: "",
+  });
+  const [transferCandidate, setTransferCandidate] = useState<OwnerUser | null>(null);
   const [activeSheet, setActiveSheet] = useState<SheetKey>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [toast, setToast] = useState<{
@@ -803,6 +846,18 @@ export default function AccountProfilePage() {
     setActiveSheet("password");
   };
 
+  const openTransferSheet = (candidate?: OwnerUser | null, currentPassword = "") => {
+    const selected = candidate || null;
+    setTransferCandidate(selected);
+    setTransferForm({
+      targetUserId: selected?.id || "",
+      currentPassword,
+      confirmation: "",
+    });
+    setMessage("");
+    setActiveSheet("transfer");
+  };
+
   const openCameraForField = (field: CameraField) => {
     if (!requireAccount()) return;
     if (!isCameraApiAvailable()) {
@@ -1130,6 +1185,20 @@ export default function AccountProfilePage() {
       return;
     }
 
+    const existingAccountUser = (account?.users || []).find((candidate: any) =>
+      candidate?.id &&
+      candidate.id !== ownerUser?.id &&
+      String(candidate.email || "").trim().toLowerCase() === nextEmail
+    ) as OwnerUser | undefined;
+
+    if (existingAccountUser) {
+      openTransferSheet(existingAccountUser, emailForm.currentPassword);
+      setMessage(
+        `${safeText(existingAccountUser.fullName, "This user")} already owns this login email. Transfer ownership to the existing user instead of creating a duplicate login identity.`,
+      );
+      return;
+    }
+
     try {
       setSaving(true);
       const result = await apiRequest<MyProfileResponse>("/accounts/me/email", {
@@ -1163,6 +1232,61 @@ export default function AccountProfilePage() {
       showToast("success", "Owner email changed and synchronized across Account and login.");
     } catch (error: any) {
       setMessage(error?.message || "Owner email could not be changed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function transferOwnership(event?: React.FormEvent) {
+    event?.preventDefault();
+
+    const targetUser = (account?.users || []).find(
+      (candidate: any) => String(candidate?.id || "") === transferForm.targetUserId,
+    ) as OwnerUser | undefined;
+
+    if (!transferForm.targetUserId || !targetUser) {
+      setMessage("Select the existing user who should become the new owner.");
+      return;
+    }
+
+    if (targetUser.id === ownerUser?.id) {
+      setMessage("You are already the current owner.");
+      return;
+    }
+
+    if (!transferForm.currentPassword) {
+      setMessage("Enter the current owner's password to authorize the transfer.");
+      return;
+    }
+
+    if (transferForm.confirmation.trim().toUpperCase() !== "TRANSFER") {
+      setMessage('Type TRANSFER exactly to confirm the ownership transfer.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await apiRequest<any>("/accounts/me/ownership/transfer", {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: transferForm.targetUserId,
+          currentPassword: transferForm.currentPassword,
+        }),
+      } as any);
+
+      // This browser belongs to the former owner. The backend has revoked the
+      // owner sessions, so remove cached owner identity immediately and force a
+      // fresh login. The new owner signs in with THEIR EXISTING password.
+      clearOwnerAuthAfterTransfer();
+      setTransferForm({ targetUserId: "", currentPassword: "", confirmation: "" });
+      setTransferCandidate(null);
+
+      window.alert(
+        `Ownership transferred to ${safeText(targetUser.fullName, targetUser.email || "the selected user")}. They can now sign in with their existing email and existing password.`,
+      );
+      window.location.assign("/login");
+    } catch (error: any) {
+      setMessage(error?.message || "Ownership could not be transferred.");
     } finally {
       setSaving(false);
     }
@@ -1432,6 +1556,10 @@ export default function AccountProfilePage() {
             setMoreOpen(false);
             setActiveSheet("security");
           }}
+          onTransfer={() => {
+            setMoreOpen(false);
+            openTransferSheet();
+          }}
           onSync={() => {
             setMoreOpen(false);
             setActiveSheet("sync");
@@ -1495,6 +1623,7 @@ export default function AccountProfilePage() {
           saveSettings={saveSecuritySettings}
           openEmail={openEmailSheet}
           openPassword={openPasswordSheet}
+          openTransfer={() => openTransferSheet()}
           close={() => setActiveSheet(null)}
         />
       )}
@@ -1523,6 +1652,30 @@ export default function AccountProfilePage() {
             setMessage("");
           }}
           save={changePassword}
+          close={() => setActiveSheet("security")}
+        />
+      )}
+
+      {activeSheet === "transfer" && (
+        <TransferOwnershipSheet
+          currentOwner={ownerUser}
+          users={(account?.users || []) as OwnerUser[]}
+          candidate={transferCandidate}
+          form={transferForm}
+          saving={saving}
+          message={message}
+          update={(patch) => {
+            const next = { ...transferForm, ...patch };
+            setTransferForm(next);
+            if (patch.targetUserId !== undefined) {
+              const selected = (account?.users || []).find(
+                (user: any) => String(user?.id || "") === patch.targetUserId,
+              ) as OwnerUser | undefined;
+              setTransferCandidate(selected || null);
+            }
+            setMessage("");
+          }}
+          save={transferOwnership}
           close={() => setActiveSheet("security")}
         />
       )}
@@ -1642,6 +1795,7 @@ function MoreSheet({
   onAccount,
   onDefaults,
   onSecurity,
+  onTransfer,
   onSync,
   onProtected,
   onRefresh,
@@ -1651,6 +1805,7 @@ function MoreSheet({
   onAccount: () => void;
   onDefaults: () => void;
   onSecurity: () => void;
+  onTransfer: () => void;
   onSync: () => void;
   onProtected: () => void;
   onRefresh: () => void | Promise<void>;
@@ -1686,6 +1841,12 @@ function MoreSheet({
             title="Owner Login & Security"
             note="Login email, password and access rules"
             onClick={onSecurity}
+          />
+          <MenuButton
+            icon="↔"
+            title="Transfer Ownership"
+            note="Move the complete owner account to an existing user"
+            onClick={onTransfer}
           />
           <MenuButton
             icon="⚙"
@@ -2018,6 +2179,7 @@ function SecuritySheet({
   saveSettings,
   openEmail,
   openPassword,
+  openTransfer,
   close,
 }: {
   user: OwnerUser | null;
@@ -2031,6 +2193,7 @@ function SecuritySheet({
   saveSettings: (event?: React.FormEvent) => void | Promise<void>;
   openEmail: () => void;
   openPassword: () => void;
+  openTransfer: () => void;
   close: () => void;
 }) {
   return (
@@ -2062,6 +2225,18 @@ function SecuritySheet({
           <div>
             <b>Password</b>
             <small>Last changed: {safeDate(user?.passwordChangedAt)}</small>
+          </div>
+          <span>›</span>
+        </button>
+
+        <button
+          type="button"
+          className="ba-security-action danger"
+          onClick={openTransfer}
+        >
+          <div>
+            <b>Transfer Ownership</b>
+            <small>Move the complete owner identity to an existing active user in this account.</small>
           </div>
           <span>›</span>
         </button>
@@ -2157,6 +2332,120 @@ function ChangeEmailSheet({
         School and branch contact emails do not count as registered owner logins.
         If this email already belongs to another AppUser, the backend will identify
         that separately because AppUser login emails must remain unique.
+      </p>
+    </SettingsModal>
+  );
+}
+
+function TransferOwnershipSheet({
+  currentOwner,
+  users,
+  candidate,
+  form,
+  saving,
+  message,
+  update,
+  save,
+  close,
+}: {
+  currentOwner: OwnerUser | null;
+  users: OwnerUser[];
+  candidate: OwnerUser | null;
+  form: TransferOwnershipForm;
+  saving: boolean;
+  message: string;
+  update: (patch: Partial<TransferOwnershipForm>) => void;
+  save: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
+  const candidates = users.filter((user) => {
+    if (!user?.id || user.id === currentOwner?.id || user.active === false) return false;
+    const role = String(user.role || "").toLowerCase();
+    return role !== "developer" && role !== "platform_team";
+  });
+
+  const selected =
+    candidate ||
+    candidates.find((user) => String(user.id) === form.targetUserId) ||
+    null;
+
+  return (
+    <SettingsModal
+      title="Transfer Ownership"
+      text="Move the complete Eleeveon Account owner identity to an existing user. The new owner keeps their existing email, password and lower memberships."
+      saving={saving}
+      message={message}
+      onSubmit={save}
+      close={close}
+      submitLabel="Transfer Ownership"
+    >
+      <div className="ba-transfer-warning">
+        <strong>This is a complete ownership transfer.</strong>
+        <span>
+          Your owner/super-admin authority will be removed. If you have no other
+          active lower membership, your login will be deactivated. Existing owner
+          sessions are revoked after the transfer.
+        </span>
+      </div>
+
+      <div className="ba-form">
+        <label className="wide">
+          <span>New Owner</span>
+          <select
+            value={form.targetUserId}
+            onChange={(event) => update({ targetUserId: event.target.value })}
+          >
+            <option value="">Select an existing account user</option>
+            {candidates.map((user) => (
+              <option key={user.id} value={user.id}>
+                {safeText(user.fullName, "Unnamed user")} · {safeText(user.email, "No email")} · {titleCase(user.role)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {selected && (
+          <div className="ba-transfer-summary wide">
+            <div>
+              <span>New owner</span>
+              <strong>{safeText(selected.fullName, "Unnamed user")}</strong>
+              <small>{safeText(selected.email, "No email")}</small>
+            </div>
+            <div>
+              <span>Existing password</span>
+              <strong>Preserved</strong>
+              <small>Their password hash is not changed or copied.</small>
+            </div>
+            <div>
+              <span>Existing memberships</span>
+              <strong>Preserved</strong>
+              <small>Branch/school roles stay available alongside owner access.</small>
+            </div>
+          </div>
+        )}
+
+        <PasswordInput
+          wide
+          label="Current Owner Password"
+          value={form.currentPassword}
+          onChange={(value) => update({ currentPassword: value })}
+          autoComplete="current-password"
+        />
+
+        <TextInput
+          wide
+          label='Type "TRANSFER" to Confirm'
+          value={form.confirmation}
+          onChange={(value) => update({ confirmation: value })}
+          placeholder="TRANSFER"
+          autoComplete="off"
+        />
+      </div>
+
+      <p className="ba-inline-note danger-note">
+        After completion, the new owner signs in using their existing email and
+        the same password they already use now. This browser will be signed out
+        because it belongs to the former owner.
       </p>
     </SettingsModal>
   );
@@ -2746,6 +3035,19 @@ const css = `
 .ba-security-action b { display: block; font-size: 13px; font-weight: 1000; }
 .ba-security-action small { display: block; margin-top: 3px; color: var(--muted,#64748b); font-size: 11px; line-height: 1.4; font-weight: 750; overflow-wrap: anywhere; }
 .ba-security-action span { color: var(--ba-primary); font-size: 18px; font-weight: 1000; }
+.ba-security-action.danger { border-color: rgba(220,38,38,.24); background: rgba(239,68,68,.055); }
+.ba-security-action.danger b, .ba-security-action.danger span { color: #b91c1c; }
+.ba-transfer-warning { display: grid; gap: 5px; margin-bottom: 12px; padding: 12px; border-radius: 18px; border: 1px solid rgba(220,38,38,.20); background: rgba(239,68,68,.07); }
+.ba-transfer-warning strong { color: #991b1b; font-size: 13px; font-weight: 1000; }
+.ba-transfer-warning span { color: var(--muted,#64748b); font-size: 11px; line-height: 1.5; font-weight: 750; }
+.ba-transfer-summary { display: grid; grid-template-columns: minmax(0,1fr); gap: 8px; padding: 10px; border-radius: 18px; background: color-mix(in srgb,var(--ba-primary) 6%,transparent); border: 1px solid color-mix(in srgb,var(--ba-primary) 16%,var(--border,rgba(0,0,0,.10))); }
+.ba-transfer-summary div { min-width: 0; padding: 8px; border-radius: 14px; background: var(--surface,#fff); border: 1px solid var(--border,rgba(0,0,0,.08)); }
+.ba-transfer-summary span, .ba-transfer-summary strong, .ba-transfer-summary small { display: block; }
+.ba-transfer-summary span { color: var(--muted,#64748b); font-size: 10px; font-weight: 950; text-transform: uppercase; letter-spacing: .05em; }
+.ba-transfer-summary strong { margin-top: 3px; font-size: 13px; font-weight: 1000; overflow-wrap: anywhere; }
+.ba-transfer-summary small { margin-top: 3px; color: var(--muted,#64748b); font-size: 11px; line-height: 1.4; font-weight: 750; overflow-wrap: anywhere; }
+.danger-note { background: rgba(239,68,68,.07) !important; color: #991b1b !important; }
+@media (min-width: 680px) { .ba-transfer-summary { grid-template-columns: repeat(3,minmax(0,1fr)); } }
 .ba-inline-note { margin: 8px 0 0; padding: 10px 12px; border-radius: 16px; background: color-mix(in srgb,var(--ba-primary) 7%,transparent); color: var(--muted,#64748b); font-size: 11px; line-height: 1.5; font-weight: 750; }
 .ba-form input[readonly] { background: color-mix(in srgb,var(--muted,#64748b) 7%,var(--surface,#fff)); color: var(--muted,#64748b); cursor: default; }
 

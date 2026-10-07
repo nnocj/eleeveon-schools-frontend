@@ -377,7 +377,10 @@ export default function LoginPage() {
       
 
       // Owner may have no school/branch membership yet because owner creates schools.
-      if (role === "super_admin") {
+      // If the owner also has another active membership (for example branch admin
+      // or teacher), do not skip role selection. Only a sole-role owner should
+      // enter the owner portal directly.
+      if (role === "super_admin" && memberships.length <= 1) {
         const ownerMembership =
           chooseSingleMembershipForRole(role, memberships) ||
           createFallbackMembership({ role, user: res.user });

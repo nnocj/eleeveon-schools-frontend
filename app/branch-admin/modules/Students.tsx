@@ -52,6 +52,12 @@
  * - Camera, Cancel, Close and other secondary actions use the same neutral/outlined hierarchy
  * - all action colors resolve from --ba-primary so Branch Settings theme changes flow into Students
  *
+ * Integrated enrollment workflow:
+ * - new students can receive their initial class/structure/period enrollment during creation
+ * - existing students manage enrollment history directly from the student action sheet
+ * - active enrollment automatically synchronizes student.currentClassId
+ * - duplicate and one-active-enrollment-per-period rules are preserved
+ *
  * Student map view:
  * - adds Map under More without changing the compact main toolbar
  * - maps only the already branch-scoped, searched and filtered student rows
@@ -64,6 +70,8 @@ import { useRouter } from "next/navigation";
 import { useSettings } from "../../context/settings-context";
 import {
   db,
+  type AcademicPeriod,
+  type AcademicStructure,
   type Branch,
   type Class,
   type Organization,
@@ -109,6 +117,7 @@ import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
 type ViewMode = "cards" | "table" | "map" | "summary";
 type ToastTone = "success" | "error" | "info";
 type StudentStatus = "active" | "graduated" | "transferred" | "withdrawn";
+type EnrollmentStatus = "active" | "completed" | "promoted" | "withdrawn";
 type CameraField = "photo" | "coverPhoto";
 type ProximityLayer = "branch" | "student" | "teacher" | "parent";
 
@@ -238,6 +247,9 @@ type FormState = {
   id?: string;
   organizationId: string;
   currentClassId: string;
+  enrollmentAcademicStructureId: string;
+  enrollmentAcademicPeriodId: string;
+  enrollmentStartDate: string;
   admissionNumber: string;
   fullName: string;
   gender: string;
@@ -267,6 +279,17 @@ type FormState = {
   status: StudentStatus;
 };
 
+type EnrollmentFormState = {
+  id?: string;
+  studentId: string;
+  classId: string;
+  academicStructureId: string;
+  academicPeriodId: string;
+  startDate: string;
+  endDate: string;
+  status: EnrollmentStatus;
+};
+
 type StudentView = {
   id: string;
   row: Student;
@@ -279,9 +302,24 @@ type StudentView = {
   active: boolean;
 };
 
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const emptyEnrollmentForm: EnrollmentFormState = {
+  studentId: "",
+  classId: "",
+  academicStructureId: "",
+  academicPeriodId: "",
+  startDate: todayISO(),
+  endDate: "",
+  status: "active",
+};
+
 const emptyForm: FormState = {
   organizationId: "",
   currentClassId: "",
+  enrollmentAcademicStructureId: "",
+  enrollmentAcademicPeriodId: "",
+  enrollmentStartDate: todayISO(),
   admissionNumber: "",
   fullName: "",
   gender: "",
@@ -378,6 +416,21 @@ function statusTone(
   if (s === "transferred") return "orange";
   if (s === "withdrawn") return "red";
   return "gray";
+}
+
+function enrollmentStatusTone(
+  status?: EnrollmentStatus,
+): "green" | "red" | "blue" | "orange" | "gray" {
+  if (!status || status === "active") return "green";
+  if (status === "completed") return "blue";
+  if (status === "promoted") return "orange";
+  if (status === "withdrawn") return "red";
+  return "gray";
+}
+
+function enrollmentStatusLabel(status?: EnrollmentStatus) {
+  if (!status) return "Active";
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 const timeText = (v?: string | number | null) => {
@@ -505,6 +558,8 @@ export default function StudentsPage() {
     "branches",
     "classes",
     "organizations",
+    "academicStructures",
+    "academicPeriods",
     "studentEnrollments",
     "mediaAssets",
     "mediaBlobs",
@@ -545,6 +600,8 @@ export default function StudentsPage() {
   });
   const [classes, setClasses] = useState<Class[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<AcademicStructure[]>([]);
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
   const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
     Record<string, string>
@@ -575,6 +632,10 @@ export default function StudentsPage() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [enrollmentStudentId, setEnrollmentStudentId] = useState<string | null>(null);
+  const [enrollmentEditorOpen, setEnrollmentEditorOpen] = useState(false);
+  const [enrollmentForm, setEnrollmentForm] = useState<EnrollmentFormState>(emptyEnrollmentForm);
+  const [enrollmentSaving, setEnrollmentSaving] = useState(false);
   const [toast, setToast] = useState<{
     tone: ToastTone;
     message: string;
@@ -694,6 +755,8 @@ export default function StudentsPage() {
     setParents([]);
     setClasses([]);
     setOrganizations([]);
+    setAcademicStructures([]);
+    setPeriods([]);
     setEnrollments([]);
     setMediaPreviewUrls({});
   };
@@ -757,6 +820,8 @@ export default function StudentsPage() {
         branchRows,
         classRows,
         organizationRows,
+        structureRows,
+        periodRows,
         enrollmentRows,
       ] = await Promise.all([
         tableSafe("students")?.toArray?.() || [],
@@ -769,6 +834,16 @@ export default function StudentsPage() {
           branchId: branchId,
         } as any),
         listActiveLocal("organizations", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("academicStructures", {
+          accountId,
+          schoolId: schoolId,
+          branchId: branchId,
+        } as any),
+        listActiveLocal("academicPeriods", {
           accountId,
           schoolId: schoolId,
           branchId: branchId,
@@ -851,6 +926,20 @@ export default function StudentsPage() {
         (organizationRows as Organization[]).sort((a: any, b: any) =>
           String(a.name || "").localeCompare(String(b.name || "")),
         ),
+      );
+
+      setAcademicStructures(
+        (structureRows as AcademicStructure[])
+          .filter((row: any) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) =>
+            String(a.name || "").localeCompare(String(b.name || "")),
+          ),
+      );
+
+      setPeriods(
+        (periodRows as AcademicPeriod[])
+          .filter((row: any) => sameTenant(row as TenantRow) && isActiveRow(row))
+          .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0)),
       );
 
       setEnrollments(
@@ -940,6 +1029,28 @@ export default function StudentsPage() {
     () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
     [organizations],
   );
+  const structureMap = useMemo(
+    () => new Map(academicStructures.map((r: any) => [idOf(r.id), r])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(periods.map((r: any) => [idOf(r.id), r])),
+    [periods],
+  );
+
+  const filteredPeriodsForStudentForm = useMemo(() => {
+    if (!form.enrollmentAcademicStructureId) return periods;
+    return periods.filter((row: any) =>
+      sameId(row.academicStructureId, form.enrollmentAcademicStructureId),
+    );
+  }, [form.enrollmentAcademicStructureId, periods]);
+
+  const filteredPeriodsForEnrollmentForm = useMemo(() => {
+    if (!enrollmentForm.academicStructureId) return periods;
+    return periods.filter((row: any) =>
+      sameId(row.academicStructureId, enrollmentForm.academicStructureId),
+    );
+  }, [enrollmentForm.academicStructureId, periods]);
 
   const enrollmentMap = useMemo(() => {
     const m = new Map<string, StudentEnrollment[]>();
@@ -993,6 +1104,23 @@ export default function StudentsPage() {
       rows,
     ],
   );
+
+  const enrollmentManagerItem = useMemo(
+    () =>
+      enrollmentStudentId
+        ? viewRows.find((item) => sameId(item.id, enrollmentStudentId)) || null
+        : null,
+    [enrollmentStudentId, viewRows],
+  );
+
+  const managedEnrollments = useMemo(() => {
+    if (!enrollmentStudentId) return [] as StudentEnrollment[];
+    return [...(enrollmentMap.get(enrollmentStudentId) || [])].sort((a: any, b: any) => {
+      const left = String(a.startDate || a.updatedAt || a.createdAt || "");
+      const right = String(b.startDate || b.updatedAt || b.createdAt || "");
+      return right.localeCompare(left);
+    });
+  }, [enrollmentMap, enrollmentStudentId]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1362,6 +1490,35 @@ export default function StudentsPage() {
     return true;
   };
 
+  const defaultEnrollmentSelection = () => {
+    const configuredPeriodId = cleanId(settings?.currentAcademicPeriodId);
+    const configuredStructureId = cleanId(settings?.currentAcademicStructureId);
+    const configuredPeriod: any = configuredPeriodId
+      ? periodMap.get(configuredPeriodId)
+      : undefined;
+
+    const structureId =
+      cleanId(configuredPeriod?.academicStructureId) ||
+      (configuredStructureId && structureMap.has(configuredStructureId)
+        ? configuredStructureId
+        : "") ||
+      (academicStructures.length === 1 ? cleanId((academicStructures[0] as any)?.id) : "");
+
+    const matchingPeriods = structureId
+      ? periods.filter((row: any) => sameId(row.academicStructureId, structureId))
+      : periods;
+
+    const selectedPeriod: any =
+      configuredPeriod ||
+      (matchingPeriods.length === 1 ? matchingPeriods[0] : undefined);
+
+    return {
+      academicStructureId: structureId,
+      academicPeriodId: cleanId(selectedPeriod?.id),
+      startDate: selectedPeriod?.startDate || todayISO(),
+    };
+  };
+
   const openCreate = (defaults?: StudentCreateDefaults) => {
     if (!requireTenant()) return;
 
@@ -1371,10 +1528,14 @@ export default function StudentsPage() {
     const hasMapCoordinate =
       Number.isFinite(defaults?.latitude) &&
       Number.isFinite(defaults?.longitude);
+    const enrollmentDefaults = defaultEnrollmentSelection();
 
     setForm({
       ...emptyForm,
       currentClassId: filterClassId !== "all" ? filterClassId : "",
+      enrollmentAcademicStructureId: enrollmentDefaults.academicStructureId,
+      enrollmentAcademicPeriodId: enrollmentDefaults.academicPeriodId,
+      enrollmentStartDate: enrollmentDefaults.startDate,
       organizationId:
         filterOrganizationId !== "all" ? filterOrganizationId : "",
       status: filterStatus !== "all" ? filterStatus : "active",
@@ -1461,6 +1622,9 @@ export default function StudentsPage() {
       resolvedMediaById[studentId]?.coverPhoto ||
       mediaPreviewUrls[mediaKey(studentId, "coverPhoto")] ||
       "";
+    const activeEnrollment: any = (enrollmentMap.get(studentId) || []).find(
+      (item: any) => item.status === "active" && !item.isDeleted,
+    );
 
     mediaSessionKey.current = makeMediaSessionKey();
     uploadedMediaAssetIds.current = {};
@@ -1468,7 +1632,14 @@ export default function StudentsPage() {
     setForm({
       id: studentId,
       organizationId: s.organizationId ? String(s.organizationId) : "",
-      currentClassId: s.currentClassId ? String(s.currentClassId) : "",
+      currentClassId: activeEnrollment?.classId
+        ? String(activeEnrollment.classId)
+        : s.currentClassId
+          ? String(s.currentClassId)
+          : "",
+      enrollmentAcademicStructureId: "",
+      enrollmentAcademicPeriodId: "",
+      enrollmentStartDate: todayISO(),
       admissionNumber: s.admissionNumber || "",
       fullName: s.fullName || "",
       gender: s.gender || "",
@@ -1505,6 +1676,259 @@ export default function StudentsPage() {
       status: s.status || "active",
     });
     setModalOpen(true);
+  };
+
+  const resolveStudentRecord = async (studentId: string): Promise<Student | undefined> => {
+    const normalizedId = cleanId(studentId);
+    if (!normalizedId) return undefined;
+
+    const direct = await db.students.get(normalizedId).catch(() => undefined);
+    if (direct) return direct;
+
+    const byCloudId = await db.students
+      .where("cloudId")
+      .equals(normalizedId)
+      .first()
+      .catch(() => undefined);
+    if (byCloudId) return byCloudId;
+
+    return db.students
+      .where("localId")
+      .equals(normalizedId)
+      .first()
+      .catch(() => undefined);
+  };
+
+  const syncStudentCurrentClass = async (studentId: string, classId: string) => {
+    const student = await resolveStudentRecord(studentId);
+    const localStudentId = cleanId((student as any)?.id) || cleanId(studentId);
+
+    if (!student || !localStudentId) {
+      throw new Error("The selected student record could not be resolved locally.");
+    }
+
+    await updateLocal("students", localStudentId, {
+      currentClassId: cleanId(classId) || null,
+      status: (student as any).status === "graduated" ? "active" : (student as any).status,
+    } as unknown as Partial<Student>);
+  };
+
+  const validateEnrollmentDraft = (
+    draft: EnrollmentFormState,
+    options: { studentId?: string; ignoreId?: string } = {},
+  ) => {
+    if (!authenticated || !accountId) return "Sign in first.";
+    if (!schoolId) return "Select a school first.";
+    if (!branchId) return "Select a branch first.";
+
+    const studentId = cleanId(options.studentId || draft.studentId);
+    if (!studentId) return "Select student.";
+    if (!draft.classId) return "Select class.";
+    if (!draft.academicStructureId) return "Select academic structure.";
+    if (!draft.academicPeriodId) return "Select academic period.";
+    if (!draft.startDate) return "Select start date.";
+
+    const selectedStudent = rows.find((row: any) => sameId(row.id, studentId));
+    if (!selectedStudent) return "Selected student is not in this branch.";
+    if (!classMap.get(idOf(draft.classId))) return "Selected class is not in this branch.";
+    if (!structureMap.get(idOf(draft.academicStructureId)))
+      return "Selected academic structure is not in this branch.";
+
+    const selectedPeriod: any = periodMap.get(idOf(draft.academicPeriodId));
+    if (!selectedPeriod) return "Selected academic period is not in this branch.";
+    if (!sameId(selectedPeriod.academicStructureId, draft.academicStructureId))
+      return "Selected academic period does not belong to the selected academic structure.";
+    if (draft.endDate && draft.endDate < draft.startDate)
+      return "End date cannot be before start date.";
+
+    const ignoredId = cleanId(options.ignoreId || draft.id);
+    const duplicate = enrollments.find((row: any) => {
+      if (ignoredId && sameId(row.id, ignoredId)) return false;
+      return (
+        sameId(row.studentId, studentId) &&
+        sameId(row.classId, draft.classId) &&
+        sameId(row.academicStructureId, draft.academicStructureId) &&
+        sameId(row.academicPeriodId, draft.academicPeriodId) &&
+        !row.isDeleted
+      );
+    });
+    if (duplicate)
+      return "This student is already enrolled in this class for this academic period.";
+
+    const activeClassInSamePeriod = enrollments.find((row: any) => {
+      if (ignoredId && sameId(row.id, ignoredId)) return false;
+      return (
+        sameId(row.studentId, studentId) &&
+        sameId(row.academicStructureId, draft.academicStructureId) &&
+        sameId(row.academicPeriodId, draft.academicPeriodId) &&
+        row.status === "active" &&
+        !row.isDeleted
+      );
+    });
+    if (activeClassInSamePeriod && draft.status === "active")
+      return "This student already has an active class enrollment for this academic period.";
+
+    return "";
+  };
+
+  const openEnrollmentManager = (item: StudentView) => {
+    setSelectedItem(null);
+    setEnrollmentEditorOpen(false);
+    setEnrollmentStudentId(item.id);
+  };
+
+  const openEnrollmentCreate = (item?: StudentView | null) => {
+    const target = item || enrollmentManagerItem;
+    if (!target) return;
+    const defaults = defaultEnrollmentSelection();
+    const row: any = target.row;
+
+    setEnrollmentForm({
+      ...emptyEnrollmentForm,
+      studentId: target.id,
+      classId: cleanId((target.activeEnrollment as any)?.classId || row.currentClassId),
+      academicStructureId: defaults.academicStructureId,
+      academicPeriodId: defaults.academicPeriodId,
+      startDate: defaults.startDate,
+      status: "active",
+    });
+    setEnrollmentEditorOpen(true);
+  };
+
+  const openEnrollmentEdit = (row: StudentEnrollment) => {
+    const item: any = row;
+    setEnrollmentForm({
+      id: cleanId(item.id),
+      studentId: cleanId(item.studentId),
+      classId: cleanId(item.classId),
+      academicStructureId: cleanId(item.academicStructureId),
+      academicPeriodId: cleanId(item.academicPeriodId),
+      startDate: item.startDate || todayISO(),
+      endDate: item.endDate || "",
+      status: (item.status || "active") as EnrollmentStatus,
+    });
+    setEnrollmentEditorOpen(true);
+  };
+
+  const saveEnrollment = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    const error = validateEnrollmentDraft(enrollmentForm);
+    if (error) {
+      showToast("error", error);
+      return;
+    }
+    if (!authenticated || !accountId || !schoolId || !branchId) return;
+
+    try {
+      setEnrollmentSaving(true);
+      const studentId = cleanId(enrollmentForm.studentId);
+      const classId = cleanId(enrollmentForm.classId);
+      const payload: Partial<StudentEnrollment> = {
+        accountId,
+        schoolId,
+        branchId,
+        studentId: studentId || undefined,
+        classId: classId || undefined,
+        academicStructureId: cleanId(enrollmentForm.academicStructureId) || undefined,
+        academicPeriodId: cleanId(enrollmentForm.academicPeriodId) || undefined,
+        startDate: enrollmentForm.startDate,
+        endDate:
+          enrollmentForm.status === "active"
+            ? undefined
+            : enrollmentForm.endDate.trim() || undefined,
+        status: enrollmentForm.status,
+        isDeleted: false,
+      } as Partial<StudentEnrollment>;
+
+      if (enrollmentForm.id) {
+        await updateLocal("studentEnrollments", enrollmentForm.id, payload);
+      } else {
+        await createLocal("studentEnrollments", payload as unknown as StudentEnrollment);
+      }
+
+      if (enrollmentForm.status === "active" && studentId && classId) {
+        await syncStudentCurrentClass(studentId, classId);
+      }
+
+      setEnrollmentEditorOpen(false);
+      showToast("success", "Student enrollment saved.");
+      await load();
+    } catch (error: any) {
+      console.error("Failed to save student enrollment:", error);
+      showToast("error", error?.message || "Failed to save student enrollment.");
+    } finally {
+      setEnrollmentSaving(false);
+    }
+  };
+
+  const setEnrollmentStatus = async (
+    row: StudentEnrollment,
+    status: EnrollmentStatus,
+  ) => {
+    const item: any = row;
+    const id = cleanId(item.id);
+    if (!id) return;
+
+    if (status === "active") {
+      const draft: EnrollmentFormState = {
+        id,
+        studentId: cleanId(item.studentId),
+        classId: cleanId(item.classId),
+        academicStructureId: cleanId(item.academicStructureId),
+        academicPeriodId: cleanId(item.academicPeriodId),
+        startDate: item.startDate || todayISO(),
+        endDate: "",
+        status: "active",
+      };
+      const error = validateEnrollmentDraft(draft, { ignoreId: id });
+      if (error) {
+        showToast("error", error);
+        return;
+      }
+    }
+
+    try {
+      const patch: Partial<StudentEnrollment> = { status } as Partial<StudentEnrollment>;
+      if (status === "active") {
+        patch.endDate = undefined;
+      } else if (!item.endDate) {
+        patch.endDate = todayISO();
+      }
+
+      await updateLocal("studentEnrollments", id, patch);
+      if (status === "active") {
+        await syncStudentCurrentClass(String(item.studentId), String(item.classId));
+      }
+
+      showToast("success", `Enrollment marked as ${enrollmentStatusLabel(status)}.`);
+      await load();
+    } catch (error: any) {
+      console.error("Failed to update enrollment status:", error);
+      showToast("error", error?.message || "Failed to update enrollment status.");
+    }
+  };
+
+  const syncEnrollmentCurrentClass = async (row: StudentEnrollment) => {
+    const item: any = row;
+    try {
+      await syncStudentCurrentClass(String(item.studentId), String(item.classId));
+      showToast("success", "Student current class updated from the active enrollment.");
+      await load();
+    } catch (error: any) {
+      console.error("Failed to sync current class:", error);
+      showToast("error", error?.message || "Failed to sync current class.");
+    }
+  };
+
+  const removeEnrollment = async (row: StudentEnrollment) => {
+    const item: any = row;
+    const id = cleanId(item.id);
+    if (!id) return;
+    if (!window.confirm("Delete this student enrollment record?")) return;
+
+    await softDeleteLocal("studentEnrollments", id);
+    showToast("success", "Student enrollment deleted.");
+    await load();
   };
 
   const clearFilters = () => {
@@ -1561,6 +1985,24 @@ export default function StudentsPage() {
       return "Selected class is not in this branch.";
     if (form.organizationId && !organizationMap.get(idOf(form.organizationId)))
       return "Selected organization is not in this branch.";
+
+    if (!form.id && form.currentClassId) {
+      if (form.status !== "active")
+        return "Initial enrollment requires the student status to be Active, or leave the class unassigned.";
+      if (!form.enrollmentAcademicStructureId)
+        return "Select academic structure for the initial enrollment.";
+      if (!form.enrollmentAcademicPeriodId)
+        return "Select academic period for the initial enrollment.";
+      if (!form.enrollmentStartDate)
+        return "Select enrollment start date.";
+      if (!structureMap.get(idOf(form.enrollmentAcademicStructureId)))
+        return "Selected academic structure is not in this branch.";
+      const initialPeriod: any = periodMap.get(idOf(form.enrollmentAcademicPeriodId));
+      if (!initialPeriod)
+        return "Selected academic period is not in this branch.";
+      if (!sameId(initialPeriod.academicStructureId, form.enrollmentAcademicStructureId))
+        return "Selected academic period does not belong to the selected academic structure.";
+    }
 
     return "";
   };
@@ -1747,10 +2189,39 @@ export default function StudentsPage() {
         );
       }
 
+      let initialEnrollmentCreated = false;
+      if (!existing && form.currentClassId) {
+        const initialEnrollment: Partial<StudentEnrollment> = {
+          accountId,
+          schoolId,
+          branchId,
+          studentId: savedStudentId,
+          classId: cleanId(form.currentClassId) || undefined,
+          academicStructureId:
+            cleanId(form.enrollmentAcademicStructureId) || undefined,
+          academicPeriodId: cleanId(form.enrollmentAcademicPeriodId) || undefined,
+          startDate: form.enrollmentStartDate,
+          status: "active",
+          isDeleted: false,
+        };
+
+        await createLocal(
+          "studentEnrollments",
+          initialEnrollment as unknown as StudentEnrollment,
+        );
+        await syncStudentCurrentClass(savedStudentId, form.currentClassId);
+        initialEnrollmentCreated = true;
+      }
+
       uploadedMediaAssetIds.current = {};
       mediaSessionKey.current = makeMediaSessionKey();
       setModalOpen(false);
-      showToast("success", "Student saved.");
+      showToast(
+        "success",
+        initialEnrollmentCreated
+          ? "Student saved and enrolled in the selected academic period."
+          : "Student saved.",
+      );
       await load();
     } catch (error: any) {
       console.error(
@@ -2150,6 +2621,7 @@ export default function StudentsPage() {
           openEdit={openEdit}
           remove={remove}
           setStatus={setStatus}
+          manageEnrollment={openEnrollmentManager}
           onClose={() => setSelectedItem(null)}
         />
       )}
@@ -2160,11 +2632,58 @@ export default function StudentsPage() {
           saving={saving}
           classes={classes}
           organizations={organizations}
+          academicStructures={academicStructures}
+          filteredPeriodsForForm={filteredPeriodsForStudentForm}
+          periodMap={periodMap}
+          activeEnrollment={
+            form.id
+              ? (enrollmentMap.get(form.id) || []).find(
+                  (row: any) => row.status === "active" && !row.isDeleted,
+                )
+              : undefined
+          }
           setModalOpen={setModalOpen}
           updateForm={updateForm}
           handleImageUpload={handleImageUpload}
           openCameraForField={openCameraForField}
           save={save}
+        />
+      )}
+
+      {enrollmentManagerItem && (
+        <EnrollmentManagerSheet
+          item={enrollmentManagerItem}
+          enrollments={managedEnrollments}
+          classMap={classMap}
+          structureMap={structureMap}
+          periodMap={periodMap}
+          primary={primary}
+          openCreate={() => openEnrollmentCreate(enrollmentManagerItem)}
+          openEdit={openEnrollmentEdit}
+          setStatus={setEnrollmentStatus}
+          syncCurrentClass={syncEnrollmentCurrentClass}
+          remove={removeEnrollment}
+          onClose={() => {
+            setEnrollmentEditorOpen(false);
+            setEnrollmentStudentId(null);
+          }}
+        />
+      )}
+
+      {enrollmentEditorOpen && enrollmentManagerItem && (
+        <EnrollmentEditorModal
+          student={enrollmentManagerItem}
+          form={enrollmentForm}
+          saving={enrollmentSaving}
+          classes={classes}
+          academicStructures={academicStructures}
+          filteredPeriodsForForm={filteredPeriodsForEnrollmentForm}
+          periodMap={periodMap}
+          updateForm={(patch) =>
+            setEnrollmentForm((current) => ({ ...current, ...patch }))
+          }
+          save={saveEnrollment}
+          onClose={() => setEnrollmentEditorOpen(false)}
         />
       )}
 
@@ -2497,12 +3016,14 @@ function ActionSheet({
   openEdit,
   remove,
   setStatus,
+  manageEnrollment,
   onClose,
 }: {
   item: StudentView;
   openEdit: (row: Student) => void;
   remove: (item: StudentView) => void;
   setStatus: (item: StudentView, status: StudentStatus) => void;
+  manageEnrollment: (item: StudentView) => void;
   onClose: () => void;
 }) {
   const row: any = item.row;
@@ -2545,7 +3066,13 @@ function ActionSheet({
           <button type="button" onClick={() => openEdit(item.row)}>
             <span>✎</span>
             <b>Edit student</b>
-            <small>Update profile, class, parent and photos</small>
+            <small>Update profile, parent, location and photos</small>
+          </button>
+
+          <button type="button" onClick={() => manageEnrollment(item)}>
+            <span>⇄</span>
+            <b>Manage enrollment</b>
+            <small>Class placement, academic period, status and history</small>
           </button>
 
           {row.status !== "active" && (
@@ -2694,6 +3221,10 @@ function StudentModal({
   saving,
   classes,
   organizations,
+  academicStructures,
+  filteredPeriodsForForm,
+  periodMap,
+  activeEnrollment,
   setModalOpen,
   updateForm,
   handleImageUpload,
@@ -2704,6 +3235,10 @@ function StudentModal({
   saving: boolean;
   classes: Class[];
   organizations: Organization[];
+  academicStructures: AcademicStructure[];
+  filteredPeriodsForForm: AcademicPeriod[];
+  periodMap: Map<string, AcademicPeriod>;
+  activeEnrollment?: StudentEnrollment;
   setModalOpen: (open: boolean) => void;
   updateForm: (patch: Partial<FormState>) => void;
   handleImageUpload: (
@@ -2855,9 +3390,10 @@ function StudentModal({
           <h3>Academic</h3>
           <div className="ba-form two">
             <label>
-              <span>Current Class</span>
+              <span>{form.id ? "Current Class" : "Class / Initial Enrollment"}</span>
               <select
                 value={form.currentClassId}
+                disabled={Boolean(form.id && activeEnrollment)}
                 onChange={(e) => updateForm({ currentClassId: e.target.value })}
               >
                 <option value="">No class assigned</option>
@@ -2867,6 +3403,15 @@ function StudentModal({
                   </option>
                 ))}
               </select>
+              {form.id && activeEnrollment ? (
+                <small className="ba-field-hint">
+                  Current class is controlled by the active enrollment. Use Manage Enrollment from the student actions to change it.
+                </small>
+              ) : !form.id ? (
+                <small className="ba-field-hint">
+                  Leave blank to create the student without enrolling them yet.
+                </small>
+              ) : null}
             </label>
 
             <label>
@@ -2884,6 +3429,77 @@ function StudentModal({
                 ))}
               </select>
             </label>
+
+            {!form.id && form.currentClassId && (
+              <>
+                <label>
+                  <span>Academic Structure</span>
+                  <select
+                    value={form.enrollmentAcademicStructureId}
+                    onChange={(e) =>
+                      updateForm({
+                        enrollmentAcademicStructureId: e.target.value,
+                        enrollmentAcademicPeriodId: "",
+                      })
+                    }
+                  >
+                    <option value="">Select academic structure</option>
+                    {academicStructures.map((row: any) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {row.name}
+                        {row.level ? ` · ${row.level}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Academic Period</span>
+                  <select
+                    value={form.enrollmentAcademicPeriodId}
+                    onChange={(e) => {
+                      const periodId = e.target.value;
+                      const period: any = periodId
+                        ? periodMap.get(idOf(periodId))
+                        : undefined;
+                      updateForm({
+                        enrollmentAcademicPeriodId: periodId,
+                        enrollmentAcademicStructureId: period?.academicStructureId
+                          ? String(period.academicStructureId)
+                          : form.enrollmentAcademicStructureId,
+                        enrollmentStartDate:
+                          period?.startDate || form.enrollmentStartDate,
+                      });
+                    }}
+                  >
+                    <option value="">Select academic period</option>
+                    {filteredPeriodsForForm.map((row: any) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {row.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Enrollment Start Date</span>
+                  <input
+                    type="date"
+                    value={form.enrollmentStartDate}
+                    onChange={(e) =>
+                      updateForm({ enrollmentStartDate: e.target.value })
+                    }
+                  />
+                </label>
+
+                <div className="ba-inline-info">
+                  <b>Initial enrollment</b>
+                  <span>
+                    Saving this student will also create an active enrollment for the selected class and academic period.
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </section>
 
@@ -3229,6 +3845,280 @@ function StudentModal({
           </button>
           <button type="submit" className="ba-save-button" disabled={saving}>
             {saving ? "Saving..." : form.id ? "Save Changes" : "Add Student"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function EnrollmentManagerSheet({
+  item,
+  enrollments,
+  classMap,
+  structureMap,
+  periodMap,
+  primary,
+  openCreate,
+  openEdit,
+  setStatus,
+  syncCurrentClass,
+  remove,
+  onClose,
+}: {
+  item: StudentView;
+  enrollments: StudentEnrollment[];
+  classMap: Map<string, Class>;
+  structureMap: Map<string, AcademicStructure>;
+  periodMap: Map<string, AcademicPeriod>;
+  primary: string;
+  openCreate: () => void;
+  openEdit: (row: StudentEnrollment) => void;
+  setStatus: (row: StudentEnrollment, status: EnrollmentStatus) => void;
+  syncCurrentClass: (row: StudentEnrollment) => void;
+  remove: (row: StudentEnrollment) => void;
+  onClose: () => void;
+}) {
+  const student: any = item.row;
+  const activeEnrollment: any = enrollments.find(
+    (row: any) => row.status === "active" && !row.isDeleted,
+  );
+
+  return (
+    <div className="ba-sheet-backdrop enrollment-manager-layer" role="dialog" aria-modal="true">
+      <section className="ba-sheet enrollment-manager-sheet">
+        <div className="ba-sheet-profile">
+          <div className="enrollment-manager-profile">
+            <Avatar name={student.fullName || "Student"} photo={item.photoUrl} primary={primary} />
+            <div>
+              <h2>{student.fullName || "Student"}</h2>
+              <p>{student.admissionNumber || "No admission number"} · {enrollments.length} enrollment{enrollments.length === 1 ? "" : "s"}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close enrollment manager">✕</button>
+        </div>
+
+        <div className="enrollment-manager-current">
+          <div>
+            <small>Current academic placement</small>
+            <strong>
+              {activeEnrollment
+                ? (classMap.get(idOf(activeEnrollment.classId)) as any)?.name || "Assigned class"
+                : "No active enrollment"}
+            </strong>
+            <span>
+              {activeEnrollment
+                ? `${(structureMap.get(idOf(activeEnrollment.academicStructureId)) as any)?.name || "Structure"} · ${(periodMap.get(idOf(activeEnrollment.academicPeriodId)) as any)?.name || "Period"}`
+                : "Create an enrollment when the student is placed into a class."}
+            </span>
+          </div>
+          <button type="button" className="primary" onClick={openCreate}>+ New Enrollment</button>
+        </div>
+
+        <div className="enrollment-history-heading">
+          <div>
+            <h3>Enrollment History</h3>
+            <p>Class placement is managed here; the student profile keeps currentClassId synchronized from active enrollment.</p>
+          </div>
+        </div>
+
+        <div className="enrollment-history-list">
+          {enrollments.map((row: any) => {
+            const classRow: any = classMap.get(idOf(row.classId));
+            const structure: any = structureMap.get(idOf(row.academicStructureId));
+            const period: any = periodMap.get(idOf(row.academicPeriodId));
+            const currentClassMatches = sameId(student.currentClassId, row.classId);
+
+            return (
+              <article className="enrollment-history-card" key={String(row.id)}>
+                <div className="enrollment-history-main">
+                  <div>
+                    <strong>{classRow?.name || "Unknown class"}</strong>
+                    <span>{structure?.name || "Unknown structure"} · {period?.name || "Unknown period"}</span>
+                  </div>
+                  <Chip tone={enrollmentStatusTone(row.status)}>
+                    {enrollmentStatusLabel(row.status)}
+                  </Chip>
+                </div>
+
+                <div className="enrollment-history-meta">
+                  <span><b>Start</b>{row.startDate || "—"}</span>
+                  <span><b>End</b>{row.endDate || "Open"}</span>
+                  <span><b>Profile class</b>{row.status === "active" ? (currentClassMatches ? "Synced" : "Needs sync") : "Historical"}</span>
+                </div>
+
+                <div className="enrollment-history-actions">
+                  {row.status === "active" && !currentClassMatches && (
+                    <button type="button" onClick={() => syncCurrentClass(row)}>Sync Class</button>
+                  )}
+                  <button type="button" onClick={() => openEdit(row)}>Edit</button>
+                  {row.status !== "active" && (
+                    <button type="button" onClick={() => setStatus(row, "active")}>Activate</button>
+                  )}
+                  {row.status !== "completed" && (
+                    <button type="button" onClick={() => setStatus(row, "completed")}>Complete</button>
+                  )}
+                  {row.status !== "promoted" && (
+                    <button type="button" onClick={() => setStatus(row, "promoted")}>Promote</button>
+                  )}
+                  {row.status !== "withdrawn" && (
+                    <button type="button" onClick={() => setStatus(row, "withdrawn")}>Withdraw</button>
+                  )}
+                  <button type="button" className="danger" onClick={() => remove(row)}>Delete</button>
+                </div>
+              </article>
+            );
+          })}
+
+          {!enrollments.length && (
+            <div className="enrollment-history-empty">
+              <span>⇄</span>
+              <strong>No enrollment history yet</strong>
+              <small>Add the student&apos;s first class placement without leaving Students.</small>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function EnrollmentEditorModal({
+  student,
+  form,
+  saving,
+  classes,
+  academicStructures,
+  filteredPeriodsForForm,
+  periodMap,
+  updateForm,
+  save,
+  onClose,
+}: {
+  student: StudentView;
+  form: EnrollmentFormState;
+  saving: boolean;
+  classes: Class[];
+  academicStructures: AcademicStructure[];
+  filteredPeriodsForForm: AcademicPeriod[];
+  periodMap: Map<string, AcademicPeriod>;
+  updateForm: (patch: Partial<EnrollmentFormState>) => void;
+  save: (event?: React.FormEvent) => void;
+  onClose: () => void;
+}) {
+  const row: any = student.row;
+
+  return (
+    <div className="ba-modal-backdrop enrollment-editor-layer">
+      <form className="ba-modal enrollment-editor-modal" onSubmit={save}>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{form.id ? "Edit Enrollment" : "Enroll Student"}</h2>
+            <p>{row.fullName || "Student"} · {row.admissionNumber || "No admission number"}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close enrollment form">✕</button>
+        </div>
+
+        <section className="ba-form-section">
+          <h3>Academic Placement</h3>
+          <div className="ba-form two">
+            <label>
+              <span>Class</span>
+              <select value={form.classId} onChange={(event) => updateForm({ classId: event.target.value })}>
+                <option value="">Select class</option>
+                {classes.map((classRow: any) => (
+                  <option key={String(classRow.id)} value={String(classRow.id)}>{classRow.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Academic Structure</span>
+              <select
+                value={form.academicStructureId}
+                onChange={(event) =>
+                  updateForm({ academicStructureId: event.target.value, academicPeriodId: "" })
+                }
+              >
+                <option value="">Select academic structure</option>
+                {academicStructures.map((structure: any) => (
+                  <option key={String(structure.id)} value={String(structure.id)}>
+                    {structure.name}{structure.level ? ` · ${structure.level}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Academic Period</span>
+              <select
+                value={form.academicPeriodId}
+                onChange={(event) => {
+                  const periodId = event.target.value;
+                  const period: any = periodId ? periodMap.get(idOf(periodId)) : undefined;
+                  updateForm({
+                    academicPeriodId: periodId,
+                    academicStructureId: period?.academicStructureId
+                      ? String(period.academicStructureId)
+                      : form.academicStructureId,
+                    startDate: period?.startDate || form.startDate,
+                    endDate: form.status === "active" ? "" : form.endDate || period?.endDate || "",
+                  });
+                }}
+              >
+                <option value="">Select academic period</option>
+                {filteredPeriodsForForm.map((period: any) => (
+                  <option key={String(period.id)} value={String(period.id)}>{period.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Status</span>
+              <select
+                value={form.status}
+                onChange={(event) => {
+                  const status = event.target.value as EnrollmentStatus;
+                  updateForm({
+                    status,
+                    endDate: status === "active" ? "" : form.endDate,
+                  });
+                }}
+              >
+                <option value="active">Active</option>
+                <option value="completed">Completed</option>
+                <option value="promoted">Promoted</option>
+                <option value="withdrawn">Withdrawn</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Start Date</span>
+              <input type="date" value={form.startDate} onChange={(event) => updateForm({ startDate: event.target.value })} />
+            </label>
+
+            <label>
+              <span>End Date</span>
+              <input
+                type="date"
+                value={form.endDate}
+                disabled={form.status === "active"}
+                onChange={(event) => updateForm({ endDate: event.target.value })}
+              />
+              {form.status === "active" && <small className="ba-field-hint">Active enrollments remain open-ended.</small>}
+            </label>
+          </div>
+        </section>
+
+        <div className="ba-inline-info enrollment-sync-note">
+          <b>Automatic class sync</b>
+          <span>When an enrollment is saved as Active, Eleeveon automatically updates the student&apos;s current class.</span>
+        </div>
+
+        <div className="ba-modal-actions">
+          <button type="button" className="ba-cancel-button" onClick={onClose}>Cancel</button>
+          <button type="submit" className="ba-save-button" disabled={saving}>
+            {saving ? "Saving..." : form.id ? "Save Enrollment" : "Enroll Student"}
           </button>
         </div>
       </form>
@@ -5053,4 +5943,249 @@ const css = `
     margin-left: 0;
   }
 }
+
+/* Integrated student enrollment manager */
+.ba-field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted, #64748b);
+  font-size: .74rem;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.ba-page select:disabled,
+.ba-page input:disabled {
+  opacity: .68;
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--surface, #fff) 86%, var(--border, rgba(0,0,0,.10)));
+}
+
+.ba-inline-info {
+  align-self: stretch;
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 22%, var(--border, rgba(0,0,0,.10)));
+  background: color-mix(in srgb, var(--ba-primary) 7%, var(--card-bg, var(--surface, #fff)));
+}
+
+.ba-inline-info b {
+  font-size: .8rem;
+  color: var(--text, #111827);
+}
+
+.ba-inline-info span {
+  color: var(--muted, #64748b);
+  font-size: .73rem;
+  line-height: 1.45;
+}
+
+.enrollment-manager-layer {
+  z-index: 78;
+}
+
+.enrollment-editor-layer {
+  z-index: 86;
+}
+
+.enrollment-manager-sheet {
+  width: min(760px, 100%);
+  max-height: min(90dvh, 900px);
+  overflow: auto;
+}
+
+.enrollment-manager-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.enrollment-manager-profile .ba-avatar {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+}
+
+.enrollment-manager-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--ba-primary) 22%, var(--border, rgba(0,0,0,.10)));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ba-primary) 7%, var(--card-bg, var(--surface, #fff)));
+}
+
+.enrollment-manager-current > div {
+  display: grid;
+  gap: 3px;
+}
+
+.enrollment-manager-current small,
+.enrollment-manager-current span {
+  color: var(--muted, #64748b);
+  font-size: .73rem;
+}
+
+.enrollment-manager-current strong {
+  font-size: .95rem;
+}
+
+.enrollment-manager-current > button {
+  min-height: 40px;
+  padding: 0 13px;
+  border-radius: 13px;
+  border: 1px solid var(--ba-primary);
+  background: var(--ba-primary);
+  color: var(--ba-primary-text, #fff);
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.enrollment-history-heading {
+  margin: 16px 0 8px;
+}
+
+.enrollment-history-heading h3 {
+  margin: 0;
+  font-size: .94rem;
+}
+
+.enrollment-history-heading p {
+  margin: 4px 0 0;
+  color: var(--muted, #64748b);
+  font-size: .73rem;
+  line-height: 1.45;
+}
+
+.enrollment-history-list {
+  display: grid;
+  gap: 9px;
+}
+
+.enrollment-history-card {
+  padding: 12px;
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  border-radius: 16px;
+  background: var(--card-bg, var(--surface, #fff));
+}
+
+.enrollment-history-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.enrollment-history-main > div {
+  display: grid;
+  gap: 3px;
+}
+
+.enrollment-history-main strong {
+  font-size: .9rem;
+}
+
+.enrollment-history-main span:not(.ba-chip) {
+  color: var(--muted, #64748b);
+  font-size: .72rem;
+}
+
+.enrollment-history-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.enrollment-history-meta span {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--muted, #64748b) 7%, transparent);
+  color: var(--muted, #64748b);
+  font-size: .7rem;
+}
+
+.enrollment-history-meta b {
+  color: var(--text, #111827);
+  font-size: .67rem;
+}
+
+.enrollment-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.enrollment-history-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(0,0,0,.10));
+  background: var(--surface, #fff);
+  color: var(--text, #111827);
+  font-weight: 800;
+  font-size: .72rem;
+  cursor: pointer;
+}
+
+.enrollment-history-actions button.danger {
+  color: #dc2626;
+  border-color: rgba(220,38,38,.2);
+  background: rgba(220,38,38,.05);
+}
+
+.enrollment-history-empty {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  padding: 24px 14px;
+  border: 1px dashed var(--border, rgba(0,0,0,.12));
+  border-radius: 16px;
+  text-align: center;
+}
+
+.enrollment-history-empty > span {
+  font-size: 1.45rem;
+}
+
+.enrollment-history-empty small {
+  color: var(--muted, #64748b);
+}
+
+.enrollment-editor-modal {
+  width: min(680px, calc(100vw - 20px));
+}
+
+.enrollment-sync-note {
+  margin: 0 16px 14px;
+}
+
+@media (max-width: 640px) {
+  .enrollment-manager-current {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .enrollment-manager-current > button {
+    width: 100%;
+  }
+
+  .enrollment-history-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .enrollment-history-actions button {
+    flex: 1 1 calc(50% - 6px);
+  }
+}
+
 `;

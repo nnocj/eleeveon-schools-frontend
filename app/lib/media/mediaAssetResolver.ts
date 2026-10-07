@@ -334,16 +334,53 @@ export async function findMediaAssetById(
   return asset;
 }
 
+
+function normalizeMediaRemoteUrl(
+  value?: string | null,
+): string {
+  const url = String(value || "").trim();
+
+  if (!url) {
+    return "";
+  }
+
+  // Repair legacy development URLs.
+  if (
+    url.startsWith(
+      "http://localhost:4000/"
+    )
+  ) {
+    const apiBase =
+      String(
+        process.env.NEXT_PUBLIC_API_BASE_URL ||
+          ""
+      )
+        .trim()
+        .replace(/\/+$/, "");
+
+    if (apiBase) {
+      return url.replace(
+        "http://localhost:4000",
+        apiBase
+      );
+    }
+  }
+
+  return url;
+}
+
+
 export async function resolveMediaAssetUrl(asset: any): Promise<string> {
   if (!asset || asset.isDeleted || asset.active === false) {
     return "";
   }
 
-  const remote = text(
+  const remote =
+  normalizeMediaRemoteUrl(
     asset.publicUrl ||
       asset.remoteUrl ||
       asset.storageUrl ||
-      asset.downloadUrl,
+      asset.downloadUrl
   );
 
   if (remote) {
@@ -600,3 +637,4 @@ export function revokeResolvedPortalHighlightMedia(
     media.displayUrl,
   ]).forEach(revokeResolvedMediaUrl);
 }
+

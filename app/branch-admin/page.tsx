@@ -66,7 +66,7 @@ import Students from "./modules/Students";
 import Teachers from "./modules/Teachers";
 import Parents from "./modules/Parents";
 import Classes from "./modules/Classes";
-import StudentEnrollments from "./modules/StudentEnrollments";
+//import StudentEnrollments from "./modules/StudentEnrollments";
 
 // These can be replaced with real imports when their files are ready.
 // import Classsubjects from "./modules/Classsubjects";
@@ -475,11 +475,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         label: "Classes",
         icon: "🏫",
       },
-      {
-        key: "studentEnrollments",
-        label: "Enrollments",
-        icon: "🧾",
-      },
+     
       
     ],
   },
@@ -689,7 +685,6 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   parents: Parents,
   classes: Classes,
   subjectSetup: SubjectSetup,
-  studentEnrollments: StudentEnrollments,
 
   identityOverview: IdentityOverview,
   identityCredentials: IdentityCredentials,

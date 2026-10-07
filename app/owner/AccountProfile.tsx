@@ -2,19 +2,19 @@
 
 /**
  * app/owner/modules/AccountProfile.tsx
- * Eleeveon Account Profile V3.
- * Account-scoped, backend-backed, mobile-first, mediaAsset powered.
+ * Eleeveon Account Profile V4.
  *
- * Merged replacement for the old OwnerProfile.tsx and AccountSettings.tsx:
- * - one owner account page instead of separate Profile + Settings screens
- * - golden-standard compact action strip: identity search, inline edit, slider sections, More sheet
- * - profile, defaults, security, sync and protected billing values live in one compact account panel
- * - account identity/contact/media are editable from the Profile sheet
- * - country/currency/timezone/language/security/sync defaults are editable from focused bottom sheets
- * - plan, subscription, invoices, payments and platform flags stay backend-controlled/read-only
- * - logo/photo/banner upload and camera capture use the shared media asset pipeline
- * - local settings cache keeps account settings usable when live settings API is unavailable
- * - no hard-coded page theme; all colors flow from useSettings/local CSS variables
+ * Drop-in replacement for the previous AccountProfile.tsx.
+ * Existing account media, defaults, sync, protected billing and mobile-first
+ * behavior are preserved, while login identity is now correctly separated
+ * from the Account/workspace record.
+ *
+ * Backend contracts used:
+ * - GET/PATCH /accounts/me                    -> Account workspace
+ * - GET/PATCH /accounts/me/profile            -> current AppUser
+ * - PATCH     /accounts/me/email              -> login email + current password
+ * - PATCH     /accounts/me/password           -> password change
+ * - GET/PATCH /accounts/me/settings           -> AccountSystemSetting
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -44,7 +44,34 @@ import {
 type ToastTone = "success" | "error" | "info";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
 type CameraField = "logo" | "photo" | "bannerImage";
-type SheetKey = "profile" | "defaults" | "security" | "sync" | "protected" | null;
+type SheetKey =
+  | "myProfile"
+  | "account"
+  | "defaults"
+  | "security"
+  | "sync"
+  | "protected"
+  | "email"
+  | "password"
+  | null;
+
+type OwnerUser = {
+  id?: string;
+  accountId?: string;
+  fullName?: string;
+  email?: string;
+  phone?: string | null;
+  role?: string;
+  preferredLocale?: string | null;
+  active?: boolean;
+  emailVerifiedAt?: string | null;
+  phoneVerifiedAt?: string | null;
+  passwordChangedAt?: string | null;
+  lastLoginAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  memberships?: any[];
+};
 
 type AccountData = {
   id?: string;
@@ -53,14 +80,16 @@ type AccountData = {
   phone?: string | null;
   country?: string | null;
   currency?: string | null;
+  defaultLocale?: string | null;
+  timeZone?: string | null;
   status?: string;
   website?: string | null;
   address?: string | null;
   description?: string | null;
-  logoMediaId?: number | string | null;
-  photoMediaId?: number | string | null;
-  bannerMediaId?: number | string | null;
-  bannerImageMediaId?: number | string | null;
+  logoMediaId?: string | number | null;
+  photoMediaId?: string | number | null;
+  bannerMediaId?: string | number | null;
+  bannerImageMediaId?: string | number | null;
   logo?: string | null;
   photo?: string | null;
   bannerImage?: string | null;
@@ -83,6 +112,11 @@ type AccountData = {
   payments?: any[];
 };
 
+type MyProfileResponse = {
+  user?: OwnerUser | null;
+  account?: AccountData | null;
+};
+
 type AccountSetting = {
   id?: string | number;
   accountId?: string;
@@ -91,10 +125,17 @@ type AccountSetting = {
   group?: string;
   label?: string;
   description?: string;
+  locked?: boolean;
   updatedAt?: number | string;
 };
 
-type ProfileForm = {
+type MyProfileForm = {
+  fullName: string;
+  phone: string;
+  preferredLocale: string;
+};
+
+type AccountProfileForm = {
   name: string;
   email: string;
   phone: string;
@@ -102,11 +143,11 @@ type ProfileForm = {
   address: string;
   description: string;
   logo: string;
-  logoMediaId?: number;
+  logoMediaId?: string;
   photo: string;
-  photoMediaId?: number;
+  photoMediaId?: string;
   bannerImage: string;
-  bannerMediaId?: number;
+  bannerMediaId?: string;
 };
 
 type SettingsForm = {
@@ -124,7 +165,24 @@ type SettingsForm = {
   backupFrequency: string;
 };
 
-const emptyProfile: ProfileForm = {
+type EmailForm = {
+  newEmail: string;
+  currentPassword: string;
+};
+
+type PasswordForm = {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+};
+
+const emptyMyProfile: MyProfileForm = {
+  fullName: "",
+  phone: "",
+  preferredLocale: "",
+};
+
+const emptyAccountProfile: AccountProfileForm = {
   name: "",
   email: "",
   phone: "",
@@ -144,7 +202,7 @@ const defaultSettings: SettingsForm = {
   currency: "GHS",
   timezone: "Africa/Accra",
   academicYearStartMonth: "9",
-  defaultLanguage: "en",
+  defaultLanguage: "en-GH",
   allowOfflineMode: true,
   autoSyncOnLogin: true,
   requireStrongPasswords: true,
@@ -159,7 +217,10 @@ const ACCOUNT_MEDIA_ENTITY_LABEL = "Account";
 const ACCOUNT_FIELD_KEYS: Record<CameraField, string> = {
   logo: (MediaFieldKeys as any).LOGO || "logo",
   photo: (MediaFieldKeys as any).PHOTO || "photo",
-  bannerImage: (MediaFieldKeys as any).BANNER || (MediaFieldKeys as any).BANNER_IMAGE || "bannerImage",
+  bannerImage:
+    (MediaFieldKeys as any).BANNER ||
+    (MediaFieldKeys as any).BANNER_IMAGE ||
+    "bannerImage",
 };
 
 const createAccountMediaSessionKey = (accountId?: string | null) =>
@@ -171,9 +232,12 @@ const idOf = (value: unknown) => {
 };
 
 const cleanText = (value: any) => String(value || "").trim();
-const safeText = (value: any, fallback = "Not set") => cleanText(value) || fallback;
-const titleCase = (value?: string | null) => safeText(value, "Not set").replaceAll("_", " ");
-const mediaKey = (accountCloudId: string, field: CameraField) => `accounts:${accountCloudId}:${field}`;
+const safeText = (value: any, fallback = "Not set") =>
+  cleanText(value) || fallback;
+const titleCase = (value?: string | null) =>
+  safeText(value, "Not set").replaceAll("_", " ");
+const mediaKey = (accountCloudId: string, field: CameraField) =>
+  `accounts:${accountCloudId}:${field}`;
 
 const safeRecordMediaValue = (value?: string | null) => {
   const media = String(value || "");
@@ -187,14 +251,29 @@ function safeDate(value?: string | null) {
   if (!value) return "Not set";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not set";
-  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function statusTone(status?: string): Tone {
   const value = String(status || "").toLowerCase();
-  if (["active", "paid", "succeeded", "current", "enabled", "healthy"].includes(value)) return "green";
-  if (["suspended", "closed", "expired", "cancelled", "failed", "disabled"].includes(value)) return "red";
-  if (["trial", "past_due", "pending", "draft", "limited"].includes(value)) return "orange";
+  if (
+    ["active", "paid", "succeeded", "current", "enabled", "healthy"].includes(
+      value,
+    )
+  )
+    return "green";
+  if (
+    ["suspended", "closed", "expired", "cancelled", "failed", "disabled"].includes(
+      value,
+    )
+  )
+    return "red";
+  if (["trial", "past_due", "pending", "draft", "limited"].includes(value))
+    return "orange";
   if (!value || value === "not set") return "gray";
   return "blue";
 }
@@ -220,17 +299,26 @@ async function cacheSettingsLocally(accountId: string, values: SettingsForm) {
   const now = Date.now();
 
   for (const [key, value] of Object.entries(values)) {
-    const row = { id: `${accountId}:${key}`, accountId, key, value, updatedAt: now };
+    const row = {
+      id: `${accountId}:${key}`,
+      accountId,
+      key,
+      value,
+      updatedAt: now,
+    };
     try {
       if (table.put) await table.put(row);
       else await table.add(row);
     } catch {
-      // Local cache should never block the profile page.
+      // Local cache must never block the account profile page.
     }
   }
 }
 
-function settingsArrayToForm(rows: AccountSetting[], fallback: Partial<SettingsForm>): SettingsForm {
+function settingsArrayToForm(
+  rows: AccountSetting[],
+  fallback: Partial<SettingsForm>,
+): SettingsForm {
   const next: any = { ...defaultSettings, ...fallback };
   for (const row of rows) {
     if (!row.key) continue;
@@ -240,7 +328,84 @@ function settingsArrayToForm(rows: AccountSetting[], fallback: Partial<SettingsF
   return next as SettingsForm;
 }
 
-function Chip({ children, tone = "gray" }: { children: React.ReactNode; tone?: Tone }) {
+function readStoredUser(): OwnerUser | null {
+  if (typeof window === "undefined") return null;
+  const stores = [window.localStorage, window.sessionStorage];
+  const keys = ["eleeveon_auth_user", "eleeveon_account_user", "user"];
+
+  for (const storage of stores) {
+    for (const key of keys) {
+      try {
+        const raw = storage.getItem(key);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") return parsed as OwnerUser;
+      } catch {
+        // Ignore malformed old caches.
+      }
+    }
+  }
+
+  return null;
+}
+
+function mergeStoredJson(
+  storage: Storage,
+  key: string,
+  patch: Record<string, any>,
+) {
+  try {
+    const raw = storage.getItem(key);
+    if (!raw) return;
+    const current = JSON.parse(raw);
+    if (!current || typeof current !== "object") return;
+    storage.setItem(key, JSON.stringify({ ...current, ...patch }));
+  } catch {
+    // Cache refresh is best-effort only.
+  }
+}
+
+function refreshStoredUserCaches(user: OwnerUser) {
+  if (typeof window === "undefined") return;
+  const patch = {
+    id: user.id,
+    accountId: user.accountId,
+    fullName: user.fullName,
+    name: user.fullName,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    preferredLocale: user.preferredLocale,
+    active: user.active,
+    emailVerifiedAt: user.emailVerifiedAt,
+    phoneVerifiedAt: user.phoneVerifiedAt,
+    passwordChangedAt: user.passwordChangedAt,
+    lastLoginAt: user.lastLoginAt,
+  };
+
+  ["eleeveon_auth_user", "eleeveon_account_user", "user"].forEach((key) =>
+    mergeStoredJson(window.localStorage, key, patch),
+  );
+  mergeStoredJson(window.sessionStorage, "eleeveon_auth_user", patch);
+}
+
+function refreshStoredAccountCaches(account: AccountData) {
+  if (typeof window === "undefined") return;
+  const patch = { ...account };
+
+  ["eleeveon_auth_account", "eleeveon_account_info", "account"].forEach((key) =>
+    mergeStoredJson(window.localStorage, key, patch),
+  );
+  mergeStoredJson(window.sessionStorage, "eleeveon_auth_account", patch);
+}
+
+function Chip({
+  children,
+  tone = "gray",
+}: {
+  children: React.ReactNode;
+  tone?: Tone;
+}) {
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
@@ -253,21 +418,40 @@ export default function AccountProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [account, setAccount] = useState<AccountData | null>(null);
-  const [profile, setProfile] = useState<ProfileForm>(emptyProfile);
-  const [accountSettings, setAccountSettings] = useState<SettingsForm>(defaultSettings);
+  const [ownerUser, setOwnerUser] = useState<OwnerUser | null>(null);
+  const [myProfile, setMyProfile] = useState<MyProfileForm>(emptyMyProfile);
+  const [accountProfile, setAccountProfile] =
+    useState<AccountProfileForm>(emptyAccountProfile);
+  const [accountSettings, setAccountSettings] =
+    useState<SettingsForm>(defaultSettings);
+  const [emailForm, setEmailForm] = useState<EmailForm>({
+    newEmail: "",
+    currentPassword: "",
+  });
+  const [passwordForm, setPasswordForm] = useState<PasswordForm>({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
   const [activeSheet, setActiveSheet] = useState<SheetKey>(null);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [toast, setToast] = useState<{ tone: ToastTone; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
   const [message, setMessage] = useState("");
   const [notice, setNotice] = useState("");
-  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<Record<string, string>>({});
+  const [mediaPreviewUrls, setMediaPreviewUrls] = useState<
+    Record<string, string>
+  >({});
 
   const mediaSessionKeyRef = useRef(createAccountMediaSessionKey(accountId));
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraField, setCameraField] = useState<CameraField>("logo");
-  const [cameraFacing, setCameraFacing] = useState<CameraFacingMode>("environment");
+  const [cameraFacing, setCameraFacing] =
+    useState<CameraFacingMode>("environment");
   const [cameraStarting, setCameraStarting] = useState(false);
   const [cameraCapturing, setCameraCapturing] = useState(false);
 
@@ -278,7 +462,13 @@ export default function AccountProfilePage() {
 
   const showToast = (tone: ToastTone, message: string) => {
     setToast({ tone, message });
-    window.setTimeout(() => setToast((current) => (current?.message === message ? null : current)), 4200);
+    window.setTimeout(
+      () =>
+        setToast((current) =>
+          current?.message === message ? null : current,
+        ),
+      4200,
+    );
   };
 
   const requireAccount = () => {
@@ -311,7 +501,10 @@ export default function AccountProfilePage() {
     if (!cloudId || !accountId) return;
     const next: Record<string, string> = {};
 
-    const resolveOwnedAssetUrl = async (field: CameraField, fallbackMediaId?: number | string | null) => {
+    const resolveOwnedAssetUrl = async (
+      field: CameraField,
+      fallbackMediaId?: string | number | null,
+    ) => {
       const ownedAsset = await getOwnerFieldMediaAsset({
         accountId,
         ownerTable: ACCOUNT_MEDIA_OWNER_TABLE,
@@ -329,9 +522,14 @@ export default function AccountProfilePage() {
     try {
       const logoUrl = await resolveOwnedAssetUrl("logo", data?.logoMediaId);
       if (logoUrl) next[mediaKey(cloudId, "logo")] = logoUrl;
+
       const photoUrl = await resolveOwnedAssetUrl("photo", data?.photoMediaId);
       if (photoUrl) next[mediaKey(cloudId, "photo")] = photoUrl;
-      const bannerUrl = await resolveOwnedAssetUrl("bannerImage", data?.bannerMediaId || data?.bannerImageMediaId);
+
+      const bannerUrl = await resolveOwnedAssetUrl(
+        "bannerImage",
+        data?.bannerMediaId || data?.bannerImageMediaId,
+      );
       if (bannerUrl) next[mediaKey(cloudId, "bannerImage")] = bannerUrl;
     } catch (error) {
       console.error("Failed to resolve account media:", error);
@@ -357,34 +555,85 @@ export default function AccountProfilePage() {
       setNotice("");
 
       let loadedAccount: AccountData | null = null;
+      let loadedUser: OwnerUser | null = null;
       let loadedSettings: AccountSetting[] = [];
+      let liveAccountAvailable = false;
 
       try {
-        loadedAccount = await apiRequest<AccountData>("/accounts/me");
-        setAccount(loadedAccount);
-        await cacheAccount(loadedAccount);
-        await resolveAccountMediaUrls(loadedAccount);
+        const [accountResult, profileResult, settingsResult] = await Promise.allSettled([
+          apiRequest<AccountData>("/accounts/me"),
+          apiRequest<MyProfileResponse>("/accounts/me/profile"),
+          apiRequest<any>("/accounts/me/settings"),
+        ]);
 
-        try {
-          const remoteSettings = await apiRequest<any>("/accounts/me/settings");
-          loadedSettings = Array.isArray(remoteSettings) ? remoteSettings : remoteSettings?.settings || remoteSettings?.data || [];
-        } catch {
-          loadedSettings = [];
+        if (accountResult.status === "fulfilled") {
+          loadedAccount = accountResult.value;
+          liveAccountAvailable = true;
         }
-      } catch (error: any) {
-        setNotice("Live account server was not available, so account settings may show the latest values saved on this device.");
+
+        if (profileResult.status === "fulfilled") {
+          loadedUser = profileResult.value?.user || null;
+          loadedAccount = loadedAccount || profileResult.value?.account || null;
+        }
+
+        if (settingsResult.status === "fulfilled") {
+          const remoteSettings = settingsResult.value;
+          loadedSettings = Array.isArray(remoteSettings)
+            ? remoteSettings
+            : remoteSettings?.settings || remoteSettings?.data || [];
+        }
+      } catch {
+        // Promise.allSettled protects individual requests, this is only a final guard.
+      }
+
+      loadedUser = loadedUser || readStoredUser();
+
+      if (!loadedAccount) {
+        const localAccountTable = (db as any).accounts;
+        if (localAccountTable?.get) {
+          loadedAccount =
+            (await localAccountTable.get(accountId).catch(() => undefined)) || null;
+        }
+      }
+
+      if (!liveAccountAvailable) {
+        setNotice(
+          "Live account data was not fully available, so some values may reflect the latest information saved on this device.",
+        );
       }
 
       if (!loadedSettings.length) {
-        const localRows = await tableToArray<AccountSetting>("accountSystemSettings", "settings");
-        loadedSettings = localRows.filter((row) => !row.accountId || row.accountId === accountId);
+        const localRows = await tableToArray<AccountSetting>(
+          "accountSystemSettings",
+          "settings",
+        );
+        loadedSettings = localRows.filter(
+          (row) => !row.accountId || row.accountId === accountId,
+        );
       }
 
-      setProfile(accountToProfileForm(loadedAccount, mediaPreviewUrls));
+      setAccount(loadedAccount);
+      setOwnerUser(loadedUser);
+
+      if (loadedAccount) {
+        await cacheAccount(loadedAccount);
+        await resolveAccountMediaUrls(loadedAccount);
+        refreshStoredAccountCaches(loadedAccount);
+      }
+      if (loadedUser) refreshStoredUserCaches(loadedUser);
+
+      setMyProfile(userToMyProfileForm(loadedUser));
+      setAccountProfile(accountToProfileForm(loadedAccount, mediaPreviewUrls));
+      setEmailForm({
+        newEmail: loadedUser?.email || "",
+        currentPassword: "",
+      });
       setAccountSettings(
         settingsArrayToForm(loadedSettings, {
           country: loadedAccount?.country || "GH",
           currency: loadedAccount?.currency || "GHS",
+          timezone: loadedAccount?.timeZone || "Africa/Accra",
+          defaultLanguage: loadedAccount?.defaultLocale || "en-GH",
         }),
       );
     } catch (error: any) {
@@ -416,13 +665,19 @@ export default function AccountProfilePage() {
       try {
         setCameraStarting(true);
         stopCurrentCamera();
-        const stream = await openCameraStream({ facingMode: cameraFacing, width: 1280, height: 720 });
+        const stream = await openCameraStream({
+          facingMode: cameraFacing,
+          width: 1280,
+          height: 720,
+        });
         if (cancelled) {
           stopCameraStream(stream);
           return;
         }
         cameraStreamRef.current = stream;
-        if (cameraVideoRef.current) await attachCameraStreamToVideo(cameraVideoRef.current, stream);
+        if (cameraVideoRef.current) {
+          await attachCameraStreamToVideo(cameraVideoRef.current, stream);
+        }
       } catch (error: any) {
         console.error("Failed to open account camera:", error);
         showToast("error", error?.message || getCameraUnavailableMessage());
@@ -465,25 +720,60 @@ export default function AccountProfilePage() {
   }, [account, accountSettings]);
 
   const accountCloudId = account?.id || accountId || "";
-  const logoUrl = mediaPreviewUrls[mediaKey(accountCloudId, "logo")] || safeRecordMediaValue(account?.logo);
-  const photoUrl = mediaPreviewUrls[mediaKey(accountCloudId, "photo")] || safeRecordMediaValue(account?.photo);
-  const bannerUrl = mediaPreviewUrls[mediaKey(accountCloudId, "bannerImage")] || safeRecordMediaValue(account?.bannerImage);
+  const bannerUrl =
+    mediaPreviewUrls[mediaKey(accountCloudId, "bannerImage")] ||
+    safeRecordMediaValue(account?.bannerImage);
 
-  const updateProfile = (patch: Partial<ProfileForm>) => {
-    setProfile((current) => ({ ...current, ...patch }));
+  const updateMyProfile = (patch: Partial<MyProfileForm>) => {
+    setMyProfile((current) => ({ ...current, ...patch }));
     setMessage("");
   };
 
-  const updateSettings = <K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) => {
+  const updateAccountProfile = (patch: Partial<AccountProfileForm>) => {
+    setAccountProfile((current) => ({ ...current, ...patch }));
+    setMessage("");
+  };
+
+  const updateSettings = <K extends keyof SettingsForm>(
+    key: K,
+    value: SettingsForm[K],
+  ) => {
     setAccountSettings((current) => ({ ...current, [key]: value }));
     setMessage("");
   };
 
-  const openProfileSheet = () => {
-    mediaSessionKeyRef.current = createAccountMediaSessionKey(account?.id || accountId);
-    setProfile(accountToProfileForm(account, mediaPreviewUrls));
+  const openMyProfileSheet = () => {
+    setMyProfile(userToMyProfileForm(ownerUser));
     setMessage("");
-    setActiveSheet("profile");
+    setActiveSheet("myProfile");
+  };
+
+  const openAccountSheet = () => {
+    mediaSessionKeyRef.current = createAccountMediaSessionKey(
+      account?.id || accountId,
+    );
+    setAccountProfile(accountToProfileForm(account, mediaPreviewUrls));
+    setMessage("");
+    setActiveSheet("account");
+  };
+
+  const openEmailSheet = () => {
+    setEmailForm({
+      newEmail: ownerUser?.email || "",
+      currentPassword: "",
+    });
+    setMessage("");
+    setActiveSheet("email");
+  };
+
+  const openPasswordSheet = () => {
+    setPasswordForm({
+      currentPassword: "",
+      newPassword: "",
+      confirmPassword: "",
+    });
+    setMessage("");
+    setActiveSheet("password");
   };
 
   const openCameraForField = (field: CameraField) => {
@@ -516,7 +806,7 @@ export default function AccountProfilePage() {
         mimeType: "image/jpeg",
         quality: 0.88,
         maxWidth: cameraField === "logo" ? 900 : 1440,
-        maxHeight: cameraField === "logo" ? 900 : 900,
+        maxHeight: 900,
       });
       await handleImageUpload(cameraField, file);
       closeCamera();
@@ -539,32 +829,60 @@ export default function AccountProfilePage() {
         ownerCloudId: account?.id || accountId!,
         ownerTempKey: mediaSessionKeyRef.current,
         fieldKey: ACCOUNT_FIELD_KEYS[field],
-        variant: field === "logo" ? "avatar" : field === "bannerImage" ? "cover" : "image",
+        variant:
+          field === "logo"
+            ? "avatar"
+            : field === "bannerImage"
+              ? "cover"
+              : "image",
         replaceExisting: true,
       } as any);
 
-      updateProfile({
+      updateAccountProfile({
         [field]: result.previewUrl,
-        [field === "bannerImage" ? "bannerMediaId" : `${field}MediaId`]: result.assetId,
-      } as Partial<ProfileForm>);
+        [field === "bannerImage" ? "bannerMediaId" : `${field}MediaId`]:
+          idOf(result.assetId) || undefined,
+      } as Partial<AccountProfileForm>);
 
-      showToast("success", `${field === "logo" ? "Account logo" : field === "photo" ? "Account photo" : "Account banner"} optimized.`);
+      showToast(
+        "success",
+        `${
+          field === "logo"
+            ? "Account logo"
+            : field === "photo"
+              ? "Account photo"
+              : "Account banner"
+        } optimized.`,
+      );
     } catch (error: any) {
       console.error("Failed to process account image:", error);
       showToast("error", error?.message || "Failed to process image.");
     }
   };
 
-  const validateProfile = () => {
-    if (!profile.name.trim()) return "Account name is required.";
-    if (profile.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profile.email.trim())) return "Enter a valid account email address.";
-    if (profile.website.trim() && !/^https?:\/\/.+/i.test(profile.website.trim()) && !/^www\..+/i.test(profile.website.trim())) {
+  const validateMyProfile = () => {
+    if (!myProfile.fullName.trim()) return "Your full name is required.";
+    return "";
+  };
+
+  const validateAccountProfile = () => {
+    if (!accountProfile.name.trim()) return "Account name is required.";
+    if (
+      accountProfile.email.trim() &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountProfile.email.trim())
+    )
+      return "Enter a valid account contact email address.";
+    if (
+      accountProfile.website.trim() &&
+      !/^https?:\/\/.+/i.test(accountProfile.website.trim()) &&
+      !/^www\..+/i.test(accountProfile.website.trim())
+    ) {
       return "Website should begin with https://, http://, or www.";
     }
     return "";
   };
 
-  const validateSettings = () => {
+  const validateDefaults = () => {
     if (!accountSettings.country.trim()) return "Country is required.";
     if (!accountSettings.currency.trim()) return "Currency is required.";
     if (!accountSettings.timezone.trim()) return "Timezone is required.";
@@ -572,9 +890,40 @@ export default function AccountProfilePage() {
     return "";
   };
 
-  async function saveProfile(event?: React.FormEvent) {
+  async function saveMyProfile(event?: React.FormEvent) {
     event?.preventDefault();
-    const error = validateProfile();
+    const error = validateMyProfile();
+    if (error) {
+      setMessage(error);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const updated = await apiRequest<OwnerUser>("/accounts/me/profile", {
+        method: "PATCH",
+        body: JSON.stringify({
+          fullName: myProfile.fullName.trim(),
+          phone: myProfile.phone.trim(),
+          preferredLocale: myProfile.preferredLocale.trim(),
+        }),
+      } as any);
+
+      const merged = { ...(ownerUser || {}), ...updated };
+      setOwnerUser(merged);
+      refreshStoredUserCaches(merged);
+      setActiveSheet(null);
+      showToast("success", "Your profile was updated.");
+    } catch (error: any) {
+      setMessage(error?.message || "Your profile could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveAccountProfile(event?: React.FormEvent) {
+    event?.preventDefault();
+    const error = validateAccountProfile();
     if (error) {
       setMessage(error);
       return;
@@ -583,18 +932,18 @@ export default function AccountProfilePage() {
     try {
       setSaving(true);
       const payload: Partial<AccountData> = {
-        name: profile.name.trim(),
-        email: profile.email.trim() || undefined,
-        phone: profile.phone.trim() || undefined,
-        website: profile.website.trim() || undefined,
-        address: profile.address.trim() || undefined,
-        description: profile.description.trim() || undefined,
-        logoMediaId: profile.logoMediaId || undefined,
-        photoMediaId: profile.photoMediaId || undefined,
-        bannerMediaId: profile.bannerMediaId || undefined,
+        name: accountProfile.name.trim(),
+        email: accountProfile.email.trim() || undefined,
+        phone: accountProfile.phone.trim() || undefined,
+        website: accountProfile.website.trim() || undefined,
+        address: accountProfile.address.trim() || undefined,
+        description: accountProfile.description.trim() || undefined,
+        logoMediaId: accountProfile.logoMediaId || undefined,
+        photoMediaId: accountProfile.photoMediaId || undefined,
+        bannerMediaId: accountProfile.bannerMediaId || undefined,
       };
 
-      const updated = await apiRequest<AccountData>(`/accounts/${account?.id || "me"}`, {
+      const updated = await apiRequest<AccountData>("/accounts/me", {
         method: "PATCH",
         body: JSON.stringify(payload),
       } as any);
@@ -602,12 +951,16 @@ export default function AccountProfilePage() {
       const merged = { ...(account || {}), ...payload, ...updated };
       setAccount(merged);
       await cacheAccount(merged);
+      refreshStoredAccountCaches(merged);
 
       await Promise.all(
         [
-          { id: profile.logoMediaId, field: "logo" as CameraField },
-          { id: profile.photoMediaId, field: "photo" as CameraField },
-          { id: profile.bannerMediaId, field: "bannerImage" as CameraField },
+          { id: accountProfile.logoMediaId, field: "logo" as CameraField },
+          { id: accountProfile.photoMediaId, field: "photo" as CameraField },
+          {
+            id: accountProfile.bannerMediaId,
+            field: "bannerImage" as CameraField,
+          },
         ]
           .filter((asset) => Boolean(asset.id))
           .map((asset) =>
@@ -620,7 +973,9 @@ export default function AccountProfilePage() {
           ),
       );
 
-      mediaSessionKeyRef.current = createAccountMediaSessionKey(account?.id || accountId);
+      mediaSessionKeyRef.current = createAccountMediaSessionKey(
+        account?.id || accountId,
+      );
       setActiveSheet(null);
       showToast("success", "Account profile saved.");
       await load();
@@ -631,9 +986,9 @@ export default function AccountProfilePage() {
     }
   }
 
-  async function saveSettings(event?: React.FormEvent) {
+  async function saveDefaults(event?: React.FormEvent) {
     event?.preventDefault();
-    const error = validateSettings();
+    const error = validateDefaults();
     if (error) {
       setMessage(error);
       return;
@@ -649,46 +1004,207 @@ export default function AccountProfilePage() {
         defaultLanguage: accountSettings.defaultLanguage.trim(),
       };
 
-      try {
-        await apiRequest<any>("/accounts/me/settings", {
-          method: "PATCH",
-          body: JSON.stringify(cleanSettings),
-        } as any);
-      } catch {
-        await apiRequest<any>(`/accounts/${account?.id || accountId}`, {
-          method: "PATCH",
-          body: JSON.stringify({ country: cleanSettings.country, currency: cleanSettings.currency }),
-        } as any);
-      }
+      const updatedAccount = await apiRequest<AccountData>("/accounts/me", {
+        method: "PATCH",
+        body: JSON.stringify({
+          country: cleanSettings.country,
+          currency: cleanSettings.currency,
+          timeZone: cleanSettings.timezone,
+          defaultLocale: cleanSettings.defaultLanguage,
+        }),
+      } as any);
 
-      await cacheSettingsLocally(accountId!, cleanSettings);
+      await apiRequest<any>("/accounts/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          academicYearStartMonth: cleanSettings.academicYearStartMonth,
+        }),
+      } as any);
+
+      const mergedAccount = { ...(account || {}), ...updatedAccount };
+      setAccount(mergedAccount);
       setAccountSettings(cleanSettings);
+      await cacheAccount(mergedAccount);
+      refreshStoredAccountCaches(mergedAccount);
+      await cacheSettingsLocally(accountId!, cleanSettings);
+
       setActiveSheet(null);
-      showToast("success", "Account settings saved.");
-      await load();
+      showToast("success", "Account defaults saved.");
     } catch (error: any) {
-      setMessage(error?.message || "Account settings could not be saved.");
+      setMessage(error?.message || "Account defaults could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveSecuritySettings(event?: React.FormEvent) {
+    event?.preventDefault();
+    try {
+      setSaving(true);
+      await apiRequest<any>("/accounts/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          requireStrongPasswords: accountSettings.requireStrongPasswords,
+          requirePasswordChangeForTempUsers:
+            accountSettings.requirePasswordChangeForTempUsers,
+          allowBranchSwitching: accountSettings.allowBranchSwitching,
+          allowOwnerDataExport: accountSettings.allowOwnerDataExport,
+        }),
+      } as any);
+
+      await cacheSettingsLocally(accountId!, accountSettings);
+      setActiveSheet(null);
+      showToast("success", "Security preferences saved.");
+    } catch (error: any) {
+      setMessage(error?.message || "Security preferences could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveSyncSettings(event?: React.FormEvent) {
+    event?.preventDefault();
+    try {
+      setSaving(true);
+      await apiRequest<any>("/accounts/me/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          allowOfflineMode: accountSettings.allowOfflineMode,
+          autoSyncOnLogin: accountSettings.autoSyncOnLogin,
+          backupFrequency: accountSettings.backupFrequency,
+        }),
+      } as any);
+
+      await cacheSettingsLocally(accountId!, accountSettings);
+      setActiveSheet(null);
+      showToast("success", "Sync and backup preferences saved.");
+    } catch (error: any) {
+      setMessage(error?.message || "Sync preferences could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changeLoginEmail(event?: React.FormEvent) {
+    event?.preventDefault();
+    const nextEmail = emailForm.newEmail.trim().toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      setMessage("Enter a valid new login email address.");
+      return;
+    }
+    if (!emailForm.currentPassword) {
+      setMessage("Enter your current password to change your login email.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const updated = await apiRequest<OwnerUser>("/accounts/me/email", {
+        method: "PATCH",
+        body: JSON.stringify({
+          newEmail: nextEmail,
+          currentPassword: emailForm.currentPassword,
+        }),
+      } as any);
+
+      const merged = { ...(ownerUser || {}), ...updated };
+      setOwnerUser(merged);
+      refreshStoredUserCaches(merged);
+      setEmailForm({ newEmail: merged.email || nextEmail, currentPassword: "" });
+      setActiveSheet("security");
+      showToast("success", "Login email changed.");
+    } catch (error: any) {
+      setMessage(error?.message || "Login email could not be changed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function changePassword(event?: React.FormEvent) {
+    event?.preventDefault();
+
+    if (!passwordForm.currentPassword) {
+      setMessage("Enter your current password.");
+      return;
+    }
+    if (passwordForm.newPassword.length < 6) {
+      setMessage("New password must be at least 6 characters.");
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setMessage("New password and confirmation do not match.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const result = await apiRequest<any>("/accounts/me/password", {
+        method: "PATCH",
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      } as any);
+
+      const merged = {
+        ...(ownerUser || {}),
+        passwordChangedAt:
+          result?.passwordChangedAt || new Date().toISOString(),
+      };
+      setOwnerUser(merged);
+      refreshStoredUserCaches(merged);
+      setPasswordForm({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+      setActiveSheet("security");
+      showToast("success", "Password changed successfully.");
+    } catch (error: any) {
+      setMessage(error?.message || "Password could not be changed.");
     } finally {
       setSaving(false);
     }
   }
 
   if (accountLoading || settingsLoading || loading) {
-    return <State primary={primary} title="Opening Account Profile..." text="Loading account identity, branding, defaults, security and billing context." />;
+    return (
+      <State
+        primary={primary}
+        title="Opening Account Profile..."
+        text="Loading your login identity, account workspace, defaults, security and billing context."
+      />
+    );
   }
 
   if (!authenticated || !accountId) {
-    return <State primary={primary} title="Redirecting to login..." text="You must sign in before viewing the account profile." />;
+    return (
+      <State
+        primary={primary}
+        title="Redirecting to login..."
+        text="You must sign in before viewing the account profile."
+      />
+    );
   }
 
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
 
       {toast && (
         <section className={`ba-toast ${toast.tone}`}>
           {toast.message}
-          <button type="button" onClick={() => setToast(null)} aria-label="Close notification">✕</button>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Close notification"
+          >
+            ✕
+          </button>
         </section>
       )}
 
@@ -697,16 +1213,45 @@ export default function AccountProfilePage() {
       <section className="ba-search-card" aria-label="Account profile actions">
         <label className="ba-search ba-profile-search">
           <span>👑</span>
-          <input value={`${safeText(account?.name, "Account")} · ${safeText(account?.email, "No email")} · ${titleCase(summary.accountStatus)}`} readOnly aria-label="Account profile" />
+          <input
+            value={`${safeText(ownerUser?.fullName, "Owner")} · ${safeText(
+              account?.name,
+              "Account",
+            )} · ${titleCase(summary.accountStatus)}`}
+            readOnly
+            aria-label="Owner and account profile"
+          />
         </label>
 
-        <button type="button" className="ba-add-inline ba-edit-inline" onClick={openProfileSheet} aria-label="Edit account profile" title="Edit account profile">✎</button>
+        <button
+          type="button"
+          className="ba-add-inline ba-edit-inline"
+          onClick={openMyProfileSheet}
+          aria-label="Edit my profile"
+          title="Edit my profile"
+        >
+          ✎
+        </button>
 
-        <button type="button" className="ba-filter-button" onClick={() => setActiveSheet("defaults")} aria-label="Open account sections" title="Account sections">
+        <button
+          type="button"
+          className="ba-filter-button"
+          onClick={() => setActiveSheet("defaults")}
+          aria-label="Open account defaults"
+          title="Account defaults"
+        >
           <SliderIcon />
         </button>
 
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options" title="More">⋯</button>
+        <button
+          type="button"
+          className="ba-icon-button"
+          onClick={() => setMoreOpen(true)}
+          aria-label="More options"
+          title="More"
+        >
+          ⋯
+        </button>
       </section>
 
       <section className="ba-profile-panel" aria-label="Account profile overview">
@@ -716,62 +1261,121 @@ export default function AccountProfilePage() {
             <h2>{safeText(account?.name, "Account")}</h2>
             <p>{safeText(account?.description, "No account description yet")}</p>
           </div>
-          <Chip tone={statusTone(summary.accountStatus)}>{titleCase(summary.accountStatus)}</Chip>
+          <Chip tone={statusTone(summary.accountStatus)}>
+            {titleCase(summary.accountStatus)}
+          </Chip>
         </div>
 
         <div className="ba-profile-detail-grid">
-          <button type="button" className="ba-profile-detail wide" onClick={openProfileSheet}>
-            <b>Profile</b>
-            <strong>{safeText(account?.website, "Website not set")}</strong>
-            <small>{safeText(account?.address, "No address set")}</small>
+          <button
+            type="button"
+            className="ba-profile-detail wide"
+            onClick={openMyProfileSheet}
+          >
+            <b>My Profile</b>
+            <strong>{safeText(ownerUser?.fullName, "Name not set")}</strong>
+            <small>
+              {safeText(ownerUser?.email, "No login email")} · {titleCase(ownerUser?.role)}
+            </small>
           </button>
 
-          <button type="button" className="ba-profile-detail" onClick={() => setActiveSheet("defaults")}>
+          <button
+            type="button"
+            className="ba-profile-detail"
+            onClick={openAccountSheet}
+          >
+            <b>Account</b>
+            <strong>{safeText(account?.email, "Contact email not set")}</strong>
+            <small>{safeText(account?.website, "Website not set")}</small>
+          </button>
+
+          <button
+            type="button"
+            className="ba-profile-detail"
+            onClick={() => setActiveSheet("security")}
+          >
+            <b>Login & Security</b>
+            <strong>{safeText(ownerUser?.email, "No login email")}</strong>
+            <small>
+              Password changed {safeDate(ownerUser?.passwordChangedAt)}
+            </small>
+          </button>
+
+          <button
+            type="button"
+            className="ba-profile-detail"
+            onClick={() => setActiveSheet("defaults")}
+          >
             <b>Defaults</b>
-            <strong>{accountSettings.country} · {accountSettings.currency}</strong>
-            <small>{accountSettings.timezone} · {accountSettings.defaultLanguage}</small>
+            <strong>
+              {accountSettings.country} · {accountSettings.currency}
+            </strong>
+            <small>
+              {accountSettings.timezone} · {accountSettings.defaultLanguage}
+            </small>
           </button>
 
-          <button type="button" className="ba-profile-detail" onClick={() => setActiveSheet("security")}>
-            <b>Security</b>
-            <strong>{summary.enabledSettings} enabled</strong>
-            <small>Passwords, branch switching and owner exports</small>
-          </button>
-
-          <button type="button" className="ba-profile-detail" onClick={() => setActiveSheet("sync")}>
+          <button
+            type="button"
+            className="ba-profile-detail"
+            onClick={() => setActiveSheet("sync")}
+          >
             <b>Sync & Backup</b>
             <strong>{booleanLabel(accountSettings.allowOfflineMode)}</strong>
-            <small>{accountSettings.backupFrequency} backup · auto sync {accountSettings.autoSyncOnLogin ? "on" : "off"}</small>
+            <small>
+              {accountSettings.backupFrequency} backup · auto sync{" "}
+              {accountSettings.autoSyncOnLogin ? "on" : "off"}
+            </small>
           </button>
 
-          <button type="button" className="ba-profile-detail" onClick={() => setActiveSheet("protected")}>
+          <button
+            type="button"
+            className="ba-profile-detail"
+            onClick={() => setActiveSheet("protected")}
+          >
             <b>Plan</b>
             <strong>{summary.plan}</strong>
-            <small>{titleCase(summary.subscriptionStatus)} · {summary.billingCycle}</small>
-          </button>
-
-          <button type="button" className="ba-profile-detail" onClick={() => setActiveSheet("protected")}>
-            <b>Period Ends</b>
-            <strong>{safeDate(summary.periodEnd)}</strong>
-            <small>Backend-controlled subscription date</small>
+            <small>
+              {titleCase(summary.subscriptionStatus)} · {summary.billingCycle}
+            </small>
           </button>
         </div>
 
         <div className="ba-profile-metrics" aria-label="Account metrics">
-          <span><b>{summary.users}</b><small>Users</small></span>
-          <span><b>{summary.invoices}</b><small>Invoices</small></span>
-          <span><b>{summary.payments}</b><small>Payments</small></span>
-          <span><b>{bannerUrl ? "Saved" : "Missing"}</b><small>Banner</small></span>
+          <span>
+            <b>{summary.users}</b>
+            <small>Users</small>
+          </span>
+          <span>
+            <b>{summary.invoices}</b>
+            <small>Invoices</small>
+          </span>
+          <span>
+            <b>{summary.payments}</b>
+            <small>Payments</small>
+          </span>
+          <span>
+            <b>{bannerUrl ? "Saved" : "Missing"}</b>
+            <small>Banner</small>
+          </span>
         </div>
 
-        <p className="ba-profile-note">Account identity, defaults, security and sync settings now live here. Plan, subscription, invoices, payments and platform feature flags remain protected backend values.</p>
+        <p className="ba-profile-note">
+          Your personal login identity and the Account workspace are managed
+          separately here. Plan, subscription, invoices, payments and platform
+          capabilities remain protected backend values.
+        </p>
       </section>
 
       {moreOpen && (
         <MoreSheet
-          onProfile={() => {
+          onMyProfile={() => {
             setMoreOpen(false);
-            openProfileSheet();
+            openMyProfileSheet();
+          }}
+          onAccount={() => {
+            setMoreOpen(false);
+            openAccountSheet();
           }}
           onDefaults={() => {
             setMoreOpen(false);
@@ -797,32 +1401,133 @@ export default function AccountProfilePage() {
         />
       )}
 
-      {activeSheet === "profile" && (
-        <ProfileSheet profile={profile} saving={saving} message={message} updateProfile={updateProfile} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} saveProfile={saveProfile} close={() => setActiveSheet(null)} />
+      {activeSheet === "myProfile" && (
+        <MyProfileSheet
+          form={myProfile}
+          user={ownerUser}
+          saving={saving}
+          message={message}
+          update={updateMyProfile}
+          save={saveMyProfile}
+          openSecurity={() => setActiveSheet("security")}
+          close={() => setActiveSheet(null)}
+        />
+      )}
+
+      {activeSheet === "account" && (
+        <AccountProfileSheet
+          profile={accountProfile}
+          saving={saving}
+          message={message}
+          updateProfile={updateAccountProfile}
+          handleImageUpload={handleImageUpload}
+          openCameraForField={openCameraForField}
+          saveProfile={saveAccountProfile}
+          close={() => setActiveSheet(null)}
+        />
       )}
 
       {activeSheet === "defaults" && (
-        <DefaultsSheet settings={accountSettings} saving={saving} message={message} updateSettings={updateSettings} saveSettings={saveSettings} close={() => setActiveSheet(null)} />
+        <DefaultsSheet
+          settings={accountSettings}
+          saving={saving}
+          message={message}
+          updateSettings={updateSettings}
+          saveSettings={saveDefaults}
+          close={() => setActiveSheet(null)}
+        />
       )}
 
       {activeSheet === "security" && (
-        <SecuritySheet settings={accountSettings} saving={saving} message={message} updateSettings={updateSettings} saveSettings={saveSettings} close={() => setActiveSheet(null)} />
+        <SecuritySheet
+          user={ownerUser}
+          settings={accountSettings}
+          saving={saving}
+          message={message}
+          updateSettings={updateSettings}
+          saveSettings={saveSecuritySettings}
+          openEmail={openEmailSheet}
+          openPassword={openPasswordSheet}
+          close={() => setActiveSheet(null)}
+        />
+      )}
+
+      {activeSheet === "email" && (
+        <ChangeEmailSheet
+          form={emailForm}
+          saving={saving}
+          message={message}
+          update={(patch) => {
+            setEmailForm((current) => ({ ...current, ...patch }));
+            setMessage("");
+          }}
+          save={changeLoginEmail}
+          close={() => setActiveSheet("security")}
+        />
+      )}
+
+      {activeSheet === "password" && (
+        <ChangePasswordSheet
+          form={passwordForm}
+          saving={saving}
+          message={message}
+          update={(patch) => {
+            setPasswordForm((current) => ({ ...current, ...patch }));
+            setMessage("");
+          }}
+          save={changePassword}
+          close={() => setActiveSheet("security")}
+        />
       )}
 
       {activeSheet === "sync" && (
-        <SyncSheet settings={accountSettings} saving={saving} message={message} updateSettings={updateSettings} saveSettings={saveSettings} close={() => setActiveSheet(null)} />
+        <SyncSheet
+          settings={accountSettings}
+          saving={saving}
+          message={message}
+          updateSettings={updateSettings}
+          saveSettings={saveSyncSettings}
+          close={() => setActiveSheet(null)}
+        />
       )}
 
-      {activeSheet === "protected" && <ProtectedSheet account={account} summary={summary} close={() => setActiveSheet(null)} />}
+      {activeSheet === "protected" && (
+        <ProtectedSheet
+          account={account}
+          summary={summary}
+          close={() => setActiveSheet(null)}
+        />
+      )}
 
       {cameraOpen && (
-        <CameraCaptureModal field={cameraField} videoRef={cameraVideoRef} starting={cameraStarting} capturing={cameraCapturing} facing={cameraFacing} setFacing={setCameraFacing} capture={captureCameraPhoto} close={closeCamera} entityLabel={ACCOUNT_MEDIA_ENTITY_LABEL} />
+        <CameraCaptureModal
+          field={cameraField}
+          videoRef={cameraVideoRef}
+          starting={cameraStarting}
+          capturing={cameraCapturing}
+          facing={cameraFacing}
+          setFacing={setCameraFacing}
+          capture={captureCameraPhoto}
+          close={closeCamera}
+          entityLabel={ACCOUNT_MEDIA_ENTITY_LABEL}
+        />
       )}
     </main>
   );
 }
 
-function accountToProfileForm(account: AccountData | null, previews: Record<string, string>): ProfileForm {
+function userToMyProfileForm(user: OwnerUser | null): MyProfileForm {
+  return {
+    fullName: user?.fullName || "",
+    phone: user?.phone || "",
+    preferredLocale: user?.preferredLocale || "",
+  };
+}
+
+function accountToProfileForm(
+  account: AccountData | null,
+  previews: Record<string, string>,
+): AccountProfileForm {
   const cloudId = account?.id || "";
   return {
     name: account?.name || "",
@@ -831,18 +1536,39 @@ function accountToProfileForm(account: AccountData | null, previews: Record<stri
     website: account?.website || "",
     address: account?.address || "",
     description: account?.description || "",
-    logo: previews[mediaKey(cloudId, "logo")] || safeRecordMediaValue(account?.logo) || "",
-    logoMediaId: account?.logoMediaId ? Number(account.logoMediaId) : undefined,
-    photo: previews[mediaKey(cloudId, "photo")] || safeRecordMediaValue(account?.photo) || "",
-    photoMediaId: account?.photoMediaId ? Number(account.photoMediaId) : undefined,
-    bannerImage: previews[mediaKey(cloudId, "bannerImage")] || safeRecordMediaValue(account?.bannerImage) || "",
-    bannerMediaId: account?.bannerMediaId || account?.bannerImageMediaId ? Number(account.bannerMediaId || account.bannerImageMediaId) : undefined,
+    logo:
+      previews[mediaKey(cloudId, "logo")] ||
+      safeRecordMediaValue(account?.logo) ||
+      "",
+    logoMediaId: idOf(account?.logoMediaId) || undefined,
+    photo:
+      previews[mediaKey(cloudId, "photo")] ||
+      safeRecordMediaValue(account?.photo) ||
+      "",
+    photoMediaId: idOf(account?.photoMediaId) || undefined,
+    bannerImage:
+      previews[mediaKey(cloudId, "bannerImage")] ||
+      safeRecordMediaValue(account?.bannerImage) ||
+      "",
+    bannerMediaId:
+      idOf(account?.bannerMediaId || account?.bannerImageMediaId) || undefined,
   };
 }
 
-function State({ primary, title, text }: { primary: string; title: string; text: string }) {
+function State({
+  primary,
+  title,
+  text,
+}: {
+  primary: string;
+  title: string;
+  text: string;
+}) {
   return (
-    <main className="ba-page" style={{ "--ba-primary": primary } as React.CSSProperties}>
+    <main
+      className="ba-page"
+      style={{ "--ba-primary": primary } as React.CSSProperties}
+    >
       <style>{css}</style>
       <section className="ba-state">
         <div className="ba-spinner" />
@@ -866,28 +1592,97 @@ function SliderIcon() {
   );
 }
 
-function MoreSheet({ onProfile, onDefaults, onSecurity, onSync, onProtected, onRefresh, onClose }: { onProfile: () => void; onDefaults: () => void; onSecurity: () => void; onSync: () => void; onProtected: () => void; onRefresh: () => void | Promise<void>; onClose: () => void }) {
+function MoreSheet({
+  onMyProfile,
+  onAccount,
+  onDefaults,
+  onSecurity,
+  onSync,
+  onProtected,
+  onRefresh,
+  onClose,
+}: {
+  onMyProfile: () => void;
+  onAccount: () => void;
+  onDefaults: () => void;
+  onSecurity: () => void;
+  onSync: () => void;
+  onProtected: () => void;
+  onRefresh: () => void | Promise<void>;
+  onClose: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
-          <div><h2>More</h2><p>Manage account profile sections or reload account data.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close more options">✕</button>
+          <div>
+            <h2>More</h2>
+            <p>Manage your profile, workspace and account preferences.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close more options">
+            ✕
+          </button>
         </div>
         <div className="ba-menu-list">
-          <MenuButton icon="✎" title="Profile" note="Identity, contact and account media" onClick={onProfile} />
-          <MenuButton icon="⚙" title="Defaults" note="Country, currency, timezone and language" onClick={onDefaults} />
-          <MenuButton icon="🔒" title="Security" note="Password rules, branch switching and exports" onClick={onSecurity} />
-          <MenuButton icon="☁" title="Sync & Backup" note="Offline mode, auto sync and backup frequency" onClick={onSync} />
-          <MenuButton icon="🛡" title="Protected" note="Plan, subscription and platform flags" onClick={onProtected} />
-          <MenuButton icon="↻" title="Refresh" note="Reload backend and local account data" onClick={onRefresh} />
+          <MenuButton
+            icon="👤"
+            title="My Profile"
+            note="Your name, phone and personal locale"
+            onClick={onMyProfile}
+          />
+          <MenuButton
+            icon="🏢"
+            title="Account"
+            note="Workspace identity, contact and branding"
+            onClick={onAccount}
+          />
+          <MenuButton
+            icon="🔒"
+            title="Login & Security"
+            note="Login email, password and access rules"
+            onClick={onSecurity}
+          />
+          <MenuButton
+            icon="⚙"
+            title="Defaults"
+            note="Country, currency, timezone and locale"
+            onClick={onDefaults}
+          />
+          <MenuButton
+            icon="☁"
+            title="Sync & Backup"
+            note="Offline mode, auto sync and backup frequency"
+            onClick={onSync}
+          />
+          <MenuButton
+            icon="🛡"
+            title="Protected"
+            note="Plan, subscription and platform flags"
+            onClick={onProtected}
+          />
+          <MenuButton
+            icon="↻"
+            title="Refresh"
+            note="Reload backend and local account data"
+            onClick={onRefresh}
+          />
         </div>
       </section>
     </div>
   );
 }
 
-function MenuButton({ icon, title, note, onClick }: { icon: string; title: string; note: string; onClick: () => void | Promise<void> }) {
+function MenuButton({
+  icon,
+  title,
+  note,
+  onClick,
+}: {
+  icon: string;
+  title: string;
+  note: string;
+  onClick: () => void | Promise<void>;
+}) {
   return (
     <button type="button" onClick={onClick}>
       <span>{icon}</span>
@@ -897,88 +1692,585 @@ function MenuButton({ icon, title, note, onClick }: { icon: string; title: strin
   );
 }
 
-function ProfileSheet({ profile, saving, message, updateProfile, handleImageUpload, openCameraForField, saveProfile, close }: { profile: ProfileForm; saving: boolean; message: string; updateProfile: (patch: Partial<ProfileForm>) => void; handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>; openCameraForField: (field: CameraField) => void; saveProfile: (event?: React.FormEvent) => void | Promise<void>; close: () => void }) {
+function MyProfileSheet({
+  form,
+  user,
+  saving,
+  message,
+  update,
+  save,
+  openSecurity,
+  close,
+}: {
+  form: MyProfileForm;
+  user: OwnerUser | null;
+  saving: boolean;
+  message: string;
+  update: (patch: Partial<MyProfileForm>) => void;
+  save: (event?: React.FormEvent) => void | Promise<void>;
+  openSecurity: () => void;
+  close: () => void;
+}) {
   return (
     <div className="ba-modal-backdrop" role="dialog" aria-modal="true">
-      <form className="ba-modal" onSubmit={saveProfile}>
+      <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
-          <div><h2>Edit Account Profile</h2><p>Update identity, contact details, logo, photo and banner.</p></div>
-          <button type="button" onClick={close} aria-label="Close account profile form">✕</button>
+          <div>
+            <h2>My Profile</h2>
+            <p>Update the personal details attached to your current login.</p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close my profile form">
+            ✕
+          </button>
         </div>
         {message && <section className="ba-toast error">{message}</section>}
+
         <section className="ba-form-section">
-          <h3>Identity</h3>
+          <h3>Personal Identity</h3>
           <div className="ba-form">
-            <TextInput wide label="Account Name" value={profile.name} onChange={(value) => updateProfile({ name: value })} placeholder="Account name" />
-            <TextInput label="Email" value={profile.email} onChange={(value) => updateProfile({ email: value })} placeholder="owner@example.com" />
-            <TextInput label="Phone" value={profile.phone} onChange={(value) => updateProfile({ phone: value })} placeholder="Phone" />
-            <TextInput wide label="Website" value={profile.website} onChange={(value) => updateProfile({ website: value })} placeholder="https://example.com" />
-            <TextareaInput wide label="Address" value={profile.address} onChange={(value) => updateProfile({ address: value })} placeholder="Account address" />
-            <TextareaInput wide label="Description" value={profile.description} onChange={(value) => updateProfile({ description: value })} placeholder="Short account description" />
+            <TextInput
+              wide
+              label="Full Name"
+              value={form.fullName}
+              onChange={(value) => update({ fullName: value })}
+              placeholder="Your full name"
+              autoComplete="name"
+            />
+            <TextInput
+              label="Phone"
+              value={form.phone}
+              onChange={(value) => update({ phone: value })}
+              placeholder="Phone"
+              autoComplete="tel"
+            />
+            <TextInput
+              label="Preferred Locale"
+              value={form.preferredLocale}
+              onChange={(value) => update({ preferredLocale: value })}
+              placeholder="e.g. en-GH"
+            />
+            <TextInput
+              wide
+              label="Login Email"
+              value={user?.email || ""}
+              onChange={() => undefined}
+              readOnly
+              autoComplete="email"
+            />
           </div>
+          <p className="ba-inline-note">
+            Login email and password are protected security values. Use Login &amp;
+            Security to change them.
+          </p>
         </section>
-        <section className="ba-form-section">
-          <h3>Media</h3>
-          <div className="ba-form">
-            <MediaInput title="Logo" field="logo" preview={profile.logo} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} />
-            <MediaInput title="Account Photo" field="photo" preview={profile.photo} handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} />
-            <MediaInput title="Banner Image" field="bannerImage" preview={profile.bannerImage} banner handleImageUpload={handleImageUpload} openCameraForField={openCameraForField} />
-          </div>
-        </section>
-        <div className="ba-modal-actions"><button type="button" onClick={close}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : "Save Profile"}</button></div>
+
+        <div className="ba-modal-actions">
+          <button type="button" onClick={openSecurity}>
+            Login &amp; Security
+          </button>
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : "Save My Profile"}
+          </button>
+        </div>
       </form>
     </div>
   );
 }
 
-function DefaultsSheet({ settings, saving, message, updateSettings, saveSettings, close }: { settings: SettingsForm; saving: boolean; message: string; updateSettings: <K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) => void; saveSettings: (event?: React.FormEvent) => void | Promise<void>; close: () => void }) {
+function AccountProfileSheet({
+  profile,
+  saving,
+  message,
+  updateProfile,
+  handleImageUpload,
+  openCameraForField,
+  saveProfile,
+  close,
+}: {
+  profile: AccountProfileForm;
+  saving: boolean;
+  message: string;
+  updateProfile: (patch: Partial<AccountProfileForm>) => void;
+  handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>;
+  openCameraForField: (field: CameraField) => void;
+  saveProfile: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <SettingsModal title="Defaults" text="Set localization defaults used across schools, reports and billing." saving={saving} message={message} onSubmit={saveSettings} close={close} submitLabel="Save Defaults">
+    <div className="ba-modal-backdrop" role="dialog" aria-modal="true">
+      <form className="ba-modal" onSubmit={saveProfile}>
+        <div className="ba-modal-head">
+          <div>
+            <h2>Edit Account</h2>
+            <p>
+              Update workspace identity, business contact details and account
+              branding. This does not change your login email.
+            </p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close account form">
+            ✕
+          </button>
+        </div>
+        {message && <section className="ba-toast error">{message}</section>}
+
+        <section className="ba-form-section">
+          <h3>Workspace Identity</h3>
+          <div className="ba-form">
+            <TextInput
+              wide
+              label="Account Name"
+              value={profile.name}
+              onChange={(value) => updateProfile({ name: value })}
+              placeholder="Account name"
+            />
+            <TextInput
+              label="Account Contact Email"
+              value={profile.email}
+              onChange={(value) => updateProfile({ email: value })}
+              placeholder="admin@example.com"
+              autoComplete="email"
+            />
+            <TextInput
+              label="Account Phone"
+              value={profile.phone}
+              onChange={(value) => updateProfile({ phone: value })}
+              placeholder="Phone"
+              autoComplete="tel"
+            />
+            <TextInput
+              wide
+              label="Website"
+              value={profile.website}
+              onChange={(value) => updateProfile({ website: value })}
+              placeholder="https://example.com"
+            />
+            <TextareaInput
+              wide
+              label="Address"
+              value={profile.address}
+              onChange={(value) => updateProfile({ address: value })}
+              placeholder="Account address"
+            />
+            <TextareaInput
+              wide
+              label="Description"
+              value={profile.description}
+              onChange={(value) => updateProfile({ description: value })}
+              placeholder="Short account description"
+            />
+          </div>
+        </section>
+
+        <section className="ba-form-section">
+          <h3>Media</h3>
+          <div className="ba-form">
+            <MediaInput
+              title="Logo"
+              field="logo"
+              preview={profile.logo}
+              handleImageUpload={handleImageUpload}
+              openCameraForField={openCameraForField}
+            />
+            <MediaInput
+              title="Account Photo"
+              field="photo"
+              preview={profile.photo}
+              handleImageUpload={handleImageUpload}
+              openCameraForField={openCameraForField}
+            />
+            <MediaInput
+              title="Banner Image"
+              field="bannerImage"
+              preview={profile.bannerImage}
+              banner
+              handleImageUpload={handleImageUpload}
+              openCameraForField={openCameraForField}
+            />
+          </div>
+        </section>
+
+        <div className="ba-modal-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : "Save Account"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function DefaultsSheet({
+  settings,
+  saving,
+  message,
+  updateSettings,
+  saveSettings,
+  close,
+}: {
+  settings: SettingsForm;
+  saving: boolean;
+  message: string;
+  updateSettings: <K extends keyof SettingsForm>(
+    key: K,
+    value: SettingsForm[K],
+  ) => void;
+  saveSettings: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
+  return (
+    <SettingsModal
+      title="Defaults"
+      text="Set account localization defaults used across schools, reports and billing."
+      saving={saving}
+      message={message}
+      onSubmit={saveSettings}
+      close={close}
+      submitLabel="Save Defaults"
+    >
       <div className="ba-form">
-        <TextInput label="Country" value={settings.country} onChange={(value) => updateSettings("country", value.toUpperCase())} placeholder="GH" />
-        <TextInput label="Currency" value={settings.currency} onChange={(value) => updateSettings("currency", value.toUpperCase())} placeholder="GHS" />
-        <TextInput label="Timezone" value={settings.timezone} onChange={(value) => updateSettings("timezone", value)} placeholder="Africa/Accra" />
-        <TextInput label="Default Language" value={settings.defaultLanguage} onChange={(value) => updateSettings("defaultLanguage", value)} placeholder="en" />
-        <label><span>Academic Year Start</span><select value={settings.academicYearStartMonth} onChange={(event) => updateSettings("academicYearStartMonth", event.target.value)}><option value="1">January</option><option value="4">April</option><option value="9">September</option></select></label>
+        <TextInput
+          label="Country"
+          value={settings.country}
+          onChange={(value) => updateSettings("country", value.toUpperCase())}
+          placeholder="GH"
+        />
+        <TextInput
+          label="Currency"
+          value={settings.currency}
+          onChange={(value) => updateSettings("currency", value.toUpperCase())}
+          placeholder="GHS"
+        />
+        <TextInput
+          label="Timezone"
+          value={settings.timezone}
+          onChange={(value) => updateSettings("timezone", value)}
+          placeholder="Africa/Accra"
+        />
+        <TextInput
+          label="Default Locale"
+          value={settings.defaultLanguage}
+          onChange={(value) => updateSettings("defaultLanguage", value)}
+          placeholder="en-GH"
+        />
+        <label>
+          <span>Academic Year Start</span>
+          <select
+            value={settings.academicYearStartMonth}
+            onChange={(event) =>
+              updateSettings("academicYearStartMonth", event.target.value)
+            }
+          >
+            <option value="1">January</option>
+            <option value="4">April</option>
+            <option value="9">September</option>
+          </select>
+        </label>
       </div>
     </SettingsModal>
   );
 }
 
-function SecuritySheet({ settings, saving, message, updateSettings, saveSettings, close }: { settings: SettingsForm; saving: boolean; message: string; updateSettings: <K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) => void; saveSettings: (event?: React.FormEvent) => void | Promise<void>; close: () => void }) {
+function SecuritySheet({
+  user,
+  settings,
+  saving,
+  message,
+  updateSettings,
+  saveSettings,
+  openEmail,
+  openPassword,
+  close,
+}: {
+  user: OwnerUser | null;
+  settings: SettingsForm;
+  saving: boolean;
+  message: string;
+  updateSettings: <K extends keyof SettingsForm>(
+    key: K,
+    value: SettingsForm[K],
+  ) => void;
+  saveSettings: (event?: React.FormEvent) => void | Promise<void>;
+  openEmail: () => void;
+  openPassword: () => void;
+  close: () => void;
+}) {
   return (
-    <SettingsModal title="Security" text="Keep account access rules tight while still supporting branch operations." saving={saving} message={message} onSubmit={saveSettings} close={close} submitLabel="Save Security">
+    <SettingsModal
+      title="Login & Security"
+      text="Manage your login credentials and account-wide security preferences."
+      saving={saving}
+      message={message}
+      onSubmit={saveSettings}
+      close={close}
+      submitLabel="Save Security Preferences"
+    >
+      <div className="ba-security-actions">
+        <button type="button" className="ba-security-action" onClick={openEmail}>
+          <div>
+            <b>Login Email</b>
+            <small>
+              {safeText(user?.email, "No login email")} · {user?.emailVerifiedAt ? "verified" : "not verified"}
+            </small>
+          </div>
+          <span>›</span>
+        </button>
+
+        <button
+          type="button"
+          className="ba-security-action"
+          onClick={openPassword}
+        >
+          <div>
+            <b>Password</b>
+            <small>Last changed: {safeDate(user?.passwordChangedAt)}</small>
+          </div>
+          <span>›</span>
+        </button>
+      </div>
+
       <div className="ba-toggle-grid">
-        <ToggleCard title="Require Strong Passwords" note="New users must use secure passwords." value={settings.requireStrongPasswords} onToggle={() => updateSettings("requireStrongPasswords", !settings.requireStrongPasswords)} />
-        <ToggleCard title="Force Temporary Password Change" note="Temporary users must change their password after first login." value={settings.requirePasswordChangeForTempUsers} onToggle={() => updateSettings("requirePasswordChangeForTempUsers", !settings.requirePasswordChangeForTempUsers)} />
-        <ToggleCard title="Allow Branch Switching" note="Permitted users can switch assigned branches." value={settings.allowBranchSwitching} onToggle={() => updateSettings("allowBranchSwitching", !settings.allowBranchSwitching)} />
-        <ToggleCard title="Owner Data Export" note="Owner can export account-scoped backup data." value={settings.allowOwnerDataExport} onToggle={() => updateSettings("allowOwnerDataExport", !settings.allowOwnerDataExport)} />
+        <ToggleCard
+          title="Require Strong Passwords"
+          note="New users must use secure passwords."
+          value={settings.requireStrongPasswords}
+          onToggle={() =>
+            updateSettings(
+              "requireStrongPasswords",
+              !settings.requireStrongPasswords,
+            )
+          }
+        />
+        <ToggleCard
+          title="Force Temporary Password Change"
+          note="Temporary users must change their password after first login."
+          value={settings.requirePasswordChangeForTempUsers}
+          onToggle={() =>
+            updateSettings(
+              "requirePasswordChangeForTempUsers",
+              !settings.requirePasswordChangeForTempUsers,
+            )
+          }
+        />
+        <ToggleCard
+          title="Allow Branch Switching"
+          note="Permitted users can switch assigned branches."
+          value={settings.allowBranchSwitching}
+          onToggle={() =>
+            updateSettings("allowBranchSwitching", !settings.allowBranchSwitching)
+          }
+        />
+        <ToggleCard
+          title="Owner Data Export"
+          note="Owner can export account-scoped backup data."
+          value={settings.allowOwnerDataExport}
+          onToggle={() =>
+            updateSettings("allowOwnerDataExport", !settings.allowOwnerDataExport)
+          }
+        />
       </div>
     </SettingsModal>
   );
 }
 
-function SyncSheet({ settings, saving, message, updateSettings, saveSettings, close }: { settings: SettingsForm; saving: boolean; message: string; updateSettings: <K extends keyof SettingsForm>(key: K, value: SettingsForm[K]) => void; saveSettings: (event?: React.FormEvent) => void | Promise<void>; close: () => void }) {
+function ChangeEmailSheet({
+  form,
+  saving,
+  message,
+  update,
+  save,
+  close,
+}: {
+  form: EmailForm;
+  saving: boolean;
+  message: string;
+  update: (patch: Partial<EmailForm>) => void;
+  save: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
   return (
-    <SettingsModal title="Sync & Backup" text="Control offline behavior, login sync and backup rhythm." saving={saving} message={message} onSubmit={saveSettings} close={close} submitLabel="Save Sync">
+    <SettingsModal
+      title="Change Login Email"
+      text="This changes the email used to sign in. Your current password is required."
+      saving={saving}
+      message={message}
+      onSubmit={save}
+      close={close}
+      submitLabel="Change Login Email"
+    >
+      <div className="ba-form">
+        <TextInput
+          wide
+          label="New Login Email"
+          value={form.newEmail}
+          onChange={(value) => update({ newEmail: value })}
+          placeholder="new@example.com"
+          autoComplete="email"
+        />
+        <PasswordInput
+          wide
+          label="Current Password"
+          value={form.currentPassword}
+          onChange={(value) => update({ currentPassword: value })}
+          autoComplete="current-password"
+        />
+      </div>
+      <p className="ba-inline-note">
+        Account/business contact email is separate and can be changed from the
+        Account section.
+      </p>
+    </SettingsModal>
+  );
+}
+
+function ChangePasswordSheet({
+  form,
+  saving,
+  message,
+  update,
+  save,
+  close,
+}: {
+  form: PasswordForm;
+  saving: boolean;
+  message: string;
+  update: (patch: Partial<PasswordForm>) => void;
+  save: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
+  return (
+    <SettingsModal
+      title="Change Password"
+      text="Confirm your current password, then choose a new password."
+      saving={saving}
+      message={message}
+      onSubmit={save}
+      close={close}
+      submitLabel="Change Password"
+    >
+      <div className="ba-form">
+        <PasswordInput
+          wide
+          label="Current Password"
+          value={form.currentPassword}
+          onChange={(value) => update({ currentPassword: value })}
+          autoComplete="current-password"
+        />
+        <PasswordInput
+          label="New Password"
+          value={form.newPassword}
+          onChange={(value) => update({ newPassword: value })}
+          autoComplete="new-password"
+        />
+        <PasswordInput
+          label="Confirm New Password"
+          value={form.confirmPassword}
+          onChange={(value) => update({ confirmPassword: value })}
+          autoComplete="new-password"
+        />
+      </div>
+    </SettingsModal>
+  );
+}
+
+function SyncSheet({
+  settings,
+  saving,
+  message,
+  updateSettings,
+  saveSettings,
+  close,
+}: {
+  settings: SettingsForm;
+  saving: boolean;
+  message: string;
+  updateSettings: <K extends keyof SettingsForm>(
+    key: K,
+    value: SettingsForm[K],
+  ) => void;
+  saveSettings: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
+  return (
+    <SettingsModal
+      title="Sync & Backup"
+      text="Control offline behavior, login sync and backup rhythm."
+      saving={saving}
+      message={message}
+      onSubmit={saveSettings}
+      close={close}
+      submitLabel="Save Sync"
+    >
       <div className="ba-toggle-grid">
-        <ToggleCard title="Offline Mode" note="Allow school work to continue in IndexedDB when internet is unavailable." value={settings.allowOfflineMode} onToggle={() => updateSettings("allowOfflineMode", !settings.allowOfflineMode)} />
-        <ToggleCard title="Auto Sync on Login" note="Try to sync pending records when a user signs in." value={settings.autoSyncOnLogin} onToggle={() => updateSettings("autoSyncOnLogin", !settings.autoSyncOnLogin)} />
+        <ToggleCard
+          title="Offline Mode"
+          note="Allow school work to continue in IndexedDB when internet is unavailable."
+          value={settings.allowOfflineMode}
+          onToggle={() =>
+            updateSettings("allowOfflineMode", !settings.allowOfflineMode)
+          }
+        />
+        <ToggleCard
+          title="Auto Sync on Login"
+          note="Try to sync pending records when a user signs in."
+          value={settings.autoSyncOnLogin}
+          onToggle={() =>
+            updateSettings("autoSyncOnLogin", !settings.autoSyncOnLogin)
+          }
+        />
       </div>
       <div className="ba-form compact top-gap">
-        <label><span>Backup Frequency</span><select value={settings.backupFrequency} onChange={(event) => updateSettings("backupFrequency", event.target.value)}><option value="manual">Manual only</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label>
+        <label>
+          <span>Backup Frequency</span>
+          <select
+            value={settings.backupFrequency}
+            onChange={(event) =>
+              updateSettings("backupFrequency", event.target.value)
+            }
+          >
+            <option value="manual">Manual only</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
       </div>
     </SettingsModal>
   );
 }
 
-function ProtectedSheet({ account, summary, close }: { account: AccountData | null; summary: any; close: () => void }) {
+function ProtectedSheet({
+  account,
+  summary,
+  close,
+}: {
+  account: AccountData | null;
+  summary: any;
+  close: () => void;
+}) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
-          <div><h2>Protected Values</h2><p>These values are read-only here and controlled by backend billing/platform rules.</p></div>
-          <button type="button" onClick={close} aria-label="Close protected values">✕</button>
+          <div>
+            <h2>Protected Values</h2>
+            <p>
+              These values are read-only here and controlled by backend
+              billing/platform rules.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            aria-label="Close protected values"
+          >
+            ✕
+          </button>
         </div>
         <div className="ba-protected-grid">
           <Detail label="Account Status" value={account?.status || "active"} />
@@ -987,9 +2279,20 @@ function ProtectedSheet({ account, summary, close }: { account: AccountData | nu
           <Detail label="Subscription" value={summary.subscriptionStatus} />
           <Detail label="Billing Cycle" value={summary.billingCycle} />
           <Detail label="Period Ends" value={safeDate(summary.periodEnd)} />
-          <Detail label="API Access" value={booleanLabel(Boolean(account?.subscription?.plan?.apiAccess))} />
-          <Detail label="Cloud Backup" value={booleanLabel(Boolean(account?.subscription?.plan?.cloudBackup))} />
-          <Detail label="Advanced Analytics" value={booleanLabel(Boolean(account?.subscription?.plan?.advancedAnalytics))} />
+          <Detail
+            label="API Access"
+            value={booleanLabel(Boolean(account?.subscription?.plan?.apiAccess))}
+          />
+          <Detail
+            label="Cloud Backup"
+            value={booleanLabel(Boolean(account?.subscription?.plan?.cloudBackup))}
+          />
+          <Detail
+            label="Advanced Analytics"
+            value={booleanLabel(
+              Boolean(account?.subscription?.plan?.advancedAnalytics),
+            )}
+          />
           <Detail label="Users" value={summary.users} />
           <Detail label="Invoices" value={summary.invoices} />
           <Detail label="Payments" value={summary.payments} />
@@ -999,62 +2302,307 @@ function ProtectedSheet({ account, summary, close }: { account: AccountData | nu
   );
 }
 
-function SettingsModal({ title, text, saving, message, submitLabel, children, onSubmit, close }: { title: string; text: string; saving: boolean; message: string; submitLabel: string; children: React.ReactNode; onSubmit: (event?: React.FormEvent) => void | Promise<void>; close: () => void }) {
+function SettingsModal({
+  title,
+  text,
+  saving,
+  message,
+  submitLabel,
+  children,
+  onSubmit,
+  close,
+}: {
+  title: string;
+  text: string;
+  saving: boolean;
+  message: string;
+  submitLabel: string;
+  children: React.ReactNode;
+  onSubmit: (event?: React.FormEvent) => void | Promise<void>;
+  close: () => void;
+}) {
   return (
     <div className="ba-modal-backdrop" role="dialog" aria-modal="true">
       <form className="ba-modal settings-modal" onSubmit={onSubmit}>
-        <div className="ba-modal-head"><div><h2>{title}</h2><p>{text}</p></div><button type="button" onClick={close} aria-label={`Close ${title}`}>✕</button></div>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>{text}</p>
+          </div>
+          <button type="button" onClick={close} aria-label={`Close ${title}`}>
+            ✕
+          </button>
+        </div>
         {message && <section className="ba-toast error">{message}</section>}
         <section className="ba-form-section">{children}</section>
-        <div className="ba-modal-actions"><button type="button" onClick={close}>Cancel</button><button type="submit" disabled={saving}>{saving ? "Saving..." : submitLabel}</button></div>
+        <div className="ba-modal-actions">
+          <button type="button" onClick={close}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving}>
+            {saving ? "Saving..." : submitLabel}
+          </button>
+        </div>
       </form>
     </div>
   );
 }
 
-function TextInput({ label, value, onChange, placeholder, wide = false }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; wide?: boolean }) {
-  return <label className={wide ? "wide" : undefined}><span>{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>;
+function TextInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  wide = false,
+  readOnly = false,
+  autoComplete,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  wide?: boolean;
+  readOnly?: boolean;
+  autoComplete?: string;
+}) {
+  return (
+    <label className={wide ? "wide" : undefined}>
+      <span>{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        readOnly={readOnly}
+        autoComplete={autoComplete}
+      />
+    </label>
+  );
 }
 
-function TextareaInput({ label, value, onChange, placeholder, wide = false }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; wide?: boolean }) {
-  return <label className={wide ? "wide" : undefined}><span>{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /></label>;
+function PasswordInput({
+  label,
+  value,
+  onChange,
+  wide = false,
+  autoComplete,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  wide?: boolean;
+  autoComplete?: string;
+}) {
+  return (
+    <label className={wide ? "wide" : undefined}>
+      <span>{label}</span>
+      <input
+        type="password"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
+      />
+    </label>
+  );
 }
 
-function ToggleCard({ title, note, value, onToggle }: { title: string; note: string; value: boolean; onToggle: () => void }) {
+function TextareaInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  wide = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  wide?: boolean;
+}) {
+  return (
+    <label className={wide ? "wide" : undefined}>
+      <span>{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+      />
+    </label>
+  );
+}
+
+function ToggleCard({
+  title,
+  note,
+  value,
+  onToggle,
+}: {
+  title: string;
+  note: string;
+  value: boolean;
+  onToggle: () => void;
+}) {
   return (
     <article className="ba-toggle-card">
-      <div><h3>{title}</h3><p>{note}</p><Chip tone={value ? "green" : "gray"}>{value ? "Enabled" : "Disabled"}</Chip></div>
-      <button type="button" className={`ba-switch ${value ? "on" : ""}`} onClick={onToggle} aria-pressed={value}><span /></button>
+      <div>
+        <h3>{title}</h3>
+        <p>{note}</p>
+        <Chip tone={value ? "green" : "gray"}>
+          {value ? "Enabled" : "Disabled"}
+        </Chip>
+      </div>
+      <button
+        type="button"
+        className={`ba-switch ${value ? "on" : ""}`}
+        onClick={onToggle}
+        aria-pressed={value}
+      >
+        <span />
+      </button>
     </article>
   );
 }
 
 function Detail({ label, value }: { label: string; value: string | number }) {
-  return <div className="ba-detail"><span>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div className="ba-detail">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
-function MediaInput({ title, field, preview, banner = false, handleImageUpload, openCameraForField }: { title: string; field: CameraField; preview?: string; banner?: boolean; handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>; openCameraForField: (field: CameraField) => void }) {
+function MediaInput({
+  title,
+  field,
+  preview,
+  banner = false,
+  handleImageUpload,
+  openCameraForField,
+}: {
+  title: string;
+  field: CameraField;
+  preview?: string;
+  banner?: boolean;
+  handleImageUpload: (field: CameraField, file?: File) => void | Promise<void>;
+  openCameraForField: (field: CameraField) => void;
+}) {
   return (
     <label className={banner ? "wide" : undefined}>
       <span>{title}</span>
       <div className="ba-media-actions">
-        <label className="ba-media-button">Upload<input type="file" accept="image/*" onChange={(event) => handleImageUpload(field, event.target.files?.[0])} hidden /></label>
-        <button type="button" className="ba-media-button secondary" onClick={() => openCameraForField(field)}>Take Photo</button>
+        <label className="ba-media-button">
+          Upload
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(event) => handleImageUpload(field, event.target.files?.[0])}
+            hidden
+          />
+        </label>
+        <button
+          type="button"
+          className="ba-media-button secondary"
+          onClick={() => openCameraForField(field)}
+        >
+          Take Photo
+        </button>
       </div>
-      <small className="ba-media-hint">Upload from files or take a camera photo. It is optimized and saved as a media asset.</small>
-      {preview && <img src={preview} alt={`${title} preview`} className={banner ? "ba-preview-banner" : "ba-preview-photo"} />}
+      <small className="ba-media-hint">
+        Upload from files or take a camera photo. It is optimized and saved as a
+        media asset.
+      </small>
+      {preview && (
+        <img
+          src={preview}
+          alt={`${title} preview`}
+          className={banner ? "ba-preview-banner" : "ba-preview-photo"}
+        />
+      )}
     </label>
   );
 }
 
-function CameraCaptureModal({ field, videoRef, starting, capturing, facing, setFacing, capture, close, entityLabel }: { field: CameraField; videoRef: React.RefObject<HTMLVideoElement | null>; starting: boolean; capturing: boolean; facing: CameraFacingMode; setFacing: (value: CameraFacingMode) => void; capture: () => void | Promise<void>; close: () => void; entityLabel: string }) {
-  const title = field === "logo" ? `Take ${entityLabel} Logo` : field === "bannerImage" ? `Take ${entityLabel} Banner` : `Take ${entityLabel} Photo`;
+function CameraCaptureModal({
+  field,
+  videoRef,
+  starting,
+  capturing,
+  facing,
+  setFacing,
+  capture,
+  close,
+  entityLabel,
+}: {
+  field: CameraField;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  starting: boolean;
+  capturing: boolean;
+  facing: CameraFacingMode;
+  setFacing: (value: CameraFacingMode) => void;
+  capture: () => void | Promise<void>;
+  close: () => void;
+  entityLabel: string;
+}) {
+  const title =
+    field === "logo"
+      ? `Take ${entityLabel} Logo`
+      : field === "bannerImage"
+        ? `Take ${entityLabel} Banner`
+        : `Take ${entityLabel} Photo`;
+
   return (
-    <div className="ba-modal-backdrop camera-backdrop" role="dialog" aria-modal="true">
+    <div
+      className="ba-modal-backdrop camera-backdrop"
+      role="dialog"
+      aria-modal="true"
+    >
       <section className="ba-camera-modal">
-        <div className="ba-modal-head"><div><h2>{title}</h2><p>Use the live camera preview, then capture. The image will be compressed and saved as a media asset.</p></div><button type="button" onClick={close} aria-label="Close camera">✕</button></div>
-        <div className="ba-camera-preview"><video ref={videoRef} autoPlay muted playsInline />{starting && <span className="ba-camera-loading">Opening camera...</span>}</div>
-        <div className="ba-camera-actions"><button type="button" className="ba-camera-secondary" onClick={() => setFacing(facing === "environment" ? "user" : "environment")} disabled={starting || capturing}>Switch Camera</button><button type="button" className="ba-camera-secondary" onClick={close} disabled={capturing}>Cancel</button><button type="button" className="ba-camera-primary" onClick={capture} disabled={starting || capturing}>{capturing ? "Capturing..." : "Capture Photo"}</button></div>
+        <div className="ba-modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>
+              Use the live camera preview, then capture. The image will be
+              compressed and saved as a media asset.
+            </p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close camera">
+            ✕
+          </button>
+        </div>
+        <div className="ba-camera-preview">
+          <video ref={videoRef} autoPlay muted playsInline />
+          {starting && (
+            <span className="ba-camera-loading">Opening camera...</span>
+          )}
+        </div>
+        <div className="ba-camera-actions">
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={() =>
+              setFacing(facing === "environment" ? "user" : "environment")
+            }
+            disabled={starting || capturing}
+          >
+            Switch Camera
+          </button>
+          <button
+            type="button"
+            className="ba-camera-secondary"
+            onClick={close}
+            disabled={capturing}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="ba-camera-primary"
+            onClick={capture}
+            disabled={starting || capturing}
+          >
+            {capturing ? "Capturing..." : "Capture Photo"}
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -1155,4 +2703,16 @@ const css = `
 @media (min-width: 680px) { .ba-page { padding: calc(12px * var(--local-density-scale,1)); padding-bottom: 44px; } .ba-search-card { grid-template-columns: minmax(0,1fr) 48px 48px 48px; } .ba-profile-detail-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } .ba-form { grid-template-columns: repeat(2, minmax(0,1fr)); } .ba-toggle-grid, .ba-protected-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .ba-modal-backdrop, .ba-sheet-backdrop { place-items: center; padding: 18px; } .ba-sheet, .ba-modal { border-radius: 28px; padding: 18px; } }
 @media (min-width: 1040px) { .ba-page { padding: calc(16px * var(--local-density-scale,1)); padding-bottom: 48px; } .ba-search-card, .ba-profile-panel { max-width: 1180px; margin-left: auto; margin-right: auto; } .ba-form { grid-template-columns: repeat(3, minmax(0,1fr)); } .ba-protected-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
 @media (max-width: 520px) { .ba-profile-metrics { grid-template-columns: repeat(2, minmax(0,1fr)); } .ba-page { padding: calc(7px * var(--local-density-scale,1)); padding-bottom: max(38px, env(safe-area-inset-bottom)); } .ba-icon-button, .ba-filter-button, .ba-add-inline { width: 40px; height: 40px; } .ba-sheet, .ba-modal { border-radius: 24px 24px 18px 18px; padding: 12px; } .ba-modal-actions { display: grid; grid-template-columns: minmax(0,1fr); } .ba-modal-actions button { width: 100%; } .ba-media-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .ba-media-button, .ba-camera-actions button { width: 100%; } .ba-camera-actions { display: grid; grid-template-columns: minmax(0, 1fr); } .ba-camera-modal { border-radius: 22px; padding: 11px; } }
+.ba-identity-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px; border-radius: 20px; border: 1px solid var(--border,rgba(0,0,0,.10)); background: color-mix(in srgb,var(--ba-primary) 5%,var(--surface,#fff)); }
+.ba-identity-card h3 { margin: 0; font-size: 14px; font-weight: 1000; letter-spacing: -.03em; }
+.ba-identity-card p { margin: 4px 0 0; color: var(--muted,#64748b); font-size: 12px; line-height: 1.45; font-weight: 750; overflow-wrap: anywhere; }
+.ba-identity-card small { display: block; margin-top: 5px; color: var(--muted,#64748b); font-size: 10px; font-weight: 850; }
+.ba-security-actions { display: grid; gap: 8px; margin-bottom: 12px; }
+.ba-security-action { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 62px; padding: 10px 12px; border: 1px solid var(--border,rgba(0,0,0,.10)); border-radius: 18px; background: var(--surface,#fff); color: var(--text,#111827); text-align: left; cursor: pointer; }
+.ba-security-action b { display: block; font-size: 13px; font-weight: 1000; }
+.ba-security-action small { display: block; margin-top: 3px; color: var(--muted,#64748b); font-size: 11px; line-height: 1.4; font-weight: 750; overflow-wrap: anywhere; }
+.ba-security-action span { color: var(--ba-primary); font-size: 18px; font-weight: 1000; }
+.ba-inline-note { margin: 8px 0 0; padding: 10px 12px; border-radius: 16px; background: color-mix(in srgb,var(--ba-primary) 7%,transparent); color: var(--muted,#64748b); font-size: 11px; line-height: 1.5; font-weight: 750; }
+.ba-form input[readonly] { background: color-mix(in srgb,var(--muted,#64748b) 7%,var(--surface,#fff)); color: var(--muted,#64748b); cursor: default; }
+
 `;

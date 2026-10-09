@@ -390,7 +390,7 @@ export default function PortalLibrary({
   return (
     <main className="portal-library-page">
       <header className="portal-library-page-head root">
-        <div>
+        /*<div>
           <p>Workspace</p>
 
           <h1>
@@ -402,7 +402,7 @@ export default function PortalLibrary({
             this role, organized by
             purpose.
           </span>
-        </div>
+        </div>*/
       </header>
 
       {onOpenHub ? (
@@ -483,11 +483,11 @@ export default function PortalLibrary({
                     {visual.label}
                   </strong>
 
-                  <small>
+                 /* <small>
                     {
                       visual.description
                     }
-                  </small>
+                  </small>*/
                 </span>
               </button>
             );

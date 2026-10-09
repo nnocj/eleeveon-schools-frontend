@@ -41,76 +41,94 @@ type SectionVisual = {
   glyph: string;
 };
 
-const SECTION_VISUALS: Record<string, SectionVisual> = {
+const SECTION_VISUALS: Record<
+  string,
+  SectionVisual
+> = {
   administration: {
     label: "People",
-    description: "Students, teachers and parents",
+    description:
+      "Students, teachers and parents",
     glyph: "👥",
   },
 
   people: {
     label: "People",
-    description: "Students, teachers and parents",
+    description:
+      "Students, teachers and parents",
     glyph: "👥",
   },
 
   setup: {
     label: "Setup",
-    description: "Academic structures and learning setup",
+    description:
+      "Academic structures and learning setup",
     glyph: "🧩",
   },
 
   "academic records": {
     label: "Records",
-    description: "Assessment, reports and learner progress",
+    description:
+      "Assessment, reports and learner progress",
     glyph: "📊",
   },
 
   "identity & safety": {
     label: "Identity & Safety",
-    description: "Identity, access, visitors and safety",
+    description:
+      "Identity, access, visitors and safety",
     glyph: "🪪",
   },
 
   attendance: {
     label: "Attendance",
-    description: "Student and staff attendance",
+    description:
+      "Student and staff attendance",
     glyph: "✅",
   },
 
   communication: {
     label: "Communication",
-    description: "Announcements and messages",
+    description:
+      "Announcements and messages",
     glyph: "💬",
   },
 
   "calendar & timetable": {
     label: "Schedule",
-    description: "Calendars, classes, exams and resources",
+    description:
+      "Calendars, classes, exams and resources",
     glyph: "📅",
   },
 
   finance: {
     label: "Finance",
-    description: "Fees, income, expenses and payouts",
+    description:
+      "Fees, income, expenses and payouts",
     glyph: "💳",
   },
 
   "branch control": {
     label: "Branch",
-    description: "Settings, access and local controls",
+    description:
+      "Settings, access and local controls",
     glyph: "⚙️",
   },
 
   "school control": {
     label: "School",
-    description: "School settings, users and controls",
+    description:
+      "School settings, users and controls",
     glyph: "🏫",
   },
 };
 
-function normalizedTitle(value: string) {
-  return String(value || "")
+function normalizedTitle(
+  value: string,
+) {
+  return String(
+    value || "",
+  )
     .trim()
     .toLowerCase();
 }
@@ -120,9 +138,17 @@ function sectionKey(
 ) {
   return (
     section.key ||
-    normalizedTitle(section.title)
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "") ||
+    normalizedTitle(
+      section.title,
+    )
+      .replace(
+        /[^a-z0-9]+/g,
+        "-",
+      )
+      .replace(
+        /^-|-$/g,
+        "",
+      ) ||
     "section"
   );
 }
@@ -131,10 +157,14 @@ function sectionVisual(
   section: LibraryNavSection,
 ): SectionVisual {
   const normalized =
-    normalizedTitle(section.title);
+    normalizedTitle(
+      section.title,
+    );
 
   const known =
-    SECTION_VISUALS[normalized];
+    SECTION_VISUALS[
+      normalized
+    ];
 
   if (known) {
     return {
@@ -147,7 +177,8 @@ function sectionVisual(
         known.description,
 
       glyph:
-        section.items?.[0]?.icon ||
+        section.items?.[0]
+          ?.icon ||
         known.glyph,
     };
   }
@@ -159,10 +190,14 @@ function sectionVisual(
 
     description:
       section.libraryDescription ||
-      `${section.items?.length || 0} tools`,
+      `${
+        section.items?.length ||
+        0
+      } tools`,
 
     glyph:
-      section.items?.[0]?.icon ||
+      section.items?.[0]
+        ?.icon ||
       "◫",
   };
 }
@@ -173,15 +208,6 @@ function itemLabel(
   return (
     item.libraryLabel ||
     item.label
-  );
-}
-
-function itemDescription(
-  item: LibraryNavItem,
-) {
-  return (
-    item.libraryDescription ||
-    `Open ${item.label}`
   );
 }
 
@@ -204,12 +230,15 @@ function VisualCover({
       className="portal-library-cover"
       aria-hidden="true"
     >
-      {image && !failed ? (
+      {image &&
+      !failed ? (
         <img
           src={image}
           alt=""
           onError={() =>
-            setFailed(true)
+            setFailed(
+              true,
+            )
           }
         />
       ) : (
@@ -242,9 +271,9 @@ export default function PortalLibrary({
   const [
     selectedSectionKey,
     setSelectedSectionKey,
-  ] = useState<string | null>(
-    null,
-  );
+  ] = useState<
+    string | null
+  >(null);
 
   const librarySections =
     useMemo(
@@ -252,23 +281,31 @@ export default function PortalLibrary({
         (
           sections as LibraryNavSection[]
         )
-          .map((section) => ({
-            ...section,
+          .map(
+            (
+              section,
+            ) => ({
+              ...section,
 
-            items:
-              (
-                section.items ||
-                []
-              ).filter(
-                (item) =>
-                  item.key !==
-                  homeKey,
-              ),
-          }))
+              items:
+                (
+                  section.items ||
+                  []
+                ).filter(
+                  (
+                    item,
+                  ) =>
+                    item.key !==
+                    homeKey,
+                ),
+            }),
+          )
           .filter(
-            (section) =>
-              section.items.length >
-              0,
+            (
+              section,
+            ) =>
+              section.items
+                .length > 0,
           ),
       [
         sections,
@@ -280,8 +317,12 @@ export default function PortalLibrary({
     useMemo(
       () =>
         librarySections.find(
-          (section) =>
-            sectionKey(section) ===
+          (
+            section,
+          ) =>
+            sectionKey(
+              section,
+            ) ===
             selectedSectionKey,
         ) || null,
       [
@@ -290,7 +331,22 @@ export default function PortalLibrary({
       ],
     );
 
-  if (selectedSection) {
+  /*
+   * =====================================================
+   * OPENED LIBRARY CATEGORY
+   * =====================================================
+   *
+   * Example:
+   *
+   * Library
+   *   ↓
+   * People
+   *   ↓
+   * Students / Teachers / Parents
+   */
+  if (
+    selectedSection
+  ) {
     const visual =
       sectionVisual(
         selectedSection,
@@ -313,14 +369,20 @@ export default function PortalLibrary({
           </button>
 
           <div>
-            <p>Library</p>
+            <p>
+              Library
+            </p>
 
             <h1>
-              {visual.label}
+              {
+                visual.label
+              }
             </h1>
 
             <span>
-              {visual.description}
+              {
+                visual.description
+              }
             </span>
           </div>
         </header>
@@ -331,85 +393,127 @@ export default function PortalLibrary({
         >
           {(
             selectedSection.items as LibraryNavItem[]
-          ).map((item) => {
-            const image =
-              item.libraryImage;
+          ).map(
+            (
+              item,
+            ) => {
+              const image =
+                item.libraryImage;
 
-            return (
-              <button
-                type="button"
-                className={[
-                  "portal-library-card",
-                  item.key ===
-                    activeKey &&
-                    "active",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                key={item.key}
-                onClick={() =>
-                  onNavigate(
-                    item.key,
-                  )
-                }
-              >
-                <VisualCover
-                  image={image}
-                  glyph={
-                    item.icon ||
-                    "◫"
-                  }
-                  alt={
-                    itemLabel(item)
-                  }
-                />
+              return (
+                <button
+                  type="button"
+                  className={[
+                    "portal-library-card",
 
-                <span className="portal-library-card-copy">
-                  <strong>
-                    {itemLabel(
-                      item,
+                    item.key ===
+                      activeKey &&
+                      "active",
+                  ]
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
                     )}
-                  </strong>
+                  key={
+                    item.key
+                  }
+                  onClick={() =>
+                    onNavigate(
+                      item.key,
+                    )
+                  }
+                >
+                  <VisualCover
+                    image={
+                      image
+                    }
+                    glyph={
+                      item.icon ||
+                      "◫"
+                    }
+                    alt={
+                      itemLabel(
+                        item,
+                      )
+                    }
+                  />
 
-                  /*<small>
-                    {itemDescription(
-                      item,
-                    )}
-                  </small>*/
-                </span>
-              </button>
-            );
-          })}
+                  <span className="portal-library-card-copy">
+                    <strong>
+                      {itemLabel(
+                        item,
+                      )}
+                    </strong>
+
+                    {/*
+                     * Child-item description intentionally hidden.
+                     *
+                     * We currently want the visual card and title only.
+                     *
+                     * If we later want descriptions again, restore:
+                     *
+                     * <small>
+                     *   {item.libraryDescription || `Open ${item.label}`}
+                     * </small>
+                     */}
+                  </span>
+                </button>
+              );
+            },
+          )}
         </section>
 
-        <style>{css}</style>
+        <style>
+          {css}
+        </style>
       </main>
     );
   }
 
+  /*
+   * =====================================================
+   * LIBRARY ROOT
+   * =====================================================
+   */
   return (
     <main className="portal-library-page">
-      <header className="portal-library-page-head root">
-        /*<div>
-          <p>Workspace</p>
-
-          <h1>
-            Library
-          </h1>
-
-          <span>
-            Everything available in
-            this role, organized by
-            purpose.
-          </span>
-        </div>*/
-      </header>
+      {/*
+       * Library root heading intentionally hidden.
+       *
+       * This previously displayed:
+       *
+       * Workspace
+       * Library
+       * Everything available in this role...
+       *
+       * It can be restored later if needed.
+       *
+       * <header className="portal-library-page-head root">
+       *   <div>
+       *     <p>Workspace</p>
+       *
+       *     <h1>
+       *       Library
+       *     </h1>
+       *
+       *     <span>
+       *       Everything available in
+       *       this role, organized by
+       *       purpose.
+       *     </span>
+       *   </div>
+       * </header>
+       */}
 
       {onOpenHub ? (
         <button
           type="button"
           className="portal-library-hub"
-          onClick={onOpenHub}
+          onClick={
+            onOpenHub
+          }
         >
           <span className="portal-library-hub-icon">
             ◎
@@ -421,11 +525,14 @@ export default function PortalLibrary({
             </strong>
 
             <small>
-              Notices, messages and support
+              Notices,
+              messages and
+              support
             </small>
           </span>
 
-          {hubUnreadCount > 0 ||
+          {hubUnreadCount >
+            0 ||
           hubHasAttention ? (
             <b>
               {hubUnreadCount >
@@ -435,7 +542,9 @@ export default function PortalLibrary({
                   "!"}
             </b>
           ) : (
-            <i>›</i>
+            <i>
+              ›
+            </i>
           )}
         </button>
       ) : null}
@@ -445,7 +554,9 @@ export default function PortalLibrary({
         aria-label="Library categories"
       >
         {librarySections.map(
-          (section) => {
+          (
+            section,
+          ) => {
             const visual =
               sectionVisual(
                 section,
@@ -455,9 +566,11 @@ export default function PortalLibrary({
               <button
                 type="button"
                 className="portal-library-card"
-                key={sectionKey(
-                  section,
-                )}
+                key={
+                  sectionKey(
+                    section,
+                  )
+                }
                 onClick={() =>
                   setSelectedSectionKey(
                     sectionKey(
@@ -480,14 +593,23 @@ export default function PortalLibrary({
 
                 <span className="portal-library-card-copy">
                   <strong>
-                    {visual.label}
+                    {
+                      visual.label
+                    }
                   </strong>
 
-                 /* <small>
-                    {
-                      visual.description
-                    }
-                  </small>*/
+                  {/*
+                   * Category description intentionally hidden.
+                   *
+                   * We currently want only:
+                   * image + category title.
+                   *
+                   * Restore this later if wanted:
+                   *
+                   * <small>
+                   *   {visual.description}
+                   * </small>
+                   */}
                 </span>
               </button>
             );
@@ -495,7 +617,9 @@ export default function PortalLibrary({
         )}
       </section>
 
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
     </main>
   );
 }
@@ -505,6 +629,7 @@ const css = `
   width: min(760px, 100%);
   margin: 0 auto;
   padding: 14px 12px 24px;
+
   color:
     var(
       --eds-text,
@@ -514,89 +639,151 @@ const css = `
 
 .portal-library-page-head {
   display: grid;
+
   grid-template-columns:
     40px minmax(0, 1fr);
+
   align-items: start;
+
   gap: 10px;
+
   margin-bottom: 14px;
 }
 
 .portal-library-page-head.root {
-  grid-template-columns: 1fr;
+  grid-template-columns:
+    1fr;
 }
 
 .portal-library-page-head p {
   margin: 0;
+
   color:
     var(
       --eds-primary,
       var(--primary-color, #2563eb)
     );
+
   font-size: 10px;
   font-weight: 900;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+
+  letter-spacing:
+    .08em;
+
+  text-transform:
+    uppercase;
 }
 
 .portal-library-page-head h1 {
-  margin: 2px 0 0;
+  margin:
+    2px 0 0;
+
   color:
     var(
       --eds-text-strong,
       var(--text, #111827)
     );
-  font-size: clamp(26px, 7vw, 38px);
-  line-height: .96;
-  letter-spacing: -.045em;
+
+  font-size:
+    clamp(
+      26px,
+      7vw,
+      38px
+    );
+
+  line-height:
+    .96;
+
+  letter-spacing:
+    -.045em;
 }
 
 .portal-library-page-head span {
   display: block;
-  margin-top: 7px;
+
+  margin-top:
+    7px;
+
   color:
     var(
       --eds-text-muted,
       var(--muted, #64748b)
     );
-  font-size: 12px;
-  line-height: 1.5;
-  font-weight: 650;
+
+  font-size:
+    12px;
+
+  line-height:
+    1.5;
+
+  font-weight:
+    650;
 }
 
 .portal-library-back {
-  width: 38px;
-  height: 38px;
+  width:
+    38px;
+
+  height:
+    38px;
+
   border:
     1px solid
     var(
       --eds-border,
       var(--border, rgba(0,0,0,.10))
     );
-  border-radius: 13px;
+
+  border-radius:
+    13px;
+
   background:
     var(
       --eds-surface,
       var(--surface, #ffffff)
     );
+
   color:
     var(
       --eds-text-strong,
       var(--text, #111827)
     );
-  font-size: 28px;
-  line-height: 1;
+
+  font-size:
+    28px;
+
+  line-height:
+    1;
+
+  cursor:
+    pointer;
 }
 
 .portal-library-hub {
-  width: 100%;
-  min-height: 68px;
-  display: grid;
+  width:
+    100%;
+
+  min-height:
+    68px;
+
+  display:
+    grid;
+
   grid-template-columns:
     42px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-  padding: 9px 11px;
+
+  align-items:
+    center;
+
+  gap:
+    10px;
+
+  margin-bottom:
+    14px;
+
+  padding:
+    9px 11px;
+
   border:
     1px solid
     color-mix(
@@ -610,10 +797,14 @@ const css = `
         var(--border, rgba(0,0,0,.10))
       )
     );
-  border-radius: 18px;
+
+  border-radius:
+    18px;
+
   background:
     linear-gradient(
       135deg,
+
       color-mix(
         in srgb,
         var(
@@ -625,38 +816,64 @@ const css = `
           var(--surface, #ffffff)
         )
       ),
+
       var(
         --eds-surface,
         var(--surface, #ffffff)
       )
     );
-  color: inherit;
-  text-align: left;
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
 }
 
 .portal-library-hub-icon {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
+  width:
+    42px;
+
+  height:
+    42px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    14px;
+
   background:
     var(
       --eds-primary,
       var(--primary-color, #2563eb)
     );
-  color: #ffffff;
-  font-size: 22px;
-  font-weight: 1000;
+
+  color:
+    #ffffff;
+
+  font-size:
+    22px;
+
+  font-weight:
+    1000;
 }
 
 .portal-library-hub > span:nth-child(2) {
-  min-width: 0;
+  min-width:
+    0;
 }
 
 .portal-library-hub strong,
 .portal-library-hub small {
-  display: block;
+  display:
+    block;
 }
 
 .portal-library-hub strong {
@@ -665,35 +882,61 @@ const css = `
       --eds-text-strong,
       var(--text, #111827)
     );
-  font-size: 13px;
-  font-weight: 900;
+
+  font-size:
+    13px;
+
+  font-weight:
+    900;
 }
 
 .portal-library-hub small {
-  margin-top: 2px;
+  margin-top:
+    2px;
+
   color:
     var(
       --eds-text-muted,
       var(--muted, #64748b)
     );
-  font-size: 10px;
-  font-weight: 650;
+
+  font-size:
+    10px;
+
+  font-weight:
+    650;
 }
 
 .portal-library-hub b {
-  min-width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  padding: 0 6px;
-  border-radius: 999px;
+  min-width:
+    28px;
+
+  height:
+    28px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  padding:
+    0 6px;
+
+  border-radius:
+    999px;
+
   background:
     var(
       --eds-primary,
       var(--primary-color, #2563eb)
     );
-  color: #fff;
-  font-size: 10px;
+
+  color:
+    #ffffff;
+
+  font-size:
+    10px;
 }
 
 .portal-library-hub i {
@@ -702,46 +945,90 @@ const css = `
       --eds-text-muted,
       var(--muted, #64748b)
     );
-  font-size: 24px;
-  font-style: normal;
+
+  font-size:
+    24px;
+
+  font-style:
+    normal;
 }
 
 .portal-library-grid {
-  display: grid;
+  display:
+    grid;
+
   grid-template-columns:
-    repeat(2, minmax(0, 1fr));
-  gap: 12px;
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
+
+  gap:
+    12px;
 }
 
 .portal-library-card {
-  min-width: 0;
-  display: grid;
-  gap: 8px;
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
+  min-width:
+    0;
+
+  display:
+    grid;
+
+  gap:
+    8px;
+
+  border:
+    0;
+
+  padding:
+    0;
+
+  background:
+    transparent;
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
 }
 
 .portal-library-cover {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 1 / 1.06;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: 17px;
+  position:
+    relative;
+
+  width:
+    100%;
+
+  aspect-ratio:
+    1 / 1.06;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  overflow:
+    hidden;
+
+  border-radius:
+    17px;
+
   border:
     1px solid
     var(
       --eds-border,
       var(--border, rgba(0,0,0,.08))
     );
+
   background:
     linear-gradient(
       145deg,
+
       color-mix(
         in srgb,
         var(
@@ -753,6 +1040,7 @@ const css = `
           var(--surface, #ffffff)
         )
       ),
+
       color-mix(
         in srgb,
         var(
@@ -765,22 +1053,36 @@ const css = `
         )
       )
     );
+
   box-shadow:
     0 8px 22px
     rgba(15,23,42,.07);
 }
 
 .portal-library-cover img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width:
+    100%;
+
+  height:
+    100%;
+
+  object-fit:
+    cover;
 }
 
 .portal-library-cover-glow {
-  position: absolute;
-  width: 72%;
-  height: 72%;
-  border-radius: 50%;
+  position:
+    absolute;
+
+  width:
+    72%;
+
+  height:
+    72%;
+
+  border-radius:
+    50%;
+
   background:
     color-mix(
       in srgb,
@@ -790,13 +1092,25 @@ const css = `
       ) 18%,
       transparent
     );
-  filter: blur(22px);
+
+  filter:
+    blur(22px);
 }
 
 .portal-library-glyph {
-  position: relative;
-  z-index: 1;
-  font-size: clamp(44px, 16vw, 76px);
+  position:
+    relative;
+
+  z-index:
+    1;
+
+  font-size:
+    clamp(
+      44px,
+      16vw,
+      76px
+    );
+
   filter:
     drop-shadow(
       0 9px 13px
@@ -805,16 +1119,26 @@ const css = `
 }
 
 .portal-library-card-copy {
-  min-width: 0;
-  display: block;
-  padding: 0 1px;
+  min-width:
+    0;
+
+  display:
+    block;
+
+  padding:
+    0 1px;
 }
 
 .portal-library-card-copy strong,
 .portal-library-card-copy small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
 }
 
 .portal-library-card-copy strong {
@@ -823,21 +1147,35 @@ const css = `
       --eds-text-strong,
       var(--text, #111827)
     );
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.16;
+
+  font-size:
+    15px;
+
+  font-weight:
+    800;
+
+  line-height:
+    1.16;
 }
 
 .portal-library-card-copy small {
-  margin-top: 3px;
+  margin-top:
+    3px;
+
   color:
     var(
       --eds-text-muted,
       var(--muted, #64748b)
     );
-  font-size: 10px;
-  line-height: 1.35;
-  font-weight: 650;
+
+  font-size:
+    10px;
+
+  line-height:
+    1.35;
+
+  font-weight:
+    650;
 }
 
 .portal-library-card.active
@@ -854,6 +1192,7 @@ const css = `
         transparent
       )
     );
+
   box-shadow:
     0 0 0 2px
     color-mix(
@@ -866,10 +1205,15 @@ const css = `
     );
 }
 
-@media (min-width: 620px) {
+@media (
+  min-width: 620px
+) {
   .portal-library-grid {
     grid-template-columns:
-      repeat(3, minmax(0, 1fr));
+      repeat(
+        3,
+        minmax(0, 1fr)
+      );
   }
 }
 `;

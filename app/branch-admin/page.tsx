@@ -470,13 +470,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
         label: "Parents",
         icon: "👨‍👩‍👧",
       },
-      {
-        key: "classes",
-        label: "Classes",
-        icon: "🏫",
-      },
      
-      
     ],
   },
   {

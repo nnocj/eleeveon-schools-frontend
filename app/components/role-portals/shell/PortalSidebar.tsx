@@ -24,6 +24,7 @@ import NavigationGroup from "./NavigationGroup";
 import SidebarWorkspace from "./SidebarWorkspace";
 
 import PortalMobileNavigation from "./PortalMobileNavigation";
+import PortalSearchBridge from "./PortalSearchBridge";
 
 export interface PortalSidebarProps {
   open: boolean;
@@ -210,16 +211,9 @@ export default function PortalSidebar({
 
   return (
     <>
-      {/*
-       * =====================================================
-       * DESKTOP NAVIGATION
-       * =====================================================
-       *
-       * This remains the existing sidebar experience.
-       *
-       * PortalMobileNavigation hides this sidebar below
-       * the 980px breakpoint.
-       */}
+      {/* ==================================================
+       * DESKTOP SIDEBAR
+       * ================================================== */}
 
       <aside
         data-surface="role-sidebar"
@@ -238,7 +232,9 @@ export default function PortalSidebar({
           .join(" ")}
       >
         <BrandGlow />
+
         <BrandPattern />
+
         <BrandTexture />
 
         <div className="shell-sidebar-inner">
@@ -329,16 +325,32 @@ export default function PortalSidebar({
         />
       </aside>
 
-      {/*
-       * =====================================================
-       * MOBILE NAVIGATION
-       * =====================================================
+      {/* ==================================================
+       * GLOBAL PORTAL SEARCH
+       * ==================================================
        *
-       * Home / Library / Screens replaces the sidebar.
-       *
-       * It uses the exact same NAV_SECTIONS and onNavigate
-       * callback, so routes and permissions remain shared.
+       * PortalHeader communicates with this bridge using
+       * browser events. NAV_SECTIONS remains authoritative.
        */}
+
+      <PortalSearchBridge
+        sections={
+          sections
+        }
+        hubKey={
+          hubKey
+        }
+        onNavigate={
+          onNavigate
+        }
+        onOpenHub={
+          onOpenHub
+        }
+      />
+
+      {/* ==================================================
+       * MOBILE NAVIGATION
+       * ================================================== */}
 
       <PortalMobileNavigation
         portalTitle={

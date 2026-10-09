@@ -13,6 +13,10 @@ export interface PortalMobileBottomNavProps {
   onScreens(): void;
 }
 
+// ======================================================
+// HOME ICON
+// ======================================================
+
 function HomeIcon() {
   return (
     <svg
@@ -29,6 +33,10 @@ function HomeIcon() {
     </svg>
   );
 }
+
+// ======================================================
+// LIBRARY ICON
+// ======================================================
 
 function LibraryIcon() {
   return (
@@ -69,6 +77,10 @@ function LibraryIcon() {
   );
 }
 
+// ======================================================
+// SCREENS ICON
+// ======================================================
+
 function ScreensIcon() {
   return (
     <svg
@@ -100,6 +112,10 @@ function ScreensIcon() {
   );
 }
 
+// ======================================================
+// MOBILE BOTTOM NAVIGATION
+// ======================================================
+
 export default function PortalMobileBottomNav({
   active,
 
@@ -112,6 +128,7 @@ export default function PortalMobileBottomNav({
       className="portal-mobile-bottom-nav"
       aria-label="Portal navigation"
     >
+      {/* HOME */}
       <button
         type="button"
         className={
@@ -120,8 +137,13 @@ export default function PortalMobileBottomNav({
             : ""
         }
         onClick={onHome}
+        aria-current={
+          active === "home"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-bottom-nav-icon">
           <HomeIcon />
         </span>
 
@@ -130,6 +152,7 @@ export default function PortalMobileBottomNav({
         </strong>
       </button>
 
+      {/* LIBRARY */}
       <button
         type="button"
         className={
@@ -138,8 +161,13 @@ export default function PortalMobileBottomNav({
             : ""
         }
         onClick={onLibrary}
+        aria-current={
+          active === "library"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-bottom-nav-icon">
           <LibraryIcon />
         </span>
 
@@ -148,6 +176,7 @@ export default function PortalMobileBottomNav({
         </strong>
       </button>
 
+      {/* SCREENS */}
       <button
         type="button"
         className={
@@ -156,8 +185,13 @@ export default function PortalMobileBottomNav({
             : ""
         }
         onClick={onScreens}
+        aria-current={
+          active === "screens"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-bottom-nav-icon">
           <ScreensIcon />
         </span>
 
@@ -166,33 +200,91 @@ export default function PortalMobileBottomNav({
         </strong>
       </button>
 
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
     </nav>
   );
 }
 
 const css = `
+/*
+ * =====================================================
+ * DESKTOP
+ * =====================================================
+ *
+ * Bottom navigation belongs only to the mobile portal.
+ */
 .portal-mobile-bottom-nav {
-  display: none;
+  display:
+    none;
 }
 
-@media (max-width: 979px) {
+/*
+ * =====================================================
+ * MOBILE / TABLET
+ * =====================================================
+ */
+@media (
+  max-width: 979px
+) {
   .portal-mobile-bottom-nav {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 32;
+    /*
+     * Permanently pin the navigation to the viewport.
+     *
+     * !important prevents older shell/navigation rules
+     * from accidentally changing the positioning.
+     */
+    position:
+      fixed !important;
+
+    left:
+      0 !important;
+
+    right:
+      0 !important;
+
+    bottom:
+      0 !important;
+
+    top:
+      auto !important;
+
+    width:
+      100% !important;
+
+    max-width:
+      100vw !important;
+
+    margin:
+      0 !important;
+
+    transform:
+      none !important;
+
+    /*
+     * Keep it above portal content and mobile overlays.
+     */
+    z-index:
+      60 !important;
+
+    /*
+     * Normal navigation height plus phone safe area.
+     */
+    min-height:
+      64px;
 
     height:
       calc(
-        66px +
+        64px +
         env(
-          safe-area-inset-bottom
+          safe-area-inset-bottom,
+          0px
         )
       );
 
-    display: grid;
+    display:
+      grid !important;
 
     grid-template-columns:
       repeat(
@@ -200,13 +292,19 @@ const css = `
         minmax(0, 1fr)
       );
 
-    align-items: start;
+    align-items:
+      start;
 
     padding:
-      5px 10px
+      4px
+      10px
       env(
-        safe-area-inset-bottom
+        safe-area-inset-bottom,
+        0px
       );
+
+    box-sizing:
+      border-box;
 
     background:
       color-mix(
@@ -222,89 +320,243 @@ const css = `
       1px solid
       var(
         --eds-divider,
-        var(--border, rgba(0,0,0,.08))
+        var(
+          --border,
+          rgba(0,0,0,.08)
+        )
       );
+
+    /*
+     * Slight glass effect while content moves behind it.
+     */
+    -webkit-backdrop-filter:
+      blur(18px);
 
     backdrop-filter:
       blur(18px);
 
     box-shadow:
-      0 -8px 24px
-      rgba(15,23,42,.055);
+      0 -7px 24px
+      rgba(
+        15,
+        23,
+        42,
+        .07
+      );
+
+    /*
+     * Keep navigation stable while the page scrolls.
+     */
+    overflow:
+      hidden;
+
+    overscroll-behavior:
+      none;
+
+    touch-action:
+      manipulation;
   }
 
-  .portal-mobile-bottom-nav button {
-    min-width: 0;
-    height: 56px;
+  /*
+   * ===================================================
+   * NAV BUTTON
+   * ===================================================
+   */
+  .portal-mobile-bottom-nav
+  > button {
+    min-width:
+      0;
 
-    display: grid;
+    height:
+      56px;
+
+    display:
+      grid;
 
     grid-template-rows:
       31px auto;
 
-    place-items: center;
-    align-content: start;
+    place-items:
+      center;
 
-    gap: 1px;
+    align-content:
+      start;
 
-    border: 0;
-    border-radius: 16px;
+    gap:
+      1px;
 
-    padding: 3px 4px;
+    border:
+      0;
 
-    background: transparent;
+    border-radius:
+      15px;
+
+    padding:
+      3px 4px;
+
+    margin:
+      0;
+
+    background:
+      transparent;
 
     color:
       var(
         --eds-text-muted,
-        var(--muted, #5f6877)
+        var(
+          --muted,
+          #5f6877
+        )
       );
+
+    cursor:
+      pointer;
+
+    -webkit-tap-highlight-color:
+      transparent;
   }
 
-  .portal-mobile-bottom-nav button > span {
-    width: 46px;
-    height: 31px;
+  /*
+   * ===================================================
+   * ICON AREA
+   * ===================================================
+   */
+  .portal-bottom-nav-icon {
+    width:
+      46px;
 
-    display: grid;
-    place-items: center;
+    height:
+      31px;
 
-    border-radius: 16px;
+    display:
+      grid;
+
+    place-items:
+      center;
+
+    border-radius:
+      16px;
+
+    transition:
+      background-color
+      .16s ease,
+      color
+      .16s ease;
   }
 
-  .portal-mobile-bottom-nav svg {
-    width: 24px;
-    height: 24px;
+  .portal-mobile-bottom-nav
+  svg {
+    width:
+      23px;
+
+    height:
+      23px;
+
+    display:
+      block;
   }
 
-  .portal-mobile-bottom-nav strong {
-    max-width: 100%;
+  /*
+   * ===================================================
+   * LABEL
+   * ===================================================
+   */
+  .portal-mobile-bottom-nav
+  strong {
+    max-width:
+      100%;
 
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow:
+      hidden;
 
-    font-size: 10px;
-    font-weight: 800;
+    text-overflow:
+      ellipsis;
+
+    white-space:
+      nowrap;
+
+    font-size:
+      10px;
+
+    line-height:
+      1.1;
+
+    font-weight:
+      800;
   }
 
-  .portal-mobile-bottom-nav button.active {
+  /*
+   * ===================================================
+   * ACTIVE NAV ITEM
+   * ===================================================
+   */
+  .portal-mobile-bottom-nav
+  > button.active {
     color:
       var(
         --eds-primary,
-        var(--primary-color, #2563eb)
+        var(
+          --primary-color,
+          #2563eb
+        )
       );
   }
 
-  .portal-mobile-bottom-nav button.active > span {
+  .portal-mobile-bottom-nav
+  > button.active
+  .portal-bottom-nav-icon {
     background:
       color-mix(
         in srgb,
         var(
           --eds-primary,
-          var(--primary-color, #2563eb)
+          var(
+            --primary-color,
+            #2563eb
+          )
         ) 12%,
         transparent
       );
+  }
+
+  /*
+   * ===================================================
+   * PRESSED STATE
+   * ===================================================
+   */
+  .portal-mobile-bottom-nav
+  > button:active
+  .portal-bottom-nav-icon {
+    transform:
+      scale(.96);
+  }
+}
+
+/*
+ * =====================================================
+ * VERY SMALL PHONES
+ * =====================================================
+ */
+@media (
+  max-width: 360px
+) {
+  .portal-mobile-bottom-nav {
+    padding-left:
+      5px;
+
+    padding-right:
+      5px;
+  }
+
+  .portal-bottom-nav-icon {
+    width:
+      40px;
+  }
+
+  .portal-mobile-bottom-nav
+  strong {
+    font-size:
+      9px;
   }
 }
 `;

@@ -36,7 +36,10 @@ export interface PortalMobileNavigationProps {
   hubUnreadCount?: number;
   hubHasAttention?: boolean;
 
-  onNavigate(key: string): void;
+  onNavigate(
+    key: string,
+  ): void;
+
   onOpenHub(): void;
 }
 
@@ -80,6 +83,9 @@ export default function PortalMobileNavigation({
     useState<OverlayMode>(
       null,
     );
+
+  const overlayOpen =
+    overlay !== null;
 
   const labels =
     useMemo(() => {
@@ -160,9 +166,90 @@ export default function PortalMobileNavigation({
       screenScope,
     );
 
+  /**
+   * -----------------------------------------------------
+   * LOCK UNDERLYING PAGE SCROLL
+   * -----------------------------------------------------
+   *
+   * Library and Screens are app-level root surfaces.
+   * Home or another module underneath them must not keep
+   * moving while the user scrolls Library/Screens.
+   *
+   * We deliberately avoid position:fixed on body so the
+   * underlying document keeps its exact scroll position.
+   */
   useEffect(() => {
     if (
-      activeTab === homeKey
+      !overlayOpen ||
+      typeof document ===
+        "undefined"
+    ) {
+      return;
+    }
+
+    const html =
+      document.documentElement;
+
+    const body =
+      document.body;
+
+    const previousHtmlOverflow =
+      html.style.overflow;
+
+    const previousHtmlOverflowY =
+      html.style.overflowY;
+
+    const previousBodyOverflow =
+      body.style.overflow;
+
+    const previousBodyOverflowY =
+      body.style.overflowY;
+
+    const previousBodyTouchAction =
+      body.style.touchAction;
+
+    html.style.overflow =
+      "hidden";
+
+    html.style.overflowY =
+      "hidden";
+
+    body.style.overflow =
+      "hidden";
+
+    body.style.overflowY =
+      "hidden";
+
+    body.style.touchAction =
+      "none";
+
+    return () => {
+      html.style.overflow =
+        previousHtmlOverflow;
+
+      html.style.overflowY =
+        previousHtmlOverflowY;
+
+      body.style.overflow =
+        previousBodyOverflow;
+
+      body.style.overflowY =
+        previousBodyOverflowY;
+
+      body.style.touchAction =
+        previousBodyTouchAction;
+    };
+  }, [
+    overlayOpen,
+  ]);
+
+  /**
+   * Keep Screens automatically aware of visited modules.
+   */
+  useEffect(() => {
+    if (
+      activeTab ===
+      homeKey
     ) {
       if (!overlay) {
         setRootTab(
@@ -174,7 +261,8 @@ export default function PortalMobileNavigation({
     }
 
     if (
-      rootTab === "home" &&
+      rootTab ===
+        "home" &&
       !overlay
     ) {
       setRootTab(
@@ -183,7 +271,9 @@ export default function PortalMobileNavigation({
     }
 
     const label =
-      labels[activeTab];
+      labels[
+        activeTab
+      ];
 
     if (!label) {
       return;
@@ -192,7 +282,9 @@ export default function PortalMobileNavigation({
     touchScreen(
       activeTab,
       label,
-      groups[activeTab] ||
+      groups[
+        activeTab
+      ] ||
         "Workspace",
     );
   }, [
@@ -205,16 +297,25 @@ export default function PortalMobileNavigation({
     touchScreen,
   ]);
 
+  /**
+   * Global Eleeveon Hub bridge.
+   *
+   * The account/workspace drawer can dispatch this event,
+   * allowing Hub to open from either mobile or desktop.
+   */
   useEffect(() => {
-    const openHub = () => {
-      setOverlay(null);
+    const openHub =
+      () => {
+        setOverlay(
+          null,
+        );
 
-      setRootTab(
-        "library",
-      );
+        setRootTab(
+          "library",
+        );
 
-      onOpenHub();
-    };
+        onOpenHub();
+      };
 
     window.addEventListener(
       "eleeveon:open-hub",
@@ -227,51 +328,63 @@ export default function PortalMobileNavigation({
         openHub,
       );
     };
-  }, [onOpenHub]);
+  }, [
+    onOpenHub,
+  ]);
 
-  const openHome = () => {
-    setOverlay(null);
-
-    setRootTab(
-      "home",
-    );
-
-    if (
-      activeTab !== homeKey
-    ) {
-      onNavigate(
-        homeKey,
+  const openHome =
+    () => {
+      setOverlay(
+        null,
       );
-    }
-  };
 
-  const openLibrary = () => {
-    setRootTab(
-      "library",
-    );
+      setRootTab(
+        "home",
+      );
 
-    setOverlay(
-      "library",
-    );
-  };
+      if (
+        activeTab !==
+        homeKey
+      ) {
+        onNavigate(
+          homeKey,
+        );
+      }
+    };
 
-  const openScreens = () => {
-    setRootTab(
-      "screens",
-    );
-
-    setOverlay(
-      "screens",
-    );
-  };
-
-  const openFromLibrary =
-    (key: string) => {
+  const openLibrary =
+    () => {
       setRootTab(
         "library",
       );
 
-      setOverlay(null);
+      setOverlay(
+        "library",
+      );
+    };
+
+  const openScreens =
+    () => {
+      setRootTab(
+        "screens",
+      );
+
+      setOverlay(
+        "screens",
+      );
+    };
+
+  const openFromLibrary =
+    (
+      key: string,
+    ) => {
+      setRootTab(
+        "library",
+      );
+
+      setOverlay(
+        null,
+      );
 
       onNavigate(
         key,
@@ -279,33 +392,27 @@ export default function PortalMobileNavigation({
     };
 
   const openFromScreens =
-    (key: string) => {
+    (
+      key: string,
+    ) => {
       setRootTab(
         "screens",
       );
 
-      setOverlay(null);
+      setOverlay(
+        null,
+      );
 
       if (
         key === hubKey
       ) {
         onOpenHub();
-      } else {
-        onNavigate(
-          key,
-        );
+        return;
       }
-    };
 
-  const openHubFromLibrary =
-    () => {
-      setRootTab(
-        "library",
+      onNavigate(
+        key,
       );
-
-      setOverlay(null);
-
-      onOpenHub();
     };
 
   return (
@@ -334,9 +441,6 @@ export default function PortalMobileNavigation({
             }
             onNavigate={
               openFromLibrary
-            }
-            onOpenHub={
-              openHubFromLibrary
             }
           />
         </section>
@@ -386,60 +490,88 @@ export default function PortalMobileNavigation({
         }
       />
 
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
     </div>
   );
 }
 
 const css = `
 .portal-mobile-navigation {
-  display: none;
+  display:
+    none;
 }
 
-@media (max-width: 979px) {
+@media (
+  max-width: 979px
+) {
   /*
-   * Mobile navigation is no longer a drawer/sidebar.
-   * The desktop sidebar remains mounted for desktop,
-   * but it disappears completely on phone/tablet.
+   * Mobile completely removes the old sidebar.
    */
   .app-sidebar {
-    display: none !important;
+    display:
+      none !important;
   }
 
   .portal-mobile-navigation {
-    display: block;
+    display:
+      block;
   }
 
   /*
-   * Library and Screens are root surfaces underneath
-   * the global portal header and above the bottom nav.
+   * Library and Screens fill the usable area between
+   * the fixed header and fixed bottom navigation.
    */
   .portal-mobile-overlay {
-    position: fixed;
+    position:
+      fixed;
 
     top:
-      var(
-        --portal-header-height,
-        48px
-      );
-
-    left: 0;
-    right: 0;
-
-    bottom:
       calc(
-        66px +
-        env(
-          safe-area-inset-bottom
+        var(
+          --eds-shell-top-offset,
+          0px
+        )
+        +
+        var(
+          --portal-header-height,
+          48px
         )
       );
 
-    z-index: 26;
+    left:
+      0;
 
-    overflow-x: hidden;
-    overflow-y: auto;
+    right:
+      0;
 
-    overscroll-behavior: contain;
+    bottom:
+      calc(
+        64px +
+        env(
+          safe-area-inset-bottom,
+          0px
+        )
+      );
+
+    z-index:
+      55;
+
+    overflow-x:
+      hidden;
+
+    overflow-y:
+      auto;
+
+    overscroll-behavior:
+      contain;
+
+    -webkit-overflow-scrolling:
+      touch;
+
+    touch-action:
+      pan-y;
 
     background:
       var(
@@ -455,15 +587,16 @@ const css = `
   }
 
   /*
-   * Normal module content must never disappear under
-   * the persistent bottom navigation.
+   * Normal modules need enough bottom room so the fixed
+   * navigation never covers their final content.
    */
   .app-content {
     padding-bottom:
       calc(
         82px +
         env(
-          safe-area-inset-bottom
+          safe-area-inset-bottom,
+          0px
         )
       ) !important;
   }
@@ -473,20 +606,10 @@ const css = `
       calc(
         78px +
         env(
-          safe-area-inset-bottom
+          safe-area-inset-bottom,
+          0px
         )
       ) !important;
-  }
-
-  /*
-   * If a stale mobile sidebar-open state exists from an
-   * earlier build, do not leave a dark overlay blocking
-   * the app. The account drawer still receives the same
-   * overlay because it sits above this layer.
-   */
-  .role-shell
-  > .app-overlay {
-    z-index: 40;
   }
 }
 `;

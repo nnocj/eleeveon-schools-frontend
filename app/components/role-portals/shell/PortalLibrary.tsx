@@ -371,11 +371,11 @@ export default function PortalLibrary({
                     )}
                   </strong>
 
-                  <small>
+                  /*<small>
                     {itemDescription(
                       item,
                     )}
-                  </small>
+                  </small>*/
                 </span>
               </button>
             );

@@ -23,68 +23,106 @@ import type {
 import NavigationGroup from "./NavigationGroup";
 import SidebarWorkspace from "./SidebarWorkspace";
 
+import PortalMobileNavigation from "./PortalMobileNavigation";
+
 export interface PortalSidebarProps {
   open: boolean;
   hidden: boolean;
+
   portalTitle: string;
   portalSubtitle: string;
+
   activeInstitutionName?: string | null;
   activeBranchName?: string | null;
+
   hubUnreadCount?: number;
   hubHasAttention?: boolean;
   hubKey: string;
+
   activeTab: string;
   homeKey: string;
+
   sections: RoleNavSection[];
-  openSections: Record<string, boolean>;
+
+  openSections:
+    Record<string, boolean>;
+
   footer?: ReactNode;
-  onNavigate(key: string): void;
+
+  onNavigate(
+    key: string,
+  ): void;
+
   onOpenHub(): void;
-  onToggleSection(title: string): void;
-  onResizeStart(event: MouseEvent): void;
+
+  onToggleSection(
+    title: string,
+  ): void;
+
+  onResizeStart(
+    event: MouseEvent,
+  ): void;
 }
 
 type ResolvedNavigationIcon =
   | EleeveonIconName
   | ReactElement;
 
-const ICON_ALIASES: Record<
-  string,
-  EleeveonIconName
-> = {
-  dashboard: "dashboard",
-  home: "dashboard",
-  students: "student",
-  student: "student",
-  teachers: "teacher",
-  teacher: "teacher",
-  parents: "parent",
-  parent: "parent",
-  attendance: "attendance",
-  assessment: "assessment",
-  assessments: "assessment",
-  reports: "reports",
-  report: "reports",
-  calendar: "calendar",
-  timetable: "timetable",
-  finance: "finance",
-  communication: "communication",
-  communications: "communication",
-  messages: "communication",
-  message: "communication",
-  announcements: "communication",
-  announcement: "communication",
-  workspace: "workspace",
-  settings: "settings",
-  setting: "settings",
-  sync: "sync",
-  devices: "device",
-  device: "device",
-  school: "school",
-  schools: "school",
-  branches: "branch",
-  branch: "branch",
-};
+const ICON_ALIASES:
+  Record<
+    string,
+    EleeveonIconName
+  > = {
+    dashboard: "dashboard",
+    home: "dashboard",
+
+    students: "student",
+    student: "student",
+
+    teachers: "teacher",
+    teacher: "teacher",
+
+    parents: "parent",
+    parent: "parent",
+
+    attendance: "attendance",
+
+    assessment: "assessment",
+    assessments: "assessment",
+
+    reports: "reports",
+    report: "reports",
+
+    calendar: "calendar",
+    timetable: "timetable",
+
+    finance: "finance",
+
+    communication: "communication",
+    communications: "communication",
+
+    messages: "communication",
+    message: "communication",
+
+    announcements: "communication",
+    announcement: "communication",
+
+    workspace: "workspace",
+
+    settings: "settings",
+    setting: "settings",
+
+    sync: "sync",
+
+    devices: "device",
+    device: "device",
+
+    school: "school",
+    schools: "school",
+
+    branches: "branch",
+    branch: "branch",
+  };
 
 function resolveIcon(
   key: string,
@@ -99,10 +137,19 @@ function resolveIcon(
     .toLowerCase();
 
   for (
-    const [needle, icon] of
-    Object.entries(ICON_ALIASES)
+    const [
+      needle,
+      icon,
+    ] of
+    Object.entries(
+      ICON_ALIASES,
+    )
   ) {
-    if (normalized.includes(needle)) {
+    if (
+      normalized.includes(
+        needle,
+      )
+    ) {
       return icon;
     }
   }
@@ -135,103 +182,199 @@ function resolveIcon(
 export default function PortalSidebar({
   open,
   hidden,
+
   portalTitle,
   portalSubtitle,
+
   activeInstitutionName,
   activeBranchName,
+
   hubUnreadCount = 0,
   hubHasAttention = false,
   hubKey,
+
   activeTab,
   homeKey,
+
   sections,
   openSections,
+
   footer,
+
   onNavigate,
   onOpenHub,
   onToggleSection,
   onResizeStart,
 }: PortalSidebarProps) {
   void portalSubtitle;
-  void activeInstitutionName;
-  void activeBranchName;
-  void homeKey;
 
   return (
-    <aside
-      data-surface="role-sidebar"
-      className={[
-        "app-sidebar",
-        "shell-sidebar",
-        "eds-sidebar-surface",
-        open && "open",
-        hidden && "hidden",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <BrandGlow />
-      <BrandPattern />
-      <BrandTexture />
+    <>
+      {/*
+       * =====================================================
+       * DESKTOP NAVIGATION
+       * =====================================================
+       *
+       * This remains the existing sidebar experience.
+       *
+       * PortalMobileNavigation hides this sidebar below
+       * the 980px breakpoint.
+       */}
 
-      <div className="shell-sidebar-inner">
-        <header className="sidebar-head shell-sidebar-head shell-hub-head">
-          <SidebarWorkspace
-            unreadCount={hubUnreadCount}
-            attention={hubHasAttention}
-            active={activeTab === hubKey}
-            onOpen={onOpenHub}
-          />
-        </header>
+      <aside
+        data-surface="role-sidebar"
+        className={[
+          "app-sidebar",
+          "shell-sidebar",
+          "eds-sidebar-surface",
 
-        <nav
-          className="nav-list shell-nav-list"
-          aria-label={`${portalTitle} navigation`}
-        >
-          {sections.map((section) => (
-            <NavigationGroup
-              key={section.title}
-              title={section.title}
-              open={
-                openSections[
-                  section.title
-                ] !== false
+          open &&
+            "open",
+
+          hidden &&
+            "hidden",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        <BrandGlow />
+        <BrandPattern />
+        <BrandTexture />
+
+        <div className="shell-sidebar-inner">
+          <header className="sidebar-head shell-sidebar-head shell-hub-head">
+            <SidebarWorkspace
+              unreadCount={
+                hubUnreadCount
               }
-              activeKey={activeTab}
-              items={section.items.map(
-                (item) => ({
-                  key: item.key,
-                  label: item.label,
-                  icon: resolveIcon(
-                    item.key,
-                    item.label,
-                    item.icon,
-                  ),
-                }),
-              )}
-              onToggle={() =>
-                onToggleSection(
-                  section.title,
-                )
+              attention={
+                hubHasAttention
               }
-              onNavigate={onNavigate}
+              active={
+                activeTab ===
+                hubKey
+              }
+              onOpen={
+                onOpenHub
+              }
             />
-          ))}
-        </nav>
+          </header>
 
-        {footer ? (
-          <footer className="shell-sidebar-footer">
-            {footer}
-          </footer>
-        ) : null}
-      </div>
+          <nav
+            className="nav-list shell-nav-list"
+            aria-label={`${portalTitle} navigation`}
+          >
+            {sections.map(
+              (section) => (
+                <NavigationGroup
+                  key={
+                    section.title
+                  }
+                  title={
+                    section.title
+                  }
+                  open={
+                    openSections[
+                      section.title
+                    ] !== false
+                  }
+                  activeKey={
+                    activeTab
+                  }
+                  items={
+                    section.items.map(
+                      (item) => ({
+                        key:
+                          item.key,
 
-      <button
-        type="button"
-        className="sidebar-resize-handle"
-        aria-label="Resize sidebar"
-        onMouseDown={onResizeStart}
+                        label:
+                          item.label,
+
+                        icon:
+                          resolveIcon(
+                            item.key,
+                            item.label,
+                            item.icon,
+                          ),
+                      }),
+                    )
+                  }
+                  onToggle={() =>
+                    onToggleSection(
+                      section.title,
+                    )
+                  }
+                  onNavigate={
+                    onNavigate
+                  }
+                />
+              ),
+            )}
+          </nav>
+
+          {footer ? (
+            <footer className="shell-sidebar-footer">
+              {footer}
+            </footer>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          className="sidebar-resize-handle"
+          aria-label="Resize sidebar"
+          onMouseDown={
+            onResizeStart
+          }
+        />
+      </aside>
+
+      {/*
+       * =====================================================
+       * MOBILE NAVIGATION
+       * =====================================================
+       *
+       * Home / Library / Screens replaces the sidebar.
+       *
+       * It uses the exact same NAV_SECTIONS and onNavigate
+       * callback, so routes and permissions remain shared.
+       */}
+
+      <PortalMobileNavigation
+        portalTitle={
+          portalTitle
+        }
+        activeInstitutionName={
+          activeInstitutionName
+        }
+        activeBranchName={
+          activeBranchName
+        }
+        activeTab={
+          activeTab
+        }
+        homeKey={
+          homeKey
+        }
+        hubKey={
+          hubKey
+        }
+        sections={
+          sections
+        }
+        hubUnreadCount={
+          hubUnreadCount
+        }
+        hubHasAttention={
+          hubHasAttention
+        }
+        onNavigate={
+          onNavigate
+        }
+        onOpenHub={
+          onOpenHub
+        }
       />
-    </aside>
+    </>
   );
 }

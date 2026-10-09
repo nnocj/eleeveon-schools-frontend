@@ -2,12 +2,17 @@
 
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
 import {
   useWindowChrome,
 } from "../../../context/window-chrome-context";
+
+import type {
+  PortalSearchResult,
+} from "./PortalSearchBridge";
 
 export interface PortalHeaderProps {
   activeLabel: string;
@@ -70,40 +75,36 @@ function HeaderAvatar({
           src={image}
           alt=""
           onError={() =>
-            setFailed(
-              true,
-            )
+            setFailed(true)
           }
         />
       ) : (
-        initials(
-          name,
-        )
+        initials(name)
       )}
     </span>
   );
 }
 
-function HubIcon() {
+function SearchIcon() {
   return (
     <svg
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
       <circle
-        cx="12"
-        cy="12"
-        r="3.1"
+        cx="10.8"
+        cy="10.8"
+        r="6.2"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="2"
       />
 
       <path
-        d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"
+        d="m15.5 15.5 4.4 4.4"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.8"
+        strokeWidth="2"
         strokeLinecap="round"
       />
     </svg>
@@ -133,13 +134,112 @@ export default function PortalHeader({
   } =
     useWindowChrome();
 
-  /*
-   * Installed desktop Window Controls Overlay already
-   * supplies the top chrome.
-   *
-   * Therefore this fallback portal header is not rendered
-   * while that overlay is active.
+  const [
+    searchOpen,
+    setSearchOpen,
+  ] =
+    useState(false);
+
+  const [
+    query,
+    setQuery,
+  ] =
+    useState("");
+
+  const [
+    results,
+    setResults,
+  ] =
+    useState<
+      PortalSearchResult[]
+    >([]);
+
+  const inputRef =
+    useRef<HTMLInputElement | null>(
+      null,
+    );
+
+  /**
+   * Receive search results from PortalSearchBridge.
    */
+  useEffect(() => {
+    const handleResults =
+      (
+        event: Event,
+      ) => {
+        const custom =
+          event as CustomEvent<{
+            results?: PortalSearchResult[];
+          }>;
+
+        setResults(
+          Array.isArray(
+            custom.detail
+              ?.results,
+          )
+            ? custom.detail
+                .results
+            : [],
+        );
+      };
+
+    window.addEventListener(
+      "eleeveon:portal-search-results",
+      handleResults,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "eleeveon:portal-search-results",
+        handleResults,
+      );
+    };
+  }, []);
+
+  /**
+   * Send the current query to the role navigation bridge.
+   */
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "eleeveon:portal-search-query",
+        {
+          detail: {
+            query,
+          },
+        },
+      ),
+    );
+  }, [
+    query,
+    searchOpen,
+  ]);
+
+  /**
+   * Automatically focus the search input.
+   */
+  useEffect(() => {
+    if (!searchOpen) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () =>
+          inputRef.current?.focus(),
+        0,
+      );
+
+    return () =>
+      window.clearTimeout(
+        timer,
+      );
+  }, [searchOpen]);
+
   if (
     overlayVisible
   ) {
@@ -164,160 +264,274 @@ export default function PortalHeader({
           ? `Synced — realtime ${realtimeStatus}`
           : "Sync needs attention";
 
-  /*
-   * Mobile Hub access.
-   *
-   * PortalMobileNavigation listens for this event and
-   * opens the existing Eleeveon Center route.
-   */
-  const openHub = () => {
-    if (
-      typeof window ===
-      "undefined"
-    ) {
-      return;
-    }
+  const closeSearch =
+    () => {
+      setSearchOpen(
+        false,
+      );
 
-    window.dispatchEvent(
-      new CustomEvent(
-        "eleeveon:open-hub",
-      ),
-    );
-  };
+      setQuery("");
+
+      setResults([]);
+    };
+
+  const openSearch =
+    () => {
+      setSearchOpen(
+        true,
+      );
+    };
+
+  const openResult =
+    (
+      key: string,
+    ) => {
+      window.dispatchEvent(
+        new CustomEvent(
+          "eleeveon:portal-search-open",
+          {
+            detail: {
+              key,
+            },
+          },
+        ),
+      );
+
+      closeSearch();
+    };
+
+  const handleStatus =
+    () => {
+      closeSearch();
+      onOpenStatus();
+    };
+
+  const handleAccount =
+    () => {
+      closeSearch();
+      onOpenAccount();
+    };
 
   return (
-    <header
-      className="app-header eds-header-surface eds-glass-subtle portal-fixed-header"
-      data-window-overlay="fallback"
-    >
-      {/*
-       * Desktop sidebar control.
-       *
-       * Hidden on mobile because mobile navigation uses:
-       * Home / Library / Screens.
-       */}
-      <button
-        className="icon-btn primary portal-header-sidebar-toggle"
-        onClick={
-          onToggleSidebar
-        }
-        type="button"
-        aria-label="Toggle sidebar"
+    <>
+      <header
+        className="app-header eds-header-surface eds-glass-subtle portal-fixed-header"
+        data-window-overlay="fallback"
       >
-        ☰
-      </button>
+        {/*
+         * Desktop keeps the sidebar toggle.
+         * Mobile uses Home / Library / Screens.
+         */}
+        {!searchOpen ? (
+          <button
+            className="icon-btn primary portal-header-sidebar-toggle"
+            onClick={
+              onToggleSidebar
+            }
+            type="button"
+            aria-label="Toggle sidebar"
+          >
+            ☰
+          </button>
+        ) : null}
 
-      <div className="header-title">
-        <strong>
-          {
-            activeLabel
+        {searchOpen ? (
+          <div className="portal-header-search-box">
+            <span className="portal-header-search-leading">
+              <SearchIcon />
+            </span>
+
+            <input
+              ref={
+                inputRef
+              }
+              value={
+                query
+              }
+              onChange={(
+                event,
+              ) =>
+                setQuery(
+                  event.target
+                    .value,
+                )
+              }
+              placeholder="Search this portal"
+              aria-label="Search this portal"
+              onKeyDown={(
+                event,
+              ) => {
+                if (
+                  event.key ===
+                  "Escape"
+                ) {
+                  closeSearch();
+                  return;
+                }
+
+                if (
+                  event.key ===
+                    "Enter" &&
+                  results[0]
+                ) {
+                  openResult(
+                    results[0]
+                      .key,
+                  );
+                }
+              }}
+            />
+
+            <button
+              type="button"
+              className="portal-search-close"
+              onClick={
+                closeSearch
+              }
+              aria-label="Close search"
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <div className="header-title">
+            <strong>
+              {activeLabel}
+            </strong>
+
+            <span>
+              {workspaceLabel}
+            </span>
+          </div>
+        )}
+
+        {!searchOpen ? (
+          <button
+            type="button"
+            className="icon-btn portal-header-search-button"
+            onClick={
+              openSearch
+            }
+            aria-label="Search portal"
+            title="Search"
+          >
+            <SearchIcon />
+          </button>
+        ) : null}
+
+        <button
+          type="button"
+          className={`sync-dot-btn header-status ${statusClass}`}
+          onClick={
+            handleStatus
           }
-        </strong>
-
-        <span>
-          {
-            workspaceLabel
+          aria-label="Open system status"
+          title={
+            statusTitle
           }
-        </span>
-      </div>
+        >
+          <span />
+        </button>
 
-      {/*
-       * Global Eleeveon Hub button on mobile.
-       *
-       * Hub has now been removed from the Library page,
-       * so this header button remains the permanent
-       * mobile access point.
-       */}
-      <button
-        type="button"
-        className="icon-btn portal-header-hub"
-        onClick={
-          openHub
-        }
-        aria-label="Open Eleeveon Hub"
-        title="Eleeveon Hub"
-      >
-        <HubIcon />
-      </button>
-
-      {/*
-       * Global synchronization / realtime status.
-       */}
-      <button
-        type="button"
-        className={`sync-dot-btn header-status ${statusClass}`}
-        onClick={
-          onOpenStatus
-        }
-        aria-label="Open system status"
-        title={
-          statusTitle
-        }
-      >
-        <span />
-      </button>
-
-      {/*
-       * Global account / workspace access.
-       */}
-      <button
-        type="button"
-        className="header-account-button"
-        onClick={
-          onOpenAccount
-        }
-        aria-label="Open account and workspace menu"
-        title={
-          memberMeta
-        }
-      >
-        <HeaderAvatar
-          image={
-            memberImage
+        <button
+          type="button"
+          className="header-account-button"
+          onClick={
+            handleAccount
           }
-          name={
-            memberName
+          aria-label="Open account and workspace menu"
+          title={
+            memberMeta
           }
-        />
-
-        <span className="header-account-copy">
-          <strong>
-            {
+        >
+          <HeaderAvatar
+            image={
+              memberImage
+            }
+            name={
               memberName
             }
-          </strong>
+          />
 
-          <small>
-            {
-              memberRole
-            }
-          </small>
-        </span>
-      </button>
+          <span className="header-account-copy">
+            <strong>
+              {memberName}
+            </strong>
+
+            <small>
+              {memberRole}
+            </small>
+          </span>
+        </button>
+      </header>
+
+      {searchOpen &&
+      query.trim() ? (
+        <section
+          className="portal-header-search-results"
+          aria-label="Search results"
+        >
+          {results.length ? (
+            results.map(
+              (item) => (
+                <button
+                  type="button"
+                  key={
+                    item.key
+                  }
+                  onClick={() =>
+                    openResult(
+                      item.key,
+                    )
+                  }
+                >
+                  <span className="portal-search-result-icon">
+                    {item.icon ||
+                      "⌕"}
+                  </span>
+
+                  <span className="portal-search-result-copy">
+                    <strong>
+                      {
+                        item.label
+                      }
+                    </strong>
+
+                    <small>
+                      {
+                        item.group
+                      }
+                    </small>
+                  </span>
+
+                  <b
+                    aria-hidden="true"
+                  >
+                    ›
+                  </b>
+                </button>
+              ),
+            )
+          ) : (
+            <div className="portal-search-empty">
+              No matching portal item.
+            </div>
+          )}
+        </section>
+      ) : null}
 
       <style>
         {css}
       </style>
-    </header>
+    </>
   );
 }
 
 const css = `
-/*
- * =====================================================
+/* =====================================================
  * FIXED PORTAL HEADER
- * =====================================================
- *
- * The header no longer scrolls with the document.
- *
- * RolePortalShell already publishes:
- *
- * --portal-header-height
- * --portal-content-left
- *
- * We use those existing variables instead of introducing
- * another layout system.
- */
+ * ===================================================== */
+
 .portal-fixed-header {
   position:
     fixed !important;
@@ -347,13 +561,12 @@ const css = `
     );
 
   z-index:
-    38 !important;
+    70 !important;
 }
 
 /*
- * Because a fixed element is removed from normal document
- * flow, reserve exactly the same amount of space at the top
- * of the main portal content.
+ * Fixed header is removed from normal document flow.
+ * Reserve its height before page content begins.
  */
 .app-main {
   padding-top:
@@ -363,15 +576,12 @@ const css = `
     );
 }
 
-/*
- * Hub remains a mobile-only global action.
- */
-.portal-header-hub {
-  display:
-    none !important;
-}
+/* =====================================================
+ * SEARCH BUTTON
+ * ===================================================== */
 
-.portal-header-hub svg {
+.portal-header-search-button svg,
+.portal-header-search-box svg {
   width:
     19px;
 
@@ -379,19 +589,396 @@ const css = `
     19px;
 }
 
-/*
- * =====================================================
- * MOBILE / TABLET
- * =====================================================
- */
+.portal-header-search-box {
+  flex:
+    1;
+
+  min-width:
+    0;
+
+  height:
+    38px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    26px
+    minmax(0, 1fr)
+    30px;
+
+  align-items:
+    center;
+
+  gap:
+    3px;
+
+  padding:
+    0 4px
+    0 9px;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      var(--border, rgba(0,0,0,.10))
+    );
+
+  border-radius:
+    14px;
+
+  background:
+    var(
+      --eds-surface,
+      var(--surface, #ffffff)
+    );
+
+  box-shadow:
+    inset 0 1px 0
+    rgba(255,255,255,.04);
+}
+
+.portal-header-search-leading {
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+}
+
+.portal-header-search-box input {
+  width:
+    100%;
+
+  min-width:
+    0;
+
+  border:
+    0;
+
+  outline:
+    0;
+
+  background:
+    transparent;
+
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font:
+    inherit;
+
+  font-size:
+    12px;
+}
+
+.portal-header-search-box input::placeholder {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+}
+
+.portal-search-close {
+  width:
+    30px;
+
+  height:
+    30px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border:
+    0;
+
+  border-radius:
+    10px;
+
+  background:
+    transparent;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    20px;
+
+  cursor:
+    pointer;
+}
+
+/* =====================================================
+ * SEARCH RESULTS
+ * ===================================================== */
+
+.portal-header-search-results {
+  position:
+    fixed;
+
+  top:
+    calc(
+      var(
+        --eds-shell-top-offset,
+        0px
+      )
+      +
+      var(
+        --portal-header-height,
+        48px
+      )
+      +
+      6px
+    );
+
+  right:
+    8px;
+
+  width:
+    min(
+      430px,
+      calc(
+        100vw -
+        var(
+          --portal-content-left,
+          0px
+        )
+        -
+        16px
+      )
+    );
+
+  max-height:
+    min(
+      62dvh,
+      520px
+    );
+
+  overflow-y:
+    auto;
+
+  z-index:
+    90;
+
+  padding:
+    6px;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      var(--border, rgba(0,0,0,.10))
+    );
+
+  border-radius:
+    17px;
+
+  background:
+    var(
+      --eds-surface,
+      var(--surface, #ffffff)
+    );
+
+  box-shadow:
+    0 20px 50px
+    rgba(15,23,42,.18);
+}
+
+.portal-header-search-results
+> button {
+  width:
+    100%;
+
+  min-height:
+    54px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    36px
+    minmax(0, 1fr)
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    8px;
+
+  border:
+    0;
+
+  border-radius:
+    12px;
+
+  padding:
+    7px;
+
+  background:
+    transparent;
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
+}
+
+.portal-header-search-results
+> button:hover {
+  background:
+    var(
+      --eds-primary-softer,
+      color-mix(
+        in srgb,
+        var(
+          --primary-color,
+          #2563eb
+        ) 7%,
+        transparent
+      )
+    );
+}
+
+.portal-search-result-icon {
+  width:
+    36px;
+
+  height:
+    36px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    11px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --primary-color,
+        #2563eb
+      ) 10%,
+      transparent
+    );
+
+  font-size:
+    17px;
+}
+
+.portal-search-result-copy {
+  min-width:
+    0;
+}
+
+.portal-search-result-copy
+strong,
+.portal-search-result-copy
+small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  white-space:
+    nowrap;
+
+  text-overflow:
+    ellipsis;
+}
+
+.portal-search-result-copy
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    12px;
+
+  font-weight:
+    850;
+}
+
+.portal-search-result-copy
+small {
+  margin-top:
+    2px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    9px;
+}
+
+.portal-header-search-results
+> button
+> b {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    20px;
+}
+
+.portal-search-empty {
+  padding:
+    18px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  text-align:
+    center;
+
+  font-size:
+    11px;
+}
+
+/* =====================================================
+ * MOBILE
+ * ===================================================== */
+
 @media (
   max-width: 979px
 ) {
-  /*
-   * Mobile has no permanent sidebar column.
-   *
-   * The fixed header therefore spans the full viewport.
-   */
   .portal-fixed-header {
     left:
       0 !important;
@@ -403,20 +990,9 @@ const css = `
       100% !important;
   }
 
-  /*
-   * Sidebar hamburger disappears on mobile.
-   */
   .portal-header-sidebar-toggle {
     display:
       none !important;
-  }
-
-  /*
-   * Hub becomes globally available in the mobile header.
-   */
-  .portal-header-hub {
-    display:
-      grid !important;
   }
 
   .app-header {
@@ -429,17 +1005,27 @@ const css = `
     min-width:
       0;
   }
+
+  .portal-header-search-results {
+    left:
+      8px;
+
+    right:
+      8px;
+
+    width:
+      auto;
+  }
 }
 
-/*
- * =====================================================
- * VERY SMALL PHONES
- * =====================================================
- */
+/* =====================================================
+ * VERY SMALL PHONE
+ * ===================================================== */
+
 @media (
   max-width: 420px
 ) {
-  .portal-header-hub {
+  .portal-header-search-button {
     width:
       34px !important;
 
@@ -448,6 +1034,11 @@ const css = `
 
     border-radius:
       13px !important;
+  }
+
+  .portal-header-search-box {
+    height:
+      36px;
   }
 }
 `;

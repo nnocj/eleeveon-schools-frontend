@@ -64,16 +64,21 @@ function HeaderAvatar({
 
   return (
     <span className="header-account-avatar">
-      {image && !failed ? (
+      {image &&
+      !failed ? (
         <img
           src={image}
           alt=""
           onError={() =>
-            setFailed(true)
+            setFailed(
+              true,
+            )
           }
         />
       ) : (
-        initials(name)
+        initials(
+          name,
+        )
       )}
     </span>
   );
@@ -129,14 +134,15 @@ export default function PortalHeader({
     useWindowChrome();
 
   /*
-   * Installed desktop overlay mode has exactly one top bar:
-   * WindowTitleBar.
+   * Installed desktop Window Controls Overlay already
+   * supplies the top chrome.
    *
-   * The portal header is only a normal browser/mobile
-   * fallback and must not consume height while the
-   * overlay is active.
+   * Therefore this fallback portal header is not rendered
+   * while that overlay is active.
    */
-  if (overlayVisible) {
+  if (
+    overlayVisible
+  ) {
     return null;
   }
 
@@ -159,10 +165,10 @@ export default function PortalHeader({
           : "Sync needs attention";
 
   /*
-   * The mobile navigation component listens for this event.
+   * Mobile Hub access.
    *
-   * This avoids moving Hub state into PortalHeader and keeps
-   * the existing RolePortalShell contract intact.
+   * PortalMobileNavigation listens for this event and
+   * opens the existing Eleeveon Center route.
    */
   const openHub = () => {
     if (
@@ -181,16 +187,14 @@ export default function PortalHeader({
 
   return (
     <header
-      className="app-header eds-header-surface eds-glass-subtle"
+      className="app-header eds-header-surface eds-glass-subtle portal-fixed-header"
       data-window-overlay="fallback"
     >
       {/*
-       * Desktop:
-       * keeps the sidebar control.
+       * Desktop sidebar control.
        *
-       * Mobile:
-       * CSS hides it because Home / Library / Screens
-       * replace the sidebar.
+       * Hidden on mobile because mobile navigation uses:
+       * Home / Library / Screens.
        */}
       <button
         className="icon-btn primary portal-header-sidebar-toggle"
@@ -205,18 +209,24 @@ export default function PortalHeader({
 
       <div className="header-title">
         <strong>
-          {activeLabel}
+          {
+            activeLabel
+          }
         </strong>
 
         <span>
-          {workspaceLabel}
+          {
+            workspaceLabel
+          }
         </span>
       </div>
 
       {/*
-       * Mobile global Hub access.
-       * Hidden on desktop because desktop already has Hub
-       * inside the sidebar workspace area.
+       * Global Eleeveon Hub button on mobile.
+       *
+       * Hub has now been removed from the Library page,
+       * so this header button remains the permanent
+       * mobile access point.
        */}
       <button
         type="button"
@@ -230,6 +240,9 @@ export default function PortalHeader({
         <HubIcon />
       </button>
 
+      {/*
+       * Global synchronization / realtime status.
+       */}
       <button
         type="button"
         className={`sync-dot-btn header-status ${statusClass}`}
@@ -244,6 +257,9 @@ export default function PortalHeader({
         <span />
       </button>
 
+      {/*
+       * Global account / workspace access.
+       */}
       <button
         type="button"
         className="header-account-button"
@@ -266,57 +282,172 @@ export default function PortalHeader({
 
         <span className="header-account-copy">
           <strong>
-            {memberName}
+            {
+              memberName
+            }
           </strong>
 
           <small>
-            {memberRole}
+            {
+              memberRole
+            }
           </small>
         </span>
       </button>
 
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
     </header>
   );
 }
 
 const css = `
+/*
+ * =====================================================
+ * FIXED PORTAL HEADER
+ * =====================================================
+ *
+ * The header no longer scrolls with the document.
+ *
+ * RolePortalShell already publishes:
+ *
+ * --portal-header-height
+ * --portal-content-left
+ *
+ * We use those existing variables instead of introducing
+ * another layout system.
+ */
+.portal-fixed-header {
+  position:
+    fixed !important;
+
+  top:
+    var(
+      --eds-shell-top-offset,
+      0px
+    ) !important;
+
+  left:
+    var(
+      --portal-content-left,
+      0px
+    );
+
+  right:
+    0;
+
+  width:
+    auto !important;
+
+  min-height:
+    var(
+      --portal-header-height,
+      48px
+    );
+
+  z-index:
+    38 !important;
+}
+
+/*
+ * Because a fixed element is removed from normal document
+ * flow, reserve exactly the same amount of space at the top
+ * of the main portal content.
+ */
+.app-main {
+  padding-top:
+    var(
+      --portal-header-height,
+      48px
+    );
+}
+
+/*
+ * Hub remains a mobile-only global action.
+ */
 .portal-header-hub {
-  display: none !important;
+  display:
+    none !important;
 }
 
 .portal-header-hub svg {
-  width: 19px;
-  height: 19px;
+  width:
+    19px;
+
+  height:
+    19px;
 }
 
-@media (max-width: 979px) {
+/*
+ * =====================================================
+ * MOBILE / TABLET
+ * =====================================================
+ */
+@media (
+  max-width: 979px
+) {
   /*
-   * Mobile no longer opens the role sidebar.
-   * Home / Library / Screens live in the bottom navigation.
+   * Mobile has no permanent sidebar column.
+   *
+   * The fixed header therefore spans the full viewport.
    */
-  .portal-header-sidebar-toggle {
-    display: none !important;
+  .portal-fixed-header {
+    left:
+      0 !important;
+
+    right:
+      0 !important;
+
+    width:
+      100% !important;
   }
 
+  /*
+   * Sidebar hamburger disappears on mobile.
+   */
+  .portal-header-sidebar-toggle {
+    display:
+      none !important;
+  }
+
+  /*
+   * Hub becomes globally available in the mobile header.
+   */
   .portal-header-hub {
-    display: grid !important;
+    display:
+      grid !important;
   }
 
   .app-header {
-    gap: 6px;
+    gap:
+      6px;
   }
 
-  .app-header .header-title {
-    min-width: 0;
+  .app-header
+  .header-title {
+    min-width:
+      0;
   }
 }
 
-@media (max-width: 420px) {
+/*
+ * =====================================================
+ * VERY SMALL PHONES
+ * =====================================================
+ */
+@media (
+  max-width: 420px
+) {
   .portal-header-hub {
-    width: 34px !important;
-    height: 34px !important;
-    border-radius: 13px !important;
+    width:
+      34px !important;
+
+    height:
+      34px !important;
+
+    border-radius:
+      13px !important;
   }
 }
 `;

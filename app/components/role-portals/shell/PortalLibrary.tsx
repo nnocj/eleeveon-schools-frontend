@@ -28,11 +28,17 @@ export interface PortalLibraryProps {
   homeKey: string;
   activeKey: string;
 
+  /*
+   * Kept in the interface for backward compatibility with
+   * PortalMobileNavigation.
+   *
+   * Hub is no longer rendered inside Library.
+   */
   hubUnreadCount?: number;
   hubHasAttention?: boolean;
+  onOpenHub?(): void;
 
   onNavigate(key: string): void;
-  onOpenHub?(): void;
 }
 
 type SectionVisual = {
@@ -261,12 +267,7 @@ export default function PortalLibrary({
   sections,
   homeKey,
   activeKey,
-
-  hubUnreadCount = 0,
-  hubHasAttention = false,
-
   onNavigate,
-  onOpenHub,
 }: PortalLibraryProps) {
   const [
     selectedSectionKey,
@@ -339,9 +340,9 @@ export default function PortalLibrary({
    * Example:
    *
    * Library
-   *   ↓
+   *      ↓
    * People
-   *   ↓
+   *      ↓
    * Students / Teachers / Parents
    */
   if (
@@ -448,15 +449,12 @@ export default function PortalLibrary({
                     </strong>
 
                     {/*
-                     * Child-item description intentionally hidden.
+                     * Item description intentionally hidden.
                      *
-                     * We currently want the visual card and title only.
+                     * Cards currently display:
                      *
-                     * If we later want descriptions again, restore:
-                     *
-                     * <small>
-                     *   {item.libraryDescription || `Open ${item.label}`}
-                     * </small>
+                     * image
+                     * title
                      */}
                   </span>
                 </button>
@@ -476,79 +474,13 @@ export default function PortalLibrary({
    * =====================================================
    * LIBRARY ROOT
    * =====================================================
+   *
+   * No heading and no Eleeveon Hub card.
+   *
+   * The user arrives directly at the visual category grid.
    */
   return (
-    <main className="portal-library-page">
-      {/*
-       * Library root heading intentionally hidden.
-       *
-       * This previously displayed:
-       *
-       * Workspace
-       * Library
-       * Everything available in this role...
-       *
-       * It can be restored later if needed.
-       *
-       * <header className="portal-library-page-head root">
-       *   <div>
-       *     <p>Workspace</p>
-       *
-       *     <h1>
-       *       Library
-       *     </h1>
-       *
-       *     <span>
-       *       Everything available in
-       *       this role, organized by
-       *       purpose.
-       *     </span>
-       *   </div>
-       * </header>
-       */}
-
-      {onOpenHub ? (
-        <button
-          type="button"
-          className="portal-library-hub"
-          onClick={
-            onOpenHub
-          }
-        >
-          <span className="portal-library-hub-icon">
-            ◎
-          </span>
-
-          <span>
-            <strong>
-              Eleeveon Hub
-            </strong>
-
-            <small>
-              Notices,
-              messages and
-              support
-            </small>
-          </span>
-
-          {hubUnreadCount >
-            0 ||
-          hubHasAttention ? (
-            <b>
-              {hubUnreadCount >
-              99
-                ? "99+"
-                : hubUnreadCount ||
-                  "!"}
-            </b>
-          ) : (
-            <i>
-              ›
-            </i>
-          )}
-        </button>
-      ) : null}
-
+    <main className="portal-library-page portal-library-root">
       <section
         className="portal-library-grid"
         aria-label="Library categories"
@@ -601,14 +533,10 @@ export default function PortalLibrary({
                   {/*
                    * Category description intentionally hidden.
                    *
-                   * We currently want only:
-                   * image + category title.
+                   * Cards currently display:
                    *
-                   * Restore this later if wanted:
-                   *
-                   * <small>
-                   *   {visual.description}
-                   * </small>
+                   * image
+                   * title
                    */}
                 </span>
               </button>
@@ -626,9 +554,18 @@ export default function PortalLibrary({
 
 const css = `
 .portal-library-page {
-  width: min(760px, 100%);
-  margin: 0 auto;
-  padding: 14px 12px 24px;
+  width:
+    min(
+      860px,
+      100%
+    );
+
+  margin:
+    0 auto;
+
+  padding:
+    12px 8px
+    24px;
 
   color:
     var(
@@ -637,26 +574,36 @@ const css = `
     );
 }
 
-.portal-library-page-head {
-  display: grid;
-
-  grid-template-columns:
-    40px minmax(0, 1fr);
-
-  align-items: start;
-
-  gap: 10px;
-
-  margin-bottom: 14px;
+/*
+ * Root Library has no heading or Hub,
+ * therefore the card grid begins immediately.
+ */
+.portal-library-root {
+  padding-top:
+    8px;
 }
 
-.portal-library-page-head.root {
+.portal-library-page-head {
+  display:
+    grid;
+
   grid-template-columns:
-    1fr;
+    38px
+    minmax(0, 1fr);
+
+  align-items:
+    start;
+
+  gap:
+    9px;
+
+  margin-bottom:
+    12px;
 }
 
 .portal-library-page-head p {
-  margin: 0;
+  margin:
+    0;
 
   color:
     var(
@@ -664,8 +611,11 @@ const css = `
       var(--primary-color, #2563eb)
     );
 
-  font-size: 10px;
-  font-weight: 900;
+  font-size:
+    9px;
+
+  font-weight:
+    900;
 
   letter-spacing:
     .08em;
@@ -686,23 +636,24 @@ const css = `
 
   font-size:
     clamp(
-      26px,
-      7vw,
-      38px
+      24px,
+      6vw,
+      36px
     );
 
   line-height:
-    .96;
+    .98;
 
   letter-spacing:
     -.045em;
 }
 
 .portal-library-page-head span {
-  display: block;
+  display:
+    block;
 
   margin-top:
-    7px;
+    5px;
 
   color:
     var(
@@ -711,10 +662,10 @@ const css = `
     );
 
   font-size:
-    12px;
+    11px;
 
   line-height:
-    1.5;
+    1.45;
 
   font-weight:
     650;
@@ -722,10 +673,10 @@ const css = `
 
 .portal-library-back {
   width:
-    38px;
+    36px;
 
   height:
-    38px;
+    36px;
 
   border:
     1px solid
@@ -735,7 +686,7 @@ const css = `
     );
 
   border-radius:
-    13px;
+    12px;
 
   background:
     var(
@@ -750,7 +701,7 @@ const css = `
     );
 
   font-size:
-    28px;
+    27px;
 
   line-height:
     1;
@@ -759,212 +710,32 @@ const css = `
     pointer;
 }
 
-.portal-library-hub {
-  width:
-    100%;
-
-  min-height:
-    68px;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    42px minmax(0, 1fr) auto;
-
-  align-items:
-    center;
-
-  gap:
-    10px;
-
-  margin-bottom:
-    14px;
-
-  padding:
-    9px 11px;
-
-  border:
-    1px solid
-    color-mix(
-      in srgb,
-      var(
-        --eds-primary,
-        var(--primary-color, #2563eb)
-      ) 22%,
-      var(
-        --eds-border,
-        var(--border, rgba(0,0,0,.10))
-      )
-    );
-
-  border-radius:
-    18px;
-
-  background:
-    linear-gradient(
-      135deg,
-
-      color-mix(
-        in srgb,
-        var(
-          --eds-primary,
-          var(--primary-color, #2563eb)
-        ) 10%,
-        var(
-          --eds-surface,
-          var(--surface, #ffffff)
-        )
-      ),
-
-      var(
-        --eds-surface,
-        var(--surface, #ffffff)
-      )
-    );
-
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
-}
-
-.portal-library-hub-icon {
-  width:
-    42px;
-
-  height:
-    42px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    14px;
-
-  background:
-    var(
-      --eds-primary,
-      var(--primary-color, #2563eb)
-    );
-
-  color:
-    #ffffff;
-
-  font-size:
-    22px;
-
-  font-weight:
-    1000;
-}
-
-.portal-library-hub > span:nth-child(2) {
-  min-width:
-    0;
-}
-
-.portal-library-hub strong,
-.portal-library-hub small {
-  display:
-    block;
-}
-
-.portal-library-hub strong {
-  color:
-    var(
-      --eds-text-strong,
-      var(--text, #111827)
-    );
-
-  font-size:
-    13px;
-
-  font-weight:
-    900;
-}
-
-.portal-library-hub small {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    10px;
-
-  font-weight:
-    650;
-}
-
-.portal-library-hub b {
-  min-width:
-    28px;
-
-  height:
-    28px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  padding:
-    0 6px;
-
-  border-radius:
-    999px;
-
-  background:
-    var(
-      --eds-primary,
-      var(--primary-color, #2563eb)
-    );
-
-  color:
-    #ffffff;
-
-  font-size:
-    10px;
-}
-
-.portal-library-hub i {
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    24px;
-
-  font-style:
-    normal;
-}
-
+/*
+ * =====================================================
+ * LIBRARY CARD GRID
+ * =====================================================
+ *
+ * Phone:
+ * 3 cards per row.
+ *
+ * Medium:
+ * 4 cards per row.
+ *
+ * Larger:
+ * 5 cards per row.
+ */
 .portal-library-grid {
   display:
     grid;
 
   grid-template-columns:
     repeat(
-      2,
+      3,
       minmax(0, 1fr)
     );
 
   gap:
-    12px;
+    10px 8px;
 }
 
 .portal-library-card {
@@ -974,8 +745,11 @@ const css = `
   display:
     grid;
 
+  align-content:
+    start;
+
   gap:
-    8px;
+    6px;
 
   border:
     0;
@@ -1004,7 +778,7 @@ const css = `
     100%;
 
   aspect-ratio:
-    1 / 1.06;
+    1 / 1.03;
 
   display:
     grid;
@@ -1016,7 +790,7 @@ const css = `
     hidden;
 
   border-radius:
-    17px;
+    14px;
 
   border:
     1px solid
@@ -1055,8 +829,8 @@ const css = `
     );
 
   box-shadow:
-    0 8px 22px
-    rgba(15,23,42,.07);
+    0 5px 15px
+    rgba(15,23,42,.065);
 }
 
 .portal-library-cover img {
@@ -1065,6 +839,9 @@ const css = `
 
   height:
     100%;
+
+  display:
+    block;
 
   object-fit:
     cover;
@@ -1094,7 +871,7 @@ const css = `
     );
 
   filter:
-    blur(22px);
+    blur(18px);
 }
 
 .portal-library-glyph {
@@ -1106,15 +883,15 @@ const css = `
 
   font-size:
     clamp(
-      44px,
-      16vw,
-      76px
+      30px,
+      11vw,
+      64px
     );
 
   filter:
     drop-shadow(
-      0 9px 13px
-      rgba(15,23,42,.12)
+      0 7px 10px
+      rgba(15,23,42,.10)
     );
 }
 
@@ -1126,11 +903,10 @@ const css = `
     block;
 
   padding:
-    0 1px;
+    0 2px;
 }
 
-.portal-library-card-copy strong,
-.portal-library-card-copy small {
+.portal-library-card-copy strong {
   display:
     block;
 
@@ -1139,9 +915,7 @@ const css = `
 
   text-overflow:
     ellipsis;
-}
 
-.portal-library-card-copy strong {
   color:
     var(
       --eds-text-strong,
@@ -1149,33 +923,13 @@ const css = `
     );
 
   font-size:
-    15px;
+    12px;
 
   font-weight:
     800;
 
   line-height:
-    1.16;
-}
-
-.portal-library-card-copy small {
-  margin-top:
-    3px;
-
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    10px;
-
-  line-height:
-    1.35;
-
-  font-weight:
-    650;
+    1.2;
 }
 
 .portal-library-card.active
@@ -1205,13 +959,41 @@ const css = `
     );
 }
 
+/*
+ * Slightly wider phone / tablet:
+ * show four cards.
+ */
 @media (
-  min-width: 620px
+  min-width: 520px
 ) {
   .portal-library-grid {
     grid-template-columns:
       repeat(
-        3,
+        4,
+        minmax(0, 1fr)
+      );
+
+    gap:
+      12px 10px;
+  }
+
+  .portal-library-card-copy strong {
+    font-size:
+      13px;
+  }
+}
+
+/*
+ * Larger tablet / desktop-sized Library surface:
+ * five cards per row.
+ */
+@media (
+  min-width: 760px
+) {
+  .portal-library-grid {
+    grid-template-columns:
+      repeat(
+        5,
         minmax(0, 1fr)
       );
   }

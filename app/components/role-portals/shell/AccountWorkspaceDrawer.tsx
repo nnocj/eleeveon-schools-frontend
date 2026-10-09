@@ -41,13 +41,21 @@ import {
 
 export interface AccountWorkspaceDrawerProps {
   open: boolean;
+
   memberName: string;
   memberRole: string;
   memberImage?: string | null;
+
   selectedMembership?: UserMembership | null;
-  memberships: UserMembership[];
-  identities: WorkspaceDisplayIdentityMap;
+
+  memberships:
+    UserMembership[];
+
+  identities:
+    WorkspaceDisplayIdentityMap;
+
   switchingMembershipId?: string | null;
+
   schoolId?: string | null;
   branchId?: string | null;
 
@@ -62,40 +70,57 @@ export interface AccountWorkspaceDrawerProps {
   }>;
 
   lockedContext?: boolean;
+
   online: boolean;
   realtimeConnected: boolean;
 
   membershipKey(
-    membership: UserMembership,
+    membership:
+      UserMembership,
   ): string;
 
   sameMembership(
-    left: UserMembership,
-    right?: UserMembership | null,
+    left:
+      UserMembership,
+
+    right?:
+      UserMembership |
+      null,
   ): boolean;
 
-  roleLabel(role: string): string;
-  roleIcon(role: string): string;
+  roleLabel(
+    role: string,
+  ): string;
+
+  roleIcon(
+    role: string,
+  ): string;
 
   onClose(): void;
 
   onSwitchMembership(
-    membership: UserMembership,
+    membership:
+      UserMembership,
   ): void;
 
   onSchoolChange(
-    schoolId: string | null,
+    schoolId:
+      string |
+      null,
   ): void;
 
   onBranchChange(
-    branchId: string | null,
+    branchId:
+      string |
+      null,
   ): void;
 
   onOpenStatus(): void;
+
   onSelectRole(): void;
+
   onLogout(): void;
 }
-
 
 function initials(
   name: string,
@@ -126,7 +151,8 @@ function DrawerProfileImage({
   const [
     failed,
     setFailed,
-  ] = useState(false);
+  ] =
+    useState(false);
 
   useEffect(() => {
     setFailed(false);
@@ -140,7 +166,10 @@ function DrawerProfileImage({
     <span
       className={[
         "drawer-profile-image",
-        active && "active",
+
+        active &&
+          "active",
+
         className,
       ]
         .filter(Boolean)
@@ -149,10 +178,14 @@ function DrawerProfileImage({
     >
       {showImage ? (
         <img
-          src={src || ""}
+          src={
+            src || ""
+          }
           alt=""
           onError={() =>
-            setFailed(true)
+            setFailed(
+              true,
+            )
           }
         />
       ) : (
@@ -160,7 +193,9 @@ function DrawerProfileImage({
           className="drawer-profile-fallback"
           aria-hidden="true"
         >
-          {initials(name)}
+          {initials(
+            name,
+          )}
         </span>
       )}
 
@@ -174,26 +209,78 @@ function DrawerProfileImage({
   );
 }
 
+function HubIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <circle
+        cx="12"
+        cy="12"
+        r="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+
+      <circle
+        cx="12"
+        cy="12"
+        r="8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeDasharray="2 3"
+      />
+    </svg>
+  );
+}
+
+function openEleeveonHub() {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent(
+      "eleeveon:open-hub",
+    ),
+  );
+}
+
 export default function AccountWorkspaceDrawer({
   open,
+
   memberName,
   memberRole,
   memberImage,
+
   selectedMembership,
   memberships,
   identities,
+
   switchingMembershipId,
+
   schoolId,
   branchId,
+
   schools = [],
   branches = [],
+
   lockedContext = false,
+
   online,
   realtimeConnected,
+
   membershipKey,
   sameMembership,
   roleLabel,
   roleIcon,
+
   onClose,
   onSwitchMembership,
   onSchoolChange,
@@ -216,7 +303,27 @@ export default function AccountWorkspaceDrawer({
           selectedMembership,
           identities,
         )
-      : "Workspace access";
+      : "";
+
+  const meaningfulDetail =
+    currentDetail &&
+    currentDetail !==
+      "Workspace access" &&
+    currentDetail !==
+      currentScope
+      ? currentDetail
+      : "";
+
+  const handleHub =
+    () => {
+      onClose();
+
+      window.setTimeout(
+        () =>
+          openEleeveonHub(),
+        0,
+      );
+    };
 
   return (
     <aside
@@ -227,43 +334,62 @@ export default function AccountWorkspaceDrawer({
         "compact-account-drawer",
         "eds-drawer-surface",
         "eds-account-drawer-surface",
-        open && "open",
+
+        open &&
+          "open",
       ]
         .filter(Boolean)
         .join(" ")}
-      aria-hidden={!open}
+      aria-hidden={
+        !open
+      }
     >
       <BrandGlow
         placement="top-right"
         size="16rem"
-        opacity={0.07}
+        opacity={
+          0.07
+        }
       />
 
       <BrandPattern
         variant="network"
-        opacity={0.018}
+        opacity={
+          0.018
+        }
       />
 
       <BrandTexture
         texture="grain"
-        intensity={0.4}
+        intensity={
+          0.4
+        }
         decorative
         className="shell-drawer-texture"
       />
 
       <div className="shell-drawer-inner compact-drawer-inner">
+        {/* =================================================
+         * MEMBER IDENTITY
+         * ================================================= */}
+
         <header className="account-drawer-head compact-drawer-head">
           <div className="account-drawer-identity compact-drawer-identity">
             <DrawerProfileImage
-              src={memberImage}
-              name={memberName}
+              src={
+                memberImage
+              }
+              name={
+                memberName
+              }
               className="drawer-account-photo"
             />
 
-            <span>
+            <span className="compact-drawer-member-copy">
               <strong>
                 {memberName}
               </strong>
+
               <small>
                 {memberRole}
               </small>
@@ -272,7 +398,9 @@ export default function AccountWorkspaceDrawer({
 
           <button
             className="icon-btn compact-drawer-close"
-            onClick={onClose}
+            onClick={
+              onClose
+            }
             type="button"
             aria-label="Close account menu"
           >
@@ -280,46 +408,98 @@ export default function AccountWorkspaceDrawer({
           </button>
         </header>
 
-        <section className="compact-current-access">
-          <DrawerProfileImage
-            src={memberImage}
-            name={memberName}
-            active
-            className="compact-current-access-photo"
-          />
+        {/* =================================================
+         * ELEEVEON HUB
+         * ================================================= */}
 
+        <button
+          type="button"
+          className="drawer-hub-strip"
+          onClick={
+            handleHub
+          }
+        >
+          <span className="drawer-hub-icon">
+            <HubIcon />
+          </span>
+
+          <span className="drawer-hub-copy">
+            <strong>
+              Eleeveon Hub
+            </strong>
+
+            <small>
+              Notices, messages, support and updates
+            </small>
+          </span>
+
+          <b
+            aria-hidden="true"
+          >
+            ›
+          </b>
+        </button>
+
+        {/* =================================================
+         * CURRENT WORKSPACE
+         * ================================================= */}
+
+        <section className="compact-current-access">
           <span className="compact-current-access-copy">
             <small>
-              Current access
+              Current workspace
             </small>
-            <strong title={currentScope}>
+
+            <strong
+              title={
+                currentScope
+              }
+            >
               {currentScope}
             </strong>
-            <em title={currentDetail}>
-              {currentDetail}
-            </em>
+
+            {meaningfulDetail ? (
+              <em
+                title={
+                  meaningfulDetail
+                }
+              >
+                {meaningfulDetail}
+              </em>
+            ) : null}
           </span>
 
           <WorkspaceStatusBadge
-            online={online}
+            online={
+              online
+            }
             realtimeConnected={
               realtimeConnected
             }
           />
         </section>
 
-        {memberships.length > 1 ? (
+        {/* =================================================
+         * WORKSPACE SWITCHING
+         * ================================================= */}
+
+        {memberships.length >
+        1 ? (
           <AccountSection
             title="Workspaces"
             meta={`${memberships.length}`}
             className="compact-workspaces-section"
           >
             <QuickWorkspaceSwitcher
-              memberships={memberships}
+              memberships={
+                memberships
+              }
               selectedMembership={
                 selectedMembership
               }
-              identities={identities}
+              identities={
+                identities
+              }
               switchingMembershipId={
                 switchingMembershipId
               }
@@ -329,14 +509,22 @@ export default function AccountWorkspaceDrawer({
               sameMembership={
                 sameMembership
               }
-              roleLabel={roleLabel}
-              roleIcon={roleIcon}
+              roleLabel={
+                roleLabel
+              }
+              roleIcon={
+                roleIcon
+              }
               onSwitchMembership={
                 onSwitchMembership
               }
             />
           </AccountSection>
         ) : null}
+
+        {/* =================================================
+         * SCHOOL / BRANCH CONTEXT
+         * ================================================= */}
 
         {!lockedContext ? (
           <AccountSection
@@ -347,18 +535,27 @@ export default function AccountWorkspaceDrawer({
               <label className="account-context-field">
                 <span>
                   <SchoolIcon size="sm" />
+
                   School
                 </span>
 
                 <select
-                  value={schoolId ?? ""}
-                  onChange={(event) =>
+                  value={
+                    schoolId ??
+                    ""
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     onSchoolChange(
-                      event.target.value ||
+                      event.target
+                        .value ||
                         null,
                     )
                   }
-                  disabled={!schools.length}
+                  disabled={
+                    !schools.length
+                  }
                 >
                   <option value="">
                     {schools.length
@@ -369,10 +566,16 @@ export default function AccountWorkspaceDrawer({
                   {schools.map(
                     (school) => (
                       <option
-                        key={school.id}
-                        value={school.id}
+                        key={
+                          school.id
+                        }
+                        value={
+                          school.id
+                        }
                       >
-                        {school.name}
+                        {
+                          school.name
+                        }
                       </option>
                     ),
                   )}
@@ -382,14 +585,21 @@ export default function AccountWorkspaceDrawer({
               <label className="account-context-field">
                 <span>
                   <WorkspaceIcon size="sm" />
+
                   Branch
                 </span>
 
                 <select
-                  value={branchId ?? ""}
-                  onChange={(event) =>
+                  value={
+                    branchId ??
+                    ""
+                  }
+                  onChange={(
+                    event,
+                  ) =>
                     onBranchChange(
-                      event.target.value ||
+                      event.target
+                        .value ||
                         null,
                     )
                   }
@@ -409,10 +619,16 @@ export default function AccountWorkspaceDrawer({
                   {branches.map(
                     (branch) => (
                       <option
-                        key={branch.id}
-                        value={branch.id}
+                        key={
+                          branch.id
+                        }
+                        value={
+                          branch.id
+                        }
                       >
-                        {branch.name}
+                        {
+                          branch.name
+                        }
                       </option>
                     ),
                   )}
@@ -422,6 +638,10 @@ export default function AccountWorkspaceDrawer({
           </AccountSection>
         ) : null}
 
+        {/* =================================================
+         * SYSTEM AND ACCESS
+         * ================================================= */}
+
         <AccountSection
           title="System and access"
           className="compact-actions-section"
@@ -429,44 +649,54 @@ export default function AccountWorkspaceDrawer({
           <section className="compact-account-actions">
             <button
               type="button"
-              onClick={onOpenStatus}
+              onClick={
+                onOpenStatus
+              }
             >
               <span className="compact-action-icon">
                 <SyncIcon size="sm" />
               </span>
 
-              <span>
+              <span className="compact-action-copy">
                 <strong>
                   System status
                 </strong>
+
                 <small>
                   Connection and sync
                 </small>
               </span>
 
-              <b aria-hidden="true">
+              <b
+                aria-hidden="true"
+              >
                 ›
               </b>
             </button>
 
             <button
               type="button"
-              onClick={onSelectRole}
+              onClick={
+                onSelectRole
+              }
             >
               <span className="compact-action-icon">
                 <SettingsIcon size="sm" />
               </span>
 
-              <span>
+              <span className="compact-action-copy">
                 <strong>
                   Select role
                 </strong>
+
                 <small>
                   All access points
                 </small>
               </span>
 
-              <b aria-hidden="true">
+              <b
+                aria-hidden="true"
+              >
                 ›
               </b>
             </button>
@@ -476,12 +706,736 @@ export default function AccountWorkspaceDrawer({
         <Button
           variant="danger"
           fullWidth
-          onClick={onLogout}
+          onClick={
+            onLogout
+          }
           className="account-logout compact-account-logout"
         >
           Logout
         </Button>
       </div>
+
+      <style>
+        {css}
+      </style>
     </aside>
   );
 }
+
+const css = `
+/* =====================================================
+ * DRAWER CONTENT
+ * ===================================================== */
+
+.compact-drawer-inner {
+  gap:
+    12px;
+}
+
+/* =====================================================
+ * MEMBER PROFILE
+ * ===================================================== */
+
+.compact-drawer-head {
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  justify-content:
+    space-between;
+
+  gap:
+    12px;
+
+  padding-bottom:
+    12px;
+}
+
+.compact-drawer-identity {
+  min-width:
+    0;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    54px
+    minmax(0, 1fr);
+
+  align-items:
+    center;
+
+  gap:
+    11px;
+}
+
+.drawer-profile-image {
+  position:
+    relative;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  overflow:
+    hidden;
+}
+
+.drawer-account-photo {
+  width:
+    54px !important;
+
+  height:
+    54px !important;
+
+  flex:
+    0 0 54px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        var(--primary-color, #2563eb)
+      ) 30%,
+      var(
+        --eds-border,
+        transparent
+      )
+    );
+
+  border-radius:
+    18px !important;
+
+  background:
+    var(
+      --eds-primary-soft,
+      color-mix(
+        in srgb,
+        var(--primary-color, #2563eb) 12%,
+        transparent
+      )
+    );
+
+  box-shadow:
+    0 8px 22px
+    rgba(15,23,42,.13);
+}
+
+.drawer-account-photo img {
+  width:
+    100%;
+
+  height:
+    100%;
+
+  display:
+    block;
+
+  object-fit:
+    cover;
+
+  object-position:
+    center;
+}
+
+.drawer-profile-fallback {
+  width:
+    100%;
+
+  height:
+    100%;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  color:
+    var(
+      --eds-primary,
+      var(--primary-color, #2563eb)
+    );
+
+  font-size:
+    17px;
+
+  font-weight:
+    850;
+}
+
+.compact-drawer-member-copy {
+  min-width:
+    0;
+}
+
+.compact-drawer-member-copy
+strong,
+.compact-drawer-member-copy
+small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+
+  white-space:
+    nowrap;
+}
+
+.compact-drawer-member-copy
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    16px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    -.02em;
+}
+
+.compact-drawer-member-copy
+small {
+  margin-top:
+    4px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    11px;
+
+  font-weight:
+    650;
+}
+
+/* =====================================================
+ * ELEEVEON HUB STRIP
+ * ===================================================== */
+
+.drawer-hub-strip {
+  width:
+    100%;
+
+  min-height:
+    60px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    40px
+    minmax(0, 1fr)
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    10px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        var(--primary-color, #2563eb)
+      ) 22%,
+      var(
+        --eds-border,
+        rgba(0,0,0,.09)
+      )
+    );
+
+  border-radius:
+    17px;
+
+  padding:
+    9px 10px;
+
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(
+        in srgb,
+        var(
+          --eds-primary,
+          var(--primary-color, #2563eb)
+        ) 11%,
+        var(
+          --eds-surface,
+          var(--surface, #ffffff)
+        )
+      ),
+      var(
+        --eds-surface,
+        var(--surface, #ffffff)
+      )
+    );
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
+}
+
+.drawer-hub-icon {
+  width:
+    40px;
+
+  height:
+    40px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    13px;
+
+  background:
+    var(
+      --eds-primary,
+      var(--primary-color, #2563eb)
+    );
+
+  color:
+    var(
+      --eds-primary-text,
+      #ffffff
+    );
+}
+
+.drawer-hub-icon svg {
+  width:
+    22px;
+
+  height:
+    22px;
+}
+
+.drawer-hub-copy {
+  min-width:
+    0;
+}
+
+.drawer-hub-copy
+strong,
+.drawer-hub-copy
+small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+}
+
+.drawer-hub-copy
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    13px;
+
+  font-weight:
+    900;
+}
+
+.drawer-hub-copy
+small {
+  margin-top:
+    3px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    9px;
+
+  line-height:
+    1.35;
+}
+
+.drawer-hub-strip
+> b {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    21px;
+
+  font-weight:
+    500;
+}
+
+/* =====================================================
+ * CURRENT WORKSPACE
+ * ===================================================== */
+
+.compact-current-access {
+  width:
+    100%;
+
+  min-width:
+    0;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    10px;
+
+  padding:
+    11px 12px;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      var(--border, rgba(0,0,0,.09))
+    );
+
+  border-radius:
+    17px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-surface,
+        var(--surface, #ffffff)
+      ) 96%,
+      var(
+        --eds-primary,
+        #2563eb
+      )
+    );
+}
+
+.compact-current-access-copy {
+  min-width:
+    0;
+
+  display:
+    block;
+}
+
+.compact-current-access-copy
+small,
+.compact-current-access-copy
+strong,
+.compact-current-access-copy
+em {
+  display:
+    block;
+
+  min-width:
+    0;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+}
+
+.compact-current-access-copy
+small {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    8px;
+
+  font-weight:
+    850;
+
+  letter-spacing:
+    .065em;
+
+  text-transform:
+    uppercase;
+}
+
+.compact-current-access-copy
+strong {
+  margin-top:
+    4px;
+
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    13px;
+
+  line-height:
+    1.35;
+
+  font-weight:
+    900;
+}
+
+.compact-current-access-copy
+em {
+  margin-top:
+    3px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    10px;
+
+  line-height:
+    1.35;
+
+  font-style:
+    normal;
+}
+
+/* =====================================================
+ * CONTEXT SELECTORS
+ * ===================================================== */
+
+.compact-context-grid {
+  display:
+    grid;
+
+  gap:
+    8px;
+}
+
+/* =====================================================
+ * SYSTEM AND ACCESS
+ * ===================================================== */
+
+.compact-account-actions {
+  display:
+    grid;
+
+  gap:
+    4px;
+}
+
+.compact-account-actions
+> button {
+  width:
+    100%;
+
+  min-width:
+    0;
+
+  min-height:
+    54px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    36px
+    minmax(0, 1fr)
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    9px;
+
+  border:
+    0;
+
+  border-radius:
+    14px;
+
+  padding:
+    7px 8px;
+
+  background:
+    transparent;
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
+}
+
+.compact-account-actions
+> button:hover {
+  background:
+    var(
+      --eds-primary-softer,
+      color-mix(
+        in srgb,
+        var(--primary-color, #2563eb) 7%,
+        transparent
+      )
+    );
+}
+
+.compact-action-icon {
+  width:
+    36px;
+
+  height:
+    36px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    11px;
+
+  background:
+    var(
+      --eds-primary-softer,
+      color-mix(
+        in srgb,
+        var(--primary-color, #2563eb) 8%,
+        transparent
+      )
+    );
+
+  color:
+    var(
+      --eds-primary,
+      var(--primary-color, #2563eb)
+    );
+}
+
+.compact-action-copy {
+  min-width:
+    0;
+}
+
+.compact-action-copy
+strong,
+.compact-action-copy
+small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+}
+
+.compact-action-copy
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    12px;
+
+  font-weight:
+    850;
+}
+
+.compact-action-copy
+small {
+  margin-top:
+    2px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    9px;
+}
+
+.compact-account-actions
+> button
+> b {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    20px;
+
+  font-weight:
+    500;
+}
+
+/* =====================================================
+ * LOGOUT
+ * ===================================================== */
+
+.compact-account-logout {
+  margin-top:
+    4px;
+}
+`;

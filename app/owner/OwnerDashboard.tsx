@@ -3,71 +3,86 @@
 /**
  * app/owner/OwnerDashboard.tsx
  * ---------------------------------------------------------
- * ELEEVEON OWNER DASHBOARD V5 — ACCOUNT-WIDE HOME
+ * ELEEVEON OWNER HOME
  * ---------------------------------------------------------
- * Golden Standard Owner Home.
- * Account-scoped, offline-first, mobile-first, theme-safe.
+ * Account-wide portal home.
  *
- * What changed in V4:
- * - The dashboard no longer keeps a manually duplicated module list.
- * - It receives the same navSections used by app/owner/page.tsx.
- * - Adding/removing/reordering nav items in owner/page.tsx automatically
- *   updates the dashboard module list.
- * - Counts are still real local Dexie counts, mapped by route key.
- * - Unknown/new module keys safely appear as Open until a metric is added.
- * - The Owner Dashboard item itself is hidden from the dashboard module list.
- * - Users are counted as unique active account users, not raw membership rows.
- *
- * Workspace-session aligned:
- * - Owner is account-scoped, so counts remain account-wide.
- * - The selected workspace session is still read for owner identity/role context
- *   so multi-role users do not accidentally display another selected member.
- * - Data filtering continues to use accountId, not schoolId/branchId.
+ * - Portal Highlights first
+ * - No greeting/name/account-name hero text
+ * - No dashboard search strip
+ * - No quick-action row
+ * - Compact ownership overview
+ * - One document scroll
  */
 
-import React, { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-import { useAccount } from "../context/account-context";
-import { useSettings } from "../context/settings-context";
-import { db } from "../lib/db";
-import type { RoleNavSection } from "../components/role-portals/RolePortalShell";
+import {
+  useRouter,
+} from "next/navigation";
 
-type AnyRow = Record<string, any>;
-type ViewMode = "cards" | "table" | "analytics";
-type AreaFilter =
-  | "all"
-  | "institution"
-  | "access"
-  | "billing"
-  | "communication"
-  | "system"
-  | "other";
-type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
+import {
+  useAccount,
+} from "../context/account-context";
+
+import {
+  useSettings,
+} from "../context/settings-context";
+
+import {
+  db,
+} from "../lib/db";
+
+import type {
+  RoleNavSection,
+} from "../components/role-portals/RolePortalShell";
+
+type AnyRow =
+  Record<string, any>;
 
 type RouteProps = {
-  navigate?: (key: string) => void;
-  navSections?: RoleNavSection[];
+  navigate?: (
+    key: string,
+  ) => void;
+
+  navSections?:
+    RoleNavSection[];
 };
 
-type DashboardModule = {
-  key: string;
-  label: string;
-  icon: string;
-  area: Exclude<AreaFilter, "all">;
-  value: string | number;
-  note: string;
-  tone: Tone;
-  routeKey: string;
+type HeroSlide = {
+  id: string;
+  type:
+    | "image"
+    | "video";
+  src: string;
+  poster?: string;
+  durationSeconds: number;
 };
 
-type CountMetric = {
-  value: string | number;
-  note: string;
-  tone: Tone;
-};
-
-const HIDDEN_DASHBOARD_KEYS = new Set(["ownerDashboard"]);
+const DEFAULT_HERO_SLIDES: HeroSlide[] = [
+  {
+    id: "pathways-to-possibility",
+    type: "image",
+    src: "/pathways-to-possibility.png",
+    durationSeconds: 7,
+  },
+  {
+    id: "building-the-future",
+    type: "image",
+    src: "/building-the-future.png",
+    durationSeconds: 7,
+  },
+  {
+    id: "knowledge-in-motion",
+    type: "image",
+    src: "/knowledge-in-motion.png",
+    durationSeconds: 7,
+  },
+];
 
 const TABLE_NAMES = [
   "schools",
@@ -85,445 +100,466 @@ const TABLE_NAMES = [
   "accountSubscriptions",
   "subscriptionPlans",
   "syncConflicts",
-  "billingEvents",
-  "syncDevices",
-  "storageUsages",
+  "portalHighlights",
+  "mediaAssets",
 ] as const;
 
-const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
-
-type OpenWorkspaceSession = {
-  membership?: AnyRow | null;
-  membershipId?: string | null;
-  role?: string | null;
-  schoolId?: number | string | null;
-  branchId?: number | string | null;
-  teacherLocalId?: number | string | null;
-  studentLocalId?: number | string | null;
-  parentLocalId?: number | string | null;
-  memberName?: string | null;
-  fullName?: string | null;
-  userName?: string | null;
-  openedAt?: number;
-};
-
-function safeRead(key: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    return window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function safeJson<T>(key: string): T | null {
-  const raw = safeRead(key);
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function readOpenWorkspaceSession(): OpenWorkspaceSession | null {
-  return safeJson<OpenWorkspaceSession>(OPEN_WORKSPACE_KEY);
-}
-
-function readStoredActiveMembership(): AnyRow | null {
-  return safeJson<AnyRow>("activeMembership");
-}
-
-function selectedOwnerName(args: {
-  openWorkspace?: OpenWorkspaceSession | null;
-  user?: AnyRow | null;
-  account?: AnyRow | null;
-}) {
-  const membership = args.openWorkspace?.membership || readStoredActiveMembership();
-
-  return text(
-    args.openWorkspace?.memberName ||
-      args.openWorkspace?.fullName ||
-      args.openWorkspace?.userName ||
-      membership?.fullName ||
-      membership?.memberName ||
-      membership?.userName ||
-      args.user?.fullName ||
-      args.user?.name ||
-      args.user?.email ||
-      args.account?.name,
-    "Owner"
+function text(
+  value: unknown,
+  fallback = "",
+) {
+  return (
+    String(
+      value ?? "",
+    ).trim() ||
+    fallback
   );
 }
 
-function selectedOwnerRole(args: {
-  openWorkspace?: OpenWorkspaceSession | null;
-  user?: AnyRow | null;
-}) {
-  const membership = args.openWorkspace?.membership || readStoredActiveMembership();
-
-  return text(
-    args.openWorkspace?.role ||
-      membership?.role ||
-      args.user?.role,
-    "owner"
-  ).replaceAll("_", " ");
+function clean(
+  value: unknown,
+) {
+  return value ===
+    null ||
+    value ===
+      undefined
+    ? ""
+    : String(
+        value,
+      ).trim();
 }
 
-function n(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
+function sameId(
+  a: unknown,
+  b: unknown,
+) {
+  const left =
+    clean(a);
+
+  const right =
+    clean(b);
+
+  return Boolean(
+    left &&
+    right &&
+    left === right,
+  );
 }
 
-function text(value: any, fallback = "") {
-  return String(value || "").trim() || fallback;
+function n(
+  value: unknown,
+) {
+  const parsed =
+    Number(
+      value ?? 0,
+    );
+
+  return Number.isFinite(
+    parsed,
+  )
+    ? parsed
+    : 0;
 }
 
-function idOf(row?: AnyRow) {
+function idOf(
+  row?: AnyRow | null,
+) {
   return (
     row?.id ??
     row?.localId ??
     row?.cloudId ??
-    row?.payload?.id ??
-    row?.payload?.localId
+    row?.payload?.id
   );
 }
 
-function sameAccount(row: AnyRow, accountId?: string | null) {
-  return (
-    row &&
-    row.isDeleted !== true &&
-    (!row.accountId || !accountId || row.accountId === accountId)
+function activeRow(
+  row?: AnyRow | null,
+) {
+  if (
+    !row ||
+    row.isDeleted === true ||
+    row.active === false
+  ) {
+    return false;
+  }
+
+  return ![
+    "deleted",
+    "archived",
+    "inactive",
+    "disabled",
+    "blocked",
+    "suspended",
+  ].includes(
+    text(
+      row.status,
+    ).toLowerCase(),
   );
 }
 
-function activeRow(row: AnyRow) {
-  const status = String(row?.status || "").toLowerCase();
-  return (
-    row?.isDeleted !== true &&
-    row?.active !== false &&
-    row?.disabled !== true &&
-    ![
-      "deleted",
-      "archived",
-      "inactive",
-      "disabled",
-      "blocked",
-      "suspended",
-    ].includes(status)
-  );
+async function safeArray(
+  tableName: string,
+): Promise<AnyRow[]> {
+  const table =
+    (db as any)[
+      tableName
+    ];
+
+  return table?.toArray
+    ? table.toArray()
+    : [];
 }
 
-function rowName(row?: AnyRow) {
+function count(
+  rows: AnyRow[],
+) {
+  return rows.filter(
+    activeRow,
+  ).length;
+}
+
+function money(
+  value: unknown,
+  currency = "GHS",
+) {
+  try {
+    return new Intl.NumberFormat(
+      undefined,
+      {
+        style:
+          "currency",
+        currency,
+        maximumFractionDigits:
+          0,
+      },
+    ).format(
+      n(value),
+    );
+  } catch {
+    return `${currency} ${n(
+      value,
+    ).toLocaleString()}`;
+  }
+}
+
+function dateLabel(
+  value: unknown,
+) {
+  if (!value) {
+    return "Not set";
+  }
+
+  const date =
+    new Date(
+      value as any,
+    );
+
+  if (
+    !Number.isFinite(
+      date.getTime(),
+    )
+  ) {
+    return "Not set";
+  }
+
+  return new Intl.DateTimeFormat(
+    undefined,
+    {
+      month: "short",
+      day: "numeric",
+    },
+  ).format(date);
+}
+
+function rowName(
+  row?: AnyRow | null,
+) {
   return text(
-    row?.fullName || row?.name || row?.title || row?.label || row?.email,
+    row?.name ||
+      row?.fullName ||
+      row?.title ||
+      row?.email,
     "Unnamed",
   );
 }
 
-function dateLabel(value?: number | string | null) {
-  if (!value) return "Not set";
-  const time = typeof value === "number" ? value : new Date(value).getTime();
-  if (!Number.isFinite(time)) return "Not set";
-
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(time));
-  } catch {
-    return "Not set";
-  }
-}
-
-function money(value: any, currency = "GHS") {
-  const amount = n(value);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency || "GHS",
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${currency || "GHS"} ${amount.toLocaleString()}`;
-  }
-}
-
-async function safeArray<T = AnyRow>(tableName: string): Promise<T[]> {
-  const table = (db as any)[tableName];
-  return table?.toArray ? table.toArray() : [];
-}
-
-function latestOf(rows: AnyRow[]) {
-  return [...rows]
-    .filter(activeRow)
-    .sort(
-      (a, b) =>
-        n(b.updatedAt || b.createdAt || b.sentAt || b.paidAt) -
-        n(a.updatedAt || a.createdAt || a.sentAt || a.paidAt),
-    )[0];
-}
-
-function count(rows: AnyRow[]) {
-  return rows.filter(activeRow).length;
-}
-
-function sum(rows: AnyRow[], field: string) {
-  return rows
-    .filter(activeRow)
-    .reduce((total, row) => total + n(row[field]), 0);
-}
-
-function roleCount(rows: AnyRow[], role: string) {
-  return rows
-    .filter(activeRow)
-    .filter(
-      (row) => String(row.role || row.roleName || "").toLowerCase() === role,
-    ).length;
-}
-
-function uniqueUsersRoleCount(users: AnyRow[], memberships: AnyRow[]) {
-  const map = new Map<string, AnyRow>();
-
-  users.filter(activeRow).forEach((row) => {
-    const key = String(row.id || row.userId || row.email || "");
-    if (key) map.set(key, row);
-  });
-
-  memberships.filter(activeRow).forEach((row) => {
-    const key = String(
-      row.userId ||
-        row.appUserId ||
-        row.email ||
-        row.userEmail ||
-        row.id ||
-        `${row.role || "user"}-${row.teacherLocalId || row.studentLocalId || row.parentLocalId || row.schoolId || row.branchId || ""}`,
+function mediaUrl(
+  media: AnyRow[],
+  id: unknown,
+) {
+  const asset =
+    media.find(
+      (
+        row,
+      ) =>
+        sameId(
+          idOf(row),
+          id,
+        ),
     );
 
-    if (key) map.set(key, row);
-  });
-
-  return map.size;
-}
-
-function statusTone(status?: string): Tone {
-  const value = String(status || "").toLowerCase();
-  if (
-    ["active", "paid", "sent", "succeeded", "success", "synced"].includes(value)
-  )
-    return "green";
-  if (
-    ["failed", "overdue", "cancelled", "expired", "suspended"].includes(value)
-  )
-    return "red";
-  if (["pending", "processing", "trial", "draft"].includes(value))
-    return "orange";
-  if (["scheduled", "issued"].includes(value)) return "blue";
-  return "gray";
-}
-
-function areaFromSectionTitle(title: string): Exclude<AreaFilter, "all"> {
-  const value = String(title || "")
-    .toLowerCase()
-    .trim();
-  if (
-    value.includes("institution") ||
-    value.includes("school") ||
-    value.includes("branch")
-  )
-    return "institution";
-  if (
-    value.includes("access") ||
-    value.includes("user") ||
-    value.includes("role")
-  )
-    return "access";
-  if (
-    value.includes("billing") ||
-    value.includes("subscription") ||
-    value.includes("invoice") ||
-    value.includes("payment")
-  )
-    return "billing";
-  if (
-    value.includes("communication") ||
-    value.includes("message") ||
-    value.includes("announcement")
-  )
-    return "communication";
-  if (
-    value.includes("system") ||
-    value.includes("profile") ||
-    value.includes("sync") ||
-    value.includes("calendar")
-  )
-    return "system";
-  return "other";
-}
-
-function areaLabel(area: string) {
-  const labels: Record<string, string> = {
-    all: "All areas",
-    institution: "Institution",
-    access: "Access Control",
-    billing: "Billing",
-    communication: "Communication",
-    system: "System",
-    other: "Other",
-  };
-  return labels[area] || area;
-}
-
-function buildNavModules(
-  navSections?: RoleNavSection[],
-): Omit<DashboardModule, "value" | "note" | "tone">[] {
-  const unique = new Map<
-    string,
-    Omit<DashboardModule, "value" | "note" | "tone">
-  >();
-
-  (navSections || []).forEach((section) => {
-    const area = areaFromSectionTitle(section.title);
-
-    section.items.forEach((item) => {
-      if (HIDDEN_DASHBOARD_KEYS.has(item.key)) return;
-      if (unique.has(item.key)) return;
-
-      unique.set(item.key, {
-        key: item.key,
-        label: item.label,
-        icon: item.icon,
-        area,
-        routeKey: item.key,
-      });
-    });
-  });
-
-  return [...unique.values()];
-}
-
-function metricFor(
-  routeKey: string,
-  rows: Record<string, AnyRow[]>,
-  summary: AnyRow,
-): CountMetric {
-  const currency = summary.currency || "GHS";
-
-  const metricMap: Record<string, CountMetric> = {
-    schools: {
-      value: summary.schools,
-      note: `${summary.branches} branch record(s) linked to your account.`,
-      tone: summary.schools ? "green" : "orange",
-    },
-    branches: {
-      value: summary.branches,
-      note: "Campuses and branch operating units under your schools.",
-      tone: summary.branches ? "blue" : "orange",
-    },
-    users: {
-      value: summary.users,
-      note: `${summary.schoolAdmins} school admin(s), ${summary.branchAdmins} branch admin(s), ${summary.accountants} accountant(s).`,
-      tone: summary.users ? "purple" : "orange",
-    },
-    billing: {
-      value: money(summary.totalPaid || summary.totalInvoice, currency),
-      note: `${summary.invoices} invoice(s), ${summary.payments} payment record(s).`,
-      tone: summary.totalPaid ? "green" : "gray",
-    },
-    subscription: {
-      value: summary.planName,
-      note: `Status: ${summary.subscriptionStatus}.`,
-      tone: statusTone(summary.subscriptionStatus),
-    },
-    invoices: {
-      value: summary.invoices,
-      note: "Billing invoices and account payment obligations.",
-      tone: summary.invoices ? "blue" : "gray",
-    },
-    payments: {
-      value: summary.payments,
-      note: "Account payments, receipts and provider references.",
-      tone: summary.payments ? "green" : "gray",
-    },
-    profile: {
-      value: "Open",
-      note: "Account identity, media, defaults and protected settings.",
-      tone: "purple",
-    },
-    sync: {
-      value: summary.openConflicts,
-      note: `${summary.openConflicts} open sync conflict(s) from local cache.`,
-      tone: summary.openConflicts ? "red" : "green",
-    },
-    calendarOverview: {
-      value: summary.calendarItems || "Open",
-      note: "Owner-level calendar overview and upcoming account events.",
-      tone: summary.calendarItems ? "blue" : "gray",
-    },
-    ownerAnnouncements: {
-      value: summary.announcements,
-      note: "Owner authority broadcasts to school admins and branch admins.",
-      tone: summary.announcements ? "blue" : "gray",
-    },
-    messages: {
-      value: summary.messages,
-      note: "Direct owner conversations with admins and accountants.",
-      tone: summary.messages ? "green" : "gray",
-    },
-  };
-
-  if (metricMap[routeKey]) return metricMap[routeKey];
-
-  const guessedRows = rows[routeKey] || [];
-  if (guessedRows.length) {
-    return {
-      value: count(guessedRows),
-      note: "Auto-counted from matching local table.",
-      tone: count(guessedRows) ? "green" : "gray",
-    };
-  }
-
-  return {
-    value: "Open",
-    note: "Module is listed from Owner navigation. Add a metric mapping when data is ready.",
-    tone: "gray",
-  };
-}
-
-function Chip({
-  children,
-  tone = "gray",
-}: {
-  children: React.ReactNode;
-  tone?: Tone;
-}) {
-  return <span className={`od-chip ${tone}`}>{children}</span>;
-}
-
-function SliderIcon() {
-  return (
-    <svg className="od-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
+  return text(
+    asset?.publicUrl ||
+      asset?.remoteUrl ||
+      asset?.previewDataUrl ||
+      asset?.thumbnailDataUrl ||
+      asset?.localObjectUrl,
   );
 }
 
-function Empty({ title, text: body }: { title: string; text: string }) {
+function buildHeroSlides(
+  highlights: AnyRow[],
+  media: AnyRow[],
+) {
+  const slides =
+    highlights
+      .filter(
+        activeRow,
+      )
+      .filter(
+        (
+          row,
+        ) => {
+          const audiences =
+            Array.isArray(
+              row.audiences,
+            )
+              ? row.audiences.map(
+                  (
+                    value: unknown,
+                  ) =>
+                    text(
+                      value,
+                    ).toLowerCase(),
+                )
+              : [
+                  text(
+                    row.audience ||
+                      row.portal ||
+                      row.role ||
+                      "all",
+                  ).toLowerCase(),
+                ];
+
+          return audiences.some(
+            (
+              value: string,
+            ) =>
+              [
+                "all",
+                "owner",
+                "super_admin",
+                "super-admin",
+              ].includes(
+                value,
+              ),
+          );
+        },
+      )
+      .sort(
+        (
+          a,
+          b,
+        ) =>
+          n(
+            a.displayOrder ||
+              a.order,
+          ) -
+          n(
+            b.displayOrder ||
+              b.order,
+          ),
+      )
+      .map(
+        (
+          row,
+          index,
+        ):
+          HeroSlide | null => {
+          const type =
+            text(
+              row.mediaType,
+            ).toLowerCase() ===
+            "video"
+              ? "video"
+              : "image";
+
+          const src =
+            mediaUrl(
+              media,
+              row.mediaAssetId,
+            ) ||
+            (
+              type ===
+              "image"
+                ? text(
+                    row.fallbackImageUrl,
+                  )
+                : ""
+            );
+
+          if (!src) {
+            return null;
+          }
+
+          return {
+            id:
+              clean(
+                idOf(row),
+              ) ||
+              `owner-highlight-${index}`,
+            type,
+            src,
+            poster:
+              mediaUrl(
+                media,
+                row.posterMediaAssetId,
+              ) ||
+              undefined,
+            durationSeconds:
+              Math.max(
+                3,
+                n(
+                  row.durationSeconds ||
+                    7,
+                ),
+              ),
+          };
+        },
+      )
+      .filter(
+        (
+          item,
+        ): item is HeroSlide =>
+          Boolean(item),
+      );
+
+  return slides.length
+    ? slides
+    : DEFAULT_HERO_SLIDES;
+}
+
+function PortalHero({
+  slides,
+}: {
+  slides: HeroSlide[];
+}) {
+  const [
+    index,
+    setIndex,
+  ] =
+    useState(0);
+
+  const slide =
+    slides[
+      index %
+        Math.max(
+          1,
+          slides.length,
+        )
+    ];
+
+  useEffect(() => {
+    if (
+      !slide ||
+      slides.length <= 1 ||
+      slide.type ===
+        "video"
+    ) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () =>
+          setIndex(
+            (
+              current,
+            ) =>
+              (
+                current +
+                1
+              ) %
+              slides.length,
+          ),
+        slide.durationSeconds *
+          1000,
+      );
+
+    return () =>
+      clearTimeout(
+        timer,
+      );
+  }, [
+    slide,
+    slides.length,
+  ]);
+
+  if (!slide) {
+    return null;
+  }
+
   return (
-    <section className="od-empty">
-      <div>👑</div>
-      <h3>{title}</h3>
-      <p>{body}</p>
+    <section className="od-hero">
+      {slide.type ===
+      "video" ? (
+        <video
+          src={slide.src}
+          poster={
+            slide.poster
+          }
+          autoPlay
+          muted
+          playsInline
+          onEnded={() =>
+            setIndex(
+              (
+                current,
+              ) =>
+                (
+                  current +
+                  1
+                ) %
+                slides.length,
+            )
+          }
+        />
+      ) : (
+        <img
+          src={slide.src}
+          alt=""
+        />
+      )}
+
+      {slides.length >
+      1 ? (
+        <div className="od-dots">
+          {slides.map(
+            (
+              item,
+              i,
+            ) => (
+              <button
+                type="button"
+                key={
+                  item.id
+                }
+                className={
+                  i ===
+                  index
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  setIndex(
+                    i,
+                  )
+                }
+              />
+            ),
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -532,1113 +568,1195 @@ export default function OwnerDashboardPage({
   navigate,
   navSections,
 }: RouteProps) {
-  const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading, user, account } = useAccount() as any;
-  const { settings, loading: settingsLoading } = useSettings();
-  const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
+  void navSections;
 
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
+  const router =
+    useRouter();
 
-  const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<ViewMode>("cards");
-  const [query, setQuery] = useState("");
-  const [area, setArea] = useState<AreaFilter>("all");
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [rowsByTable, setRowsByTable] = useState<Record<string, AnyRow[]>>({});
+  const {
+    accountId,
+    authenticated,
+    loading:
+      accountLoading,
+  } =
+    useAccount() as any;
+
+  const {
+    settings,
+    loading:
+      settingsLoading,
+  } =
+    useSettings();
+
+  const primary =
+    settings?.primaryColor ||
+    "var(--primary-color,#2563eb)";
+
+  const [
+    loading,
+    setLoading,
+  ] =
+    useState(true);
+
+  const [
+    rowsByTable,
+    setRowsByTable,
+  ] =
+    useState<
+      Record<
+        string,
+        AnyRow[]
+      >
+    >({});
 
   useEffect(() => {
-    if (accountLoading) return;
-    if (!authenticated || !accountId) router.replace("/login");
-  }, [accountLoading, authenticated, accountId, router]);
+    if (
+      !accountLoading &&
+      (
+        !authenticated ||
+        !accountId
+      )
+    ) {
+      router.replace(
+        "/login",
+      );
+    }
+  }, [
+    accountLoading,
+    authenticated,
+    accountId,
+    router,
+  ]);
 
   async function load() {
-    if (!authenticated || !accountId) {
-      setRowsByTable({});
-      setLoading(false);
+    if (
+      !authenticated ||
+      !accountId
+    ) {
+      setLoading(
+        false,
+      );
       return;
     }
 
-    setLoading(true);
+    setLoading(
+      true,
+    );
 
     try {
-      const loaded = await Promise.all(
-        TABLE_NAMES.map(async (tableName) => {
-          const tableRows = await safeArray(tableName);
-          return [
-            tableName,
-            tableRows.filter((row) => sameAccount(row, accountId)),
-          ] as const;
-        }),
-      );
+      const loaded =
+        await Promise.all(
+          TABLE_NAMES.map(
+            async (
+              tableName,
+            ) => {
+              const records =
+                await safeArray(
+                  tableName,
+                );
 
-      setRowsByTable(Object.fromEntries(loaded));
-    } catch (error) {
-      console.error("Failed to load owner dashboard:", error);
+              return [
+                tableName,
+                records.filter(
+                  (
+                    row,
+                  ) =>
+                    !row.accountId ||
+                    sameId(
+                      row.accountId,
+                      accountId,
+                    ),
+                ),
+              ] as const;
+            },
+          ),
+        );
+
+      setRowsByTable(
+        Object.fromEntries(
+          loaded,
+        ),
+      );
     } finally {
-      setLoading(false);
+      setLoading(
+        false,
+      );
     }
   }
 
   useEffect(() => {
-    if (accountLoading || settingsLoading) return;
-    load();
+    if (
+      accountLoading ||
+      settingsLoading
+    ) {
+      return;
+    }
+
+    void load();
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, accountLoading, settingsLoading]);
+  }, [
+    authenticated,
+    accountId,
+    accountLoading,
+    settingsLoading,
+  ]);
 
-  const rows = rowsByTable;
+  const rows =
+    rowsByTable;
 
-  const summary = useMemo(() => {
-    const schools = rows.schools || [];
-    const schoolIds = new Set(
-      schools
-        .filter(activeRow)
-        .map((school) => Number(idOf(school)))
-        .filter(Boolean),
-    );
-    const branches = (rows.branches || []).filter(
-      (branch) => !schoolIds.size || schoolIds.has(Number(branch.schoolId)),
-    );
-    const users = (rows.appUsers || []).length
-      ? rows.appUsers || []
-      : (rows.users || []).length
-        ? rows.users || []
-        : rows.accountUsers || [];
-    const memberships = (rows.userMemberships || []).length
-      ? rows.userMemberships || []
-      : rows.memberships || [];
-    const invoices = rows.invoices || [];
-    const payments = [...(rows.appPayments || []), ...(rows.payments || [])];
-    const subscriptions = rows.accountSubscriptions || [];
-    const plans = rows.subscriptionPlans || [];
-    const latestSubscription = latestOf(subscriptions);
-    const currentPlan =
-      plans.find(
-        (plan) => String(plan.id) === String(latestSubscription?.planId),
-      ) ||
-      plans.find((plan) => plan.active) ||
-      null;
-    const totalInvoice = invoices.reduce(
-      (total, row) => total + n(row.total || row.amount || row.subtotal),
-      0,
-    );
-    const totalPaid = payments
-      .filter((row) =>
-        ["paid", "succeeded", "success"].includes(
-          String(row.status || "").toLowerCase(),
-        ),
-      )
-      .reduce((total, row) => total + n(row.amount || row.total), 0);
-    const openConflicts = (rows.syncConflicts || []).filter(
-      (row) => String(row.status || "open").toLowerCase() === "open",
-    ).length;
+  const summary =
+    useMemo(() => {
+      const schools =
+        (
+          rows.schools ||
+          []
+        ).filter(
+          activeRow,
+        );
 
-    return {
-      schools: count(schools),
-      branches: count(branches),
-      users: uniqueUsersRoleCount(users, memberships),
-      memberships: count(memberships),
-      schoolAdmins:
-        roleCount(memberships, "admin") +
-        roleCount(memberships, "school_admin"),
-      branchAdmins: roleCount(memberships, "branch_admin"),
-      accountants: roleCount(memberships, "accountant"),
-      announcements: count(rows.announcements || []),
-      messages: count(rows.messageThreads || []),
-      invoices: count(invoices),
-      payments: count(payments),
-      totalInvoice,
-      totalPaid,
-      openConflicts,
-      subscriptionStatus: text(latestSubscription?.status, "Not set"),
-      planName: text(
-        currentPlan?.name || latestSubscription?.planName,
-        "No plan",
-      ),
-      currency: currentPlan?.currency || latestSubscription?.currency || "GHS",
-      calendarItems: 0,
-      ownerName: selectedOwnerName({ openWorkspace, user, account }),
-      ownerRole: selectedOwnerRole({ openWorkspace, user }),
-      accountName: text(
-        account?.name ||
-          account?.accountName ||
-          user?.accountName,
-        "Eleeveon Account",
-      ),
-    };
-  }, [rows, openWorkspace, user, account]);
+      const branches =
+        (
+          rows.branches ||
+          []
+        ).filter(
+          activeRow,
+        );
 
-  const modules = useMemo<DashboardModule[]>(() => {
-    const navModules = buildNavModules(navSections);
+      const users =
+        (
+          rows.appUsers ||
+          rows.users ||
+          rows.accountUsers ||
+          []
+        ).filter(
+          activeRow,
+        );
 
-    return navModules.map((module) => {
-      const metric = metricFor(module.routeKey, rows, summary);
+      const memberships =
+        (
+          rows.userMemberships ||
+          rows.memberships ||
+          []
+        ).filter(
+          activeRow,
+        );
+
+      const uniqueUsers =
+        new Set(
+          [
+            ...users.map(
+              (
+                row,
+              ) =>
+                clean(
+                  row.id ||
+                    row.userId ||
+                    row.email,
+                ),
+            ),
+            ...memberships.map(
+              (
+                row,
+              ) =>
+                clean(
+                  row.userId ||
+                    row.appUserId ||
+                    row.email,
+                ),
+            ),
+          ].filter(
+            Boolean,
+          ),
+        ).size;
+
+      const invoices =
+        (
+          rows.invoices ||
+          []
+        ).filter(
+          activeRow,
+        );
+
+      const payments =
+        [
+          ...(
+            rows.appPayments ||
+            []
+          ),
+          ...(
+            rows.payments ||
+            []
+          ),
+        ].filter(
+          activeRow,
+        );
+
+      const subscriptions =
+        (
+          rows.accountSubscriptions ||
+          []
+        ).filter(
+          activeRow,
+        );
+
+      const plans =
+        (
+          rows.subscriptionPlans ||
+          []
+        ).filter(
+          activeRow,
+        );
+
+      const subscription =
+        subscriptions
+          .slice()
+          .sort(
+            (
+              a,
+              b,
+            ) =>
+              n(
+                b.updatedAt ||
+                  b.createdAt,
+              ) -
+              n(
+                a.updatedAt ||
+                  a.createdAt,
+              ),
+          )[0];
+
+      const plan =
+        plans.find(
+          (
+            row,
+          ) =>
+            sameId(
+              idOf(row),
+              subscription?.planId,
+            ),
+        );
+
+      const totalPaid =
+        payments
+          .filter(
+            (
+              row,
+            ) =>
+              [
+                "paid",
+                "success",
+                "succeeded",
+                "completed",
+              ].includes(
+                text(
+                  row.status,
+                ).toLowerCase(),
+              ),
+          )
+          .reduce(
+            (
+              total,
+              row,
+            ) =>
+              total +
+              n(
+                row.amount ||
+                  row.total,
+              ),
+            0,
+          );
+
+      const conflicts =
+        (
+          rows.syncConflicts ||
+          []
+        ).filter(
+          (
+            row,
+          ) =>
+            ![
+              "resolved",
+              "closed",
+              "ignored",
+            ].includes(
+              text(
+                row.status,
+                "open",
+              ).toLowerCase(),
+            ),
+        ).length;
+
       return {
-        ...module,
-        ...metric,
+        schools:
+          schools.length,
+        branches:
+          branches.length,
+        users:
+          uniqueUsers,
+        invoices:
+          invoices.length,
+        payments:
+          payments.length,
+        totalPaid,
+        conflicts,
+        planName:
+          text(
+            plan?.name ||
+              subscription?.planName,
+            "No plan",
+          ),
+        subscriptionStatus:
+          text(
+            subscription?.status,
+            "Not set",
+          ),
+        currency:
+          text(
+            plan?.currency ||
+              subscription?.currency ||
+              payments[0]
+                ?.currency,
+            "GHS",
+          ),
       };
-    });
-  }, [navSections, rows, summary]);
+    }, [
+      rows,
+    ]);
 
-  const filteredModules = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    return modules.filter((item) => {
-      if (area !== "all" && item.area !== area) return false;
-      if (!q) return true;
-      return `${item.label} ${item.note} ${item.value} ${item.area}`
-        .toLowerCase()
-        .includes(q);
-    });
-  }, [area, modules, query]);
+  const schools =
+    useMemo(
+      () =>
+        (
+          rows.schools ||
+          []
+        )
+          .filter(
+            activeRow,
+          )
+          .slice(
+            0,
+            3,
+          ),
+      [
+        rows.schools,
+      ],
+    );
 
-  const recent = useMemo(() => {
-    const schools = rows.schools || [];
-    const branches = rows.branches || [];
-    const announcements = rows.announcements || [];
-    const threads = rows.messageThreads || [];
-    const payments = [...(rows.appPayments || []), ...(rows.payments || [])];
-
-    const recentRows: AnyRow[] = [
-      ...schools.map((row) => ({
-        ...row,
-        _kind: "School",
-        _icon: "🏫",
-        _title: rowName(row),
-        _date: row.updatedAt || row.createdAt,
-      })),
-      ...branches.map((row) => ({
-        ...row,
-        _kind: "Branch",
-        _icon: "🏢",
-        _title: rowName(row),
-        _date: row.updatedAt || row.createdAt,
-      })),
-      ...announcements.map((row) => ({
-        ...row,
-        _kind: "Announcement",
-        _icon: "📢",
-        _title: text(row.title, "Announcement"),
-        _date: row.sentAt || row.publishAt || row.updatedAt || row.createdAt,
-      })),
-      ...threads.map((row) => ({
-        ...row,
-        _kind: "Message",
-        _icon: "✉️",
-        _title: text(row.subject || row.title, "Message thread"),
-        _date: row.lastMessageAt || row.updatedAt || row.createdAt,
-      })),
-      ...payments.map((row) => ({
-        ...row,
-        _kind: "Payment",
-        _icon: "💰",
-        _title: money(
-          row.amount || row.total,
-          row.currency || summary.currency || "GHS",
+  const recent =
+    useMemo(() => {
+      const records = [
+        ...(
+          rows.announcements ||
+          []
+        ).map(
+          (
+            row,
+          ) => ({
+            ...row,
+            _kind:
+              "Announcement",
+            _icon:
+              "📣",
+            _title:
+              text(
+                row.title,
+                "Announcement",
+              ),
+            _date:
+              row.sentAt ||
+              row.updatedAt ||
+              row.createdAt,
+          }),
         ),
-        _date: row.paidAt || row.updatedAt || row.createdAt,
-      })),
-    ];
+        ...(
+          rows.payments ||
+          []
+        ).map(
+          (
+            row,
+          ) => ({
+            ...row,
+            _kind:
+              "Payment",
+            _icon:
+              "💳",
+            _title:
+              money(
+                row.amount ||
+                  row.total,
+                row.currency ||
+                  summary.currency,
+              ),
+            _date:
+              row.paidAt ||
+              row.updatedAt ||
+              row.createdAt,
+          }),
+        ),
+      ];
 
-    return recentRows
-      .filter(activeRow)
-      .sort((a, b) => n(b._date) - n(a._date))
-      .slice(0, 8);
-  }, [rows, summary.currency]);
+      return records
+        .filter(
+          activeRow,
+        )
+        .sort(
+          (
+            a,
+            b,
+          ) =>
+            new Date(
+              b._date ||
+                0,
+            ).getTime() -
+            new Date(
+              a._date ||
+                0,
+            ).getTime(),
+        )
+        .slice(
+          0,
+          3,
+        );
+    }, [
+      rows,
+      summary.currency,
+    ]);
 
-  const activeFilterCount = area !== "all" ? 1 : 0;
+  const heroSlides =
+    useMemo(
+      () =>
+        buildHeroSlides(
+          rows.portalHighlights ||
+            [],
+          (
+            rows.mediaAssets ||
+            []
+          ).filter(
+            activeRow,
+          ),
+        ),
+      [
+        rows.portalHighlights,
+        rows.mediaAssets,
+      ],
+    );
 
-  function openRoute(routeKey: string) {
-    if (typeof navigate === "function") {
-      navigate(routeKey);
+  function openRoute(
+    key: string,
+  ) {
+    if (navigate) {
+      navigate(key);
       return;
     }
 
     try {
       window.dispatchEvent(
-        new CustomEvent("eleeveon:portal-route", { detail: { key: routeKey } }),
+        new CustomEvent(
+          "eleeveon:portal-route",
+          {
+            detail: {
+              key,
+            },
+          },
+        ),
       );
-      window.dispatchEvent(
-        new CustomEvent("role-portal:navigate", { detail: { key: routeKey } }),
-      );
-      window.dispatchEvent(
-        new CustomEvent("portal:navigate", { detail: routeKey }),
-      );
-    } catch {
-      // Fallback only. Current RolePortalShell should use the navigate prop.
-    }
+    } catch {}
   }
 
-  if (loading || accountLoading || settingsLoading) {
+  if (
+    loading ||
+    accountLoading ||
+    settingsLoading
+  ) {
     return (
       <State
-        primary={primary}
-        title="Opening owner dashboard..."
-        text="Loading account schools, branches, users, billing and communication records."
+        primary={
+          primary
+        }
       />
     );
   }
-
-  if (!authenticated || !accountId) {
-    return (
-      <State
-        primary={primary}
-        title="Redirecting to login..."
-        text="You must sign in before viewing the owner dashboard."
-      />
-    );
-  }
-
-  const q = query.trim().toLowerCase();
-  const searchResults = q ? filteredModules.slice(0, 12) : [];
-
-  const quickActions = [
-    ["schools", "🏫", "Schools"],
-    ["branches", "🏢", "Branches"],
-    ["users", "👥", "Users"],
-    ["billing", "💳", "Billing"],
-    ["sync", "☁️", "Sync"],
-  ] as const;
-
-  const latestSchools = (rows.schools || [])
-    .filter(activeRow)
-    .sort(
-      (a, b) =>
-        n(b.updatedAt || b.createdAt) -
-        n(a.updatedAt || a.createdAt),
-    )
-    .slice(0, 4);
-
-  const latestInvoices = (rows.invoices || [])
-    .filter(activeRow)
-    .sort(
-      (a, b) =>
-        n(b.updatedAt || b.createdAt || b.dueDate) -
-        n(a.updatedAt || a.createdAt || a.dueDate),
-    )
-    .slice(0, 4);
-
-  const greetingHour = new Date().getHours();
-  const greeting =
-    greetingHour < 12
-      ? "Good morning"
-      : greetingHour < 17
-        ? "Good afternoon"
-        : "Good evening";
 
   return (
     <main
       className="od-page"
-      style={{ "--od-primary": primary } as React.CSSProperties}
+      style={
+        {
+          "--od-primary":
+            primary,
+        } as React.CSSProperties
+      }
     >
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
 
-      <section
-        className="od-search-card"
-        aria-label="Owner dashboard search and actions"
-      >
-        <span
-          className={`status-dot-mini ${
-            summary.openConflicts
-              ? "orange"
-              : summary.schools
-                ? "green"
-                : "gray"
-          }`}
-          title={`${summary.schools} school(s), ${summary.openConflicts} conflict(s)`}
-        />
+      <PortalHero
+        slides={
+          heroSlides
+        }
+      />
 
-        <label className="od-search">
-          <span>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search owner modules..."
-            aria-label="Search owner dashboard"
-          />
-        </label>
-
-        {query ? (
-          <button
-            type="button"
-            className="od-clear"
-            onClick={() => setQuery("")}
-            aria-label="Clear search"
-          >
-            ×
-          </button>
-        ) : null}
-
+      <section className="od-metrics">
         <button
           type="button"
-          className="od-add-inline"
-          onClick={load}
-          aria-label="Refresh owner dashboard"
-          title="Refresh"
+          onClick={() =>
+            openRoute(
+              "schools",
+            )
+          }
         >
-          ↻
+          <span>
+            Schools
+          </span>
+
+          <strong>
+            {
+              summary.schools
+            }
+          </strong>
+
+          <small>
+            {
+              summary.branches
+            }{" "}
+            branches
+          </small>
         </button>
 
         <button
           type="button"
-          className="od-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
+          onClick={() =>
+            openRoute(
+              "users",
+            )
+          }
         >
-          ⋯
+          <span>
+            Users
+          </span>
+
+          <strong>
+            {
+              summary.users
+            }
+          </strong>
+
+          <small>
+            account-wide
+          </small>
         </button>
       </section>
 
-      {q ? (
-        <section className="od-search-results">
-          <div className="od-section-head">
+      <section className="od-grid">
+        <article className="od-card">
+          <header>
             <div>
-              <span>Search results</span>
+              <span>
+                Institution
+              </span>
               <h2>
-                {searchResults.length
-                  ? `Matching “${query.trim()}”`
-                  : "No matches found"}
+                Schools
               </h2>
             </div>
-            <b>{searchResults.length}</b>
-          </div>
 
-          {searchResults.map((item) => (
             <button
-              key={item.key}
-              type="button"
-              className="owner-row"
-              onClick={() => openRoute(item.routeKey)}
+              onClick={() =>
+                openRoute(
+                  "schools",
+                )
+              }
             >
-              <span className="owner-avatar">{item.icon}</span>
-              <span className="owner-main">
-                <strong>{item.label}</strong>
-                <small>{item.note}</small>
-                <em>{areaLabel(item.area)}</em>
-              </span>
-              <span className="owner-side">
-                <Chip tone={item.tone}>{item.value}</Chip>
-                <i>›</i>
-              </span>
+              Manage
             </button>
-          ))}
+          </header>
 
-          {!searchResults.length ? (
-            <Empty
-              title="Nothing matches that search"
-              text="Try schools, branches, users, billing, subscription, invoices, payments, sync or messages."
-            />
-          ) : null}
-        </section>
-      ) : (
-        <>
-          <section className="od-account-hero">
-            <div className="od-account-orb one" />
-            <div className="od-account-orb two" />
+          <div className="od-list">
+            {schools.map(
+              (
+                school,
+                index,
+              ) => {
+                const schoolId =
+                  idOf(
+                    school,
+                  );
 
-            <div className="od-hero-copy">
-              <span>{greeting}</span>
-              <h1>{summary.ownerName}</h1>
-              <p>
-                Owner of <strong>{summary.accountName}</strong>
-                <small>Account-wide control centre</small>
-              </p>
-              <blockquote>
-                Manage every school, branch, user and subscription from one place.
-              </blockquote>
-            </div>
+                const branchCount =
+                  (
+                    rows.branches ||
+                    []
+                  ).filter(
+                    (
+                      row,
+                    ) =>
+                      activeRow(
+                        row,
+                      ) &&
+                      sameId(
+                        row.schoolId,
+                        schoolId,
+                      ),
+                  ).length;
 
-            <div className="od-hero-stats">
-              <span>
-                <b>{summary.schools}</b> Schools
-              </span>
-              <span>
-                <b>{summary.branches}</b> Branches
-              </span>
-              <span>
-                <b>{summary.users}</b> Users
-              </span>
-              <span>
-                <b>{summary.planName}</b> Plan
-              </span>
-            </div>
-          </section>
-
-          <section className="od-quick-actions" aria-label="Quick actions">
-            {quickActions.map(([route, icon, label]) => (
-              <button
-                key={route}
-                type="button"
-                onClick={() => openRoute(route)}
-              >
-                <span>{icon}</span>
-                <b>{label}</b>
-              </button>
-            ))}
-          </section>
-
-          <section className="od-dashboard-grid">
-            <article className="od-card od-network-card">
-              <div className="od-section-head">
-                <div>
-                  <span>Institution network</span>
-                  <h2>Schools & branches</h2>
-                </div>
-                <button onClick={() => openRoute("schools")}>
-                  Manage
-                </button>
-              </div>
-
-              <div className="od-network-main">
-                <strong>{summary.schools}</strong>
-                <span>schools across {summary.branches} branches</span>
-              </div>
-
-              <div className="od-network-meta">
-                <div>
-                  <b>{summary.branches}</b>
-                  <small>Branches</small>
-                </div>
-                <div>
-                  <b>{summary.users}</b>
-                  <small>Users</small>
-                </div>
-                <div>
-                  <b>{summary.memberships}</b>
-                  <small>Memberships</small>
-                </div>
-              </div>
-            </article>
-
-            <article className="od-card">
-              <div className="od-section-head">
-                <div>
-                  <span>Recent institutions</span>
-                  <h2>Schools</h2>
-                </div>
-                <button onClick={() => openRoute("schools")}>
-                  View all
-                </button>
-              </div>
-
-              <div className="od-stack">
-                {latestSchools.length ? (
-                  latestSchools.map((school, index) => {
-                    const schoolId = idOf(school);
-                    const branchCount = (rows.branches || []).filter(
-                      (branch) =>
-                        activeRow(branch) &&
-                        String(branch.schoolId) === String(schoolId),
-                    ).length;
-
-                    return (
-                      <button
-                        key={String(schoolId || index)}
-                        className="od-school-row"
-                        onClick={() => openRoute("schools")}
-                      >
-                        <span>🏫</span>
-                        <div>
-                          <b>{rowName(school)}</b>
-                          <small>{branchCount} branch(es)</small>
-                        </div>
-                        <Chip tone={activeRow(school) ? "green" : "gray"}>
-                          {activeRow(school) ? "Active" : "Inactive"}
-                        </Chip>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <MiniEmpty
-                    icon="🏫"
-                    text="No schools have been added to this account."
-                  />
-                )}
-              </div>
-            </article>
-
-            <article className="od-card od-billing-card">
-              <div className="od-section-head">
-                <div>
-                  <span>Account billing</span>
-                  <h2>Subscription</h2>
-                </div>
-                <button onClick={() => openRoute("subscription")}>
-                  Open
-                </button>
-              </div>
-
-              <div className="od-plan-main">
-                <strong>{summary.planName}</strong>
-                <Chip tone={statusTone(summary.subscriptionStatus)}>
-                  {summary.subscriptionStatus}
-                </Chip>
-              </div>
-
-              <div className="od-billing-total">
-                <b>{money(summary.totalPaid, summary.currency)}</b>
-                <small>confirmed payments</small>
-              </div>
-
-              <div className="od-network-meta">
-                <div>
-                  <b>{summary.invoices}</b>
-                  <small>Invoices</small>
-                </div>
-                <div>
-                  <b>{summary.payments}</b>
-                  <small>Payments</small>
-                </div>
-                <div>
-                  <b>{money(summary.totalInvoice, summary.currency)}</b>
-                  <small>Invoiced</small>
-                </div>
-              </div>
-            </article>
-
-            <article className="od-card">
-              <div className="od-section-head">
-                <div>
-                  <span>Billing activity</span>
-                  <h2>Latest invoices</h2>
-                </div>
-                <button onClick={() => openRoute("invoices")}>
-                  View all
-                </button>
-              </div>
-
-              <div className="od-stack">
-                {latestInvoices.length ? (
-                  latestInvoices.map((invoice, index) => (
-                    <button
-                      key={String(idOf(invoice) || index)}
-                      className="od-invoice-row"
-                      onClick={() => openRoute("invoices")}
-                    >
-                      <span>🧾</span>
-                      <div>
-                        <b>
-                          {text(
-                            invoice.invoiceNumber || invoice.reference,
-                            "Invoice",
-                          )}
-                        </b>
-                        <small>
-                          {dateLabel(
-                            invoice.dueDate ||
-                              invoice.updatedAt ||
-                              invoice.createdAt,
-                          )}
-                        </small>
-                      </div>
-                      <Chip tone={statusTone(invoice.status)}>
-                        {text(invoice.status, "Draft")}
-                      </Chip>
-                    </button>
-                  ))
-                ) : (
-                  <MiniEmpty
-                    icon="🧾"
-                    text="No billing invoices are available."
-                  />
-                )}
-              </div>
-            </article>
-
-            <article className="od-card od-health-card">
-              <div className="od-section-head">
-                <div>
-                  <span>System health</span>
-                  <h2>Sync & access</h2>
-                </div>
-                <button onClick={() => openRoute("sync")}>
-                  Inspect
-                </button>
-              </div>
-
-              <div className="od-health-status">
-                <strong>
-                  {summary.openConflicts ? "Needs attention" : "Healthy"}
-                </strong>
-                <span>
-                  {summary.openConflicts
-                    ? `${summary.openConflicts} open sync conflict(s)`
-                    : "No open sync conflicts"}
-                </span>
-              </div>
-
-              <div className="od-network-meta">
-                <div>
-                  <b>{summary.schoolAdmins}</b>
-                  <small>School admins</small>
-                </div>
-                <div>
-                  <b>{summary.branchAdmins}</b>
-                  <small>Branch admins</small>
-                </div>
-                <div>
-                  <b>{summary.accountants}</b>
-                  <small>Accountants</small>
-                </div>
-              </div>
-            </article>
-
-            <article className="od-card">
-              <div className="od-section-head">
-                <div>
-                  <span>Communication</span>
-                  <h2>Account activity</h2>
-                </div>
-                <button onClick={() => openRoute("messages")}>
-                  Messages
-                </button>
-              </div>
-
-              <div className="od-communication-grid">
-                <button onClick={() => openRoute("ownerAnnouncements")}>
-                  <span>📢</span>
-                  <b>{summary.announcements}</b>
-                  <small>Announcements</small>
-                </button>
-                <button onClick={() => openRoute("messages")}>
-                  <span>✉️</span>
-                  <b>{summary.messages}</b>
-                  <small>Messages</small>
-                </button>
-                <button onClick={() => openRoute("calendarOverview")}>
-                  <span>📆</span>
-                  <b>{summary.calendarItems || "Open"}</b>
-                  <small>Calendar</small>
-                </button>
-              </div>
-            </article>
-          </section>
-
-          <section className="od-card od-recent">
-            <div className="od-section-head">
-              <div>
-                <span>Across your account</span>
-                <h2>Recent activity</h2>
-              </div>
-              <b>{recent.length}</b>
-            </div>
-
-            <div className="od-recent-list">
-              {recent.length ? (
-                recent.map((item, index) => (
-                  <article
-                    key={`${item._kind}-${idOf(item) || index}`}
-                    className="recent-row"
+                return (
+                  <button
+                    type="button"
+                    className="od-row"
+                    key={
+                      clean(
+                        schoolId,
+                      ) ||
+                      index
+                    }
+                    onClick={() =>
+                      openRoute(
+                        "schools",
+                      )
+                    }
                   >
-                    <span>{item._icon}</span>
-                    <b>{item._title}</b>
-                    <small>
-                      {item._kind} · {dateLabel(item._date)}
-                    </small>
-                  </article>
-                ))
-              ) : (
-                <MiniEmpty
-                  icon="✨"
-                  text="Account activity will appear here."
-                />
-              )}
-            </div>
-          </section>
-        </>
-      )}
+                    <span>
+                      🏫
+                    </span>
 
-      {moreOpen ? (
-        <MoreSheet
-          view={view}
-          setView={(mode) => {
-            setView(mode);
-            setMoreOpen(false);
-          }}
-          summary={summary}
-          onRefresh={async () => {
-            setMoreOpen(false);
-            await load();
-          }}
-          onClose={() => setMoreOpen(false)}
-        />
-      ) : null}
+                    <div>
+                      <strong>
+                        {rowName(
+                          school,
+                        )}
+                      </strong>
+
+                      <small>
+                        {
+                          branchCount
+                        }{" "}
+                        branch(es)
+                      </small>
+                    </div>
+                  </button>
+                );
+              },
+            )}
+
+            {!schools.length ? (
+              <MiniEmpty
+                text="No schools yet."
+              />
+            ) : null}
+          </div>
+        </article>
+
+        <article className="od-card">
+          <header>
+            <div>
+              <span>
+                Subscription
+              </span>
+              <h2>
+                Account plan
+              </h2>
+            </div>
+
+            <button
+              onClick={() =>
+                openRoute(
+                  "subscription",
+                )
+              }
+            >
+              Open
+            </button>
+          </header>
+
+          <strong className="od-big">
+            {
+              summary.planName
+            }
+          </strong>
+
+          <p>
+            {
+              summary.subscriptionStatus
+            }
+          </p>
+
+          <div className="od-inline">
+            <span>
+              <b>
+                {
+                  summary.invoices
+                }
+              </b>
+              Invoices
+            </span>
+
+            <span>
+              <b>
+                {money(
+                  summary.totalPaid,
+                  summary.currency,
+                )}
+              </b>
+              Paid
+            </span>
+          </div>
+        </article>
+
+        <article className="od-card">
+          <header>
+            <div>
+              <span>
+                System
+              </span>
+              <h2>
+                Sync health
+              </h2>
+            </div>
+
+            <button
+              onClick={() =>
+                openRoute(
+                  "sync",
+                )
+              }
+            >
+              Inspect
+            </button>
+          </header>
+
+          <strong className="od-big">
+            {summary.conflicts
+              ? "Attention"
+              : "Healthy"}
+          </strong>
+
+          <p>
+            {summary.conflicts
+              ? `${summary.conflicts} unresolved conflict(s)`
+              : "No unresolved sync conflicts"}
+          </p>
+        </article>
+
+        <article className="od-card">
+          <header>
+            <div>
+              <span>
+                Recent
+              </span>
+              <h2>
+                Account activity
+              </h2>
+            </div>
+          </header>
+
+          <div className="od-list">
+            {recent.map(
+              (
+                item,
+                index,
+              ) => (
+                <button
+                  type="button"
+                  className="od-row"
+                  key={
+                    clean(
+                      idOf(
+                        item,
+                      ),
+                    ) ||
+                    index
+                  }
+                  onClick={() =>
+                    openRoute(
+                      item._kind ===
+                        "Payment"
+                        ? "payments"
+                        : "ownerAnnouncements",
+                    )
+                  }
+                >
+                  <span>
+                    {
+                      item._icon
+                    }
+                  </span>
+
+                  <div>
+                    <strong>
+                      {
+                        item._title
+                      }
+                    </strong>
+
+                    <small>
+                      {
+                        item._kind
+                      }{" "}
+                      ·{" "}
+                      {dateLabel(
+                        item._date,
+                      )}
+                    </small>
+                  </div>
+                </button>
+              ),
+            )}
+
+            {!recent.length ? (
+              <MiniEmpty
+                text="No recent account activity."
+              />
+            ) : null}
+          </div>
+        </article>
+      </section>
     </main>
   );
 }
 
-
 function MiniEmpty({
-  icon,
   text: body,
 }: {
-  icon: string;
   text: string;
 }) {
   return (
-    <div className="od-mini-empty">
-      <span>{icon}</span>
-      <p>{body}</p>
+    <div className="od-empty">
+      {body}
     </div>
   );
 }
 
 function State({
   primary,
-  title,
-  text: body,
 }: {
   primary: string;
-  title: string;
-  text: string;
 }) {
   return (
     <main
       className="od-page"
-      style={{ "--od-primary": primary } as React.CSSProperties}
+      style={
+        {
+          "--od-primary":
+            primary,
+        } as React.CSSProperties
+      }
     >
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
+
       <section className="od-state">
         <div className="od-spinner" />
-        <h2>{title}</h2>
-        <p>{body}</p>
+        <h2>
+          Opening owner home...
+        </h2>
       </section>
     </main>
   );
 }
 
-function FilterSheet({
-  area,
-  setArea,
-  onClose,
-}: {
-  area: AreaFilter;
-  setArea: (value: AreaFilter) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="od-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="od-sheet small">
-        <div className="od-sheet-head">
-          <div>
-            <h2>Filters</h2>
-            <p>Choose which owner area to show.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close filters">
-            ✕
-          </button>
-        </div>
-
-        <div className="od-form compact">
-          <label>
-            <span>Area</span>
-            <select
-              value={area}
-              onChange={(event) => setArea(event.target.value as AreaFilter)}
-            >
-              <option value="all">All areas</option>
-              <option value="institution">Institution</option>
-              <option value="access">Access Control</option>
-              <option value="billing">Billing</option>
-              <option value="communication">Communication</option>
-              <option value="system">System</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="od-sheet-actions">
-          <button type="button" onClick={() => setArea("all")}>
-            Reset
-          </button>
-          <button type="button" className="primary" onClick={onClose}>
-            Apply
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function MoreSheet({
-  view,
-  setView,
-  summary,
-  onRefresh,
-  onClose,
-}: {
-  view: ViewMode;
-  setView: (value: ViewMode) => void;
-  summary: AnyRow;
-  onRefresh: () => void | Promise<void>;
-  onClose: () => void;
-}) {
-  return (
-    <div className="od-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="od-sheet small">
-        <div className="od-sheet-head">
-          <div>
-            <h2>More</h2>
-            <p>Advanced views stay here so the owner home remains compact.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">
-            ✕
-          </button>
-        </div>
-
-        <div className="od-menu-list">
-          <button
-            type="button"
-            className={view === "cards" ? "active" : ""}
-            onClick={() => setView("cards")}
-          >
-            <span>☰</span>
-            <b>List view</b>
-            <small>Compact owner modules</small>
-          </button>
-          <button
-            type="button"
-            className={view === "table" ? "active" : ""}
-            onClick={() => setView("table")}
-          >
-            <span>☷</span>
-            <b>Table view</b>
-            <small>Dense laptop-friendly module list</small>
-          </button>
-          <button
-            type="button"
-            className={view === "analytics" ? "active" : ""}
-            onClick={() => setView("analytics")}
-          >
-            <span>◔</span>
-            <b>Analytics</b>
-            <small>
-              {summary.schools} schools · {summary.branches} branches ·{" "}
-              {summary.users} users
-            </small>
-          </button>
-          <button type="button" onClick={onRefresh}>
-            <span>↻</span>
-            <b>Refresh</b>
-            <small>Reload local owner dashboard data</small>
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function TableView({
-  modules,
-  openRoute,
-}: {
-  modules: DashboardModule[];
-  openRoute: (routeKey: string) => void;
-}) {
-  return (
-    <section className="od-table-card">
-      <div className="od-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Owner Modules ({modules.length})</th>
-              <th>Area</th>
-              <th>Value</th>
-              <th>Status</th>
-              <th>Note</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {modules.map((item) => (
-              <tr key={item.key}>
-                <td>
-                  <strong>
-                    {item.icon} {item.label}
-                  </strong>
-                  <span>{item.routeKey}</span>
-                </td>
-                <td>{areaLabel(item.area)}</td>
-                <td>{item.value}</td>
-                <td>
-                  <Chip tone={item.tone}>{item.tone}</Chip>
-                </td>
-                <td>{item.note}</td>
-                <td>
-                  <div className="od-table-actions">
-                    <button
-                      type="button"
-                      onClick={() => openRoute(item.routeKey)}
-                    >
-                      Open
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!modules.length ? (
-          <div className="od-empty-table">
-            No owner module matches your filters.
-          </div>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function AnalyticsView({
-  summary,
-  modules,
-  recent,
-}: {
-  summary: AnyRow;
-  modules: DashboardModule[];
-  recent: AnyRow[];
-}) {
-  const areaRows = [
-    "institution",
-    "access",
-    "billing",
-    "communication",
-    "system",
-    "other",
-  ]
-    .map((area) => ({
-      label: areaLabel(area),
-      value: modules.filter((module) => module.area === area).length,
-    }))
-    .filter((row) => row.value > 0);
-
-  return (
-    <section className="od-analysis-grid">
-      <article className="od-analysis">
-        <span>Schools</span>
-        <strong>{summary.schools}</strong>
-        <p>{summary.branches} branch record(s) connected to your account.</p>
-      </article>
-      <article className="od-analysis">
-        <span>Authority Users</span>
-        <strong>{summary.users}</strong>
-        <p>
-          {summary.schoolAdmins} school admin(s), {summary.branchAdmins} branch
-          admin(s), {summary.accountants} accountant(s).
-        </p>
-      </article>
-      <article className="od-analysis">
-        <span>Billing</span>
-        <strong>{summary.invoices}</strong>
-        <p>
-          {summary.payments} payment record(s), {summary.subscriptionStatus}{" "}
-          subscription.
-        </p>
-      </article>
-      <article className="od-analysis">
-        <span>Sync</span>
-        <strong>{summary.openConflicts}</strong>
-        <p>Open sync conflict(s) detected in local cache.</p>
-      </article>
-      <article className="od-analysis wide">
-        <span>Module Areas</span>
-        <strong>{modules.length}</strong>
-        <div className="od-analysis-list">
-          {areaRows.map((row) => (
-            <section key={row.label}>
-              <div>
-                <b>{row.label}</b>
-                <small>{row.value}</small>
-              </div>
-              <div className="od-progress">
-                <i
-                  style={{
-                    width: `${Math.max(6, Math.round((row.value / Math.max(1, modules.length)) * 100))}%`,
-                  }}
-                />
-              </div>
-            </section>
-          ))}
-        </div>
-      </article>
-      <article className="od-analysis wide">
-        <span>Recent Activity</span>
-        <strong>{recent.length}</strong>
-        <p>
-          Recent records from schools, branches, announcements, messages and
-          payments.
-        </p>
-      </article>
-    </section>
-  );
-}
-
 const css = `
-@keyframes spin { to { transform: rotate(360deg); } }
-.od-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--od-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.od-page *,.od-page *::before,.od-page *::after{box-sizing:border-box;min-width:0}.od-page button,.od-page input,.od-page select{font:inherit;max-width:100%}.od-page button{-webkit-tap-highlight-color:transparent}.od-page input,.od-page select{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.od-page input:focus,.od-page select:focus{border-color:color-mix(in srgb,var(--od-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--od-primary) 12%,transparent)}.od-state,.od-search-card,.od-owner-strip,.owner-row,.od-table-card,.od-analysis,.od-empty,.od-sheet,.od-recent,.recent-row{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.od-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.od-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--od-primary) 18%,transparent);border-top-color:var(--od-primary);animation:spin .8s linear infinite}.od-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.od-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.od-search-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.od-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.od-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.od-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.od-icon-button,.od-filter-button,.od-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.od-add-inline{border-color:var(--od-primary);background:var(--od-primary);color:#fff;box-shadow:0 12px 28px color-mix(in srgb,var(--od-primary) 22%,transparent)}.od-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.od-filter-button{position:relative;background:color-mix(in srgb,var(--od-primary) 8%,var(--card-bg,#fff));color:var(--od-primary)}.od-filter-button.active{background:var(--od-primary);color:#fff;border-color:var(--od-primary)}.od-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-flex;box-shadow:0 0 0 4px color-mix(in srgb,var(--muted,#64748b) 10%,transparent)}.status-dot-mini.green{background:#22c55e}.status-dot-mini.orange{background:#f59e0b}.status-dot-mini.gray{background:var(--muted,#64748b)}.od-owner-strip{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-top:8px;padding:9px 10px;border-radius:20px}.od-owner-strip strong,.od-owner-strip span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.od-owner-strip strong{font-size:13px;font-weight:1000}.od-owner-strip span{color:var(--muted,#64748b);font-size:12px;font-weight:850}.od-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.od-filter-chips::-webkit-scrollbar{display:none}.od-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--od-primary) 11%,transparent);color:var(--od-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.od-list{display:grid;gap:7px;margin-top:10px}.owner-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left;cursor:pointer;color:inherit}.owner-avatar{width:48px;height:48px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--od-primary) 12%,var(--surface,#fff));font-size:22px}.owner-main,.owner-main strong,.owner-main small,.owner-main em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.owner-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000;letter-spacing:-.02em}.owner-main small{margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:850}.owner-main em{margin-top:3px;color:color-mix(in srgb,var(--muted,#64748b) 86%,var(--text,#111827));font-size:11px;font-weight:750;font-style:normal}.owner-side{display:flex;align-items:center;gap:7px}.owner-side i{color:var(--muted,#64748b);font-style:normal;font-weight:1000}.od-chip{max-width:100%;display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:capitalize}.od-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.od-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.od-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.od-chip.gray{background:color-mix(in srgb,var(--muted,#64748b) 14%,transparent);color:var(--muted,#64748b)}.od-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.od-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.od-sheet-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.50);backdrop-filter:blur(12px)}.od-sheet{width:min(760px,100%);max-height:min(88dvh,760px);overflow-y:auto;padding:14px;border-radius:28px 28px 22px 22px;box-shadow:0 30px 90px rgba(15,23,42,.32);animation:sheetIn .18s var(--ease)}.od-sheet.small{width:min(520px,100%)}@keyframes sheetIn{from{transform:translateY(16px);opacity:.7}to{transform:translateY(0);opacity:1}}.od-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px}.od-sheet-head h2{margin:0;color:var(--text,#111827);font-size:21px;font-weight:1000;letter-spacing:-.05em}.od-sheet-head p{margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5;font-weight:750}.od-sheet-head button{width:38px;height:38px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-weight:1000;cursor:pointer;flex:0 0 auto}.od-form{display:grid;gap:10px}.od-form label{display:grid;gap:6px}.od-form span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.od-menu-list{display:grid;gap:8px}.od-menu-list button{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:10px;align-items:center;min-height:58px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;padding:9px;background:var(--surface,#fff);color:var(--text,#111827);text-align:left;cursor:pointer}.od-menu-list button span{grid-row:span 2;width:42px;height:42px;display:grid;place-items:center;border-radius:16px;background:color-mix(in srgb,var(--od-primary) 10%,transparent);color:var(--od-primary);font-weight:1000}.od-menu-list button b,.od-menu-list button small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.od-menu-list button b{font-size:13px;font-weight:1000}.od-menu-list button small{margin-top:2px;color:var(--muted,#64748b);font-size:11px;font-weight:750}.od-menu-list button.active{border-color:color-mix(in srgb,var(--od-primary) 34%,var(--border,rgba(0,0,0,.10)));background:color-mix(in srgb,var(--od-primary) 8%,var(--surface,#fff))}.od-sheet-actions{position:sticky;bottom:-14px;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px;padding:12px 0 2px;background:linear-gradient(to top,var(--card-bg,var(--surface,#fff)) 70%,transparent)}.od-sheet-actions button{min-height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;padding:0 16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--surface,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.od-sheet-actions button.primary{border-color:var(--od-primary);background:var(--od-primary);color:#fff;box-shadow:0 14px 32px color-mix(in srgb,var(--od-primary) 25%,transparent)}.od-table-card,.od-analysis,.od-empty{padding:13px;border-radius:24px}.od-table-card{margin-top:10px}.od-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.08))}.od-table-scroll table{width:100%;min-width:920px;border-collapse:collapse;background:var(--card-bg,var(--surface,var(--bg,transparent)))}.od-table-scroll th,.od-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px}.od-table-scroll th{background:var(--table-header-bg,color-mix(in srgb,var(--od-primary) 6%,var(--card-bg,var(--surface,var(--bg,transparent)))));color:var(--table-header-text,var(--muted,var(--text)));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em}.od-table-scroll td strong,.od-table-scroll td span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.od-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.od-table-actions{display:flex;gap:7px;overflow-x:auto}.od-table-actions button{flex:0 0 auto;min-height:34px;border:1px solid var(--od-primary);border-radius:999px;padding:0 12px;background:var(--od-primary);color:#fff;font-size:11px;font-weight:950;cursor:pointer}.od-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.od-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.od-analysis span,.od-section-head span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.od-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.od-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.od-analysis-list{display:grid;gap:10px;margin-top:12px}.od-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.od-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.od-analysis-list b,.od-analysis-list small{font-size:12px}.od-analysis-list small{color:var(--muted,#64748b);font-weight:850}.od-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.od-progress i{display:block;height:100%;border-radius:inherit;background:var(--od-primary)}.od-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed}.od-empty div{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--od-primary) 12%,var(--surface,#fff));font-size:28px}.od-empty h3{margin:0;font-size:18px;font-weight:1000}.od-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.od-recent{margin-top:10px;border-radius:24px;padding:12px}.od-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.od-section-head h2{margin:0;color:var(--text,#111827);font-size:15px;font-weight:1000;letter-spacing:-.03em}.od-recent-list{display:grid;gap:7px}.recent-row{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:9px;align-items:center;border-radius:18px;padding:9px}.recent-row span{grid-row:span 2;width:34px;height:34px;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--od-primary) 10%,transparent)}.recent-row b,.recent-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.recent-row b{font-size:12px;font-weight:1000}.recent-row small{font-size:11px;color:var(--muted,#64748b);font-weight:800}@media (min-width:680px){.od-page{padding:calc(12px * var(--local-density-scale,1));padding-bottom:44px}.od-search-card{grid-template-columns:auto minmax(0,1fr) 48px 48px 48px}.od-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.owner-row{border-radius:24px;padding:12px}.od-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.od-analysis.wide{grid-column:span 2}.od-sheet-backdrop{place-items:center;padding:18px}.od-sheet{border-radius:28px;padding:18px}.od-recent-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (min-width:1040px){.od-page{padding:calc(16px * var(--local-density-scale,1));padding-bottom:48px}.od-search-card,.od-owner-strip,.od-list,.od-analysis-grid,.od-table-card,.od-filter-chips,.od-recent{max-width:1180px;margin-left:auto;margin-right:auto}.od-list{grid-template-columns:repeat(3,minmax(0,1fr))}.od-analysis-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.od-analysis.wide{grid-column:span 2}.od-recent-list{grid-template-columns:repeat(4,minmax(0,1fr))}}@media (max-width:520px){.od-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.od-icon-button,.od-filter-button,.od-add-inline{width:40px;height:40px}.owner-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.owner-side{grid-column:1/-1;justify-content:flex-end}.od-sheet{border-radius:24px 24px 18px 18px;padding:12px}.od-sheet-actions{display:grid;grid-template-columns:minmax(0,1fr)}.od-sheet-actions button{width:100%}}
-.od-page{padding:8px;padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--od-primary) 9%,transparent),transparent 34rem),var(--bg,#f7f8fb)}
-.od-search-card{grid-template-columns:auto minmax(0,1fr) auto auto auto}
-.od-clear{width:40px;height:40px;border-radius:99px;border:1px solid var(--border,rgba(0,0,0,.1));background:var(--surface,#fff);color:var(--text,#111827);font-size:18px;font-weight:1000}
-.od-account-hero{position:relative;min-height:285px;margin-top:10px;border-radius:30px;padding:22px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;color:#fff;background:linear-gradient(135deg,color-mix(in srgb,var(--od-primary) 94%,#111827),color-mix(in srgb,var(--od-primary) 48%,#020617));box-shadow:0 22px 60px color-mix(in srgb,var(--od-primary) 20%,transparent)}
-.od-account-hero:after{content:"";position:absolute;inset:0;background:linear-gradient(110deg,rgba(255,255,255,.05),transparent 52%);pointer-events:none}
-.od-account-orb{position:absolute;border-radius:999px;background:rgba(255,255,255,.1);filter:blur(2px)}
-.od-account-orb.one{width:220px;height:220px;right:-60px;top:-80px}
-.od-account-orb.two{width:120px;height:120px;right:120px;bottom:-70px}
-.od-hero-copy,.od-hero-stats{position:relative;z-index:1}
-.od-hero-copy>span{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;opacity:.85}
-.od-account-hero h1{margin:7px 0 4px;font-size:clamp(28px,7vw,48px);line-height:.98;letter-spacing:-.06em}
-.od-account-hero p{margin:0;font-size:14px}
-.od-account-hero p strong{display:inline}
-.od-account-hero p small{display:block;width:max-content;max-width:100%;margin-top:7px;padding:5px 9px;border:1px solid rgba(255,255,255,.22);border-radius:10px;background:rgba(255,255,255,.12);backdrop-filter:blur(8px);font-size:11px;font-weight:850}
-.od-account-hero blockquote{margin:18px 0 0;max-width:38rem;font-size:13px;line-height:1.55;font-weight:750;opacity:.9}
-.od-hero-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
-.od-hero-stats span{display:flex;align-items:baseline;gap:5px;padding:8px 11px;border:1px solid rgba(255,255,255,.22);border-radius:999px;background:rgba(255,255,255,.12);backdrop-filter:blur(10px);font-size:11px;font-weight:850}
-.od-hero-stats b{font-size:15px}
-.od-quick-actions{display:grid;grid-template-columns:repeat(5,minmax(78px,1fr));gap:8px;margin-top:10px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
-.od-quick-actions::-webkit-scrollbar{display:none}
-.od-quick-actions button{min-height:76px;border:1px solid var(--border,rgba(0,0,0,.1));border-radius:22px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);display:grid;place-items:center;align-content:center;gap:7px;box-shadow:0 10px 24px rgba(15,23,42,.04)}
-.od-quick-actions span{width:34px;height:34px;display:grid;place-items:center;border-radius:13px;background:color-mix(in srgb,var(--od-primary) 11%,transparent);color:var(--od-primary);font-size:17px;font-weight:1000}
-.od-quick-actions b{font-size:11px;font-weight:950;white-space:nowrap}
-.od-dashboard-grid{display:grid;gap:10px;margin-top:10px}
-.od-card,.od-search-results{padding:14px;border-radius:26px;background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.1));box-shadow:0 12px 30px rgba(15,23,42,.05)}
-.od-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}
-.od-section-head span{display:block;color:var(--muted,#64748b);font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.1em}
-.od-section-head h2{margin:3px 0 0;font-size:17px;font-weight:1000;letter-spacing:-.035em}
-.od-section-head>button,.od-section-head>b{border:0;border-radius:999px;padding:7px 10px;background:color-mix(in srgb,var(--od-primary) 10%,transparent);color:var(--od-primary);font-size:10px;font-weight:950}
-.od-network-main strong{display:block;font-size:48px;line-height:1;font-weight:1000;letter-spacing:-.07em}
-.od-network-main span{color:var(--muted,#64748b);font-size:12px;font-weight:850}
-.od-network-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:15px}
-.od-network-meta div{padding:10px 7px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent);text-align:center}
-.od-network-meta b,.od-network-meta small{display:block}
-.od-network-meta b{font-size:16px;overflow:hidden;text-overflow:ellipsis}
-.od-network-meta small{margin-top:3px;color:var(--muted,#64748b);font-size:9px;font-weight:850}
-.od-stack{display:grid;gap:7px}
-.od-school-row,.od-invoice-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;width:100%;padding:9px;border:0;border-radius:17px;background:color-mix(in srgb,var(--muted,#64748b) 6%,transparent);color:inherit;text-align:left}
-.od-school-row>span:first-child,.od-invoice-row>span:first-child{width:38px;height:38px;display:grid;place-items:center;border-radius:14px;background:color-mix(in srgb,var(--od-primary) 12%,transparent)}
-.od-school-row b,.od-school-row small,.od-invoice-row b,.od-invoice-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.od-school-row b,.od-invoice-row b{font-size:12px}
-.od-school-row small,.od-invoice-row small{margin-top:3px;color:var(--muted,#64748b);font-size:10px;font-weight:750}
-.od-plan-main{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.od-plan-main>strong{font-size:30px;line-height:1;font-weight:1000;letter-spacing:-.05em}
-.od-billing-total{margin-top:16px}
-.od-billing-total b,.od-billing-total small{display:block}
-.od-billing-total b{font-size:27px;letter-spacing:-.04em}
-.od-billing-total small{color:var(--muted,#64748b);font-size:10px;font-weight:800}
-.od-health-status strong,.od-health-status span{display:block}
-.od-health-status strong{font-size:24px;letter-spacing:-.04em}
-.od-health-status span{margin-top:5px;color:var(--muted,#64748b);font-size:11px;font-weight:800}
-.od-communication-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
-.od-communication-grid button{padding:12px 8px;border:0;border-radius:17px;background:color-mix(in srgb,var(--muted,#64748b) 6%,transparent);color:inherit;text-align:center}
-.od-communication-grid span,.od-communication-grid b,.od-communication-grid small{display:block}
-.od-communication-grid span{font-size:20px}
-.od-communication-grid b{margin-top:5px;font-size:18px}
-.od-communication-grid small{margin-top:3px;color:var(--muted,#64748b);font-size:9px;font-weight:850}
-.od-recent{margin-top:10px}
-.od-recent-list{display:grid;gap:7px}
-.od-mini-empty{min-height:110px;display:grid;place-items:center;align-content:center;text-align:center;color:var(--muted,#64748b)}
-.od-mini-empty span{font-size:26px}
-.od-mini-empty p{margin:6px 0 0;font-size:11px;font-weight:800}
-.od-search-results{margin-top:10px}
-@media(min-width:760px){.od-page{padding:12px}.od-dashboard-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.od-recent-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(min-width:1180px){.od-dashboard-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:620px){.od-quick-actions{grid-template-columns:repeat(5,minmax(78px,1fr))}.od-network-meta{grid-template-columns:1fr}.od-communication-grid{grid-template-columns:1fr}}
+@keyframes odSpin {
+  to { transform: rotate(360deg); }
+}
 
+.od-page {
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  padding: 8px 8px calc(76px + env(safe-area-inset-bottom,0px));
+  background: var(--bg,#f7f8fb);
+  color: var(--text,#111827);
+}
+
+.od-page,
+.od-page * {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.od-page button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.od-hero {
+  position: relative;
+  height: clamp(290px,47vw,390px);
+  overflow: hidden;
+  border-radius: 25px;
+  background: #0f172a;
+  box-shadow: 0 14px 34px rgba(15,23,42,.08);
+}
+
+.od-hero img,
+.od-hero video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.od-dots {
+  position: absolute;
+  left: 50%;
+  bottom: 11px;
+  display: flex;
+  gap: 6px;
+  transform: translateX(-50%);
+}
+
+.od-dots button {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  background: rgba(255,255,255,.5);
+}
+
+.od-dots button.active {
+  width: 20px;
+  background: #fff;
+}
+
+.od-metrics,
+.od-grid {
+  display: grid;
+  gap: 9px;
+  margin-top: 9px;
+}
+
+.od-metrics {
+  grid-template-columns: repeat(2,minmax(0,1fr));
+}
+
+.od-metrics button,
+.od-card {
+  border: 1px solid var(--border,rgba(15,23,42,.09));
+  background: var(--card-bg,var(--surface,#fff));
+  color: inherit;
+  box-shadow: 0 8px 22px rgba(15,23,42,.045);
+}
+
+.od-metrics button {
+  min-height: 92px;
+  padding: 12px;
+  border-radius: 20px;
+  text-align: left;
+}
+
+.od-metrics span,
+.od-metrics strong,
+.od-metrics small {
+  display: block;
+}
+
+.od-metrics span {
+  color: var(--muted,#64748b);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.od-metrics strong {
+  margin-top: 5px;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.od-metrics small {
+  margin-top: 5px;
+  color: var(--muted,#64748b);
+  font-size: 10px;
+}
+
+.od-card {
+  padding: 13px;
+  border-radius: 22px;
+}
+
+.od-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.od-card header span {
+  color: var(--muted,#64748b);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+}
+
+.od-card h2 {
+  margin: 2px 0 0;
+  font-size: 16px;
+}
+
+.od-card header button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: color-mix(in srgb,var(--od-primary) 9%,transparent);
+  color: var(--od-primary);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.od-list {
+  display: grid;
+  gap: 6px;
+}
+
+.od-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 36px minmax(0,1fr);
+  gap: 9px;
+  align-items: center;
+  border: 0;
+  border-radius: 15px;
+  padding: 8px;
+  background: color-mix(in srgb,var(--muted,#64748b) 5%,transparent);
+  color: inherit;
+  text-align: left;
+}
+
+.od-row > span {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: color-mix(in srgb,var(--od-primary) 10%,transparent);
+}
+
+.od-row strong,
+.od-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.od-row strong {
+  font-size: 12px;
+}
+
+.od-row small {
+  margin-top: 2px;
+  color: var(--muted,#64748b);
+  font-size: 10px;
+}
+
+.od-big {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -.05em;
+}
+
+.od-card > p {
+  margin: 6px 0 0;
+  color: var(--muted,#64748b);
+  font-size: 10px;
+}
+
+.od-inline {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 7px;
+  margin-top: 13px;
+}
+
+.od-inline span {
+  padding: 9px;
+  border-radius: 14px;
+  background: color-mix(in srgb,var(--muted,#64748b) 6%,transparent);
+  color: var(--muted,#64748b);
+  font-size: 9px;
+}
+
+.od-inline b {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+  color: var(--text,#111827);
+  font-size: 14px;
+}
+
+.od-empty {
+  padding: 18px 8px;
+  text-align: center;
+  color: var(--muted,#64748b);
+  font-size: 11px;
+}
+
+.od-state {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+}
+
+.od-spinner {
+  width: 36px;
+  height: 36px;
+  border: 4px solid color-mix(in srgb,var(--od-primary) 16%,transparent);
+  border-top-color: var(--od-primary);
+  border-radius: 999px;
+  animation: odSpin .8s linear infinite;
+}
+
+.od-state h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.od-page,
+.app-content,
+.app-content-inner,
+.shell-portal-content,
+.shell-content-background {
+  height: auto !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow-y: visible !important;
+}
+
+html {
+  overflow-y: auto !important;
+}
+
+body {
+  overflow-y: visible !important;
+}
+
+@media (min-width:720px) {
+  .od-page {
+    padding: 12px 12px 24px;
+  }
+
+  .od-grid {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+
+  .od-hero {
+    height: 370px;
+  }
+}
+
+@media (min-width:1100px) {
+  .od-page {
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+}
 `;

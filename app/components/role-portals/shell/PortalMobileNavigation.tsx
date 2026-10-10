@@ -1,5 +1,46 @@
 "use client";
 
+/**
+ * app/components/role-portals/shell/PortalMobileNavigation.tsx
+ * --------------------------------------------------------------------------
+ * ELEEVEON MOBILE ROOT NAVIGATION
+ * --------------------------------------------------------------------------
+ *
+ * Mobile portal navigation is built around three permanent root destinations:
+ *
+ *   Home · Explore · Screens
+ *
+ * HOME
+ * - Returns to the role dashboard/home.
+ * - Shows the most relevant information for the current role.
+ *
+ * EXPLORE
+ * - Replaces the old mobile sidebar.
+ * - Presents the portal's modules as visual categories.
+ * - Users move from category -> module.
+ * - Eleeveon Hub does not live inside Explore.
+ *
+ * SCREENS
+ * - Keeps track of recently opened/current working modules.
+ * - Allows the user to quickly return to recent work.
+ * - "Add screen" opens Explore so another module can be selected.
+ *
+ * MOBILE OVERLAYS
+ * - Explore and Screens are fixed application-level surfaces.
+ * - They fill the usable area between the fixed portal header and
+ *   the fixed bottom navigation.
+ * - The page underneath is scroll-locked while either surface is open.
+ *
+ * ELEEVEON HUB
+ * - Hub lives in the account/workspace experience rather than Explore.
+ * - The account/workspace drawer can dispatch "eleeveon:open-hub".
+ *
+ * SCROLL OWNERSHIP
+ * - Home and normal modules use the document's single scroll.
+ * - Explore and Screens temporarily own scrolling only while their
+ *   fixed overlay is open.
+ */
+
 import {
   useEffect,
   useMemo,
@@ -10,7 +51,7 @@ import type {
   RoleNavSection,
 } from "../RolePortalShell";
 
-import PortalLibrary from "./PortalLibrary";
+import PortalExplore from "./PortalExplore";
 import PortalScreens from "./PortalScreens";
 
 import PortalMobileBottomNav, {
@@ -44,7 +85,7 @@ export interface PortalMobileNavigationProps {
 }
 
 type OverlayMode =
-  | "library"
+  | "explore"
   | "screens"
   | null;
 
@@ -66,6 +107,13 @@ export default function PortalMobileNavigation({
   onNavigate,
   onOpenHub,
 }: PortalMobileNavigationProps) {
+  /**
+   * Root bottom-navigation selection.
+   *
+   * If the portal opens directly on Home, Home is active.
+   * If it opens on another module, Explore represents the
+   * module/navigation side of the portal.
+   */
   const [
     rootTab,
     setRootTab,
@@ -73,9 +121,14 @@ export default function PortalMobileNavigation({
     useState<PortalMobileRootTab>(
       activeTab === homeKey
         ? "home"
-        : "library",
+        : "explore",
     );
 
+  /**
+   * Explore and Screens are temporary full mobile surfaces.
+   *
+   * null = normal portal module/home is visible.
+   */
   const [
     overlay,
     setOverlay,
@@ -87,23 +140,40 @@ export default function PortalMobileNavigation({
   const overlayOpen =
     overlay !== null;
 
+  /**
+   * Build a lookup table for module names.
+   *
+   * Screens uses these labels when remembering recently
+   * opened modules.
+   */
   const labels =
     useMemo(() => {
       const out:
-        Record<string, string> =
+        Record<
+          string,
+          string
+        > =
         {};
 
       sections.forEach(
-        (section) =>
+        (
+          section,
+        ) =>
           section.items.forEach(
-            (item) => {
-              out[item.key] =
+            (
+              item,
+            ) => {
+              out[
+                item.key
+              ] =
                 item.label;
             },
           ),
       );
 
-      out[hubKey] =
+      out[
+        hubKey
+      ] =
         "Eleeveon Hub";
 
       return out;
@@ -112,23 +182,42 @@ export default function PortalMobileNavigation({
       hubKey,
     ]);
 
+  /**
+   * Build a second lookup containing each module's category.
+   *
+   * Example:
+   * Students -> People
+   * Fees -> Finance
+   * Announcements -> Communication
+   */
   const groups =
     useMemo(() => {
       const out:
-        Record<string, string> =
+        Record<
+          string,
+          string
+        > =
         {};
 
       sections.forEach(
-        (section) =>
+        (
+          section,
+        ) =>
           section.items.forEach(
-            (item) => {
-              out[item.key] =
+            (
+              item,
+            ) => {
+              out[
+                item.key
+              ] =
                 section.title;
             },
           ),
       );
 
-      out[hubKey] =
+      out[
+        hubKey
+      ] =
         "Messages, notices and support";
 
       return out;
@@ -137,6 +226,11 @@ export default function PortalMobileNavigation({
       hubKey,
     ]);
 
+  /**
+   * Screens history should remain scoped to the current
+   * portal/institution/branch rather than leaking across
+   * unrelated workspaces.
+   */
   const screenScope =
     useMemo(
       () =>
@@ -148,7 +242,9 @@ export default function PortalMobileNavigation({
 
           activeBranchName ||
             "workspace",
-        ].join("|"),
+        ].join(
+          "|",
+        ),
       [
         portalTitle,
         activeInstitutionName,
@@ -167,16 +263,21 @@ export default function PortalMobileNavigation({
     );
 
   /**
-   * -----------------------------------------------------
-   * LOCK UNDERLYING PAGE SCROLL
-   * -----------------------------------------------------
+   * ------------------------------------------------------------------------
+   * LOCK THE UNDERLYING DOCUMENT WHILE EXPLORE OR SCREENS IS OPEN
+   * ------------------------------------------------------------------------
    *
-   * Library and Screens are app-level root surfaces.
-   * Home or another module underneath them must not keep
-   * moving while the user scrolls Library/Screens.
+   * Explore and Screens are app-level mobile surfaces.
    *
-   * We deliberately avoid position:fixed on body so the
-   * underlying document keeps its exact scroll position.
+   * The Home dashboard or module underneath them must not continue
+   * scrolling while the user scrolls one of these overlays.
+   *
+   * We deliberately do NOT use position: fixed on body because doing
+   * so can cause the document to jump back to the top or lose its
+   * previous scroll position.
+   *
+   * Instead, overflow is temporarily disabled and restored exactly
+   * when the overlay closes.
    */
   useEffect(() => {
     if (
@@ -244,14 +345,23 @@ export default function PortalMobileNavigation({
   ]);
 
   /**
-   * Keep Screens automatically aware of visited modules.
+   * ------------------------------------------------------------------------
+   * KEEP SCREENS AWARE OF VISITED MODULES
+   * ------------------------------------------------------------------------
+   *
+   * Home is not treated as a working screen.
+   *
+   * Whenever another portal module becomes active we remember it
+   * automatically so the user can return through Screens.
    */
   useEffect(() => {
     if (
       activeTab ===
       homeKey
     ) {
-      if (!overlay) {
+      if (
+        !overlay
+      ) {
         setRootTab(
           "home",
         );
@@ -260,13 +370,19 @@ export default function PortalMobileNavigation({
       return;
     }
 
+    /**
+     * A module is open outside Home.
+     *
+     * Explore represents the navigation/module side of the
+     * application unless Screens itself is currently open.
+     */
     if (
       rootTab ===
         "home" &&
       !overlay
     ) {
       setRootTab(
-        "library",
+        "explore",
       );
     }
 
@@ -275,13 +391,17 @@ export default function PortalMobileNavigation({
         activeTab
       ];
 
-    if (!label) {
+    if (
+      !label
+    ) {
       return;
     }
 
     touchScreen(
       activeTab,
+
       label,
+
       groups[
         activeTab
       ] ||
@@ -298,10 +418,18 @@ export default function PortalMobileNavigation({
   ]);
 
   /**
-   * Global Eleeveon Hub bridge.
+   * ------------------------------------------------------------------------
+   * GLOBAL ELEEVEON HUB BRIDGE
+   * ------------------------------------------------------------------------
    *
-   * The account/workspace drawer can dispatch this event,
-   * allowing Hub to open from either mobile or desktop.
+   * Eleeveon Hub is no longer part of Explore.
+   *
+   * The account/workspace drawer can dispatch:
+   *
+   *   eleeveon:open-hub
+   *
+   * This closes any mobile overlay and opens Hub using the
+   * RolePortalShell-provided handler.
    */
   useEffect(() => {
     const openHub =
@@ -310,8 +438,14 @@ export default function PortalMobileNavigation({
           null,
         );
 
+        /**
+         * Hub is not one of the three bottom-navigation roots.
+         *
+         * Keep Explore selected because Hub belongs to the broader
+         * workspace/application area rather than Home.
+         */
         setRootTab(
-          "library",
+          "explore",
         );
 
         onOpenHub();
@@ -332,6 +466,11 @@ export default function PortalMobileNavigation({
     onOpenHub,
   ]);
 
+  /**
+   * ------------------------------------------------------------------------
+   * HOME
+   * ------------------------------------------------------------------------
+   */
   const openHome =
     () => {
       setOverlay(
@@ -352,17 +491,29 @@ export default function PortalMobileNavigation({
       }
     };
 
-  const openLibrary =
+  /**
+   * ------------------------------------------------------------------------
+   * EXPLORE
+   * ------------------------------------------------------------------------
+   *
+   * Opens the visual replacement for the old mobile sidebar.
+   */
+  const openExplore =
     () => {
       setRootTab(
-        "library",
+        "explore",
       );
 
       setOverlay(
-        "library",
+        "explore",
       );
     };
 
+  /**
+   * ------------------------------------------------------------------------
+   * SCREENS
+   * ------------------------------------------------------------------------
+   */
   const openScreens =
     () => {
       setRootTab(
@@ -374,12 +525,18 @@ export default function PortalMobileNavigation({
       );
     };
 
-  const openFromLibrary =
+  /**
+   * A module was selected from Explore.
+   *
+   * Close Explore, keep Explore selected in the root navigation,
+   * then let RolePortalShell open the chosen module.
+   */
+  const openFromExplore =
     (
       key: string,
     ) => {
       setRootTab(
-        "library",
+        "explore",
       );
 
       setOverlay(
@@ -391,6 +548,12 @@ export default function PortalMobileNavigation({
       );
     };
 
+  /**
+   * A remembered module was selected from Screens.
+   *
+   * Screens closes after selection while remaining the most
+   * recently used root destination.
+   */
   const openFromScreens =
     (
       key: string,
@@ -404,9 +567,11 @@ export default function PortalMobileNavigation({
       );
 
       if (
-        key === hubKey
+        key ===
+        hubKey
       ) {
         onOpenHub();
+
         return;
       }
 
@@ -418,29 +583,34 @@ export default function PortalMobileNavigation({
   return (
     <div className="portal-mobile-navigation">
       {overlay ===
-      "library" ? (
+      "explore" ? (
         <section
-          className="portal-mobile-overlay"
-          aria-label="Library"
+          className="portal-mobile-overlay portal-mobile-explore-overlay"
+          aria-label="Explore"
         >
-          <PortalLibrary
+          <PortalExplore
             sections={
               sections
             }
+
             homeKey={
               homeKey
             }
+
             activeKey={
               activeTab
             }
+
             hubUnreadCount={
               hubUnreadCount
             }
+
             hubHasAttention={
               hubHasAttention
             }
+
             onNavigate={
-              openFromLibrary
+              openFromExplore
             }
           />
         </section>
@@ -449,27 +619,35 @@ export default function PortalMobileNavigation({
       {overlay ===
       "screens" ? (
         <section
-          className="portal-mobile-overlay"
+          className="portal-mobile-overlay portal-mobile-screens-overlay"
           aria-label="Screens"
         >
           <PortalScreens
             screens={
               screens
             }
+
             activeKey={
               activeTab
             }
+
             onOpenScreen={
               openFromScreens
             }
+
             onRemoveScreen={
               removeScreen
             }
+
             onClearScreens={
               clearScreens
             }
+
+            /**
+             * Adding another working screen begins in Explore.
+             */
             onAddScreen={
-              openLibrary
+              openExplore
             }
           />
         </section>
@@ -479,19 +657,24 @@ export default function PortalMobileNavigation({
         active={
           rootTab
         }
+
         onHome={
           openHome
         }
-        onLibrary={
-          openLibrary
+
+        onExplore={
+          openExplore
         }
+
         onScreens={
           openScreens
         }
       />
 
       <style>
-        {css}
+        {
+          css
+        }
       </style>
     </div>
   );
@@ -503,11 +686,19 @@ const css = `
     none;
 }
 
+
+/* ========================================================================
+   MOBILE ROOT NAVIGATION
+   ======================================================================== */
+
 @media (
-  max-width: 979px
+  max-width:
+    979px
 ) {
-  /*
-   * Mobile completely removes the old sidebar.
+  /**
+   * The desktop/sidebar navigation disappears completely on mobile.
+   *
+   * Explore is now the mobile replacement for that sidebar.
    */
   .app-sidebar {
     display:
@@ -519,9 +710,21 @@ const css = `
       block;
   }
 
-  /*
-   * Library and Screens fill the usable area between
-   * the fixed header and fixed bottom navigation.
+
+  /**
+   * ----------------------------------------------------------------------
+   * EXPLORE + SCREENS OVERLAY SURFACE
+   * ----------------------------------------------------------------------
+   *
+   * Both root surfaces occupy exactly the usable space between:
+   *
+   *   fixed portal header
+   *          ↓
+   *   Explore / Screens
+   *          ↓
+   *   fixed bottom navigation
+   *
+   * Each overlay owns its own scrolling while it is open.
    */
   .portal-mobile-overlay {
     position:
@@ -548,7 +751,8 @@ const css = `
 
     bottom:
       calc(
-        64px +
+        64px
+        +
         env(
           safe-area-inset-bottom,
           0px
@@ -557,6 +761,12 @@ const css = `
 
     z-index:
       55;
+
+    width:
+      100%;
+
+    min-width:
+      0;
 
     overflow-x:
       hidden;
@@ -576,24 +786,52 @@ const css = `
     background:
       var(
         --eds-shell-bg,
-        var(--bg, #f7f8fb)
+        var(
+          --bg,
+          #f7f8fb
+        )
       );
 
     color:
       var(
         --eds-text,
-        var(--text, #111827)
+        var(
+          --text,
+          #111827
+        )
       );
   }
 
-  /*
-   * Normal modules need enough bottom room so the fixed
-   * navigation never covers their final content.
+
+  /**
+   * Explore and Screens intentionally share the same geometry.
+   *
+   * Individual classes are retained so either surface can receive
+   * specialised styling later without changing the navigation API.
+   */
+  .portal-mobile-explore-overlay,
+  .portal-mobile-screens-overlay {
+    height:
+      auto;
+  }
+
+
+  /**
+   * ----------------------------------------------------------------------
+   * NORMAL HOME / MODULE CONTENT
+   * ----------------------------------------------------------------------
+   *
+   * Home and ordinary modules remain part of the normal document
+   * and use the application's single page scroll.
+   *
+   * Extra bottom space prevents the fixed Home / Explore / Screens
+   * navigation from covering the final content.
    */
   .app-content {
     padding-bottom:
       calc(
-        82px +
+        82px
+        +
         env(
           safe-area-inset-bottom,
           0px
@@ -601,10 +839,16 @@ const css = `
       ) !important;
   }
 
+
+  /**
+   * Keep the background refresh indicator above the fixed
+   * Home / Explore / Screens navigation.
+   */
   .background-refresh-indicator {
     bottom:
       calc(
-        78px +
+        78px
+        +
         env(
           safe-area-inset-bottom,
           0px

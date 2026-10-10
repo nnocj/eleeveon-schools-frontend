@@ -39,8 +39,12 @@ export interface AccountWorkspaceDrawerProps {
   open: boolean;
 
   memberName: string;
+
   memberRole: string;
-  memberImage?: string | null;
+
+  memberImage?:
+    string |
+    null;
 
   selectedMembership?:
     UserMembership |
@@ -125,10 +129,9 @@ export interface AccountWorkspaceDrawerProps {
   ): void;
 
   /*
-   * Kept for RolePortalShell backwards compatibility.
+   * Kept only because RolePortalShell still supplies them.
    *
-   * System and Access has intentionally been removed
-   * from this drawer.
+   * System and Access is no longer rendered here.
    */
   onOpenStatus(): void;
 
@@ -138,7 +141,7 @@ export interface AccountWorkspaceDrawerProps {
 }
 
 // ======================================================
-// HELPERS
+// INITIALS
 // ======================================================
 
 function initials(
@@ -147,10 +150,16 @@ function initials(
   return name
     .split(/\s+/)
     .filter(Boolean)
-    .slice(0, 2)
+    .slice(
+      0,
+      2,
+    )
     .map(
-      (part) =>
-        part[0] ?? "",
+      (
+        part,
+      ) =>
+        part[0] ??
+        "",
     )
     .join("")
     .toUpperCase();
@@ -163,16 +172,12 @@ function initials(
 function DrawerProfileImage({
   src,
   name,
-  className = "",
 }: {
   src?:
     string |
     null;
 
   name:
-    string;
-
-  className?:
     string;
 }) {
   const [
@@ -199,22 +204,14 @@ function DrawerProfileImage({
 
   return (
     <span
-      className={[
-        "drawer-profile-image",
-        className,
-      ]
-        .filter(
-          Boolean,
-        )
-        .join(
-          " ",
-        )}
+      className="drawer-account-photo"
       aria-label={`${name} profile image`}
     >
       {showImage ? (
         <img
           src={
-            src || ""
+            src ||
+            ""
           }
           alt=""
           onError={() =>
@@ -224,10 +221,7 @@ function DrawerProfileImage({
           }
         />
       ) : (
-        <span
-          className="drawer-profile-fallback"
-          aria-hidden="true"
-        >
+        <span className="drawer-account-photo-fallback">
           {initials(
             name,
           )}
@@ -262,16 +256,12 @@ function HubIcon() {
         r="8"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.7"
         strokeDasharray="2 3"
       />
     </svg>
   );
 }
-
-// ======================================================
-// HUB EVENT
-// ======================================================
 
 function openEleeveonHub() {
   if (
@@ -322,6 +312,7 @@ export default function AccountWorkspaceDrawer({
   roleIcon,
 
   onClose,
+
   onSwitchMembership,
 
   onSchoolChange,
@@ -333,40 +324,25 @@ export default function AccountWorkspaceDrawer({
   onLogout,
 }: AccountWorkspaceDrawerProps) {
   /*
-   * These props remain in the contract because
-   * RolePortalShell already passes them.
-   *
-   * The visual System and Access section itself has been
-   * removed as requested.
+   * Still accepted so RolePortalShell remains unchanged.
    */
   void onOpenStatus;
   void onSelectRole;
-
-  /*
-   * Keep these available to QuickWorkspaceSwitcher and
-   * future status presentation without changing the shell
-   * contract.
-   */
   void online;
   void realtimeConnected;
-  void selectedMembership;
 
   // ====================================================
-  // LOCK THE PAGE BEHIND THE DRAWER
+  // DRAWER SCROLL OWNERSHIP
   // ====================================================
   //
-  // Before:
+  // While this drawer is open:
   //
-  // drawer scroll
-  // +
-  // document scroll
+  // document = locked
+  // drawer   = scrollable
   //
-  // could both exist at the same time.
+  // When closed:
   //
-  // Now:
-  //
-  // drawer open  = only drawer scrolls
-  // drawer closed = document scrolls normally
+  // document = normal
   //
 
   useEffect(() => {
@@ -386,25 +362,28 @@ export default function AccountWorkspaceDrawer({
 
     const previous = {
       htmlOverflow:
-        html.style.overflow,
+        html.style
+          .overflow,
 
       htmlOverflowY:
-        html.style.overflowY,
-
-      htmlOverscroll:
-        html.style.overscrollBehavior,
+        html.style
+          .overflowY,
 
       bodyOverflow:
-        body.style.overflow,
+        body.style
+          .overflow,
 
       bodyOverflowY:
-        body.style.overflowY,
+        body.style
+          .overflowY,
+
+      htmlOverscroll:
+        html.style
+          .overscrollBehavior,
 
       bodyOverscroll:
-        body.style.overscrollBehavior,
-
-      bodyTouchAction:
-        body.style.touchAction,
+        body.style
+          .overscrollBehavior,
     };
 
     html.style.overflow =
@@ -425,47 +404,37 @@ export default function AccountWorkspaceDrawer({
     body.style.overscrollBehavior =
       "none";
 
-    body.style.touchAction =
-      "none";
-
     return () => {
       html.style.overflow =
-        previous.htmlOverflow;
+        previous
+          .htmlOverflow;
 
       html.style.overflowY =
-        previous.htmlOverflowY;
+        previous
+          .htmlOverflowY;
 
       html.style.overscrollBehavior =
-        previous.htmlOverscroll;
+        previous
+          .htmlOverscroll;
 
       body.style.overflow =
-        previous.bodyOverflow;
+        previous
+          .bodyOverflow;
 
       body.style.overflowY =
-        previous.bodyOverflowY;
+        previous
+          .bodyOverflowY;
 
       body.style.overscrollBehavior =
-        previous.bodyOverscroll;
-
-      body.style.touchAction =
-        previous.bodyTouchAction;
+        previous
+          .bodyOverscroll;
     };
   }, [
     open,
   ]);
 
-  // ====================================================
-  // HUB
-  // ====================================================
-
   const handleHub =
     () => {
-      /*
-       * Close the drawer first.
-       *
-       * This restores normal scroll ownership before the
-       * Hub route becomes active.
-       */
       onClose();
 
       window.setTimeout(
@@ -483,7 +452,6 @@ export default function AccountWorkspaceDrawer({
         "account-drawer",
         "shell-account-drawer",
         "compact-account-drawer",
-        "eds-drawer-surface",
         "eds-account-drawer-surface",
 
         open &&
@@ -501,35 +469,35 @@ export default function AccountWorkspaceDrawer({
     >
       <BrandGlow
         placement="top-right"
-        size="16rem"
+        size="14rem"
         opacity={
-          0.07
+          0.035
         }
       />
 
       <BrandPattern
         variant="network"
         opacity={
-          0.018
+          0.008
         }
       />
 
       <BrandTexture
         texture="grain"
         intensity={
-          0.4
+          0.18
         }
         decorative
         className="shell-drawer-texture"
       />
 
-      <div className="shell-drawer-inner compact-drawer-inner">
+      <div className="compact-drawer-inner">
         {/* ===============================================
-         * MEMBER
+         * MEMBER PROFILE
          * =============================================== */}
 
-        <header className="account-drawer-head compact-drawer-head">
-          <div className="account-drawer-identity compact-drawer-identity">
+        <header className="compact-drawer-head">
+          <div className="compact-drawer-identity">
             <DrawerProfileImage
               src={
                 memberImage
@@ -537,7 +505,6 @@ export default function AccountWorkspaceDrawer({
               name={
                 memberName
               }
-              className="drawer-account-photo"
             />
 
             <span className="compact-drawer-member-copy">
@@ -552,7 +519,7 @@ export default function AccountWorkspaceDrawer({
           </div>
 
           <button
-            className="icon-btn compact-drawer-close"
+            className="compact-drawer-close"
             onClick={
               onClose
             }
@@ -565,11 +532,7 @@ export default function AccountWorkspaceDrawer({
 
         {/* ===============================================
          * ELEEVEON HUB
-         * ===============================================
-         *
-         * Hub replaces the extra information that was
-         * competing for space near the top of the drawer.
-         */}
+         * =============================================== */}
 
         <button
           type="button"
@@ -600,17 +563,8 @@ export default function AccountWorkspaceDrawer({
         </button>
 
         {/* ===============================================
-         * CURRENT WORKSPACE STRIP REMOVED
-         * ===============================================
-         *
-         * The old:
-         *
-         * CURRENT WORKSPACE
-         * School · Branch
-         * Online
-         *
-         * card is intentionally no longer rendered.
-         */}
+         * CURRENT WORKSPACE REMOVED
+         * =============================================== */}
 
         {/* ===============================================
          * WORKSPACES
@@ -656,12 +610,8 @@ export default function AccountWorkspaceDrawer({
         ) : null}
 
         {/* ===============================================
-         * OPTIONAL UNLOCKED SCHOOL CONTEXT
-         * ===============================================
-         *
-         * Branch Admin uses lockedContext=true, so this
-         * normally stays hidden there.
-         */}
+         * OPTIONAL UNLOCKED CONTEXT
+         * =============================================== */}
 
         {!lockedContext ? (
           <AccountSection
@@ -671,7 +621,9 @@ export default function AccountWorkspaceDrawer({
             <div className="compact-context-grid">
               <label className="account-context-field">
                 <span>
-                  <SchoolIcon size="sm" />
+                  <SchoolIcon
+                    size="sm"
+                  />
 
                   School
                 </span>
@@ -723,7 +675,9 @@ export default function AccountWorkspaceDrawer({
 
               <label className="account-context-field">
                 <span>
-                  <WorkspaceIcon size="sm" />
+                  <WorkspaceIcon
+                    size="sm"
+                  />
 
                   Branch
                 </span>
@@ -781,13 +735,7 @@ export default function AccountWorkspaceDrawer({
 
         {/* ===============================================
          * SYSTEM AND ACCESS REMOVED
-         * ===============================================
-         *
-         * System status remains globally accessible from
-         * the fixed header status button.
-         *
-         * Workspace switching remains above.
-         */}
+         * =============================================== */}
 
         <Button
           variant="danger"
@@ -795,7 +743,7 @@ export default function AccountWorkspaceDrawer({
           onClick={
             onLogout
           }
-          className="account-logout compact-account-logout"
+          className="compact-account-logout"
         >
           Logout
         </Button>
@@ -809,7 +757,7 @@ export default function AccountWorkspaceDrawer({
 }
 
 // ======================================================
-// CSS
+// STYLES
 // ======================================================
 
 const css = `
@@ -818,20 +766,12 @@ const css = `
  * DRAWER POSITION
  * =====================================================
  *
- * This is the main correction visible in your screenshot.
+ * PortalHeader remains visible.
  *
- * Previously:
- *
- * drawer top = 0
- * fixed header = on top of drawer
- *
- * therefore the member identity disappeared behind the
- * fixed header.
- *
- * Now the drawer begins BELOW the fixed portal header.
+ * Drawer begins immediately underneath it.
  */
 
-.compact-account-drawer {
+.context-drawer.compact-account-drawer {
   top:
     calc(
       var(
@@ -845,44 +785,54 @@ const css = `
       )
     ) !important;
 
+  right:
+    0 !important;
+
   bottom:
     0 !important;
 
   height:
-    calc(
-      100dvh
-      -
-      var(
-        --eds-shell-top-offset,
-        0px
-      )
-      -
-      var(
-        --portal-header-height,
-        48px
-      )
-    ) !important;
+    auto !important;
 
   max-height:
-    calc(
-      100dvh
-      -
+    none !important;
+
+  /*
+   * Similar visual foundation to SyncStatusSheet:
+   * neutral application background + clear cards.
+   */
+  background:
+    var(
+      --eds-bg,
       var(
-        --eds-shell-top-offset,
-        0px
-      )
-      -
-      var(
-        --portal-header-height,
-        48px
+        --bg,
+        #f5f7fb
       )
     ) !important;
 
-  /*
-   * Drawer itself owns scrolling while open.
-   *
-   * The useEffect above disables the document scroll.
-   */
+  color:
+    var(
+      --eds-text,
+      var(
+        --text,
+        #273449
+      )
+    ) !important;
+
+  border-left:
+    1px solid
+    var(
+      --eds-divider,
+      var(
+        --border,
+        rgba(15,23,42,.08)
+      )
+    ) !important;
+
+  box-shadow:
+    -16px 0 40px
+    rgba(15,23,42,.14) !important;
+
   overflow-x:
     hidden !important;
 
@@ -900,45 +850,29 @@ const css = `
 }
 
 /*
- * The fixed header remains above the drawer and visible.
+ * Fixed header remains visually above drawer.
  */
+
 .portal-fixed-header {
   z-index:
     70 !important;
 }
 
 /*
- * Installed desktop Window Controls Overlay already
- * replaces PortalHeader, therefore do not reserve another
- * 48px there.
+ * Mobile:
+ *
+ * stop the drawer above Home / Library / Screens.
  */
+
 @media (
-  display-mode:
-    window-controls-overlay
+  max-width: 979px
 ) {
-  .compact-account-drawer {
-    top:
-      var(
-        --eds-shell-top-offset,
-        0px
-      ) !important;
-
-    height:
+  .context-drawer.compact-account-drawer {
+    bottom:
       calc(
-        100dvh
-        -
-        var(
-          --eds-shell-top-offset,
-          0px
-        )
-      ) !important;
-
-    max-height:
-      calc(
-        100dvh
-        -
-        var(
-          --eds-shell-top-offset,
+        64px +
+        env(
+          safe-area-inset-bottom,
           0px
         )
       ) !important;
@@ -946,12 +880,36 @@ const css = `
 }
 
 /*
+ * Desktop installed window overlay does not render
+ * PortalHeader, therefore remove the local 48px reservation.
+ */
+
+@media (
+  display-mode:
+    window-controls-overlay
+) {
+  .context-drawer.compact-account-drawer {
+    top:
+      var(
+        --eds-shell-top-offset,
+        0px
+      ) !important;
+  }
+}
+
+/*
  * =====================================================
- * DRAWER CONTENT
+ * DRAWER INNER
  * =====================================================
  */
 
 .compact-drawer-inner {
+  position:
+    relative;
+
+  z-index:
+    2;
+
   min-height:
     100%;
 
@@ -962,11 +920,14 @@ const css = `
     column;
 
   gap:
-    12px;
+    14px;
+
+  padding:
+    14px;
 
   padding-bottom:
     max(
-      16px,
+      18px,
       env(
         safe-area-inset-bottom,
         0px
@@ -976,7 +937,7 @@ const css = `
 
 /*
  * =====================================================
- * MEMBER PROFILE
+ * PROFILE HEADER
  * =====================================================
  */
 
@@ -986,6 +947,9 @@ const css = `
 
   top:
     auto !important;
+
+  width:
+    100%;
 
   display:
     flex;
@@ -1000,10 +964,11 @@ const css = `
     12px;
 
   margin:
-    0 !important;
+    0;
 
   padding:
-    3px 0 12px !important;
+    2px 0
+    14px;
 
   background:
     transparent !important;
@@ -1014,7 +979,7 @@ const css = `
       --eds-divider,
       var(
         --border,
-        rgba(0,0,0,.08)
+        rgba(15,23,42,.08)
       )
     );
 }
@@ -1034,12 +999,15 @@ const css = `
     center;
 
   gap:
-    11px;
+    12px;
 }
 
-.drawer-profile-image {
-  position:
-    relative;
+.drawer-account-photo {
+  width:
+    56px;
+
+  height:
+    56px;
 
   display:
     grid;
@@ -1049,17 +1017,6 @@ const css = `
 
   overflow:
     hidden;
-}
-
-.drawer-account-photo {
-  width:
-    56px !important;
-
-  height:
-    56px !important;
-
-  flex:
-    0 0 56px;
 
   border:
     1px solid
@@ -1067,36 +1024,37 @@ const css = `
       in srgb,
       var(
         --eds-primary,
-        var(--primary-color, #2563eb)
-      ) 30%,
+        #2563eb
+      ) 25%,
       var(
         --eds-border,
-        transparent
+        rgba(15,23,42,.09)
       )
     );
 
   border-radius:
-    18px !important;
+    18px;
 
   background:
-    var(
-      --eds-primary-soft,
-      color-mix(
-        in srgb,
-        var(
-          --primary-color,
-          #2563eb
-        ) 12%,
-        transparent
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 8%,
+      var(
+        --eds-surface,
+        #ffffff
       )
     );
 
   box-shadow:
-    0 8px 22px
-    rgba(15,23,42,.13);
+    0 5px 16px
+    rgba(15,23,42,.08);
 }
 
-.drawer-account-photo img {
+.drawer-account-photo
+img {
   width:
     100%;
 
@@ -1111,9 +1069,12 @@ const css = `
 
   object-position:
     center;
+
+  max-width:
+    none !important;
 }
 
-.drawer-profile-fallback {
+.drawer-account-photo-fallback {
   width:
     100%;
 
@@ -1129,7 +1090,7 @@ const css = `
   color:
     var(
       --eds-primary,
-      var(--primary-color, #2563eb)
+      #2563eb
     );
 
   font-size:
@@ -1166,7 +1127,10 @@ strong {
   color:
     var(
       --eds-text-strong,
-      var(--text, #111827)
+      var(
+        --text,
+        #273449
+      )
     );
 
   font-size:
@@ -1174,9 +1138,6 @@ strong {
 
   font-weight:
     900;
-
-  letter-spacing:
-    -.02em;
 }
 
 .compact-drawer-member-copy
@@ -1187,7 +1148,10 @@ small {
   color:
     var(
       --eds-text-muted,
-      var(--muted, #64748b)
+      var(
+        --muted,
+        #66728a
+      )
     );
 
   font-size:
@@ -1197,9 +1161,61 @@ small {
     650;
 }
 
+.compact-drawer-close {
+  width:
+    44px;
+
+  height:
+    44px;
+
+  flex:
+    0 0 44px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      rgba(15,23,42,.09)
+    );
+
+  border-radius:
+    15px;
+
+  background:
+    var(
+      --eds-surface,
+      var(
+        --surface,
+        #ffffff
+      )
+    );
+
+  color:
+    var(
+      --eds-text-strong,
+      #273449
+    );
+
+  font-size:
+    22px;
+
+  cursor:
+    pointer;
+
+  box-shadow:
+    0 3px 12px
+    rgba(15,23,42,.04);
+}
+
 /*
  * =====================================================
- * ELEEVEON HUB
+ * HUB
  * =====================================================
  */
 
@@ -1208,13 +1224,13 @@ small {
     100%;
 
   min-height:
-    62px;
+    66px;
 
   display:
     grid;
 
   grid-template-columns:
-    42px
+    44px
     minmax(0, 1fr)
     auto;
 
@@ -1222,7 +1238,7 @@ small {
     center;
 
   gap:
-    10px;
+    11px;
 
   border:
     1px solid
@@ -1230,39 +1246,30 @@ small {
       in srgb,
       var(
         --eds-primary,
-        var(--primary-color, #2563eb)
-      ) 22%,
+        #2563eb
+      ) 28%,
       var(
         --eds-border,
-        rgba(0,0,0,.09)
+        rgba(15,23,42,.08)
       )
     );
 
   border-radius:
-    17px;
+    20px;
 
   padding:
-    9px 10px;
+    10px;
 
   background:
-    linear-gradient(
-      135deg,
-
-      color-mix(
-        in srgb,
-        var(
-          --eds-primary,
-          var(--primary-color, #2563eb)
-        ) 11%,
-        var(
-          --eds-surface,
-          var(--surface, #ffffff)
-        )
-      ),
-
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 5%,
       var(
         --eds-surface,
-        var(--surface, #ffffff)
+        #ffffff
       )
     );
 
@@ -1274,14 +1281,18 @@ small {
 
   cursor:
     pointer;
+
+  box-shadow:
+    0 4px 14px
+    rgba(15,23,42,.045);
 }
 
 .drawer-hub-icon {
   width:
-    42px;
+    44px;
 
   height:
-    42px;
+    44px;
 
   display:
     grid;
@@ -1290,12 +1301,12 @@ small {
     center;
 
   border-radius:
-    13px;
+    14px;
 
   background:
     var(
       --eds-primary,
-      var(--primary-color, #2563eb)
+      #2563eb
     );
 
   color:
@@ -1338,7 +1349,7 @@ strong {
   color:
     var(
       --eds-text-strong,
-      var(--text, #111827)
+      #273449
     );
 
   font-size:
@@ -1356,7 +1367,7 @@ small {
   color:
     var(
       --eds-text-muted,
-      var(--muted, #64748b)
+      #66728a
     );
 
   font-size:
@@ -1371,11 +1382,11 @@ small {
   color:
     var(
       --eds-text-muted,
-      var(--muted, #64748b)
+      #66728a
     );
 
   font-size:
-    21px;
+    22px;
 
   font-weight:
     500;
@@ -1383,27 +1394,231 @@ small {
 
 /*
  * =====================================================
- * WORKSPACES
+ * ACCOUNT SECTION HEADING
  * =====================================================
  */
 
-.compact-workspaces-section {
-  margin:
-    0 !important;
+.compact-account-drawer
+.account-drawer-section {
+  gap:
+    9px;
+}
+
+.compact-account-drawer
+.account-drawer-section
+> header {
+  min-height:
+    28px;
+
+  padding:
+    0 3px;
+}
+
+.compact-account-drawer
+.account-drawer-section
+> header
+span {
+  color:
+    var(
+      --eds-text-muted,
+      #66728a
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    .06em;
+
+  text-transform:
+    uppercase;
 }
 
 /*
- * Improve actual uploaded user/profile images inside
- * workspace cards.
+ * =====================================================
+ * WORKSPACE CARDS
+ * =====================================================
+ *
+ * Neutral styling mirrors System Status:
+ *
+ * light background
+ * dark text
+ * muted secondary text
+ * subtle border
+ * brand colour only for state/accent
+ */
+
+.compact-account-drawer
+.workspace-list {
+  display:
+    grid;
+
+  gap:
+    9px;
+}
+
+.compact-account-drawer
+.workspace-list
+button {
+  width:
+    100%;
+
+  min-width:
+    0;
+
+  min-height:
+    72px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    46px
+    minmax(0, 1fr)
+    auto;
+
+  grid-template-rows:
+    auto auto;
+
+  align-items:
+    center;
+
+  column-gap:
+    11px;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      rgba(15,23,42,.09)
+    ) !important;
+
+  border-radius:
+    20px !important;
+
+  padding:
+    10px !important;
+
+  background:
+    var(
+      --eds-surface,
+      var(
+        --surface,
+        #ffffff
+      )
+    ) !important;
+
+  color:
+    var(
+      --eds-text,
+      #273449
+    ) !important;
+
+  box-shadow:
+    0 4px 14px
+    rgba(15,23,42,.045) !important;
+}
+
+.compact-account-drawer
+.workspace-list
+button:hover {
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 3%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    ) !important;
+}
+
+.compact-account-drawer
+.workspace-list
+button.active {
+  border-color:
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 48%,
+      var(
+        --eds-border,
+        rgba(15,23,42,.09)
+      )
+    ) !important;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 7%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    ) !important;
+
+  box-shadow:
+    0 4px 16px
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 7%,
+      transparent
+    ) !important;
+}
+
+/*
+ * Workspace image/icon.
  */
 
 .compact-account-drawer
 .workspace-avatar {
+  grid-row:
+    span 2;
+
+  width:
+    46px !important;
+
+  height:
+    46px !important;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
   overflow:
     hidden;
 
   border-radius:
-    14px;
+    14px !important;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 8%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    ) !important;
 }
 
 .compact-account-drawer
@@ -1415,6 +1630,9 @@ img {
   height:
     100% !important;
 
+  max-width:
+    none !important;
+
   display:
     block;
 
@@ -1425,23 +1643,86 @@ img {
     center;
 }
 
-/*
- * Keep workspace cards compact enough that several roles
- * remain visible without making the drawer unnecessarily
- * long.
- */
-
 .compact-account-drawer
-.workspace-list {
-  gap:
-    8px;
+.workspace-list
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      #273449
+    ) !important;
+
+  font-size:
+    12px !important;
+
+  font-weight:
+    850 !important;
 }
 
 .compact-account-drawer
 .workspace-list
-button {
+small {
+  color:
+    var(
+      --eds-text-muted,
+      #66728a
+    ) !important;
+
+  font-size:
+    9px !important;
+
+  font-weight:
+    650 !important;
+}
+
+.compact-account-drawer
+.workspace-list
+b {
+  grid-row:
+    span 2;
+
+  min-width:
+    72px;
+
   min-height:
-    64px;
+    34px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    999px !important;
+
+  padding:
+    0 12px !important;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-primary,
+        #2563eb
+      ) 8%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    ) !important;
+
+  color:
+    var(
+      --eds-primary,
+      #2563eb
+    ) !important;
+
+  font-size:
+    9px !important;
+
+  font-weight:
+    850 !important;
 }
 
 /*
@@ -1458,6 +1739,37 @@ button {
     8px;
 }
 
+.compact-account-drawer
+.account-context-field {
+  color:
+    var(
+      --eds-text-muted,
+      #66728a
+    );
+}
+
+.compact-account-drawer
+.account-context-field
+select {
+  background:
+    var(
+      --eds-surface,
+      #ffffff
+    );
+
+  color:
+    var(
+      --eds-text-strong,
+      #273449
+    );
+
+  border-color:
+    var(
+      --eds-border,
+      rgba(15,23,42,.09)
+    );
+}
+
 /*
  * =====================================================
  * LOGOUT
@@ -1467,31 +1779,31 @@ button {
 .compact-account-logout {
   margin-top:
     auto !important;
-}
 
-/*
- * =====================================================
- * MOBILE
- * =====================================================
- */
+  min-height:
+    48px;
 
-@media (
-  max-width: 979px
-) {
-  .compact-account-drawer {
-    /*
-     * Keep room for the fixed bottom navigation as well.
-     *
-     * The drawer itself can scroll above it.
-     */
-    padding-bottom:
-      calc(
-        10px +
-        env(
-          safe-area-inset-bottom,
-          0px
-        )
-      );
-  }
+  border-radius:
+    17px !important;
+
+  background:
+    color-mix(
+      in srgb,
+      #ef4444 8%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    ) !important;
+
+  color:
+    #dc2626 !important;
+
+  border:
+    1px solid
+    rgba(239,68,68,.12) !important;
+
+  box-shadow:
+    none !important;
 }
 `;

@@ -6,56 +6,24 @@
  * ELEEVEON BRANCH ADMIN HOME
  * ---------------------------------------------------------
  *
- * Compact mobile-first Home inspired by the information
- * hierarchy of apps such as Gospel Library.
+ * Golden Standard branch home.
  *
- * HOME RESPONSIBILITY
- * ---------------------------------------------------------
- * Home shows what matters now:
- *
- * 1. Portal Highlights
- * 2. Attendance snapshot
- * 3. Upcoming events
- * 4. Announcements
- *
- * Navigation belongs elsewhere:
- *
- * - Header Search = find anything
- * - Library       = discover modules
- * - Screens       = return to opened/recent work
- *
- * HERO
- * ---------------------------------------------------------
- * The hero no longer displays:
- *
- * - greeting
- * - user name
- * - school name
- * - branch name
- * - school motto
- * - student/teacher/class statistics
- *
- * This releases the entire hero area for imagery/video.
- *
- * DEFAULT HERO ASSETS
- * ---------------------------------------------------------
- * Put these exact files in /public:
- *
- * /public/pathways-to-possibility.png
- * /public/building-the-future.png
- * /public/knowledge-in-motion.png
- *
- * Actual Portal Highlights override these defaults.
- *
- * SCROLL OWNERSHIP
- * ---------------------------------------------------------
- * This file intentionally does NOT use DashboardBackground
- * or WelcomeHero.
- *
- * Everything is normal document-flow content.
- * There is no page-level overflow:auto and no 100vh wrapper.
- *
- * The browser/document is the one page scrollbar.
+ * Design:
+ * - Portal Highlights lead the dashboard.
+ * - Same hero height/proportion as Teacher Dashboard.
+ * - Hero is visual only: no greeting, user name, school name,
+ *   branch name, motto or statistics over the image.
+ * - Portal Highlights take precedence over default public images.
+ * - Default public hero rotation:
+ *     /pathways-to-possibility.png
+ *     /building-the-future.png
+ *     /knowledge-in-motion.png
+ * - No local dashboard search bar. Portal header owns search.
+ * - No quick-action strip. Explore owns module discovery.
+ * - Two compact attendance percentage cards.
+ * - Compact Upcoming and Announcements sections.
+ * - One document/window scroll.
+ * - Branch scoped, offline-first and theme safe.
  */
 
 import React, {
@@ -100,15 +68,6 @@ import {
   useBackgroundLoader,
 } from "../../hooks/useBackgroundLoader";
 
-import {
-  AttendanceIcon,
-  TeacherIcon,
-} from "../../components/icons";
-
-// ======================================================
-// TYPES
-// ======================================================
-
 type AnyRow =
   Record<string, any>;
 
@@ -132,12 +91,7 @@ type HeroSlide = {
 
   poster?: string;
 
-  title?: string;
-
-  subtitle?: string;
-
-  durationSeconds:
-    number;
+  durationSeconds: number;
 
   transition:
     | "fade"
@@ -150,67 +104,61 @@ type HeroSlide = {
   actionValue?: string;
 };
 
-// ======================================================
-// DEFAULT HERO SLIDES
-// ======================================================
+const OPEN_WORKSPACE_KEY =
+  "eleeveon_open_workspace";
 
-const DEFAULT_HERO_SLIDES:
-  HeroSlide[] = [
-    {
-      id:
-        "pathways-to-possibility",
+const DEFAULT_HERO_SLIDES: HeroSlide[] = [
+  {
+    id:
+      "pathways-to-possibility",
 
-      type:
-        "image",
+    type:
+      "image",
 
-      src:
-        "/pathways-to-possibility.png",
+    src:
+      "/pathways-to-possibility.png",
 
-      durationSeconds:
-        7,
+    durationSeconds:
+      7,
 
-      transition:
-        "fade",
-    },
+    transition:
+      "fade",
+  },
 
-    {
-      id:
-        "building-the-future",
+  {
+    id:
+      "building-the-future",
 
-      type:
-        "image",
+    type:
+      "image",
 
-      src:
-        "/building-the-future.png",
+    src:
+      "/building-the-future.png",
 
-      durationSeconds:
-        7,
+    durationSeconds:
+      7,
 
-      transition:
-        "fade",
-    },
+    transition:
+      "fade",
+  },
 
-    {
-      id:
-        "knowledge-in-motion",
+  {
+    id:
+      "knowledge-in-motion",
 
-      type:
-        "image",
+    type:
+      "image",
 
-      src:
-        "/knowledge-in-motion.png",
+    src:
+      "/knowledge-in-motion.png",
 
-      durationSeconds:
-        7,
+    durationSeconds:
+      7,
 
-      transition:
-        "fade",
-    },
-  ];
-
-// ======================================================
-// HOME DATA ONLY
-// ======================================================
+    transition:
+      "fade",
+  },
+];
 
 const TABLE_NAMES = [
   "schools",
@@ -219,7 +167,9 @@ const TABLE_NAMES = [
 
   "students",
   "teachers",
+  "parents",
   "classes",
+  "studentEnrollments",
 
   "attendance",
   "teacherAttendance",
@@ -231,61 +181,43 @@ const TABLE_NAMES = [
   "mediaAssets",
 ] as const;
 
-const OPEN_WORKSPACE_KEY =
-  "eleeveon_open_workspace";
-
 type OpenWorkspaceSession = {
   membership?:
-    AnyRow |
-    null;
+    AnyRow | null;
 
   membershipId?:
-    string |
-    null;
+    string | null;
 
   role?:
-    string |
-    null;
+    string | null;
 
   schoolId?:
-    string |
-    null;
+    string | number | null;
 
   branchId?:
-    string |
-    null;
+    string | number | null;
 
-  teacherId?:
-    string |
-    null;
+  teacherLocalId?:
+    string | number | null;
 
-  studentId?:
-    string |
-    null;
+  studentLocalId?:
+    string | number | null;
 
-  parentId?:
-    string |
-    null;
+  parentLocalId?:
+    string | number | null;
 
   memberName?:
-    string |
-    null;
+    string | null;
 
   fullName?:
-    string |
-    null;
+    string | null;
 
   userName?:
-    string |
-    null;
+    string | null;
 
   openedAt?:
     number;
 };
-
-// ======================================================
-// STORAGE HELPERS
-// ======================================================
 
 function safeRead(
   key: string,
@@ -333,28 +265,22 @@ function safeJson<T>(
 }
 
 function readOpenWorkspaceSession():
-  OpenWorkspaceSession |
-  null {
+  OpenWorkspaceSession | null {
   return safeJson<OpenWorkspaceSession>(
     OPEN_WORKSPACE_KEY,
   );
 }
 
 function readStoredActiveMembership():
-  AnyRow |
-  null {
+  AnyRow | null {
   return safeJson<AnyRow>(
     "activeMembership",
   );
 }
 
-// ======================================================
-// VALUE HELPERS
-// ======================================================
-
 function cleanId(
   value: unknown,
-): string {
+) {
   if (
     value === null ||
     value === undefined
@@ -367,33 +293,53 @@ function cleanId(
   ).trim();
 }
 
-function firstPermanentId(
+function firstId(
   ...values: unknown[]
-): string | null {
+) {
   for (
-    const value of values
+    const value
+    of values
   ) {
     const parsed =
       cleanId(
         value,
       );
 
-    if (
-      parsed
-    ) {
+    if (parsed) {
       return parsed;
     }
   }
 
-  return null;
+  return "";
+}
+
+function sameId(
+  a: unknown,
+  b: unknown,
+) {
+  const left =
+    cleanId(
+      a,
+    );
+
+  const right =
+    cleanId(
+      b,
+    );
+
+  return Boolean(
+    left &&
+    right &&
+    left === right,
+  );
 }
 
 function n(
-  value: any,
+  value: unknown,
 ) {
   const parsed =
     Number(
-      value || 0,
+      value ?? 0,
     );
 
   return Number.isFinite(
@@ -404,73 +350,63 @@ function n(
 }
 
 function text(
-  value: any,
+  value: unknown,
   fallback = "",
 ) {
   return (
     String(
-      value || "",
+      value ?? "",
     ).trim() ||
     fallback
   );
 }
 
 function idOf(
-  row?: AnyRow,
-): string {
-  return cleanId(
+  row?: AnyRow | null,
+) {
+  return (
     row?.id ??
-      row?.payload?.id,
+    row?.localId ??
+    row?.cloudId ??
+    row?.payload?.id ??
+    row?.payload?.localId
   );
 }
 
 function activeRow(
-  row: AnyRow,
+  row?: AnyRow | null,
 ) {
-  const status =
-    String(
-      row?.status ||
-        "",
-    )
-      .trim()
-      .toLowerCase();
+  if (
+    !row ||
+    row.isDeleted === true ||
+    row.active === false
+  ) {
+    return false;
+  }
 
-  return (
-    row?.isDeleted !==
-      true &&
-    row?.active !==
-      false &&
-    ![
-      "deleted",
-      "archived",
-      "inactive",
-      "disabled",
-    ].includes(
-      status,
-    )
+  const status =
+    text(
+      row.status,
+    ).toLowerCase();
+
+  return ![
+    "deleted",
+    "archived",
+    "inactive",
+    "disabled",
+    "withdrawn",
+    "cancelled",
+  ].includes(
+    status,
   );
 }
 
-function count(
-  rows: AnyRow[],
-) {
-  return rows.filter(
-    activeRow,
-  ).length;
-}
-
-// ======================================================
-// WORKSPACE HELPERS
-// ======================================================
-
 function workspaceMembership(
   openWorkspace?:
-    OpenWorkspaceSession |
-    null,
+    OpenWorkspaceSession | null,
 
   activeMembership?:
-    AnyRow |
-    null,
+    AnyRow | null,
 ) {
   return (
     openWorkspace?.membership ||
@@ -483,22 +419,19 @@ function workspaceMembership(
 function selectedSchoolId(
   args: {
     openWorkspace?:
-      OpenWorkspaceSession |
-      null;
+      OpenWorkspaceSession | null;
 
     activeMembership?:
-      AnyRow |
-      null;
+      AnyRow | null;
 
-    activeSchoolId?: any;
+    activeSchoolId?:
+      unknown;
 
     activeSchool?:
-      AnyRow |
-      null;
+      AnyRow | null;
 
     settings?:
-      AnyRow |
-      null;
+      AnyRow | null;
   },
 ) {
   const membership =
@@ -507,7 +440,7 @@ function selectedSchoolId(
       args.activeMembership,
     );
 
-  return firstPermanentId(
+  return firstId(
     args.openWorkspace
       ?.schoolId,
 
@@ -515,7 +448,8 @@ function selectedSchoolId(
       ?.schoolId,
 
     membership
-      ?.school?.id,
+      ?.school
+      ?.id,
 
     args.activeSchoolId,
 
@@ -534,22 +468,19 @@ function selectedSchoolId(
 function selectedBranchId(
   args: {
     openWorkspace?:
-      OpenWorkspaceSession |
-      null;
+      OpenWorkspaceSession | null;
 
     activeMembership?:
-      AnyRow |
-      null;
+      AnyRow | null;
 
-    activeBranchId?: any;
+    activeBranchId?:
+      unknown;
 
     activeBranch?:
-      AnyRow |
-      null;
+      AnyRow | null;
 
     settings?:
-      AnyRow |
-      null;
+      AnyRow | null;
   },
 ) {
   const membership =
@@ -558,7 +489,7 @@ function selectedBranchId(
       args.activeMembership,
     );
 
-  return firstPermanentId(
+  return firstId(
     args.openWorkspace
       ?.branchId,
 
@@ -569,7 +500,8 @@ function selectedBranchId(
       ?.schoolBranchId,
 
     membership
-      ?.branch?.id,
+      ?.branch
+      ?.id,
 
     args.activeBranchId,
 
@@ -585,44 +517,33 @@ function selectedBranchId(
   );
 }
 
-// ======================================================
-// DATA SCOPE
-// ======================================================
-
 function sameAccount(
   row: AnyRow,
-
   accountId?:
-    string |
-    null,
+    string | null,
 ) {
   return (
     row &&
-    row.isDeleted !==
-      true &&
+    row.isDeleted !== true &&
     (
       !row.accountId ||
       !accountId ||
-      row.accountId ===
-        accountId
+      sameId(
+        row.accountId,
+        accountId,
+      )
     )
   );
 }
 
 function branchScoped(
   row: AnyRow,
-
   accountId?:
-    string |
-    null,
-
+    string | null,
   schoolId?:
-    string |
-    null,
-
+    string | null,
   branchId?:
-    string |
-    null,
+    string | null,
 ) {
   if (
     !sameAccount(
@@ -635,21 +556,23 @@ function branchScoped(
 
   const rowSchoolId =
     row.schoolId ??
-    row.payload?.schoolId;
+    row.schoolLocalId ??
+    row.payload
+      ?.schoolId;
 
   const rowBranchId =
     row.branchId ??
-    row.payload?.branchId;
+    row.branchLocalId ??
+    row.payload
+      ?.branchId;
 
   if (
     schoolId &&
     rowSchoolId &&
-    String(
+    !sameId(
       rowSchoolId,
-    ) !==
-      String(
-        schoolId,
-      )
+      schoolId,
+    )
   ) {
     return false;
   }
@@ -657,12 +580,10 @@ function branchScoped(
   if (
     branchId &&
     rowBranchId &&
-    String(
+    !sameId(
       rowBranchId,
-    ) !==
-      String(
-        branchId,
-      )
+      branchId,
+    )
   ) {
     return false;
   }
@@ -680,14 +601,19 @@ async function safeArray<
       tableName
     ];
 
-  return table?.toArray
+  return table
+    ?.toArray
     ? table.toArray()
     : [];
 }
 
-// ======================================================
-// DATE HELPERS
-// ======================================================
+function count(
+  rows: AnyRow[],
+) {
+  return rows.filter(
+    activeRow,
+  ).length;
+}
 
 function todayKey() {
   try {
@@ -704,25 +630,22 @@ function todayKey() {
 
 function dateLabel(
   value?:
-    number |
-    string |
-    null,
+    | number
+    | string
+    | null,
 ) {
   if (!value) {
     return "Not set";
   }
 
-  const time =
-    typeof value ===
-    "number"
-      ? value
-      : new Date(
-          value,
-        ).getTime();
+  const date =
+    new Date(
+      value as any,
+    );
 
   if (
     !Number.isFinite(
-      time,
+      date.getTime(),
     )
   ) {
     return "Not set";
@@ -736,84 +659,538 @@ function dateLabel(
           "short",
 
         day:
-          "2-digit",
+          "numeric",
       },
     ).format(
-      new Date(
-        time,
-      ),
+      date,
     );
   } catch {
     return "Not set";
   }
 }
 
-// ======================================================
-// HERO MEDIA
-// ======================================================
+function mediaUrl(
+  media: AnyRow[],
+  mediaId: unknown,
+) {
+  const targetId =
+    cleanId(
+      mediaId,
+    );
 
-function HeroMedia({
-  slide,
-  onEnded,
-}: {
-  slide:
-    HeroSlide;
-
-  onEnded():
-    void;
-}) {
   if (
-    slide.type ===
-    "video"
+    !targetId
   ) {
-    return (
-      <video
-        key={
-          slide.id
-        }
-        src={
-          slide.src
-        }
-        poster={
-          slide.poster
-        }
-        className="branch-home-hero-media"
-        autoPlay
-        muted
-        playsInline
-        preload="metadata"
-        onEnded={
-          onEnded
-        }
-      />
+    return "";
+  }
+
+  const asset =
+    media.find(
+      (
+        row,
+      ) =>
+        sameId(
+          idOf(
+            row,
+          ),
+          targetId,
+        ),
+    );
+
+  return text(
+    asset
+      ?.publicUrl ||
+      asset
+        ?.remoteUrl ||
+      asset
+        ?.localObjectUrl ||
+      asset
+        ?.previewDataUrl ||
+      asset
+        ?.thumbnailDataUrl,
+  );
+}
+
+function isBranchAudience(
+  row: AnyRow,
+) {
+  const audiences =
+    Array.isArray(
+      row.audiences,
+    )
+      ? row.audiences.map(
+          (
+            value: unknown,
+          ) =>
+            text(
+              value,
+            ).toLowerCase(),
+        )
+      : [
+          text(
+            row.audience ||
+              row.portal ||
+              row.role ||
+              "all",
+          ).toLowerCase(),
+        ];
+
+  return audiences.some(
+    (
+      value: string,
+    ) =>
+      [
+        "all",
+        "branch_admin",
+        "branch-admin",
+        "branch admin",
+        "admin",
+      ].includes(
+        value,
+      ),
+  );
+}
+
+function buildHeroSlides(
+  highlights: AnyRow[],
+  media: AnyRow[],
+) {
+  const now =
+    Date.now();
+
+  const highlightSlides =
+    highlights
+      .filter(
+        activeRow,
+      )
+
+      /*
+       * Gallery-only media should stay in the Portal Gallery.
+       * It should not automatically become a dashboard hero.
+       */
+      .filter(
+        (
+          row,
+        ) =>
+          row
+            ?.metadata
+            ?.placement !==
+          "gallery",
+      )
+
+      .filter(
+        (
+          row,
+        ) => {
+          if (
+            !isBranchAudience(
+              row,
+            )
+          ) {
+            return false;
+          }
+
+          const status =
+            text(
+              row.status,
+              "published",
+            ).toLowerCase();
+
+          if (
+            ![
+              "published",
+              "scheduled",
+              "active",
+            ].includes(
+              status,
+            )
+          ) {
+            return false;
+          }
+
+          const startAt =
+            n(
+              row.startAt,
+            );
+
+          const endAt =
+            n(
+              row.endAt,
+            );
+
+          if (
+            startAt &&
+            startAt >
+              now
+          ) {
+            return false;
+          }
+
+          if (
+            endAt &&
+            endAt <
+              now
+          ) {
+            return false;
+          }
+
+          return true;
+        },
+      )
+
+      .sort(
+        (
+          a,
+          b,
+        ) =>
+          n(
+            a.displayOrder ??
+              a.order,
+          ) -
+          n(
+            b.displayOrder ??
+              b.order,
+          ),
+      )
+
+      .map(
+        (
+          row,
+          index,
+        ):
+          HeroSlide | null => {
+          const type:
+            "image" | "video" =
+            text(
+              row.mediaType,
+            ).toLowerCase() ===
+            "video"
+              ? "video"
+              : "image";
+
+          const src =
+            mediaUrl(
+              media,
+              row.mediaAssetId,
+            ) ||
+            (
+              type ===
+              "image"
+                ? text(
+                    row.fallbackImageUrl,
+                  )
+                : ""
+            );
+
+          if (!src) {
+            return null;
+          }
+
+          const poster =
+            mediaUrl(
+              media,
+              row.posterMediaAssetId,
+            ) ||
+            text(
+              row.fallbackImageUrl,
+            );
+
+          return {
+            id:
+              cleanId(
+                idOf(
+                  row,
+                ),
+              ) ||
+              `portal-highlight-${index}`,
+
+            type,
+
+            src,
+
+            poster:
+              poster ||
+              undefined,
+
+            durationSeconds:
+              Math.max(
+                3,
+                Math.min(
+                  30,
+                  n(
+                    row.durationSeconds ||
+                      7,
+                  ),
+                ),
+              ),
+
+            transition:
+              row.transition ===
+              "slide"
+                ? "slide"
+                : "fade",
+
+            actionType:
+              text(
+                row.actionType,
+              ),
+
+            actionLabel:
+              text(
+                row.actionLabel,
+              ),
+
+            actionValue:
+              text(
+                row.actionValue,
+              ),
+          };
+        },
+      )
+
+      .filter(
+        (
+          row,
+        ): row is HeroSlide =>
+          Boolean(
+            row,
+          ),
+      );
+
+  /*
+   * School-created Portal Highlights always win.
+   *
+   * Only when there are no active highlights do we rotate
+   * the three Eleeveon defaults from /public.
+   */
+  return highlightSlides
+    .length
+    ? highlightSlides
+    : DEFAULT_HERO_SLIDES;
+}
+
+function PortalHero({
+  slides,
+  onAction,
+}: {
+  slides:
+    HeroSlide[];
+
+  onAction:
+    (
+      slide:
+        HeroSlide,
+    ) => void;
+}) {
+  const [
+    index,
+    setIndex,
+  ] =
+    useState(
+      0,
+    );
+
+  const slide =
+    slides[
+      index %
+        Math.max(
+          1,
+          slides.length,
+        )
+    ] ||
+    null;
+
+  useEffect(() => {
+    if (
+      !slide ||
+      slides.length <=
+        1 ||
+      slide.type ===
+        "video"
+    ) {
+      return;
+    }
+
+    const timer =
+      window.setTimeout(
+        () => {
+          setIndex(
+            (
+              current,
+            ) =>
+              (
+                current +
+                1
+              ) %
+              slides.length,
+          );
+        },
+
+        (
+          slide.durationSeconds ||
+          7
+        ) *
+          1000,
+      );
+
+    return () =>
+      window.clearTimeout(
+        timer,
+      );
+  }, [
+    slide,
+    slides.length,
+  ]);
+
+  useEffect(() => {
+    if (
+      index >=
+      slides.length
+    ) {
+      setIndex(
+        0,
+      );
+    }
+  }, [
+    index,
+    slides.length,
+  ]);
+
+  if (!slide) {
+    return null;
+  }
+
+  function advance() {
+    if (
+      slides.length <=
+      1
+    ) {
+      return;
+    }
+
+    setIndex(
+      (
+        current,
+      ) =>
+        (
+          current +
+          1
+        ) %
+        slides.length,
     );
   }
 
   return (
-    <img
-      key={
-        slide.id
-      }
-      src={
-        slide.src
-      }
-      alt=""
-      className="branch-home-hero-media"
-    />
+    <section
+      className={`bd-hero ${
+        slide.transition ===
+        "slide"
+          ? "slide-transition"
+          : "fade-transition"
+      }`}
+    >
+      <div
+        key={
+          slide.id
+        }
+        className="bd-hero-media"
+      >
+        {slide.type ===
+        "video" ? (
+          <video
+            src={
+              slide.src
+            }
+            poster={
+              slide.poster
+            }
+            autoPlay
+            muted
+            playsInline
+            preload="metadata"
+            onEnded={
+              advance
+            }
+            onError={
+              advance
+            }
+          />
+        ) : (
+          <img
+            src={
+              slide.src
+            }
+            alt=""
+          />
+        )}
+      </div>
+
+      {slide.actionLabel ? (
+        <button
+          type="button"
+          className="bd-hero-action"
+          onClick={() =>
+            onAction(
+              slide,
+            )
+          }
+        >
+          {
+            slide.actionLabel
+          }
+        </button>
+      ) : null}
+
+      {slides.length >
+      1 ? (
+        <div
+          className="bd-hero-dots"
+          aria-label="Portal highlights"
+        >
+          {slides.map(
+            (
+              item,
+              dotIndex,
+            ) => (
+              <button
+                key={
+                  item.id
+                }
+                type="button"
+                className={
+                  dotIndex ===
+                  index
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  setIndex(
+                    dotIndex,
+                  )
+                }
+                aria-label={`Show portal highlight ${
+                  dotIndex +
+                  1
+                }`}
+              />
+            ),
+          )}
+        </div>
+      ) : null}
+    </section>
   );
 }
-
-// ======================================================
-// DASHBOARD
-// ======================================================
 
 export default function BranchAdminDashboard({
   navigate,
   navSections,
 }: RouteProps) {
   /*
-   * Kept for compatibility with branch-admin/page.tsx.
-   * Module discovery belongs to Library/Search.
+   * Kept in the component signature so this remains a direct
+   * drop-in for app/branch-admin/page.tsx.
+   *
+   * Explore now owns the full module catalogue, so Home does
+   * not render navigation modules.
    */
   void navSections;
 
@@ -826,7 +1203,6 @@ export default function BranchAdminDashboard({
   const {
     accountId,
     authenticated,
-
     loading:
       accountLoading,
   } =
@@ -834,7 +1210,6 @@ export default function BranchAdminDashboard({
 
   const {
     settings,
-
     loading:
       settingsLoading,
   } =
@@ -843,7 +1218,6 @@ export default function BranchAdminDashboard({
   const {
     activeSchoolId,
     activeBranchId,
-
     activeSchool,
     activeBranch,
   } =
@@ -854,8 +1228,15 @@ export default function BranchAdminDashboard({
   } =
     useActiveMembership();
 
+  const {
+    loading,
+    setLoading,
+  } =
+    useBackgroundLoader();
+
   const primary =
-    settings?.primaryColor ||
+    settings
+      ?.primaryColor ||
     "var(--primary-color,#2563eb)";
 
   const openWorkspace =
@@ -866,38 +1247,38 @@ export default function BranchAdminDashboard({
     );
 
   const schoolId =
-    selectedSchoolId({
-      openWorkspace,
+    selectedSchoolId(
+      {
+        openWorkspace,
 
-      activeMembership,
+        activeMembership,
 
-      activeSchoolId,
+        activeSchoolId,
 
-      activeSchool,
+        activeSchool:
+          activeSchool as AnyRow,
 
-      settings:
-        settings as AnyRow,
-    });
+        settings:
+          settings as AnyRow,
+      },
+    );
 
   const branchId =
-    selectedBranchId({
-      openWorkspace,
+    selectedBranchId(
+      {
+        openWorkspace,
 
-      activeMembership,
+        activeMembership,
 
-      activeBranchId,
+        activeBranchId,
 
-      activeBranch,
+        activeBranch:
+          activeBranch as AnyRow,
 
-      settings:
-        settings as AnyRow,
-    });
-
-  const {
-    loading,
-    setLoading,
-  } =
-    useBackgroundLoader();
+        settings:
+          settings as AnyRow,
+      },
+    );
 
   const [
     rowsByTable,
@@ -909,10 +1290,6 @@ export default function BranchAdminDashboard({
         AnyRow[]
       >
     >({});
-
-  // ====================================================
-  // AUTH
-  // ====================================================
 
   useEffect(() => {
     if (
@@ -935,10 +1312,6 @@ export default function BranchAdminDashboard({
     accountId,
     router,
   ]);
-
-  // ====================================================
-  // LOAD
-  // ====================================================
 
   async function load() {
     if (
@@ -1000,7 +1373,7 @@ export default function BranchAdminDashboard({
       error
     ) {
       console.error(
-        "Failed to load branch admin home:",
+        "Failed to load branch admin dashboard:",
         error,
       );
     } finally {
@@ -1034,370 +1407,201 @@ export default function BranchAdminDashboard({
   const rows =
     rowsByTable;
 
-  // ====================================================
-  // IDENTITY
-  // ====================================================
-
-  const identity =
-    useMemo(() => {
-      const membership =
-        workspaceMembership(
-          openWorkspace,
-          activeMembership,
-        );
-
-      const possibleBranchIds =
-        [
-          branchId,
-
-          openWorkspace
-            ?.branchId,
-
-          membership
-            ?.branchId,
-
-          membership
-            ?.schoolBranchId,
-
-          membership
-            ?.branch?.id,
-
-          (
-            activeBranch as AnyRow
-          )?.id,
-
-          (
-            settings as AnyRow
-          )?.branchId,
-
-          safeRead(
-            "activeBranchId",
-          ),
-        ]
-          .map(
-            cleanId,
-          )
-          .filter(
-            Boolean,
-          );
-
-      const possibleSchoolIds =
-        [
-          schoolId,
-
-          openWorkspace
-            ?.schoolId,
-
-          membership
-            ?.schoolId,
-
-          membership
-            ?.school?.id,
-
-          (
-            activeSchool as AnyRow
-          )?.id,
-
-          (
-            settings as AnyRow
-          )?.schoolId,
-
-          safeRead(
-            "activeSchoolId",
-          ),
-        ]
-          .map(
-            cleanId,
-          )
-          .filter(
-            Boolean,
-          );
-
-      const branchRows =
-        (
-          rows.branches ||
-          []
-        ).filter(
-          activeRow,
-        );
-
-      const schoolRows =
-        (
-          rows.schools ||
-          []
-        ).filter(
-          activeRow,
-        );
-
-      const branch =
-        branchRows.find(
-          (
-            row,
-          ) =>
-            possibleBranchIds.includes(
-              idOf(
-                row,
-              ),
-            ),
-        ) ||
-        branchRows[0] ||
-        (
-          activeBranch as AnyRow
-        ) ||
-        membership?.branch ||
-        null;
-
-      const resolvedSchoolId =
-        cleanId(
-          branch?.schoolId,
-        ) ||
-        possibleSchoolIds[0] ||
-        "";
-
-      const school =
-        schoolRows.find(
-          (
-            row,
-          ) =>
-            idOf(
-              row,
-            ) ===
-            resolvedSchoolId,
-        ) ||
-        schoolRows[0] ||
-        (
-          activeSchool as AnyRow
-        ) ||
-        membership?.school ||
-        null;
-
-      return {
-        branch,
-        school,
-      };
-    }, [
-      rows.branches,
-      rows.schools,
-
-      branchId,
-      schoolId,
-
-      openWorkspace,
-      activeMembership,
-
-      activeBranch,
-      activeSchool,
-
-      settings,
-    ]);
-
-  // ====================================================
-  // ATTENDANCE
-  // ====================================================
-
   const summary =
-    useMemo(() => {
-      const today =
-        todayKey();
+    useMemo(
+      () => {
+        const today =
+          todayKey();
 
-      const students =
-        rows.students ||
-        [];
-
-      const teachers =
-        rows.teachers ||
-        [];
-
-      const studentAttendance =
-        rows.attendance ||
-        [];
-
-      const teacherAttendance =
-        rows.teacherAttendance ||
-        [];
-
-      const todayStudents =
-        studentAttendance.filter(
+        const students =
           (
-            row,
-          ) =>
-            String(
-              row.date ||
-                row.createdAt ||
-                "",
-            ).startsWith(
-              today,
-            ),
-        );
+            rows.students ||
+            []
+          ).filter(
+            activeRow,
+          );
 
-      const todayTeachers =
-        teacherAttendance.filter(
+        const teachers =
           (
-            row,
-          ) =>
-            String(
-              row.date ||
-                row.createdAt ||
-                "",
-            ).startsWith(
-              today,
-            ),
-        );
+            rows.teachers ||
+            []
+          ).filter(
+            activeRow,
+          );
 
-      const presentStudents =
-        todayStudents.filter(
+        const classes =
           (
-            row,
-          ) =>
-            String(
-              row.status ||
-                "",
-            )
-              .trim()
-              .toLowerCase() ===
-            "present",
-        ).length;
+            rows.classes ||
+            []
+          ).filter(
+            activeRow,
+          );
 
-      const lateStudents =
-        todayStudents.filter(
+        const studentAttendance =
           (
-            row,
-          ) =>
-            String(
-              row.status ||
-                "",
-            )
-              .trim()
-              .toLowerCase() ===
-            "late",
-        ).length;
+            rows.attendance ||
+            []
+          ).filter(
+            activeRow,
+          );
 
-      const presentTeachers =
-        todayTeachers.filter(
+        const teacherAttendance =
           (
-            row,
-          ) => {
-            const status =
-              String(
-                row.status ||
-                  "",
-              )
-                .trim()
-                .toLowerCase();
+            rows.teacherAttendance ||
+            []
+          ).filter(
+            activeRow,
+          );
 
-            return (
-              [
+        const todayStudents =
+          studentAttendance.filter(
+            (
+              row,
+            ) =>
+              text(
+                row.date ||
+                  row.attendanceDate ||
+                  row.createdAt,
+              ).startsWith(
+                today,
+              ),
+          );
+
+        const todayTeachers =
+          teacherAttendance.filter(
+            (
+              row,
+            ) =>
+              text(
+                row.date ||
+                  row.attendanceDate ||
+                  row.createdAt,
+              ).startsWith(
+                today,
+              ),
+          );
+
+        const studentPresent =
+          todayStudents.filter(
+            (
+              row,
+            ) => {
+              const status =
+                text(
+                  row.status,
+                ).toLowerCase();
+
+              return [
                 "present",
                 "late",
-                "on_time",
-                "on-time",
               ].includes(
                 status,
-              ) ||
-              Boolean(
-                row.clockIn,
+              );
+            },
+          ).length;
+
+        const studentAbsent =
+          todayStudents.filter(
+            (
+              row,
+            ) => {
+              const status =
+                text(
+                  row.status,
+                ).toLowerCase();
+
+              return [
+                "absent",
+                "excused",
+              ].includes(
+                status,
+              );
+            },
+          ).length;
+
+        const teacherPresent =
+          todayTeachers.filter(
+            (
+              row,
+            ) => {
+              const status =
+                text(
+                  row.status,
+                ).toLowerCase();
+
+              return (
+                [
+                  "present",
+                  "late",
+                  "clocked_in",
+                  "clocked-in",
+                ].includes(
+                  status,
+                ) ||
+                Boolean(
+                  row.clockIn,
+                )
+              );
+            },
+          ).length;
+
+        const studentAttendancePercent =
+          todayStudents.length
+            ? Math.round(
+                (
+                  studentPresent /
+                  todayStudents.length
+                ) *
+                  100,
               )
-            );
-          },
-        ).length;
+            : 0;
 
-      return {
-        students:
-          count(
-            students,
-          ),
+        const teacherAttendancePercent =
+          todayTeachers.length
+            ? Math.round(
+                (
+                  teacherPresent /
+                  todayTeachers.length
+                ) *
+                  100,
+              )
+            : 0;
 
-        teachers:
-          count(
-            teachers,
-          ),
+        return {
+          students:
+            students.length,
 
-        studentAttending:
-          presentStudents +
-          lateStudents,
+          teachers:
+            teachers.length,
 
-        teacherPresent:
-          presentTeachers,
-      };
-    }, [
-      rows.students,
-      rows.teachers,
-      rows.attendance,
-      rows.teacherAttendance,
-    ]);
+          classes:
+            classes.length,
 
-  const studentAttendancePercentage =
-    summary.students > 0
-      ? Math.min(
-          100,
+          studentPresent,
 
-          Math.round(
-            (
-              summary.studentAttending /
-              summary.students
-            ) *
-              100,
-          ),
-        )
-      : 0;
+          studentAbsent,
 
-  const teacherAttendancePercentage =
-    summary.teachers > 0
-      ? Math.min(
-          100,
+          studentAttendanceRecords:
+            todayStudents.length,
 
-          Math.round(
-            (
-              summary.teacherPresent /
-              summary.teachers
-            ) *
-              100,
-          ),
-        )
-      : 0;
+          studentAttendancePercent,
 
-  // ====================================================
-  // UPCOMING
-  // ====================================================
+          teacherPresent,
 
-  const events =
-    useMemo(
-      () =>
-        (
-          rows.calendarEvents ||
-          []
-        )
-          .filter(
-            activeRow,
-          )
-          .sort(
-            (
-              a,
-              b,
-            ) =>
-              n(
-                a.startAt ||
-                  a.startDate ||
-                  a.date,
-              ) -
-              n(
-                b.startAt ||
-                  b.startDate ||
-                  b.date,
-              ),
-          )
-          .slice(
-            0,
-            2,
-          ),
+          teacherAttendanceRecords:
+            todayTeachers.length,
+
+          teacherAttendancePercent,
+        };
+      },
       [
-        rows.calendarEvents,
+        rows.students,
+        rows.teachers,
+        rows.classes,
+        rows.attendance,
+        rows.teacherAttendance,
       ],
     );
-
-  // ====================================================
-  // ANNOUNCEMENTS
-  // ====================================================
 
   const announcements =
     useMemo(
@@ -1414,18 +1618,20 @@ export default function BranchAdminDashboard({
               a,
               b,
             ) =>
-              n(
+              new Date(
                 b.publishAt ||
                   b.sentAt ||
                   b.updatedAt ||
-                  b.createdAt,
-              ) -
-              n(
+                  b.createdAt ||
+                  0,
+              ).getTime() -
+              new Date(
                 a.publishAt ||
                   a.sentAt ||
                   a.updatedAt ||
-                  a.createdAt,
-              ),
+                  a.createdAt ||
+                  0,
+              ).getTime(),
           )
           .slice(
             0,
@@ -1436,409 +1642,62 @@ export default function BranchAdminDashboard({
       ],
     );
 
-  // ====================================================
-  // PORTAL HIGHLIGHTS
-  // ====================================================
-
-  const heroSlides =
-    useMemo<
-      HeroSlide[]
-    >(() => {
-      const media =
+  const events =
+    useMemo(
+      () =>
         (
-          rows.mediaAssets ||
-          []
-        ).filter(
-          activeRow,
-        );
-
-      const now =
-        Date.now();
-
-      const mediaUrl =
-        (
-          mediaId:
-            unknown,
-        ) => {
-          const asset =
-            media.find(
-              (
-                row,
-              ) =>
-                idOf(
-                  row,
-                ) ===
-                cleanId(
-                  mediaId,
-                ),
-            );
-
-          return text(
-            asset?.publicUrl ||
-              asset?.remoteUrl ||
-              asset?.storageUrl ||
-              asset?.downloadUrl ||
-              asset?.localObjectUrl ||
-              asset?.previewDataUrl ||
-              asset?.thumbnailDataUrl,
-          );
-        };
-
-      const highlightSlides =
-        (
-          rows.portalHighlights ||
+          rows.calendarEvents ||
           []
         )
           .filter(
             activeRow,
           )
-
-          .filter(
-            (
-              row,
-            ) =>
-              row
-                ?.metadata
-                ?.placement !==
-              "gallery",
-          )
-
-          .filter(
-            (
-              row,
-            ) => {
-              const audiences =
-                Array.isArray(
-                  row.audiences,
-                )
-                  ? row.audiences.map(
-                      (
-                        value:
-                          unknown,
-                      ) =>
-                        String(
-                          value,
-                        ).toLowerCase(),
-                    )
-                  : [
-                      String(
-                        row.audience ||
-                          row.portal ||
-                          row.role ||
-                          "all",
-                      ).toLowerCase(),
-                    ];
-
-              if (
-                !audiences.some(
-                  (
-                    value:
-                      string,
-                  ) =>
-                    [
-                      "all",
-                      "branch_admin",
-                      "branch-admin",
-                      "admin",
-                    ].includes(
-                      value,
-                    ),
-                )
-              ) {
-                return false;
-              }
-
-              const status =
-                String(
-                  row.status ||
-                    "published",
-                ).toLowerCase();
-
-              if (
-                ![
-                  "published",
-                  "scheduled",
-                  "active",
-                ].includes(
-                  status,
-                )
-              ) {
-                return false;
-              }
-
-              const startAt =
-                Number(
-                  row.startAt ||
-                    0,
-                );
-
-              const endAt =
-                Number(
-                  row.endAt ||
-                    0,
-                );
-
-              if (
-                startAt &&
-                startAt >
-                  now
-              ) {
-                return false;
-              }
-
-              if (
-                endAt &&
-                endAt <
-                  now
-              ) {
-                return false;
-              }
-
-              return true;
-            },
-          )
-
           .sort(
             (
               a,
               b,
             ) =>
-              n(
-                a.displayOrder ||
-                  a.order,
-              ) -
-              n(
-                b.displayOrder ||
-                  b.order,
-              ),
+              new Date(
+                a.startAt ||
+                  a.startDate ||
+                  a.date ||
+                  0,
+              ).getTime() -
+              new Date(
+                b.startAt ||
+                  b.startDate ||
+                  b.date ||
+                  0,
+              ).getTime(),
           )
-
-          .map(
-            (
-              row,
-              index,
-            ):
-              HeroSlide |
-              null => {
-              const type =
-                String(
-                  row.mediaType ||
-                    "",
-                ).toLowerCase() ===
-                "video"
-                  ? "video"
-                  : "image";
-
-              const src =
-                mediaUrl(
-                  row.mediaAssetId,
-                ) ||
-                (
-                  type ===
-                  "image"
-                    ? text(
-                        row.fallbackImageUrl,
-                      )
-                    : ""
-                );
-
-              const poster =
-                mediaUrl(
-                  row.posterMediaAssetId,
-                ) ||
-                text(
-                  row.fallbackImageUrl,
-                );
-
-              if (
-                !src
-              ) {
-                return null;
-              }
-
-              return {
-                id:
-                  cleanId(
-                    idOf(
-                      row,
-                    ),
-                  ) ||
-                  `portal-highlight-${index}`,
-
-                type,
-
-                src,
-
-                poster:
-                  poster ||
-                  undefined,
-
-                title:
-                  text(
-                    row.title,
-                  ),
-
-                subtitle:
-                  text(
-                    row.subtitle ||
-                      row.description,
-                  ),
-
-                durationSeconds:
-                  Math.max(
-                    3,
-
-                    Math.min(
-                      30,
-
-                      n(
-                        row.durationSeconds ||
-                          7,
-                      ),
-                    ),
-                  ),
-
-                transition:
-                  row.transition ===
-                  "slide"
-                    ? "slide"
-                    : "fade",
-
-                actionType:
-                  text(
-                    row.actionType,
-                  ),
-
-                actionLabel:
-                  text(
-                    row.actionLabel,
-                  ),
-
-                actionValue:
-                  text(
-                    row.actionValue,
-                  ),
-              };
-            },
-          )
-
-          .filter(
-            (
-              row,
-            ):
-              row is HeroSlide =>
-              Boolean(
-                row,
-              ),
-          );
-
-      /*
-       * School/platform supplied highlights win.
-       *
-       * Otherwise use the three bundled Eleeveon defaults.
-       */
-      return highlightSlides.length
-        ? highlightSlides
-        : DEFAULT_HERO_SLIDES;
-    }, [
-      rows.mediaAssets,
-      rows.portalHighlights,
-      identity,
-    ]);
-
-  const [
-    heroSlideIndex,
-    setHeroSlideIndex,
-  ] =
-    useState(
-      0,
+          .slice(
+            0,
+            2,
+          ),
+      [
+        rows.calendarEvents,
+      ],
     );
 
-  const activeHeroSlide =
-    heroSlides[
-      heroSlideIndex %
-        Math.max(
-          1,
-          heroSlides.length,
-        )
-    ] ||
-    null;
+  const heroSlides =
+    useMemo(
+      () =>
+        buildHeroSlides(
+          rows.portalHighlights ||
+            [],
 
-  useEffect(() => {
-    if (
-      !heroSlides.length
-    ) {
-      setHeroSlideIndex(
-        0,
-      );
-
-      return;
-    }
-
-    if (
-      heroSlideIndex >=
-      heroSlides.length
-    ) {
-      setHeroSlideIndex(
-        0,
-      );
-
-      return;
-    }
-
-    if (
-      activeHeroSlide
-        ?.type ===
-      "video"
-    ) {
-      return;
-    }
-
-    const timer =
-      window.setTimeout(
-        () => {
-          setHeroSlideIndex(
-            (
-              current,
-            ) =>
-              (
-                current +
-                1
-              ) %
-              heroSlides.length,
-          );
-        },
-
-        (
-          activeHeroSlide
-            ?.durationSeconds ||
-          7
-        ) *
-          1000,
-      );
-
-    return () =>
-      window.clearTimeout(
-        timer,
-      );
-  }, [
-    activeHeroSlide
-      ?.durationSeconds,
-
-    activeHeroSlide
-      ?.id,
-
-    activeHeroSlide
-      ?.type,
-
-    heroSlideIndex,
-
-    heroSlides.length,
-  ]);
-
-  // ====================================================
-  // NAVIGATION
-  // ====================================================
+          (
+            rows.mediaAssets ||
+            []
+          ).filter(
+            activeRow,
+          ),
+        ),
+      [
+        rows.portalHighlights,
+        rows.mediaAssets,
+      ],
+    );
 
   function openRoute(
     routeKey: string,
@@ -1865,32 +1724,35 @@ export default function BranchAdminDashboard({
           },
         ),
       );
-    } catch {}
-  }
 
-  function advanceHero() {
-    if (
-      heroSlides.length <=
-      1
-    ) {
-      return;
+      window.dispatchEvent(
+        new CustomEvent(
+          "role-portal:navigate",
+          {
+            detail: {
+              key:
+                routeKey,
+            },
+          },
+        ),
+      );
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "portal:navigate",
+          {
+            detail:
+              routeKey,
+          },
+        ),
+      );
+    } catch {
+      // RolePortalShell remains the normal navigation owner.
     }
-
-    setHeroSlideIndex(
-      (
-        current,
-      ) =>
-        (
-          current +
-          1
-        ) %
-        heroSlides.length,
-    );
   }
 
   function openHeroAction(
-    slide:
-      HeroSlide,
+    slide: HeroSlide,
   ) {
     if (
       !slide.actionType ||
@@ -1914,23 +1776,7 @@ export default function BranchAdminDashboard({
 
     if (
       slide.actionType ===
-        "external_url" &&
-      slide.actionValue &&
-      typeof window !==
-        "undefined"
-    ) {
-      window.open(
-        slide.actionValue,
-        "_blank",
-        "noopener,noreferrer",
-      );
-
-      return;
-    }
-
-    if (
-      slide.actionType ===
-      "announcement"
+        "announcement"
     ) {
       openRoute(
         "announcements",
@@ -1941,17 +1787,29 @@ export default function BranchAdminDashboard({
 
     if (
       slide.actionType ===
-      "calendar_event"
+        "calendar_event"
     ) {
       openRoute(
         "calendar",
       );
+
+      return;
+    }
+
+    if (
+      slide.actionType ===
+        "external_url" &&
+      slide.actionValue &&
+      typeof window !==
+        "undefined"
+    ) {
+      window.open(
+        slide.actionValue,
+        "_blank",
+        "noopener,noreferrer",
+      );
     }
   }
-
-  // ====================================================
-  // STATES
-  // ====================================================
 
   if (
     loading ||
@@ -1959,31 +1817,15 @@ export default function BranchAdminDashboard({
     settingsLoading
   ) {
     return (
-      <main
-        className="branch-home-page"
-        style={
-          {
-            "--branch-home-primary":
-              primary,
-          } as React.CSSProperties
+      <State
+        primary={
+          primary
         }
-      >
-        <style>
-          {css}
-        </style>
 
-        <section className="branch-home-state">
-          <div className="branch-home-spinner" />
+        title="Opening branch home..."
 
-          <strong>
-            Opening branch home...
-          </strong>
-
-          <span>
-            Preparing your dashboard.
-          </span>
-        </section>
-      </main>
+        text="Preparing attendance, announcements and school activity."
+      />
     );
   }
 
@@ -1992,30 +1834,24 @@ export default function BranchAdminDashboard({
     !accountId
   ) {
     return (
-      <main className="branch-home-page">
-        <style>
-          {css}
-        </style>
+      <State
+        primary={
+          primary
+        }
 
-        <section className="branch-home-state">
-          <strong>
-            Redirecting to login...
-          </strong>
-        </section>
-      </main>
+        title="Redirecting to login..."
+
+        text="You must sign in before viewing the Branch Admin portal."
+      />
     );
   }
 
-  // ====================================================
-  // HOME
-  // ====================================================
-
   return (
     <main
-      className="branch-home-page"
+      className="bd-page"
       style={
         {
-          "--branch-home-primary":
+          "--bd-primary":
             primary,
         } as React.CSSProperties
       }
@@ -2024,504 +1860,479 @@ export default function BranchAdminDashboard({
         {css}
       </style>
 
-      {/* =================================================
-       * HERO
-       * ================================================= */}
+      <PortalHero
+        slides={
+          heroSlides
+        }
 
-      {activeHeroSlide ? (
-        <>
-          <section className="branch-home-hero">
-            <HeroMedia
-              slide={
-                activeHeroSlide
+        onAction={
+          openHeroAction
+        }
+      />
+
+      <section
+        className="bd-attendance-grid"
+        aria-label="Today's attendance"
+      >
+        <button
+          type="button"
+          className="bd-attendance-card"
+          onClick={() =>
+            openRoute(
+              "studentAttendance",
+            )
+          }
+        >
+          <div className="bd-attendance-top">
+            <span className="bd-attendance-icon">
+              🎓
+            </span>
+
+            <span className="bd-attendance-label">
+              Student attendance
+            </span>
+          </div>
+
+          <div className="bd-attendance-value">
+            <strong>
+              {
+                summary.studentAttendancePercent
               }
-              onEnded={
-                advanceHero
+              %
+            </strong>
+
+            <span>
+              Today
+            </span>
+          </div>
+
+          <div className="bd-attendance-meta">
+            <span>
+              <b>
+                {
+                  summary.studentPresent
+                }
+              </b>{" "}
+              present
+            </span>
+
+            <span>
+              <b>
+                {
+                  summary.studentAbsent
+                }
+              </b>{" "}
+              absent
+            </span>
+          </div>
+        </button>
+
+        <button
+          type="button"
+          className="bd-attendance-card"
+          onClick={() =>
+            openRoute(
+              "teacherAttendance",
+            )
+          }
+        >
+          <div className="bd-attendance-top">
+            <span className="bd-attendance-icon">
+              👨‍🏫
+            </span>
+
+            <span className="bd-attendance-label">
+              Teacher attendance
+            </span>
+          </div>
+
+          <div className="bd-attendance-value">
+            <strong>
+              {
+                summary.teacherAttendancePercent
               }
-            />
+              %
+            </strong>
 
-            {/*
-             * User/school identity text has been removed.
-             *
-             * Real Portal Highlights may still supply their
-             * own editorial title/subtitle/action.
-             */}
-            {activeHeroSlide.title ||
-            activeHeroSlide.subtitle ||
-            activeHeroSlide.actionLabel ? (
-              <div className="branch-home-highlight-caption">
-                {activeHeroSlide.title ? (
-                  <strong>
-                    {
-                      activeHeroSlide.title
-                    }
-                  </strong>
-                ) : null}
+            <span>
+              Today
+            </span>
+          </div>
 
-                {activeHeroSlide.subtitle ? (
-                  <span>
-                    {
-                      activeHeroSlide.subtitle
-                    }
-                  </span>
-                ) : null}
+          <div className="bd-attendance-meta">
+            <span>
+              <b>
+                {
+                  summary.teacherPresent
+                }
+              </b>{" "}
+              present
+            </span>
 
-                {activeHeroSlide.actionLabel &&
-                activeHeroSlide.actionType &&
-                activeHeroSlide.actionType !==
-                  "none" ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      openHeroAction(
-                        activeHeroSlide,
-                      )
-                    }
-                  >
-                    {
-                      activeHeroSlide.actionLabel
-                    }
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </section>
+            <span>
+              <b>
+                {
+                  summary.teacherAttendanceRecords
+                }
+              </b>{" "}
+              recorded
+            </span>
+          </div>
+        </button>
+      </section>
 
-          {heroSlides.length >
-          1 ? (
-            <div
-              className="branch-home-hero-dots"
-              aria-label="Portal highlights"
+      <section className="bd-content-grid">
+        <article className="bd-card">
+          <div className="bd-section-head">
+            <div>
+              <span>
+                School day
+              </span>
+
+              <h2>
+                Upcoming
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                openRoute(
+                  "calendar",
+                )
+              }
             >
-              {heroSlides.map(
+              Calendar
+            </button>
+          </div>
+
+          <div className="bd-stack">
+            {events.length ? (
+              events.map(
                 (
-                  slide,
+                  event,
                   index,
                 ) => (
                   <button
                     key={
-                      slide.id
+                      cleanId(
+                        idOf(
+                          event,
+                        ),
+                      ) ||
+                      index
                     }
                     type="button"
-                    className={
-                      index ===
-                      heroSlideIndex
-                        ? "active"
-                        : ""
-                    }
+                    className="bd-event-row"
                     onClick={() =>
-                      setHeroSlideIndex(
-                        index,
+                      openRoute(
+                        "calendar",
                       )
                     }
-                    aria-label={`Show highlight ${index + 1}`}
-                  />
+                  >
+                    <span className="bd-event-date">
+                      {dateLabel(
+                        event.startAt ||
+                          event.startDate ||
+                          event.date,
+                      )}
+                    </span>
+
+                    <span className="bd-event-copy">
+                      <strong>
+                        {text(
+                          event.title ||
+                            event.name,
+                          "School event",
+                        )}
+                      </strong>
+
+                      <small>
+                        {text(
+                          event.location ||
+                            event.venue,
+                          "School calendar",
+                        )}
+                      </small>
+                    </span>
+
+                    <i>
+                      ›
+                    </i>
+                  </button>
                 ),
-              )}
+              )
+            ) : (
+              <MiniEmpty
+                icon="🗓️"
+                text="No upcoming events yet."
+              />
+            )}
+          </div>
+        </article>
+
+        <article className="bd-card">
+          <div className="bd-section-head">
+            <div>
+              <span>
+                Notice board
+              </span>
+
+              <h2>
+                Announcements
+              </h2>
             </div>
-          ) : null}
-        </>
-      ) : null}
 
-      {/* =================================================
-       * ATTENDANCE
-       * ================================================= */}
-
-      <section className="branch-home-section">
-        <header className="branch-home-section-head">
-          <span>
-            Today
-          </span>
-
-          <h2>
-            Attendance
-          </h2>
-        </header>
-
-        <div className="branch-attendance-grid">
-          <button
-            type="button"
-            className="branch-attendance-card"
-            onClick={() =>
-              openRoute(
-                "studentAttendance",
-              )
-            }
-          >
-            <span className="branch-attendance-icon">
-              <AttendanceIcon />
-            </span>
-
-            <span className="branch-attendance-copy">
-              <small>
-                Students
-              </small>
-
-              <strong>
-                {
-                  studentAttendancePercentage
-                }
-                %
-              </strong>
-
-              <em>
-                {
-                  summary.studentAttending
-                }
-                {" of "}
-                {
-                  summary.students
-                }
-              </em>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="branch-attendance-card"
-            onClick={() =>
-              openRoute(
-                "teacherAttendance",
-              )
-            }
-          >
-            <span className="branch-attendance-icon">
-              <TeacherIcon />
-            </span>
-
-            <span className="branch-attendance-copy">
-              <small>
-                Teachers
-              </small>
-
-              <strong>
-                {
-                  teacherAttendancePercentage
-                }
-                %
-              </strong>
-
-              <em>
-                {
-                  summary.teacherPresent
-                }
-                {" of "}
-                {
-                  summary.teachers
-                }
-              </em>
-            </span>
-          </button>
-        </div>
-      </section>
-
-      {/* =================================================
-       * UPCOMING
-       * ================================================= */}
-
-      <section className="branch-home-section">
-        <header className="branch-home-section-head horizontal">
-          <div>
-            <span>
-              School day
-            </span>
-
-            <h2>
-              Upcoming
-            </h2>
+            <button
+              type="button"
+              onClick={() =>
+                openRoute(
+                  "announcements",
+                )
+              }
+            >
+              View all
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              openRoute(
-                "calendar",
+          <div className="bd-stack">
+            {announcements.length ? (
+              announcements.map(
+                (
+                  item,
+                  index,
+                ) => (
+                  <button
+                    key={
+                      cleanId(
+                        idOf(
+                          item,
+                        ),
+                      ) ||
+                      index
+                    }
+                    type="button"
+                    className="bd-notice-row"
+                    onClick={() =>
+                      openRoute(
+                        "announcements",
+                      )
+                    }
+                  >
+                    <span className="bd-notice-icon">
+                      📣
+                    </span>
+
+                    <span className="bd-notice-copy">
+                      <strong>
+                        {text(
+                          item.title,
+                          "Announcement",
+                        )}
+                      </strong>
+
+                      <small>
+                        {text(
+                          item.message ||
+                            item.body ||
+                            item.content,
+                          "Open to read this school update.",
+                        )}
+                      </small>
+                    </span>
+
+                    <i>
+                      ›
+                    </i>
+                  </button>
+                ),
               )
-            }
-          >
-            Calendar
-          </button>
-        </header>
-
-        <div className="branch-home-list">
-          {events.length ? (
-            events.map(
-              (
-                event,
-                index,
-              ) => (
-                <button
-                  type="button"
-                  className="branch-home-row"
-                  key={
-                    idOf(
-                      event,
-                    ) ||
-                    String(
-                      index,
-                    )
-                  }
-                  onClick={() =>
-                    openRoute(
-                      "calendar",
-                    )
-                  }
-                >
-                  <span className="branch-home-date">
-                    {dateLabel(
-                      event.startAt ||
-                        event.startDate ||
-                        event.date,
-                    )}
-                  </span>
-
-                  <span className="branch-home-row-copy">
-                    <strong>
-                      {text(
-                        event.title ||
-                          event.name,
-
-                        "School event",
-                      )}
-                    </strong>
-
-                    <small>
-                      {text(
-                        event.location ||
-                          event.venue,
-
-                        "School calendar",
-                      )}
-                    </small>
-                  </span>
-
-                  <b>
-                    ›
-                  </b>
-                </button>
-              ),
-            )
-          ) : (
-            <div className="branch-home-empty">
-              No upcoming events.
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* =================================================
-       * ANNOUNCEMENTS
-       * ================================================= */}
-
-      <section className="branch-home-section">
-        <header className="branch-home-section-head horizontal">
-          <div>
-            <span>
-              Notice board
-            </span>
-
-            <h2>
-              Announcements
-            </h2>
+            ) : (
+              <MiniEmpty
+                icon="📣"
+                text="No announcements published."
+              />
+            )}
           </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              openRoute(
-                "announcements",
-              )
-            }
-          >
-            View all
-          </button>
-        </header>
-
-        <div className="branch-home-list">
-          {announcements.length ? (
-            announcements.map(
-              (
-                item,
-                index,
-              ) => (
-                <button
-                  type="button"
-                  className="branch-home-row"
-                  key={
-                    idOf(
-                      item,
-                    ) ||
-                    String(
-                      index,
-                    )
-                  }
-                  onClick={() =>
-                    openRoute(
-                      "announcements",
-                    )
-                  }
-                >
-                  <span className="branch-home-announcement-icon">
-                    📣
-                  </span>
-
-                  <span className="branch-home-row-copy">
-                    <strong>
-                      {text(
-                        item.title,
-
-                        "Announcement",
-                      )}
-                    </strong>
-
-                    <small>
-                      {text(
-                        item.message ||
-                          item.body ||
-                          item.content,
-
-                        "Open to read this school update.",
-                      ).slice(
-                        0,
-                        90,
-                      )}
-                    </small>
-                  </span>
-
-                  <b>
-                    ›
-                  </b>
-                </button>
-              ),
-            )
-          ) : (
-            <div className="branch-home-empty">
-              No announcements published.
-            </div>
-          )}
-        </div>
+        </article>
       </section>
     </main>
   );
 }
 
-// ======================================================
-// CSS
-// ======================================================
+function MiniEmpty({
+  icon,
+  text: body,
+}: {
+  icon: string;
+
+  text: string;
+}) {
+  return (
+    <div className="bd-mini-empty">
+      <span>
+        {icon}
+      </span>
+
+      <p>
+        {body}
+      </p>
+    </div>
+  );
+}
+
+function State({
+  primary,
+  title,
+  text: body,
+}: {
+  primary: string;
+
+  title: string;
+
+  text: string;
+}) {
+  return (
+    <main
+      className="bd-page"
+      style={
+        {
+          "--bd-primary":
+            primary,
+        } as React.CSSProperties
+      }
+    >
+      <style>
+        {css}
+      </style>
+
+      <section className="bd-state">
+        <div className="bd-spinner" />
+
+        <h2>
+          {title}
+        </h2>
+
+        <p>
+          {body}
+        </p>
+      </section>
+    </main>
+  );
+}
 
 const css = `
-/*
- * =====================================================
- * PAGE
- * =====================================================
- *
- * NO:
- *
- * height: 100vh
- * height: 100dvh
- * overflow-y: auto
- * overflow-y: scroll
- *
- * The document owns scrolling.
- */
+@keyframes bdSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-.branch-home-page {
-  width:
-    100%;
+@keyframes bdHeroFade {
+  from {
+    opacity: .32;
+  }
 
-  min-width:
-    0;
+  to {
+    opacity: 1;
+  }
+}
 
-  max-width:
-    900px;
+@keyframes bdHeroSlide {
+  from {
+    opacity: .55;
+    transform: translateX(3%);
+  }
 
-  margin:
-    0 auto;
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+
+/* =========================================================
+   PAGE
+   ========================================================= */
+
+.bd-page {
+  --ease:
+    cubic-bezier(.2,.8,.2,1);
+
+  width: 100%;
+
+  height: auto !important;
+
+  min-height: 0 !important;
+
+  max-height: none !important;
+
+  overflow-x: hidden !important;
+
+  overflow-y: visible !important;
 
   padding:
-    8px 8px
-    10px;
-
-  display:
-    grid;
-
-  gap:
-    10px;
+    8px
+    8px
+    calc(
+      76px +
+      env(
+        safe-area-inset-bottom,
+        0px
+      )
+    );
 
   background:
-    transparent;
+    var(
+      --bg,
+      #f7f8fb
+    );
 
   color:
     var(
-      --eds-text,
-      var(--text, #111827)
+      --text,
+      #111827
     );
 
-  overflow:
-    visible;
+  font-family:
+    var(
+      --font-family,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif
+    );
 }
 
-/*
- * Critical single-scroll ownership.
- *
- * Undo any dashboard/page-level scrolling styles inherited
- * from older dashboard generations.
- */
+.bd-page *,
+.bd-page *::before,
+.bd-page *::after {
+  box-sizing:
+    border-box;
 
-.branch-home-page,
-.branch-home-page *,
-.app-content,
-.app-content-inner,
-.shell-portal-content,
-.shell-content-background {
-  max-height:
-    none;
+  min-width:
+    0;
 }
 
-.branch-home-page {
-  height:
-    auto !important;
-
-  min-height:
-    0 !important;
-
-  overflow-y:
-    visible !important;
-}
-
-.app-content,
-.app-content-inner,
-.shell-portal-content,
-.shell-content-background {
-  height:
-    auto !important;
-
-  max-height:
-    none !important;
-
-  overflow-y:
-    visible !important;
-}
-
-/*
- * Do not add another min-height:100vh from old dashboard
- * background components because this dashboard no longer
- * uses those components.
- */
-
-.branch-home-page
-button {
+.bd-page button {
   font:
     inherit;
+
+  cursor:
+    pointer;
+
+  -webkit-tap-highlight-color:
+    transparent;
 }
 
-/*
- * =====================================================
- * HERO
- * =====================================================
- */
 
-.branch-home-hero {
+/* =========================================================
+   HERO
+   EXACT SAME HEIGHT LANGUAGE AS TEACHER DASHBOARD
+   ========================================================= */
+
+.bd-hero {
   position:
     relative;
 
@@ -2530,33 +2341,45 @@ button {
 
   height:
     clamp(
-      420px,
-      50dvh,
-      570px
+      290px,
+      47vw,
+      390px
     );
+
+  min-height:
+    0 !important;
+
+  max-height:
+    390px;
 
   overflow:
     hidden;
 
   border-radius:
-    28px;
+    25px;
 
   background:
-    #0f172a;
-
-  border:
-    1px solid
-    var(
-      --eds-border,
-      rgba(0,0,0,.08)
+    color-mix(
+      in srgb,
+      var(
+        --bd-primary
+      ) 12%,
+      #0f172a
     );
 
   box-shadow:
-    0 12px 32px
-    rgba(15,23,42,.10);
+    0
+    14px
+    34px
+    rgba(
+      15,
+      23,
+      42,
+      .08
+    );
 }
 
-.branch-home-hero-media {
+.bd-hero-media {
   position:
     absolute;
 
@@ -2564,409 +2387,240 @@ button {
     0;
 
   width:
-    100% !important;
+    100%;
 
   height:
-    100% !important;
+    100%;
+}
 
-  max-width:
-    none !important;
+.bd-hero-media img,
+.bd-hero-media video {
+  width:
+    100%;
+
+  height:
+    100%;
+
+  display:
+    block;
 
   object-fit:
     cover;
 
   object-position:
     center;
-
-  display:
-    block;
 }
 
-/*
- * Only editorial Portal Highlight text appears here.
- *
- * Default Eleeveon slides contain no text overlay.
- */
+.bd-hero.fade-transition
+.bd-hero-media {
+  animation:
+    bdHeroFade
+    .55s
+    ease;
+}
 
-.branch-home-highlight-caption {
+.bd-hero.slide-transition
+.bd-hero-media {
+  animation:
+    bdHeroSlide
+    .55s
+    ease;
+}
+
+.bd-hero-action {
   position:
     absolute;
 
   left:
-    16px;
-
-  right:
-    16px;
-
-  bottom:
-    16px;
-
-  display:
-    grid;
-
-  justify-items:
-    start;
-
-  gap:
-    5px;
-
-  padding:
     14px;
 
-  border-radius:
-    18px;
+  bottom:
+    14px;
 
-  background:
-    linear-gradient(
-      135deg,
-      rgba(7,18,36,.80),
-      rgba(7,18,36,.55)
+  z-index:
+    3;
+
+  max-width:
+    calc(
+      100% -
+      100px
     );
 
-  color:
-    #ffffff;
+  overflow:
+    hidden;
 
-  backdrop-filter:
-    blur(12px);
-}
+  text-overflow:
+    ellipsis;
 
-.branch-home-highlight-caption
-strong {
-  font-size:
-    18px;
+  white-space:
+    nowrap;
 
-  line-height:
-    1.15;
-
-  font-weight:
-    900;
-}
-
-.branch-home-highlight-caption
-span {
-  font-size:
-    11px;
-
-  line-height:
-    1.45;
-
-  color:
-    rgba(255,255,255,.82);
-}
-
-.branch-home-highlight-caption
-button {
   min-height:
     34px;
 
-  margin-top:
-    4px;
+  padding:
+    0
+    13px;
 
   border:
-    0;
+    1px
+    solid
+    rgba(
+      255,
+      255,
+      255,
+      .28
+    );
 
   border-radius:
     999px;
 
-  padding:
-    0 14px;
-
   background:
-    #ffffff;
+    rgba(
+      15,
+      23,
+      42,
+      .45
+    );
 
   color:
-    #111827;
+    #fff;
 
   font-size:
     10px;
 
   font-weight:
-    850;
+    900;
 
-  cursor:
-    pointer;
+  backdrop-filter:
+    blur(
+      10px
+    );
 }
 
-.branch-home-hero-dots {
+.bd-hero-dots {
+  position:
+    absolute;
+
+  left:
+    50%;
+
+  bottom:
+    11px;
+
+  z-index:
+    4;
+
   display:
     flex;
 
   align-items:
     center;
 
-  justify-content:
-    center;
-
   gap:
     6px;
 
-  min-height:
-    18px;
+  transform:
+    translateX(
+      -50%
+    );
 }
 
-.branch-home-hero-dots
-button {
+.bd-hero-dots button {
   width:
     7px;
 
   height:
     7px;
 
+  padding:
+    0;
+
   border:
     0;
 
   border-radius:
     999px;
 
-  padding:
-    0;
-
   background:
-    color-mix(
-      in srgb,
-      var(
-        --branch-home-primary,
-        #2563eb
-      ) 28%,
-      transparent
+    rgba(
+      255,
+      255,
+      255,
+      .52
     );
 
-  cursor:
-    pointer;
-
   transition:
-    width .18s ease,
-    background-color .18s ease;
+    width
+    .18s
+    ease,
+    background
+    .18s
+    ease;
 }
 
-.branch-home-hero-dots
-button.active {
+.bd-hero-dots button.active {
   width:
     20px;
 
   background:
-    var(
-      --branch-home-primary,
-      #2563eb
-    );
+    #fff;
 }
 
-/*
- * =====================================================
- * SECTIONS
- * =====================================================
- */
 
-.branch-home-section {
-  min-width:
-    0;
+/* =========================================================
+   ATTENDANCE
+   ========================================================= */
 
-  display:
-    grid;
-
-  gap:
-    10px;
-
-  padding:
-    14px;
-
-  border:
-    1px solid
-    var(
-      --eds-border,
-      var(--border, rgba(15,23,42,.08))
-    );
-
-  border-radius:
-    22px;
-
-  background:
-    var(
-      --eds-surface,
-      var(--surface, #ffffff)
-    );
-
-  box-shadow:
-    0 6px 20px
-    rgba(15,23,42,.045);
-}
-
-.branch-home-section-head {
-  min-width:
-    0;
-}
-
-.branch-home-section-head.horizontal {
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    space-between;
-
-  gap:
-    12px;
-}
-
-.branch-home-section-head
-span {
-  display:
-    block;
-
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    9px;
-
-  font-weight:
-    850;
-
-  letter-spacing:
-    .07em;
-
-  text-transform:
-    uppercase;
-}
-
-.branch-home-section-head
-h2 {
-  margin:
-    3px 0 0;
-
-  color:
-    var(
-      --eds-text-strong,
-      var(--text, #111827)
-    );
-
-  font-size:
-    20px;
-
-  line-height:
-    1.1;
-
-  font-weight:
-    850;
-}
-
-.branch-home-section-head
-> button,
-.branch-home-section-head
-.horizontal
-button {
-  flex:
-    0 0 auto;
-
-  min-height:
-    32px;
-
-  border:
-    0;
-
-  border-radius:
-    999px;
-
-  padding:
-    0 11px;
-
-  background:
-    var(
-      --eds-primary-softer,
-      color-mix(
-        in srgb,
-        var(
-          --branch-home-primary,
-          #2563eb
-        ) 8%,
-        transparent
-      )
-    );
-
-  color:
-    var(
-      --branch-home-primary,
-      #2563eb
-    );
-
-  font-size:
-    9px;
-
-  font-weight:
-    850;
-
-  cursor:
-    pointer;
-}
-
-/*
- * =====================================================
- * ATTENDANCE
- * =====================================================
- */
-
-.branch-attendance-grid {
+.bd-attendance-grid {
   display:
     grid;
 
   grid-template-columns:
     repeat(
       2,
-      minmax(0, 1fr)
+      minmax(
+        0,
+        1fr
+      )
     );
 
   gap:
-    8px;
+    9px;
+
+  margin-top:
+    9px;
 }
 
-.branch-attendance-card {
-  min-width:
-    0;
-
+.bd-attendance-card {
   min-height:
-    70px;
+    106px;
 
-  display:
-    grid;
-
-  grid-template-columns:
-    32px
-    minmax(0, 1fr);
-
-  align-items:
-    center;
-
-  gap:
-    8px;
+  padding:
+    12px;
 
   border:
-    1px solid
+    1px
+    solid
     var(
-      --eds-border,
-      var(--border, rgba(15,23,42,.08))
+      --border,
+      rgba(
+        15,
+        23,
+        42,
+        .09
+      )
     );
 
   border-radius:
-    15px;
-
-  padding:
-    7px 8px;
+    20px;
 
   background:
-    color-mix(
-      in srgb,
+    var(
+      --card-bg,
       var(
-        --eds-bg,
-        var(--bg, #f5f7fb)
-      ) 70%,
-      var(
-        --eds-surface,
-        #ffffff
+        --surface,
+        #fff
       )
     );
 
@@ -2976,16 +2630,38 @@ button {
   text-align:
     left;
 
-  cursor:
-    pointer;
+  box-shadow:
+    0
+    8px
+    22px
+    rgba(
+      15,
+      23,
+      42,
+      .045
+    );
 }
 
-.branch-attendance-icon {
+.bd-attendance-top {
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  gap:
+    7px;
+}
+
+.bd-attendance-icon {
   width:
-    32px;
+    28px;
 
   height:
-    32px;
+    28px;
+
+  flex:
+    0 0 auto;
 
   display:
     grid;
@@ -3000,119 +2676,286 @@ button {
     color-mix(
       in srgb,
       var(
-        --branch-home-primary,
-        #2563eb
+        --bd-primary
+      ) 10%,
+      transparent
+    );
+
+  font-size:
+    14px;
+}
+
+.bd-attendance-label {
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+
+  white-space:
+    nowrap;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    .05em;
+
+  text-transform:
+    uppercase;
+}
+
+.bd-attendance-value {
+  display:
+    flex;
+
+  align-items:
+    baseline;
+
+  gap:
+    6px;
+
+  margin-top:
+    8px;
+}
+
+.bd-attendance-value strong {
+  font-size:
+    clamp(
+      27px,
+      7vw,
+      34px
+    );
+
+  line-height:
+    1;
+
+  font-weight:
+    1000;
+
+  letter-spacing:
+    -.06em;
+}
+
+.bd-attendance-value > span {
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    850;
+}
+
+.bd-attendance-meta {
+  display:
+    flex;
+
+  flex-wrap:
+    wrap;
+
+  gap:
+    5px
+    10px;
+
+  margin-top:
+    7px;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    750;
+}
+
+.bd-attendance-meta b {
+  color:
+    var(
+      --text,
+      #111827
+    );
+
+  font-weight:
+    950;
+}
+
+
+/* =========================================================
+   CONTENT
+   ========================================================= */
+
+.bd-content-grid {
+  display:
+    grid;
+
+  gap:
+    9px;
+
+  margin-top:
+    9px;
+}
+
+.bd-card {
+  padding:
+    13px;
+
+  border:
+    1px
+    solid
+    var(
+      --border,
+      rgba(
+        15,
+        23,
+        42,
+        .09
+      )
+    );
+
+  border-radius:
+    22px;
+
+  background:
+    var(
+      --card-bg,
+      var(
+        --surface,
+        #fff
+      )
+    );
+
+  color:
+    inherit;
+
+  box-shadow:
+    0
+    8px
+    22px
+    rgba(
+      15,
+      23,
+      42,
+      .045
+    );
+}
+
+.bd-section-head {
+  display:
+    flex;
+
+  align-items:
+    flex-start;
+
+  justify-content:
+    space-between;
+
+  gap:
+    10px;
+
+  margin-bottom:
+    10px;
+}
+
+.bd-section-head
+> div
+> span {
+  display:
+    block;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    900;
+
+  letter-spacing:
+    .09em;
+
+  text-transform:
+    uppercase;
+}
+
+.bd-section-head h2 {
+  margin:
+    2px
+    0
+    0;
+
+  font-size:
+    16px;
+
+  font-weight:
+    1000;
+
+  letter-spacing:
+    -.03em;
+}
+
+.bd-section-head
+> button {
+  flex:
+    0 0 auto;
+
+  min-height:
+    28px;
+
+  padding:
+    0
+    10px;
+
+  border:
+    0;
+
+  border-radius:
+    999px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --bd-primary
       ) 9%,
       transparent
     );
 
   color:
     var(
-      --branch-home-primary,
-      #2563eb
-    );
-}
-
-.branch-attendance-icon
-svg {
-  width:
-    18px;
-
-  height:
-    18px;
-}
-
-.branch-attendance-copy {
-  min-width:
-    0;
-}
-
-.branch-attendance-copy
-small,
-.branch-attendance-copy
-strong,
-.branch-attendance-copy
-em {
-  display:
-    block;
-}
-
-.branch-attendance-copy
-small {
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
+      --bd-primary
     );
 
   font-size:
-    8px;
+    10px;
 
   font-weight:
-    850;
-
-  text-transform:
-    uppercase;
+    900;
 }
 
-.branch-attendance-copy
-strong {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --eds-text-strong,
-      var(--text, #111827)
-    );
-
-  font-size:
-    21px;
-
-  line-height:
-    1;
-
-  font-weight:
-    950;
-}
-
-.branch-attendance-copy
-em {
-  margin-top:
-    3px;
-
-  overflow:
-    hidden;
-
-  white-space:
-    nowrap;
-
-  text-overflow:
-    ellipsis;
-
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    8px;
-
-  font-style:
-    normal;
-
-  font-weight:
-    650;
-}
-
-/*
- * =====================================================
- * HOME LISTS
- * =====================================================
- */
-
-.branch-home-list {
+.bd-stack {
   display:
     grid;
 
@@ -3120,22 +2963,24 @@ em {
     6px;
 }
 
-.branch-home-row {
+
+/* =========================================================
+   UPCOMING
+   ========================================================= */
+
+.bd-event-row {
   width:
     100%;
-
-  min-width:
-    0;
-
-  min-height:
-    58px;
 
   display:
     grid;
 
   grid-template-columns:
     auto
-    minmax(0, 1fr)
+    minmax(
+      0,
+      1fr
+    )
     auto;
 
   align-items:
@@ -3144,26 +2989,23 @@ em {
   gap:
     9px;
 
+  padding:
+    8px;
+
   border:
     0;
 
   border-radius:
-    14px;
-
-  padding:
-    8px;
+    15px;
 
   background:
     color-mix(
       in srgb,
       var(
-        --eds-bg,
-        var(--bg, #f5f7fb)
-      ) 72%,
-      var(
-        --eds-surface,
-        #ffffff
-      )
+        --muted,
+        #64748b
+      ) 5%,
+      transparent
     );
 
   color:
@@ -3171,89 +3013,31 @@ em {
 
   text-align:
     left;
-
-  cursor:
-    pointer;
 }
 
-.branch-home-date {
+.bd-event-date {
   min-width:
-    56px;
-
-  height:
-    38px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    11px;
-
-  background:
-    color-mix(
-      in srgb,
-      var(
-        --branch-home-primary,
-        #2563eb
-      ) 9%,
-      transparent
-    );
+    55px;
 
   color:
     var(
-      --branch-home-primary,
-      #2563eb
+      --bd-primary
     );
 
   font-size:
-    9px;
+    10px;
 
   font-weight:
-    850;
+    950;
 }
 
-.branch-home-announcement-icon {
-  width:
-    38px;
-
-  height:
-    38px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    11px;
-
-  background:
-    color-mix(
-      in srgb,
-      var(
-        --branch-home-primary,
-        #2563eb
-      ) 9%,
-      transparent
-    );
-
-  font-size:
-    17px;
-}
-
-.branch-home-row-copy {
+.bd-event-copy {
   min-width:
     0;
 }
 
-.branch-home-row-copy
-strong,
-.branch-home-row-copy
-small {
+.bd-event-copy strong,
+.bd-event-copy small {
   display:
     block;
 
@@ -3262,74 +3046,108 @@ small {
 
   text-overflow:
     ellipsis;
-}
-
-.branch-home-row-copy
-strong {
-  color:
-    var(
-      --eds-text-strong,
-      var(--text, #111827)
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    850;
 
   white-space:
     nowrap;
 }
 
-.branch-home-row-copy
-small {
-  margin-top:
-    3px;
-
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
+.bd-event-copy strong {
   font-size:
-    9px;
-
-  line-height:
-    1.35;
-
-  display:
-    -webkit-box;
-
-  -webkit-box-orient:
-    vertical;
-
-  -webkit-line-clamp:
-    2;
-
-  overflow:
-    hidden;
-}
-
-.branch-home-row
-> b {
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #64748b)
-    );
-
-  font-size:
-    20px;
+    12px;
 
   font-weight:
-    500;
+    1000;
 }
 
-.branch-home-empty {
-  min-height:
-    56px;
+.bd-event-copy small {
+  margin-top:
+    2px;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    10px;
+
+  font-weight:
+    750;
+}
+
+.bd-event-row i {
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    18px;
+
+  font-style:
+    normal;
+}
+
+
+/* =========================================================
+   ANNOUNCEMENTS
+   ========================================================= */
+
+.bd-notice-row {
+  width:
+    100%;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    36px
+    minmax(
+      0,
+      1fr
+    )
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    9px;
+
+  padding:
+    8px;
+
+  border:
+    0;
+
+  border-radius:
+    15px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --muted,
+        #64748b
+      ) 5%,
+      transparent
+    );
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+}
+
+.bd-notice-icon {
+  width:
+    36px;
+
+  height:
+    36px;
 
   display:
     grid;
@@ -3338,24 +3156,48 @@ small {
     center;
 
   border-radius:
-    14px;
+    13px;
 
   background:
     color-mix(
       in srgb,
       var(
-        --eds-bg,
-        #f5f7fb
-      ) 72%,
-      var(
-        --eds-surface,
-        #ffffff
-      )
+        --bd-primary
+      ) 10%,
+      transparent
     );
+}
+
+.bd-notice-copy strong,
+.bd-notice-copy small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+
+  white-space:
+    nowrap;
+}
+
+.bd-notice-copy strong {
+  font-size:
+    12px;
+
+  font-weight:
+    1000;
+}
+
+.bd-notice-copy small {
+  margin-top:
+    2px;
 
   color:
     var(
-      --eds-text-muted,
+      --muted,
       #64748b
     );
 
@@ -3363,18 +3205,31 @@ small {
     10px;
 
   font-weight:
-    650;
+    750;
 }
 
-/*
- * =====================================================
- * STATES
- * =====================================================
- */
+.bd-notice-row i {
+  color:
+    var(
+      --muted,
+      #64748b
+    );
 
-.branch-home-state {
+  font-size:
+    18px;
+
+  font-style:
+    normal;
+}
+
+
+/* =========================================================
+   EMPTY
+   ========================================================= */
+
+.bd-mini-empty {
   min-height:
-    220px;
+    88px;
 
   display:
     grid;
@@ -3386,124 +3241,333 @@ small {
     center;
 
   gap:
-    8px;
+    5px;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
 
   text-align:
     center;
 }
 
-.branch-home-state
-strong {
-  color:
-    var(
-      --eds-text-strong,
-      #111827
-    );
-
+.bd-mini-empty span {
   font-size:
-    15px;
+    23px;
 }
 
-.branch-home-state
-span {
-  color:
-    var(
-      --eds-text-muted,
-      #64748b
-    );
+.bd-mini-empty p {
+  margin:
+    0;
 
   font-size:
     10px;
+
+  font-weight:
+    800;
 }
 
-.branch-home-spinner {
-  width:
-    34px;
 
-  height:
-    34px;
+/* =========================================================
+   LOADING STATE
+   ========================================================= */
+
+.bd-state {
+  min-height:
+    280px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  align-content:
+    center;
+
+  gap:
+    10px;
+
+  padding:
+    20px;
 
   border:
-    3px solid
+    1px
+    solid
+    var(
+      --border,
+      rgba(
+        15,
+        23,
+        42,
+        .09
+      )
+    );
+
+  border-radius:
+    22px;
+
+  background:
+    var(
+      --card-bg,
+      var(
+        --surface,
+        #fff
+      )
+    );
+
+  text-align:
+    center;
+}
+
+.bd-spinner {
+  width:
+    36px;
+
+  height:
+    36px;
+
+  border:
+    4px
+    solid
     color-mix(
       in srgb,
       var(
-        --branch-home-primary,
-        #2563eb
-      ) 17%,
+        --bd-primary
+      ) 16%,
       transparent
     );
 
   border-top-color:
     var(
-      --branch-home-primary,
-      #2563eb
+      --bd-primary
     );
 
   border-radius:
     999px;
 
   animation:
-    branchHomeSpin
+    bdSpin
     .8s
     linear
     infinite;
 }
 
-@keyframes branchHomeSpin {
-  to {
-    transform:
-      rotate(
-        360deg
+.bd-state h2 {
+  margin:
+    0;
+
+  font-size:
+    17px;
+
+  font-weight:
+    1000;
+}
+
+.bd-state p {
+  max-width:
+    30rem;
+
+  margin:
+    0;
+
+  color:
+    var(
+      --muted,
+      #64748b
+    );
+
+  font-size:
+    11px;
+
+  line-height:
+    1.55;
+}
+
+
+/* =========================================================
+   SINGLE DOCUMENT SCROLL
+
+   Dashboard itself does NOT own vertical scrolling.
+   RolePortalShell/document remains the single scroll owner.
+   ========================================================= */
+
+.bd-page,
+.app-main,
+.app-content,
+.app-content-inner,
+.shell-portal-content,
+.shell-content-background {
+  height:
+    auto !important;
+
+  min-height:
+    0 !important;
+
+  max-height:
+    none !important;
+
+  overflow-y:
+    visible !important;
+
+  overscroll-behavior-y:
+    auto !important;
+
+  scrollbar-gutter:
+    auto !important;
+}
+
+html {
+  height:
+    auto !important;
+
+  min-height:
+    100%;
+
+  overflow-x:
+    hidden !important;
+
+  overflow-y:
+    auto !important;
+
+  scrollbar-gutter:
+    auto !important;
+}
+
+body {
+  height:
+    auto !important;
+
+  min-height:
+    100%;
+
+  overflow-x:
+    hidden !important;
+
+  overflow-y:
+    visible !important;
+}
+
+
+/* =========================================================
+   TABLET / DESKTOP
+   ========================================================= */
+
+@media (
+  min-width:
+    720px
+) {
+  .bd-page {
+    padding:
+      12px
+      12px
+      24px;
+  }
+
+  /*
+   * Same as Teacher Dashboard.
+   */
+  .bd-hero {
+    height:
+      370px;
+
+    max-height:
+      370px;
+  }
+
+  .bd-content-grid {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(
+          0,
+          1fr
+        )
       );
   }
 }
 
-/*
- * =====================================================
- * MOBILE
- * =====================================================
- */
+@media (
+  min-width:
+    1100px
+) {
+  .bd-page {
+    max-width:
+      1180px;
+
+    margin:
+      0
+      auto;
+
+    padding:
+      16px
+      16px
+      28px;
+  }
+}
+
+
+/* =========================================================
+   SMALL PHONES
+   ========================================================= */
 
 @media (
-  max-width: 699px
+  max-width:
+    480px
 ) {
-  .branch-home-page {
+  .bd-page {
     padding:
-      6px 6px
-      8px;
-
-    gap:
-      8px;
+      7px
+      7px
+      calc(
+        76px +
+        env(
+          safe-area-inset-bottom,
+          0px
+        )
+      );
   }
 
-  .branch-home-hero {
-    /*
-     * Larger because the old four quick-action cards are
-     * gone and the hero is now primarily visual.
-     */
+  /*
+   * Do not override the hero with the old 490px+ mobile size.
+   * Clamp keeps it in the same family as Teacher Home.
+   */
+  .bd-hero {
     height:
       clamp(
-        440px,
-        50dvh,
-        580px
+        290px,
+        47vw,
+        390px
       );
 
-    border-radius:
-      24px;
-  }
-
-  .branch-home-section {
-    padding:
-      12px;
-
-    border-radius:
-      19px;
-  }
-
-  .branch-attendance-card {
     min-height:
-      66px;
+      0 !important;
+  }
+
+  .bd-attendance-card {
+    min-height:
+      104px;
+  }
+}
+
+
+/* =========================================================
+   REDUCED MOTION
+   ========================================================= */
+
+@media (
+  prefers-reduced-motion:
+    reduce
+) {
+  .bd-spinner,
+  .bd-hero.fade-transition
+  .bd-hero-media,
+  .bd-hero.slide-transition
+  .bd-hero-media {
+    animation:
+      none !important;
   }
 }
 `;

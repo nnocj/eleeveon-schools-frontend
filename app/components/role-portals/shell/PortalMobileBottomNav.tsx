@@ -1,15 +1,41 @@
 "use client";
 
+/**
+ * app/components/role-portals/shell/PortalMobileBottomNav.tsx
+ * --------------------------------------------------------------------------
+ * ELEEVEON MOBILE BOTTOM NAVIGATION
+ * --------------------------------------------------------------------------
+ *
+ * The mobile portal has three permanent root destinations:
+ *
+ *   Home · Explore · Screens
+ *
+ * HOME
+ * - Opens the role dashboard/home.
+ *
+ * EXPLORE
+ * - Replaces the old mobile sidebar.
+ * - Opens the visual portal category browser.
+ *
+ * SCREENS
+ * - Shows current/recent working modules.
+ *
+ * This component is intentionally presentation-only.
+ * PortalMobileNavigation owns all navigation behavior.
+ */
+
 export type PortalMobileRootTab =
   | "home"
-  | "library"
+  | "explore"
   | "screens";
 
 export interface PortalMobileBottomNavProps {
   active: PortalMobileRootTab;
 
   onHome(): void;
-  onLibrary(): void;
+
+  onExplore(): void;
+
   onScreens(): void;
 }
 
@@ -19,13 +45,11 @@ function HomeIcon() {
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
-      <path
-        d="M3.8 10.6 12 3.8l8.2 6.8v9a1.4 1.4 0 0 1-1.4 1.4h-4.2v-6.2H9.4V21H5.2a1.4 1.4 0 0 1-1.4-1.4v-9Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
+      <path d="M3.5 10.5 12 3l8.5 7.5" />
+
+      <path d="M5.5 9.5V21h13V9.5" />
+
+      <path d="M9.5 21v-6h5v6" />
     </svg>
   );
 }
@@ -39,26 +63,10 @@ function ExploreIcon() {
       <circle
         cx="12"
         cy="12"
-        r="9"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
+        r="8.5"
       />
 
-      <path
-        d="m15.8 8.2-2.1 5.5-5.5 2.1 2.1-5.5 5.5-2.1Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-      />
-
-      <circle
-        cx="12"
-        cy="12"
-        r="1"
-        fill="currentColor"
-      />
+      <path d="m14.9 9.1-2 4-4 2 2-4 4-2Z" />
     </svg>
   );
 }
@@ -71,34 +79,21 @@ function ScreensIcon() {
     >
       <rect
         x="4"
-        y="3"
-        width="12"
+        y="5"
+        width="13"
         height="14"
         rx="2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
       />
 
-      <rect
-        x="8"
-        y="7"
-        width="12"
-        height="14"
-        rx="2"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
+      <path d="M8 2h10a2 2 0 0 1 2 2v11" />
     </svg>
   );
 }
 
 export default function PortalMobileBottomNav({
   active,
-
   onHome,
-  onLibrary,
+  onExplore,
   onScreens,
 }: PortalMobileBottomNavProps) {
   return (
@@ -114,32 +109,42 @@ export default function PortalMobileBottomNav({
             : ""
         }
         onClick={onHome}
+        aria-current={
+          active === "home"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-mobile-nav-icon">
           <HomeIcon />
         </span>
 
-        <strong>
+        <span className="portal-mobile-nav-label">
           Home
-        </strong>
+        </span>
       </button>
 
       <button
         type="button"
         className={
-          active === "library"
+          active === "explore"
             ? "active"
             : ""
         }
-        onClick={onLibrary}
+        onClick={onExplore}
+        aria-current={
+          active === "explore"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-mobile-nav-icon">
           <ExploreIcon />
         </span>
 
-        <strong>
+        <span className="portal-mobile-nav-label">
           Explore
-        </strong>
+        </span>
       </button>
 
       <button
@@ -150,184 +155,325 @@ export default function PortalMobileBottomNav({
             : ""
         }
         onClick={onScreens}
+        aria-current={
+          active === "screens"
+            ? "page"
+            : undefined
+        }
       >
-        <span>
+        <span className="portal-mobile-nav-icon">
           <ScreensIcon />
         </span>
 
-        <strong>
+        <span className="portal-mobile-nav-label">
           Screens
-        </strong>
+        </span>
       </button>
 
-      <style>{css}</style>
+      <style>
+        {css}
+      </style>
     </nav>
   );
 }
 
 const css = `
 .portal-mobile-bottom-nav {
-  display: none;
+  display:
+    none;
 }
 
-@media (max-width: 979px) {
+@media (
+  max-width:
+    979px
+) {
   .portal-mobile-bottom-nav {
-    position: fixed;
+    position:
+      fixed !important;
 
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left:
+      0 !important;
 
-    z-index: 80;
+    right:
+      0 !important;
+
+    bottom:
+      0 !important;
+
+    z-index:
+      60;
+
+    width:
+      100%;
 
     height:
       calc(
-        66px +
+        64px +
         env(
           safe-area-inset-bottom,
           0px
         )
       );
 
-    display: grid;
+    display:
+      grid;
 
     grid-template-columns:
       repeat(
         3,
-        minmax(0, 1fr)
+        minmax(
+          0,
+          1fr
+        )
       );
 
-    align-items: start;
+    align-items:
+      start;
 
     padding:
-      5px 10px
+      5px
+      8px
       env(
         safe-area-inset-bottom,
         0px
       );
 
-    background:
-      color-mix(
-        in srgb,
-        var(
-          --eds-surface,
-          var(--surface, #ffffff)
-        ) 97%,
-        transparent
-      );
-
     border-top:
-      1px solid
+      1px
+      solid
       var(
-        --eds-divider,
+        --eds-border,
         var(
           --border,
-          rgba(0,0,0,.08)
+          rgba(
+            15,
+            23,
+            42,
+            .09
+          )
         )
       );
 
-    backdrop-filter:
-      blur(18px);
+    background:
+      color-mix(
+        in srgb,
+
+        var(
+          --eds-surface,
+          var(
+            --surface,
+            #ffffff
+          )
+        )
+        95%,
+
+        transparent
+      );
 
     box-shadow:
-      0 -8px 24px
-      rgba(15,23,42,.055);
+      0
+      -8px
+      28px
+      rgba(
+        15,
+        23,
+        42,
+        .07
+      );
+
+    backdrop-filter:
+      blur(
+        18px
+      );
+
+    -webkit-backdrop-filter:
+      blur(
+        18px
+      );
   }
 
-  .portal-mobile-bottom-nav button {
-    min-width: 0;
+  .portal-mobile-bottom-nav
+  > button {
+    position:
+      relative;
 
-    height: 56px;
+    min-width:
+      0;
 
-    display: grid;
+    height:
+      54px;
 
-    grid-template-rows:
-      31px auto;
+    display:
+      flex;
 
-    place-items: center;
+    flex-direction:
+      column;
 
-    align-content: start;
+    align-items:
+      center;
 
-    gap: 1px;
+    justify-content:
+      center;
 
-    border: 0;
+    gap:
+      2px;
 
-    border-radius: 16px;
+    padding:
+      2px
+      4px;
 
-    padding: 3px 4px;
+    border:
+      0;
 
-    background: transparent;
+    border-radius:
+      16px;
+
+    background:
+      transparent;
 
     color:
       var(
         --eds-text-muted,
-        var(--muted, #5f6877)
+        var(
+          --muted,
+          #64748b
+        )
       );
 
-    cursor: pointer;
+    font:
+      inherit;
+
+    cursor:
+      pointer;
+
+    -webkit-tap-highlight-color:
+      transparent;
   }
 
-  .portal-mobile-bottom-nav button > span {
-    width: 46px;
-    height: 31px;
+  .portal-mobile-nav-icon {
+    width:
+      40px;
 
-    display: grid;
+    height:
+      28px;
 
-    place-items: center;
+    display:
+      grid;
 
-    border-radius: 16px;
+    place-items:
+      center;
+
+    border-radius:
+      999px;
 
     transition:
-      background-color .18s ease,
-      color .18s ease,
-      transform .18s ease;
+      background
+      .16s
+      ease,
+      color
+      .16s
+      ease,
+      transform
+      .16s
+      ease;
   }
 
-  .portal-mobile-bottom-nav svg {
-    width: 24px;
-    height: 24px;
+  .portal-mobile-nav-icon
+  svg {
+    width:
+      21px;
 
-    display: block;
+    height:
+      21px;
+
+    fill:
+      none;
+
+    stroke:
+      currentColor;
+
+    stroke-width:
+      1.9;
+
+    stroke-linecap:
+      round;
+
+    stroke-linejoin:
+      round;
   }
 
-  .portal-mobile-bottom-nav strong {
-    max-width: 100%;
+  .portal-mobile-nav-label {
+    max-width:
+      100%;
 
-    overflow: hidden;
+    overflow:
+      hidden;
 
-    text-overflow: ellipsis;
+    text-overflow:
+      ellipsis;
 
-    white-space: nowrap;
+    white-space:
+      nowrap;
 
-    font-size: 10px;
+    font-size:
+      10px;
 
-    font-weight: 800;
+    line-height:
+      1.1;
 
-    line-height: 1.1;
+    font-weight:
+      800;
   }
 
-  .portal-mobile-bottom-nav button.active {
+  .portal-mobile-bottom-nav
+  > button.active {
     color:
       var(
         --eds-primary,
-        var(--primary-color, #2563eb)
+        var(
+          --primary-color,
+          #2563eb
+        )
       );
   }
 
-  .portal-mobile-bottom-nav button.active > span {
+  .portal-mobile-bottom-nav
+  > button.active
+  .portal-mobile-nav-icon {
     background:
       color-mix(
         in srgb,
+
         var(
           --eds-primary,
-          var(--primary-color, #2563eb)
-        ) 12%,
+          var(
+            --primary-color,
+            #2563eb
+          )
+        )
+        13%,
+
         transparent
       );
   }
 
-  .portal-mobile-bottom-nav button:active > span {
-    transform: scale(.96);
+  .portal-mobile-bottom-nav
+  > button:active
+  .portal-mobile-nav-icon {
+    transform:
+      scale(
+        .94
+      );
+  }
+}
+
+@media (
+  prefers-reduced-motion:
+  reduce
+) {
+  .portal-mobile-nav-icon {
+    transition:
+      none;
   }
 }
 `;

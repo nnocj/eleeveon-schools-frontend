@@ -1,6 +1,54 @@
 "use client";
 
+/**
+ * app/components/role-portals/shell/PortalExplore.tsx
+ * --------------------------------------------------------------------------
+ * ELEEVEON EXPLORE
+ * --------------------------------------------------------------------------
+ *
+ * Explore is the visual module browser used by mobile role portals.
+ *
+ * It replaces the old mobile sidebar.
+ *
+ * NAVIGATION MODEL
+ * --------------------------------------------------------------------------
+ *
+ *   Explore
+ *      ↓
+ *   Category
+ *      ↓
+ *   Module
+ *
+ * Example:
+ *
+ *   Explore
+ *      ↓
+ *   People
+ *      ↓
+ *   Students
+ *
+ * HISTORY
+ * --------------------------------------------------------------------------
+ * Explore categories participate in the real browser History API.
+ *
+ * Example URLs:
+ *
+ *   ?surface=explore
+ *   ?surface=explore&category=administration
+ *
+ * Therefore Android/browser Back can perform:
+ *
+ *   Students
+ *      ↓
+ *   People
+ *      ↓
+ *   Explore
+ *
+ * without reloading or leaving the PWA.
+ */
+
 import {
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -9,6 +57,12 @@ import type {
   RoleNavItem,
   RoleNavSection,
 } from "../RolePortalShell";
+
+import {
+  readExploreCategory,
+  readPortalSurface,
+  writeExploreCategoryHistory,
+} from "./portalHistory";
 
 type ExploreNavItem =
   RoleNavItem & {
@@ -27,17 +81,20 @@ type ExploreNavSection =
 
 export interface PortalExploreProps {
   sections: RoleNavSection[];
+
   homeKey: string;
+
   activeKey: string;
 
   /*
-   * Kept for compatibility with
-   * PortalMobileNavigation.
+   * Retained for PortalMobileNavigation compatibility.
    *
-   * Hub is not rendered inside Explore.
+   * Eleeveon Hub is deliberately not rendered inside Explore.
    */
   hubUnreadCount?: number;
+
   hubHasAttention?: boolean;
+
   onOpenHub?(): void;
 
   onNavigate(
@@ -47,14 +104,17 @@ export interface PortalExploreProps {
 
 type SectionVisual = {
   label: string;
+
   description: string;
+
   glyph: string;
 };
 
-const SECTION_VISUALS: Record<
-  string,
-  SectionVisual
-> = {
+const SECTION_VISUALS:
+  Record<
+    string,
+    SectionVisual
+  > = {
   administration: {
     label:
       "People",
@@ -224,9 +284,7 @@ function sectionVisual(
       normalized
     ];
 
-  if (
-    known
-  ) {
+  if (known) {
     return {
       label:
         section.exploreLabel ||
@@ -281,7 +339,9 @@ function VisualCover({
   alt,
 }: {
   image?: string;
+
   glyph: string;
+
   alt: string;
 }) {
   const [
@@ -336,16 +396,6 @@ export default function PortalExplore({
   activeKey,
   onNavigate,
 }: PortalExploreProps) {
-  const [
-    selectedSectionKey,
-    setSelectedSectionKey,
-  ] =
-    useState<
-      string | null
-    >(
-      null,
-    );
-
   const exploreSections =
     useMemo(
       () =>
@@ -354,9 +404,7 @@ export default function PortalExplore({
             ExploreNavSection[]
         )
           .map(
-            (
-              section,
-            ) => ({
+            (section) => ({
               ...section,
 
               items:
@@ -364,18 +412,14 @@ export default function PortalExplore({
                   section.items ||
                   []
                 ).filter(
-                  (
-                    item,
-                  ) =>
+                  (item) =>
                     item.key !==
                     homeKey,
                 ),
             }),
           )
           .filter(
-            (
-              section,
-            ) =>
+            (section) =>
               section.items
                 .length >
               0,
@@ -386,13 +430,46 @@ export default function PortalExplore({
       ],
     );
 
+  /**
+   * Restore the selected category from browser history.
+   *
+   * If the URL contains a stale/unknown category, Explore safely falls
+   * back to its root instead.
+   */
+  const [
+    selectedSectionKey,
+    setSelectedSectionKey,
+  ] =
+    useState<
+      string | null
+    >(
+      () => {
+        if (
+          typeof window ===
+          "undefined"
+        ) {
+          return null;
+        }
+
+        if (
+          readPortalSurface() !==
+          "explore"
+        ) {
+          return null;
+        }
+
+        return (
+          readExploreCategory() ||
+          null
+        );
+      },
+    );
+
   const selectedSection =
     useMemo(
       () =>
         exploreSections.find(
-          (
-            section,
-          ) =>
+          (section) =>
             sectionKey(
               section,
             ) ===
@@ -405,19 +482,138 @@ export default function PortalExplore({
       ],
     );
 
-  /*
-   * =====================================================
-   * OPENED EXPLORE CATEGORY
-   * =====================================================
-   *
-   * Example:
-   *
-   * Explore
-   *    ↓
-   * People
-   *    ↓
-   * Students / Teachers / Parents
+  /**
+   * Browser / Android Back and Forward restore the Explore category.
    */
+  useEffect(() => {
+    const handlePopState =
+      () => {
+        if (
+          readPortalSurface() !==
+          "explore"
+        ) {
+          return;
+        }
+
+        const category =
+          readExploreCategory();
+
+        const exists =
+          category
+            ? exploreSections.some(
+                (section) =>
+                  sectionKey(
+                    section,
+                  ) ===
+                  category,
+              )
+            : false;
+
+        setSelectedSectionKey(
+          exists
+            ? category
+            : null,
+        );
+      };
+
+    window.addEventListener(
+      "popstate",
+      handlePopState,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "popstate",
+        handlePopState,
+      );
+    };
+  }, [
+    exploreSections,
+  ]);
+
+  /**
+   * If an old/stale category exists in the URL but is no longer available,
+   * normalize Explore back to the root without adding another history entry.
+   */
+  useEffect(() => {
+    if (
+      !selectedSectionKey
+    ) {
+      return;
+    }
+
+    const exists =
+      exploreSections.some(
+        (section) =>
+          sectionKey(
+            section,
+          ) ===
+          selectedSectionKey,
+      );
+
+    if (exists) {
+      return;
+    }
+
+    setSelectedSectionKey(
+      null,
+    );
+
+    writeExploreCategoryHistory({
+      category:
+        null,
+
+      mode:
+        "replace",
+    });
+  }, [
+    exploreSections,
+    selectedSectionKey,
+  ]);
+
+  const openSection =
+    (
+      key: string,
+    ) => {
+      if (
+        selectedSectionKey ===
+        key
+      ) {
+        return;
+      }
+
+      setSelectedSectionKey(
+        key,
+      );
+
+      writeExploreCategoryHistory({
+        category:
+          key,
+      });
+    };
+
+  /**
+   * The visible Back button should use the SAME browser history stack as the
+   * Android/browser Back button.
+   *
+   * Therefore it calls history.back() rather than directly mutating state.
+   */
+  const backFromSection =
+    () => {
+      if (
+        typeof window ===
+        "undefined"
+      ) {
+        setSelectedSectionKey(
+          null,
+        );
+
+        return;
+      }
+
+      window.history.back();
+    };
+
   if (
     selectedSection
   ) {
@@ -432,10 +628,8 @@ export default function PortalExplore({
           <button
             type="button"
             className="portal-explore-back"
-            onClick={() =>
-              setSelectedSectionKey(
-                null,
-              )
+            onClick={
+              backFromSection
             }
             aria-label="Back to Explore"
           >
@@ -469,93 +663,65 @@ export default function PortalExplore({
             selectedSection.items as
               ExploreNavItem[]
           ).map(
-            (
-              item,
-            ) => {
-              const image =
-                item.exploreImage;
+            (item) => (
+              <button
+                type="button"
+                className={[
+                  "portal-explore-card",
 
-              return (
-                <button
-                  type="button"
-                  className={[
-                    "portal-explore-card",
-
-                    item.key ===
-                      activeKey &&
-                      "active",
-                  ]
-                    .filter(
-                      Boolean,
+                  item.key ===
+                    activeKey &&
+                    "active",
+                ]
+                  .filter(
+                    Boolean,
+                  )
+                  .join(
+                    " ",
+                  )}
+                key={
+                  item.key
+                }
+                onClick={() =>
+                  onNavigate(
+                    item.key,
+                  )
+                }
+              >
+                <VisualCover
+                  image={
+                    item.exploreImage
+                  }
+                  glyph={
+                    item.icon ||
+                    "◫"
+                  }
+                  alt={
+                    itemLabel(
+                      item,
                     )
-                    .join(
-                      " ",
+                  }
+                />
+
+                <span className="portal-explore-card-copy">
+                  <strong>
+                    {itemLabel(
+                      item,
                     )}
-                  key={
-                    item.key
-                  }
-                  onClick={() =>
-                    onNavigate(
-                      item.key,
-                    )
-                  }
-                >
-                  <VisualCover
-                    image={
-                      image
-                    }
-                    glyph={
-                      item.icon ||
-                      "◫"
-                    }
-                    alt={
-                      itemLabel(
-                        item,
-                      )
-                    }
-                  />
-
-                  <span className="portal-explore-card-copy">
-                    <strong>
-                      {itemLabel(
-                        item,
-                      )}
-                    </strong>
-
-                    {/*
-                     * Description intentionally hidden.
-                     *
-                     * Cards display:
-                     *
-                     * image
-                     * title
-                     */}
-                  </span>
-                </button>
-              );
-            },
+                  </strong>
+                </span>
+              </button>
+            ),
           )}
         </section>
 
         <style>
-          {
-            css
-          }
+          {css}
         </style>
       </main>
     );
   }
 
-  /*
-   * =====================================================
-   * EXPLORE ROOT
-   * =====================================================
-   *
-   * No heading.
-   * No Eleeveon Hub card.
-   *
-   * The visual category grid starts immediately.
-   */
   return (
     <main className="portal-explore-page portal-explore-root">
       <section
@@ -563,11 +729,14 @@ export default function PortalExplore({
         aria-label="Explore categories"
       >
         {exploreSections.map(
-          (
-            section,
-          ) => {
+          (section) => {
             const visual =
               sectionVisual(
+                section,
+              );
+
+            const key =
+              sectionKey(
                 section,
               );
 
@@ -576,15 +745,11 @@ export default function PortalExplore({
                 type="button"
                 className="portal-explore-card"
                 key={
-                  sectionKey(
-                    section,
-                  )
+                  key
                 }
                 onClick={() =>
-                  setSelectedSectionKey(
-                    sectionKey(
-                      section,
-                    ),
+                  openSection(
+                    key,
                   )
                 }
               >
@@ -606,15 +771,6 @@ export default function PortalExplore({
                       visual.label
                     }
                   </strong>
-
-                  {/*
-                   * Description intentionally hidden.
-                   *
-                   * Cards display:
-                   *
-                   * image
-                   * title
-                   */}
                 </span>
               </button>
             );
@@ -623,9 +779,7 @@ export default function PortalExplore({
       </section>
 
       <style>
-        {
-          css
-        }
+        {css}
       </style>
     </main>
   );
@@ -643,8 +797,7 @@ const css = `
     0 auto;
 
   padding:
-    12px
-    8px
+    12px 8px
     24px;
 
   color:
@@ -657,10 +810,6 @@ const css = `
     );
 }
 
-/*
- * Explore root has no heading or Hub,
- * so the card grid begins immediately.
- */
 .portal-explore-root {
   padding-top:
     8px;
@@ -715,9 +864,7 @@ const css = `
 
 .portal-explore-page-head h1 {
   margin:
-    2px
-    0
-    0;
+    2px 0 0;
 
   color:
     var(
@@ -821,22 +968,6 @@ const css = `
     pointer;
 }
 
-
-/*
- * =====================================================
- * EXPLORE CARD GRID
- * =====================================================
- *
- * Phone:
- * 3 cards per row.
- *
- * Medium:
- * 4 cards per row.
- *
- * Larger:
- * 5 cards per row.
- */
-
 .portal-explore-grid {
   display:
     grid;
@@ -851,8 +982,7 @@ const css = `
     );
 
   gap:
-    10px
-    8px;
+    10px 8px;
 }
 
 .portal-explore-card {
@@ -930,16 +1060,13 @@ const css = `
 
       color-mix(
         in srgb,
-
         var(
           --eds-primary,
           var(
             --primary-color,
             #2563eb
           )
-        )
-        13%,
-
+        ) 13%,
         var(
           --eds-surface,
           var(
@@ -951,16 +1078,13 @@ const css = `
 
       color-mix(
         in srgb,
-
         var(
           --eds-bg,
           var(
             --bg,
             #f7f8fb
           )
-        )
-        84%,
-
+        ) 84%,
         var(
           --eds-surface,
           var(
@@ -972,9 +1096,7 @@ const css = `
     );
 
   box-shadow:
-    0
-    5px
-    15px
+    0 5px 15px
     rgba(
       15,
       23,
@@ -1013,16 +1135,13 @@ const css = `
   background:
     color-mix(
       in srgb,
-
       var(
         --eds-primary,
         var(
           --primary-color,
           #2563eb
         )
-      )
-      18%,
-
+      ) 18%,
       transparent
     );
 
@@ -1048,9 +1167,7 @@ const css = `
 
   filter:
     drop-shadow(
-      0
-      7px
-      10px
+      0 7px 10px
       rgba(
         15,
         23,
@@ -1068,8 +1185,7 @@ const css = `
     block;
 
   padding:
-    0
-    2px;
+    0 2px;
 }
 
 .portal-explore-card-copy strong {
@@ -1106,16 +1222,13 @@ const css = `
   border-color:
     color-mix(
       in srgb,
-
       var(
         --eds-primary,
         var(
           --primary-color,
           #2563eb
         )
-      )
-      55%,
-
+      ) 55%,
       var(
         --eds-border,
         transparent
@@ -1123,31 +1236,19 @@ const css = `
     );
 
   box-shadow:
-    0
-    0
-    0
-    2px
+    0 0 0 2px
     color-mix(
       in srgb,
-
       var(
         --eds-primary,
         var(
           --primary-color,
           #2563eb
         )
-      )
-      14%,
-
+      ) 14%,
       transparent
     );
 }
-
-
-/*
- * Slightly wider phone / tablet:
- * four cards.
- */
 
 @media (
   min-width:
@@ -1164,8 +1265,7 @@ const css = `
       );
 
     gap:
-      12px
-      10px;
+      12px 10px;
   }
 
   .portal-explore-card-copy strong {
@@ -1173,12 +1273,6 @@ const css = `
       13px;
   }
 }
-
-
-/*
- * Larger tablet / desktop surface:
- * five cards.
- */
 
 @media (
   min-width:

@@ -3,41 +3,59 @@
 /**
  * app/branch-admin/modules/BranchAdminDashboard.tsx
  * ---------------------------------------------------------
- * BRANCH ADMIN HOME — COMPACT MOBILE-FIRST HOME
+ * ELEEVEON BRANCH ADMIN HOME
  * ---------------------------------------------------------
  *
- * Home now has one clear responsibility:
- * show what matters now.
+ * Compact mobile-first Home inspired by the information
+ * hierarchy of apps such as Gospel Library.
  *
- * Navigation responsibilities live elsewhere:
+ * HOME RESPONSIBILITY
+ * ---------------------------------------------------------
+ * Home shows what matters now:
  *
- * - Header Search = find anything quickly
- * - Library       = discover everything available
- * - Screens       = return to recent/open work
+ * 1. Portal Highlights
+ * 2. Attendance snapshot
+ * 3. Upcoming events
+ * 4. Announcements
  *
- * Therefore Home contains:
+ * Navigation belongs elsewhere:
  *
- * 1. Portal Highlights / Hero
- * 2. Student attendance %
- * 3. Teacher attendance %
- * 4. Upcoming events
- * 5. Announcements
+ * - Header Search = find anything
+ * - Library       = discover modules
+ * - Screens       = return to opened/recent work
  *
- * Removed from Home:
+ * HERO
+ * ---------------------------------------------------------
+ * The hero no longer displays:
  *
- * - Dashboard search bar
- * - Student shortcut
- * - Attendance shortcut
- * - Assessment shortcut
- * - Reports shortcut
- * - Recent activity
+ * - greeting
+ * - user name
+ * - school name
+ * - branch name
+ * - school motto
+ * - student/teacher/class statistics
  *
- * SCROLL OWNERSHIP:
+ * This releases the entire hero area for imagery/video.
  *
- * The dashboard must NEVER create a second page-level
- * vertical scroll context. The browser/document owns the
- * page scroll. Dashboard containers remain height:auto and
- * overflow-y:visible.
+ * DEFAULT HERO ASSETS
+ * ---------------------------------------------------------
+ * Put these exact files in /public:
+ *
+ * /public/pathways-to-possibility.png
+ * /public/building-the-future.png
+ * /public/knowledge-in-motion.png
+ *
+ * Actual Portal Highlights override these defaults.
+ *
+ * SCROLL OWNERSHIP
+ * ---------------------------------------------------------
+ * This file intentionally does NOT use DashboardBackground
+ * or WelcomeHero.
+ *
+ * Everything is normal document-flow content.
+ * There is no page-level overflow:auto and no 100vh wrapper.
+ *
+ * The browser/document is the one page scrollbar.
  */
 
 import React, {
@@ -83,16 +101,6 @@ import {
 } from "../../hooks/useBackgroundLoader";
 
 import {
-  ActivityFeed,
-  CalendarPreview,
-  DashboardBackground,
-  DashboardSection,
-  DashboardWidget,
-  DashboardWidgets,
-  WelcomeHero,
-} from "../../components/dashboard";
-
-import {
   AttendanceIcon,
   TeacherIcon,
 } from "../../components/icons";
@@ -125,6 +133,7 @@ type HeroSlide = {
   poster?: string;
 
   title?: string;
+
   subtitle?: string;
 
   durationSeconds:
@@ -135,12 +144,72 @@ type HeroSlide = {
     | "slide";
 
   actionType?: string;
+
   actionLabel?: string;
+
   actionValue?: string;
 };
 
 // ======================================================
-// ONLY LOAD DATA HOME ACTUALLY NEEDS
+// DEFAULT HERO SLIDES
+// ======================================================
+
+const DEFAULT_HERO_SLIDES:
+  HeroSlide[] = [
+    {
+      id:
+        "pathways-to-possibility",
+
+      type:
+        "image",
+
+      src:
+        "/pathways-to-possibility.png",
+
+      durationSeconds:
+        7,
+
+      transition:
+        "fade",
+    },
+
+    {
+      id:
+        "building-the-future",
+
+      type:
+        "image",
+
+      src:
+        "/building-the-future.png",
+
+      durationSeconds:
+        7,
+
+      transition:
+        "fade",
+    },
+
+    {
+      id:
+        "knowledge-in-motion",
+
+      type:
+        "image",
+
+      src:
+        "/knowledge-in-motion.png",
+
+      durationSeconds:
+        7,
+
+      transition:
+        "fade",
+    },
+  ];
+
+// ======================================================
+// HOME DATA ONLY
 // ======================================================
 
 const TABLE_NAMES = [
@@ -215,7 +284,7 @@ type OpenWorkspaceSession = {
 };
 
 // ======================================================
-// SAFE STORAGE
+// STORAGE HELPERS
 // ======================================================
 
 function safeRead(
@@ -439,15 +508,22 @@ function selectedSchoolId(
     );
 
   return firstPermanentId(
-    args.openWorkspace?.schoolId,
+    args.openWorkspace
+      ?.schoolId,
 
-    membership?.schoolId,
-    membership?.school?.id,
+    membership
+      ?.schoolId,
+
+    membership
+      ?.school?.id,
 
     args.activeSchoolId,
-    args.activeSchool?.id,
 
-    args.settings?.schoolId,
+    args.activeSchool
+      ?.id,
+
+    args.settings
+      ?.schoolId,
 
     safeRead(
       "activeSchoolId",
@@ -483,16 +559,25 @@ function selectedBranchId(
     );
 
   return firstPermanentId(
-    args.openWorkspace?.branchId,
+    args.openWorkspace
+      ?.branchId,
 
-    membership?.branchId,
-    membership?.schoolBranchId,
-    membership?.branch?.id,
+    membership
+      ?.branchId,
+
+    membership
+      ?.schoolBranchId,
+
+    membership
+      ?.branch?.id,
 
     args.activeBranchId,
-    args.activeBranch?.id,
 
-    args.settings?.branchId,
+    args.activeBranch
+      ?.id,
+
+    args.settings
+      ?.branchId,
 
     safeRead(
       "activeBranchId",
@@ -501,7 +586,7 @@ function selectedBranchId(
 }
 
 // ======================================================
-// SCOPE HELPERS
+// DATA SCOPE
 // ======================================================
 
 function sameAccount(
@@ -601,7 +686,7 @@ async function safeArray<
 }
 
 // ======================================================
-// DATES
+// DATE HELPERS
 // ======================================================
 
 function todayKey() {
@@ -664,6 +749,61 @@ function dateLabel(
 }
 
 // ======================================================
+// HERO MEDIA
+// ======================================================
+
+function HeroMedia({
+  slide,
+  onEnded,
+}: {
+  slide:
+    HeroSlide;
+
+  onEnded():
+    void;
+}) {
+  if (
+    slide.type ===
+    "video"
+  ) {
+    return (
+      <video
+        key={
+          slide.id
+        }
+        src={
+          slide.src
+        }
+        poster={
+          slide.poster
+        }
+        className="branch-home-hero-media"
+        autoPlay
+        muted
+        playsInline
+        preload="metadata"
+        onEnded={
+          onEnded
+        }
+      />
+    );
+  }
+
+  return (
+    <img
+      key={
+        slide.id
+      }
+      src={
+        slide.src
+      }
+      alt=""
+      className="branch-home-hero-media"
+    />
+  );
+}
+
+// ======================================================
 // DASHBOARD
 // ======================================================
 
@@ -672,8 +812,8 @@ export default function BranchAdminDashboard({
   navSections,
 }: RouteProps) {
   /*
-   * Navigation discovery is now owned by Library/Search.
-   * Keep this prop for compatibility with page.tsx.
+   * Kept for compatibility with branch-admin/page.tsx.
+   * Module discovery belongs to Library/Search.
    */
   void navSections;
 
@@ -906,17 +1046,6 @@ export default function BranchAdminDashboard({
           activeMembership,
         );
 
-      const storedUser =
-        safeJson<AnyRow>(
-          "currentUser",
-        ) ||
-        safeJson<AnyRow>(
-          "authUser",
-        ) ||
-        safeJson<AnyRow>(
-          "user",
-        );
-
       const possibleBranchIds =
         [
           branchId,
@@ -1011,16 +1140,6 @@ export default function BranchAdminDashboard({
               ),
             ),
         ) ||
-        branchRows.find(
-          (
-            row,
-          ) =>
-            possibleSchoolIds.includes(
-              cleanId(
-                row.schoolId,
-              ),
-            ),
-        ) ||
         branchRows[0] ||
         (
           activeBranch as AnyRow
@@ -1045,16 +1164,6 @@ export default function BranchAdminDashboard({
             ) ===
             resolvedSchoolId,
         ) ||
-        schoolRows.find(
-          (
-            row,
-          ) =>
-            possibleSchoolIds.includes(
-              idOf(
-                row,
-              ),
-            ),
-        ) ||
         schoolRows[0] ||
         (
           activeSchool as AnyRow
@@ -1062,100 +1171,13 @@ export default function BranchAdminDashboard({
         membership?.school ||
         null;
 
-      const userId =
-        cleanId(
-          membership
-            ?.userId ||
-            membership
-              ?.appUserId ||
-            openWorkspace
-              ?.membership
-              ?.userId ||
-            storedUser?.id,
-        );
-
-      const appUser =
-        (
-          rows.appUsers ||
-          []
-        ).find(
-          (
-            row,
-          ) =>
-            idOf(
-              row,
-            ) ===
-            userId,
-        ) ||
-        (
-          rows.appUsers ||
-          []
-        ).find(
-          (
-            row,
-          ) =>
-            cleanId(
-              row.email,
-            ) ===
-            cleanId(
-              membership
-                ?.email,
-            ),
-        ) ||
-        storedUser ||
-        membership?.user ||
-        membership?.appUser ||
-        null;
-
       return {
         branch,
         school,
-
-        branchName:
-          text(
-            branch?.name ||
-              membership
-                ?.branchName ||
-              (
-                settings as AnyRow
-              )?.branchName,
-            "Branch",
-          ),
-
-        schoolName:
-          text(
-            school?.name ||
-              membership
-                ?.schoolName ||
-              (
-                settings as AnyRow
-              )?.schoolName,
-            "School",
-          ),
-
-        userName:
-          text(
-            appUser
-              ?.fullName ||
-              appUser?.name ||
-              openWorkspace
-                ?.fullName ||
-              openWorkspace
-                ?.userName ||
-              openWorkspace
-                ?.memberName ||
-              membership
-                ?.fullName ||
-              membership
-                ?.userName ||
-              membership?.name,
-            "Administrator",
-          ),
       };
     }, [
       rows.branches,
       rows.schools,
-      rows.appUsers,
 
       branchId,
       schoolId,
@@ -1170,7 +1192,7 @@ export default function BranchAdminDashboard({
     ]);
 
   // ====================================================
-  // SUMMARY
+  // ATTENDANCE
   // ====================================================
 
   const summary =
@@ -1184,10 +1206,6 @@ export default function BranchAdminDashboard({
 
       const teachers =
         rows.teachers ||
-        [];
-
-      const classes =
-        rows.classes ||
         [];
 
       const studentAttendance =
@@ -1226,7 +1244,7 @@ export default function BranchAdminDashboard({
             ),
         );
 
-      const studentPresent =
+      const presentStudents =
         todayStudents.filter(
           (
             row,
@@ -1240,7 +1258,7 @@ export default function BranchAdminDashboard({
             "present",
         ).length;
 
-      const studentLate =
+      const lateStudents =
         todayStudents.filter(
           (
             row,
@@ -1254,7 +1272,7 @@ export default function BranchAdminDashboard({
             "late",
         ).length;
 
-      const teacherPresent =
+      const presentTeachers =
         todayTeachers.filter(
           (
             row,
@@ -1294,34 +1312,18 @@ export default function BranchAdminDashboard({
             teachers,
           ),
 
-        classes:
-          count(
-            classes,
-          ),
-
-        studentPresent,
-
-        studentLate,
-
         studentAttending:
-          studentPresent +
-          studentLate,
+          presentStudents +
+          lateStudents,
 
-        teacherPresent,
-
-        branchName:
-          identity.branchName,
-
-        schoolName:
-          identity.schoolName,
+        teacherPresent:
+          presentTeachers,
       };
     }, [
       rows.students,
       rows.teachers,
-      rows.classes,
       rows.attendance,
       rows.teacherAttendance,
-      identity,
     ]);
 
   const studentAttendancePercentage =
@@ -1355,7 +1357,7 @@ export default function BranchAdminDashboard({
       : 0;
 
   // ====================================================
-  // UPCOMING — KEEP SHORT
+  // UPCOMING
   // ====================================================
 
   const events =
@@ -1394,7 +1396,7 @@ export default function BranchAdminDashboard({
     );
 
   // ====================================================
-  // ANNOUNCEMENTS — KEEP SHORT
+  // ANNOUNCEMENTS
   // ====================================================
 
   const announcements =
@@ -1435,418 +1437,314 @@ export default function BranchAdminDashboard({
     );
 
   // ====================================================
-  // HERO / PORTAL HIGHLIGHTS
+  // PORTAL HIGHLIGHTS
   // ====================================================
 
   const heroSlides =
-    useMemo<HeroSlide[]>(
-      () => {
-        const media =
-          (
-            rows.mediaAssets ||
-            []
-          ).filter(
+    useMemo<
+      HeroSlide[]
+    >(() => {
+      const media =
+        (
+          rows.mediaAssets ||
+          []
+        ).filter(
+          activeRow,
+        );
+
+      const now =
+        Date.now();
+
+      const mediaUrl =
+        (
+          mediaId:
+            unknown,
+        ) => {
+          const asset =
+            media.find(
+              (
+                row,
+              ) =>
+                idOf(
+                  row,
+                ) ===
+                cleanId(
+                  mediaId,
+                ),
+            );
+
+          return text(
+            asset?.publicUrl ||
+              asset?.remoteUrl ||
+              asset?.storageUrl ||
+              asset?.downloadUrl ||
+              asset?.localObjectUrl ||
+              asset?.previewDataUrl ||
+              asset?.thumbnailDataUrl,
+          );
+        };
+
+      const highlightSlides =
+        (
+          rows.portalHighlights ||
+          []
+        )
+          .filter(
             activeRow,
+          )
+
+          .filter(
+            (
+              row,
+            ) =>
+              row
+                ?.metadata
+                ?.placement !==
+              "gallery",
+          )
+
+          .filter(
+            (
+              row,
+            ) => {
+              const audiences =
+                Array.isArray(
+                  row.audiences,
+                )
+                  ? row.audiences.map(
+                      (
+                        value:
+                          unknown,
+                      ) =>
+                        String(
+                          value,
+                        ).toLowerCase(),
+                    )
+                  : [
+                      String(
+                        row.audience ||
+                          row.portal ||
+                          row.role ||
+                          "all",
+                      ).toLowerCase(),
+                    ];
+
+              if (
+                !audiences.some(
+                  (
+                    value:
+                      string,
+                  ) =>
+                    [
+                      "all",
+                      "branch_admin",
+                      "branch-admin",
+                      "admin",
+                    ].includes(
+                      value,
+                    ),
+                )
+              ) {
+                return false;
+              }
+
+              const status =
+                String(
+                  row.status ||
+                    "published",
+                ).toLowerCase();
+
+              if (
+                ![
+                  "published",
+                  "scheduled",
+                  "active",
+                ].includes(
+                  status,
+                )
+              ) {
+                return false;
+              }
+
+              const startAt =
+                Number(
+                  row.startAt ||
+                    0,
+                );
+
+              const endAt =
+                Number(
+                  row.endAt ||
+                    0,
+                );
+
+              if (
+                startAt &&
+                startAt >
+                  now
+              ) {
+                return false;
+              }
+
+              if (
+                endAt &&
+                endAt <
+                  now
+              ) {
+                return false;
+              }
+
+              return true;
+            },
+          )
+
+          .sort(
+            (
+              a,
+              b,
+            ) =>
+              n(
+                a.displayOrder ||
+                  a.order,
+              ) -
+              n(
+                b.displayOrder ||
+                  b.order,
+              ),
+          )
+
+          .map(
+            (
+              row,
+              index,
+            ):
+              HeroSlide |
+              null => {
+              const type =
+                String(
+                  row.mediaType ||
+                    "",
+                ).toLowerCase() ===
+                "video"
+                  ? "video"
+                  : "image";
+
+              const src =
+                mediaUrl(
+                  row.mediaAssetId,
+                ) ||
+                (
+                  type ===
+                  "image"
+                    ? text(
+                        row.fallbackImageUrl,
+                      )
+                    : ""
+                );
+
+              const poster =
+                mediaUrl(
+                  row.posterMediaAssetId,
+                ) ||
+                text(
+                  row.fallbackImageUrl,
+                );
+
+              if (
+                !src
+              ) {
+                return null;
+              }
+
+              return {
+                id:
+                  cleanId(
+                    idOf(
+                      row,
+                    ),
+                  ) ||
+                  `portal-highlight-${index}`,
+
+                type,
+
+                src,
+
+                poster:
+                  poster ||
+                  undefined,
+
+                title:
+                  text(
+                    row.title,
+                  ),
+
+                subtitle:
+                  text(
+                    row.subtitle ||
+                      row.description,
+                  ),
+
+                durationSeconds:
+                  Math.max(
+                    3,
+
+                    Math.min(
+                      30,
+
+                      n(
+                        row.durationSeconds ||
+                          7,
+                      ),
+                    ),
+                  ),
+
+                transition:
+                  row.transition ===
+                  "slide"
+                    ? "slide"
+                    : "fade",
+
+                actionType:
+                  text(
+                    row.actionType,
+                  ),
+
+                actionLabel:
+                  text(
+                    row.actionLabel,
+                  ),
+
+                actionValue:
+                  text(
+                    row.actionValue,
+                  ),
+              };
+            },
+          )
+
+          .filter(
+            (
+              row,
+            ):
+              row is HeroSlide =>
+              Boolean(
+                row,
+              ),
           );
 
-        const now =
-          Date.now();
-
-        const mediaUrl =
-          (
-            mediaId:
-              unknown,
-          ) => {
-            const asset =
-              media.find(
-                (
-                  row,
-                ) =>
-                  idOf(
-                    row,
-                  ) ===
-                  cleanId(
-                    mediaId,
-                  ),
-              );
-
-            return text(
-              asset
-                ?.publicUrl ||
-                asset
-                  ?.remoteUrl ||
-                asset
-                  ?.storageUrl ||
-                asset
-                  ?.downloadUrl ||
-                asset
-                  ?.localObjectUrl ||
-                asset
-                  ?.previewDataUrl ||
-                asset
-                  ?.thumbnailDataUrl,
-            );
-          };
-
-        const highlightSlides =
-          (
-            rows.portalHighlights ||
-            []
-          )
-            .filter(
-              activeRow,
-            )
-
-            .filter(
-              (
-                row,
-              ) =>
-                row
-                  ?.metadata
-                  ?.placement !==
-                "gallery",
-            )
-
-            .filter(
-              (
-                row,
-              ) => {
-                const audiences =
-                  Array.isArray(
-                    row.audiences,
-                  )
-                    ? row.audiences.map(
-                        (
-                          value:
-                            unknown,
-                        ) =>
-                          String(
-                            value,
-                          ).toLowerCase(),
-                      )
-                    : [
-                        String(
-                          row.audience ||
-                            row.portal ||
-                            row.role ||
-                            "all",
-                        ).toLowerCase(),
-                      ];
-
-                if (
-                  !audiences.some(
-                    (
-                      value:
-                        string,
-                    ) =>
-                      [
-                        "all",
-                        "branch_admin",
-                        "branch-admin",
-                        "admin",
-                      ].includes(
-                        value,
-                      ),
-                  )
-                ) {
-                  return false;
-                }
-
-                const status =
-                  String(
-                    row.status ||
-                      "published",
-                  ).toLowerCase();
-
-                if (
-                  ![
-                    "published",
-                    "scheduled",
-                    "active",
-                  ].includes(
-                    status,
-                  )
-                ) {
-                  return false;
-                }
-
-                const startAt =
-                  Number(
-                    row.startAt ||
-                      0,
-                  );
-
-                const endAt =
-                  Number(
-                    row.endAt ||
-                      0,
-                  );
-
-                if (
-                  startAt &&
-                  startAt >
-                    now
-                ) {
-                  return false;
-                }
-
-                if (
-                  endAt &&
-                  endAt <
-                    now
-                ) {
-                  return false;
-                }
-
-                return true;
-              },
-            )
-
-            .sort(
-              (
-                a,
-                b,
-              ) =>
-                n(
-                  a.displayOrder ||
-                    a.order,
-                ) -
-                n(
-                  b.displayOrder ||
-                    b.order,
-                ),
-            )
-
-            .map(
-              (
-                row,
-                index,
-              ):
-                HeroSlide |
-                null => {
-                const type =
-                  String(
-                    row.mediaType ||
-                      "",
-                  ).toLowerCase() ===
-                  "video"
-                    ? "video"
-                    : "image";
-
-                const src =
-                  mediaUrl(
-                    row.mediaAssetId,
-                  ) ||
-                  (
-                    type ===
-                    "image"
-                      ? text(
-                          row.fallbackImageUrl,
-                        )
-                      : ""
-                  );
-
-                const poster =
-                  mediaUrl(
-                    row.posterMediaAssetId,
-                  ) ||
-                  text(
-                    row.fallbackImageUrl,
-                  );
-
-                if (
-                  !src
-                ) {
-                  return null;
-                }
-
-                return {
-                  id:
-                    cleanId(
-                      idOf(
-                        row,
-                      ),
-                    ) ||
-                    `portal-highlight-${index}`,
-
-                  type,
-
-                  src,
-
-                  poster:
-                    poster ||
-                    undefined,
-
-                  title:
-                    text(
-                      row.title,
-                    ),
-
-                  subtitle:
-                    text(
-                      row.subtitle ||
-                        row.description,
-                    ),
-
-                  durationSeconds:
-                    Math.max(
-                      3,
-
-                      Math.min(
-                        30,
-
-                        n(
-                          row.durationSeconds ||
-                            7,
-                        ),
-                      ),
-                    ),
-
-                  transition:
-                    row.transition ===
-                    "slide"
-                      ? "slide"
-                      : "fade",
-
-                  actionType:
-                    text(
-                      row.actionType,
-                    ),
-
-                  actionLabel:
-                    text(
-                      row.actionLabel,
-                    ),
-
-                  actionValue:
-                    text(
-                      row.actionValue,
-                    ),
-                };
-              },
-            )
-
-            .filter(
-              (
-                row,
-              ):
-                row is HeroSlide =>
-                Boolean(
-                  row,
-                ),
-            );
-
-        /*
-         * Real Portal Highlights take priority.
-         */
-        if (
-          highlightSlides.length
-        ) {
-          return highlightSlides;
-        }
-
-        /*
-         * Fallback imagery is only used when there is no
-         * configured Portal Highlight.
-         */
-        const fallbackCandidates =
-          [
-            mediaUrl(
-              (
-                settings as AnyRow
-              )
-                ?.dashboardHeroImageMediaId,
-            ),
-
-            (
-              settings as AnyRow
-            )
-              ?.dashboardHeroImage,
-
-            mediaUrl(
-              identity
-                .branch
-                ?.bannerImageMediaId,
-            ),
-
-            identity
-              .branch
-              ?.bannerImage,
-
-            mediaUrl(
-              identity
-                .school
-                ?.bannerImageMediaId,
-            ),
-
-            identity
-              .school
-              ?.bannerImage,
-
-            mediaUrl(
-              identity
-                .branch
-                ?.photoMediaId,
-            ),
-
-            identity
-              .branch
-              ?.photo,
-
-            mediaUrl(
-              identity
-                .school
-                ?.photoMediaId,
-            ),
-
-            identity
-              .school
-              ?.photo,
-          ]
-            .map(
-              (
-                value,
-              ) =>
-                text(
-                  value,
-                ),
-            )
-            .filter(
-              Boolean,
-            );
-
-        if (
-          !fallbackCandidates[0]
-        ) {
-          return [];
-        }
-
-        return [
-          {
-            id:
-              "dashboard-fallback-image",
-
-            type:
-              "image",
-
-            src:
-              fallbackCandidates[0],
-
-            durationSeconds:
-              7,
-
-            transition:
-              "fade",
-          },
-        ];
-      },
-      [
-        identity,
-        rows.mediaAssets,
-        rows.portalHighlights,
-        settings,
-      ],
-    );
+      /*
+       * School/platform supplied highlights win.
+       *
+       * Otherwise use the three bundled Eleeveon defaults.
+       */
+      return highlightSlides.length
+        ? highlightSlides
+        : DEFAULT_HERO_SLIDES;
+    }, [
+      rows.mediaAssets,
+      rows.portalHighlights,
+      identity,
+    ]);
 
   const [
     heroSlideIndex,
@@ -1888,10 +1786,6 @@ export default function BranchAdminDashboard({
       return;
     }
 
-    /*
-     * Video slides are expected to advance through their
-     * playback-end behaviour.
-     */
     if (
       activeHeroSlide
         ?.type ===
@@ -1968,28 +1862,6 @@ export default function BranchAdminDashboard({
               key:
                 routeKey,
             },
-          },
-        ),
-      );
-
-      window.dispatchEvent(
-        new CustomEvent(
-          "role-portal:navigate",
-          {
-            detail: {
-              key:
-                routeKey,
-            },
-          },
-        ),
-      );
-
-      window.dispatchEvent(
-        new CustomEvent(
-          "portal:navigate",
-          {
-            detail:
-              routeKey,
           },
         ),
       );
@@ -2078,68 +1950,6 @@ export default function BranchAdminDashboard({
   }
 
   // ====================================================
-  // DISPLAY
-  // ====================================================
-
-  const branchRecord =
-    identity.branch;
-
-  const schoolRecord =
-    identity.school;
-
-  const motto =
-    text(
-      (
-        settings as AnyRow
-      )?.motto ||
-        branchRecord?.motto ||
-        schoolRecord?.motto,
-
-      "Learning today. Leading tomorrow.",
-    );
-
-  const userName =
-    identity.userName;
-
-  const hour =
-    new Date()
-      .getHours();
-
-  const greeting =
-    hour < 12
-      ? "Good morning"
-      : hour < 17
-        ? "Good afternoon"
-        : "Good evening";
-
-  const heroStats =
-    [
-      {
-        label:
-          "Students",
-
-        value:
-          summary.students,
-      },
-
-      {
-        label:
-          "Teachers",
-
-        value:
-          summary.teachers,
-      },
-
-      {
-        label:
-          "Classes",
-
-        value:
-          summary.classes,
-      },
-    ];
-
-  // ====================================================
   // STATES
   // ====================================================
 
@@ -2149,25 +1959,31 @@ export default function BranchAdminDashboard({
     settingsLoading
   ) {
     return (
-      <DashboardBackground
-        primaryColor={
-          primary
+      <main
+        className="branch-home-page"
+        style={
+          {
+            "--branch-home-primary":
+              primary,
+          } as React.CSSProperties
         }
       >
-        <section className="eds-dashboard-state">
-          <div className="eds-dashboard-state-spinner" />
+        <style>
+          {css}
+        </style>
 
-          <h2>
+        <section className="branch-home-state">
+          <div className="branch-home-spinner" />
+
+          <strong>
             Opening branch home...
-          </h2>
+          </strong>
 
-          <p>
-            Preparing highlights,
-            attendance and today's
-            school information.
-          </p>
+          <span>
+            Preparing your dashboard.
+          </span>
         </section>
-      </DashboardBackground>
+      </main>
     );
   }
 
@@ -2176,22 +1992,17 @@ export default function BranchAdminDashboard({
     !accountId
   ) {
     return (
-      <DashboardBackground
-        primaryColor={
-          primary
-        }
-      >
-        <section className="eds-dashboard-state">
-          <h2>
-            Redirecting to login...
-          </h2>
+      <main className="branch-home-page">
+        <style>
+          {css}
+        </style>
 
-          <p>
-            You must sign in before
-            viewing the branch home.
-          </p>
+        <section className="branch-home-state">
+          <strong>
+            Redirecting to login...
+          </strong>
         </section>
-      </DashboardBackground>
+      </main>
     );
   }
 
@@ -2200,298 +2011,397 @@ export default function BranchAdminDashboard({
   // ====================================================
 
   return (
-    <DashboardBackground
-      primaryColor={
-        primary
+    <main
+      className="branch-home-page"
+      style={
+        {
+          "--branch-home-primary":
+            primary,
+        } as React.CSSProperties
       }
     >
       <style>
-        {dashboardCss}
+        {css}
       </style>
 
-      <main className="branch-admin-home">
-        {/* ===============================================
-         * HERO / PORTAL HIGHLIGHTS
-         * ===============================================
-         *
-         * This is now the first visible Home content.
-         *
-         * The old four-action strip has been removed.
-         */}
+      {/* =================================================
+       * HERO
+       * ================================================= */}
 
-        <WelcomeHero
-          greeting={
-            greeting
-          }
-          name={
-            userName
-          }
-          schoolName={
-            summary.schoolName
-          }
-          branchName={
-            summary.branchName
-          }
-          motto={
-            motto
-          }
-          slide={
-            activeHeroSlide
-          }
-          slides={
-            heroSlides
-          }
-          slideIndex={
-            heroSlideIndex
-          }
-          stats={
-            heroStats
-          }
-          onAdvance={
-            advanceHero
-          }
-          onSlideChange={
-            setHeroSlideIndex
-          }
-          onSlideAction={() => {
-            if (
-              activeHeroSlide
-            ) {
-              openHeroAction(
-                activeHeroSlide,
-              );
-            }
-          }}
-        />
+      {activeHeroSlide ? (
+        <>
+          <section className="branch-home-hero">
+            <HeroMedia
+              slide={
+                activeHeroSlide
+              }
+              onEnded={
+                advanceHero
+              }
+            />
 
-        {/* ===============================================
-         * ATTENDANCE
-         * =============================================== */}
-
-        <DashboardWidget>
-          <DashboardSection
-            eyebrow="Today"
-            title="Attendance"
-          >
-            <div className="branch-attendance-summary">
-              <button
-                type="button"
-                className="branch-attendance-card"
-                onClick={() =>
-                  openRoute(
-                    "studentAttendance",
-                  )
-                }
-              >
-                <span className="branch-attendance-icon">
-                  <AttendanceIcon />
-                </span>
-
-                <span className="branch-attendance-copy">
-                  <small>
-                    Students
-                  </small>
-
+            {/*
+             * User/school identity text has been removed.
+             *
+             * Real Portal Highlights may still supply their
+             * own editorial title/subtitle/action.
+             */}
+            {activeHeroSlide.title ||
+            activeHeroSlide.subtitle ||
+            activeHeroSlide.actionLabel ? (
+              <div className="branch-home-highlight-caption">
+                {activeHeroSlide.title ? (
                   <strong>
                     {
-                      studentAttendancePercentage
+                      activeHeroSlide.title
                     }
-                    %
                   </strong>
+                ) : null}
 
-                  <em>
+                {activeHeroSlide.subtitle ? (
+                  <span>
                     {
-                      summary.studentAttending
+                      activeHeroSlide.subtitle
                     }
-                    {" of "}
-                    {
-                      summary.students
-                    }
-                  </em>
-                </span>
-              </button>
+                  </span>
+                ) : null}
 
-              <button
-                type="button"
-                className="branch-attendance-card"
-                onClick={() =>
-                  openRoute(
-                    "teacherAttendance",
-                  )
-                }
-              >
-                <span className="branch-attendance-icon">
-                  <TeacherIcon />
-                </span>
-
-                <span className="branch-attendance-copy">
-                  <small>
-                    Teachers
-                  </small>
-
-                  <strong>
-                    {
-                      teacherAttendancePercentage
+                {activeHeroSlide.actionLabel &&
+                activeHeroSlide.actionType &&
+                activeHeroSlide.actionType !==
+                  "none" ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openHeroAction(
+                        activeHeroSlide,
+                      )
                     }
-                    %
-                  </strong>
+                  >
+                    {
+                      activeHeroSlide.actionLabel
+                    }
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
 
-                  <em>
-                    {
-                      summary.teacherPresent
+          {heroSlides.length >
+          1 ? (
+            <div
+              className="branch-home-hero-dots"
+              aria-label="Portal highlights"
+            >
+              {heroSlides.map(
+                (
+                  slide,
+                  index,
+                ) => (
+                  <button
+                    key={
+                      slide.id
                     }
-                    {" of "}
-                    {
-                      summary.teachers
+                    type="button"
+                    className={
+                      index ===
+                      heroSlideIndex
+                        ? "active"
+                        : ""
                     }
-                  </em>
-                </span>
-              </button>
+                    onClick={() =>
+                      setHeroSlideIndex(
+                        index,
+                      )
+                    }
+                    aria-label={`Show highlight ${index + 1}`}
+                  />
+                ),
+              )}
             </div>
-          </DashboardSection>
-        </DashboardWidget>
+          ) : null}
+        </>
+      ) : null}
 
-        {/* ===============================================
-         * SMALL HOME FEED
-         * =============================================== */}
+      {/* =================================================
+       * ATTENDANCE
+       * ================================================= */}
 
-        <DashboardWidgets>
-          <DashboardWidget>
-            <DashboardSection
-              eyebrow="School day"
-              title="Upcoming"
-              action={
+      <section className="branch-home-section">
+        <header className="branch-home-section-head">
+          <span>
+            Today
+          </span>
+
+          <h2>
+            Attendance
+          </h2>
+        </header>
+
+        <div className="branch-attendance-grid">
+          <button
+            type="button"
+            className="branch-attendance-card"
+            onClick={() =>
+              openRoute(
+                "studentAttendance",
+              )
+            }
+          >
+            <span className="branch-attendance-icon">
+              <AttendanceIcon />
+            </span>
+
+            <span className="branch-attendance-copy">
+              <small>
+                Students
+              </small>
+
+              <strong>
+                {
+                  studentAttendancePercentage
+                }
+                %
+              </strong>
+
+              <em>
+                {
+                  summary.studentAttending
+                }
+                {" of "}
+                {
+                  summary.students
+                }
+              </em>
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className="branch-attendance-card"
+            onClick={() =>
+              openRoute(
+                "teacherAttendance",
+              )
+            }
+          >
+            <span className="branch-attendance-icon">
+              <TeacherIcon />
+            </span>
+
+            <span className="branch-attendance-copy">
+              <small>
+                Teachers
+              </small>
+
+              <strong>
+                {
+                  teacherAttendancePercentage
+                }
+                %
+              </strong>
+
+              <em>
+                {
+                  summary.teacherPresent
+                }
+                {" of "}
+                {
+                  summary.teachers
+                }
+              </em>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      {/* =================================================
+       * UPCOMING
+       * ================================================= */}
+
+      <section className="branch-home-section">
+        <header className="branch-home-section-head horizontal">
+          <div>
+            <span>
+              School day
+            </span>
+
+            <h2>
+              Upcoming
+            </h2>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              openRoute(
+                "calendar",
+              )
+            }
+          >
+            Calendar
+          </button>
+        </header>
+
+        <div className="branch-home-list">
+          {events.length ? (
+            events.map(
+              (
+                event,
+                index,
+              ) => (
                 <button
                   type="button"
+                  className="branch-home-row"
+                  key={
+                    idOf(
+                      event,
+                    ) ||
+                    String(
+                      index,
+                    )
+                  }
                   onClick={() =>
                     openRoute(
                       "calendar",
                     )
                   }
                 >
-                  Calendar
+                  <span className="branch-home-date">
+                    {dateLabel(
+                      event.startAt ||
+                        event.startDate ||
+                        event.date,
+                    )}
+                  </span>
+
+                  <span className="branch-home-row-copy">
+                    <strong>
+                      {text(
+                        event.title ||
+                          event.name,
+
+                        "School event",
+                      )}
+                    </strong>
+
+                    <small>
+                      {text(
+                        event.location ||
+                          event.venue,
+
+                        "School calendar",
+                      )}
+                    </small>
+                  </span>
+
+                  <b>
+                    ›
+                  </b>
                 </button>
-              }
-            >
-              <CalendarPreview
-                items={
-                  events.map(
-                    (
-                      event,
-                      index,
-                    ) => ({
-                      id:
-                        idOf(
-                          event,
-                        ) ||
-                        String(
-                          index,
-                        ),
+              ),
+            )
+          ) : (
+            <div className="branch-home-empty">
+              No upcoming events.
+            </div>
+          )}
+        </div>
+      </section>
 
-                      date:
-                        dateLabel(
-                          event.startAt ||
-                            event.startDate ||
-                            event.date,
-                        ),
+      {/* =================================================
+       * ANNOUNCEMENTS
+       * ================================================= */}
 
-                      title:
-                        text(
-                          event.title ||
-                            event.name,
+      <section className="branch-home-section">
+        <header className="branch-home-section-head horizontal">
+          <div>
+            <span>
+              Notice board
+            </span>
 
-                          "School event",
-                        ),
+            <h2>
+              Announcements
+            </h2>
+          </div>
 
-                      description:
-                        text(
-                          event.location ||
-                            event.venue,
+          <button
+            type="button"
+            onClick={() =>
+              openRoute(
+                "announcements",
+              )
+            }
+          >
+            View all
+          </button>
+        </header>
 
-                          "School calendar",
-                        ),
-
-                      onClick:
-                        () =>
-                          openRoute(
-                            "calendar",
-                          ),
-                    }),
-                  )
-                }
-              />
-            </DashboardSection>
-          </DashboardWidget>
-
-          <DashboardWidget>
-            <DashboardSection
-              eyebrow="Notice board"
-              title="Announcements"
-              action={
+        <div className="branch-home-list">
+          {announcements.length ? (
+            announcements.map(
+              (
+                item,
+                index,
+              ) => (
                 <button
                   type="button"
+                  className="branch-home-row"
+                  key={
+                    idOf(
+                      item,
+                    ) ||
+                    String(
+                      index,
+                    )
+                  }
                   onClick={() =>
                     openRoute(
                       "announcements",
                     )
                   }
                 >
-                  View all
+                  <span className="branch-home-announcement-icon">
+                    📣
+                  </span>
+
+                  <span className="branch-home-row-copy">
+                    <strong>
+                      {text(
+                        item.title,
+
+                        "Announcement",
+                      )}
+                    </strong>
+
+                    <small>
+                      {text(
+                        item.message ||
+                          item.body ||
+                          item.content,
+
+                        "Open to read this school update.",
+                      ).slice(
+                        0,
+                        90,
+                      )}
+                    </small>
+                  </span>
+
+                  <b>
+                    ›
+                  </b>
                 </button>
-              }
-            >
-              <ActivityFeed
-                items={
-                  announcements.map(
-                    (
-                      item,
-                      index,
-                    ) => ({
-                      id:
-                        idOf(
-                          item,
-                        ) ||
-                        String(
-                          index,
-                        ),
-
-                      title:
-                        text(
-                          item.title,
-
-                          "Announcement",
-                        ),
-
-                      meta:
-                        text(
-                          item.message ||
-                            item.body ||
-                            item.content,
-
-                          "Open to read this school update.",
-                        ).slice(
-                          0,
-                          90,
-                        ),
-
-                      icon:
-                        "📣",
-
-                      onClick:
-                        () =>
-                          openRoute(
-                            "announcements",
-                          ),
-                    }),
-                  )
-                }
-                emptyText="No announcements published."
-              />
-            </DashboardSection>
-          </DashboardWidget>
-        </DashboardWidgets>
-      </main>
-    </DashboardBackground>
+              ),
+            )
+          ) : (
+            <div className="branch-home-empty">
+              No announcements published.
+            </div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -2499,14 +2409,23 @@ export default function BranchAdminDashboard({
 // CSS
 // ======================================================
 
-const dashboardCss = `
+const css = `
 /*
  * =====================================================
- * HOME LAYOUT
+ * PAGE
  * =====================================================
+ *
+ * NO:
+ *
+ * height: 100vh
+ * height: 100dvh
+ * overflow-y: auto
+ * overflow-y: scroll
+ *
+ * The document owns scrolling.
  */
 
-.branch-admin-home {
+.branch-home-page {
   width:
     100%;
 
@@ -2514,62 +2433,62 @@ const dashboardCss = `
     0;
 
   max-width:
-    1180px;
+    900px;
 
   margin:
     0 auto;
+
+  padding:
+    8px 8px
+    10px;
 
   display:
     grid;
 
   gap:
     10px;
+
+  background:
+    transparent;
+
+  color:
+    var(
+      --eds-text,
+      var(--text, #111827)
+    );
+
+  overflow:
+    visible;
 }
 
 /*
- * =====================================================
- * ONE AND ONLY ONE PAGE SCROLL
- * =====================================================
+ * Critical single-scroll ownership.
  *
- * The RolePortalShell/browser owns vertical scrolling.
- *
- * None of the dashboard wrappers may become another
- * vertical scrolling viewport.
+ * Undo any dashboard/page-level scrolling styles inherited
+ * from older dashboard generations.
  */
 
-.branch-admin-home,
-.eds-dashboard-background,
-.eds-dashboard,
-.eds-dashboard-inner,
-.eds-dashboard-content,
-.eds-dashboard-state,
-.eds-dashboard-widgets,
-.eds-dashboard-widget,
-.eds-dashboard-section,
-.eds-dashboard-hero,
-.eds-welcome-hero {
+.branch-home-page,
+.branch-home-page *,
+.app-content,
+.app-content-inner,
+.shell-portal-content,
+.shell-content-background {
+  max-height:
+    none;
+}
+
+.branch-home-page {
   height:
     auto !important;
 
-  max-height:
-    none !important;
+  min-height:
+    0 !important;
 
   overflow-y:
     visible !important;
-
-  overscroll-behavior-y:
-    auto !important;
-
-  scrollbar-gutter:
-    auto !important;
 }
 
-/*
- * Also prevent outer portal content wrappers from becoming
- * a second vertical scroller while Home is mounted.
- */
-
-.app-main,
 .app-content,
 .app-content-inner,
 .shell-portal-content,
@@ -2585,48 +2504,404 @@ const dashboardCss = `
 }
 
 /*
- * Horizontal clipping is fine.
- * Vertical clipping/scrolling is not.
+ * Do not add another min-height:100vh from old dashboard
+ * background components because this dashboard no longer
+ * uses those components.
  */
 
-.branch-admin-home,
-.eds-dashboard-background,
-.eds-dashboard,
-.eds-dashboard-inner {
-  overflow-x:
-    clip !important;
+.branch-home-page
+button {
+  font:
+    inherit;
 }
 
 /*
  * =====================================================
  * HERO
  * =====================================================
- *
- * The four shortcut cards are gone.
- *
- * We use part of that reclaimed space to make Portal
- * Highlights feel more like the Gospel Library feature
- * carousel without letting the hero consume the complete
- * screen.
  */
 
-.branch-admin-home
-:is(
-  .eds-dashboard-hero,
-  .eds-welcome-hero
-) {
+.branch-home-hero {
+  position:
+    relative;
+
   width:
     100%;
 
-  min-height:
+  height:
     clamp(
       420px,
-      44dvh,
-      560px
-    ) !important;
+      50dvh,
+      570px
+    );
 
+  overflow:
+    hidden;
+
+  border-radius:
+    28px;
+
+  background:
+    #0f172a;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      rgba(0,0,0,.08)
+    );
+
+  box-shadow:
+    0 12px 32px
+    rgba(15,23,42,.10);
+}
+
+.branch-home-hero-media {
+  position:
+    absolute;
+
+  inset:
+    0;
+
+  width:
+    100% !important;
+
+  height:
+    100% !important;
+
+  max-width:
+    none !important;
+
+  object-fit:
+    cover;
+
+  object-position:
+    center;
+
+  display:
+    block;
+}
+
+/*
+ * Only editorial Portal Highlight text appears here.
+ *
+ * Default Eleeveon slides contain no text overlay.
+ */
+
+.branch-home-highlight-caption {
+  position:
+    absolute;
+
+  left:
+    16px;
+
+  right:
+    16px;
+
+  bottom:
+    16px;
+
+  display:
+    grid;
+
+  justify-items:
+    start;
+
+  gap:
+    5px;
+
+  padding:
+    14px;
+
+  border-radius:
+    18px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(7,18,36,.80),
+      rgba(7,18,36,.55)
+    );
+
+  color:
+    #ffffff;
+
+  backdrop-filter:
+    blur(12px);
+}
+
+.branch-home-highlight-caption
+strong {
+  font-size:
+    18px;
+
+  line-height:
+    1.15;
+
+  font-weight:
+    900;
+}
+
+.branch-home-highlight-caption
+span {
+  font-size:
+    11px;
+
+  line-height:
+    1.45;
+
+  color:
+    rgba(255,255,255,.82);
+}
+
+.branch-home-highlight-caption
+button {
+  min-height:
+    34px;
+
+  margin-top:
+    4px;
+
+  border:
+    0;
+
+  border-radius:
+    999px;
+
+  padding:
+    0 14px;
+
+  background:
+    #ffffff;
+
+  color:
+    #111827;
+
+  font-size:
+    10px;
+
+  font-weight:
+    850;
+
+  cursor:
+    pointer;
+}
+
+.branch-home-hero-dots {
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  justify-content:
+    center;
+
+  gap:
+    6px;
+
+  min-height:
+    18px;
+}
+
+.branch-home-hero-dots
+button {
+  width:
+    7px;
+
+  height:
+    7px;
+
+  border:
+    0;
+
+  border-radius:
+    999px;
+
+  padding:
+    0;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --branch-home-primary,
+        #2563eb
+      ) 28%,
+      transparent
+    );
+
+  cursor:
+    pointer;
+
+  transition:
+    width .18s ease,
+    background-color .18s ease;
+}
+
+.branch-home-hero-dots
+button.active {
+  width:
+    20px;
+
+  background:
+    var(
+      --branch-home-primary,
+      #2563eb
+    );
+}
+
+/*
+ * =====================================================
+ * SECTIONS
+ * =====================================================
+ */
+
+.branch-home-section {
+  min-width:
+    0;
+
+  display:
+    grid;
+
+  gap:
+    10px;
+
+  padding:
+    14px;
+
+  border:
+    1px solid
+    var(
+      --eds-border,
+      var(--border, rgba(15,23,42,.08))
+    );
+
+  border-radius:
+    22px;
+
+  background:
+    var(
+      --eds-surface,
+      var(--surface, #ffffff)
+    );
+
+  box-shadow:
+    0 6px 20px
+    rgba(15,23,42,.045);
+}
+
+.branch-home-section-head {
+  min-width:
+    0;
+}
+
+.branch-home-section-head.horizontal {
+  display:
+    flex;
+
+  align-items:
+    center;
+
+  justify-content:
+    space-between;
+
+  gap:
+    12px;
+}
+
+.branch-home-section-head
+span {
+  display:
+    block;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    850;
+
+  letter-spacing:
+    .07em;
+
+  text-transform:
+    uppercase;
+}
+
+.branch-home-section-head
+h2 {
   margin:
-    0 !important;
+    3px 0 0;
+
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    20px;
+
+  line-height:
+    1.1;
+
+  font-weight:
+    850;
+}
+
+.branch-home-section-head
+> button,
+.branch-home-section-head
+.horizontal
+button {
+  flex:
+    0 0 auto;
+
+  min-height:
+    32px;
+
+  border:
+    0;
+
+  border-radius:
+    999px;
+
+  padding:
+    0 11px;
+
+  background:
+    var(
+      --eds-primary-softer,
+      color-mix(
+        in srgb,
+        var(
+          --branch-home-primary,
+          #2563eb
+        ) 8%,
+        transparent
+      )
+    );
+
+  color:
+    var(
+      --branch-home-primary,
+      #2563eb
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    850;
+
+  cursor:
+    pointer;
 }
 
 /*
@@ -2635,7 +2910,7 @@ const dashboardCss = `
  * =====================================================
  */
 
-.branch-attendance-summary {
+.branch-attendance-grid {
   display:
     grid;
 
@@ -2673,19 +2948,26 @@ const dashboardCss = `
     1px solid
     var(
       --eds-border,
-      var(--border, rgba(0,0,0,.09))
+      var(--border, rgba(15,23,42,.08))
     );
 
   border-radius:
-    14px;
+    15px;
 
   padding:
     7px 8px;
 
   background:
-    var(
-      --eds-surface,
-      var(--surface, #ffffff)
+    color-mix(
+      in srgb,
+      var(
+        --eds-bg,
+        var(--bg, #f5f7fb)
+      ) 70%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
     );
 
   color:
@@ -2696,10 +2978,6 @@ const dashboardCss = `
 
   cursor:
     pointer;
-
-  box-shadow:
-    0 4px 12px
-    rgba(15,23,42,.045);
 }
 
 .branch-attendance-icon {
@@ -2719,22 +2997,19 @@ const dashboardCss = `
     10px;
 
   background:
-    var(
-      --eds-primary-softer,
-      color-mix(
-        in srgb,
-        var(
-          --primary-color,
-          #2563eb
-        ) 8%,
-        transparent
-      )
+    color-mix(
+      in srgb,
+      var(
+        --branch-home-primary,
+        #2563eb
+      ) 9%,
+      transparent
     );
 
   color:
     var(
-      --eds-primary,
-      var(--primary-color, #2563eb)
+      --branch-home-primary,
+      #2563eb
     );
 }
 
@@ -2775,9 +3050,6 @@ small {
 
   font-weight:
     850;
-
-  letter-spacing:
-    .035em;
 
   text-transform:
     uppercase;
@@ -2836,23 +3108,355 @@ em {
 
 /*
  * =====================================================
- * WIDGETS
+ * HOME LISTS
  * =====================================================
  */
 
-.branch-admin-home
-.eds-dashboard-widgets {
+.branch-home-list {
+  display:
+    grid;
+
   gap:
-    10px !important;
+    6px;
 }
 
-.branch-admin-home
-.eds-dashboard-widget {
+.branch-home-row {
+  width:
+    100%;
+
   min-width:
     0;
 
-  margin:
-    0 !important;
+  min-height:
+    58px;
+
+  display:
+    grid;
+
+  grid-template-columns:
+    auto
+    minmax(0, 1fr)
+    auto;
+
+  align-items:
+    center;
+
+  gap:
+    9px;
+
+  border:
+    0;
+
+  border-radius:
+    14px;
+
+  padding:
+    8px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-bg,
+        var(--bg, #f5f7fb)
+      ) 72%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    );
+
+  color:
+    inherit;
+
+  text-align:
+    left;
+
+  cursor:
+    pointer;
+}
+
+.branch-home-date {
+  min-width:
+    56px;
+
+  height:
+    38px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    11px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --branch-home-primary,
+        #2563eb
+      ) 9%,
+      transparent
+    );
+
+  color:
+    var(
+      --branch-home-primary,
+      #2563eb
+    );
+
+  font-size:
+    9px;
+
+  font-weight:
+    850;
+}
+
+.branch-home-announcement-icon {
+  width:
+    38px;
+
+  height:
+    38px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    11px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --branch-home-primary,
+        #2563eb
+      ) 9%,
+      transparent
+    );
+
+  font-size:
+    17px;
+}
+
+.branch-home-row-copy {
+  min-width:
+    0;
+}
+
+.branch-home-row-copy
+strong,
+.branch-home-row-copy
+small {
+  display:
+    block;
+
+  overflow:
+    hidden;
+
+  text-overflow:
+    ellipsis;
+}
+
+.branch-home-row-copy
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      var(--text, #111827)
+    );
+
+  font-size:
+    11px;
+
+  font-weight:
+    850;
+
+  white-space:
+    nowrap;
+}
+
+.branch-home-row-copy
+small {
+  margin-top:
+    3px;
+
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    9px;
+
+  line-height:
+    1.35;
+
+  display:
+    -webkit-box;
+
+  -webkit-box-orient:
+    vertical;
+
+  -webkit-line-clamp:
+    2;
+
+  overflow:
+    hidden;
+}
+
+.branch-home-row
+> b {
+  color:
+    var(
+      --eds-text-muted,
+      var(--muted, #64748b)
+    );
+
+  font-size:
+    20px;
+
+  font-weight:
+    500;
+}
+
+.branch-home-empty {
+  min-height:
+    56px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  border-radius:
+    14px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(
+        --eds-bg,
+        #f5f7fb
+      ) 72%,
+      var(
+        --eds-surface,
+        #ffffff
+      )
+    );
+
+  color:
+    var(
+      --eds-text-muted,
+      #64748b
+    );
+
+  font-size:
+    10px;
+
+  font-weight:
+    650;
+}
+
+/*
+ * =====================================================
+ * STATES
+ * =====================================================
+ */
+
+.branch-home-state {
+  min-height:
+    220px;
+
+  display:
+    grid;
+
+  place-items:
+    center;
+
+  align-content:
+    center;
+
+  gap:
+    8px;
+
+  text-align:
+    center;
+}
+
+.branch-home-state
+strong {
+  color:
+    var(
+      --eds-text-strong,
+      #111827
+    );
+
+  font-size:
+    15px;
+}
+
+.branch-home-state
+span {
+  color:
+    var(
+      --eds-text-muted,
+      #64748b
+    );
+
+  font-size:
+    10px;
+}
+
+.branch-home-spinner {
+  width:
+    34px;
+
+  height:
+    34px;
+
+  border:
+    3px solid
+    color-mix(
+      in srgb,
+      var(
+        --branch-home-primary,
+        #2563eb
+      ) 17%,
+      transparent
+    );
+
+  border-top-color:
+    var(
+      --branch-home-primary,
+      #2563eb
+    );
+
+  border-radius:
+    999px;
+
+  animation:
+    branchHomeSpin
+    .8s
+    linear
+    infinite;
+}
+
+@keyframes branchHomeSpin {
+  to {
+    transform:
+      rotate(
+        360deg
+      );
+  }
 }
 
 /*
@@ -2864,40 +3468,42 @@ em {
 @media (
   max-width: 699px
 ) {
-  .branch-admin-home {
+  .branch-home-page {
+    padding:
+      6px 6px
+      8px;
+
     gap:
       8px;
   }
 
-  /*
-   * Slightly taller than the previous Home hero because
-   * the four navigation cards have been removed.
-   */
-  .branch-admin-home
-  :is(
-    .eds-dashboard-hero,
-    .eds-welcome-hero
-  ) {
-    min-height:
+  .branch-home-hero {
+    /*
+     * Larger because the old four quick-action cards are
+     * gone and the hero is now primarily visual.
+     */
+    height:
       clamp(
-        490px,
-        46dvh,
-        590px
-      ) !important;
+        440px,
+        50dvh,
+        580px
+      );
+
+    border-radius:
+      24px;
+  }
+
+  .branch-home-section {
+    padding:
+      12px;
+
+    border-radius:
+      19px;
   }
 
   .branch-attendance-card {
     min-height:
       66px;
-
-    padding:
-      6px 7px;
-  }
-
-  .branch-attendance-copy
-  strong {
-    font-size:
-      19px;
   }
 }
 `;

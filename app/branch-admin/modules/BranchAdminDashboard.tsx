@@ -3,28 +3,41 @@
 /**
  * app/branch-admin/modules/BranchAdminDashboard.tsx
  * ---------------------------------------------------------
- * BRANCH ADMIN HOME — COMPACT APP HOME
+ * BRANCH ADMIN HOME — COMPACT MOBILE-FIRST HOME
  * ---------------------------------------------------------
  *
- * Mobile-first dashboard/home screen.
+ * Home now has one clear responsibility:
+ * show what matters now.
  *
- * Navigation responsibilities have moved out of Home:
+ * Navigation responsibilities live elsewhere:
  *
- * - Search lives in the fixed Role Portal header.
- * - Library owns module discovery.
- * - Screens owns quick return to opened work.
+ * - Header Search = find anything quickly
+ * - Library       = discover everything available
+ * - Screens       = return to recent/open work
  *
- * Therefore Home now focuses on:
+ * Therefore Home contains:
  *
- * 1. Portal Highlights / hero
- * 2. Quick actions
- * 3. Compact student attendance percentage
- * 4. Compact teacher attendance percentage
- * 5. A very small upcoming-events preview
- * 6. A very small announcement preview
+ * 1. Portal Highlights / Hero
+ * 2. Student attendance %
+ * 3. Teacher attendance %
+ * 4. Upcoming events
+ * 5. Announcements
  *
- * The page intentionally avoids becoming a second Library
- * or a long administrative dashboard.
+ * Removed from Home:
+ *
+ * - Dashboard search bar
+ * - Student shortcut
+ * - Attendance shortcut
+ * - Assessment shortcut
+ * - Reports shortcut
+ * - Recent activity
+ *
+ * SCROLL OWNERSHIP:
+ *
+ * The dashboard must NEVER create a second page-level
+ * vertical scroll context. The browser/document owns the
+ * page scroll. Dashboard containers remain height:auto and
+ * overflow-y:visible.
  */
 
 import React, {
@@ -76,17 +89,17 @@ import {
   DashboardSection,
   DashboardWidget,
   DashboardWidgets,
-  QuickActionGrid,
   WelcomeHero,
 } from "../../components/dashboard";
 
 import {
-  AssessmentIcon,
   AttendanceIcon,
-  ReportsIcon,
-  StudentIcon,
   TeacherIcon,
 } from "../../components/icons";
+
+// ======================================================
+// TYPES
+// ======================================================
 
 type AnyRow =
   Record<string, any>;
@@ -126,12 +139,10 @@ type HeroSlide = {
   actionValue?: string;
 };
 
-/*
- * Home now loads only the data it actually needs.
- *
- * This makes dashboard opening faster and reduces Dexie
- * work on lower-powered mobile devices.
- */
+// ======================================================
+// ONLY LOAD DATA HOME ACTUALLY NEEDS
+// ======================================================
+
 const TABLE_NAMES = [
   "schools",
   "branches",
@@ -203,9 +214,9 @@ type OpenWorkspaceSession = {
     number;
 };
 
-/* ======================================================
- * STORAGE HELPERS
- * ====================================================== */
+// ======================================================
+// SAFE STORAGE
+// ======================================================
 
 function safeRead(
   key: string,
@@ -235,7 +246,9 @@ function safeJson<T>(
   key: string,
 ): T | null {
   const raw =
-    safeRead(key);
+    safeRead(
+      key,
+    );
 
   if (!raw) {
     return null;
@@ -266,9 +279,9 @@ function readStoredActiveMembership():
   );
 }
 
-/* ======================================================
- * VALUE HELPERS
- * ====================================================== */
+// ======================================================
+// VALUE HELPERS
+// ======================================================
 
 function cleanId(
   value: unknown,
@@ -296,7 +309,9 @@ function firstPermanentId(
         value,
       );
 
-    if (parsed) {
+    if (
+      parsed
+    ) {
       return parsed;
     }
   }
@@ -347,7 +362,9 @@ function activeRow(
     String(
       row?.status ||
         "",
-    ).toLowerCase();
+    )
+      .trim()
+      .toLowerCase();
 
   return (
     row?.isDeleted !==
@@ -373,9 +390,9 @@ function count(
   ).length;
 }
 
-/* ======================================================
- * WORKSPACE HELPERS
- * ====================================================== */
+// ======================================================
+// WORKSPACE HELPERS
+// ======================================================
 
 function workspaceMembership(
   openWorkspace?:
@@ -422,15 +439,12 @@ function selectedSchoolId(
     );
 
   return firstPermanentId(
-    args.openWorkspace
-      ?.schoolId,
+    args.openWorkspace?.schoolId,
 
     membership?.schoolId,
-
     membership?.school?.id,
 
     args.activeSchoolId,
-
     args.activeSchool?.id,
 
     args.settings?.schoolId,
@@ -469,18 +483,13 @@ function selectedBranchId(
     );
 
   return firstPermanentId(
-    args.openWorkspace
-      ?.branchId,
+    args.openWorkspace?.branchId,
 
     membership?.branchId,
-
-    membership
-      ?.schoolBranchId,
-
+    membership?.schoolBranchId,
     membership?.branch?.id,
 
     args.activeBranchId,
-
     args.activeBranch?.id,
 
     args.settings?.branchId,
@@ -491,9 +500,9 @@ function selectedBranchId(
   );
 }
 
-/* ======================================================
- * DATA SCOPE HELPERS
- * ====================================================== */
+// ======================================================
+// SCOPE HELPERS
+// ======================================================
 
 function sameAccount(
   row: AnyRow,
@@ -591,9 +600,9 @@ async function safeArray<
     : [];
 }
 
-/* ======================================================
- * DATE HELPERS
- * ====================================================== */
+// ======================================================
+// DATES
+// ======================================================
 
 function todayKey() {
   try {
@@ -654,18 +663,17 @@ function dateLabel(
   }
 }
 
-/* ======================================================
- * DASHBOARD
- * ====================================================== */
+// ======================================================
+// DASHBOARD
+// ======================================================
 
 export default function BranchAdminDashboard({
   navigate,
   navSections,
 }: RouteProps) {
   /*
-   * Navigation is now handled by Library/Search.
-   * navSections stays accepted for backwards compatibility
-   * with branch-admin/page.tsx.
+   * Navigation discovery is now owned by Library/Search.
+   * Keep this prop for compatibility with page.tsx.
    */
   void navSections;
 
@@ -762,9 +770,9 @@ export default function BranchAdminDashboard({
       >
     >({});
 
-  /* ====================================================
-   * AUTH
-   * ==================================================== */
+  // ====================================================
+  // AUTH
+  // ====================================================
 
   useEffect(() => {
     if (
@@ -788,9 +796,9 @@ export default function BranchAdminDashboard({
     router,
   ]);
 
-  /* ====================================================
-   * LOAD DASHBOARD DATA
-   * ==================================================== */
+  // ====================================================
+  // LOAD
+  // ====================================================
 
   async function load() {
     if (
@@ -886,9 +894,9 @@ export default function BranchAdminDashboard({
   const rows =
     rowsByTable;
 
-  /* ====================================================
-   * ACTIVE IDENTITY
-   * ==================================================== */
+  // ====================================================
+  // IDENTITY
+  // ====================================================
 
   const identity =
     useMemo(() => {
@@ -998,7 +1006,9 @@ export default function BranchAdminDashboard({
             row,
           ) =>
             possibleBranchIds.includes(
-              idOf(row),
+              idOf(
+                row,
+              ),
             ),
         ) ||
         branchRows.find(
@@ -1030,7 +1040,9 @@ export default function BranchAdminDashboard({
           (
             row,
           ) =>
-            idOf(row) ===
+            idOf(
+              row,
+            ) ===
             resolvedSchoolId,
         ) ||
         schoolRows.find(
@@ -1038,7 +1050,9 @@ export default function BranchAdminDashboard({
             row,
           ) =>
             possibleSchoolIds.includes(
-              idOf(row),
+              idOf(
+                row,
+              ),
             ),
         ) ||
         schoolRows[0] ||
@@ -1068,7 +1082,9 @@ export default function BranchAdminDashboard({
           (
             row,
           ) =>
-            idOf(row) ===
+            idOf(
+              row,
+            ) ===
             userId,
         ) ||
         (
@@ -1153,9 +1169,9 @@ export default function BranchAdminDashboard({
       settings,
     ]);
 
-  /* ====================================================
-   * HOME SUMMARY
-   * ==================================================== */
+  // ====================================================
+  // SUMMARY
+  // ====================================================
 
   const summary =
     useMemo(() => {
@@ -1184,7 +1200,9 @@ export default function BranchAdminDashboard({
 
       const todayStudents =
         studentAttendance.filter(
-          (row) =>
+          (
+            row,
+          ) =>
             String(
               row.date ||
                 row.createdAt ||
@@ -1196,7 +1214,9 @@ export default function BranchAdminDashboard({
 
       const todayTeachers =
         teacherAttendance.filter(
-          (row) =>
+          (
+            row,
+          ) =>
             String(
               row.date ||
                 row.createdAt ||
@@ -1208,7 +1228,9 @@ export default function BranchAdminDashboard({
 
       const studentPresent =
         todayStudents.filter(
-          (row) =>
+          (
+            row,
+          ) =>
             String(
               row.status ||
                 "",
@@ -1220,7 +1242,9 @@ export default function BranchAdminDashboard({
 
       const studentLate =
         todayStudents.filter(
-          (row) =>
+          (
+            row,
+          ) =>
             String(
               row.status ||
                 "",
@@ -1232,7 +1256,9 @@ export default function BranchAdminDashboard({
 
       const teacherPresent =
         todayTeachers.filter(
-          (row) => {
+          (
+            row,
+          ) => {
             const status =
               String(
                 row.status ||
@@ -1302,6 +1328,7 @@ export default function BranchAdminDashboard({
     summary.students > 0
       ? Math.min(
           100,
+
           Math.round(
             (
               summary.studentAttending /
@@ -1316,6 +1343,7 @@ export default function BranchAdminDashboard({
     summary.teachers > 0
       ? Math.min(
           100,
+
           Math.round(
             (
               summary.teacherPresent /
@@ -1326,9 +1354,9 @@ export default function BranchAdminDashboard({
         )
       : 0;
 
-  /* ====================================================
-   * UPCOMING
-   * ==================================================== */
+  // ====================================================
+  // UPCOMING — KEEP SHORT
+  // ====================================================
 
   const events =
     useMemo(
@@ -1365,9 +1393,9 @@ export default function BranchAdminDashboard({
       ],
     );
 
-  /* ====================================================
-   * ANNOUNCEMENTS
-   * ==================================================== */
+  // ====================================================
+  // ANNOUNCEMENTS — KEEP SHORT
+  // ====================================================
 
   const announcements =
     useMemo(
@@ -1406,9 +1434,9 @@ export default function BranchAdminDashboard({
       ],
     );
 
-  /* ====================================================
-   * PORTAL HIGHLIGHTS
-   * ==================================================== */
+  // ====================================================
+  // HERO / PORTAL HIGHLIGHTS
+  // ====================================================
 
   const heroSlides =
     useMemo<HeroSlide[]>(
@@ -1468,6 +1496,7 @@ export default function BranchAdminDashboard({
             .filter(
               activeRow,
             )
+
             .filter(
               (
                 row,
@@ -1477,6 +1506,7 @@ export default function BranchAdminDashboard({
                   ?.placement !==
                 "gallery",
             )
+
             .filter(
               (
                 row,
@@ -1571,6 +1601,7 @@ export default function BranchAdminDashboard({
                 return true;
               },
             )
+
             .sort(
               (
                 a,
@@ -1585,6 +1616,7 @@ export default function BranchAdminDashboard({
                     b.order,
                 ),
             )
+
             .map(
               (
                 row,
@@ -1622,7 +1654,9 @@ export default function BranchAdminDashboard({
                     row.fallbackImageUrl,
                   );
 
-                if (!src) {
+                if (
+                  !src
+                ) {
                   return null;
                 }
 
@@ -1657,8 +1691,10 @@ export default function BranchAdminDashboard({
                   durationSeconds:
                     Math.max(
                       3,
+
                       Math.min(
                         30,
+
                         n(
                           row.durationSeconds ||
                             7,
@@ -1689,6 +1725,7 @@ export default function BranchAdminDashboard({
                 };
               },
             )
+
             .filter(
               (
                 row,
@@ -1700,11 +1737,7 @@ export default function BranchAdminDashboard({
             );
 
         /*
-         * Portal Highlights are now authoritative.
-         *
-         * If any are configured, Home begins directly with
-         * those slides instead of placing a generic school
-         * image before them.
+         * Real Portal Highlights take priority.
          */
         if (
           highlightSlides.length
@@ -1713,8 +1746,8 @@ export default function BranchAdminDashboard({
         }
 
         /*
-         * Fallback image only when no Portal Highlight
-         * exists for this role.
+         * Fallback imagery is only used when there is no
+         * configured Portal Highlight.
          */
         const fallbackCandidates =
           [
@@ -1819,7 +1852,9 @@ export default function BranchAdminDashboard({
     heroSlideIndex,
     setHeroSlideIndex,
   ] =
-    useState(0);
+    useState(
+      0,
+    );
 
   const activeHeroSlide =
     heroSlides[
@@ -1854,7 +1889,8 @@ export default function BranchAdminDashboard({
     }
 
     /*
-     * Video slides advance through onEnded.
+     * Video slides are expected to advance through their
+     * playback-end behaviour.
      */
     if (
       activeHeroSlide
@@ -1878,6 +1914,7 @@ export default function BranchAdminDashboard({
               heroSlides.length,
           );
         },
+
         (
           activeHeroSlide
             ?.durationSeconds ||
@@ -1905,14 +1942,16 @@ export default function BranchAdminDashboard({
     heroSlides.length,
   ]);
 
-  /* ====================================================
-   * NAVIGATION
-   * ==================================================== */
+  // ====================================================
+  // NAVIGATION
+  // ====================================================
 
   function openRoute(
     routeKey: string,
   ) {
-    if (navigate) {
+    if (
+      navigate
+    ) {
       navigate(
         routeKey,
       );
@@ -2038,9 +2077,9 @@ export default function BranchAdminDashboard({
     }
   }
 
-  /* ====================================================
-   * DISPLAY TEXT
-   * ==================================================== */
+  // ====================================================
+  // DISPLAY
+  // ====================================================
 
   const branchRecord =
     identity.branch;
@@ -2055,6 +2094,7 @@ export default function BranchAdminDashboard({
       )?.motto ||
         branchRecord?.motto ||
         schoolRecord?.motto,
+
       "Learning today. Leading tomorrow.",
     );
 
@@ -2062,7 +2102,8 @@ export default function BranchAdminDashboard({
     identity.userName;
 
   const hour =
-    new Date().getHours();
+    new Date()
+      .getHours();
 
   const greeting =
     hour < 12
@@ -2098,80 +2139,9 @@ export default function BranchAdminDashboard({
       },
     ];
 
-  const quickActions =
-    [
-      {
-        key:
-          "students",
-
-        label:
-          "Student",
-
-        icon:
-          <StudentIcon />,
-
-        onClick:
-          () =>
-            openRoute(
-              "students",
-            ),
-      },
-
-      {
-        key:
-          "studentAttendance",
-
-        label:
-          "Attendance",
-
-        icon:
-          <AttendanceIcon />,
-
-        onClick:
-          () =>
-            openRoute(
-              "studentAttendance",
-            ),
-      },
-
-      {
-        key:
-          "assessmentEntries",
-
-        label:
-          "Assessment",
-
-        icon:
-          <AssessmentIcon />,
-
-        onClick:
-          () =>
-            openRoute(
-              "assessmentEntries",
-            ),
-      },
-
-      {
-        key:
-          "studentReports",
-
-        label:
-          "Reports",
-
-        icon:
-          <ReportsIcon />,
-
-        onClick:
-          () =>
-            openRoute(
-              "studentReports",
-            ),
-      },
-    ];
-
-  /* ====================================================
-   * STATES
-   * ==================================================== */
+  // ====================================================
+  // STATES
+  // ====================================================
 
   if (
     loading ||
@@ -2225,9 +2195,9 @@ export default function BranchAdminDashboard({
     );
   }
 
-  /* ====================================================
-   * HOME
-   * ==================================================== */
+  // ====================================================
+  // HOME
+  // ====================================================
 
   return (
     <DashboardBackground
@@ -2241,8 +2211,13 @@ export default function BranchAdminDashboard({
 
       <main className="branch-admin-home">
         {/* ===============================================
-         * PORTAL HIGHLIGHTS
-         * =============================================== */}
+         * HERO / PORTAL HIGHLIGHTS
+         * ===============================================
+         *
+         * This is now the first visible Home content.
+         *
+         * The old four-action strip has been removed.
+         */}
 
         <WelcomeHero
           greeting={
@@ -2290,107 +2265,97 @@ export default function BranchAdminDashboard({
         />
 
         {/* ===============================================
-         * QUICK ACTIONS
+         * ATTENDANCE
          * =============================================== */}
 
-        <QuickActionGrid
-          actions={
-            quickActions
-          }
-        />
+        <DashboardWidget>
+          <DashboardSection
+            eyebrow="Today"
+            title="Attendance"
+          >
+            <div className="branch-attendance-summary">
+              <button
+                type="button"
+                className="branch-attendance-card"
+                onClick={() =>
+                  openRoute(
+                    "studentAttendance",
+                  )
+                }
+              >
+                <span className="branch-attendance-icon">
+                  <AttendanceIcon />
+                </span>
+
+                <span className="branch-attendance-copy">
+                  <small>
+                    Students
+                  </small>
+
+                  <strong>
+                    {
+                      studentAttendancePercentage
+                    }
+                    %
+                  </strong>
+
+                  <em>
+                    {
+                      summary.studentAttending
+                    }
+                    {" of "}
+                    {
+                      summary.students
+                    }
+                  </em>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className="branch-attendance-card"
+                onClick={() =>
+                  openRoute(
+                    "teacherAttendance",
+                  )
+                }
+              >
+                <span className="branch-attendance-icon">
+                  <TeacherIcon />
+                </span>
+
+                <span className="branch-attendance-copy">
+                  <small>
+                    Teachers
+                  </small>
+
+                  <strong>
+                    {
+                      teacherAttendancePercentage
+                    }
+                    %
+                  </strong>
+
+                  <em>
+                    {
+                      summary.teacherPresent
+                    }
+                    {" of "}
+                    {
+                      summary.teachers
+                    }
+                  </em>
+                </span>
+              </button>
+            </div>
+          </DashboardSection>
+        </DashboardWidget>
 
         {/* ===============================================
-         * COMPACT HOME INFORMATION
+         * SMALL HOME FEED
          * =============================================== */}
 
         <DashboardWidgets>
-          {/* ATTENDANCE */}
-
-          <DashboardWidget>
-            <DashboardSection
-              eyebrow="Today"
-              title="Attendance"
-            >
-              <div className="branch-attendance-summary">
-                <button
-                  type="button"
-                  className="branch-attendance-card"
-                  onClick={() =>
-                    openRoute(
-                      "studentAttendance",
-                    )
-                  }
-                >
-                  <span className="branch-attendance-icon">
-                    <AttendanceIcon />
-                  </span>
-
-                  <span className="branch-attendance-copy">
-                    <small>
-                      Students
-                    </small>
-
-                    <strong>
-                      {
-                        studentAttendancePercentage
-                      }
-                      %
-                    </strong>
-
-                    <em>
-                      {
-                        summary.studentAttending
-                      }
-                      {" of "}
-                      {
-                        summary.students
-                      }
-                    </em>
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  className="branch-attendance-card"
-                  onClick={() =>
-                    openRoute(
-                      "teacherAttendance",
-                    )
-                  }
-                >
-                  <span className="branch-attendance-icon">
-                    <TeacherIcon />
-                  </span>
-
-                  <span className="branch-attendance-copy">
-                    <small>
-                      Teachers
-                    </small>
-
-                    <strong>
-                      {
-                        teacherAttendancePercentage
-                      }
-                      %
-                    </strong>
-
-                    <em>
-                      {
-                        summary.teacherPresent
-                      }
-                      {" of "}
-                      {
-                        summary.teachers
-                      }
-                    </em>
-                  </span>
-                </button>
-              </div>
-            </DashboardSection>
-          </DashboardWidget>
-
-          {/* UPCOMING */}
-
           <DashboardWidget>
             <DashboardSection
               eyebrow="School day"
@@ -2434,6 +2399,7 @@ export default function BranchAdminDashboard({
                         text(
                           event.title ||
                             event.name,
+
                           "School event",
                         ),
 
@@ -2441,6 +2407,7 @@ export default function BranchAdminDashboard({
                         text(
                           event.location ||
                             event.venue,
+
                           "School calendar",
                         ),
 
@@ -2455,8 +2422,6 @@ export default function BranchAdminDashboard({
               />
             </DashboardSection>
           </DashboardWidget>
-
-          {/* ANNOUNCEMENTS */}
 
           <DashboardWidget>
             <DashboardSection
@@ -2493,6 +2458,7 @@ export default function BranchAdminDashboard({
                       title:
                         text(
                           item.title,
+
                           "Announcement",
                         ),
 
@@ -2501,6 +2467,7 @@ export default function BranchAdminDashboard({
                           item.message ||
                             item.body ||
                             item.content,
+
                           "Open to read this school update.",
                         ).slice(
                           0,
@@ -2528,10 +2495,16 @@ export default function BranchAdminDashboard({
   );
 }
 
+// ======================================================
+// CSS
+// ======================================================
+
 const dashboardCss = `
-/* =====================================================
- * COMPACT BRANCH HOME
- * ===================================================== */
+/*
+ * =====================================================
+ * HOME LAYOUT
+ * =====================================================
+ */
 
 .branch-admin-home {
   width:
@@ -2554,20 +2527,53 @@ const dashboardCss = `
 }
 
 /*
- * The dashboard participates in normal page scrolling.
- * No nested full-page scroll containers.
+ * =====================================================
+ * ONE AND ONLY ONE PAGE SCROLL
+ * =====================================================
+ *
+ * The RolePortalShell/browser owns vertical scrolling.
+ *
+ * None of the dashboard wrappers may become another
+ * vertical scrolling viewport.
  */
+
 .branch-admin-home,
-.branch-admin-home
+.eds-dashboard-background,
 .eds-dashboard,
-.branch-admin-home
 .eds-dashboard-inner,
-.branch-admin-home
+.eds-dashboard-content,
+.eds-dashboard-state,
 .eds-dashboard-widgets,
-.branch-admin-home
 .eds-dashboard-widget,
-.branch-admin-home
-.eds-dashboard-section {
+.eds-dashboard-section,
+.eds-dashboard-hero,
+.eds-welcome-hero {
+  height:
+    auto !important;
+
+  max-height:
+    none !important;
+
+  overflow-y:
+    visible !important;
+
+  overscroll-behavior-y:
+    auto !important;
+
+  scrollbar-gutter:
+    auto !important;
+}
+
+/*
+ * Also prevent outer portal content wrappers from becoming
+ * a second vertical scroller while Home is mounted.
+ */
+
+.app-main,
+.app-content,
+.app-content-inner,
+.shell-portal-content,
+.shell-content-background {
   height:
     auto !important;
 
@@ -2578,48 +2584,56 @@ const dashboardCss = `
     visible !important;
 }
 
-/* =====================================================
- * HERO
- * ===================================================== */
+/*
+ * Horizontal clipping is fine.
+ * Vertical clipping/scrolling is not.
+ */
+
+.branch-admin-home,
+.eds-dashboard-background,
+.eds-dashboard,
+.eds-dashboard-inner {
+  overflow-x:
+    clip !important;
+}
 
 /*
- * Keep Home visually significant but stop the hero from
- * consuming most of the mobile viewport.
+ * =====================================================
+ * HERO
+ * =====================================================
+ *
+ * The four shortcut cards are gone.
+ *
+ * We use part of that reclaimed space to make Portal
+ * Highlights feel more like the Gospel Library feature
+ * carousel without letting the hero consume the complete
+ * screen.
  */
+
 .branch-admin-home
 :is(
   .eds-dashboard-hero,
   .eds-welcome-hero
 ) {
+  width:
+    100%;
+
   min-height:
-    0 !important;
+    clamp(
+      420px,
+      44dvh,
+      560px
+    ) !important;
 
   margin:
     0 !important;
 }
 
-/* =====================================================
- * WIDGET SPACING
- * ===================================================== */
-
-.branch-admin-home
-.eds-dashboard-widgets {
-  gap:
-    10px !important;
-}
-
-.branch-admin-home
-.eds-dashboard-widget {
-  min-width:
-    0;
-
-  margin:
-    0 !important;
-}
-
-/* =====================================================
+/*
+ * =====================================================
  * ATTENDANCE
- * ===================================================== */
+ * =====================================================
+ */
 
 .branch-attendance-summary {
   display:
@@ -2640,7 +2654,7 @@ const dashboardCss = `
     0;
 
   min-height:
-    72px;
+    70px;
 
   display:
     grid;
@@ -2709,7 +2723,10 @@ const dashboardCss = `
       --eds-primary-softer,
       color-mix(
         in srgb,
-        var(--primary-color, #2563eb) 8%,
+        var(
+          --primary-color,
+          #2563eb
+        ) 8%,
         transparent
       )
     );
@@ -2817,66 +2834,32 @@ em {
     650;
 }
 
-/* =====================================================
- * SINGLE PAGE SCROLL OWNERSHIP
- * ===================================================== */
+/*
+ * =====================================================
+ * WIDGETS
+ * =====================================================
+ */
 
-html {
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    auto;
-
-  scrollbar-gutter:
-    stable;
+.branch-admin-home
+.eds-dashboard-widgets {
+  gap:
+    10px !important;
 }
 
-body {
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    visible;
-}
-
-.branch-admin-home,
-.eds-dashboard,
-.eds-dashboard-inner,
-.eds-dashboard-state,
-.eds-dashboard-widgets,
-.eds-dashboard-widget,
-.eds-dashboard-section,
-.eds-dashboard-background {
-  height:
-    auto !important;
-
-  max-height:
-    none !important;
-
-  min-height:
+.branch-admin-home
+.eds-dashboard-widget {
+  min-width:
     0;
 
-  overflow-y:
-    visible !important;
-
-  overscroll-behavior-y:
-    auto !important;
-
-  scrollbar-gutter:
-    auto !important;
+  margin:
+    0 !important;
 }
 
-.eds-dashboard,
-.eds-dashboard-inner,
-.eds-dashboard-background {
-  overflow-x:
-    clip !important;
-}
-
-/* =====================================================
+/*
+ * =====================================================
  * MOBILE
- * ===================================================== */
+ * =====================================================
+ */
 
 @media (
   max-width: 699px
@@ -2886,9 +2869,26 @@ body {
       8px;
   }
 
+  /*
+   * Slightly taller than the previous Home hero because
+   * the four navigation cards have been removed.
+   */
+  .branch-admin-home
+  :is(
+    .eds-dashboard-hero,
+    .eds-welcome-hero
+  ) {
+    min-height:
+      clamp(
+        490px,
+        46dvh,
+        590px
+      ) !important;
+  }
+
   .branch-attendance-card {
     min-height:
-      68px;
+      66px;
 
     padding:
       6px 7px;

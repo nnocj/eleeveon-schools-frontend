@@ -7250,6 +7250,6 @@ body {
     stable;
 }
 
-/* Portal-contained overlay contract -----------------------------------
+/* Portal-contained overlay contract*/ -----------------------------------
       
 `;

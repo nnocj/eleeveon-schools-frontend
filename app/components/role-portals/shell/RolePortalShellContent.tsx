@@ -1,3 +1,4 @@
+
 "use client";
 
 /**
@@ -6,20 +7,23 @@
  * ROLE PORTAL SHELL - RUNTIME IMPLEMENTATION
  * --------------------------------------------------------------------------
  *
- * Faithfully extracted from RolePortalShell.tsx.
+ * Responsibilities:
+ * - Account, membership, institution, settings, theme and database contexts
+ * - Access checks and selected workspace resolution
+ * - Appearance readiness
+ * - Realtime and synchronization state
+ * - Hub indicator loading
+ * - Sidebar, header, account drawer and active route rendering
+ * - Workspace switching
+ * - Original in-memory navigate(key) behavior
  *
- * This file keeps the original runtime responsibilities:
- * - account, membership, institution, settings, theme and database contexts;
- * - access checks and selected workspace resolution;
- * - appearance readiness;
- * - realtime and sync state;
- * - Hub indicator loading;
- * - sidebar, header, account drawer and active route rendering;
- * - workspace switching;
- * - the ORIGINAL in-memory `navigate(key)` behavior.
+ * Portal overlay boundaries are now owned by:
+ * ./PortalOverlayBoundaries.css
  *
- * PHASE 1 ONLY:
- * Browser/Android history support is intentionally NOT added yet.
+ * The stylesheet is imported through PortalContent.tsx.
+ *
+ * IMPORTANT:
+ * Browser/Android history support is not added in this version.
  */
 
 import React, {
@@ -30,53 +34,19 @@ import React, {
   useState,
 } from "react";
 
-import {
-  useRouter,
-} from "next/navigation";
+import { useRouter } from "next/navigation";
 
-import {
-  useAccount,
-} from "../../../context/account-context";
-
-import {
-  useSettings,
-} from "../../../context/settings-context";
-
-import {
-  useActiveBranch,
-} from "../../../context/active-branch-context";
-
-import {
-  useSyncBootstrap,
-} from "../../../context/sync-bootstrap-context";
-
-import {
-  useActiveMembership,
-} from "../../../context/active-membership-context";
-
-import {
-  useRealtimeStatus,
-} from "../../../hooks/useRealtimeStatus";
-
-import {
-  useRealtime,
-} from "../../../context/realtime-context";
-
-import {
-  useTheme,
-} from "../../../context/theme-context";
-
-import {
-  useDatabase,
-} from "../../../context/database-context";
-
-import {
-  db,
-} from "../../../lib/db/db";
-
-import {
-  useWindowChrome,
-} from "../../../context/window-chrome-context";
+import { useAccount } from "../../../context/account-context";
+import { useSettings } from "../../../context/settings-context";
+import { useActiveBranch } from "../../../context/active-branch-context";
+import { useSyncBootstrap } from "../../../context/sync-bootstrap-context";
+import { useActiveMembership } from "../../../context/active-membership-context";
+import { useRealtimeStatus } from "../../../hooks/useRealtimeStatus";
+import { useRealtime } from "../../../context/realtime-context";
+import { useTheme } from "../../../context/theme-context";
+import { useDatabase } from "../../../context/database-context";
+import { db } from "../../../lib/db/db";
+import { useWindowChrome } from "../../../context/window-chrome-context";
 
 import SyncStatusSheet from "../../SyncStatusSheet";
 import EleeveonCenter from "../EleeveonCenter";
@@ -86,13 +56,8 @@ import PortalHeader from "./PortalHeader";
 import PortalContent from "./PortalContent";
 import AccountWorkspaceDrawer from "./AccountWorkspaceDrawer";
 
-import {
-  useSyncContext,
-} from "../../../context/sync-context";
-
-import {
-  useWorkspaceTransition,
-} from "../../workspace";
+import { useSyncContext } from "../../../context/sync-context";
+import { useWorkspaceTransition } from "../../workspace";
 
 import {
   bootstrapSelectedWorkspace,
@@ -167,70 +132,39 @@ function RolePortalShellContent({
   requireSchool = true,
   requireBranch = true,
 }: RolePortalShellProps) {
-  const router =
-    useRouter();
+  const router = useRouter();
+
+  const { runTransition } = useWorkspaceTransition();
+
+  const accountContext = useAccount();
+  const membershipContext = useActiveMembership();
+  const institutionContext = useActiveBranch();
+  const settingsContext = useSettings();
+  const themeContext = useTheme();
+  const databaseContext = useDatabase();
+  const syncContext = useSyncBootstrap();
+  const syncPanelContext = useSyncContext();
+  const realtimeContext = useRealtime();
+  const appearanceContext = usePortalAppearanceReadiness();
 
   const {
-    runTransition,
-  } =
-    useWorkspaceTransition();
-
-  const accountContext =
-    useAccount();
-
-  const membershipContext =
-    useActiveMembership();
-
-  const institutionContext =
-    useActiveBranch();
-
-  const settingsContext =
-    useSettings();
-
-  const themeContext =
-    useTheme();
-
-  const databaseContext =
-    useDatabase();
-
-  const syncContext =
-    useSyncBootstrap();
-
-  const syncPanelContext =
-    useSyncContext();
-
-  const realtimeContext =
-    useRealtime();
-
-  const appearanceContext =
-    usePortalAppearanceReadiness();
-
-  const {
-    setIdentity:
-      setWindowChromeIdentity,
-    clearIdentity:
-      clearWindowChromeIdentity,
-  } =
-    useWindowChrome();
+    setIdentity: setWindowChromeIdentity,
+    clearIdentity: clearWindowChromeIdentity,
+  } = useWindowChrome();
 
   const {
     initialSyncDone,
     applyingChanges,
-  } =
-    syncContext;
+  } = syncContext;
 
   const {
     openStatusSheet,
-  } =
-    syncPanelContext;
+  } = syncPanelContext;
 
   const {
-    connected:
-      realtimeConnected,
-    status:
-      realtimeStatus,
-  } =
-    useRealtimeStatus();
+    connected: realtimeConnected,
+    status: realtimeStatus,
+  } = useRealtimeStatus();
 
   const {
     accountId,
@@ -239,18 +173,13 @@ function RolePortalShellContent({
     subscription,
     logout,
     refreshAccount,
-    loading:
-      accountLoading,
-    restoring:
-      accountRestoring,
-    verifying:
-      accountVerifying,
+    loading: accountLoading,
+    restoring: accountRestoring,
+    verifying: accountVerifying,
     sessionVerified,
     authenticated,
-    offline:
-      accountOffline,
-  } =
-    accountContext;
+    offline: accountOffline,
+  } = accountContext;
 
   const {
     activeMembership,
@@ -258,20 +187,17 @@ function RolePortalShellContent({
     activeTeacherId,
     activeStudentId,
     activeParentId,
-    restored:
-      membershipRestored,
+    restored: membershipRestored,
     setActiveMembership,
     beginMembershipTransition,
     completeMembershipTransition,
     failMembershipTransition,
-  } =
-    membershipContext;
+  } = membershipContext;
 
   const {
     settings,
     refreshSettings,
-  } =
-    settingsContext;
+  } = settingsContext;
 
   const resolvedPrimaryColor =
     settings?.primaryColor ||
@@ -284,22 +210,16 @@ function RolePortalShellContent({
     "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
   const resolvedFontSize =
-    Number(
-      settings?.fontSize,
-    ) ||
+    Number(settings?.fontSize) ||
     themeContext.fontSize ||
     16;
 
   useEffect(() => {
-    if (
-      typeof document ===
-      "undefined"
-    ) {
+    if (typeof document === "undefined") {
       return;
     }
 
-    const root =
-      document.documentElement;
+    const root = document.documentElement;
 
     root.style.setProperty(
       "--primary-color",
@@ -346,327 +266,226 @@ function RolePortalShellContent({
     branches,
     allBranches,
     setActiveBranchId,
-    loading:
-      contextLoading,
+    loading: contextLoading,
     refreshInstitution,
-  } =
-    institutionContext;
+  } = institutionContext;
 
-  const openedWorkspace =
-    useMemo(
-      () =>
-        readOpenWorkspaceSession(),
-      [],
+  const openedWorkspace = useMemo(
+    () => readOpenWorkspaceSession(),
+    [],
+  );
+
+  const storedActiveMembership = useMemo(() => {
+    return (
+      normalizeMembership(openedWorkspace?.membership) ||
+      readStoredActiveMembership()
     );
+  }, [openedWorkspace]);
 
-  const storedActiveMembership =
-    useMemo(() => {
-      return (
-        normalizeMembership(
-          openedWorkspace?.membership,
-        ) ||
-        readStoredActiveMembership()
-      );
-    }, [
-      openedWorkspace,
-    ]);
+  const allMemberships = useMemo(() => {
+    const merged = [
+      ...collectUserMemberships(account),
+      ...collectUserMemberships(user),
+      ...readStoredMemberships(),
+      ...(storedActiveMembership
+        ? [storedActiveMembership]
+        : []),
+    ];
 
-  const allMemberships =
-    useMemo(() => {
-      const merged = [
-        ...collectUserMemberships(
-          account,
-        ),
-        ...collectUserMemberships(
-          user,
-        ),
-        ...readStoredMemberships(),
-        ...(storedActiveMembership
-          ? [
-              storedActiveMembership,
-            ]
-          : []),
-      ];
+    const unique = new Map<string, UserMembership>();
 
-      const unique =
-        new Map<
-          string,
-          UserMembership
-        >();
-
-      merged
-        .map(
-          normalizeMembership,
-        )
-        .filter(
-          Boolean,
-        )
-        .filter(
-          membershipIsUsable,
-        )
-        .forEach(
-          (
-            membership,
-          ) => {
-            unique.set(
-              membershipKey(
-                membership,
-              ),
-              membership as
-                UserMembership,
-            );
-          },
+    merged
+      .map(normalizeMembership)
+      .filter(Boolean)
+      .filter(membershipIsUsable)
+      .forEach((membership) => {
+        unique.set(
+          membershipKey(membership),
+          membership as UserMembership,
         );
-
-      const list =
-        [
-          ...unique.values(),
-        ];
-
-      if (
-        list.length
-      ) {
-        safeSet(
-          MEMBERSHIP_BACKUP_KEY,
-          JSON.stringify(
-            list,
-          ),
-        );
-      }
-
-      return list;
-    }, [
-      account,
-      user,
-      storedActiveMembership,
-    ]);
-
-  const protectedProfilePortal =
-    useMemo(
-      () =>
-        portalRequiresProfileMembership(
-          allowedRoles,
-        ),
-      [
-        allowedRoles,
-      ],
-    );
-
-  const matchingMemberships =
-    useMemo(() => {
-      return allMemberships.filter(
-        (
-          membership,
-        ) => {
-          if (
-            !roleAllowed(
-              membership.role,
-              allowedRoles,
-            )
-          ) {
-            return false;
-          }
-
-          if (
-            !membershipIsUsable(
-              membership,
-            )
-          ) {
-            return false;
-          }
-
-          if (
-            protectedProfilePortal &&
-            !profileRoleHasPermanentId(
-              membership,
-            )
-          ) {
-            return false;
-          }
-
-          return true;
-        },
-      );
-    }, [
-      allMemberships,
-      allowedRoles,
-      protectedProfilePortal,
-    ]);
-
-  const selectedMembership =
-    useMemo(() => {
-      const normalizedActive =
-        normalizeMembership(
-          activeMembership,
-        ) ||
-        storedActiveMembership;
-
-      if (
-        normalizedActive &&
-        roleAllowed(
-          normalizedActive.role,
-          allowedRoles,
-        ) &&
-        membershipIsUsable(
-          normalizedActive,
-        ) &&
-        (
-          !protectedProfilePortal ||
-          profileRoleHasPermanentId(
-            normalizedActive,
-          )
-        )
-      ) {
-        return normalizedActive;
-      }
-
-      if (
-        protectedProfilePortal
-      ) {
-        return (
-          matchingMemberships.length ===
-          1
-            ? matchingMemberships[0]
-            : null
-        );
-      }
-
-      return pickMembership({
-        memberships:
-          allMemberships,
-        allowedRoles,
-        activeSchoolId,
-        activeBranchId,
       });
-    }, [
-      activeMembership,
-      storedActiveMembership,
-      allMemberships,
+
+    const list = [...unique.values()];
+
+    if (list.length) {
+      safeSet(
+        MEMBERSHIP_BACKUP_KEY,
+        JSON.stringify(list),
+      );
+    }
+
+    return list;
+  }, [
+    account,
+    user,
+    storedActiveMembership,
+  ]);
+
+  const protectedProfilePortal = useMemo(
+    () => portalRequiresProfileMembership(allowedRoles),
+    [allowedRoles],
+  );
+
+  const matchingMemberships = useMemo(() => {
+    return allMemberships.filter((membership) => {
+      if (
+        !roleAllowed(
+          membership.role,
+          allowedRoles,
+        )
+      ) {
+        return false;
+      }
+
+      if (!membershipIsUsable(membership)) {
+        return false;
+      }
+
+      if (
+        protectedProfilePortal &&
+        !profileRoleHasPermanentId(membership)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    allMemberships,
+    allowedRoles,
+    protectedProfilePortal,
+  ]);
+
+  const selectedMembership = useMemo(() => {
+    const normalizedActive =
+      normalizeMembership(activeMembership) ||
+      storedActiveMembership;
+
+    if (
+      normalizedActive &&
+      roleAllowed(
+        normalizedActive.role,
+        allowedRoles,
+      ) &&
+      membershipIsUsable(normalizedActive) &&
+      (
+        !protectedProfilePortal ||
+        profileRoleHasPermanentId(normalizedActive)
+      )
+    ) {
+      return normalizedActive;
+    }
+
+    if (protectedProfilePortal) {
+      return matchingMemberships.length === 1
+        ? matchingMemberships[0]
+        : null;
+    }
+
+    return pickMembership({
+      memberships: allMemberships,
       allowedRoles,
       activeSchoolId,
       activeBranchId,
-      protectedProfilePortal,
-      matchingMemberships,
-    ]);
+    });
+  }, [
+    activeMembership,
+    storedActiveMembership,
+    allMemberships,
+    allowedRoles,
+    activeSchoolId,
+    activeBranchId,
+    protectedProfilePortal,
+    matchingMemberships,
+  ]);
 
-  const effectiveSchoolId =
-    useMemo(
-      () =>
-        toPermanentId(
-          activeSchoolId,
-        ) ||
-        toPermanentId(
-          selectedMembership?.schoolId,
-        ) ||
-        toPermanentId(
-          openedWorkspace?.schoolId,
-        ) ||
-        readStoredId(
-          "activeSchoolId",
-        ),
-      [
-        activeSchoolId,
-        selectedMembership?.schoolId,
-        openedWorkspace,
-      ],
-    );
+  const effectiveSchoolId = useMemo(
+    () =>
+      toPermanentId(activeSchoolId) ||
+      toPermanentId(selectedMembership?.schoolId) ||
+      toPermanentId(openedWorkspace?.schoolId) ||
+      readStoredId("activeSchoolId"),
+    [
+      activeSchoolId,
+      selectedMembership?.schoolId,
+      openedWorkspace,
+    ],
+  );
 
-  const effectiveBranchId =
-    useMemo(
-      () =>
-        toPermanentId(
-          activeBranchId,
-        ) ||
-        toPermanentId(
-          selectedMembership?.branchId,
-        ) ||
-        toPermanentId(
-          openedWorkspace?.branchId,
-        ) ||
-        readStoredId(
-          "activeBranchId",
-        ),
-      [
-        activeBranchId,
-        selectedMembership?.branchId,
-        openedWorkspace,
-      ],
-    );
+  const effectiveBranchId = useMemo(
+    () =>
+      toPermanentId(activeBranchId) ||
+      toPermanentId(selectedMembership?.branchId) ||
+      toPermanentId(openedWorkspace?.branchId) ||
+      readStoredId("activeBranchId"),
+    [
+      activeBranchId,
+      selectedMembership?.branchId,
+      openedWorkspace,
+    ],
+  );
 
-  const expectedAppearance =
-    useMemo(() => {
-      const role =
+  const expectedAppearance = useMemo(() => {
+    const role =
+      activeRole ||
+      selectedMembership?.role ||
+      null;
+
+    if (!role) {
+      return null;
+    }
+
+    return appearanceIdentityFor({
+      role,
+      accountId,
+      schoolId: effectiveSchoolId,
+      branchId: effectiveBranchId,
+    });
+  }, [
+    activeRole,
+    selectedMembership?.role,
+    accountId,
+    effectiveSchoolId,
+    effectiveBranchId,
+  ]);
+
+  const expectedScope = useMemo(
+    () =>
+      appearanceScopeForRole(
         activeRole ||
         selectedMembership?.role ||
-        null;
-
-      if (
-        !role
-      ) {
-        return null;
-      }
-
-      return appearanceIdentityFor({
-        role,
-        accountId,
-        schoolId:
-          effectiveSchoolId,
-        branchId:
-          effectiveBranchId,
-      });
-    }, [
+        "",
+      ),
+    [
       activeRole,
       selectedMembership?.role,
-      accountId,
-      effectiveSchoolId,
-      effectiveBranchId,
-    ]);
+    ],
+  );
 
-  const expectedScope =
-    useMemo(
-      () =>
-        appearanceScopeForRole(
-          activeRole ||
-            selectedMembership?.role ||
-            "",
-        ),
-      [
-        activeRole,
-        selectedMembership?.role,
-      ],
-    );
+  const renderedWorkspaceRef = useRef<string | null>(
+    null,
+  );
 
-  const renderedWorkspaceRef =
-    useRef<
-      string |
-      null
-    >(
-      null,
-    );
+  const appearanceMatchesRole = Boolean(
+    expectedAppearance &&
+      themeContext.ready &&
+      appearanceContext.firstEntryReady &&
+      themeContext.effectiveScope === expectedScope &&
+      appearanceIdentityMatches(
+        themeContext.appliedFor,
+        expectedAppearance,
+      ) &&
+      appearanceIdentityMatches(
+        appearanceContext.appliedFor,
+        expectedAppearance,
+      ),
+  );
 
-  const appearanceMatchesRole =
-    Boolean(
-      expectedAppearance &&
-        themeContext.ready &&
-        appearanceContext.firstEntryReady &&
-        themeContext.effectiveScope ===
-          expectedScope &&
-        appearanceIdentityMatches(
-          themeContext.appliedFor,
-          expectedAppearance,
-        ) &&
-        appearanceIdentityMatches(
-          appearanceContext.appliedFor,
-          expectedAppearance,
-        ),
-    );
-
-  const currentAppearanceWasRendered =
-    Boolean(
-      expectedAppearance &&
-        renderedWorkspaceRef.current ===
-          expectedAppearance.key,
-    );
+  const currentAppearanceWasRendered = Boolean(
+    expectedAppearance &&
+      renderedWorkspaceRef.current ===
+        expectedAppearance.key,
+  );
 
   useEffect(() => {
     if (
@@ -693,30 +512,20 @@ function RolePortalShellContent({
     if (
       activeMembership &&
       sameMembership(
-        normalizeMembership(
-          activeMembership,
-        ),
+        normalizeMembership(activeMembership),
         selectedMembership,
       )
     ) {
       return;
     }
 
-    const normalized =
-      writeWorkspaceSession(
-        selectedMembership,
-      );
+    const normalized = writeWorkspaceSession(
+      selectedMembership,
+    );
 
-    if (
-      normalized
-    ) {
-      setActiveMembership(
-        normalized,
-      ).catch(
-        (
-          error:
-            any,
-        ) => {
+    if (normalized) {
+      setActiveMembership(normalized).catch(
+        (error: any) => {
           console.error(
             "Failed to persist selected workspace:",
             error,
@@ -732,65 +541,50 @@ function RolePortalShellContent({
     setActiveMembership,
   ]);
 
-  const switchableMemberships =
-    useMemo(
-      () =>
-        allMemberships.filter(
-          (
-            membership,
-          ) =>
-            membership.active !==
-            false,
-        ),
-      [
-        allMemberships,
-      ],
-    );
+  const switchableMemberships = useMemo(
+    () =>
+      allMemberships.filter(
+        (membership) => membership.active !== false,
+      ),
+    [allMemberships],
+  );
 
-  const canAccess =
-    useMemo(() => {
-      if (
-        protectedProfilePortal
-      ) {
-        return protectedPortalCanAccess(
-          selectedMembership,
-          allowedRoles,
-        );
-      }
-
-      if (
-        selectedMembership &&
-        roleAllowed(
-          selectedMembership.role,
-          allowedRoles,
-        )
-      ) {
-        return true;
-      }
-
-      return membershipCanAccess({
-        role:
-          account?.role ||
-          user?.role,
-        memberships:
-          allMemberships,
+  const canAccess = useMemo(() => {
+    if (protectedProfilePortal) {
+      return protectedPortalCanAccess(
         selectedMembership,
         allowedRoles,
-        schoolId:
-          effectiveSchoolId,
-        branchId:
-          effectiveBranchId,
-      });
-    }, [
-      account,
-      user,
-      allMemberships,
+      );
+    }
+
+    if (
+      selectedMembership &&
+      roleAllowed(
+        selectedMembership.role,
+        allowedRoles,
+      )
+    ) {
+      return true;
+    }
+
+    return membershipCanAccess({
+      role: account?.role || user?.role,
+      memberships: allMemberships,
       selectedMembership,
       allowedRoles,
-      effectiveSchoolId,
-      effectiveBranchId,
-      protectedProfilePortal,
-    ]);
+      schoolId: effectiveSchoolId,
+      branchId: effectiveBranchId,
+    });
+  }, [
+    account,
+    user,
+    allMemberships,
+    selectedMembership,
+    allowedRoles,
+    effectiveSchoolId,
+    effectiveBranchId,
+    protectedProfilePortal,
+  ]);
 
   useEffect(() => {
     if (
@@ -804,10 +598,7 @@ function RolePortalShellContent({
       !authenticated ||
       !accountId
     ) {
-      router.replace(
-        "/login",
-      );
-
+      router.replace("/login");
       return;
     }
 
@@ -816,10 +607,7 @@ function RolePortalShellContent({
       initialSyncDone &&
       !canAccess
     ) {
-      router.replace(
-        "/select-role",
-      );
-
+      router.replace("/select-role");
       return;
     }
 
@@ -827,19 +615,11 @@ function RolePortalShellContent({
       sessionVerified &&
       initialSyncDone &&
       (
-        (
-          requireSchool &&
-          !effectiveSchoolId
-        ) ||
-        (
-          requireBranch &&
-          !effectiveBranchId
-        )
+        (requireSchool && !effectiveSchoolId) ||
+        (requireBranch && !effectiveBranchId)
       )
     ) {
-      router.replace(
-        "/select-role",
-      );
+      router.replace("/select-role");
     }
   }, [
     accountRestoring,
@@ -856,418 +636,211 @@ function RolePortalShellContent({
     router,
   ]);
 
-  const labels =
-    useMemo(() => {
-      const out:
-        Record<
-          string,
-          string
-        > = {};
+  const labels = useMemo(() => {
+    const out: Record<string, string> = {};
 
-      navSections.forEach(
-        (
-          section,
-        ) =>
-          section.items.forEach(
-            (
-              item,
-            ) => {
-              out[
-                item.key
-              ] =
-                item.label;
-            },
-          ),
-      );
-
-      return out;
-    }, [
-      navSections,
-    ]);
-
-  const groups =
-    useMemo(() => {
-      const out:
-        Record<
-          string,
-          string
-        > = {};
-
-      navSections.forEach(
-        (
-          section,
-        ) =>
-          section.items.forEach(
-            (
-              item,
-            ) => {
-              out[
-                item.key
-              ] =
-                section.title;
-            },
-          ),
-      );
-
-      return out;
-    }, [
-      navSections,
-    ]);
-
-  const [
-    tab,
-    setTab,
-  ] =
-    useState(
-      homeKey,
+    navSections.forEach((section) =>
+      section.items.forEach((item) => {
+        out[item.key] = item.label;
+      }),
     );
 
-  const [
-    sidebarOpen,
-    setSidebarOpen,
-  ] =
-    useState(
-      false,
+    return out;
+  }, [navSections]);
+
+  const groups = useMemo(() => {
+    const out: Record<string, string> = {};
+
+    navSections.forEach((section) =>
+      section.items.forEach((item) => {
+        out[item.key] = section.title;
+      }),
     );
 
-  const [
-    sidebarHidden,
-    setSidebarHidden,
-  ] =
-    useState(
-      false,
-    );
+    return out;
+  }, [navSections]);
 
-  const [
-    sidebarWidth,
-    setSidebarWidth,
-  ] =
-    useState(
-      300,
-    );
+  const [tab, setTab] = useState(homeKey);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(300);
 
   const [
     accountDrawerOpen,
     setAccountDrawerOpen,
-  ] =
-    useState(
-      false,
-    );
+  ] = useState(false);
 
   const [
     switchingMembershipId,
     setSwitchingMembershipId,
-  ] =
-    useState<
-      string |
-      null
-    >(
-      null,
-    );
+  ] = useState<string | null>(null);
 
-  const [
-    isOnline,
-    setIsOnline,
-  ] =
-    useState(
-      true,
-    );
+  const [isOnline, setIsOnline] = useState(true);
+  const [hubUnreadCount, setHubUnreadCount] = useState(0);
+  const [hubHasAttention, setHubHasAttention] = useState(false);
 
-  const [
-    hubUnreadCount,
-    setHubUnreadCount,
-  ] =
-    useState(
-      0,
-    );
+  const [openSections, setOpenSections] = useState<
+    Record<string, boolean>
+  >(() =>
+    navSections.reduce((acc, section) => {
+      acc[section.title] =
+        section.defaultOpen === true;
 
-  const [
-    hubHasAttention,
-    setHubHasAttention,
-  ] =
-    useState(
-      false,
-    );
-
-  const [
-    openSections,
-    setOpenSections,
-  ] =
-    useState<
-      Record<
-        string,
-        boolean
-      >
-    >(
-      () =>
-        navSections.reduce(
-          (
-            acc,
-            section,
-          ) => {
-            acc[
-              section.title
-            ] =
-              section.defaultOpen ===
-              true;
-
-            return acc;
-          },
-          {} as Record<
-            string,
-            boolean
-          >,
-        ),
-    );
+      return acc;
+    }, {} as Record<string, boolean>),
+  );
 
   useEffect(() => {
-    setOpenSections(
-      (
-        current,
-      ) =>
-        navSections.reduce(
-          (
-            next,
-            section,
-          ) => {
-            next[
-              section.title
-            ] =
-              current[
-                section.title
-              ] ??
-              (
-                section.defaultOpen ===
-                true
-              );
+    setOpenSections((current) =>
+      navSections.reduce((next, section) => {
+        next[section.title] =
+          current[section.title] ??
+          (section.defaultOpen === true);
 
-            return next;
-          },
-          {} as Record<
-            string,
-            boolean
-          >,
-        ),
+        return next;
+      }, {} as Record<string, boolean>),
     );
-  }, [
-    navSections,
-  ]);
+  }, [navSections]);
 
   useEffect(() => {
-    const update =
-      () =>
-        setIsOnline(
-          navigator.onLine,
-        );
+    const update = () => {
+      setIsOnline(navigator.onLine);
+    };
 
     update();
 
-    window.addEventListener(
-      "online",
-      update,
-    );
-
-    window.addEventListener(
-      "offline",
-      update,
-    );
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
 
     return () => {
-      window.removeEventListener(
-        "online",
-        update,
-      );
-
-      window.removeEventListener(
-        "offline",
-        update,
-      );
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
     };
   }, []);
 
   useEffect(() => {
-    let cancelled =
-      false;
+    let cancelled = false;
 
-    const loadHubIndicator =
-      async () => {
-        if (
-          !accountId
-        ) {
-          if (
-            !cancelled
-          ) {
-            setHubUnreadCount(
-              0,
-            );
-
-            setHubHasAttention(
-              false,
-            );
-          }
-
-          return;
+    const loadHubIndicator = async () => {
+      if (!accountId) {
+        if (!cancelled) {
+          setHubUnreadCount(0);
+          setHubHasAttention(false);
         }
 
-        try {
-          const [
-            announcements,
-            receipts,
-            feedback,
-          ] =
-            await Promise.all([
-              db.platformAnnouncements.toArray(),
+        return;
+      }
 
-              db.platformAnnouncementReceipts
-                .where(
-                  "accountId",
-                )
-                .equals(
-                  accountId,
-                )
-                .toArray(),
+      try {
+        const [
+          announcements,
+          receipts,
+          feedback,
+        ] = await Promise.all([
+          db.platformAnnouncements.toArray(),
 
-              db.platformFeedback
-                .where(
-                  "accountId",
-                )
-                .equals(
-                  accountId,
-                )
-                .toArray(),
-            ]);
+          db.platformAnnouncementReceipts
+            .where("accountId")
+            .equals(accountId)
+            .toArray(),
 
-          const readIds =
-            new Set(
-              receipts
-                .filter(
-                  (
-                    receipt:
-                      any,
-                  ) =>
-                    Boolean(
-                      receipt.readAt,
-                    ),
-                )
-                .map(
-                  (
-                    receipt:
-                      any,
-                  ) =>
-                    String(
-                      receipt.announcementId,
-                    ),
-                ),
+          db.platformFeedback
+            .where("accountId")
+            .equals(accountId)
+            .toArray(),
+        ]);
+
+        const readIds = new Set(
+          receipts
+            .filter((receipt: any) =>
+              Boolean(receipt.readAt),
+            )
+            .map((receipt: any) =>
+              String(receipt.announcementId),
+            ),
+        );
+
+        const now = Date.now();
+
+        const role = String(
+          selectedMembership?.role ||
+          activeRole ||
+          "",
+        );
+
+        const unread = announcements.filter(
+          (announcement: any) => {
+            if (
+              announcement.status !== "published"
+            ) {
+              return false;
+            }
+
+            if (
+              announcement.publishAt &&
+              new Date(
+                announcement.publishAt,
+              ).getTime() > now
+            ) {
+              return false;
+            }
+
+            if (
+              announcement.expiresAt &&
+              new Date(
+                announcement.expiresAt,
+              ).getTime() < now
+            ) {
+              return false;
+            }
+
+            if (
+              Array.isArray(
+                announcement.targetRoles,
+              ) &&
+              announcement.targetRoles.length &&
+              role &&
+              !announcement.targetRoles.includes(role)
+            ) {
+              return false;
+            }
+
+            return !readIds.has(
+              String(announcement.id),
             );
+          },
+        ).length;
 
-          const now =
-            Date.now();
+        const attention = feedback.some(
+          (item: any) =>
+            [
+              "responded",
+              "action_required",
+              "waiting_for_user",
+            ].includes(
+              String(
+                item.status || "",
+              ).toLowerCase(),
+            ),
+        );
 
-          const role =
-            String(
-              selectedMembership?.role ||
-              activeRole ||
-              "",
-            );
-
-          const unread =
-            announcements.filter(
-              (
-                announcement:
-                  any,
-              ) => {
-                if (
-                  announcement.status !==
-                  "published"
-                ) {
-                  return false;
-                }
-
-                if (
-                  announcement.publishAt &&
-                  new Date(
-                    announcement.publishAt,
-                  ).getTime() >
-                    now
-                ) {
-                  return false;
-                }
-
-                if (
-                  announcement.expiresAt &&
-                  new Date(
-                    announcement.expiresAt,
-                  ).getTime() <
-                    now
-                ) {
-                  return false;
-                }
-
-                if (
-                  Array.isArray(
-                    announcement.targetRoles,
-                  ) &&
-                  announcement.targetRoles.length &&
-                  role &&
-                  !announcement.targetRoles.includes(
-                    role,
-                  )
-                ) {
-                  return false;
-                }
-
-                return !readIds.has(
-                  String(
-                    announcement.id,
-                  ),
-                );
-              },
-            ).length;
-
-          const attention =
-            feedback.some(
-              (
-                item:
-                  any,
-              ) =>
-                [
-                  "responded",
-                  "action_required",
-                  "waiting_for_user",
-                ].includes(
-                  String(
-                    item.status ||
-                    "",
-                  ).toLowerCase(),
-                ),
-            );
-
-          if (
-            !cancelled
-          ) {
-            setHubUnreadCount(
-              unread,
-            );
-
-            setHubHasAttention(
-              attention,
-            );
-          }
-        } catch (
-          error
-        ) {
-          console.warn(
-            "Could not load Eleeveon Hub indicator:",
-            error,
-          );
+        if (!cancelled) {
+          setHubUnreadCount(unread);
+          setHubHasAttention(attention);
         }
-      };
+      } catch (error) {
+        console.warn(
+          "Could not load Eleeveon Hub indicator:",
+          error,
+        );
+      }
+    };
 
     void loadHubIndicator();
 
-    const refresh =
-      () =>
-        void loadHubIndicator();
+    const refresh = () => {
+      void loadHubIndicator();
+    };
 
     window.addEventListener(
       "eleeveon:hub-refresh",
@@ -1280,8 +853,7 @@ function RolePortalShellContent({
     );
 
     return () => {
-      cancelled =
-        true;
+      cancelled = true;
 
       window.removeEventListener(
         "eleeveon:hub-refresh",
@@ -1303,113 +875,90 @@ function RolePortalShellContent({
   const workspaceIdentities =
     useWorkspaceDisplayNames(
       allMemberships,
-      (user as any) ??
-        null,
+      (user as any) ?? null,
     );
 
-  const visibleMemberName =
-    useMemo(
-      () =>
-        selectedMemberName({
-          openedWorkspace,
-          selectedMembership,
-          user,
-          account,
-        }),
-      [
+  const visibleMemberName = useMemo(
+    () =>
+      selectedMemberName({
         openedWorkspace,
         selectedMembership,
         user,
         account,
-      ],
-    );
+      }),
+    [
+      openedWorkspace,
+      selectedMembership,
+      user,
+      account,
+    ],
+  );
 
-  const visibleMemberMeta =
-    useMemo(
-      () =>
-        selectedMemberMeta({
-          selectedMembership,
-          identities:
-            workspaceIdentities,
-        }),
-      [
+  const visibleMemberMeta = useMemo(
+    () =>
+      selectedMemberMeta({
         selectedMembership,
-        workspaceIdentities,
-      ],
-    );
-
-  const visibleMemberImage =
-    useMemo(() => {
-      const workspaceImage =
-        workspaceProfileImage(
-          selectedMembership,
-          workspaceIdentities,
-        );
-
-      const userImage =
-        String(
-          (user as any)?.photo ??
-            (user as any)?.profilePhoto ??
-            (user as any)?.avatar ??
-            (user as any)?.image ??
-            "",
-        ).trim();
-
-      return (
-        workspaceImage ||
-        userImage ||
-        null
-      );
-    }, [
+        identities: workspaceIdentities,
+      }),
+    [
       selectedMembership,
       workspaceIdentities,
-      user,
-    ]);
+    ],
+  );
 
-  const ActiveComponent =
-    useMemo(
-      () =>
-        tab ===
-        ELEEVEON_CENTER_KEY
-          ? EleeveonCenter
-          : routes[
-              tab
-            ] ??
-            routes[
-              homeKey
-            ],
-      [
-        routes,
-        tab,
-        homeKey,
-      ],
+  const visibleMemberImage = useMemo(() => {
+    const workspaceImage = workspaceProfileImage(
+      selectedMembership,
+      workspaceIdentities,
     );
+
+    const userImage = String(
+      (user as any)?.photo ??
+      (user as any)?.profilePhoto ??
+      (user as any)?.avatar ??
+      (user as any)?.image ??
+      "",
+    ).trim();
+
+    return (
+      workspaceImage ||
+      userImage ||
+      null
+    );
+  }, [
+    selectedMembership,
+    workspaceIdentities,
+    user,
+  ]);
+
+  const ActiveComponent = useMemo(
+    () =>
+      tab === ELEEVEON_CENTER_KEY
+        ? EleeveonCenter
+        : routes[tab] ?? routes[homeKey],
+    [
+      routes,
+      tab,
+      homeKey,
+    ],
+  );
 
   const activeLabel =
-    tab ===
-    ELEEVEON_CENTER_KEY
+    tab === ELEEVEON_CENTER_KEY
       ? "Eleeveon Hub"
-      : labels[
-          tab
-        ] ??
-        portalTitle;
+      : labels[tab] ?? portalTitle;
 
   const activeGroup =
-    tab ===
-    ELEEVEON_CENTER_KEY
+    tab === ELEEVEON_CENTER_KEY
       ? "Messages, notices and support"
-      : groups[
-          tab
-        ] ??
-        portalSubtitle;
+      : groups[tab] ?? portalSubtitle;
 
-  const resolvedMemberRole =
-    roleLabel(
-      selectedMembership?.role ||
-        account?.role ||
-        user?.role ||
-        "Member",
-    );
+  const resolvedMemberRole = roleLabel(
+    selectedMembership?.role ||
+    account?.role ||
+    user?.role ||
+    "Member",
+  );
 
   const resolvedWorkspaceLabel =
     activeBranch?.name ||
@@ -1419,66 +968,35 @@ function RolePortalShellContent({
 
   useEffect(() => {
     setWindowChromeIdentity({
-      title:
-        activeLabel,
+      title: activeLabel,
+      workspace: resolvedWorkspaceLabel,
 
-      workspace:
-        resolvedWorkspaceLabel,
+      memberName: visibleMemberName,
+      memberRole: resolvedMemberRole,
+      memberImage: visibleMemberImage,
+      memberMeta: visibleMemberMeta,
 
-      memberName:
-        visibleMemberName,
-
-      memberRole:
-        resolvedMemberRole,
-
-      memberImage:
-        visibleMemberImage,
-
-      memberMeta:
-        visibleMemberMeta,
-
-      online:
-        isOnline,
-
+      online: isOnline,
       realtimeConnected,
-
       initialSyncDone,
-
-      realtimeStatus:
-        realtimeStatus.status,
-
+      realtimeStatus: realtimeStatus.status,
       sidebarHidden,
 
-      onToggleSidebar:
-        () => {
-          if (
-            sidebarHidden
-          ) {
-            setSidebarHidden(
-              false,
-            );
+      onToggleSidebar: () => {
+        if (sidebarHidden) {
+          setSidebarHidden(false);
+          setSidebarOpen(true);
+          return;
+        }
 
-            setSidebarOpen(
-              true,
-            );
+        setSidebarHidden(true);
+      },
 
-            return;
-          }
+      onOpenStatus: openStatusSheet,
 
-          setSidebarHidden(
-            true,
-          );
-        },
-
-      onOpenStatus:
-        openStatusSheet,
-
-      onOpenAccount:
-        () => {
-          setAccountDrawerOpen(
-            true,
-          );
-        },
+      onOpenAccount: () => {
+        setAccountDrawerOpen(true);
+      },
     });
 
     return () => {
@@ -1501,11 +1019,10 @@ function RolePortalShellContent({
     visibleMemberName,
   ]);
 
-  const hasUsableWorkspace =
-    Boolean(
-      selectedMembership &&
-      canAccess,
-    );
+  const hasUsableWorkspace = Boolean(
+    selectedMembership &&
+    canAccess,
+  );
 
   const accountOrWorkspaceChecking =
     (
@@ -1517,531 +1034,358 @@ function RolePortalShellContent({
     ) &&
     !hasUsableWorkspace;
 
-  const firstAppearanceChecking =
-    Boolean(
-      hasUsableWorkspace &&
-        expectedAppearance &&
-        !currentAppearanceWasRendered &&
-        !appearanceMatchesRole,
-    );
+  const firstAppearanceChecking = Boolean(
+    hasUsableWorkspace &&
+    expectedAppearance &&
+    !currentAppearanceWasRendered &&
+    !appearanceMatchesRole,
+  );
 
   const checking =
     accountOrWorkspaceChecking ||
     firstAppearanceChecking;
 
-  const portalRuntimeContext =
-    useMemo<
-      RolePortalRuntimeContext
-    >(
-      () => ({
-        accountId,
-        user,
-        account,
-        subscription,
-        authenticated,
+  const portalRuntimeContext = useMemo<
+    RolePortalRuntimeContext
+  >(
+    () => ({
+      accountId,
+      user,
+      account,
+      subscription,
+      authenticated,
 
-        offline:
-          accountOffline ||
-          !isOnline,
+      offline:
+        accountOffline ||
+        !isOnline,
 
-        restoring:
-          accountRestoring,
+      restoring: accountRestoring,
+      verifying: accountVerifying,
+      sessionVerified,
 
-        verifying:
-          accountVerifying,
+      membership: selectedMembership,
+      memberships: switchableMemberships,
 
-        sessionVerified,
+      activeRole:
+        activeRole ||
+        selectedMembership?.role ||
+        null,
 
-        membership:
-          selectedMembership,
+      teacherId:
+        activeTeacherId ||
+        toPermanentId(
+          selectedMembership?.teacherId,
+        ),
 
-        memberships:
-          switchableMemberships,
+      studentId:
+        activeStudentId ||
+        toPermanentId(
+          selectedMembership?.studentId,
+        ),
 
-        activeRole:
-          activeRole ||
-          selectedMembership?.role ||
-          null,
+      parentId:
+        activeParentId ||
+        toPermanentId(
+          selectedMembership?.parentId,
+        ),
 
-        teacherId:
-          activeTeacherId ||
-          toPermanentId(
-            selectedMembership?.teacherId,
-          ),
+      schoolId: effectiveSchoolId,
+      school: activeSchool,
+      schools,
 
-        studentId:
-          activeStudentId ||
-          toPermanentId(
-            selectedMembership?.studentId,
-          ),
+      branchId: effectiveBranchId,
+      branch: activeBranch,
+      branches,
+      allBranches,
 
-        parentId:
-          activeParentId ||
-          toPermanentId(
-            selectedMembership?.parentId,
-          ),
+      settings,
+      theme: themeContext,
+      database: databaseContext,
+      sync: syncContext,
+      syncPanel: syncPanelContext,
+      realtime: realtimeContext,
+      appearance: appearanceContext,
 
-        schoolId:
-          effectiveSchoolId,
+      refreshAccount,
+      refreshInstitution,
+      refreshSettings,
+      refreshTheme: themeContext.refreshTheme,
 
-        school:
-          activeSchool,
-
-        schools,
-
-        branchId:
-          effectiveBranchId,
-
-        branch:
-          activeBranch,
-
-        branches,
-
-        allBranches,
-
-        settings,
-
-        theme:
-          themeContext,
-
-        database:
-          databaseContext,
-
-        sync:
-          syncContext,
-
-        syncPanel:
-          syncPanelContext,
-
-        realtime:
-          realtimeContext,
-
-        appearance:
-          appearanceContext,
-
-        refreshAccount,
-
-        refreshInstitution,
-
-        refreshSettings,
-
-        refreshTheme:
-          themeContext.refreshTheme,
-
-        setActiveMembership,
-
-        setActiveSchoolId,
-
-        setActiveBranchId,
-      }),
-      [
-        accountId,
-        user,
-        account,
-        subscription,
-        authenticated,
-        accountOffline,
-        isOnline,
-        accountRestoring,
-        accountVerifying,
-        sessionVerified,
-        selectedMembership,
-        switchableMemberships,
-        activeRole,
-        activeTeacherId,
-        activeStudentId,
-        activeParentId,
-        effectiveSchoolId,
-        activeSchool,
-        schools,
-        effectiveBranchId,
-        activeBranch,
-        branches,
-        allBranches,
-        settings,
-        themeContext,
-        databaseContext,
-        syncContext,
-        syncPanelContext,
-        realtimeContext,
-        appearanceContext,
-        refreshAccount,
-        refreshInstitution,
-        refreshSettings,
-        setActiveMembership,
-        setActiveSchoolId,
-        setActiveBranchId,
-      ],
-    );
+      setActiveMembership,
+      setActiveSchoolId,
+      setActiveBranchId,
+    }),
+    [
+      accountId,
+      user,
+      account,
+      subscription,
+      authenticated,
+      accountOffline,
+      isOnline,
+      accountRestoring,
+      accountVerifying,
+      sessionVerified,
+      selectedMembership,
+      switchableMemberships,
+      activeRole,
+      activeTeacherId,
+      activeStudentId,
+      activeParentId,
+      effectiveSchoolId,
+      activeSchool,
+      schools,
+      effectiveBranchId,
+      activeBranch,
+      branches,
+      allBranches,
+      settings,
+      themeContext,
+      databaseContext,
+      syncContext,
+      syncPanelContext,
+      realtimeContext,
+      appearanceContext,
+      refreshAccount,
+      refreshInstitution,
+      refreshSettings,
+      setActiveMembership,
+      setActiveSchoolId,
+      setActiveBranchId,
+    ],
+  );
 
   /**
    * ORIGINAL NAVIGATION BEHAVIOR
-   * ------------------------------------------------------------------------
-   * Phase 1 deliberately keeps navigation exactly as it was:
-   * local React tab state only, no browser history changes yet.
+   *
+   * Navigation remains local React tab state.
+   * No browser history changes are introduced.
    */
-  const navigate =
-    (
-      key: string,
-    ) => {
-      setTab(
-        key,
-      );
+  const navigate = (key: string) => {
+    setTab(key);
+    setSidebarOpen(false);
+    setAccountDrawerOpen(false);
 
-      setSidebarOpen(
-        false,
-      );
+    const activeGroup = groups[key];
 
-      setAccountDrawerOpen(
-        false,
-      );
-
-      const activeGroup =
-        groups[
-          key
-        ];
-
-      if (
-        activeGroup
-      ) {
-        setOpenSections(
-          navSections.reduce(
-            (
-              next,
-              section,
-            ) => {
-              next[
-                section.title
-              ] =
-                section.title ===
-                activeGroup;
-
-              return next;
-            },
-            {} as Record<
-              string,
-              boolean
-            >,
-          ),
-        );
-      }
-
-      if (
-        typeof window !==
-        "undefined"
-      ) {
-        window.scrollTo({
-          top:
-            0,
-
-          behavior:
-            "smooth",
-        });
-      }
-    };
-
-  const handleLogout =
-    useCallback(
-      async () => {
-        setAccountDrawerOpen(
-          false,
-        );
-
-        setSidebarOpen(
-          false,
-        );
-
-        await logout();
-      },
-      [
-        logout,
-      ],
-    );
-
-  const toggleSection =
-    (
-      title:
-        string,
-    ) => {
+    if (activeGroup) {
       setOpenSections(
-        (
-          current,
-        ) => {
-          const willOpen =
-            !current[
-              title
-            ];
+        navSections.reduce(
+          (next, section) => {
+            next[section.title] =
+              section.title === activeGroup;
 
-          return navSections.reduce(
-            (
-              next,
-              section,
-            ) => {
-              next[
-                section.title
-              ] =
-                willOpen &&
-                section.title ===
-                  title;
+            return next;
+          },
+          {} as Record<string, boolean>,
+        ),
+      );
+    }
 
-              return next;
-            },
-            {} as Record<
-              string,
-              boolean
-            >,
+    if (typeof window !== "undefined") {
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+  };
+
+  const handleLogout = useCallback(
+    async () => {
+      setAccountDrawerOpen(false);
+      setSidebarOpen(false);
+
+      await logout();
+    },
+    [logout],
+  );
+
+  const toggleSection = (title: string) => {
+    setOpenSections((current) => {
+      const willOpen = !current[title];
+
+      return navSections.reduce(
+        (next, section) => {
+          next[section.title] =
+            willOpen &&
+            section.title === title;
+
+          return next;
+        },
+        {} as Record<string, boolean>,
+      );
+    });
+  };
+
+  const switchMembership = async (
+    membership: UserMembership,
+  ) => {
+    const normalized =
+      normalizeMembership(membership) ||
+      membership;
+
+    const id = membershipKey(normalized);
+
+    try {
+      setSwitchingMembershipId(id);
+
+      await runTransition(
+        {
+          mode: "role-switch",
+          membership: normalized,
+          title: "Switching workspace…",
+
+          detail:
+            "Preparing the selected role and downloading its permitted data.",
+        },
+
+        async ({
+          setStage,
+          setBootstrapProgress,
+        }) => {
+          setStage("access", {
+            detail:
+              "Validating access for the selected role and workspace.",
+          });
+
+          const opened =
+            writeWorkspaceSession(normalized) ||
+            normalized;
+
+          beginMembershipTransition(opened);
+
+          setStage("membership", {
+            detail:
+              `Activating ${roleLabel(opened.role)} and its profile context.`,
+          });
+
+          await setActiveMembership(opened);
+
+          const scope = appearanceScopeForRole(
+            opened.role,
+          );
+
+          if (
+            scope === "school" ||
+            scope === "branch"
+          ) {
+            await bootstrapSelectedWorkspace(
+              opened,
+              {
+                force: true,
+                allowCached: false,
+                onProgress: setBootstrapProgress,
+              },
+            );
+          }
+
+          setStage("institution");
+
+          await refreshInstitution();
+
+          setStage("settings");
+
+          await refreshSettings();
+
+          setStage("branding");
+
+          await refreshAccount({
+            background: true,
+            reason: "membership-change",
+          });
+
+          setStage("appearance");
+
+          await themeContext.refreshTheme();
+
+          await new Promise<void>((resolve) => {
+            window.requestAnimationFrame(() =>
+              window.requestAnimationFrame(
+                () => resolve(),
+              ),
+            );
+          });
+
+          completeMembershipTransition();
+
+          setAccountDrawerOpen(false);
+
+          setStage("dashboard", {
+            detail:
+              `Opening the ${roleLabel(opened.role)} workspace with its prepared local data.`,
+          });
+
+          window.location.replace(
+            getPortalPathByRole(opened.role),
           );
         },
       );
-    };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to prepare the selected workspace.";
 
-  const switchMembership =
-    async (
-      membership:
-        UserMembership,
-    ) => {
-      const normalized =
-        normalizeMembership(
-          membership,
-        ) ||
-        membership;
+      failMembershipTransition(message);
 
-      const id =
-        membershipKey(
-          normalized,
-        );
+      console.error(
+        "Failed to switch role/workspace:",
+        error,
+      );
 
-      try {
-        setSwitchingMembershipId(
-          id,
-        );
+      setSwitchingMembershipId(null);
+    }
+  };
 
-        await runTransition(
-          {
-            mode:
-              "role-switch",
+  const handleSidebarResizeStart = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
 
-            membership:
-              normalized,
+      const startX = event.clientX;
+      const startWidth = sidebarWidth;
 
-            title:
-              "Switching workspace…",
-
-            detail:
-              "Preparing the selected role and downloading its permitted data.",
-          },
-
-          async ({
-            setStage,
-            setBootstrapProgress,
-          }) => {
-            setStage(
-              "access",
-              {
-                detail:
-                  "Validating access for the selected role and workspace.",
-              },
-            );
-
-            const opened =
-              writeWorkspaceSession(
-                normalized,
-              ) ||
-              normalized;
-
-            beginMembershipTransition(
-              opened,
-            );
-
-            setStage(
-              "membership",
-              {
-                detail:
-                  `Activating ${roleLabel(opened.role)} and its profile context.`,
-              },
-            );
-
-            await setActiveMembership(
-              opened,
-            );
-
-            const scope =
-              appearanceScopeForRole(
-                opened.role,
-              );
-
-            if (
-              scope ===
-                "school" ||
-              scope ===
-                "branch"
-            ) {
-              await bootstrapSelectedWorkspace(
-                opened,
-                {
-                  force:
-                    true,
-
-                  allowCached:
-                    false,
-
-                  onProgress:
-                    setBootstrapProgress,
-                },
-              );
-            }
-
-            setStage(
-              "institution",
-            );
-
-            await refreshInstitution();
-
-            setStage(
-              "settings",
-            );
-
-            await refreshSettings();
-
-            setStage(
-              "branding",
-            );
-
-            await refreshAccount({
-              background:
-                true,
-
-              reason:
-                "membership-change",
-            });
-
-            setStage(
-              "appearance",
-            );
-
-            await themeContext.refreshTheme();
-
-            await new Promise<void>(
-              (
-                resolve,
-              ) => {
-                window.requestAnimationFrame(
-                  () =>
-                    window.requestAnimationFrame(
-                      () =>
-                        resolve(),
-                    ),
-                );
-              },
-            );
-
-            completeMembershipTransition();
-
-            setAccountDrawerOpen(
-              false,
-            );
-
-            setStage(
-              "dashboard",
-              {
-                detail:
-                  `Opening the ${roleLabel(opened.role)} workspace with its prepared local data.`,
-              },
-            );
-
-            window.location.replace(
-              getPortalPathByRole(
-                opened.role,
-              ),
-            );
-          },
-        );
-      } catch (
-        error
-      ) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Failed to prepare the selected workspace.";
-
-        failMembershipTransition(
-          message,
-        );
-
-        console.error(
-          "Failed to switch role/workspace:",
-          error,
-        );
-
-        setSwitchingMembershipId(
-          null,
-        );
-      }
-    };
-
-  const handleSidebarResizeStart =
-    useCallback(
-      (
-        event:
-          React.MouseEvent,
+      const handleMove = (
+        moveEvent: MouseEvent,
       ) => {
-        event.preventDefault();
+        setSidebarWidth(
+          Math.min(
+            380,
+            Math.max(
+              240,
+              startWidth +
+                moveEvent.clientX -
+                startX,
+            ),
+          ),
+        );
+      };
 
-        const startX =
-          event.clientX;
-
-        const startWidth =
-          sidebarWidth;
-
-        const handleMove =
-          (
-            moveEvent:
-              MouseEvent,
-          ) => {
-            setSidebarWidth(
-              Math.min(
-                380,
-                Math.max(
-                  240,
-                  startWidth +
-                    moveEvent.clientX -
-                    startX,
-                ),
-              ),
-            );
-          };
-
-        const handleUp =
-          () => {
-            window.removeEventListener(
-              "mousemove",
-              handleMove,
-            );
-
-            window.removeEventListener(
-              "mouseup",
-              handleUp,
-            );
-          };
-
-        window.addEventListener(
+      const handleUp = () => {
+        window.removeEventListener(
           "mousemove",
           handleMove,
         );
 
-        window.addEventListener(
+        window.removeEventListener(
           "mouseup",
           handleUp,
         );
-      },
-      [
-        sidebarWidth,
-      ],
-    );
+      };
 
-  if (
-    checking
-  ) {
+      window.addEventListener(
+        "mousemove",
+        handleMove,
+      );
+
+      window.addEventListener(
+        "mouseup",
+        handleUp,
+      );
+    },
+    [sidebarWidth],
+  );
+
+  if (checking) {
     const preparingAppearance =
       firstAppearanceChecking;
 
@@ -2058,9 +1402,7 @@ function RolePortalShellContent({
               "Applying the correct role, school, branch, colour, branding, and display settings."
             : "Checking your account and selected workspace."
         }
-        spin={
-          !appearanceContext.error
-        }
+        spin={!appearanceContext.error}
       />
     );
   }
@@ -2077,9 +1419,7 @@ function RolePortalShellContent({
     );
   }
 
-  if (
-    !canAccess
-  ) {
+  if (!canAccess) {
     return (
       <CenterCard
         title="Choose workspace"
@@ -2089,14 +1429,8 @@ function RolePortalShellContent({
   }
 
   if (
-    (
-      requireSchool &&
-      !effectiveSchoolId
-    ) ||
-    (
-      requireBranch &&
-      !effectiveBranchId
-    )
+    (requireSchool && !effectiveSchoolId) ||
+    (requireBranch && !effectiveBranchId)
   ) {
     return (
       <CenterCard
@@ -2110,16 +1444,11 @@ function RolePortalShellContent({
     <main
       className={[
         "role-shell",
-
         sidebarHidden &&
           "portal-sidebar-hidden",
       ]
-        .filter(
-          Boolean,
-        )
-        .join(
-          " ",
-        )}
+        .filter(Boolean)
+        .join(" ")}
       data-appearance-scope={
         themeContext.effectiveScope
       }
@@ -2158,13 +1487,10 @@ function RolePortalShellContent({
 
           "--font-size":
             `${resolvedFontSize}px`,
-        } as
-          React.CSSProperties
+        } as React.CSSProperties
       }
     >
-      <style>
-        {css}
-      </style>
+      <style>{css}</style>
 
       <SyncStatusSheet />
 
@@ -2185,338 +1511,147 @@ function RolePortalShellContent({
           aria-label="Close drawer"
           className="app-overlay"
           onClick={() => {
-            setSidebarOpen(
-              false,
-            );
-
-            setAccountDrawerOpen(
-              false,
-            );
+            setSidebarOpen(false);
+            setAccountDrawerOpen(false);
           }}
         />
       ) : null}
 
       <PortalSidebar
-        open={
-          sidebarOpen
-        }
-
-        hidden={
-          sidebarHidden
-        }
-
-        portalTitle={
-          portalTitle
-        }
-
-        portalSubtitle={
-          portalSubtitle
-        }
-
+        open={sidebarOpen}
+        hidden={sidebarHidden}
+        portalTitle={portalTitle}
+        portalSubtitle={portalSubtitle}
         activeInstitutionName={
           activeSchool?.name ||
           activeBranch?.name ||
           null
         }
-
         activeBranchName={
           activeBranch?.name ||
           null
         }
-
-        hubUnreadCount={
-          hubUnreadCount
-        }
-
-        hubHasAttention={
-          hubHasAttention
-        }
-
-        hubKey={
-          ELEEVEON_CENTER_KEY
-        }
-
-        activeTab={
-          tab
-        }
-
-        homeKey={
-          homeKey
-        }
-
-        sections={
-          navSections
-        }
-
-        openSections={
-          openSections
-        }
-
-        onNavigate={
-          navigate
-        }
-
+        hubUnreadCount={hubUnreadCount}
+        hubHasAttention={hubHasAttention}
+        hubKey={ELEEVEON_CENTER_KEY}
+        activeTab={tab}
+        homeKey={homeKey}
+        sections={navSections}
+        openSections={openSections}
+        onNavigate={navigate}
         onOpenHub={() =>
-          navigate(
-            ELEEVEON_CENTER_KEY,
-          )
+          navigate(ELEEVEON_CENTER_KEY)
         }
-
-        onToggleSection={
-          toggleSection
-        }
-
+        onToggleSection={toggleSection}
         onResizeStart={
           handleSidebarResizeStart
         }
       />
 
       <AccountWorkspaceDrawer
-        open={
-          accountDrawerOpen
-        }
-
-        memberName={
-          visibleMemberName
-        }
-
+        open={accountDrawerOpen}
+        memberName={visibleMemberName}
         memberRole={
           roleLabel(
             selectedMembership?.role ||
-              account?.role ||
-              user?.role ||
-              "Member",
+            account?.role ||
+            user?.role ||
+            "Member",
           )
         }
-
-        memberImage={
-          visibleMemberImage
-        }
-
-        selectedMembership={
-          selectedMembership
-        }
-
-        memberships={
-          switchableMemberships
-        }
-
-        identities={
-          workspaceIdentities
-        }
-
+        memberImage={visibleMemberImage}
+        selectedMembership={selectedMembership}
+        memberships={switchableMemberships}
+        identities={workspaceIdentities}
         switchingMembershipId={
           switchingMembershipId
         }
-
         schoolId={
           activeSchoolId ||
           effectiveSchoolId
         }
-
         branchId={
           activeBranchId ||
           effectiveBranchId
         }
-
         schools={
-          (
-            schools ||
-            []
-          ).map(
-            (
-              school:
-                any,
-            ) => ({
-              id:
-                school.id,
-
-              name:
-                school.name,
-            }),
-          )
+          (schools || []).map((school: any) => ({
+            id: school.id,
+            name: school.name,
+          }))
         }
-
         branches={
-          (
-            branches ||
-            []
-          ).map(
-            (
-              branch:
-                any,
-            ) => ({
-              id:
-                branch.id,
-
-              name:
-                branch.name,
-            }),
-          )
+          (branches || []).map((branch: any) => ({
+            id: branch.id,
+            name: branch.name,
+          }))
         }
-
-        lockedContext={
-          lockedContext
-        }
-
-        online={
-          isOnline
-        }
-
-        realtimeConnected={
-          realtimeConnected
-        }
-
-        membershipKey={
-          membershipKey
-        }
-
-        sameMembership={
-          sameMembership
-        }
-
-        roleLabel={
-          roleLabel
-        }
-
-        roleIcon={
-          roleIcon
-        }
-
+        lockedContext={lockedContext}
+        online={isOnline}
+        realtimeConnected={realtimeConnected}
+        membershipKey={membershipKey}
+        sameMembership={sameMembership}
+        roleLabel={roleLabel}
+        roleIcon={roleIcon}
         onClose={() =>
-          setAccountDrawerOpen(
-            false,
-          )
+          setAccountDrawerOpen(false)
         }
-
-        onSwitchMembership={
-          switchMembership
+        onSwitchMembership={switchMembership}
+        onSchoolChange={(id) =>
+          setActiveSchoolId?.(id)
         }
-
-        onSchoolChange={
-          (
-            id,
-          ) =>
-            setActiveSchoolId?.(
-              id,
-            )
+        onBranchChange={(id) =>
+          setActiveBranchId?.(id)
         }
-
-        onBranchChange={
-          (
-            id,
-          ) =>
-            setActiveBranchId?.(
-              id,
-            )
-        }
-
         onOpenStatus={() => {
           openStatusSheet();
-
-          setAccountDrawerOpen(
-            false,
-          );
+          setAccountDrawerOpen(false);
         }}
-
         onSelectRole={() =>
-          router.push(
-            "/select-role",
-          )
+          router.push("/select-role")
         }
-
-        onLogout={
-          handleLogout
-        }
+        onLogout={handleLogout}
       />
 
       <section
         className={`app-main ${
-          sidebarHidden
-            ? "full"
-            : ""
+          sidebarHidden ? "full" : ""
         }`}
       >
         <PortalHeader
-          activeLabel={
-            activeLabel
-          }
-
+          activeLabel={activeLabel}
           workspaceLabel={
             resolvedWorkspaceLabel
           }
-
-          memberName={
-            visibleMemberName
-          }
-
-          memberRole={
-            resolvedMemberRole
-          }
-
-          memberImage={
-            visibleMemberImage
-          }
-
-          memberMeta={
-            visibleMemberMeta
-          }
-
-          online={
-            isOnline
-          }
-
-          realtimeConnected={
-            realtimeConnected
-          }
-
-          initialSyncDone={
-            initialSyncDone
-          }
-
+          memberName={visibleMemberName}
+          memberRole={resolvedMemberRole}
+          memberImage={visibleMemberImage}
+          memberMeta={visibleMemberMeta}
+          online={isOnline}
+          realtimeConnected={realtimeConnected}
+          initialSyncDone={initialSyncDone}
           realtimeStatus={
             realtimeStatus.status
           }
-
-          sidebarHidden={
-            sidebarHidden
-          }
-
-          onToggleSidebar={() =>
-            sidebarHidden
-              ? (
-                  setSidebarHidden(
-                    false,
-                  ),
-                  setSidebarOpen(
-                    true,
-                  )
-                )
-              : setSidebarHidden(
-                  true,
-                )
-          }
-
-          onOpenStatus={
-            openStatusSheet
-          }
-
+          sidebarHidden={sidebarHidden}
+          onToggleSidebar={() => {
+            if (sidebarHidden) {
+              setSidebarHidden(false);
+              setSidebarOpen(true);
+            } else {
+              setSidebarHidden(true);
+            }
+          }}
+          onOpenStatus={openStatusSheet}
           onOpenAccount={() =>
-            setAccountDrawerOpen(
-              true,
-            )
+            setAccountDrawerOpen(true)
           }
         />
 
         <PortalContent>
           <ActiveComponent
-            navigate={
-              navigate
-            }
-
-            context={
-              portalRuntimeContext
-            }
+            navigate={navigate}
+            context={portalRuntimeContext}
           />
         </PortalContent>
       </section>
@@ -2537,22 +1672,15 @@ function CenterCard({
     <main className="center-page">
       <SyncStatusSheet />
 
-      <style>
-        {css}
-      </style>
+      <style>{css}</style>
 
       <section className="loading-card">
         {spin && (
           <div className="loading-spinner" />
         )}
 
-        <h2>
-          {title}
-        </h2>
-
-        <p>
-          {text}
-        </p>
+        <h2>{title}</h2>
+        <p>{text}</p>
       </section>
     </main>
   );
@@ -2560,8 +1688,25 @@ function CenterCard({
 
 export default RolePortalShellContent;
 
+/**
+ * SHELL STYLES
+ *
+ * The former .portal-contained-modal contract
+ * has been removed from this file.
+ *
+ * Shared overlay boundaries are defined in
+ * PortalOverlayBoundaries.css.
+ *
+ * Shell navigation, account drawer, appearance
+ * and ordinary scrolling styles remain here.
+ */
+
 const css = `
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 .background-refresh-indicator {
   position: fixed;
@@ -2582,26 +1727,17 @@ const css = `
 .role-shell,
 .center-page {
   --shell-sidebar-bg:
-    var(
-      --eds-sidebar-bg,
-      var(--surface, #ffffff)
-    );
+    var(--eds-sidebar-bg, var(--surface, #ffffff));
 
   --shell-header-bg:
     color-mix(
       in srgb,
-      var(
-        --eds-header-bg,
-        var(--surface, #ffffff)
-      ) 94%,
+      var(--eds-header-bg, var(--surface, #ffffff)) 94%,
       transparent
     );
 
   --shell-menu-bg:
-    var(
-      --eds-drawer-bg,
-      var(--surface, #ffffff)
-    );
+    var(--eds-drawer-bg, var(--surface, #ffffff));
 
   --shell-section-bg:
     color-mix(
@@ -2632,10 +1768,7 @@ const css = `
     );
 
   --dashboard-primary:
-    var(
-      --primary-color,
-      #2f6fed
-    );
+    var(--primary-color, #2f6fed);
 }
 
 html,
@@ -2644,33 +1777,20 @@ body {
   overflow-x: hidden;
 
   background:
-    var(
-      --eds-shell-bg,
-      var(--bg, #f7f8fb)
-    );
+    var(--eds-shell-bg, var(--bg, #f7f8fb));
 
   color:
-    var(
-      --eds-text,
-      var(--text, #111111)
-    );
+    var(--eds-text, var(--text, #111111));
 
   font-family:
-    var(
-      --font-family,
-      system-ui
-    );
+    var(--font-family, system-ui);
 
   font-size:
-    var(
-      --font-size,
-      16px
-    );
+    var(--font-size, 16px);
 }
 
 * {
-  box-sizing:
-    border-box;
+  box-sizing: border-box;
 }
 
 .role-shell,
@@ -2678,140 +1798,71 @@ body {
   min-height:
     calc(
       100dvh -
-      var(
-        --eds-shell-top-offset,
-        0px
-      )
+      var(--eds-shell-top-offset, 0px)
     );
 
-  width:
-    100%;
-
-  max-width:
-    100vw;
-
-  overflow-x:
-    hidden;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
 
   background:
-    var(
-      --eds-shell-bg,
-      var(--bg, #f7f8fb)
-    );
+    var(--eds-shell-bg, var(--bg, #f7f8fb));
 
   color:
-    var(
-      --eds-text,
-      var(--text, #111111)
-    );
+    var(--eds-text, var(--text, #111111));
 
   font-family:
-    var(
-      --font-family,
-      system-ui
-    );
+    var(--font-family, system-ui);
 
   font-size:
-    var(
-      --font-size,
-      16px
-    );
+    var(--font-size, 16px);
 }
 
 .center-page {
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  padding:
-    18px;
+  display: grid;
+  place-items: center;
+  padding: 18px;
 }
 
 .loading-card {
-  width:
-    min(
-      430px,
-      100%
-    );
-
-  border-radius:
-    26px;
-
-  padding:
-    24px;
+  width: min(430px, 100%);
+  border-radius: 26px;
+  padding: 24px;
 
   background:
-    var(
-      --card-bg,
-      var(
-        --surface,
-        #ffffff
-      )
-    );
+    var(--card-bg, var(--surface, #ffffff));
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
   box-shadow:
     var(
       --shell-shadow,
-      0 24px 60px
-      rgba(15,23,42,.10)
+      0 24px 60px rgba(15,23,42,.10)
     );
 
-  text-align:
-    center;
-
-  overflow:
-    hidden;
+  text-align: center;
+  overflow: hidden;
 }
 
 .loading-card h2 {
-  margin:
-    12px 0 6px;
-
-  font-size:
-    20px;
-
-  font-weight:
-    950;
+  margin: 12px 0 6px;
+  font-size: 20px;
+  font-weight: 950;
 }
 
 .loading-card p {
-  margin:
-    0;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    14px;
-
-  line-height:
-    1.6;
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .loading-spinner {
-  width:
-    36px;
-
-  height:
-    36px;
-
-  margin:
-    0 auto;
-
-  border-radius:
-    50%;
+  width: 36px;
+  height: 36px;
+  margin: 0 auto;
+  border-radius: 50%;
 
   border:
     4px solid
@@ -2819,10 +1870,7 @@ body {
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 18%,
       transparent
     );
@@ -2830,96 +1878,53 @@ body {
   border-top-color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
-  animation:
-    spin .8s linear infinite;
+  animation: spin .8s linear infinite;
 }
 
 .app-overlay {
-  position:
-    fixed;
-
-  inset:
-    0;
-
-  z-index:
-    40;
-
-  border:
-    0;
-
-  background:
-    rgba(
-      15,
-      23,
-      42,
-      .5
-    );
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: rgba(15,23,42,.5);
 }
 
 .app-sidebar,
 .context-drawer {
-  position:
-    fixed;
+  position: fixed;
 
-  top:
-    var(
-      --eds-shell-top-offset,
-      0px
-    );
+  top: var(--eds-shell-top-offset, 0px);
+  bottom: 0;
 
-  bottom:
-    0;
-
-  z-index:
-    50;
+  z-index: 50;
 
   height:
     calc(
       100dvh -
-      var(
-        --eds-shell-top-offset,
-        0px
-      )
+      var(--eds-shell-top-offset, 0px)
     );
 
-  max-width:
-    100vw;
+  max-width: 100vw;
 
   background:
     var(
       --shell-sidebar-bg,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
-  color:
-    var(
-      --text,
-      #111111
-    );
+  color: var(--text, #111111);
 
-  overflow-y:
-    hidden;
-
-  overflow-x:
-    hidden;
-
-  overscroll-behavior:
-    contain;
+  overflow-y: hidden;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 
   box-shadow:
     var(
       --shell-shadow,
-      0 24px 70px
-      rgba(15,23,42,.22)
+      0 24px 70px rgba(15,23,42,.22)
     );
 
   transition:
@@ -2928,607 +1933,302 @@ body {
 }
 
 .app-sidebar {
-  left:
-    0;
+  left: 0;
+  width: min(88vw, 330px);
+  transform: translateX(-105%);
+  padding: 12px;
 
-  width:
-    min(
-      88vw,
-      330px
-    );
-
-  transform:
-    translateX(
-      -105%
-    );
-
-  padding:
-    12px;
-
-  display:
-    flex;
-
-  flex-direction:
-    column;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-sidebar.open {
-  transform:
-    translateX(
-      0
-    );
+  transform: translateX(0);
 }
 
 .context-drawer {
-  right:
-    0;
+  right: 0;
+  width: min(90vw, 370px);
+  transform: translateX(105%);
+  padding: 16px;
 
-  width:
-    min(
-      90vw,
-      370px
-    );
-
-  transform:
-    translateX(
-      105%
-    );
-
-  padding:
-    16px;
-
-  overflow-y:
-    auto;
-
-  overflow-x:
-    hidden;
-
-  scrollbar-gutter:
-    stable;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 .context-drawer.open {
-  transform:
-    translateX(
-      0
-    );
+  transform: translateX(0);
 }
 
 .sidebar-head,
 .drawer-head,
 .app-header {
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    8px;
-
-  min-width:
-    0;
-
-  max-width:
-    100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sidebar-head {
-  position:
-    sticky;
-
-  top:
-    0;
-
-  z-index:
-    3;
+  position: sticky;
+  top: 0;
+  z-index: 3;
 
   background:
-    var(
-      --shell-sidebar-bg,
-      var(
-        --surface,
-        #ffffff
-      )
-    );
+    var(--shell-sidebar-bg, var(--surface, #ffffff));
 
-  padding:
-    4px 0 10px;
+  padding: 4px 0 10px;
 }
 
 .school-home {
-  min-width:
-    0;
+  min-width: 0;
+  max-width: 100%;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
 
-  max-width:
-    100%;
-
-  flex:
-    1;
-
-  border:
-    0;
-
-  background:
-    transparent;
-
-  color:
-    inherit;
-
-  padding:
-    0;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    10px;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
 }
 
-.school-home:hover
-.sidebar-title strong {
+.school-home:hover .sidebar-title strong {
   color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 }
 
 .avatar {
-  width:
-    38px;
-
-  height:
-    38px;
-
-  border-radius:
-    15px;
+  width: 38px;
+  height: 38px;
+  border-radius: 15px;
 
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  font-weight:
-    950;
-
-  flex:
-    0 0 auto;
+  display: grid;
+  place-items: center;
+  font-weight: 950;
+  flex: 0 0 auto;
 }
 
 .sidebar-title,
 .header-title {
-  min-width:
-    0;
-
-  flex:
-    1;
+  min-width: 0;
+  flex: 1;
 }
 
 .sidebar-title strong,
 .sidebar-title span,
 .header-title strong,
 .header-title span {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  white-space:
-    nowrap;
-
-  text-overflow:
-    ellipsis;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-title strong,
 .header-title strong {
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    14px;
-
-  font-weight:
-    950;
-
-  line-height:
-    1.1;
+  color: var(--text, #111111);
+  font-size: 14px;
+  font-weight: 950;
+  line-height: 1.1;
 }
 
 .sidebar-title span,
 .header-title span {
-  margin-top:
-    1px;
-
-  font-size:
-    11px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  line-height:
-    1.1;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--muted, #64748b);
+  line-height: 1.1;
 }
 
 .icon-btn {
-  width:
-    36px;
-
-  height:
-    36px;
+  width: 36px;
+  height: 36px;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
-  border-radius:
-    14px;
+  border-radius: 14px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #111111);
 
-  background:
-    var(
-      --surface,
-      #ffffff
-    );
+  font-size: 19px;
+  font-weight: 950;
+  cursor: pointer;
 
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    19px;
-
-  font-weight:
-    950;
-
-  cursor:
-    pointer;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  flex:
-    0 0 auto;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
 }
 
 .icon-btn.primary {
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 
-  border-color:
-    transparent;
+  border-color: transparent;
 }
 
 .nav-list {
-  min-height:
-    0;
+  min-height: 0;
+  flex: 1;
 
-  flex:
-    1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 
-  display:
-    flex;
+  padding-bottom: 12px;
+  max-width: 100%;
 
-  flex-direction:
-    column;
-
-  gap:
-    8px;
-
-  padding-bottom:
-    12px;
-
-  max-width:
-    100%;
-
-  overflow-y:
-    auto;
-
-  overflow-x:
-    hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .nav-section {
-  border-radius:
-    20px;
-
-  background:
-    var(
-      --shell-section-bg,
-      #f7f8fb
-    );
+  border-radius: 20px;
+  background: var(--shell-section-bg, #f7f8fb);
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 
-  overflow:
-    hidden;
-
-  max-width:
-    100%;
+  overflow: hidden;
+  max-width: 100%;
 }
 
 .nav-section-title {
-  width:
-    100%;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  padding: 0 12px;
 
-  min-height:
-    40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 
-  border:
-    0;
-
-  background:
-    transparent;
-
-  padding:
-    0 12px;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    space-between;
-
-  gap:
-    8px;
-
-  color:
-    var(
-      --muted,
-      #334155
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    950;
-
-  text-transform:
-    uppercase;
-
-  letter-spacing:
-    .06em;
-
-  cursor:
-    pointer;
+  color: var(--muted, #334155);
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  cursor: pointer;
 }
 
 .nav-section-title span {
-  min-width:
-    0;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-items {
-  display:
-    grid;
-
-  gap:
-    4px;
-
-  padding:
-    5px;
-
-  max-width:
-    100%;
+  display: grid;
+  gap: 4px;
+  padding: 5px;
+  max-width: 100%;
 }
 
 .nav-item {
-  width:
-    100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  padding: 9px;
 
-  min-width:
-    0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
 
-  min-height:
-    44px;
-
-  border:
-    0;
-
-  border-radius:
-    16px;
-
-  background:
-    transparent;
-
-  padding:
-    9px;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    9px;
-
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  color: var(--text, #111111);
+  text-align: left;
+  cursor: pointer;
 }
 
 .nav-item:hover {
-  background:
-    var(
-      --shell-hover-bg,
-      #f1f5f9
-    );
+  background: var(--shell-hover-bg, #f1f5f9);
 }
 
 .nav-item.active {
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 }
 
 .nav-item.active strong,
 .nav-item.active span {
-  color:
-    #fff;
+  color: #fff;
 }
 
 .nav-item span {
-  width:
-    24px;
-
-  flex:
-    0 0 auto;
-
-  font-size:
-    17px;
-
-  text-align:
-    center;
+  width: 24px;
+  flex: 0 0 auto;
+  font-size: 17px;
+  text-align: center;
 }
 
 .nav-item strong {
-  min-width:
-    0;
-
-  color:
-    inherit;
-
-  font-size:
-    13px;
-
-  overflow:
-    hidden;
-
-  white-space:
-    nowrap;
-
-  text-overflow:
-    ellipsis;
+  min-width: 0;
+  color: inherit;
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-resize-handle {
-  display:
-    none;
+  display: none;
 }
 
 .app-main {
-  min-height:
-    100dvh;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 
-  width:
-    100%;
+  display: flex;
+  flex-direction: column;
 
-  max-width:
-    100%;
-
-  min-width:
-    0;
-
-  display:
-    flex;
-
-  flex-direction:
-    column;
-
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    visible;
+  overflow-x: hidden;
+  overflow-y: visible;
 
   transition:
     margin-left .22s ease,
@@ -3536,292 +2236,141 @@ body {
 }
 
 .app-header {
-  position:
-    sticky;
-
-  top:
-    0;
-
-  z-index:
-    30;
-
-  min-height:
-    48px;
-
-  max-width:
-    100%;
-
-  padding:
-    5px 14px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 5px 14px;
 
   background:
     var(
       --shell-header-bg,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
   border-bottom:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 
-  backdrop-filter:
-    blur(
-      14px
-    );
-
-  overflow:
-    visible;
+  backdrop-filter: blur(14px);
+  overflow: visible;
 }
 
 .member-access {
-  min-width:
-    0;
+  min-width: 0;
+  max-width: min(430px, 48vw);
 
-  max-width:
-    min(
-      430px,
-      48vw
-    );
-
-  display:
-    grid;
-
-  grid-template-columns:
-    minmax(
-      0,
-      1fr
-    )
-    38px;
-
-  align-items:
-    center;
-
-  gap:
-    6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px;
+  align-items: center;
+  gap: 6px;
 }
 
 .member-pill {
-  min-width:
-    0;
+  min-width: 0;
+  min-height: 42px;
 
-  min-height:
-    42px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
 
-  display:
-    grid;
-
-  grid-template-columns:
-    34px
-    minmax(
-      0,
-      1fr
-    );
-
-  align-items:
-    center;
-
-  gap:
-    9px;
-
-  border:
-    0;
-
-  border-radius:
-    14px;
-
-  padding:
-    4px 7px;
-
-  background:
-    transparent;
-
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  border: 0;
+  border-radius: 14px;
+  padding: 4px 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .member-pill:hover {
-  background:
-    var(
-      --shell-hover-bg,
-      #f1f5f9
-    );
+  background: var(--shell-hover-bg, #f1f5f9);
 }
 
 .member-avatar {
-  width:
-    34px;
-
-  height:
-    34px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  overflow:
-    hidden;
-
-  border-radius:
-    50%;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
 
   background:
     color-mix(
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 16%,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
   color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
-  font-size:
-    11px;
-
-  font-weight:
-    1000;
+  font-size: 11px;
+  font-weight: 1000;
 }
 
 .member-avatar img,
 .workspace-avatar img {
-  width:
-    100%;
-
-  height:
-    100%;
-
-  display:
-    block;
-
-  object-fit:
-    cover;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .member-copy {
-  min-width:
-    0;
-
-  display:
-    block;
+  min-width: 0;
+  display: block;
 }
 
 .member-copy b,
 .member-copy > span {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-copy b {
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    12px;
-
-  font-weight:
-    950;
+  color: var(--text, #111111);
+  font-size: 12px;
+  font-weight: 950;
 }
 
 .member-copy > span {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    10px;
-
-  font-weight:
-    750;
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 750;
 }
 
 .member-center-action {
-  width:
-    38px;
-
-  height:
-    38px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 
-  border-radius:
-    12px;
-
-  background:
-    transparent;
+  border-radius: 12px;
+  background: transparent;
 
   color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
-  font-size:
-    13px;
-
-  font-weight:
-    1000;
-
-  cursor:
-    pointer;
+  font-size: 13px;
+  font-weight: 1000;
+  cursor: pointer;
 }
 
 .member-center-action:hover,
@@ -3829,10 +2378,7 @@ body {
   border-color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
   background:
@@ -3840,1032 +2386,541 @@ body {
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 9%,
       transparent
     );
 }
 
 .sync-dot-wrap {
-  position:
-    relative;
-
-  flex:
-    0 0 auto;
+  position: relative;
+  flex: 0 0 auto;
 }
 
 .sync-dot-btn {
-  width:
-    36px;
-
-  height:
-    36px;
+  width: 36px;
+  height: 36px;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
-  border-radius:
-    999px;
+  border-radius: 999px;
+  background: var(--surface, #ffffff);
 
-  background:
-    var(
-      --surface,
-      #ffffff
-    );
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  cursor:
-    pointer;
-
-  flex:
-    0 0 auto;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex: 0 0 auto;
 }
 
 .sync-dot-btn span {
-  width:
-    11px;
-
-  height:
-    11px;
-
-  display:
-    block;
-
-  border-radius:
-    999px;
-
-  background:
-    #ef4444;
+  width: 11px;
+  height: 11px;
+  display: block;
+  border-radius: 999px;
+  background: #ef4444;
 
   box-shadow:
-    0 0 0 5px
-    rgba(
-      239,
-      68,
-      68,
-      .12
-    );
+    0 0 0 5px rgba(239,68,68,.12);
 }
 
 .sync-dot-btn.ok span {
-  background:
-    #22c55e;
+  background: #22c55e;
 
   box-shadow:
-    0 0 0 5px
-    rgba(
-      34,
-      197,
-      94,
-      .13
-    );
+    0 0 0 5px rgba(34,197,94,.13);
 }
 
 .sync-dot-btn.live span {
-  background:
-    #0ea5e9;
+  background: #0ea5e9;
 
   box-shadow:
-    0 0 0 5px
-    rgba(
-      14,
-      165,
-      233,
-      .14
-    );
+    0 0 0 5px rgba(14,165,233,.14);
 }
 
 .sync-dot-btn.warn span {
-  background:
-    #ef4444;
+  background: #ef4444;
 
   box-shadow:
-    0 0 0 5px
-    rgba(
-      239,
-      68,
-      68,
-      .12
-    );
+    0 0 0 5px rgba(239,68,68,.12);
 }
 
 .sync-popover {
-  position:
-    fixed;
+  position: fixed;
+  top: 56px;
+  right: 12px;
 
-  top:
-    56px;
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(78dvh, 760px);
 
-  right:
-    12px;
-
-  width:
-    min(
-      560px,
-      calc(
-        100vw -
-        24px
-      )
-    );
-
-  max-height:
-    min(
-      78dvh,
-      760px
-    );
-
-  border-radius:
-    18px;
-
-  padding:
-    8px;
+  border-radius: 18px;
+  padding: 8px;
 
   background:
     var(
       --shell-menu-bg,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
   box-shadow:
     var(
       --shell-shadow,
-      0 24px 60px
-      rgba(15,23,42,.18)
+      0 24px 60px rgba(15,23,42,.18)
     );
 
-  z-index:
-    90;
-
-  overflow:
-    auto;
+  z-index: 90;
+  overflow: auto;
 }
 
 .sync-popover > * {
-  margin:
-    0 !important;
+  margin: 0 !important;
 }
 
 .app-content {
-  min-width:
-    0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
 
-  width:
-    100%;
-
-  max-width:
-    100%;
-
-  flex:
-    1 1 auto;
-
-  padding:
-    8px;
+  padding: 8px;
 
   padding-bottom:
     max(
       28px,
-      env(
-        safe-area-inset-bottom
-      )
+      env(safe-area-inset-bottom)
     );
 
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    visible;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .app-content-inner {
-  width:
-    100%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 
-  max-width:
-    100%;
-
-  min-width:
-    0;
-
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    visible;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .app-content *,
 .app-content *::before,
 .app-content *::after {
-  max-width:
-    100%;
-
-  box-sizing:
-    border-box;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .app-content button,
 .app-content input,
 .app-content select,
 .app-content textarea {
-  font:
-    inherit;
-
-  max-width:
-    100%;
+  font: inherit;
+  max-width: 100%;
 }
 
 .app-content img,
 .app-content svg,
 .app-content canvas,
 .app-content video {
-  max-width:
-    100%;
-
-  height:
-    auto;
+  max-width: 100%;
+  height: auto;
 }
 
 .app-content table {
-  max-width:
-    100%;
+  max-width: 100%;
 }
 
 .drawer-head {
-  justify-content:
-    space-between;
-
-  margin-bottom:
-    16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
 }
 
 .drawer-head div {
-  min-width:
-    0;
+  min-width: 0;
 }
 
 .drawer-head p {
-  margin:
-    0;
+  margin: 0;
 
   color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
-  font-size:
-    12px;
-
-  font-weight:
-    950;
-
-  text-transform:
-    uppercase;
-
-  letter-spacing:
-    .08em;
+  font-size: 12px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: .08em;
 }
 
 .drawer-head h2 {
-  margin:
-    2px 0 0;
-
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    22px;
-
-  letter-spacing:
-    -.04em;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  margin: 2px 0 0;
+  color: var(--text, #111111);
+  font-size: 22px;
+  letter-spacing: -.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-card {
-  border-radius:
-    22px;
-
-  padding:
-    14px;
-
-  background:
-    var(
-      --shell-section-bg,
-      #f7f8fb
-    );
+  border-radius: 22px;
+  padding: 14px;
+  background: var(--shell-section-bg, #f7f8fb);
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
-  margin-bottom:
-    12px;
-
-  max-width:
-    100%;
-
-  overflow:
-    hidden;
+  margin-bottom: 12px;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .drawer-card label {
-  display:
-    block;
-
-  margin-bottom:
-    8px;
-
-  font-size:
-    12px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-weight:
-    900;
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted, #64748b);
+  font-weight: 900;
 }
 
 .drawer-card select {
-  width:
-    100%;
-
-  min-width:
-    0;
-
-  min-height:
-    44px;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
 
   border:
     1px solid
     var(
       --input-border,
-      var(
-        --border,
-        rgba(0,0,0,.10)
-      )
+      var(--border, rgba(0,0,0,.10))
     );
 
-  border-radius:
-    15px;
-
-  padding:
-    0 12px;
+  border-radius: 15px;
+  padding: 0 12px;
 
   background:
     var(
       --input-bg,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
   color:
     var(
       --input-text,
-      var(
-        --text,
-        #111111
-      )
+      var(--text, #111111)
     );
 
-  outline:
-    none;
+  outline: none;
 }
 
 .drawer-info {
-  display:
-    grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
-  gap:
-    10px;
-
-  margin:
-    14px 0;
-
-  max-width:
-    100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0;
+  max-width: 100%;
 }
 
 .drawer-info div {
-  min-width:
-    0;
-
-  border-radius:
-    20px;
-
-  padding:
-    14px;
-
-  background:
-    var(
-      --shell-section-bg,
-      #f7f8fb
-    );
+  min-width: 0;
+  border-radius: 20px;
+  padding: 14px;
+  background: var(--shell-section-bg, #f7f8fb);
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 
-  overflow:
-    hidden;
+  overflow: hidden;
 }
 
 .drawer-info strong,
 .drawer-info span {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .drawer-info strong {
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    18px;
-
-  font-weight:
-    950;
+  color: var(--text, #111111);
+  font-size: 18px;
+  font-weight: 950;
 }
 
 .drawer-info span {
-  margin-top:
-    4px;
-
-  font-size:
-    12px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted, #64748b);
 }
 
 .drawer-action,
 .drawer-danger {
-  width:
-    100%;
-
-  min-height:
-    46px;
-
-  border:
-    0;
-
-  border-radius:
-    999px;
-
-  font-weight:
-    950;
-
-  cursor:
-    pointer;
-
-  margin-top:
-    8px;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 950;
+  cursor: pointer;
+  margin-top: 8px;
 }
 
 .drawer-action {
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 }
 
 .drawer-danger {
-  background:
-    rgba(
-      239,
-      68,
-      68,
-      .1
-    );
-
-  color:
-    #dc2626;
+  background: rgba(239,68,68,.1);
+  color: #dc2626;
 }
 
 .workspace-list {
-  display:
-    grid;
-
-  gap:
-    8px;
+  display: grid;
+  gap: 8px;
 }
 
 .workspace-list button {
-  width:
-    100%;
-
-  min-height:
-    64px;
+  width: 100%;
+  min-height: 64px;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.10)
-    );
+    1px solid var(--border, rgba(0,0,0,.10));
 
-  border-radius:
-    18px;
-
-  padding:
-    9px;
+  border-radius: 18px;
+  padding: 9px;
 
   background:
     var(
       --shell-menu-bg,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
-  color:
-    var(
-      --text,
-      #111111
-    );
+  color: var(--text, #111111);
 
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    42px
-    minmax(
-      0,
-      1fr
-    )
-    auto;
+    42px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
 
-  grid-template-rows:
-    auto
-    auto;
-
-  column-gap:
-    10px;
-
-  align-items:
-    center;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  column-gap: 10px;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
 }
 
 .workspace-list button:hover {
-  background:
-    var(
-      --shell-hover-bg,
-      #f1f5f9
-    );
+  background: var(--shell-hover-bg, #f1f5f9);
 }
 
 .workspace-list button.active {
   border-color:
     color-mix(
       in srgb,
-      var(
-        --dashboard-primary,
-        #2563eb
-      ) 42%,
-      var(
-        --border,
-        rgba(0,0,0,.10)
-      )
+      var(--dashboard-primary, #2563eb) 42%,
+      var(--border, rgba(0,0,0,.10))
     );
 
   background:
     color-mix(
       in srgb,
-      var(
-        --dashboard-primary,
-        #2563eb
-      ) 8%,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--dashboard-primary, #2563eb) 8%,
+      var(--surface, #ffffff)
     );
 }
 
 .workspace-list button:disabled {
-  opacity:
-    .7;
-
-  cursor:
-    not-allowed;
+  opacity: .7;
+  cursor: not-allowed;
 }
 
-.workspace-list button >
-.workspace-avatar {
-  grid-row:
-    span 2;
+.workspace-list button > .workspace-avatar {
+  grid-row: span 2;
+  width: 42px;
+  height: 42px;
 
-  width:
-    42px;
-
-  height:
-    42px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    15px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
 
   background:
     color-mix(
       in srgb,
-      var(
-        --dashboard-primary,
-        #2563eb
-      ) 10%,
+      var(--dashboard-primary, #2563eb) 10%,
       transparent
     );
 
-  font-size:
-    19px;
+  font-size: 19px;
 }
 
 .workspace-list strong,
 .workspace-list small {
-  min-width:
-    0;
-
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  white-space:
-    nowrap;
-
-  text-overflow:
-    ellipsis;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .workspace-list strong {
-  color:
-    var(
-      --text,
-      #111111
-    );
-
-  font-size:
-    13px;
-
-  font-weight:
-    950;
+  color: var(--text, #111111);
+  font-size: 13px;
+  font-weight: 950;
 }
 
 .workspace-list small {
-  margin-top:
-    3px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    750;
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .workspace-list b {
-  grid-row:
-    span 2;
-
-  min-width:
-    58px;
-
-  justify-self:
-    end;
-
-  border-radius:
-    999px;
-
-  padding:
-    6px 9px;
+  grid-row: span 2;
+  min-width: 58px;
+  justify-self: end;
+  border-radius: 999px;
+  padding: 6px 9px;
 
   background:
     color-mix(
       in srgb,
-      var(
-        --dashboard-primary,
-        #2563eb
-      ) 10%,
+      var(--dashboard-primary, #2563eb) 10%,
       transparent
     );
 
-  color:
-    var(
-      --dashboard-primary,
-      #2563eb
-    );
+  color: var(--dashboard-primary, #2563eb);
 
-  font-size:
-    10px;
-
-  font-weight:
-    950;
-
-  text-align:
-    center;
+  font-size: 10px;
+  font-weight: 950;
+  text-align: center;
 }
 
 .workspace-list.compact button {
-  min-height:
-    58px;
+  min-height: 58px;
 }
 
-@media (
-  min-width:
-    980px
-) {
+@media (min-width: 980px) {
   .role-shell {
-    display:
-      grid;
+    display: grid;
 
     grid-template-columns:
       minmax(
         240px,
-        var(
-          --sidebar-width,
-          300px
-        )
+        var(--sidebar-width, 300px)
       )
-      minmax(
-        0,
-        1fr
-      );
+      minmax(0, 1fr);
 
     grid-template-rows:
-      minmax(
-        0,
-        1fr
-      );
+      minmax(0, 1fr);
 
-    align-items:
-      stretch;
-
-    width:
-      100%;
-
-    max-width:
-      100vw;
+    align-items: stretch;
+    width: 100%;
+    max-width: 100vw;
 
     min-height:
       calc(
         100dvh -
-        var(
-          --eds-shell-top-offset,
-          0px
-        )
+        var(--eds-shell-top-offset, 0px)
       );
 
-    overflow:
-      hidden;
+    overflow: hidden;
 
     transition:
-      grid-template-columns
-      .22s ease;
+      grid-template-columns .22s ease;
   }
 
   .role-shell.portal-sidebar-hidden {
     grid-template-columns:
-      0
-      minmax(
-        0,
-        1fr
-      );
+      0 minmax(0, 1fr);
   }
 
   .app-overlay {
-    display:
-      none;
+    display: none;
   }
 
   .app-sidebar {
-    position:
-      sticky;
+    position: sticky;
+    grid-column: 1;
+    grid-row: 1;
 
-    grid-column:
-      1;
+    top: var(--eds-shell-top-offset, 0px);
+    left: auto;
+    bottom: auto;
 
-    grid-row:
-      1;
-
-    top:
-      var(
-        --eds-shell-top-offset,
-        0px
-      );
-
-    left:
-      auto;
-
-    bottom:
-      auto;
-
-    z-index:
-      35;
-
-    width:
-      100%;
-
-    min-width:
-      0;
-
-    max-width:
-      none;
+    z-index: 35;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
 
     height:
       calc(
         100dvh -
-        var(
-          --eds-shell-top-offset,
-          0px
-        )
+        var(--eds-shell-top-offset, 0px)
       );
 
-    transform:
-      none;
-
-    box-shadow:
-      none;
+    transform: none;
+    box-shadow: none;
 
     border-right:
-      1px solid
-      var(
-        --border,
-        rgba(0,0,0,.08)
-      );
+      1px solid var(--border, rgba(0,0,0,.08));
 
-    overflow:
-      hidden;
+    overflow: hidden;
   }
 
   .app-sidebar.hidden,
   .app-sidebar.hidden.open {
-    width:
-      0;
+    width: 0;
+    min-width: 0;
 
-    min-width:
-      0;
+    padding-left: 0;
+    padding-right: 0;
+    border-right: 0;
 
-    padding-left:
-      0;
-
-    padding-right:
-      0;
-
-    border-right:
-      0;
-
-    transform:
-      none;
-
-    opacity:
-      0;
-
-    visibility:
-      hidden;
-
-    pointer-events:
-      none;
-
-    overflow:
-      hidden;
+    transform: none;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    overflow: hidden;
   }
 
   .app-main,
   .app-main.full {
-    position:
-      relative;
+    position: relative;
+    grid-column: 2;
+    grid-row: 1;
 
-    grid-column:
-      2;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
 
-    grid-row:
-      1;
-
-    min-width:
-      0;
-
-    width:
-      100%;
-
-    max-width:
-      100%;
-
-    margin-left:
-      0;
-
-    overflow-x:
-      hidden;
+    margin-left: 0;
+    overflow-x: hidden;
   }
 
   .app-header,
   .app-content,
   .app-content-inner {
-    min-width:
-      0;
-
-    width:
-      100%;
-
-    max-width:
-      100%;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .app-content {
-    padding:
-      12px;
+    padding: 12px;
   }
 
   .app-content-inner > *,
@@ -4874,16 +2929,12 @@ body {
   .app-content article,
   .app-content form,
   .app-content div {
-    min-width:
-      0;
+    min-width: 0;
   }
 
   .app-content table {
-    width:
-      max-content;
-
-    min-width:
-      100%;
+    width: max-content;
+    min-width: 100%;
   }
 
   .app-content :is(
@@ -4894,749 +2945,407 @@ body {
     [class*="table-container"],
     [class*="table-wrapper"]
   ) {
-    min-width:
-      0;
-
-    max-width:
-      100%;
-
-    overflow-x:
-      auto;
-
-    overscroll-behavior-inline:
-      contain;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
   }
 
   .sidebar-resize-handle {
-    display:
-      block;
+    display: block;
+    position: absolute;
 
-    position:
-      absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
 
-    top:
-      0;
+    border: 0;
+    padding: 0;
+    background: transparent;
 
-    right:
-      0;
-
-    width:
-      8px;
-
-    height:
-      100%;
-
-    border:
-      0;
-
-    padding:
-      0;
-
-    background:
-      transparent;
-
-    cursor:
-      col-resize;
-
-    z-index:
-      4;
+    cursor: col-resize;
+    z-index: 4;
   }
 
   .sidebar-resize-handle:hover {
     background:
       color-mix(
         in srgb,
-        var(
-          --dashboard-primary,
-          #2563eb
-        ) 18%,
+        var(--dashboard-primary, #2563eb) 18%,
         transparent
       );
   }
 }
 
-@media (
-  max-width:
-    420px
-) {
+@media (max-width: 420px) {
   .app-content {
-    padding:
-      6px;
+    padding: 6px;
   }
 
   .app-header {
-    min-height:
-      46px;
-
-    padding:
-      5px 6px;
+    min-height: 46px;
+    padding: 5px 6px;
   }
 
   .icon-btn,
   .sync-dot-btn {
-    width:
-      34px;
-
-    height:
-      34px;
-
-    border-radius:
-      13px;
-
-    font-size:
-      18px;
+    width: 34px;
+    height: 34px;
+    border-radius: 13px;
+    font-size: 18px;
   }
 
   .header-title strong {
-    font-size:
-      13px;
+    font-size: 13px;
   }
 
   .header-title span {
-    font-size:
-      10px;
+    font-size: 10px;
   }
 
   .member-access {
-    max-width:
-      min(
-        240px,
-        54vw
-      );
+    max-width: min(240px, 54vw);
 
     grid-template-columns:
-      minmax(
-        0,
-        1fr
-      )
-      36px;
+      minmax(0, 1fr) 36px;
   }
 
   .member-pill {
-    min-height:
-      38px;
+    min-height: 38px;
 
     grid-template-columns:
-      30px
-      minmax(
-        0,
-        1fr
-      );
+      30px minmax(0, 1fr);
 
-    gap:
-      7px;
-
-    padding:
-      3px 5px;
+    gap: 7px;
+    padding: 3px 5px;
   }
 
   .member-avatar {
-    width:
-      30px;
-
-    height:
-      30px;
+    width: 30px;
+    height: 30px;
   }
 
   .member-copy > span {
-    display:
-      none;
+    display: none;
   }
 
   .member-center-action {
-    width:
-      36px;
-
-    height:
-      36px;
+    width: 36px;
+    height: 36px;
   }
 
   .app-sidebar {
-    width:
-      min(
-        92vw,
-        320px
-      );
+    width: min(92vw, 320px);
   }
 
   .context-drawer {
-    width:
-      min(
-        94vw,
-        370px
-      );
-
-    padding:
-      12px;
+    width: min(94vw, 370px);
+    padding: 12px;
   }
 
   .sync-popover {
-    position:
-      absolute;
-
-    top:
-      42px;
-
-    right:
-      0;
+    position: absolute;
+    top: 42px;
+    right: 0;
 
     width:
       min(
         360px,
-        calc(
-          100vw -
-          18px
-        )
+        calc(100vw - 18px)
       );
 
     max-height:
-      min(
-        72dvh,
-        620px
-      );
+      min(72dvh, 620px);
   }
 
   .drawer-info {
-    grid-template-columns:
-      1fr;
+    grid-template-columns: 1fr;
   }
 
   .nav-item {
-    min-height:
-      43px;
+    min-height: 43px;
   }
 }
 
 /* Refactored shell controls */
 
 .app-sidebar {
-  display:
-    flex;
-
-  flex-direction:
-    column;
-
-  padding:
-    10px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
 }
 
 .nav-list {
-  min-height:
-    0;
+  min-height: 0;
+  flex: 1;
 
-  flex:
-    1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 
-  display:
-    flex;
+  padding: 4px 2px 14px;
 
-  flex-direction:
-    column;
-
-  gap:
-    2px;
-
-  padding:
-    4px 2px 14px;
-
-  overflow-y:
-    auto;
-
-  overflow-x:
-    hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .nav-section {
-  border:
-    0;
-
-  border-radius:
-    0;
-
-  background:
-    transparent;
-
-  overflow:
-    visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 
 .nav-section-title {
-  min-height:
-    36px;
+  min-height: 36px;
+  border-radius: 11px;
+  padding: 7px 9px;
 
-  border-radius:
-    11px;
-
-  padding:
-    7px 9px;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    minmax(
-      0,
-      1fr
-    )
-    22px;
+    minmax(0, 1fr) 22px;
 
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    850;
-
-  letter-spacing:
-    0;
-
-  text-transform:
-    none;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .nav-section-title:hover {
   background:
     color-mix(
       in srgb,
-      var(
-        --muted,
-        #64748b
-      ) 7%,
+      var(--muted, #64748b) 7%,
       transparent
     );
 
-  color:
-    var(
-      --text,
-      #111111
-    );
+  color: var(--text, #111111);
 }
 
 .nav-items {
-  gap:
-    2px;
-
-  padding:
-    2px 0 5px;
+  gap: 2px;
+  padding: 2px 0 5px;
 }
 
 .nav-item {
-  min-height:
-    40px;
+  min-height: 40px;
+  border-radius: 11px;
+  padding: 7px 9px;
 
-  border-radius:
-    11px;
-
-  padding:
-    7px 9px;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    26px
-    minmax(
-      0,
-      1fr
-    );
+    26px minmax(0, 1fr);
 
-  gap:
-    8px;
+  gap: 8px;
 }
 
 .nav-item.active {
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 }
 
 .header-status {
-  flex:
-    0 0 auto;
+  flex: 0 0 auto;
 }
 
 .header-account-button {
-  min-width:
-    0;
+  min-width: 0;
+  max-width: min(230px, 32vw);
+  min-height: 40px;
 
-  max-width:
-    min(
-      230px,
-      32vw
-    );
-
-  min-height:
-    40px;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    32px
-    minmax(
-      0,
-      1fr
-    );
+    32px minmax(0, 1fr);
 
-  align-items:
-    center;
+  align-items: center;
+  gap: 8px;
 
-  gap:
-    8px;
+  border: 0;
+  border-radius: 13px;
+  padding: 4px 7px;
 
-  border:
-    0;
-
-  border-radius:
-    13px;
-
-  padding:
-    4px 7px;
-
-  background:
-    transparent;
-
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .header-account-button:hover {
-  background:
-    var(
-      --shell-hover-bg,
-      #f1f5f9
-    );
+  background: var(--shell-hover-bg, #f1f5f9);
 }
 
 .header-account-avatar,
 .account-drawer-avatar {
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  overflow:
-    hidden;
-
-  border-radius:
-    50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
 
   background:
     color-mix(
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 16%,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
   color:
     var(
       --dashboard-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     );
 
-  font-weight:
-    1000;
+  font-weight: 1000;
 }
 
 .header-account-avatar {
-  width:
-    32px;
-
-  height:
-    32px;
-
-  font-size:
-    10px;
+  width: 32px;
+  height: 32px;
+  font-size: 10px;
 }
 
 .header-account-avatar img,
 .account-drawer-avatar img,
 .workspace-avatar img {
-  width:
-    100%;
-
-  height:
-    100%;
-
-  display:
-    block;
-
-  object-fit:
-    cover;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .header-account-copy {
-  min-width:
-    0;
+  min-width: 0;
 }
 
 .header-account-copy strong,
 .header-account-copy small {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-account-copy strong {
-  font-size:
-    11px;
-
-  font-weight:
-    900;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .header-account-copy small {
-  margin-top:
-    1px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    9px;
+  margin-top: 1px;
+  color: var(--muted, #64748b);
+  font-size: 9px;
 }
 
 .account-drawer {
-  display:
-    flex;
-
-  flex-direction:
-    column;
-
-  gap:
-    12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .account-drawer-head {
-  justify-content:
-    space-between;
-
-  padding-bottom:
-    12px;
+  justify-content: space-between;
+  padding-bottom: 12px;
 
   border-bottom:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 }
 
 .account-drawer-identity {
-  min-width:
-    0;
+  min-width: 0;
 
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    44px
-    minmax(
-      0,
-      1fr
-    );
+    44px minmax(0, 1fr);
 
-  align-items:
-    center;
-
-  gap:
-    10px;
+  align-items: center;
+  gap: 10px;
 }
 
 .account-drawer-avatar {
-  width:
-    44px;
-
-  height:
-    44px;
-
-  font-size:
-    12px;
+  width: 44px;
+  height: 44px;
+  font-size: 12px;
 }
 
 .account-drawer-identity strong,
 .account-drawer-identity small {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-drawer-identity strong {
-  font-size:
-    15px;
-
-  font-weight:
-    950;
+  font-size: 15px;
+  font-weight: 950;
 }
 
 .account-drawer-identity small {
-  margin-top:
-    3px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    11px;
-
-  text-transform:
-    capitalize;
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  text-transform: capitalize;
 }
 
 .account-current-workspace {
-  display:
-    grid;
-
-  gap:
-    3px;
-
-  padding:
-    12px;
-
-  border-radius:
-    16px;
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border-radius: 16px;
 
   background:
-    var(
-      --shell-section-bg,
-      #f7f8fb
-    );
+    var(--shell-section-bg, #f7f8fb);
 }
 
 .account-current-workspace > span,
 .account-drawer-section > header span {
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    10px;
-
-  font-weight:
-    900;
-
-  letter-spacing:
-    .04em;
-
-  text-transform:
-    uppercase;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 
 .account-current-workspace strong,
 .account-current-workspace small {
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-current-workspace strong {
-  margin-top:
-    3px;
-
-  font-size:
-    13px;
-
-  font-weight:
-    900;
+  margin-top: 3px;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .account-current-workspace small {
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    10px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
 }
 
 .account-primary-link {
-  width:
-    100%;
+  width: 100%;
 
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    38px
-    minmax(
-      0,
-      1fr
-    )
-    auto;
+    38px minmax(0, 1fr) auto;
 
-  align-items:
-    center;
-
-  gap:
-    10px;
+  align-items: center;
+  gap: 10px;
 
   border:
     1px solid
@@ -5644,354 +3353,182 @@ body {
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 20%,
-      var(
-        --border,
-        rgba(0,0,0,.08)
-      )
+      var(--border, rgba(0,0,0,.08))
     );
 
-  border-radius:
-    16px;
-
-  padding:
-    10px;
+  border-radius: 16px;
+  padding: 10px;
 
   background:
     color-mix(
       in srgb,
       var(
         --dashboard-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 7%,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     );
 
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .account-link-icon {
-  width:
-    38px;
+  width: 38px;
+  height: 38px;
 
-  height:
-    38px;
+  display: grid;
+  place-items: center;
 
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    13px;
+  border-radius: 13px;
 
   background:
     var(
       --eds-sidebar-active,
-      var(
-        --shell-active-bg
-      )
+      var(--shell-active-bg)
     );
 
   color:
     var(
       --eds-sidebar-active-text,
-      var(
-        --dashboard-primary,
-        #2563eb
-      )
+      var(--dashboard-primary, #2563eb)
     );
 
-  font-weight:
-    1000;
+  font-weight: 1000;
 }
 
 .account-primary-link strong,
 .account-primary-link small {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-primary-link small {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    10px;
+  margin-top: 2px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
 }
 
 .account-drawer-section {
-  display:
-    grid;
-
-  gap:
-    8px;
+  display: grid;
+  gap: 8px;
 }
 
 .account-drawer-section > header {
-  display:
-    flex;
-
-  justify-content:
-    space-between;
-
-  align-items:
-    center;
-
-  gap:
-    8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
 }
 
 .account-context-field {
-  display:
-    grid;
-
-  gap:
-    5px;
-
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    800;
+  display: grid;
+  gap: 5px;
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .account-context-field select {
-  width:
-    100%;
-
-  min-height:
-    42px;
+  width: 100%;
+  min-height: 42px;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.1)
-    );
+    1px solid var(--border, rgba(0,0,0,.1));
 
-  border-radius:
-    13px;
-
-  padding:
-    0 10px;
-
-  background:
-    var(
-      --surface,
-      #ffffff
-    );
-
-  color:
-    var(
-      --text,
-      #111111
-    );
+  border-radius: 13px;
+  padding: 0 10px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #111111);
 }
 
 .account-quick-actions {
-  display:
-    grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
-  gap:
-    8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 .account-quick-actions button {
-  min-width:
-    0;
+  min-width: 0;
 
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    auto
-    minmax(
-      0,
-      1fr
-    );
+    auto minmax(0, 1fr);
 
   grid-template-rows:
     auto auto;
 
-  gap:
-    1px 8px;
-
-  align-items:
-    center;
+  gap: 1px 8px;
+  align-items: center;
 
   border:
-    1px solid
-    var(
-      --border,
-      rgba(0,0,0,.08)
-    );
+    1px solid var(--border, rgba(0,0,0,.08));
 
-  border-radius:
-    14px;
-
-  padding:
-    10px;
-
-  background:
-    transparent;
-
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  border-radius: 14px;
+  padding: 10px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .account-quick-actions button > span {
-  grid-row:
-    span 2;
+  grid-row: span 2;
 }
 
 .account-quick-actions strong,
 .account-quick-actions small {
-  min-width:
-    0;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-quick-actions small {
-  color:
-    var(
-      --muted,
-      #64748b
-    );
-
-  font-size:
-    9px;
+  color: var(--muted, #64748b);
+  font-size: 9px;
 }
 
 .account-logout {
-  width:
-    100%;
-
-  min-height:
-    42px;
-
-  margin-top:
-    auto;
-
-  border:
-    0;
-
-  border-radius:
-    14px;
-
-  background:
-    rgba(
-      239,
-      68,
-      68,
-      .1
-    );
-
-  color:
-    #dc2626;
-
-  font-weight:
-    900;
-
-  cursor:
-    pointer;
+  width: 100%;
+  min-height: 42px;
+  margin-top: auto;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(239,68,68,.1);
+  color: #dc2626;
+  font-weight: 900;
+  cursor: pointer;
 }
 
-@media (
-  max-width:
-    760px
-) {
+@media (max-width: 760px) {
   .header-title span {
-    display:
-      none;
+    display: none;
   }
 
   .header-account-button {
-    width:
-      38px;
-
-    max-width:
-      38px;
-
-    grid-template-columns:
-      30px;
-
-    padding:
-      4px;
+    width: 38px;
+    max-width: 38px;
+    grid-template-columns: 30px;
+    padding: 4px;
   }
 
   .header-account-copy {
-    display:
-      none;
+    display: none;
   }
 
   .header-account-avatar {
-    width:
-      30px;
-
-    height:
-      30px;
+    width: 30px;
+    height: 30px;
   }
 
   .account-quick-actions {
-    grid-template-columns:
-      1fr;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -5999,758 +3536,390 @@ body {
 
 .role-shell {
   background:
-    var(
-      --eds-gradient-page-glow
-    ),
-    var(
-      --eds-bg
-    );
+    var(--eds-gradient-page-glow),
+    var(--eds-bg);
 }
 
 .shell-sidebar {
-  isolation:
-    isolate;
+  isolation: isolate;
 
   background:
-    var(
-      --eds-gradient-sidebar
-    ),
-    var(
-      --eds-surface
-    );
+    var(--eds-gradient-sidebar),
+    var(--eds-surface);
 
   border-right:
-    1px solid
-    var(
-      --eds-divider
-    );
+    1px solid var(--eds-divider);
 
   box-shadow:
-    var(
-      --eds-inset-highlight
-    );
+    var(--eds-inset-highlight);
 }
 
 .shell-sidebar-inner,
 .shell-drawer-inner {
-  position:
-    relative;
+  position: relative;
+  z-index: 2;
+  min-height: 100%;
 
-  z-index:
-    2;
-
-  min-height:
-    100%;
-
-  display:
-    flex;
-
-  flex-direction:
-    column;
+  display: flex;
+  flex-direction: column;
 }
 
 .shell-sidebar-texture,
 .shell-drawer-texture {
-  position:
-    absolute;
-
-  inset:
-    0;
-
-  z-index:
-    0;
-
-  pointer-events:
-    none;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
 .shell-sidebar-head {
   background:
     color-mix(
       in srgb,
-      var(
-        --eds-surface
-      ) 82%,
+      var(--eds-surface) 82%,
       transparent
     );
 
-  backdrop-filter:
-    blur(
-      16px
-    );
+  backdrop-filter: blur(16px);
 
   border-bottom:
-    1px solid
-    var(
-      --eds-divider
-    );
+    1px solid var(--eds-divider);
 }
 
 .shell-sidebar-logo {
-  width:
-    100%;
+  width: 100%;
+  min-width: 0;
 
-  min-width:
-    0;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    38px
-    minmax(
-      0,
-      1fr
-    );
+    38px minmax(0, 1fr);
 
-  align-items:
-    center;
-
-  gap:
-    10px;
-
-  border:
-    0;
-
-  padding:
-    0;
-
-  background:
-    transparent;
-
-  color:
-    inherit;
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .shell-sidebar-logo-copy {
-  min-width:
-    0;
+  min-width: 0;
 }
 
 .shell-sidebar-logo-copy strong,
 .shell-sidebar-logo-copy small {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell-sidebar-logo-copy strong {
-  color:
-    var(
-      --eds-text-strong
-    );
-
-  font-size:
-    13px;
-
-  font-weight:
-    900;
-
-  letter-spacing:
-    -.02em;
+  color: var(--eds-text-strong);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: -.02em;
 }
 
 .shell-sidebar-logo-copy small {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --eds-text-muted
-    );
-
-  font-size:
-    9px;
-
-  font-weight:
-    650;
+  margin-top: 2px;
+  color: var(--eds-text-muted);
+  font-size: 9px;
+  font-weight: 650;
 }
 
 .shell-workspace-card {
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    34px
-    minmax(
-      0,
-      1fr
-    );
+    34px minmax(0, 1fr);
 
-  align-items:
-    center;
-
-  gap:
-    9px;
-
-  margin:
-    8px 2px 10px;
-
-  padding:
-    9px;
+  align-items: center;
+  gap: 9px;
+  margin: 8px 2px 10px;
+  padding: 9px;
 
   border:
     1px solid
     color-mix(
       in srgb,
-      var(
-        --eds-primary
-      ) 17%,
-      var(
-        --eds-border
-      )
+      var(--eds-primary) 17%,
+      var(--eds-border)
     );
 
   border-radius:
-    var(
-      --eds-radius-card
-    );
+    var(--eds-radius-card);
 
   background:
-    var(
-      --eds-gradient-brand-soft
-    ),
-    var(
-      --eds-surface
-    );
+    var(--eds-gradient-brand-soft),
+    var(--eds-surface);
 
   box-shadow:
-    var(
-      --eds-shadow-soft
-    );
+    var(--eds-shadow-soft);
 }
 
 .shell-workspace-icon {
-  width:
-    34px;
-
-  height:
-    34px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
 
   border-radius:
-    var(
-      --eds-radius-control
-    );
+    var(--eds-radius-control);
 
   background:
-    var(
-      --eds-primary-soft
-    );
+    var(--eds-primary-soft);
 }
 
 .shell-workspace-copy {
-  min-width:
-    0;
+  min-width: 0;
 }
 
 .shell-workspace-copy small,
 .shell-workspace-copy strong,
 .shell-workspace-copy span {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell-workspace-copy small {
-  color:
-    var(
-      --eds-text-muted
-    );
-
-  font-size:
-    8px;
-
-  font-weight:
-    800;
-
-  text-transform:
-    uppercase;
-
-  letter-spacing:
-    .06em;
+  color: var(--eds-text-muted);
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .06em;
 }
 
 .shell-workspace-copy strong {
-  margin-top:
-    2px;
-
-  color:
-    var(
-      --eds-text-strong
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    850;
+  margin-top: 2px;
+  color: var(--eds-text-strong);
+  font-size: 11px;
+  font-weight: 850;
 }
 
 .shell-workspace-copy span {
-  margin-top:
-    1px;
-
-  color:
-    var(
-      --eds-text-muted
-    );
-
-  font-size:
-    9px;
+  margin-top: 1px;
+  color: var(--eds-text-muted);
+  font-size: 9px;
 }
 
 .shell-nav-list {
-  gap:
-    5px;
+  gap: 5px;
 }
 
 .shell-nav-group {
-  position:
-    relative;
+  position: relative;
 }
 
 .shell-nav-group-title {
-  width:
-    100%;
+  width: 100%;
+  min-height: 32px;
 
-  min-height:
-    32px;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    minmax(
-      0,
-      1fr
-    )
-    auto;
+    minmax(0, 1fr) auto;
 
-  align-items:
-    center;
-
-  gap:
-    8px;
-
-  border:
-    0;
+  align-items: center;
+  gap: 8px;
+  border: 0;
 
   border-radius:
-    var(
-      --eds-radius-sm
-    );
+    var(--eds-radius-sm);
 
-  padding:
-    5px 8px;
-
-  background:
-    transparent;
-
-  color:
-    var(
-      --eds-text-muted
-    );
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--eds-text-muted);
+  text-align: left;
+  cursor: pointer;
 }
 
 .shell-nav-group-title:hover {
-  background:
-    var(
-      --eds-primary-softer
-    );
-
-  color:
-    var(
-      --eds-text-strong
-    );
+  background: var(--eds-primary-softer);
+  color: var(--eds-text-strong);
 }
 
 .shell-nav-group-title span {
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
-
-  font-size:
-    9px;
-
-  font-weight:
-    850;
-
-  letter-spacing:
-    .055em;
-
-  text-transform:
-    uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .055em;
+  text-transform: uppercase;
 }
 
 .shell-nav-items {
-  display:
-    grid;
-
-  gap:
-    2px;
-
-  margin-top:
-    2px;
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
 }
 
 .shell-nav-item {
-  position:
-    relative;
+  position: relative;
+  width: 100%;
+  min-height: 39px;
 
-  width:
-    100%;
-
-  min-height:
-    39px;
-
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    28px
-    minmax(
-      0,
-      1fr
-    )
-    3px;
+    28px minmax(0, 1fr) 3px;
 
-  align-items:
-    center;
+  align-items: center;
+  gap: 7px;
 
-  gap:
-    7px;
-
-  border:
-    1px solid
-    transparent;
+  border: 1px solid transparent;
 
   border-radius:
-    var(
-      --eds-radius-control
-    );
+    var(--eds-radius-control);
 
-  padding:
-    6px 8px;
-
-  background:
-    transparent;
-
-  color:
-    var(
-      --eds-text
-    );
-
-  text-align:
-    left;
-
-  cursor:
-    pointer;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--eds-text);
+  text-align: left;
+  cursor: pointer;
 
   transition:
-    var(
-      --eds-transition-color
-    ),
-    var(
-      --eds-transition-transform
-    );
+    var(--eds-transition-color),
+    var(--eds-transition-transform);
 }
 
 .shell-nav-item:hover {
-  background:
-    var(
-      --eds-primary-softer
-    );
-
-  transform:
-    translateX(
-      1px
-    );
+  background: var(--eds-primary-softer);
+  transform: translateX(1px);
 }
 
 .shell-nav-item.active {
   border-color:
     color-mix(
       in srgb,
-      var(
-        --eds-primary
-      ) 22%,
-      var(
-        --eds-border
-      )
+      var(--eds-primary) 22%,
+      var(--eds-border)
     );
 
   background:
     linear-gradient(
       90deg,
-      var(
-        --eds-primary-soft
-      ),
-      var(
-        --eds-primary-softer
-      )
+      var(--eds-primary-soft),
+      var(--eds-primary-softer)
     );
 
-  color:
-    var(
-      --eds-primary
-    );
+  color: var(--eds-primary);
 
   box-shadow:
-    var(
-      --eds-shadow-soft
-    );
+    var(--eds-shadow-soft);
 }
 
 .shell-nav-icon {
-  width:
-    28px;
-
-  height:
-    28px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  border-radius:
-    9px;
-
-  color:
-    inherit;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: inherit;
 }
 
-.shell-nav-item.active
-.shell-nav-icon {
+.shell-nav-item.active .shell-nav-icon {
   background:
     color-mix(
       in srgb,
-      var(
-        --eds-primary
-      ) 12%,
+      var(--eds-primary) 12%,
       transparent
     );
 }
 
 .shell-nav-item strong {
-  min-width:
-    0;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
-
-  font-size:
-    11px;
-
-  font-weight:
-    750;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .shell-nav-active-marker {
-  width:
-    3px;
-
-  height:
-    18px;
-
-  border-radius:
-    999px;
-
-  background:
-    transparent;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: transparent;
 }
 
-.shell-nav-item.active
-.shell-nav-active-marker {
-  background:
-    var(
-      --eds-primary
-    );
+.shell-nav-item.active .shell-nav-active-marker {
+  background: var(--eds-primary);
 }
 
 .shell-sidebar-footer {
-  margin-top:
-    auto;
-
-  padding-top:
-    8px;
+  margin-top: auto;
+  padding-top: 8px;
 
   border-top:
-    1px solid
-    var(
-      --eds-divider
-    );
+    1px solid var(--eds-divider);
 }
 
 .shell-sidebar-profile {
-  width:
-    100%;
+  width: 100%;
 
-  display:
-    grid;
-
+  display: grid;
   grid-template-columns:
-    auto
-    minmax(
-      0,
-      1fr
-    )
-    auto;
+    auto minmax(0, 1fr) auto;
 
-  align-items:
-    center;
-
-  gap:
-    8px;
-
-  border:
-    0;
+  align-items: center;
+  gap: 8px;
+  border: 0;
 
   border-radius:
-    var(
-      --eds-radius-card
-    );
+    var(--eds-radius-card);
 
-  padding:
-    7px;
-
-  background:
-    var(
-      --eds-primary-softer
-    );
-
-  color:
-    inherit;
-
-  text-align:
-    left;
+  padding: 7px;
+  background: var(--eds-primary-softer);
+  color: inherit;
+  text-align: left;
 }
 
 .shell-sidebar-profile-copy {
-  min-width:
-    0;
+  min-width: 0;
 }
 
 .shell-sidebar-profile-copy strong,
 .shell-sidebar-profile-copy small {
-  display:
-    block;
-
-  overflow:
-    hidden;
-
-  text-overflow:
-    ellipsis;
-
-  white-space:
-    nowrap;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .shell-sidebar-profile-copy strong {
-  font-size:
-    10px;
+  font-size: 10px;
 }
 
 .shell-sidebar-profile-copy small {
-  color:
-    var(
-      --eds-text-muted
-    );
-
-  font-size:
-    8px;
+  color: var(--eds-text-muted);
+  font-size: 8px;
 }
 
 .app-header {
   background:
     color-mix(
       in srgb,
-      var(
-        --eds-glass-medium-bg
-      ) 94%,
+      var(--eds-glass-medium-bg) 94%,
       transparent
     );
 
   border-bottom:
-    1px solid
-    var(
-      --eds-divider
-    );
+    1px solid var(--eds-divider);
 
   box-shadow:
-    0 8px 24px
-    rgba(
-      15,
-      23,
-      42,
-      .035
-    );
+    0 8px 24px rgba(15,23,42,.035);
 }
 
 .app-header::after {
-  content:
-    "";
-
-  position:
-    absolute;
-
-  left:
-    0;
-
-  right:
-    0;
-
-  bottom:
-    -1px;
-
-  height:
-    1px;
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
 
   background:
     linear-gradient(
@@ -6758,135 +3927,84 @@ body {
       transparent,
       color-mix(
         in srgb,
-        var(
-          --eds-primary
-        ) 20%,
+        var(--eds-primary) 20%,
         transparent
       ),
       transparent
     );
 
-  pointer-events:
-    none;
+  pointer-events: none;
 }
 
 .shell-portal-content {
-  position:
-    relative;
-
-  padding:
-    0;
+  position: relative;
+  padding: 0;
 }
 
 .shell-content-background {
-  min-height:
-    100%;
-
-  padding:
-    8px;
+  min-height: 100%;
+  padding: 8px;
 }
 
 .shell-account-drawer {
-  isolation:
-    isolate;
+  isolation: isolate;
 
   background:
-    var(
-      --eds-gradient-sidebar
-    ),
-    var(
-      --eds-surface
-    );
+    var(--eds-gradient-sidebar),
+    var(--eds-surface);
 
   border-left:
-    1px solid
-    var(
-      --eds-divider
-    );
+    1px solid var(--eds-divider);
 }
 
-.shell-account-drawer
-.account-drawer-head {
-  position:
-    sticky;
-
-  top:
-    0;
-
-  z-index:
-    4;
+.shell-account-drawer .account-drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
 
   background:
     color-mix(
       in srgb,
-      var(
-        --eds-surface
-      ) 84%,
+      var(--eds-surface) 84%,
       transparent
     );
 
-  backdrop-filter:
-    blur(
-      16px
-    );
+  backdrop-filter: blur(16px);
 }
 
 .shell-current-workspace {
-  position:
-    relative;
-
-  overflow:
-    hidden;
+  position: relative;
+  overflow: hidden;
 
   background:
-    var(
-      --eds-gradient-brand-soft
-    ),
-    var(
-      --eds-surface
-    );
+    var(--eds-gradient-brand-soft),
+    var(--eds-surface);
 
   border:
     1px solid
     color-mix(
       in srgb,
-      var(
-        --eds-primary
-      ) 20%,
-      var(
-        --eds-border
-      )
+      var(--eds-primary) 20%,
+      var(--eds-border)
     );
 
   box-shadow:
-    var(
-      --eds-shadow-soft
-    );
+    var(--eds-shadow-soft);
 }
 
-.shell-current-workspace
-.eds-status-indicator {
-  margin-top:
-    6px;
+.shell-current-workspace .eds-status-indicator {
+  margin-top: 6px;
 }
 
-.shell-context-selector
-.account-context-field > span {
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    5px;
+.shell-context-selector .account-context-field > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .workspace-list button {
   box-shadow:
-    var(
-      --eds-shadow-soft
-    );
+    var(--eds-shadow-soft);
 }
 
 .workspace-list button.active {
@@ -6894,77 +4012,54 @@ body {
     0 10px 28px
     color-mix(
       in srgb,
-      var(
-        --eds-primary
-      ) 9%,
+      var(--eds-primary) 9%,
       transparent
     );
 }
 
 .background-refresh-indicator {
   background:
-    var(
-      --eds-glass-strong-bg
-    );
+    var(--eds-glass-strong-bg);
 
   backdrop-filter:
-    var(
-      --eds-glass-strong-filter
-    );
+    var(--eds-glass-strong-filter);
 
   border-color:
-    var(
-      --eds-border
-    );
+    var(--eds-border);
 
   box-shadow:
-    var(
-      --eds-shadow-raised
-    );
+    var(--eds-shadow-raised);
 }
 
-@media (
-  min-width:
-    980px
-) {
+@media (min-width: 980px) {
   .shell-content-background {
-    padding:
-      12px;
+    padding: 12px;
   }
 }
 
-@media (
-  max-width:
-    760px
-) {
+@media (max-width: 760px) {
   .shell-content-background {
-    padding:
-      6px;
+    padding: 6px;
   }
 
   .shell-workspace-card {
-    margin-bottom:
-      7px;
+    margin-bottom: 7px;
   }
 }
 
-/* -----------------------------------------------------------------------
+/* ---------------------------------------------------------
  * Portal header theme and single-page-scroll correction
- * ----------------------------------------------------------------------- */
+ * --------------------------------------------------------- */
 
 .app-header {
-  isolation:
-    isolate;
+  isolation: isolate;
 
   background:
     color-mix(
       in srgb,
       var(
         --eds-header-bg,
-        var(
-          --surface,
-          #ffffff
-        )
+        var(--surface, #ffffff)
       ) 96%,
       transparent
     ) !important;
@@ -6972,10 +4067,7 @@ body {
   color:
     var(
       --eds-text,
-      var(
-        --text,
-        #111827
-      )
+      var(--text, #111827)
     ) !important;
 
   border-bottom:
@@ -6984,89 +4076,60 @@ body {
       --eds-divider,
       var(
         --border,
-        rgba(
-          15,
-          23,
-          42,
-          .09
-        )
+        rgba(15,23,42,.09)
       )
     ) !important;
 }
 
-.app-header
-.header-title strong {
+.app-header .header-title strong {
   color:
     var(
       --eds-text-strong,
-      var(
-        --text,
-        #111827
-      )
+      var(--text, #111827)
     ) !important;
 }
 
-.app-header
-.header-title span {
+.app-header .header-title span {
   color:
     var(
       --eds-text-muted,
-      var(
-        --muted,
-        #667085
-      )
+      var(--muted, #667085)
     ) !important;
 }
 
-.app-header
-.header-account-button {
+.app-header .header-account-button {
   color:
     var(
       --eds-text,
-      var(
-        --text,
-        #111827
-      )
+      var(--text, #111827)
     ) !important;
 }
 
-.app-header
-.header-account-button:hover {
+.app-header .header-account-button:hover {
   background:
     var(
       --eds-primary-softer,
-      var(
-        --shell-hover-bg
-      )
+      var(--shell-hover-bg)
     ) !important;
 }
 
-.app-header
-.header-account-copy strong {
+.app-header .header-account-copy strong {
   color:
     var(
       --eds-text-strong,
-      var(
-        --text,
-        #111827
-      )
+      var(--text, #111827)
     ) !important;
 }
 
-.app-header
-.header-account-copy small {
+.app-header .header-account-copy small {
   color:
     var(
       --eds-text-muted,
-      var(
-        --muted,
-        #667085
-      )
+      var(--muted, #667085)
     ) !important;
 }
 
-.app-header
-.header-account-avatar {
+.app-header .header-account-avatar {
   background:
     var(
       --eds-primary-soft,
@@ -7083,10 +4146,7 @@ body {
   color:
     var(
       --eds-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     ) !important;
 
   border:
@@ -7095,36 +4155,23 @@ body {
       in srgb,
       var(
         --eds-primary,
-        var(
-          --primary-color,
-          #2563eb
-        )
+        var(--primary-color, #2563eb)
       ) 20%,
-      var(
-        --eds-border,
-        transparent
-      )
+      var(--eds-border, transparent)
     );
 }
 
-.app-header
-.icon-btn {
+.app-header .icon-btn {
   background:
     var(
       --eds-surface,
-      var(
-        --surface,
-        #ffffff
-      )
+      var(--surface, #ffffff)
     ) !important;
 
   color:
     var(
       --eds-text-strong,
-      var(
-        --text,
-        #111827
-      )
+      var(--text, #111827)
     ) !important;
 
   border-color:
@@ -7132,25 +4179,16 @@ body {
       --eds-border,
       var(
         --border,
-        rgba(
-          15,
-          23,
-          42,
-          .09
-        )
+        rgba(15,23,42,.09)
       )
     ) !important;
 }
 
-.app-header
-.icon-btn.primary {
+.app-header .icon-btn.primary {
   background:
     var(
       --eds-primary,
-      var(
-        --primary-color,
-        #2563eb
-      )
+      var(--primary-color, #2563eb)
     ) !important;
 
   color:
@@ -7164,27 +4202,22 @@ body {
 }
 
 /*
- * Normal pages use the document/window as their one vertical scrollbar.
- * Fixed drawers remain independently scrollable only while open.
+ * Normal pages continue to use the document/window
+ * as their main vertical scrolling surface.
+ *
+ * The shared PortalOverlayBoundaries.css stylesheet
+ * independently constrains supported dialogs.
  */
 
 html {
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    auto;
-
-  scrollbar-gutter:
-    stable;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 body {
-  overflow-x:
-    hidden;
-
-  overflow-y:
-    visible;
+  overflow-x: hidden;
+  overflow-y: visible;
 }
 
 .role-shell,
@@ -7193,63 +4226,48 @@ body {
 .app-content-inner,
 .shell-portal-content,
 .shell-content-background {
-  overflow-y:
-    visible !important;
+  overflow-y: visible !important;
 }
 
 .role-shell,
 .app-main {
-  height:
-    auto !important;
-
-  max-height:
-    none !important;
+  height: auto !important;
+  max-height: none !important;
 }
 
 .app-content,
 .app-content-inner,
 .shell-portal-content {
-  min-height:
-    0;
+  min-height: 0;
 }
 
 .app-sidebar {
-  overflow:
-    hidden !important;
+  overflow: hidden !important;
 }
 
-.app-sidebar
-.nav-list {
-  min-height:
-    0;
+.app-sidebar .nav-list {
+  min-height: 0;
 
-  overflow-x:
-    hidden !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
 
-  overflow-y:
-    auto !important;
-
-  overscroll-behavior:
-    contain;
-
-  scrollbar-gutter:
-    stable;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .context-drawer {
-  overflow-x:
-    hidden !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
 
-  overflow-y:
-    auto !important;
-
-  overscroll-behavior:
-    contain;
-
-  scrollbar-gutter:
-    stable;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
-/* Portal-contained overlay contract*/ -----------------------------------
-      
+/*
+ * END OF SHELL STYLES
+ *
+ * Former .portal-contained-modal rules removed.
+ * PortalOverlayBoundaries.css now owns the shared
+ * overlay viewport and mobile navigation boundaries.
+ */
 `;

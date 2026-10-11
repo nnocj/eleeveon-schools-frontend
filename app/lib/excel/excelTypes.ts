@@ -299,7 +299,14 @@ export interface ExcelValidationResult<T = ExcelMappedRecord> {
   invalidRows: number;
   warningRows: number;
 
-  rows: ExcelProcessedRow<T>;
+  /**
+   * All processed worksheet rows.
+   *
+   * This is intentionally an array because a validation result represents
+   * the complete imported dataset, not a single row.
+   */
+  rows: ExcelProcessedRow<T>[];
+
   issues: ExcelValidationIssue[];
 }
 

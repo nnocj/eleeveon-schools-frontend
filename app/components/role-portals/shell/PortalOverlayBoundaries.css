@@ -1,0 +1,377 @@
+
+/*
+ * PortalOverlayBoundaries.css
+ * ---------------------------------------------------------
+ * ELEEVEON SHARED PORTAL VIEWPORT AND OVERLAY BOUNDARIES
+ *
+ * Shared by all role portals through PortalContent.
+ *
+ * No branch-specific theme values or data logic.
+ * Preserve the existing single document scrollbar.
+ *
+ * Small-screen boundaries:
+ *   Top: portal header
+ *   Bottom: mobile bottom navigation
+ *
+ * Desktop boundaries:
+ *   Top: portal header
+ *   Bottom: viewport safe area
+ */
+
+:root {
+  --portal-header-boundary: 48px;
+  --portal-mobile-nav-height: 64px;
+  --portal-bottom-nav-space: 0px;
+  --portal-overlay-gap: 8px;
+  --portal-overlay-layer: 200;
+}
+
+/* The bottom navigation is visible below 980px. */
+@media (max-width: 979px) {
+  :root {
+    --portal-bottom-nav-space:
+      calc(
+        var(--portal-mobile-nav-height) +
+        env(safe-area-inset-bottom, 0px)
+      );
+  }
+}
+
+/* Keep the shell's existing header height authoritative. */
+.role-shell {
+  --portal-header-boundary:
+    var(--portal-header-height, 48px);
+
+  --portal-modal-gap:
+    var(--portal-overlay-gap);
+}
+
+/*
+ * PAGE BOUNDARY
+ *
+ * Ordinary module pages use the document scrollbar.
+ * Reserve enough trailing space so the last actions
+ * can scroll above the bottom navigation.
+ *
+ * Do not give every module a fixed height.
+ */
+.role-shell .app-content {
+  padding-bottom:
+    calc(
+      var(--portal-bottom-nav-space) +
+      16px
+    ) !important;
+}
+
+.role-shell .app-content-inner {
+  min-width: 0;
+  min-height: 0;
+}
+
+.role-shell .shell-content-background {
+  min-width: 0;
+}
+
+/*
+ * Prevent modules from creating an unnecessarily
+ * tall viewport inside the portal workspace.
+ */
+.role-shell .app-content-inner > .ba-page,
+.role-shell .app-content-inner > .students-page,
+.role-shell .app-content-inner > main {
+  min-height: 0;
+}
+
+/*
+ * Students uses .ba-page inside the shell.
+ * The old bottom padding was only about 38px.
+ */
+.role-shell .students-page.ba-page {
+  min-height: 0;
+
+  padding-bottom:
+    max(
+      20px,
+      env(safe-area-inset-bottom, 0px)
+    );
+}
+
+/*
+ * Common dialog boundary.
+ *
+ * The selectors deliberately include the currently
+ * supplied Students implementation.
+ *
+ * position: fixed is retained, so these rules do not
+ * change the module's React component hierarchy.
+ */
+.role-shell :is(
+  .ba-modal-backdrop,
+  .ba-sheet-backdrop,
+  .portal-contained-modal
+) {
+  position: fixed !important;
+
+  top:
+    calc(
+      var(--portal-header-boundary) +
+      var(--portal-overlay-gap)
+    ) !important;
+
+  right:
+    var(--portal-overlay-gap) !important;
+
+  bottom:
+    calc(
+      var(--portal-bottom-nav-space) +
+      var(--portal-overlay-gap)
+    ) !important;
+
+  left:
+    var(--portal-overlay-gap) !important;
+
+  width: auto !important;
+  height: auto !important;
+
+  max-width: none !important;
+  max-height: none !important;
+
+  margin: 0 !important;
+
+  display: grid;
+  place-items: center;
+
+  padding: 0 !important;
+
+  overflow: hidden;
+
+  z-index:
+    var(--portal-overlay-layer) !important;
+
+  box-sizing: border-box;
+}
+
+/*
+ * Unlike the former contained modal rule, this
+ * override does not use contain: layout paint.
+ * Paint containment could clip descendants.
+ */
+.role-shell .portal-contained-modal {
+  contain: none;
+}
+
+/*
+ * Available space is controlled by the backdrop.
+ * Its direct dialog child must never exceed it.
+ *
+ * vh first: compatibility with older browsers.
+ * dvh enhancement follows below.
+ */
+.role-shell :is(
+  .ba-modal-backdrop,
+  .ba-sheet-backdrop,
+  .portal-contained-modal
+) > :is(
+  .ba-modal,
+  .ba-sheet,
+  .ba-camera-modal,
+  [role="dialog"]
+) {
+  min-width: 0;
+
+  max-width: 100% !important;
+
+  max-height: 100% !important;
+
+  min-height: 0;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  -webkit-overflow-scrolling: touch;
+
+  overscroll-behavior: contain;
+
+  box-sizing: border-box;
+}
+
+/*
+ * Existing student forms already use .ba-modal.
+ * Use the available backdrop height rather than
+ * the previous independent 92dvh limit.
+ */
+.role-shell .ba-modal-backdrop > .ba-modal {
+  width: min(980px, 100%);
+  max-height: 100% !important;
+}
+
+/*
+ * Bottom sheets remain bottom aligned.
+ * They can scroll without growing behind the nav.
+ */
+.role-shell .ba-sheet-backdrop {
+  align-items: end;
+}
+
+.role-shell .ba-sheet-backdrop > .ba-sheet {
+  max-height: 100% !important;
+}
+
+/*
+ * Keep modal Save/Cancel actions accessible when
+ * the dialog itself is the scrolling container.
+ *
+ * Sticky footer works for existing Students forms.
+ */
+.role-shell .ba-modal > .ba-modal-actions,
+.role-shell .ba-sheet > .ba-sheet-actions {
+  position: sticky;
+
+  bottom: 0;
+
+  z-index: 3;
+
+  margin-bottom: 0;
+
+  padding:
+    12px 0
+    max(
+      10px,
+      env(safe-area-inset-bottom, 0px)
+    );
+
+  background:
+    var(
+      --card-bg,
+      var(--surface, #ffffff)
+    );
+}
+
+/*
+ * Preserve useful spacing after long menu lists.
+ */
+.role-shell .ba-sheet > .ba-menu-list,
+.role-shell .ba-sheet > .enrollment-history-list {
+  padding-bottom: 8px;
+}
+
+/*
+ * Camera is a nested overlay and should sit above
+ * the student form it belongs to.
+ */
+.role-shell .camera-backdrop {
+  z-index: 240 !important;
+}
+
+.role-shell .camera-backdrop > .ba-camera-modal {
+  max-height: 100% !important;
+  overflow-y: auto;
+}
+
+/*
+ * Enrollment manager and enrollment editor
+ * can both be open at once.
+ *
+ * The editor must appear above the manager.
+ */
+.role-shell .enrollment-manager-layer {
+  z-index: 205 !important;
+}
+
+.role-shell .enrollment-editor-layer {
+  z-index: 220 !important;
+}
+
+.role-shell .enrollment-editor-layer > .ba-modal {
+  max-height: 100% !important;
+}
+
+/*
+ * Scroll-to-focus behavior for fields near the
+ * bottom of a long modal.
+ */
+.role-shell .ba-modal input,
+.role-shell .ba-modal select,
+.role-shell .ba-modal textarea {
+  scroll-margin-block: 72px;
+}
+
+/*
+ * Avoid horizontal scrolling caused by large
+ * form contents or action groups.
+ */
+.role-shell .ba-modal,
+.role-shell .ba-sheet,
+.role-shell .ba-camera-modal {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/*
+ * Smaller mobile screens.
+ * Keep the existing compact visual language.
+ */
+@media (max-width: 520px) {
+  :root {
+    --portal-overlay-gap: 6px;
+  }
+
+  .role-shell .ba-modal-backdrop > .ba-modal,
+  .role-shell .ba-sheet-backdrop > .ba-sheet {
+    width: 100%;
+  }
+
+  .role-shell .ba-modal > .ba-modal-actions,
+  .role-shell .ba-sheet > .ba-sheet-actions {
+    padding-top: 10px;
+  }
+}
+
+/*
+ * Wider devices:
+ * no mobile bottom navigation is reserved.
+ */
+@media (min-width: 980px) {
+  :root {
+    --portal-bottom-nav-space: 0px;
+    --portal-overlay-gap: 16px;
+  }
+
+  .role-shell .ba-sheet-backdrop {
+    align-items: center;
+  }
+
+  .role-shell .app-content {
+    padding-bottom: 24px !important;
+  }
+}
+
+/*
+ * Android keyboard:
+ *
+ * Modern browsers commonly resize the visual
+ * viewport when the keyboard opens.
+ *
+ * dvh-aware constraints improve handling when
+ * supported. The CSS above remains a fallback.
+ */
+@supports (height: 100dvh) {
+  .role-shell :is(
+    .ba-modal-backdrop,
+    .ba-sheet-backdrop,
+    .portal-contained-modal
+  ) {
+    max-height: 100dvh !important;
+  }
+}
+
+/*
+ * Respect accessibility preferences.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .role-shell .ba-modal,
+  .role-shell .ba-sheet,
+  .role-shell .ba-camera-modal {
+    scroll-behavior: auto;
+  }
+}

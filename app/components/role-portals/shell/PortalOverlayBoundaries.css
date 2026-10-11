@@ -4,29 +4,41 @@
  * ---------------------------------------------------------
  * ELEEVEON SHARED PORTAL VIEWPORT AND OVERLAY BOUNDARIES
  *
- * Shared by all role portals through PortalContent.
+ * Supports:
+ * - Desktop sidebar navigation
+ * - Sidebar expanded/collapsed states
+ * - Resizable desktop sidebar
+ * - Mobile bottom navigation
+ * - Student forms and action sheets
+ * - Enrollment overlays
+ * - Camera dialogs
+ * - Small mobile screens
  *
- * No branch-specific theme values or data logic.
- * Preserve the existing single document scrollbar.
+ * Normal module pages use the document scrollbar.
+ * Supported modal containers scroll independently.
  *
- * Small-screen boundaries:
- *   Top: portal header
- *   Bottom: mobile bottom navigation
+ * DESKTOP:
+ * Modal left boundary = sidebar width + modal gap
  *
- * Desktop boundaries:
- *   Top: portal header
- *   Bottom: viewport safe area
+ * MOBILE:
+ * Modal bottom boundary = bottom navigation + gap
  */
 
 :root {
   --portal-header-boundary: 48px;
+
   --portal-mobile-nav-height: 64px;
+
   --portal-bottom-nav-space: 0px;
+
   --portal-overlay-gap: 8px;
+
   --portal-overlay-layer: 200;
 }
 
-/* The bottom navigation is visible below 980px. */
+/*
+ * MOBILE BOTTOM NAVIGATION
+ */
 @media (max-width: 979px) {
   :root {
     --portal-bottom-nav-space:
@@ -37,7 +49,17 @@
   }
 }
 
-/* Keep the shell's existing header height authoritative. */
+/*
+ * PORTAL SHELL VARIABLES
+ *
+ * RolePortalShellContent already sets:
+ *
+ * --portal-header-height
+ * --portal-content-left
+ * --sidebar-width
+ *
+ * These values are inherited by the active module.
+ */
 .role-shell {
   --portal-header-boundary:
     var(--portal-header-height, 48px);
@@ -47,13 +69,10 @@
 }
 
 /*
- * PAGE BOUNDARY
+ * NORMAL PAGE BOUNDARIES
  *
- * Ordinary module pages use the document scrollbar.
- * Reserve enough trailing space so the last actions
- * can scroll above the bottom navigation.
- *
- * Do not give every module a fixed height.
+ * Reserve space for the mobile bottom navigation
+ * so the last row and action buttons remain visible.
  */
 .role-shell .app-content {
   padding-bottom:
@@ -73,8 +92,7 @@
 }
 
 /*
- * Prevent modules from creating an unnecessarily
- * tall viewport inside the portal workspace.
+ * Avoid extra viewport height within modules.
  */
 .role-shell .app-content-inner > .ba-page,
 .role-shell .app-content-inner > .students-page,
@@ -82,10 +100,6 @@
   min-height: 0;
 }
 
-/*
- * Students uses .ba-page inside the shell.
- * The old bottom padding was only about 38px.
- */
 .role-shell .students-page.ba-page {
   min-height: 0;
 
@@ -97,13 +111,12 @@
 }
 
 /*
- * Common dialog boundary.
+ * COMMON MODAL BACKDROP CONTRACT
  *
- * The selectors deliberately include the currently
- * supplied Students implementation.
+ * These are the existing supported modal classes.
  *
- * position: fixed is retained, so these rules do not
- * change the module's React component hierarchy.
+ * The default dimensions serve mobile screens.
+ * Desktop overrides below account for the sidebar.
  */
 .role-shell :is(
   .ba-modal-backdrop,
@@ -139,6 +152,7 @@
   margin: 0 !important;
 
   display: grid;
+
   place-items: center;
 
   padding: 0 !important;
@@ -152,20 +166,18 @@
 }
 
 /*
- * Unlike the former contained modal rule, this
- * override does not use contain: layout paint.
- * Paint containment could clip descendants.
+ * Do not establish paint containment on overlays.
+ * Some descendants need to display menus and controls.
  */
 .role-shell .portal-contained-modal {
   contain: none;
 }
 
 /*
- * Available space is controlled by the backdrop.
- * Its direct dialog child must never exceed it.
+ * MODAL CONTENT
  *
- * vh first: compatibility with older browsers.
- * dvh enhancement follows below.
+ * The backdrop owns the available dimensions.
+ * The dialog must fit inside that backdrop.
  */
 .role-shell :is(
   .ba-modal-backdrop,
@@ -180,7 +192,6 @@
   min-width: 0;
 
   max-width: 100% !important;
-
   max-height: 100% !important;
 
   min-height: 0;
@@ -196,32 +207,34 @@
 }
 
 /*
- * Existing student forms already use .ba-modal.
- * Use the available backdrop height rather than
- * the previous independent 92dvh limit.
+ * STUDENT FORM MODALS
  */
 .role-shell .ba-modal-backdrop > .ba-modal {
   width: min(980px, 100%);
+
+  max-width: 100% !important;
   max-height: 100% !important;
 }
 
 /*
- * Bottom sheets remain bottom aligned.
- * They can scroll without growing behind the nav.
+ * ACTION SHEETS
+ *
+ * Mobile sheets remain bottom aligned.
  */
 .role-shell .ba-sheet-backdrop {
   align-items: end;
 }
 
 .role-shell .ba-sheet-backdrop > .ba-sheet {
+  max-width: 100% !important;
   max-height: 100% !important;
 }
 
 /*
- * Keep modal Save/Cancel actions accessible when
- * the dialog itself is the scrolling container.
+ * STICKY FORM AND SHEET ACTIONS
  *
- * Sticky footer works for existing Students forms.
+ * Save, Cancel and other final actions should
+ * remain accessible while modal content scrolls.
  */
 .role-shell .ba-modal > .ba-modal-actions,
 .role-shell .ba-sheet > .ba-sheet-actions {
@@ -248,7 +261,7 @@
 }
 
 /*
- * Preserve useful spacing after long menu lists.
+ * Long action lists
  */
 .role-shell .ba-sheet > .ba-menu-list,
 .role-shell .ba-sheet > .enrollment-history-list {
@@ -256,23 +269,25 @@
 }
 
 /*
- * Camera is a nested overlay and should sit above
- * the student form it belongs to.
+ * CAMERA OVERLAY
+ *
+ * Keep the camera dialog above the student form.
  */
 .role-shell .camera-backdrop {
   z-index: 240 !important;
 }
 
 .role-shell .camera-backdrop > .ba-camera-modal {
+  max-width: 100% !important;
   max-height: 100% !important;
+
   overflow-y: auto;
 }
 
 /*
- * Enrollment manager and enrollment editor
- * can both be open at once.
+ * ENROLLMENT OVERLAY ORDER
  *
- * The editor must appear above the manager.
+ * Editor appears above the enrollment manager.
  */
 .role-shell .enrollment-manager-layer {
   z-index: 205 !important;
@@ -283,12 +298,12 @@
 }
 
 .role-shell .enrollment-editor-layer > .ba-modal {
+  max-width: 100% !important;
   max-height: 100% !important;
 }
 
 /*
- * Scroll-to-focus behavior for fields near the
- * bottom of a long modal.
+ * INPUT FOCUS SPACING
  */
 .role-shell .ba-modal input,
 .role-shell .ba-modal select,
@@ -297,19 +312,21 @@
 }
 
 /*
- * Avoid horizontal scrolling caused by large
- * form contents or action groups.
+ * PREVENT HORIZONTAL OVERFLOW
  */
 .role-shell .ba-modal,
 .role-shell .ba-sheet,
 .role-shell .ba-camera-modal {
   min-width: 0;
+
   box-sizing: border-box;
 }
 
 /*
- * Smaller mobile screens.
- * Keep the existing compact visual language.
+ * SMALL MOBILE SCREENS
+ *
+ * The sidebar offset is NOT applied here.
+ * Mobile navigation uses the bottom bar.
  */
 @media (max-width: 520px) {
   :root {
@@ -328,32 +345,125 @@
 }
 
 /*
- * Wider devices:
- * no mobile bottom navigation is reserved.
+ * =========================================================
+ * DESKTOP SIDEBAR BOUNDARY
+ * =========================================================
+ *
+ * This is the important new section.
+ *
+ * On desktop the role shell has:
+ *
+ * [ SIDEBAR ][ WORKSPACE ]
+ *
+ * The sidebar width is provided by:
+ * --portal-content-left
+ *
+ * RolePortalShellContent changes this variable when:
+ *
+ * - the sidebar is expanded
+ * - the sidebar is collapsed
+ * - the sidebar is resized
+ *
+ * Every supported overlay therefore begins at the
+ * LEFT EDGE OF THE WORKSPACE, not the whole viewport.
  */
 @media (min-width: 980px) {
   :root {
     --portal-bottom-nav-space: 0px;
+
     --portal-overlay-gap: 16px;
   }
 
+  /*
+   * Keep page bottom spacing appropriate for desktop.
+   */
+  .role-shell .app-content {
+    padding-bottom: 24px !important;
+  }
+
+  /*
+   * DESKTOP MODAL LEFT BOUNDARY
+   *
+   * Example:
+   *
+   * Sidebar width: 300px
+   * Gap: 16px
+   * Modal backdrop starts: 316px
+   *
+   * When sidebar is hidden:
+   *
+   * Sidebar width: 0px
+   * Gap: 16px
+   * Modal backdrop starts: 16px
+   */
+  .role-shell :is(
+    .ba-modal-backdrop,
+    .ba-sheet-backdrop,
+    .portal-contained-modal
+  ) {
+    left:
+      calc(
+        var(--portal-content-left, 0px) +
+        var(--portal-overlay-gap)
+      ) !important;
+
+    right:
+      var(--portal-overlay-gap) !important;
+
+    top:
+      calc(
+        var(--portal-header-boundary) +
+        var(--portal-overlay-gap)
+      ) !important;
+
+    bottom:
+      var(--portal-overlay-gap) !important;
+
+    width: auto !important;
+
+    max-width: none !important;
+
+    box-sizing: border-box;
+  }
+
+  /*
+   * Center action sheets in the desktop workspace.
+   * Mobile action sheets remain bottom aligned.
+   */
   .role-shell .ba-sheet-backdrop {
     align-items: center;
   }
 
-  .role-shell .app-content {
-    padding-bottom: 24px !important;
+  /*
+   * Constrain form width to the remaining space.
+   */
+  .role-shell .ba-modal-backdrop > .ba-modal {
+    width: min(980px, 100%);
+
+    max-width: 100% !important;
+
+    max-height: 100% !important;
   }
+
+  .role-shell .ba-sheet-backdrop > .ba-sheet {
+    max-width: 100% !important;
+    max-height: 100% !important;
+  }
+
+  /*
+   * When the sidebar is hidden, the shell already
+   * sets --portal-content-left: 0px.
+   *
+   * The overlay therefore automatically expands
+   * into the recovered workspace area.
+   */
 }
 
 /*
- * Android keyboard:
+ * DYNAMIC VIEWPORT SUPPORT
  *
- * Modern browsers commonly resize the visual
- * viewport when the keyboard opens.
- *
- * dvh-aware constraints improve handling when
- * supported. The CSS above remains a fallback.
+ * Modern browsers can use the dynamic viewport.
+ * Older browsers retain the fixed-position fallback.
  */
 @supports (height: 100dvh) {
   .role-shell :is(
@@ -366,7 +476,7 @@
 }
 
 /*
- * Respect accessibility preferences.
+ * ACCESSIBILITY
  */
 @media (prefers-reduced-motion: reduce) {
   .role-shell .ba-modal,

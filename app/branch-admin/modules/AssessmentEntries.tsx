@@ -59,6 +59,47 @@ import {
   projectAssessmentEntryColumns,
   type AssessmentEntryProjection,
 } from "../../lib/assessments";
+
+import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
+import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
+import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
+import ExcelImportSheet, {
+  type ExcelImportStep,
+} from "../../components/excel/ExcelImportSheet";
+import ExcelExportSheet from "../../components/excel/ExcelExportSheet";
+
+import type {
+  ExcelColumnMapping,
+  ParsedExcelWorkbook,
+} from "../../lib/excel/excelTypes";
+import {
+  detectLikelyHeaderRow,
+  getParsedSheet,
+  parseExcelFile,
+  sheetToRecords,
+} from "../../lib/excel/excelWorkbook";
+import {
+  ASSESSMENT_STUDENT_FIELDS,
+  parseAssessmentWorkbookMetadata,
+  parseControlledAssessmentWorkbook,
+  parseExternalAssessmentSheet,
+} from "../../lib/excel/assessments/assessmentExcelParser";
+import {
+  validateAssessmentExcelImport,
+} from "../../lib/excel/assessments/assessmentExcelValidator";
+import {
+  importAssessmentExcel,
+} from "../../lib/excel/assessments/assessmentExcelImporter";
+import {
+  downloadAssessmentExcelTemplate,
+} from "../../lib/excel/assessments/assessmentExcelTemplate";
+import type {
+  AssessmentExcelContext,
+  AssessmentExcelImportResult,
+  AssessmentExcelParsedImport,
+  AssessmentExcelProjectedColumn,
+  AssessmentExcelValidationResult,
+} from "../../lib/excel/assessments/assessmentExcelTypes";
 type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type ReadinessFilter = "all" | "ready" | "missing";
@@ -248,6 +289,21 @@ export default function AssessmentEntries() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
+
+  // Excel interoperability: controlled Eleeveon assessment sheets and external school workbooks.
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
+  const [excelExportBusyKey, setExcelExportBusyKey] = useState<string | null>(null);
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [excelImportStep, setExcelImportStep] = useState<ExcelImportStep>("file");
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelWorkbook, setExcelWorkbook] = useState<ParsedExcelWorkbook | null>(null);
+  const [excelSheetName, setExcelSheetName] = useState("");
+  const [excelHeaderRowIndex, setExcelHeaderRowIndex] = useState(0);
+  const [excelIdentityMappings, setExcelIdentityMappings] = useState<ExcelColumnMapping[]>([]);
+  const [excelParsedImport, setExcelParsedImport] = useState<AssessmentExcelParsedImport | null>(null);
+  const [excelValidation, setExcelValidation] = useState<AssessmentExcelValidationResult | null>(null);
+  const [excelImportResult, setExcelImportResult] = useState<AssessmentExcelImportResult | null>(null);
+  const [excelBusy, setExcelBusy] = useState(false);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -777,6 +833,59 @@ export default function AssessmentEntries() {
       );
   }, [rules, gradingSystem]);
 
+
+  const assessmentExcelProjectedColumns = useMemo<
+    AssessmentExcelProjectedColumn[]
+  >(() => {
+    return (structureItems as any[]).map((item, index) => ({
+      itemId: idOf(item.id),
+      label: entryCompactLabel(item) || item.name || `Assessment ${index + 1}`,
+      compactLabel: item.__entryCompactLabel || item.name || undefined,
+      groupLabel: item.__entryGroupLabel || undefined,
+      pathLabels: Array.isArray(item.__entryPathLabels)
+        ? item.__entryPathLabels
+        : [item.name || `Assessment ${index + 1}`],
+      maxScore: Math.max(1, Number(item.maxScore || 100)),
+      weight: Number(item.weight || 0),
+      order: Number(item.order ?? index),
+    }));
+  }, [structureItems]);
+
+  const assessmentExcelContext = useMemo<AssessmentExcelContext | null>(() => {
+    if (!currentClassSubject || !selectedOption || !applicability) return null;
+
+    return {
+      accountId: idOf(accountId),
+      schoolId: idOf(schoolId),
+      branchId: idOf(branchId),
+      classSubjectId: idOf((currentClassSubject as any).id),
+      classId: idOf((currentClassSubject as any).classId),
+      subjectId: idOf((currentClassSubject as any).subjectId),
+      academicStructureId: idOf((currentClassSubject as any).academicStructureId),
+      academicPeriodId: idOf((currentClassSubject as any).academicPeriodId),
+      assessmentStructureId: idOf(applicability.assessmentStructureId),
+      gradingStructureId: idOf(applicability.gradingStructureId) || undefined,
+      organizationId:
+        idOf(applicability.organizationId || selectedOption.organizationId) || undefined,
+      branchName: (activeBranch as any)?.name || undefined,
+      className: selectedOption.className,
+      subjectName: selectedOption.subjectName,
+      subjectCode: selectedOption.subjectCode,
+      academicStructureName: selectedOption.academicStructureName,
+      academicPeriodName: selectedOption.academicPeriodName,
+      assessmentStructureName: (assessmentStructure as any)?.name || undefined,
+    };
+  }, [
+    currentClassSubject,
+    selectedOption,
+    applicability,
+    accountId,
+    schoolId,
+    branchId,
+    activeBranch,
+    assessmentStructure,
+  ]);
+
   const relevantEntries = useMemo(() => {
     if (!currentClassSubject || !applicability) return [];
     const academicPeriodId = idOf(
@@ -1106,6 +1215,370 @@ export default function AssessmentEntries() {
       showToast("error", "Failed to save assessment scores.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const assessmentExcelStudents = () =>
+    enrolledStudents.map(({ student }: any) => ({
+      id: idOf(student.id),
+      fullName: student.fullName || "Unnamed student",
+      admissionNumber: student.admissionNumber || undefined,
+      active: student.active,
+      isDeleted: student.isDeleted,
+    }));
+
+  const assessmentExcelEnrollments = () =>
+    enrollments.map((row: any) => ({
+      id: idOf(row.id),
+      studentId: idOf(row.studentId),
+      classId: idOf(row.classId),
+      academicStructureId: idOf(row.academicStructureId),
+      academicPeriodId: idOf(row.academicPeriodId) || undefined,
+      status: row.status,
+      isDeleted: row.isDeleted,
+    }));
+
+  const assessmentExcelExistingEntries = () =>
+    relevantEntries.map((row: any) => ({
+      id: idOf(row.id),
+      accountId: idOf(row.accountId) || undefined,
+      schoolId: idOf(row.schoolId) || undefined,
+      branchId: idOf(row.branchId) || undefined,
+      classSubjectId: idOf(row.classSubjectId) || undefined,
+      organizationId: idOf(row.organizationId) || undefined,
+      academicStructureId: idOf(row.academicStructureId) || undefined,
+      academicPeriodId: idOf(row.academicPeriodId) || undefined,
+      gradingStructureId: idOf(row.gradingStructureId) || undefined,
+      assessmentStructureId: idOf(row.assessmentStructureId) || undefined,
+      assessmentStructureItemId: idOf(row.assessmentStructureItemId) || undefined,
+      studentId: idOf(row.studentId) || undefined,
+      classId: idOf(row.classId) || undefined,
+      subjectId: idOf(row.subjectId) || undefined,
+      score: row.score === undefined || row.score === null ? undefined : Number(row.score),
+      grade: row.grade,
+      remark: row.remark,
+      published: row.published,
+      locked: row.locked,
+      active: row.active,
+      isDeleted: row.isDeleted,
+    }));
+
+  const assessmentExcelGradeRules = () =>
+    gradeRules.map((row: any, index) => ({
+      id: idOf(row.id) || undefined,
+      minScore: Number(row.minScore || 0),
+      maxScore: Number(row.maxScore || 100),
+      grade: row.grade || "",
+      remark: row.remark || undefined,
+      gpa: row.gpa === undefined || row.gpa === null ? undefined : Number(row.gpa),
+      order: Number(row.order ?? index),
+    }));
+
+  const ensureAssessmentExcelContext = () => {
+    if (!assessmentExcelContext || !selectedOption || !applicability) {
+      showToast("error", "Select a ready class subject before using Excel.");
+      return null;
+    }
+    if (!assessmentExcelProjectedColumns.length) {
+      showToast("error", "This assessment structure has no directly enterable score columns.");
+      return null;
+    }
+    if (!enrolledStudents.length) {
+      showToast("error", "No active students are enrolled in this assessment context.");
+      return null;
+    }
+    return assessmentExcelContext;
+  };
+
+  const buildCurrentAssessmentScoreMatrix = () => {
+    const matrix: Record<string, Record<string, number | undefined>> = {};
+
+    enrolledStudents.forEach(({ student }: any) => {
+      const studentId = idOf(student.id);
+      if (!studentId) return;
+      matrix[studentId] = {};
+
+      assessmentExcelProjectedColumns.forEach((column) => {
+        const value = scores[scoreKey(studentId, column.itemId)];
+        matrix[studentId][column.itemId] =
+          value === "" || value === undefined || value === null
+            ? undefined
+            : Number(value);
+      });
+    });
+
+    return matrix;
+  };
+
+  const handleAssessmentTemplateDownload = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      setExcelExportBusyKey("template");
+      await Promise.resolve(
+        downloadAssessmentExcelTemplate({
+          context,
+          students: assessmentExcelStudents(),
+          projectedColumns: assessmentExcelProjectedColumns,
+        }),
+      );
+      showToast("success", "Assessment template downloaded.");
+    } catch (error: any) {
+      console.error("Failed to download assessment template:", error);
+      showToast("error", error?.message || "Failed to download assessment template.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const handleAssessmentCurrentExport = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      setExcelExportBusyKey("export");
+      await Promise.resolve(
+        downloadAssessmentExcelTemplate({
+          context,
+          students: assessmentExcelStudents(),
+          projectedColumns: assessmentExcelProjectedColumns,
+          scores: buildCurrentAssessmentScoreMatrix(),
+          fileName: `Eleeveon Assessment - ${selectedOption?.className || "Class"} - ${selectedOption?.subjectName || "Subject"}.xlsx`,
+        }),
+      );
+      showToast("success", "Current assessment sheet exported.");
+    } catch (error: any) {
+      console.error("Failed to export assessment sheet:", error);
+      showToast("error", error?.message || "Failed to export assessment sheet.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const resetAssessmentExcelImport = () => {
+    setExcelFile(null);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelHeaderRowIndex(0);
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+    setExcelImportStep("file");
+  };
+
+  const openAssessmentExcelImport = () => {
+    if (!ensureAssessmentExcelContext()) return;
+    setMoreOpen(false);
+    setExcelExportOpen(false);
+    resetAssessmentExcelImport();
+    setExcelImportOpen(true);
+  };
+
+  const closeAssessmentExcelImport = () => {
+    if (excelBusy) return;
+    setExcelImportOpen(false);
+    resetAssessmentExcelImport();
+  };
+
+  const setAssessmentExcelSheet = (
+    workbook: ParsedExcelWorkbook,
+    sheetName: string,
+  ) => {
+    setExcelSheetName(sheetName);
+    const sheet = getParsedSheet(workbook, sheetName);
+    setExcelHeaderRowIndex(sheet ? detectLikelyHeaderRow(sheet) : 0);
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+  };
+
+  const handleAssessmentExcelFileChange = async (file: File | null) => {
+    setExcelFile(file);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+
+    if (!file) {
+      setExcelImportStep("file");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+      const workbook = await parseExcelFile(file);
+      const metadata = parseAssessmentWorkbookMetadata(workbook).metadata;
+      const preferredName = metadata?.sheetName;
+      const firstSheet =
+        (preferredName ? getParsedSheet(workbook, preferredName) : undefined) ||
+        workbook.sheets.find((sheet) => sheet.name !== "_Eleeveon_Metadata");
+
+      if (!firstSheet) {
+        throw new Error("The workbook does not contain a usable assessment worksheet.");
+      }
+
+      setExcelWorkbook(workbook);
+      setAssessmentExcelSheet(workbook, firstSheet.name);
+      setExcelImportStep("sheet");
+    } catch (error: any) {
+      console.error("Failed to open assessment workbook:", error);
+      showToast("error", error?.message || "Failed to open Excel workbook.");
+      setExcelFile(null);
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const validateParsedAssessmentImport = (
+    parsed: AssessmentExcelParsedImport,
+  ) => {
+    const context = assessmentExcelContext;
+    if (!context) {
+      throw new Error("The assessment context is no longer available.");
+    }
+
+    const validation = validateAssessmentExcelImport({
+      parsed,
+      context,
+      projectedColumns: assessmentExcelProjectedColumns,
+      students: assessmentExcelStudents(),
+      enrollments: assessmentExcelEnrollments(),
+      existingEntries: assessmentExcelExistingEntries(),
+      options: {
+        lockedEntrySeverity: "error",
+        allowNameMatch: true,
+      },
+    });
+
+    setExcelParsedImport(parsed);
+    setExcelValidation(validation);
+    setExcelImportStep("preview");
+  };
+
+  const prepareAssessmentExcelImport = () => {
+    if (!excelWorkbook || !excelSheetName) {
+      showToast("error", "Choose an assessment worksheet first.");
+      return;
+    }
+
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      const metadata = parseAssessmentWorkbookMetadata(excelWorkbook).metadata;
+
+      if (metadata) {
+        const parsed = parseControlledAssessmentWorkbook({
+          workbook: excelWorkbook,
+          sheetName: excelSheetName,
+          headerRowIndex: excelHeaderRowIndex,
+        });
+        validateParsedAssessmentImport(parsed);
+        return;
+      }
+
+      const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+      if (!sheet) {
+        throw new Error("The selected worksheet could not be found.");
+      }
+
+      const parsed = parseExternalAssessmentSheet({
+        sheet,
+        projectedColumns: assessmentExcelProjectedColumns,
+        headerRowIndex: excelHeaderRowIndex,
+      });
+
+      if (!parsed.metadataColumns.length) {
+        throw new Error(
+          "No assessment score columns could be matched. Use an Eleeveon assessment template or keep assessment headings aligned with the current assessment structure.",
+        );
+      }
+
+      setExcelParsedImport(parsed);
+      setExcelIdentityMappings(parsed.mappings);
+      setExcelValidation(null);
+      setExcelImportStep("mapping");
+    } catch (error: any) {
+      console.error("Failed to prepare assessment workbook:", error);
+      showToast("error", error?.message || "Failed to prepare assessment workbook.");
+    }
+  };
+
+  const reviewExternalAssessmentImport = () => {
+    if (!excelWorkbook || !excelSheetName) return;
+
+    const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+    if (!sheet) {
+      showToast("error", "The selected worksheet could not be found.");
+      return;
+    }
+
+    try {
+      const parsed = parseExternalAssessmentSheet({
+        sheet,
+        projectedColumns: assessmentExcelProjectedColumns,
+        headerRowIndex: excelHeaderRowIndex,
+        identityMappings: excelIdentityMappings,
+      });
+
+      if (!parsed.metadataColumns.length) {
+        throw new Error("No assessment score columns are mapped to the current structure.");
+      }
+
+      validateParsedAssessmentImport(parsed);
+    } catch (error: any) {
+      console.error("Failed to review external assessment workbook:", error);
+      showToast("error", error?.message || "Failed to review assessment workbook.");
+    }
+  };
+
+  const commitAssessmentExcelImport = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context || !excelValidation || !excelParsedImport) return;
+
+    if (!excelValidation.validRows) {
+      showToast("error", "There are no valid score cells ready to import.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const result = await importAssessmentExcel(
+        excelValidation,
+        context,
+        {
+          updateExisting: true,
+          clearExistingWhenBlank:
+            excelParsedImport.kind === "eleeveon-assessment",
+          lockedEntrySeverity: "error",
+          allowNameMatch: true,
+        },
+        {
+          projectedColumns: assessmentExcelProjectedColumns,
+          gradeRules: assessmentExcelGradeRules(),
+          existingEntries: assessmentExcelExistingEntries(),
+        },
+      );
+
+      setExcelImportResult(result);
+      setExcelImportStep("result");
+      setSessionStarted(false);
+      await load();
+
+      showToast(
+        result.failed ? "info" : "success",
+        `Assessment import finished: ${result.created} created, ${result.updated} updated${result.deleted ? `, ${result.deleted} cleared` : ""}.`,
+      );
+    } catch (error: any) {
+      console.error("Failed to import assessment workbook:", error);
+      showToast("error", error?.message || "Failed to import assessment workbook.");
+    } finally {
+      setExcelBusy(false);
     }
   };
 
@@ -1501,6 +1974,10 @@ export default function AssessmentEntries() {
             setViewMode(mode);
             setMoreOpen(false);
           }}
+          onExcel={() => {
+            setMoreOpen(false);
+            setExcelExportOpen(true);
+          }}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
@@ -1508,6 +1985,314 @@ export default function AssessmentEntries() {
           onClose={() => setMoreOpen(false)}
         />
       )}
+
+      {excelExportOpen && (
+        <ExcelExportSheet
+          open={excelExportOpen}
+          onClose={() => {
+            if (!excelExportBusyKey) setExcelExportOpen(false);
+          }}
+          title="Assessment Excel"
+          subtitle={
+            selectedOption
+              ? `${selectedOption.className} · ${selectedOption.subjectName}`
+              : "Choose a ready class subject first."
+          }
+          busyKey={excelExportBusyKey}
+          actions={[
+            {
+              key: "import",
+              title: "Import assessment scores",
+              description:
+                "Bring back an Eleeveon score sheet or import a compatible school workbook.",
+              badge: "Import",
+              disabled: !assessmentExcelContext,
+              onClick: async () => openAssessmentExcelImport(),
+            },
+            {
+              key: "template",
+              title: "Download blank score sheet",
+              description:
+                "Create the controlled workbook for this class, subject and assessment structure.",
+              badge: `${studentScoreRows.length} students`,
+              disabled: !assessmentExcelContext,
+              onClick: handleAssessmentTemplateDownload,
+            },
+            {
+              key: "export",
+              title: "Export current scores",
+              description:
+                "Download the same controlled workbook prefilled with the scores currently in Eleeveon.",
+              badge: `${completionStats.entered} scores`,
+              disabled: !assessmentExcelContext,
+              onClick: handleAssessmentCurrentExport,
+            },
+          ]}
+        />
+      )}
+
+      <ExcelImportSheet
+        open={excelImportOpen}
+        onClose={closeAssessmentExcelImport}
+        title="Import assessment scores"
+        subtitle="Validate the workbook against the active class, subject, period and assessment structure before any score is changed."
+        step={excelImportStep}
+        busy={excelBusy}
+        width={980}
+        footer={
+          <div className="assessment-excel-footer-actions">
+            {excelImportStep === "file" && (
+              <button type="button" className="secondary" onClick={closeAssessmentExcelImport}>
+                Cancel
+              </button>
+            )}
+
+            {excelImportStep === "sheet" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("file")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={prepareAssessmentExcelImport}
+                >
+                  Continue
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "mapping" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("sheet")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={reviewExternalAssessmentImport}
+                >
+                  Review scores
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "preview" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setExcelImportStep(
+                      excelParsedImport?.kind === "external-assessment"
+                        ? "mapping"
+                        : "sheet",
+                    )
+                  }
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!excelValidation?.validRows}
+                  onClick={commitAssessmentExcelImport}
+                >
+                  Import {excelValidation?.validRows || 0} score cell
+                  {(excelValidation?.validRows || 0) === 1 ? "" : "s"}
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "result" && (
+              <button type="button" className="primary" onClick={closeAssessmentExcelImport}>
+                Done
+              </button>
+            )}
+          </div>
+        }
+      >
+        {excelImportStep === "file" && (
+          <ExcelFilePicker
+            value={excelFile}
+            onChange={handleAssessmentExcelFileChange}
+            disabled={excelBusy}
+            label="Choose assessment workbook"
+            description="Use an Eleeveon assessment sheet or a compatible school score workbook."
+          />
+        )}
+
+        {excelImportStep === "sheet" && excelWorkbook && (
+          <section className="assessment-excel-stage">
+            <div className="assessment-excel-stage-head">
+              <h3>Choose score worksheet</h3>
+              <p>
+                Eleeveon-controlled workbooks carry hidden context metadata. External workbooks are matched to the assessment columns currently shown on this page.
+              </p>
+            </div>
+
+            <div className="assessment-excel-context-grid">
+              <label>
+                <span>Worksheet</span>
+                <select
+                  value={excelSheetName}
+                  onChange={(event) =>
+                    setAssessmentExcelSheet(excelWorkbook, event.target.value)
+                  }
+                >
+                  {excelWorkbook.sheets
+                    .filter((sheet) => sheet.name !== "_Eleeveon_Metadata")
+                    .map((sheet) => (
+                      <option key={sheet.name} value={sheet.name}>
+                        {sheet.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) =>
+                    setExcelHeaderRowIndex(
+                      Math.max(0, Number(event.target.value || 1) - 1),
+                    )
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="assessment-excel-context-card">
+              <strong>{excelFile?.name}</strong>
+              <span>
+                {parseAssessmentWorkbookMetadata(excelWorkbook).metadata
+                  ? "Controlled Eleeveon assessment workbook"
+                  : "External assessment workbook"}
+              </span>
+              <small>
+                Active context: {selectedOption?.className || "Class"} · {selectedOption?.subjectName || "Subject"} · {selectedOption?.academicPeriodName || "Period"}
+              </small>
+            </div>
+          </section>
+        )}
+
+        {excelImportStep === "mapping" && excelWorkbook && (
+          <section className="assessment-excel-stage">
+            <div className="assessment-excel-stage-head">
+              <h3>Match student identity columns</h3>
+              <p>
+                Assessment score columns are matched against the current projected assessment structure. Confirm how this external sheet identifies each student.
+              </p>
+            </div>
+
+            {(() => {
+              const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+              if (!sheet) return null;
+              const extracted = sheetToRecords(sheet, {
+                headerRowIndex: excelHeaderRowIndex,
+                skipEmptyRows: true,
+                trimStrings: true,
+              });
+
+              return (
+                <>
+                  <ExcelColumnMappingEditor
+                    columns={extracted.columns}
+                    fields={ASSESSMENT_STUDENT_FIELDS}
+                    mappings={excelIdentityMappings}
+                    onChange={(next) => {
+                      setExcelIdentityMappings(next);
+                      setExcelValidation(null);
+                    }}
+                    disabled={excelBusy}
+                    title="Match student columns"
+                    description="Student ID is strongest, followed by Admission Number. Exact Student Name is used only when unambiguous."
+                  />
+
+                  <div className="assessment-excel-column-note">
+                    <strong>{excelParsedImport?.metadataColumns.length || 0} score column{(excelParsedImport?.metadataColumns.length || 0) === 1 ? "" : "s"} recognized</strong>
+                    <span>
+                      {excelParsedImport?.metadataColumns
+                        .map((column) => column.label)
+                        .filter(Boolean)
+                        .join(" · ") || "No score columns recognized yet."}
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
+          </section>
+        )}
+
+        {excelImportStep === "preview" && excelValidation && (
+          <ExcelImportPreview
+            validation={excelValidation}
+            title="Assessment import preview"
+            description="Locked or invalid score cells are not changed. Controlled Eleeveon workbooks may clear an existing unlocked score when its cell is blank; external workbooks never clear existing scores from blanks."
+            columns={[
+              { key: "studentName", label: "Student" },
+              { key: "assessmentLabel", label: "Assessment" },
+              {
+                key: "score",
+                label: "Score",
+                render: (data: any) =>
+                  data.blank ? "Blank" : `${data.score ?? "—"} / ${data.maxScore}`,
+              },
+              {
+                key: "assessmentStructureItemId",
+                label: "Item ID",
+              },
+            ]}
+            maxRows={40}
+          />
+        )}
+
+        {excelImportStep === "result" && excelImportResult && (
+          <section className="assessment-excel-result">
+            <div className="assessment-excel-result-icon">✓</div>
+            <h3>Assessment import completed</h3>
+            <p>
+              Scores were written through the same offline-first assessmentEntries flow used by manual score entry.
+            </p>
+
+            <div className="assessment-excel-result-grid">
+              <span><strong>{excelImportResult.created}</strong><small>Created</small></span>
+              <span><strong>{excelImportResult.updated}</strong><small>Updated</small></span>
+              <span><strong>{excelImportResult.deleted}</strong><small>Cleared</small></span>
+              <span><strong>{excelImportResult.skipped}</strong><small>Skipped</small></span>
+              <span className={excelImportResult.failed ? "danger" : ""}>
+                <strong>{excelImportResult.failed}</strong><small>Failed</small>
+              </span>
+              <span><strong>{excelImportResult.studentsProcessed}</strong><small>Students</small></span>
+            </div>
+
+            {excelImportResult.failed > 0 && (
+              <div className="assessment-excel-result-errors">
+                {excelImportResult.rows
+                  .filter((row) => row.action === "failed")
+                  .slice(0, 12)
+                  .map((row, index) => (
+                    <div key={`${row.rowNumber}-${row.columnIndex || 0}-${index}`}>
+                      <strong>Row {row.rowNumber}</strong>
+                      <span>{row.error || "Score import failed."}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </section>
+        )}
+      </ExcelImportSheet>
     </main>
   );
 }
@@ -2033,11 +2818,13 @@ function FilterSheet({
 function MoreSheet({
   viewMode,
   setViewMode,
+  onExcel,
   onRefresh,
   onClose,
 }: {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
+  onExcel: () => void;
   onRefresh: () => void;
   onClose: () => void;
 }) {
@@ -2073,6 +2860,9 @@ function MoreSheet({
           onClick={() => setViewMode("summary")}
         >
           Summary <span>Completion and grade overview</span>
+        </button>
+        <button type="button" onClick={onExcel}>
+          Excel <span>Import, template and score-sheet export</span>
         </button>
         <button type="button" onClick={onRefresh}>
           Refresh data <span>Reload records from IndexedDB</span>
@@ -2119,4 +2909,6 @@ const css = `
   }
 }
 
+
+.assessment-excel-footer-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}.assessment-excel-footer-actions button{min-height:40px;border-radius:12px;padding:0 14px;border:1px solid var(--ae-border);font-weight:900}.assessment-excel-footer-actions button.secondary{background:var(--ae-card);color:var(--ae-text)}.assessment-excel-footer-actions button.primary{background:var(--ae-primary);border-color:var(--ae-primary);color:#fff}.assessment-excel-footer-actions button:disabled{opacity:.5;cursor:not-allowed}.assessment-excel-stage{display:grid;gap:14px}.assessment-excel-stage-head h3{margin:0;font-size:15px}.assessment-excel-stage-head p{margin:5px 0 0;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.assessment-excel-context-grid label{display:grid;gap:5px}.assessment-excel-context-grid label>span{font-size:11px;font-weight:900;color:var(--ae-muted)}.assessment-excel-context-card,.assessment-excel-column-note{display:grid;gap:3px;padding:12px;border:1px solid var(--ae-border);border-radius:14px;background:var(--ae-card)}.assessment-excel-context-card span,.assessment-excel-context-card small,.assessment-excel-column-note span{font-size:11px;color:var(--ae-muted);line-height:1.45}.assessment-excel-result{text-align:center;padding:10px 0}.assessment-excel-result-icon{width:56px;height:56px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;background:rgba(34,197,94,.13);color:#15803d;font-size:28px;font-weight:950}.assessment-excel-result h3{margin:0;font-size:17px}.assessment-excel-result>p{margin:6px auto 16px;max-width:620px;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-result-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.assessment-excel-result-grid span{padding:11px 7px;border-radius:12px;background:var(--ae-card);border:1px solid var(--ae-border)}.assessment-excel-result-grid span.danger{background:#fff1f0}.assessment-excel-result-grid strong{display:block;font-size:18px}.assessment-excel-result-grid small{display:block;margin-top:2px;color:var(--ae-muted);font-size:10px}.assessment-excel-result-errors{margin-top:14px;display:grid;gap:6px;text-align:left}.assessment-excel-result-errors div{display:grid;gap:2px;padding:9px 10px;border-radius:11px;background:#fff7f6;border:1px solid #ffd3cf}.assessment-excel-result-errors strong{font-size:11px}.assessment-excel-result-errors span{font-size:10px;color:#b42318}@media(max-width:720px){.assessment-excel-context-grid{grid-template-columns:1fr}.assessment-excel-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.assessment-excel-footer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.assessment-excel-footer-actions button:only-child{grid-column:1/-1}}
 `;

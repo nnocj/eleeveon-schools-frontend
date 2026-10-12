@@ -114,6 +114,43 @@ import {
   type MapLocationUpdateRequest,
 } from "../../components/maps";
 import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
+
+import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
+import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
+import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
+import ExcelImportSheet, {
+  type ExcelImportStep,
+} from "../../components/excel/ExcelImportSheet";
+import ExcelExportSheet from "../../components/excel/ExcelExportSheet";
+
+import type {
+  ExcelColumnMapping,
+  ParsedExcelWorkbook,
+} from "../../lib/excel/excelTypes";
+import {
+  downloadExcelWorkbook,
+  getParsedSheet,
+  parseExcelFile,
+} from "../../lib/excel/excelWorkbook";
+import {
+  STUDENT_EXCEL_FIELDS,
+  prepareStudentSheetRecords,
+} from "../../lib/excel/students/studentExcelParser";
+import {
+  validateStudentExcelImport,
+} from "../../lib/excel/students/studentExcelValidator";
+import {
+  importValidatedStudents,
+  getStudentExcelImportReferenceData,
+} from "../../lib/excel/students/studentExcelImporter";
+import {
+  downloadStudentExcelTemplate,
+} from "../../lib/excel/students/studentExcelTemplate";
+import type {
+  StudentExcelImportResult,
+  StudentExcelValidationResult,
+  StudentExcelDuplicateStrategy,
+} from "../../lib/excel/students/studentExcelTypes";
 type ViewMode = "cards" | "table" | "map" | "summary";
 type ToastTone = "success" | "error" | "info";
 type StudentStatus = "active" | "graduated" | "transferred" | "withdrawn";
@@ -629,6 +666,27 @@ export default function StudentsPage() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<StudentView | null>(null);
+
+  // Excel interoperability
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
+  const [excelExportBusyKey, setExcelExportBusyKey] = useState<string | null>(null);
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [excelImportStep, setExcelImportStep] = useState<ExcelImportStep>("file");
+  const [excelBusy, setExcelBusy] = useState(false);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelWorkbook, setExcelWorkbook] = useState<ParsedExcelWorkbook | null>(null);
+  const [excelSheetName, setExcelSheetName] = useState("");
+  const [excelHeaderRowIndex, setExcelHeaderRowIndex] = useState(0);
+  const [excelMappings, setExcelMappings] = useState<ExcelColumnMapping[]>([]);
+  const [excelValidation, setExcelValidation] = useState<StudentExcelValidationResult | null>(null);
+  const [excelImportResult, setExcelImportResult] = useState<StudentExcelImportResult | null>(null);
+  const [excelImportClassId, setExcelImportClassId] = useState("");
+  const [excelImportOrganizationId, setExcelImportOrganizationId] = useState("");
+  const [excelImportStructureId, setExcelImportStructureId] = useState("");
+  const [excelImportPeriodId, setExcelImportPeriodId] = useState("");
+  const [excelImportStartDate, setExcelImportStartDate] = useState(todayISO());
+  const [excelDuplicateStrategy, setExcelDuplicateStrategy] =
+    useState<StudentExcelDuplicateStrategy>("skip");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -1938,6 +1996,334 @@ export default function StudentsPage() {
     setFilterGender("all");
   };
 
+  const resetStudentExcelImport = () => {
+    setExcelImportStep("file");
+    setExcelBusy(false);
+    setExcelFile(null);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelHeaderRowIndex(0);
+    setExcelMappings([]);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+  };
+
+  const initializeStudentExcelContext = () => {
+    const defaults = defaultEnrollmentSelection();
+
+    setExcelImportClassId(filterClassId !== "all" ? filterClassId : "");
+    setExcelImportOrganizationId(
+      filterOrganizationId !== "all" ? filterOrganizationId : "",
+    );
+    setExcelImportStructureId(defaults.academicStructureId || "");
+    setExcelImportPeriodId(defaults.academicPeriodId || "");
+    setExcelImportStartDate(defaults.startDate || todayISO());
+    setExcelDuplicateStrategy("skip");
+  };
+
+  const openStudentExcelMenu = () => {
+    if (!requireTenant()) return;
+    initializeStudentExcelContext();
+    setMoreOpen(false);
+    setExcelExportOpen(true);
+  };
+
+  const openStudentExcelImport = () => {
+    if (!requireTenant()) return;
+    resetStudentExcelImport();
+    initializeStudentExcelContext();
+    setExcelExportOpen(false);
+    setExcelImportOpen(true);
+  };
+
+  const closeStudentExcelImport = () => {
+    if (excelBusy) return;
+    setExcelImportOpen(false);
+    resetStudentExcelImport();
+  };
+
+  const currentBranchName = () =>
+    String(
+      (branches.find((row: any) => sameId(row.id, branchId)) as any)?.name ||
+        "",
+    );
+
+  const handleStudentExcelTemplateDownload = async () => {
+    try {
+      setExcelExportBusyKey("template");
+
+      const classRow: any = excelImportClassId
+        ? classMap.get(idOf(excelImportClassId))
+        : undefined;
+      const structureRow: any = excelImportStructureId
+        ? structureMap.get(idOf(excelImportStructureId))
+        : undefined;
+      const periodRow: any = excelImportPeriodId
+        ? periodMap.get(idOf(excelImportPeriodId))
+        : undefined;
+
+      await downloadStudentExcelTemplate({
+        branchName: currentBranchName() || undefined,
+        className: classRow?.name || undefined,
+        academicStructureName: structureRow?.name || undefined,
+        academicPeriodName: periodRow?.name || undefined,
+        includeClassColumns: !excelImportClassId,
+        includeExampleRow: true,
+      });
+
+      showToast("success", "Student Excel template downloaded.");
+    } catch (error: any) {
+      console.error("Failed to download student template:", error);
+      showToast("error", error?.message || "Failed to download student template.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const handleStudentExcelExport = async () => {
+    try {
+      setExcelExportBusyKey("export");
+
+      const exportRows = filteredRows.map((item) => {
+        const row: any = item.row;
+        return {
+          admissionNumber: row.admissionNumber || "",
+          fullName: row.fullName || "",
+          gender: row.gender || "",
+          dateOfBirth: row.dateOfBirth || "",
+          age: row.age ?? "",
+          className: item.className === "No class assigned" ? "" : item.className,
+          organizationName:
+            item.organizationName === "No organization" ? "" : item.organizationName,
+          parentName: row.parentName || "",
+          parentPhone: row.parentPhone || "",
+          parentEmail: row.parentEmail || "",
+          address: row.address || "",
+          status: row.status || "active",
+        };
+      });
+
+      downloadExcelWorkbook({
+        fileName: `Eleeveon Students - ${currentBranchName() || "Branch"}.xlsx`,
+        sheets: [
+          {
+            name: "Students",
+            freezeHeader: true,
+            columns: [
+              { key: "admissionNumber", header: "Admission Number", width: 18 },
+              { key: "fullName", header: "Student Name", width: 28 },
+              { key: "gender", header: "Gender", width: 12 },
+              { key: "dateOfBirth", header: "Date of Birth", width: 16 },
+              { key: "age", header: "Age", width: 10 },
+              { key: "className", header: "Class", width: 18 },
+              { key: "organizationName", header: "Organization", width: 22 },
+              { key: "parentName", header: "Parent / Guardian Name", width: 26 },
+              { key: "parentPhone", header: "Parent Phone", width: 18 },
+              { key: "parentEmail", header: "Parent Email", width: 28 },
+              { key: "address", header: "Address", width: 30 },
+              { key: "status", header: "Status", width: 14 },
+            ],
+            rows: exportRows,
+          },
+        ],
+      });
+
+      showToast(
+        "success",
+        `Exported ${exportRows.length} student${exportRows.length === 1 ? "" : "s"}.`,
+      );
+    } catch (error: any) {
+      console.error("Failed to export students:", error);
+      showToast("error", error?.message || "Failed to export students.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const handleStudentExcelFileChange = async (file: File | null) => {
+    setExcelFile(file);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelMappings([]);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+
+    if (!file) {
+      setExcelImportStep("file");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+      const workbook = await parseExcelFile(file);
+      const firstSheet = workbook.sheets.find(
+        (sheet) => sheet.name !== "_Eleeveon_Metadata",
+      );
+
+      if (!firstSheet) {
+        throw new Error("The workbook does not contain a usable worksheet.");
+      }
+
+      setExcelWorkbook(workbook);
+      setExcelSheetName(firstSheet.name);
+      setExcelHeaderRowIndex(0);
+      setExcelImportStep("sheet");
+    } catch (error: any) {
+      console.error("Failed to open student workbook:", error);
+      showToast("error", error?.message || "Failed to open Excel workbook.");
+      setExcelFile(null);
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const prepareStudentExcelMappings = () => {
+    if (!excelWorkbook || !excelSheetName) {
+      showToast("error", "Choose a worksheet first.");
+      return;
+    }
+
+    const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+    if (!sheet) {
+      showToast("error", "The selected worksheet could not be found.");
+      return;
+    }
+
+    const prepared = prepareStudentSheetRecords(sheet, {
+      headerRowIndex: excelHeaderRowIndex,
+      skipEmptyRows: true,
+    });
+
+    if (!prepared.columns.length) {
+      showToast("error", "No spreadsheet columns were found on the selected header row.");
+      return;
+    }
+
+    setExcelMappings(prepared.mappings);
+    setExcelValidation(null);
+    setExcelImportStep("mapping");
+  };
+
+  const validateStudentExcelForPreview = async () => {
+    if (!excelWorkbook || !excelSheetName) return;
+    if (!accountId || !schoolId || !branchId) return;
+
+    const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+    if (!sheet) {
+      showToast("error", "The selected worksheet could not be found.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const prepared = prepareStudentSheetRecords(sheet, {
+        headerRowIndex: excelHeaderRowIndex,
+        mappings: excelMappings,
+        skipEmptyRows: true,
+      });
+
+      const reference = await getStudentExcelImportReferenceData({
+        accountId,
+        schoolId,
+        branchId,
+        organizationId: excelImportOrganizationId || undefined,
+        classId: excelImportClassId || undefined,
+        academicStructureId: excelImportStructureId || undefined,
+        academicPeriodId: excelImportPeriodId || undefined,
+        enrollmentStartDate: excelImportStartDate || todayISO(),
+      });
+
+      const validation = validateStudentExcelImport({
+        sheetName: prepared.sheetName,
+        headerRowIndex: prepared.headerRowIndex,
+        sourceColumns: prepared.columns,
+        sourceRecords: prepared.sourceRecords,
+        mappings: prepared.mappings,
+        rowNumbers: prepared.rowNumbers,
+        context: {
+          accountId,
+          schoolId,
+          branchId,
+          organizationId: excelImportOrganizationId || undefined,
+          classId: excelImportClassId || undefined,
+          academicStructureId: excelImportStructureId || undefined,
+          academicPeriodId: excelImportPeriodId || undefined,
+          enrollmentStartDate: excelImportStartDate || todayISO(),
+        },
+        existingStudents: reference.students,
+        classes: reference.classes,
+        options: {
+          duplicateStrategy: excelDuplicateStrategy,
+          resolveSpreadsheetClass: true,
+          unknownClassStrategy: excelImportClassId
+            ? "use-selected-class"
+            : "reject-row",
+          createEnrollment: true,
+          updateCurrentClass: true,
+        },
+      });
+
+      setExcelValidation(validation);
+      setExcelImportStep("preview");
+    } catch (error: any) {
+      console.error("Failed to validate student workbook:", error);
+      showToast("error", error?.message || "Failed to validate student workbook.");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const commitStudentExcelImport = async () => {
+    if (!excelValidation || !accountId || !schoolId || !branchId) return;
+
+    if (excelValidation.validRows < 1) {
+      showToast("error", "There are no valid student rows ready to import.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const result = await importValidatedStudents(
+        excelValidation,
+        {
+          accountId,
+          schoolId,
+          branchId,
+          organizationId: excelImportOrganizationId || undefined,
+          classId: excelImportClassId || undefined,
+          academicStructureId: excelImportStructureId || undefined,
+          academicPeriodId: excelImportPeriodId || undefined,
+          enrollmentStartDate: excelImportStartDate || todayISO(),
+        },
+        {
+          duplicateStrategy: excelDuplicateStrategy,
+          resolveSpreadsheetClass: true,
+          unknownClassStrategy: excelImportClassId
+            ? "use-selected-class"
+            : "reject-row",
+          createEnrollment: true,
+          updateCurrentClass: true,
+        },
+      );
+
+      setExcelImportResult(result);
+      setExcelImportStep("result");
+      await load();
+
+      showToast(
+        result.failed ? "info" : "success",
+        `Student import finished: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped${result.failed ? `, ${result.failed} failed` : ""}.`,
+      );
+    } catch (error: any) {
+      console.error("Failed to import students:", error);
+      showToast("error", error?.message || "Failed to import students.");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
   const validate = () => {
     if (!authenticated || !accountId) return "Sign in first.";
     if (!schoolId) return "Select a school first.";
@@ -2611,9 +2997,410 @@ export default function StudentsPage() {
             setMoreOpen(false);
             await load();
           }}
+          onExcel={openStudentExcelMenu}
           onClose={() => setMoreOpen(false)}
         />
       )}
+
+      {excelExportOpen && (
+        <ExcelExportSheet
+          open={excelExportOpen}
+          onClose={() => {
+            if (!excelExportBusyKey) setExcelExportOpen(false);
+          }}
+          title="Student Excel"
+          subtitle="Import an existing student spreadsheet, download a clean template, or export the students currently shown."
+          busyKey={excelExportBusyKey}
+          actions={[
+            {
+              key: "import",
+              title: "Import students",
+              description:
+                "Use an existing school spreadsheet and map its columns to Eleeveon.",
+              badge: "Import",
+              onClick: async () => openStudentExcelImport(),
+            },
+            {
+              key: "template",
+              title: "Download student template",
+              description:
+                "Get a clean workbook that schools can fill before importing.",
+              badge: "Template",
+              onClick: handleStudentExcelTemplateDownload,
+            },
+            {
+              key: "export",
+              title: "Export current students",
+              description:
+                "Export the students matching the current search and filters.",
+              badge: `${filteredRows.length}`,
+              onClick: handleStudentExcelExport,
+            },
+          ]}
+        />
+      )}
+
+      <ExcelImportSheet
+        open={excelImportOpen}
+        onClose={closeStudentExcelImport}
+        title="Import students from Excel"
+        subtitle="Match the school's spreadsheet to Eleeveon, review every row, then import through the normal offline-first student workflow."
+        step={excelImportStep}
+        busy={excelBusy}
+        width={920}
+        footer={
+          <div className="student-excel-footer-actions">
+            {excelImportStep === "file" && (
+              <button type="button" className="secondary" onClick={closeStudentExcelImport}>
+                Cancel
+              </button>
+            )}
+
+            {excelImportStep === "sheet" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("file")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={prepareStudentExcelMappings}
+                >
+                  Match columns
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "mapping" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("sheet")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={validateStudentExcelForPreview}
+                >
+                  Review import
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "preview" && (
+              <>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("mapping")}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!excelValidation?.validRows}
+                  onClick={commitStudentExcelImport}
+                >
+                  Import {excelValidation?.validRows || 0} ready row
+                  {(excelValidation?.validRows || 0) === 1 ? "" : "s"}
+                </button>
+              </>
+            )}
+
+            {excelImportStep === "result" && (
+              <button type="button" className="primary" onClick={closeStudentExcelImport}>
+                Done
+              </button>
+            )}
+          </div>
+        }
+      >
+        {excelImportStep === "file" && (
+          <ExcelFilePicker
+            value={excelFile}
+            onChange={handleStudentExcelFileChange}
+            disabled={excelBusy}
+            label="Choose student workbook"
+            description="Use the school's existing Excel file or an Eleeveon student template."
+          />
+        )}
+
+        {excelImportStep === "sheet" && excelWorkbook && (
+          <section className="student-excel-stage">
+            <div className="student-excel-stage-head">
+              <h3>Choose worksheet and header row</h3>
+              <p>
+                Select the sheet containing the student list. Header row 1 is the
+                usual choice; change it only when the workbook has titles above the columns.
+              </p>
+            </div>
+
+            <div className="student-excel-context-grid">
+              <label>
+                <span>Worksheet</span>
+                <select
+                  value={excelSheetName}
+                  onChange={(event) => {
+                    setExcelSheetName(event.target.value);
+                    setExcelMappings([]);
+                    setExcelValidation(null);
+                  }}
+                >
+                  {excelWorkbook.sheets
+                    .filter((sheet) => sheet.name !== "_Eleeveon_Metadata")
+                    .map((sheet) => (
+                      <option key={sheet.name} value={sheet.name}>
+                        {sheet.name} · {sheet.rowCount} rows
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) =>
+                    setExcelHeaderRowIndex(
+                      Math.max(0, Number(event.target.value || 1) - 1),
+                    )
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="student-excel-file-note">
+              <strong>{excelFile?.name}</strong>
+              <span>
+                {excelWorkbook.sheets.length} worksheet
+                {excelWorkbook.sheets.length === 1 ? "" : "s"} found
+              </span>
+            </div>
+          </section>
+        )}
+
+        {excelImportStep === "mapping" && excelWorkbook && (
+          <section className="student-excel-stage">
+            <div className="student-excel-stage-head">
+              <h3>Import context</h3>
+              <p>
+                A selected class applies to every imported student. Leave Class empty when
+                the spreadsheet contains its own Class/Class Code column.
+              </p>
+            </div>
+
+            <div className="student-excel-context-grid">
+              <label>
+                <span>Organization</span>
+                <select
+                  value={excelImportOrganizationId}
+                  onChange={(event) => setExcelImportOrganizationId(event.target.value)}
+                >
+                  <option value="">No fixed organization</option>
+                  {organizations.map((row: any) => (
+                    <option key={String(row.id)} value={String(row.id)}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Class</span>
+                <select
+                  value={excelImportClassId}
+                  onChange={(event) => setExcelImportClassId(event.target.value)}
+                >
+                  <option value="">Resolve from spreadsheet</option>
+                  {classes.map((row: any) => (
+                    <option key={String(row.id)} value={String(row.id)}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Academic Structure</span>
+                <select
+                  value={excelImportStructureId}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setExcelImportStructureId(value);
+                    const matchingPeriods = periods.filter((row: any) =>
+                      sameId(row.academicStructureId, value),
+                    );
+                    if (
+                      excelImportPeriodId &&
+                      !matchingPeriods.some((row: any) =>
+                        sameId(row.id, excelImportPeriodId),
+                      )
+                    ) {
+                      setExcelImportPeriodId("");
+                    }
+                  }}
+                >
+                  <option value="">No initial enrollment</option>
+                  {academicStructures.map((row: any) => (
+                    <option key={String(row.id)} value={String(row.id)}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Academic Period</span>
+                <select
+                  value={excelImportPeriodId}
+                  disabled={!excelImportStructureId}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setExcelImportPeriodId(value);
+                    const period: any = value ? periodMap.get(idOf(value)) : undefined;
+                    if (period?.startDate) setExcelImportStartDate(period.startDate);
+                  }}
+                >
+                  <option value="">No initial enrollment</option>
+                  {periods
+                    .filter(
+                      (row: any) =>
+                        !excelImportStructureId ||
+                        sameId(row.academicStructureId, excelImportStructureId),
+                    )
+                    .map((row: any) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {row.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Enrollment Start</span>
+                <input
+                  type="date"
+                  value={excelImportStartDate}
+                  disabled={!excelImportClassId || !excelImportStructureId || !excelImportPeriodId}
+                  onChange={(event) => setExcelImportStartDate(event.target.value)}
+                />
+              </label>
+
+              <label>
+                <span>If student already exists</span>
+                <select
+                  value={excelDuplicateStrategy}
+                  onChange={(event) =>
+                    setExcelDuplicateStrategy(
+                      event.target.value as StudentExcelDuplicateStrategy,
+                    )
+                  }
+                >
+                  <option value="skip">Skip existing student</option>
+                  <option value="update">Update existing student</option>
+                </select>
+              </label>
+            </div>
+
+            {(() => {
+              const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+              if (!sheet) return null;
+
+              const prepared = prepareStudentSheetRecords(sheet, {
+                headerRowIndex: excelHeaderRowIndex,
+                mappings: excelMappings,
+                skipEmptyRows: true,
+              });
+
+              return (
+                <ExcelColumnMappingEditor
+                  columns={prepared.columns}
+                  fields={STUDENT_EXCEL_FIELDS}
+                  mappings={excelMappings}
+                  onChange={(next) => {
+                    setExcelMappings(next);
+                    setExcelValidation(null);
+                  }}
+                  disabled={excelBusy}
+                  title="Match student columns"
+                  description="Eleeveon suggested matches where it could. Review them and map any remaining school-specific columns."
+                />
+              );
+            })()}
+          </section>
+        )}
+
+        {excelImportStep === "preview" && excelValidation && (
+          <ExcelImportPreview
+            validation={excelValidation}
+            title="Student import preview"
+            description="Only rows marked Ready will be written. Rows with errors are skipped; warnings can still be imported."
+            columns={[
+              { key: "admissionNumber", label: "Admission No." },
+              { key: "fullName", label: "Student" },
+              { key: "gender", label: "Gender" },
+              {
+                key: "className",
+                label: "Class",
+                render: (_data, processed) => {
+                  const row = processed as any;
+                  return (
+                    row.classResolution?.className ||
+                    (excelImportClassId
+                      ? (classMap.get(idOf(excelImportClassId)) as any)?.name
+                      : "") ||
+                    "—"
+                  );
+                },
+              },
+              { key: "status", label: "Status" },
+            ]}
+            maxRows={30}
+          />
+        )}
+
+        {excelImportStep === "result" && excelImportResult && (
+          <section className="student-excel-result">
+            <div className="student-excel-result-icon">✓</div>
+            <h3>Student import completed</h3>
+            <p>The imported records have entered the same local-first sync flow as students added manually.</p>
+
+            <div className="student-excel-result-grid">
+              <span><strong>{excelImportResult.created}</strong><small>Created</small></span>
+              <span><strong>{excelImportResult.updated}</strong><small>Updated</small></span>
+              <span><strong>{excelImportResult.enrollmentsCreated}</strong><small>Enrollments</small></span>
+              <span><strong>{excelImportResult.skipped}</strong><small>Skipped</small></span>
+              <span className={excelImportResult.failed ? "danger" : ""}>
+                <strong>{excelImportResult.failed}</strong><small>Failed</small>
+              </span>
+            </div>
+
+            {excelImportResult.failed > 0 && (
+              <div className="student-excel-result-errors">
+                {excelImportResult.rows
+                  .filter((row) => row.action === "failed")
+                  .slice(0, 10)
+                  .map((row, index) => (
+                    <div key={`${row.rowNumber}-${index}`}>
+                      <strong>Row {row.rowNumber}</strong>
+                      <span>{row.error || "Import failed."}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </section>
+        )}
+      </ExcelImportSheet>
 
       {selectedItem && (
         <ActionSheet
@@ -2939,11 +3726,13 @@ function MoreSheet({
   viewMode,
   setViewMode,
   onRefresh,
+  onExcel,
   onClose,
 }: {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   onRefresh: () => void | Promise<void>;
+  onExcel: () => void;
   onClose: () => void;
 }) {
   return (
@@ -2998,6 +3787,12 @@ function MoreSheet({
             <span>◔</span>
             <b>Analytics</b>
             <small>Class, gender, status and organization summaries</small>
+          </button>
+
+          <button type="button" onClick={onExcel}>
+            <span>▦</span>
+            <b>Excel</b>
+            <small>Import students, download a template, or export records</small>
           </button>
 
           <button type="button" onClick={onRefresh}>
@@ -6185,6 +6980,230 @@ const css = `
 
   .enrollment-history-actions button {
     flex: 1 1 calc(50% - 6px);
+  }
+}
+
+/* ============================================================
+   STUDENT EXCEL INTEROPERABILITY
+   ============================================================ */
+
+.student-excel-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.student-excel-footer-actions button {
+  min-height: 38px;
+  padding: 0 15px;
+  border-radius: 11px;
+  border: 1px solid var(--border, #d8e0ea);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.student-excel-footer-actions button.secondary {
+  background: var(--card, #ffffff);
+  color: var(--foreground, #172033);
+}
+
+.student-excel-footer-actions button.primary {
+  border-color: var(--ba-primary);
+  background: var(--ba-primary);
+  color: var(--ba-primary-text, #ffffff);
+}
+
+.student-excel-footer-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.student-excel-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.student-excel-stage-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.student-excel-stage-head p {
+  margin: 5px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.student-excel-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.student-excel-context-grid label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.student-excel-context-grid label > span {
+  color: var(--muted, #64748b);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.student-excel-context-grid select,
+.student-excel-context-grid input {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border, #d8e0ea);
+  border-radius: 11px;
+  padding: 0 11px;
+  background: var(--card, #ffffff);
+  color: var(--foreground, #172033);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.student-excel-context-grid select:focus,
+.student-excel-context-grid input:focus {
+  border-color: var(--ba-primary);
+}
+
+.student-excel-context-grid select:disabled,
+.student-excel-context-grid input:disabled {
+  opacity: 0.55;
+}
+
+.student-excel-file-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--card, #ffffff);
+  font-size: 11px;
+}
+
+.student-excel-file-note strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-excel-file-note span {
+  flex: 0 0 auto;
+  color: var(--muted, #64748b);
+}
+
+.student-excel-result {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.student-excel-result-icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #e9f9f0;
+  color: #18794e;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+.student-excel-result h3 {
+  margin: 13px 0 0;
+  font-size: 18px;
+}
+
+.student-excel-result > p {
+  max-width: 570px;
+  margin: 6px 0 0;
+  color: var(--muted, #64748b);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.student-excel-result-grid {
+  width: 100%;
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.student-excel-result-grid > span {
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: var(--panel, #f4f6f8);
+}
+
+.student-excel-result-grid > span.danger {
+  background: #fff1f0;
+}
+
+.student-excel-result-grid strong {
+  display: block;
+  font-size: 19px;
+}
+
+.student-excel-result-grid small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted, #64748b);
+  font-size: 10px;
+}
+
+.student-excel-result-errors {
+  width: 100%;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.student-excel-result-errors > div {
+  display: flex;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #fff1f0;
+  color: #b42318;
+  font-size: 11px;
+}
+
+@media (max-width: 640px) {
+  .student-excel-context-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .student-excel-footer-actions {
+    width: 100%;
+  }
+
+  .student-excel-footer-actions button {
+    flex: 1;
+  }
+
+  .student-excel-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

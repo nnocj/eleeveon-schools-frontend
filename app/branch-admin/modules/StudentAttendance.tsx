@@ -49,6 +49,64 @@ import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { PermissionGate } from "../../components/shared/PermissionGate";
 
+import * as XLSX from "xlsx";
+
+import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
+import ExcelColumnMapping from "../../components/excel/ExcelColumnMapping";
+import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
+import ExcelImportSheet, {
+  type ExcelImportStep,
+} from "../../components/excel/ExcelImportSheet";
+import ExcelExportSheet from "../../components/excel/ExcelExportSheet";
+
+import type {
+  ExcelColumnMapping,
+  ExcelParsedSheet,
+  ExcelSourceColumn,
+  ParsedExcelWorkbook,
+} from "../../lib/excel/excelTypes";
+
+import {
+  autoMapExcelColumns,
+} from "../../lib/excel/excelColumnMapper";
+
+import {
+  detectLikelyHeaderRow,
+  downloadExcelWorkbook,
+  sheetToRecords,
+} from "../../lib/excel/excelWorkbook";
+
+import {
+  ATTENDANCE_DAILY_FIELDS,
+  ATTENDANCE_TERM_FIELDS,
+  detectAttendanceDailyLayout,
+  parseDailyAttendanceSheet,
+  parseTermAttendanceSheet,
+} from "../../lib/excel/attendance/attendanceExcelParser";
+
+import {
+  validateDailyAttendanceImport,
+  validateTermAttendanceImport,
+} from "../../lib/excel/attendance/attendanceExcelValidator";
+
+import {
+  getAttendanceExcelReferenceData,
+  importDailyAttendance,
+  importTermAttendance,
+} from "../../lib/excel/attendance/attendanceExcelImporter";
+
+import {
+  buildAttendanceRegisterTemplate,
+  buildDailyAttendanceTemplate,
+  buildTermAttendanceTemplate,
+} from "../../lib/excel/attendance/attendanceExcelTemplate";
+
+import type {
+  AttendanceExcelDailyValidationResult,
+  AttendanceExcelImportResult,
+  AttendanceExcelTermValidationResult,
+} from "../../lib/excel/attendance/attendanceExcelTypes";
+
 type EntryMode = "daily" | "termTotals";
 type ViewMode = "cards" | "table" | "analytics";
 type AttendanceStatus = "present" | "absent" | "late";
@@ -329,6 +387,32 @@ export default function StudentAttendance() {
     tone: ToastTone;
     message: string;
   } | null>(null);
+
+  // ------------------------------------------------------
+  // Excel interoperability workflow
+  // ------------------------------------------------------
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelWorkbook, setExcelWorkbook] =
+    useState<ParsedExcelWorkbook | null>(null);
+  const [excelSheetName, setExcelSheetName] = useState("");
+  const [excelHeaderRowIndex, setExcelHeaderRowIndex] = useState(0);
+  const [excelColumns, setExcelColumns] = useState<ExcelSourceColumn[]>([]);
+  const [excelMappings, setExcelMappings] = useState<ExcelColumnMapping[]>([]);
+  const [excelImportStep, setExcelImportStep] =
+    useState<ExcelImportStep>("file");
+  const [excelBusy, setExcelBusy] = useState(false);
+  const [excelDailyValidation, setExcelDailyValidation] =
+    useState<AttendanceExcelDailyValidationResult | null>(null);
+  const [excelTermValidation, setExcelTermValidation] =
+    useState<AttendanceExcelTermValidationResult | null>(null);
+  const [excelImportResult, setExcelImportResult] =
+    useState<AttendanceExcelImportResult | null>(null);
+  const [excelExportBusyKey, setExcelExportBusyKey] =
+    useState<string | null>(null);
+  const [excelRegisterStartDate, setExcelRegisterStartDate] = useState(date);
+  const [excelRegisterEndDate, setExcelRegisterEndDate] = useState(date);
 
   const mediaByStudentId = useEntityMediaUrls({
     accountId,
@@ -1099,6 +1183,543 @@ export default function StudentAttendance() {
     }
   };
 
+
+  // ======================================================
+  // EXCEL INTEROPERABILITY
+  // ======================================================
+
+  const attendanceExcelContext = () => {
+    if (!accountId || !schoolId || !branchId) {
+      throw new Error("Select an account and branch first.");
+    }
+
+    if (!structureId || !periodId || !classId) {
+      throw new Error(
+        "Select an academic structure, academic period and class first.",
+      );
+    }
+
+    return {
+      accountId: String(accountId),
+      schoolId,
+      branchId,
+      classId,
+      academicStructureId: structureId,
+      academicPeriodId: periodId,
+      date: entryMode === "daily" ? date : undefined,
+    };
+  };
+
+  const attendanceExcelTemplateContext = () => {
+    const context = attendanceExcelContext();
+
+    return {
+      ...context,
+      schoolName:
+        String(
+          (activeSchool as { name?: unknown } | null)?.name ||
+            "",
+        ) || undefined,
+      branchName:
+        String(
+          (activeBranch as { name?: unknown } | null)?.name ||
+            "",
+        ) || undefined,
+      className: selectedClassName,
+      academicStructureName: selectedStructureName || undefined,
+      academicPeriodName: selectedPeriodName || undefined,
+    };
+  };
+
+  const attendanceExcelStudents = () =>
+    studentViews.map((item) => ({
+      id: item.id,
+      admissionNumber:
+        (item.student as any)?.admissionNumber || undefined,
+      fullName: item.name,
+    }));
+
+  const resetAttendanceExcelImport = () => {
+    setExcelFile(null);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelHeaderRowIndex(0);
+    setExcelColumns([]);
+    setExcelMappings([]);
+    setExcelDailyValidation(null);
+    setExcelTermValidation(null);
+    setExcelImportResult(null);
+    setExcelImportStep("file");
+    setExcelBusy(false);
+  };
+
+  const closeAttendanceExcelImport = () => {
+    if (excelBusy) return;
+    setExcelImportOpen(false);
+    resetAttendanceExcelImport();
+  };
+
+  const openAttendanceExcelImport = () => {
+    try {
+      attendanceExcelContext();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Choose the attendance context first.",
+      );
+      setFilterOpen(true);
+      return;
+    }
+
+    if (!canEdit) {
+      notify("error", "You do not have permission to import attendance.");
+      return;
+    }
+
+    setMoreOpen(false);
+    resetAttendanceExcelImport();
+    setExcelImportOpen(true);
+  };
+
+  const openAttendanceExcelExport = () => {
+    try {
+      attendanceExcelContext();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Choose the attendance context first.",
+      );
+      setFilterOpen(true);
+      return;
+    }
+
+    setMoreOpen(false);
+    setExcelRegisterStartDate(date || todayISO());
+    setExcelRegisterEndDate(date || todayISO());
+    setExcelExportOpen(true);
+  };
+
+  const parseWorkbookFile = async (
+    file: File,
+  ): Promise<ParsedExcelWorkbook> => {
+    const buffer = await file.arrayBuffer();
+
+    const workbook = XLSX.read(buffer, {
+      type: "array",
+      cellDates: true,
+    });
+
+    const sheets: ExcelParsedSheet[] = workbook.SheetNames.map(
+      (sheetName, index) => {
+        const worksheet = workbook.Sheets[sheetName];
+
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+          header: 1,
+          raw: true,
+          defval: null,
+        }) as unknown[][];
+
+        const rows = matrix.map((row) =>
+          row.map((value) => {
+            if (
+              value === null ||
+              value === undefined ||
+              typeof value === "string" ||
+              typeof value === "number" ||
+              typeof value === "boolean" ||
+              value instanceof Date
+            ) {
+              return value;
+            }
+
+            return String(value);
+          }),
+        );
+
+        const columnCount = rows.reduce(
+          (maximum, row) => Math.max(maximum, row.length),
+          0,
+        );
+
+        return {
+          name: sheetName,
+          index,
+          rows,
+          rowCount: rows.length,
+          columnCount,
+        };
+      },
+    );
+
+    return {
+      fileName: file.name,
+      sheetNames: workbook.SheetNames,
+      sheets,
+    };
+  };
+
+  const selectedExcelSheet = () => {
+    if (!excelWorkbook) return null;
+
+    return (
+      excelWorkbook.sheets.find(
+        (sheet) => sheet.name === excelSheetName,
+      ) ||
+      excelWorkbook.sheets[0] ||
+      null
+    );
+  };
+
+  const prepareAttendanceExcelMapping = (
+    sheet: ExcelParsedSheet,
+    requestedHeaderRowIndex?: number,
+  ) => {
+    const headerRowIndex =
+      requestedHeaderRowIndex ??
+      detectLikelyHeaderRow(sheet);
+
+    const extracted = sheetToRecords(sheet, {
+      headerRowIndex,
+      skipEmptyRows: true,
+      trimStrings: true,
+    });
+
+    let fields = ATTENDANCE_TERM_FIELDS;
+
+    if (entryMode === "daily") {
+      const layout = detectAttendanceDailyLayout(extracted.columns);
+
+      fields =
+        layout === "grid"
+          ? ATTENDANCE_DAILY_FIELDS.filter(
+              (field) =>
+                field.key !== "date" &&
+                field.key !== "status",
+            )
+          : ATTENDANCE_DAILY_FIELDS;
+    }
+
+    const mappings = autoMapExcelColumns(
+      extracted.columns,
+      fields,
+    );
+
+    setExcelHeaderRowIndex(headerRowIndex);
+    setExcelColumns(extracted.columns);
+    setExcelMappings(mappings);
+  };
+
+  const handleAttendanceExcelFile = async (file: File | null) => {
+    setExcelFile(file);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelColumns([]);
+    setExcelMappings([]);
+    setExcelDailyValidation(null);
+    setExcelTermValidation(null);
+    setExcelImportResult(null);
+
+    if (!file) {
+      setExcelImportStep("file");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const parsed = await parseWorkbookFile(file);
+
+      if (!parsed.sheets.length) {
+        throw new Error("This workbook does not contain any worksheets.");
+      }
+
+      const firstSheet =
+        parsed.sheets.find(
+          (sheet) =>
+            !sheet.name.toLowerCase().startsWith("_eleeveon_"),
+        ) ||
+        parsed.sheets[0];
+
+      setExcelWorkbook(parsed);
+      setExcelSheetName(firstSheet.name);
+      prepareAttendanceExcelMapping(firstSheet);
+      setExcelImportStep("sheet");
+    } catch (error) {
+      console.error("Failed to read attendance workbook:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to read the Excel workbook.",
+      );
+      setExcelFile(null);
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const continueAttendanceExcelToMapping = () => {
+    const sheet = selectedExcelSheet();
+
+    if (!sheet) {
+      notify("error", "Choose a worksheet first.");
+      return;
+    }
+
+    try {
+      prepareAttendanceExcelMapping(
+        sheet,
+        excelHeaderRowIndex,
+      );
+      setExcelImportStep("mapping");
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not prepare the worksheet columns.",
+      );
+    }
+  };
+
+  const previewAttendanceExcelImport = async () => {
+    const sheet = selectedExcelSheet();
+
+    if (!sheet) {
+      notify("error", "Choose a worksheet first.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const context = attendanceExcelContext();
+      const reference =
+        await getAttendanceExcelReferenceData(context);
+
+      if (entryMode === "daily") {
+        const parsed = parseDailyAttendanceSheet({
+          sheet,
+          headerRowIndex: excelHeaderRowIndex,
+          mappings: excelMappings,
+          defaultDate: date,
+          ignoreBlankStatuses: true,
+        });
+
+        const validation =
+          validateDailyAttendanceImport({
+            records: parsed.records,
+            rowNumbers: parsed.rowNumbers,
+            context,
+            students: reference.students,
+            enrollments: reference.enrollments,
+          });
+
+        setExcelDailyValidation(validation);
+        setExcelTermValidation(null);
+      } else {
+        const parsed = parseTermAttendanceSheet({
+          sheet,
+          headerRowIndex: excelHeaderRowIndex,
+          mappings: excelMappings,
+        });
+
+        const validation =
+          validateTermAttendanceImport({
+            records: parsed.records,
+            rowNumbers: parsed.rowNumbers,
+            context,
+            students: reference.students,
+            enrollments: reference.enrollments,
+          });
+
+        setExcelTermValidation(validation);
+        setExcelDailyValidation(null);
+      }
+
+      setExcelImportStep("preview");
+    } catch (error) {
+      console.error("Failed to preview attendance import:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to validate the attendance workbook.",
+      );
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const commitAttendanceExcelImport = async () => {
+    try {
+      setExcelBusy(true);
+
+      const context = attendanceExcelContext();
+
+      let result: AttendanceExcelImportResult;
+
+      if (entryMode === "daily") {
+        if (!excelDailyValidation) {
+          throw new Error("Preview the daily attendance import first.");
+        }
+
+        result = await importDailyAttendance(
+          excelDailyValidation,
+          context,
+        );
+      } else {
+        if (!excelTermValidation) {
+          throw new Error("Preview the term attendance import first.");
+        }
+
+        result = await importTermAttendance(
+          excelTermValidation,
+          context,
+        );
+      }
+
+      setExcelImportResult(result);
+      setExcelImportStep("result");
+
+      await load();
+
+      notify(
+        result.failed
+          ? "info"
+          : "success",
+        `Excel import finished: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped${
+          result.failed ? `, ${result.failed} failed` : ""
+        }.`,
+      );
+    } catch (error) {
+      console.error("Failed to import attendance workbook:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to import attendance.",
+      );
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const runAttendanceExcelExport = async (
+    key: string,
+    task: () => void | Promise<void>,
+  ) => {
+    try {
+      setExcelExportBusyKey(key);
+      await task();
+    } catch (error) {
+      console.error("Attendance Excel export failed:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to create the Excel workbook.",
+      );
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const exportCurrentDailyAttendance = () => {
+    const context = attendanceExcelTemplateContext();
+
+    const workbook = buildDailyAttendanceTemplate({
+      context,
+      students: attendanceExcelStudents(),
+      date,
+    });
+
+    const sheet = workbook.sheets[0];
+
+    sheet.rows = studentViews.map((item) => ({
+      studentId: item.id,
+      admissionNumber:
+        (item.student as any)?.admissionNumber || "",
+      studentName: item.name,
+      date,
+      status: dailyDrafts[item.id] || "",
+    })) as any;
+
+    downloadExcelWorkbook(workbook);
+  };
+
+  const exportCurrentTermAttendance = () => {
+    const context = attendanceExcelTemplateContext();
+
+    const workbook = buildTermAttendanceTemplate({
+      context,
+      students: attendanceExcelStudents(),
+    });
+
+    const sheet = workbook.sheets[0];
+
+    sheet.rows = studentViews.map((item) => {
+      const draft =
+        termDrafts[item.id] ||
+        normalizeTermDraft();
+
+      return {
+        studentId: item.id,
+        admissionNumber:
+          (item.student as any)?.admissionNumber || "",
+        studentName: item.name,
+        daysOpened: draft.daysOpened,
+        daysPresent: draft.daysPresent,
+        timesLate: draft.timesLate,
+        daysAbsent: draft.daysAbsent,
+        attendancePercent: draft.attendancePercent,
+      };
+    }) as any;
+
+    downloadExcelWorkbook(workbook);
+  };
+
+  const downloadBlankAttendanceTemplate = () => {
+    const context = attendanceExcelTemplateContext();
+
+    if (entryMode === "daily") {
+      downloadExcelWorkbook(
+        buildDailyAttendanceTemplate({
+          context,
+          students: attendanceExcelStudents(),
+          date,
+        }),
+      );
+      return;
+    }
+
+    downloadExcelWorkbook(
+      buildTermAttendanceTemplate({
+        context,
+        students: attendanceExcelStudents(),
+      }),
+    );
+  };
+
+  const downloadAttendanceRegister = () => {
+    if (!excelRegisterStartDate || !excelRegisterEndDate) {
+      throw new Error("Choose a start and end date for the register.");
+    }
+
+    downloadExcelWorkbook(
+      buildAttendanceRegisterTemplate({
+        context: attendanceExcelTemplateContext(),
+        students: attendanceExcelStudents(),
+        startDate: excelRegisterStartDate,
+        endDate: excelRegisterEndDate,
+      }),
+    );
+  };
+
   if (
     accountLoading ||
     contextLoading ||
@@ -1536,6 +2157,8 @@ export default function StudentAttendance() {
               setMoreOpen(false);
               setFilterOpen(true);
             }}
+            onImportExcel={openAttendanceExcelImport}
+            onExportExcel={openAttendanceExcelExport}
             onRefresh={async () => {
               setMoreOpen(false);
               await load();
@@ -1552,6 +2175,486 @@ export default function StudentAttendance() {
             onClose={() => setStatusOpen(false)}
           />
         ) : null}
+
+        <ExcelImportSheet
+          open={excelImportOpen}
+          onClose={closeAttendanceExcelImport}
+          title={
+            entryMode === "daily"
+              ? "Import Daily Attendance"
+              : "Import Term Attendance"
+          }
+          subtitle={`${selectedClassName}${
+            selectedPeriodName ? ` · ${selectedPeriodName}` : ""
+          }`}
+          step={excelImportStep}
+          busy={excelBusy}
+          width={860}
+          footer={
+            excelImportStep === "file" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={closeAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!excelFile || !excelWorkbook || excelBusy}
+                  onClick={() => setExcelImportStep("sheet")}
+                >
+                  Continue
+                </button>
+              </div>
+            ) : excelImportStep === "sheet" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("file")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={continueAttendanceExcelToMapping}
+                  disabled={!excelSheetName || excelBusy}
+                >
+                  Match columns
+                </button>
+              </div>
+            ) : excelImportStep === "mapping" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("sheet")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={previewAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Preview import
+                </button>
+              </div>
+            ) : excelImportStep === "preview" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("mapping")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={commitAttendanceExcelImport}
+                  disabled={
+                    excelBusy ||
+                    (entryMode === "daily"
+                      ? !excelDailyValidation?.valid
+                      : !excelTermValidation?.valid)
+                  }
+                >
+                  Import attendance
+                </button>
+              </div>
+            ) : (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={closeAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Done
+                </button>
+              </div>
+            )
+          }
+        >
+          {excelImportStep === "file" ? (
+            <div className="attendance-excel-stack">
+              <div className="attendance-excel-context">
+                <strong>
+                  {entryMode === "daily" ? "Daily Register" : "Term Totals"}
+                </strong>
+                <span>{selectedClassName}</span>
+                <span>{selectedPeriodName}</span>
+                {entryMode === "daily" ? <span>{date}</span> : null}
+              </div>
+
+              <ExcelFilePicker
+                value={excelFile}
+                onChange={handleAttendanceExcelFile}
+                disabled={excelBusy}
+                label="Choose attendance workbook"
+                description={
+                  entryMode === "daily"
+                    ? "Use an Eleeveon workbook or an existing daily attendance sheet."
+                    : "Use an Eleeveon workbook or an existing term-attendance sheet."
+                }
+              />
+
+              <div className="attendance-excel-note">
+                <strong>Safe import</strong>
+                <span>
+                  Nothing is changed until the workbook passes validation and
+                  you confirm the import.
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {excelImportStep === "sheet" ? (
+            <div className="attendance-excel-stack">
+              <label className="attendance-excel-field">
+                <span>Worksheet</span>
+                <select
+                  value={excelSheetName}
+                  onChange={(event) => {
+                    const nextName = event.target.value;
+                    setExcelSheetName(nextName);
+
+                    const sheet = excelWorkbook?.sheets.find(
+                      (item) => item.name === nextName,
+                    );
+
+                    if (sheet) {
+                      prepareAttendanceExcelMapping(sheet);
+                    }
+                  }}
+                >
+                  {(excelWorkbook?.sheets || []).map((sheet) => (
+                    <option key={sheet.name} value={sheet.name}>
+                      {sheet.name} · {sheet.rowCount} rows
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="attendance-excel-field">
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(
+                    1,
+                    selectedExcelSheet()?.rowCount || 1,
+                  )}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) => {
+                    const nextIndex = Math.max(
+                      0,
+                      Number(event.target.value || 1) - 1,
+                    );
+
+                    setExcelHeaderRowIndex(nextIndex);
+
+                    const sheet = selectedExcelSheet();
+                    if (sheet) {
+                      try {
+                        prepareAttendanceExcelMapping(sheet, nextIndex);
+                      } catch {
+                        // Keep the selected row visible. The next step will
+                        // show a clear validation error if it is unusable.
+                      }
+                    }
+                  }}
+                />
+                <small>
+                  Eleeveon detected row {excelHeaderRowIndex + 1}. Change it if
+                  your column headings are on another row.
+                </small>
+              </label>
+
+              <div className="attendance-excel-note">
+                <strong>
+                  {entryMode === "daily"
+                    ? "Daily spreadsheet"
+                    : "Term totals spreadsheet"}
+                </strong>
+                <span>
+                  {entryMode === "daily"
+                    ? "Daily imports can use Student · Date · Status rows or a register with dates across the columns."
+                    : "Term totals use Days Opened, Days Present and Times Late. Eleeveon recalculates Days Absent and Attendance %."}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {excelImportStep === "mapping" ? (
+            <div className="attendance-excel-stack">
+              <label className="attendance-excel-field">
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) => {
+                    const nextIndex = Math.max(
+                      0,
+                      Number(event.target.value || 1) - 1,
+                    );
+
+                    const sheet = selectedExcelSheet();
+
+                    if (!sheet) return;
+
+                    try {
+                      prepareAttendanceExcelMapping(sheet, nextIndex);
+                    } catch (error) {
+                      notify(
+                        "error",
+                        error instanceof Error
+                          ? error.message
+                          : "Could not read that header row.",
+                      );
+                    }
+                  }}
+                />
+              </label>
+
+              <ExcelColumnMapping
+                columns={excelColumns}
+                fields={
+                  entryMode === "daily" &&
+                  detectAttendanceDailyLayout(excelColumns) === "grid"
+                    ? ATTENDANCE_DAILY_FIELDS.filter(
+                        (field) =>
+                          field.key !== "date" &&
+                          field.key !== "status",
+                      )
+                    : entryMode === "daily"
+                      ? ATTENDANCE_DAILY_FIELDS
+                      : ATTENDANCE_TERM_FIELDS
+                }
+                mappings={excelMappings}
+                onChange={setExcelMappings}
+                disabled={excelBusy}
+                title="Match attendance columns"
+                description={
+                  entryMode === "daily" &&
+                  detectAttendanceDailyLayout(excelColumns) === "grid"
+                    ? "The date columns were detected automatically. Match the student identity columns below."
+                    : "Confirm which spreadsheet columns correspond to the attendance fields."
+                }
+              />
+            </div>
+          ) : null}
+
+          {excelImportStep === "preview" && excelDailyValidation ? (
+            <ExcelImportPreview
+              validation={excelDailyValidation}
+              title="Daily attendance preview"
+              description="Check student matches, dates and statuses before importing."
+              columns={[
+                {
+                  key: "studentName",
+                  label: "Student",
+                },
+                {
+                  key: "admissionNumber",
+                  label: "Admission No.",
+                },
+                {
+                  key: "date",
+                  label: "Date",
+                },
+                {
+                  key: "status",
+                  label: "Status",
+                },
+              ]}
+            />
+          ) : null}
+
+          {excelImportStep === "preview" && excelTermValidation ? (
+            <ExcelImportPreview
+              validation={excelTermValidation}
+              title="Term attendance preview"
+              description="Days Absent and Attendance % are recalculated by Eleeveon."
+              columns={[
+                {
+                  key: "studentName",
+                  label: "Student",
+                },
+                {
+                  key: "daysOpened",
+                  label: "Opened",
+                },
+                {
+                  key: "daysPresent",
+                  label: "Present",
+                },
+                {
+                  key: "daysAbsent",
+                  label: "Absent",
+                },
+                {
+                  key: "timesLate",
+                  label: "Late",
+                },
+                {
+                  key: "attendancePercent",
+                  label: "Attendance %",
+                  render: (row) => `${row.attendancePercent}%`,
+                },
+              ]}
+            />
+          ) : null}
+
+          {excelImportStep === "result" && excelImportResult ? (
+            <div className="attendance-excel-result">
+              <div className="attendance-excel-result-icon">✓</div>
+              <h3>Attendance import complete</h3>
+              <p>
+                The workbook has been applied through Eleeveon's local-first
+                attendance records and will use the normal sync pipeline.
+              </p>
+
+              <div className="attendance-excel-result-grid">
+                <div>
+                  <strong>{excelImportResult.created}</strong>
+                  <span>Created</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.updated}</strong>
+                  <span>Updated</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.skipped}</strong>
+                  <span>Skipped</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.failed}</strong>
+                  <span>Failed</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </ExcelImportSheet>
+
+        <ExcelExportSheet
+          open={excelExportOpen}
+          onClose={() => {
+            if (!excelExportBusyKey) {
+              setExcelExportOpen(false);
+            }
+          }}
+          title={
+            entryMode === "daily"
+              ? "Daily Attendance Excel"
+              : "Term Attendance Excel"
+          }
+          subtitle={`${selectedClassName}${
+            selectedPeriodName ? ` · ${selectedPeriodName}` : ""
+          }`}
+          busyKey={excelExportBusyKey}
+          headerContent={
+            entryMode === "daily" ? (
+              <div className="attendance-excel-register-range">
+                <label>
+                  <span>Register start</span>
+                  <input
+                    type="date"
+                    value={excelRegisterStartDate}
+                    onChange={(event) =>
+                      setExcelRegisterStartDate(event.target.value)
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Register end</span>
+                  <input
+                    type="date"
+                    value={excelRegisterEndDate}
+                    onChange={(event) =>
+                      setExcelRegisterEndDate(event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            ) : null
+          }
+          actions={
+            entryMode === "daily"
+              ? [
+                  {
+                    key: "export-current",
+                    title: "Export current daily attendance",
+                    description:
+                      "Download the current date with the statuses already entered in Eleeveon.",
+                    badge: date,
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "export-current",
+                        exportCurrentDailyAttendance,
+                      ),
+                  },
+                  {
+                    key: "blank-template",
+                    title: "Download daily template",
+                    description:
+                      "Create a clean sheet for this class and date.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "blank-template",
+                        downloadBlankAttendanceTemplate,
+                      ),
+                  },
+                  {
+                    key: "register-template",
+                    title: "Download multi-day register",
+                    description:
+                      "Create a student register with one attendance column for each date in the selected range.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "register-template",
+                        downloadAttendanceRegister,
+                      ),
+                  },
+                ]
+              : [
+                  {
+                    key: "export-current",
+                    title: "Export current term totals",
+                    description:
+                      "Download the current term totals already entered in Eleeveon.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "export-current",
+                        exportCurrentTermAttendance,
+                      ),
+                  },
+                  {
+                    key: "blank-template",
+                    title: "Download term template",
+                    description:
+                      "Create a clean term-attendance sheet for this class.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "blank-template",
+                        downloadBlankAttendanceTemplate,
+                      ),
+                  },
+                ]
+          }
+        />
       </main>
     </PermissionGate>
   );
@@ -2137,6 +3240,8 @@ function MoreSheet(props: {
   onMarkAll: (status: AttendanceStatus) => void;
   onClearShown: () => void;
   onOpenBulkDays: () => void;
+  onImportExcel: () => void;
+  onExportExcel: () => void;
   onRefresh: () => void;
   onClose: () => void;
 }) {
@@ -2232,6 +3337,25 @@ function MoreSheet(props: {
           </div>
         </section>
       )}
+
+      <section className="more-section">
+        <span>Excel</span>
+        <div className="more-actions">
+          <button
+            type="button"
+            disabled={!props.canEdit}
+            onClick={props.onImportExcel}
+          >
+            Import attendance
+          </button>
+          <button
+            type="button"
+            onClick={props.onExportExcel}
+          >
+            Export / templates
+          </button>
+        </div>
+      </section>
 
       <section className="more-section">
         <span>System</span>
@@ -3167,6 +4291,191 @@ button.status-dot-mini{cursor:pointer}
 @media (prefers-color-scheme: dark){
   .ba-page{
     --ba-soft:color-mix(in srgb,var(--ba-text) 8%,transparent);
+  }
+}
+
+
+/* -------------------------------------------------------
+   Excel interoperability additions
+-------------------------------------------------------- */
+.attendance-excel-stack{
+  display:grid;
+  gap:14px;
+  min-width:0;
+}
+.attendance-excel-context{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+}
+.attendance-excel-context strong,
+.attendance-excel-context span{
+  border:1px solid var(--ba-border);
+  border-radius:999px;
+  padding:5px 9px;
+  background:var(--ba-surface);
+  font-size:10px;
+}
+.attendance-excel-context strong{
+  color:var(--ba-primary);
+}
+.attendance-excel-note{
+  display:grid;
+  gap:4px;
+  padding:12px;
+  border:1px solid var(--ba-border);
+  border-radius:13px;
+  background:var(--ba-surface);
+}
+.attendance-excel-note strong{
+  font-size:11px;
+}
+.attendance-excel-note span{
+  color:var(--ba-muted);
+  font-size:10px;
+  line-height:1.5;
+}
+.attendance-excel-field{
+  display:grid;
+  gap:5px;
+}
+.attendance-excel-field>span{
+  font-size:9px;
+  font-weight:850;
+  color:var(--ba-muted);
+}
+.attendance-excel-field select,
+.attendance-excel-field input,
+.attendance-excel-register-range input{
+  width:100%;
+  min-height:40px;
+  border:1px solid var(--ba-border);
+  border-radius:11px;
+  padding:0 10px;
+  background:var(--ba-surface);
+  color:inherit;
+  font:inherit;
+  font-size:11px;
+  outline:0;
+}
+.attendance-excel-field small{
+  color:var(--ba-muted);
+  font-size:9px;
+  line-height:1.4;
+}
+.attendance-excel-field select:focus,
+.attendance-excel-field input:focus,
+.attendance-excel-register-range input:focus{
+  border-color:var(--ba-primary);
+}
+.attendance-excel-footer{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.attendance-excel-footer button{
+  min-height:38px;
+  border:1px solid var(--ba-border);
+  border-radius:11px;
+  padding:0 14px;
+  font:inherit;
+  font-size:10px;
+  font-weight:850;
+  cursor:pointer;
+}
+.attendance-excel-footer button.secondary{
+  background:var(--ba-surface);
+  color:var(--ba-text);
+}
+.attendance-excel-footer button.primary{
+  border-color:var(--ba-primary);
+  background:var(--ba-primary);
+  color:#fff;
+}
+.attendance-excel-footer button:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+.attendance-excel-result{
+  display:grid;
+  justify-items:center;
+  gap:8px;
+  padding:22px 10px;
+  text-align:center;
+}
+.attendance-excel-result-icon{
+  width:52px;
+  height:52px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:color-mix(in srgb,#22c55e 14%,transparent);
+  color:#15803d;
+  font-size:24px;
+  font-weight:900;
+}
+.attendance-excel-result h3{
+  margin:4px 0 0;
+  font-size:16px;
+}
+.attendance-excel-result p{
+  max-width:560px;
+  margin:0;
+  color:var(--ba-muted);
+  font-size:10px;
+  line-height:1.55;
+}
+.attendance-excel-result-grid{
+  width:min(100%,520px);
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin-top:8px;
+}
+.attendance-excel-result-grid>div{
+  padding:12px 8px;
+  border:1px solid var(--ba-border);
+  border-radius:12px;
+  background:var(--ba-surface);
+}
+.attendance-excel-result-grid strong{
+  display:block;
+  font-size:18px;
+}
+.attendance-excel-result-grid span{
+  display:block;
+  margin-top:2px;
+  color:var(--ba-muted);
+  font-size:9px;
+}
+.attendance-excel-register-range{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.attendance-excel-register-range label{
+  display:grid;
+  gap:4px;
+}
+.attendance-excel-register-range span{
+  color:var(--ba-muted);
+  font-size:9px;
+  font-weight:800;
+}
+@media(max-width:560px){
+  .attendance-excel-footer{
+    width:100%;
+  }
+  .attendance-excel-footer button{
+    flex:1;
+  }
+  .attendance-excel-result-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .attendance-excel-register-range{
+    grid-template-columns:1fr;
   }
 }
 

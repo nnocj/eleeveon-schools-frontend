@@ -52,7 +52,7 @@ import { PermissionGate } from "../../components/shared/PermissionGate";
 import * as XLSX from "xlsx";
 
 import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
-import ExcelColumnMapping from "../../components/excel/ExcelColumnMapping";
+import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
 import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
 import ExcelImportSheet, {
   type ExcelImportStep,
@@ -2428,7 +2428,7 @@ export default function StudentAttendance() {
                 />
               </label>
 
-              <ExcelColumnMapping
+              <ExcelColumnMappingEditor
                 columns={excelColumns}
                 fields={
                   entryMode === "daily" &&

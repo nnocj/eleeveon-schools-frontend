@@ -2911,4 +2911,275 @@ const css = `
 
 
 .assessment-excel-footer-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}.assessment-excel-footer-actions button{min-height:40px;border-radius:12px;padding:0 14px;border:1px solid var(--ae-border);font-weight:900}.assessment-excel-footer-actions button.secondary{background:var(--ae-card);color:var(--ae-text)}.assessment-excel-footer-actions button.primary{background:var(--ae-primary);border-color:var(--ae-primary);color:#fff}.assessment-excel-footer-actions button:disabled{opacity:.5;cursor:not-allowed}.assessment-excel-stage{display:grid;gap:14px}.assessment-excel-stage-head h3{margin:0;font-size:15px}.assessment-excel-stage-head p{margin:5px 0 0;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.assessment-excel-context-grid label{display:grid;gap:5px}.assessment-excel-context-grid label>span{font-size:11px;font-weight:900;color:var(--ae-muted)}.assessment-excel-context-card,.assessment-excel-column-note{display:grid;gap:3px;padding:12px;border:1px solid var(--ae-border);border-radius:14px;background:var(--ae-card)}.assessment-excel-context-card span,.assessment-excel-context-card small,.assessment-excel-column-note span{font-size:11px;color:var(--ae-muted);line-height:1.45}.assessment-excel-result{text-align:center;padding:10px 0}.assessment-excel-result-icon{width:56px;height:56px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;background:rgba(34,197,94,.13);color:#15803d;font-size:28px;font-weight:950}.assessment-excel-result h3{margin:0;font-size:17px}.assessment-excel-result>p{margin:6px auto 16px;max-width:620px;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-result-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.assessment-excel-result-grid span{padding:11px 7px;border-radius:12px;background:var(--ae-card);border:1px solid var(--ae-border)}.assessment-excel-result-grid span.danger{background:#fff1f0}.assessment-excel-result-grid strong{display:block;font-size:18px}.assessment-excel-result-grid small{display:block;margin-top:2px;color:var(--ae-muted);font-size:10px}.assessment-excel-result-errors{margin-top:14px;display:grid;gap:6px;text-align:left}.assessment-excel-result-errors div{display:grid;gap:2px;padding:9px 10px;border-radius:11px;background:#fff7f6;border:1px solid #ffd3cf}.assessment-excel-result-errors strong{font-size:11px}.assessment-excel-result-errors span{font-size:10px;color:#b42318}@media(max-width:720px){.assessment-excel-context-grid{grid-template-columns:1fr}.assessment-excel-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.assessment-excel-footer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.assessment-excel-footer-actions button:only-child{grid-column:1/-1}}
+
+/* ============================================================
+   PORTAL-SAFE CENTERED MODALS + RESPONSIVE ASSESSMENT CONTEXT
+   ============================================================ */
+.ae-sheet-backdrop,
+[class*="excel"][class*="backdrop"] {
+  top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+  right: 0 !important;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  left: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  z-index: 58 !important;
+}
+
+.ae-sheet,
+[class*="excel"][class*="sheet"]:not([class*="backdrop"]),
+[class*="excel"][class*="modal"]:not([class*="backdrop"]) {
+  margin: 0 auto !important;
+  max-height: calc(100% - 4px) !important;
+  max-width: calc(100% - 2px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 84px;
+}
+
+.ae-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: linear-gradient(to top, var(--ae-card) 78%, transparent);
+}
+
+/* Replace the single horizontally-scrolling metadata line with a true
+   responsive grid so labels never sit on top of one another. */
+.ae-compact-meta {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)) !important;
+  gap: 7px !important;
+  overflow: visible !important;
+  align-items: stretch;
+}
+
+.ae-compact-meta .ae-chip {
+  min-width: 0;
+  width: 100%;
+  min-height: 32px;
+  justify-content: center;
+  text-align: center;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
+}
+
+/* Let the subject/session strip breathe on phones instead of squeezing
+   title + Start + Save into one narrow row. */
+@media (max-width: 560px) {
+  .ae-session-strip {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    align-items: center;
+  }
+
+  .ae-session-strip > div {
+    min-width: 0;
+  }
+
+  .ae-session-strip > div strong,
+  .ae-session-strip > div small {
+    overflow-wrap: anywhere;
+  }
+
+  .ae-session-strip > button {
+    width: 100%;
+  }
+
+  .ae-session-strip > button:nth-last-child(2) {
+    grid-column: 1 / 2;
+  }
+
+  .ae-session-strip > button:last-child {
+    grid-column: 2 / 3;
+  }
+
+  .ae-compact-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .ae-compact-meta {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (min-width: 980px) {
+  .ae-sheet-backdrop,
+  [class*="excel"][class*="backdrop"] {
+    top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: var(--portal-content-left, 0px) !important;
+    max-width: calc(100vw - var(--portal-content-left, 0px)) !important;
+    padding: 18px !important;
+    z-index: 80 !important;
+  }
+
+  .ae-compact-meta {
+    grid-template-columns: repeat(auto-fit, minmax(130px, max-content)) !important;
+    justify-content: start;
+  }
+
+  .ae-compact-meta .ae-chip {
+    width: auto;
+    padding-inline: 11px;
+  }
+}
+/* ============================================================
+   EXCEL MODALS — MATCH ASSESSMENT / BRANCH-ADMIN VISUAL LANGUAGE
+   ============================================================ */
+.ae-page {
+  --excel-surface: var(--ae-card);
+  --excel-surface-2: color-mix(in srgb, var(--ae-card) 92%, var(--ae-text) 8%);
+  --excel-text: var(--ae-text);
+  --excel-muted: var(--ae-muted);
+  --excel-border: var(--ae-border);
+}
+
+.ae-page [class^="excel-"],
+.ae-page [class*=" excel-"] {
+  color: var(--excel-text);
+}
+
+.ae-page [class*="excel-"][class*="sheet"]:not([class*="backdrop"]),
+.ae-page [class*="excel-"][class*="modal"]:not([class*="backdrop"]),
+.ae-page [class*="excel-"][class*="panel"],
+.ae-page [class*="excel-"][class*="card"] {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+  box-shadow: 0 22px 58px color-mix(in srgb, #0f172a 16%, transparent) !important;
+}
+
+.ae-page [class*="excel-"][class*="backdrop"] {
+  background: color-mix(in srgb, #0f172a 52%, transparent) !important;
+  backdrop-filter: blur(7px);
+}
+
+.ae-page [class^="excel-"] h1,
+.ae-page [class^="excel-"] h2,
+.ae-page [class^="excel-"] h3,
+.ae-page [class*=" excel-"] h1,
+.ae-page [class*=" excel-"] h2,
+.ae-page [class*=" excel-"] h3 {
+  color: var(--excel-text) !important;
+}
+
+.ae-page [class^="excel-"] p,
+.ae-page [class^="excel-"] small,
+.ae-page [class^="excel-"] label > span,
+.ae-page [class*=" excel-"] p,
+.ae-page [class*=" excel-"] small,
+.ae-page [class*=" excel-"] label > span {
+  color: var(--excel-muted) !important;
+}
+
+.ae-page [class^="excel-"] input,
+.ae-page [class^="excel-"] select,
+.ae-page [class^="excel-"] textarea,
+.ae-page [class*=" excel-"] input,
+.ae-page [class*=" excel-"] select,
+.ae-page [class*=" excel-"] textarea {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border: 1px solid var(--input-border, var(--excel-border)) !important;
+}
+
+.ae-page [class^="excel-"] input:focus,
+.ae-page [class^="excel-"] select:focus,
+.ae-page [class^="excel-"] textarea:focus,
+.ae-page [class*=" excel-"] input:focus,
+.ae-page [class*=" excel-"] select:focus,
+.ae-page [class*=" excel-"] textarea:focus {
+  border-color: color-mix(in srgb, var(--ae-primary) 58%, var(--excel-border)) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ae-primary) 13%, transparent) !important;
+}
+
+.ae-page [class^="excel-"] button:not(.primary):not([class*="primary"]),
+.ae-page [class*=" excel-"] button:not(.primary):not([class*="primary"]) {
+  background: var(--excel-surface);
+  color: var(--excel-text);
+  border-color: var(--excel-border);
+}
+
+.ae-page [class^="excel-"] th,
+.ae-page [class*=" excel-"] th {
+  background: var(--excel-surface-2) !important;
+  color: var(--excel-muted) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.ae-page [class^="excel-"] td,
+.ae-page [class*=" excel-"] td {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.assessment-excel-context-card,
+.assessment-excel-column-note,
+.assessment-excel-result-grid span {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.assessment-excel-stage-head p,
+.assessment-excel-context-card span,
+.assessment-excel-context-card small,
+.assessment-excel-column-note span,
+.assessment-excel-result > p,
+.assessment-excel-result-grid small {
+  color: var(--excel-muted) !important;
+}
+
+.assessment-excel-context-grid input,
+.assessment-excel-context-grid select {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border-color: var(--input-border, var(--excel-border)) !important;
+}
+
+.assessment-excel-result-grid span.danger,
+.assessment-excel-result-errors div {
+  background: color-mix(in srgb, #ef4444 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, #ef4444 28%, var(--excel-border)) !important;
+}
+
+.assessment-excel-result-errors span {
+  color: color-mix(in srgb, #ef4444 82%, var(--excel-text)) !important;
+}
+
+.ae-page [class*="excel-"][class*="drop"],
+.ae-page [class*="excel-"][class*="picker"],
+.ae-page [class*="excel-"][class*="upload"] {
+  background: color-mix(in srgb, var(--ae-primary) 4%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ae-primary) 26%, var(--excel-border)) !important;
+  color: var(--excel-text) !important;
+}
+
+.ae-page [class*="excel-"][class*="drop"]:hover,
+.ae-page [class*="excel-"][class*="picker"]:hover,
+.ae-page [class*="excel-"][class*="upload"]:hover {
+  background: color-mix(in srgb, var(--ae-primary) 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ae-primary) 48%, var(--excel-border)) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ae-page [class*="excel-"][class*="backdrop"] {
+    background: rgba(2, 6, 23, .72) !important;
+  }
+}
+
 `;

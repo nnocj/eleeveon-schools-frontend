@@ -4479,4 +4479,263 @@ button.status-dot-mini{cursor:pointer}
   }
 }
 
+
+/* ============================================================
+   PORTAL-SAFE CENTERED MODALS
+   ============================================================ */
+.ba-sheet-backdrop,
+[class*="excel"][class*="backdrop"] {
+  top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+  right: 0 !important;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  left: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  z-index: 58 !important;
+}
+
+.ba-sheet,
+[class*="excel"][class*="sheet"]:not([class*="backdrop"]),
+[class*="excel"][class*="modal"]:not([class*="backdrop"]) {
+  margin: 0 auto !important;
+  max-height: calc(100% - 4px) !important;
+  max-width: calc(100% - 2px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 84px;
+}
+
+.ba-sheet-footer,
+.ba-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}
+
+@media (min-width: 980px) {
+  .ba-sheet-backdrop,
+  [class*="excel"][class*="backdrop"] {
+    top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: var(--portal-content-left, 0px) !important;
+    max-width: calc(100vw - var(--portal-content-left, 0px)) !important;
+    padding: 18px !important;
+    z-index: 80 !important;
+  }
+}
+/* ============================================================
+   EXCEL MODALS — MATCH BRANCH-ADMIN (BA) VISUAL LANGUAGE
+   Light/dark-safe surfaces, readable controls and strong contrast.
+   ============================================================ */
+.ba-page {
+  --excel-surface: var(--card-bg, var(--surface, #fff));
+  --excel-surface-2: var(--surface-2, color-mix(in srgb, var(--excel-surface) 93%, var(--text, #111827) 7%));
+  --excel-text: var(--text, #111827);
+  --excel-muted: var(--muted, color-mix(in srgb, var(--excel-text) 62%, transparent));
+  --excel-border: var(--border, color-mix(in srgb, var(--excel-text) 14%, transparent));
+  --excel-soft: color-mix(in srgb, var(--excel-text) 5%, transparent);
+}
+
+.ba-page [class^="excel-"],
+.ba-page [class*=" excel-"] {
+  color: var(--excel-text);
+}
+
+.ba-page [class*="excel-"][class*="sheet"]:not([class*="backdrop"]),
+.ba-page [class*="excel-"][class*="modal"]:not([class*="backdrop"]),
+.ba-page [class*="excel-"][class*="panel"],
+.ba-page [class*="excel-"][class*="card"] {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+  box-shadow: 0 22px 58px color-mix(in srgb, #0f172a 16%, transparent) !important;
+}
+
+.ba-page [class*="excel-"][class*="backdrop"] {
+  background: color-mix(in srgb, #0f172a 52%, transparent) !important;
+  backdrop-filter: blur(7px);
+}
+
+.ba-page [class^="excel-"] h1,
+.ba-page [class^="excel-"] h2,
+.ba-page [class^="excel-"] h3,
+.ba-page [class*=" excel-"] h1,
+.ba-page [class*=" excel-"] h2,
+.ba-page [class*=" excel-"] h3 {
+  color: var(--excel-text) !important;
+}
+
+.ba-page [class^="excel-"] p,
+.ba-page [class^="excel-"] small,
+.ba-page [class^="excel-"] label > span,
+.ba-page [class*=" excel-"] p,
+.ba-page [class*=" excel-"] small,
+.ba-page [class*=" excel-"] label > span {
+  color: var(--excel-muted) !important;
+}
+
+.ba-page [class^="excel-"] input,
+.ba-page [class^="excel-"] select,
+.ba-page [class^="excel-"] textarea,
+.ba-page [class*=" excel-"] input,
+.ba-page [class*=" excel-"] select,
+.ba-page [class*=" excel-"] textarea {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border: 1px solid var(--input-border, var(--excel-border)) !important;
+  box-shadow: none;
+}
+
+.ba-page [class^="excel-"] input:focus,
+.ba-page [class^="excel-"] select:focus,
+.ba-page [class^="excel-"] textarea:focus,
+.ba-page [class*=" excel-"] input:focus,
+.ba-page [class*=" excel-"] select:focus,
+.ba-page [class*=" excel-"] textarea:focus {
+  border-color: color-mix(in srgb, var(--ba-primary) 58%, var(--excel-border)) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ba-primary) 13%, transparent) !important;
+}
+
+.ba-page [class^="excel-"] button,
+.ba-page [class*=" excel-"] button {
+  color: var(--excel-text);
+  border-color: var(--excel-border);
+}
+
+.ba-page [class^="excel-"] button:not(.primary):not([class*="primary"]),
+.ba-page [class*=" excel-"] button:not(.primary):not([class*="primary"]) {
+  background: var(--excel-surface);
+}
+
+.ba-page [class^="excel-"] table,
+.ba-page [class*=" excel-"] table {
+  background: var(--excel-surface);
+  color: var(--excel-text);
+}
+
+.ba-page [class^="excel-"] th,
+.ba-page [class*=" excel-"] th {
+  background: var(--excel-surface-2) !important;
+  color: var(--excel-muted) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.ba-page [class^="excel-"] td,
+.ba-page [class*=" excel-"] td {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+}
+
+/* Local Excel workflow blocks use the same BA surfaces. */
+.attendance-excel-stage,
+.attendance-excel-file-note,
+.attendance-excel-result,
+.attendance-excel-result-grid > span,
+.attendance-excel-result-errors > div {
+  color: var(--excel-text);
+}
+
+.attendance-excel-file-note,
+.attendance-excel-result-grid > span {
+  background: var(--excel-surface) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.attendance-excel-stage-head p,
+.attendance-excel-file-note span,
+.attendance-excel-result > p,
+.attendance-excel-result-grid small {
+  color: var(--excel-muted) !important;
+}
+
+.attendance-excel-context-grid select,
+.attendance-excel-context-grid input {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border-color: var(--input-border, var(--excel-border)) !important;
+}
+
+.attendance-excel-result-errors > div {
+  background: color-mix(in srgb, #ef4444 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, #ef4444 28%, var(--excel-border)) !important;
+}
+
+.attendance-excel-result-errors > div span {
+  color: color-mix(in srgb, #ef4444 82%, var(--excel-text)) !important;
+}
+
+/* File-picker / drop-zone styling, including dark mode. */
+.ba-page [class*="excel-"][class*="drop"],
+.ba-page [class*="excel-"][class*="picker"],
+.ba-page [class*="excel-"][class*="upload"] {
+  background: color-mix(in srgb, var(--ba-primary) 4%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ba-primary) 26%, var(--excel-border)) !important;
+  color: var(--excel-text) !important;
+}
+
+.ba-page [class*="excel-"][class*="drop"]:hover,
+.ba-page [class*="excel-"][class*="picker"]:hover,
+.ba-page [class*="excel-"][class*="upload"]:hover {
+  background: color-mix(in srgb, var(--ba-primary) 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ba-primary) 48%, var(--excel-border)) !important;
+}
+
+/* Mapping and preview rows/cards. */
+.ba-page [class*="excel-"][class*="row"],
+.ba-page [class*="excel-"][class*="item"],
+.ba-page [class*="excel-"][class*="mapping"],
+.ba-page [class*="excel-"][class*="preview"] {
+  border-color: var(--excel-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ba-page [class*="excel-"][class*="backdrop"] {
+    background: rgba(2, 6, 23, .72) !important;
+  }
+}
+
+.attendance-excel-context,
+.attendance-excel-note,
+.attendance-excel-result,
+.attendance-excel-result-grid > div,
+.attendance-excel-register-range {
+  color: var(--excel-text);
+}
+
+.attendance-excel-context,
+.attendance-excel-note,
+.attendance-excel-result-grid > div {
+  background: var(--excel-surface) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.attendance-excel-context span,
+.attendance-excel-note span,
+.attendance-excel-result p,
+.attendance-excel-result-grid span,
+.attendance-excel-field > span,
+.attendance-excel-field small,
+.attendance-excel-register-range span {
+  color: var(--excel-muted) !important;
+}
+
+.attendance-excel-field select,
+.attendance-excel-field input,
+.attendance-excel-register-range input {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border-color: var(--input-border, var(--excel-border)) !important;
+}
+
 `;

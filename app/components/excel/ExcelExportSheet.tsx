@@ -24,6 +24,8 @@ import {
   useEffect,
 } from "react";
 
+import { createPortal } from "react-dom";
+
 export interface ExcelExportAction {
   key: string;
 
@@ -84,7 +86,8 @@ export default function ExcelExportSheet({
     document.body.style.overflow =
       "hidden";
 
-    return () => {
+    return createPortal(
+    () => {
       document.body.style.overflow =
         previousOverflow;
     };
@@ -124,7 +127,7 @@ export default function ExcelExportSheet({
     open,
   ]);
 
-  if (!open) {
+  if (!open || typeof document === "undefined") {
     return null;
   }
 
@@ -269,6 +272,35 @@ export default function ExcelExportSheet({
 
         <style jsx>{`
         .excel-export-overlay {
+          --eds-bg: var(--bg, var(--background, #f7f8fb));
+          --eds-surface: var(--surface, var(--card, var(--card-bg, #ffffff)));
+          --eds-surface-soft: var(
+            --surface-2,
+            var(
+              --muted-surface,
+              color-mix(in srgb, var(--eds-surface) 92%, var(--eds-text) 8%)
+            )
+          );
+          --eds-text: var(--text, var(--foreground, #172033));
+          --eds-text-muted: var(
+            --muted,
+            var(
+              --muted-foreground,
+              color-mix(in srgb, var(--eds-text) 62%, transparent)
+            )
+          );
+          --eds-border: var(
+            --border,
+            color-mix(in srgb, var(--eds-text) 14%, transparent)
+          );
+          --eds-accent: var(--primary-color, #2563eb);
+          --eds-accent-soft: color-mix(
+            in srgb,
+            var(--eds-accent) 12%,
+            var(--eds-surface)
+          );
+          color-scheme: light dark;
+          color: var(--eds-text);
           position: fixed;
           top: calc(
             var(--eds-shell-top-offset, 0px) +
@@ -289,6 +321,50 @@ export default function ExcelExportSheet({
           overflow: hidden;
           background: rgba(15, 23, 42, 0.48);
           backdrop-filter: blur(5px);
+        }
+
+        .excel-export-overlay *,
+        .excel-export-overlay *::before,
+        .excel-export-overlay *::after {
+          box-sizing: border-box;
+        }
+
+        .excel-export-overlay button,
+        .excel-export-overlay input,
+        .excel-export-overlay select,
+        .excel-export-overlay textarea {
+          font: inherit;
+        }
+
+        .excel-export-overlay input,
+        .excel-export-overlay select,
+        .excel-export-overlay textarea {
+          background: var(--eds-surface);
+          color: var(--eds-text);
+          border-color: var(--eds-border);
+        }
+
+        .excel-export-overlay input::placeholder,
+        .excel-export-overlay textarea::placeholder {
+          color: var(--eds-text-muted);
+          opacity: 1;
+        }
+
+        .excel-export-overlay select option {
+          background: var(--eds-surface);
+          color: var(--eds-text);
+        }
+
+        .excel-export-overlay strong,
+        .excel-export-overlay h1,
+        .excel-export-overlay h2,
+        .excel-export-overlay h3 {
+          color: var(--eds-text);
+        }
+
+        .excel-export-overlay small,
+        .excel-export-overlay p {
+          color: var(--eds-text-muted);
         }
 
         .excel-export-sheet {
@@ -495,5 +571,7 @@ export default function ExcelExportSheet({
       `}</style>
       </section>
     </div>
+    ),
+    document.body,
   );
 }

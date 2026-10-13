@@ -1,21 +1,30 @@
+
 /**
  * app/lib/sync/workspaceBootstrap.ts
  * --------------------------------------------------------------------------
- * Phase 21 priority selected-workspace bootstrap.
+ * NON-BLOCKING ROLE-WIDE WORKSPACE BOOTSTRAP — PLATFORM V2
  *
- * The endpoint returns one role-scoped bundle. This module:
- * - validates the authenticated account;
- * - uses a cache-aware local readiness fast path;
- * - applies local-first and platform-cache records in one Dexie transaction;
- * - quarantines malformed records;
- * - publishes one change event after the transaction;
- * - stores a workspace bootstrap marker and fast branding/settings cache.
+ * The existing backend returns ONE role-scoped response. This implementation
+ * preserves that API and the schema-v3 completeness contract, but applies the
+ * returned records in bounded Dexie transactions rather than one giant one.
+ *
+ * Features:
+ * - permanent string IDs in requests and local records;
+ * - scoped progress and completion markers (including table coverage);
+ * - per-batch events so pages can update while records are being saved;
+ * - protection for pending/failed/conflicted local writes;
+ * - account/workspace checks before applying each batch;
+ * - no false "complete" state after a failed or truncated bootstrap.
+ *
+ * NOTE: The server still sends one bundle. Network-level pagination, resume
+ * cursors and active-module prioritization REQUIRE matching backend changes.
  */
 
 import { db } from "../db";
 
 import {
   assertAccountId,
+  getAccountId,
   getDeviceId,
   SYNC_STATUS_VALUE,
 } from "./syncConfig";
@@ -34,13 +43,8 @@ import {
   validatePullRecord,
 } from "./syncIntegrity";
 
-import {
-  publishSyncPullCompleted,
-} from "./syncEvents";
-
-import {
-  appearanceScopeForRole,
-} from "../theme/appearanceScope";
+import { publishSyncPullCompleted } from "./syncEvents";
+import { appearanceScopeForRole } from "../theme/appearanceScope";
 
 export type WorkspaceBootstrapMembership = {
   id?: string | number | null;
@@ -56,17 +60,10 @@ export type WorkspaceBootstrapMembership = {
 
 export type WorkspaceBootstrapRecord = {
   tableName: string;
-
-  /** Permanent Dexie entity UUID. */
   localId?: string;
-
-  /** Prisma SyncRecord UUID. */
   cloudId?: string;
-
-  /** Temporary compatibility aliases. */
   entityId?: string;
   id?: string;
-
   accountId: string;
   deviceId?: string;
   version: number;
@@ -125,11 +122,7 @@ export type WorkspaceBootstrapResponse = {
 };
 
 export type WorkspaceBootstrapProgress = {
-  stage:
-    | "checking-cache"
-    | "requesting"
-    | "applying"
-    | "ready";
+  stage: "checking-cache" | "requesting" | "applying" | "ready";
   title: string;
   detail: string;
   percent: number;
@@ -154,21 +147,17 @@ export type WorkspaceBootstrapResult = {
   workspace?: WorkspaceBootstrapResponse["workspace"];
 };
 
-const WORKSPACE_BOOTSTRAP_ENDPOINT =
-  "/sync/workspace-bootstrap";
-
-const MARKER_PREFIX =
-  "eleeveon_workspace_bootstrap";
-
-const SETTINGS_CACHE_PREFIX =
-  "eleeveon_cached_settings";
-
-/**
- * Bump when the definition of a complete initial workspace changes.
- * Version 3 requires the complete Platform V2 local-first registry, including intelligent scheduling and feedback tables.
- */
 export const WORKSPACE_BOOTSTRAP_SCHEMA_VERSION = 3;
+export const CURRENT_WORKSPACE_SETTINGS_KEY =
+  "eleeveon_current_workspace_settings";
+export const WORKSPACE_BOOTSTRAP_STATUS_EVENT =
+  "eleeveon:workspace-bootstrap-status";
 
+const ENDPOINT = "/sync/workspace-bootstrap";
+const MARKER_PREFIX = "eleeveon_workspace_bootstrap";
+const SETTINGS_CACHE_PREFIX = "eleeveon_cached_settings";
+const STATUS_PREFIX = "eleeveon_workspace_bootstrap_status";
+const BATCH_SIZE = 150;
 
 export type ScopedWorkspaceSettingsCache = {
   accountId: string;
@@ -181,108 +170,131 @@ export type ScopedWorkspaceSettingsCache = {
   bootstrapRevision?: string;
 };
 
-export const CURRENT_WORKSPACE_SETTINGS_KEY =
-  "eleeveon_current_workspace_settings";
+export type WorkspaceDownloadStatus =
+  | "not_downloaded"
+  | "downloading"
+  | "partial"
+  | "complete"
+  | "failed";
 
-function cleanString(
-  value: unknown,
-) {
-  const result =
-    String(value ?? "").trim();
+export type WorkspaceDownloadState = {
+  status: WorkspaceDownloadStatus;
+  accountId: string;
+  membershipId: string;
+  schemaVersion: number;
+  startedAt?: number;
+  updatedAt: number;
+  completedAt?: number;
+  processed: number;
+  total?: number;
+  includedTables?: string[];
+  tablesWithRecords?: string[];
+  tableCounts?: Record<string, number>;
+  error?: string;
+};
 
-  return result || undefined;
+export type WorkspaceTableAvailability =
+  | "not_downloaded"
+  | "downloading"
+  | "partial"
+  | "complete"
+  | "failed";
+
+function clean(value: unknown): string | undefined {
+  const parsed = String(value ?? "").trim();
+  return parsed || undefined;
 }
 
-function cleanOptionalId(value: unknown): string | null {
-  const id = String(value ?? "").trim();
-  return id || null;
+function cleanId(value: unknown): string | null {
+  return clean(value) ?? null;
 }
 
-function positiveNumber(
-  value: unknown,
-) {
-  const parsed =
-    Number(value);
-
-  return Number.isFinite(parsed) &&
-    parsed > 0
-    ? parsed
-    : undefined;
+function normalizeRole(value: unknown): string {
+  const role = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  return role === "owner" ? "super_admin" : role;
 }
 
-function normalizeRole(
-  value: unknown,
-) {
-  const role =
-    String(value || "")
-      .trim()
-      .toLowerCase()
-      .replace(/-/g, "_");
-
-  if (role === "owner") {
-    return "super_admin";
-  }
-
-  return role;
-}
-
-function membershipId(
-  membership:
-    WorkspaceBootstrapMembership,
-) {
+function membershipId(membership: WorkspaceBootstrapMembership): string {
   return (
-    cleanString(membership.id) ||
+    clean(membership.id) ||
     [
-      normalizeRole(
-        membership.role,
-      ),
-      positiveNumber(
-        membership.schoolId,
-      ) || "account",
-      positiveNumber(
-        membership.branchId,
-      ) || "root",
-      positiveNumber(
-        membership.teacherId,
-      ) ||
-        positiveNumber(
-          membership.studentId,
-        ) ||
-        positiveNumber(
-          membership.parentId,
-        ) ||
+      normalizeRole(membership.role),
+      cleanId(membership.schoolId) || "account",
+      cleanId(membership.branchId) || "root",
+      cleanId(membership.teacherId) ||
+        cleanId(membership.studentId) ||
+        cleanId(membership.parentId) ||
         "profile",
     ].join(":")
   );
 }
 
+function workspaceIdentity(
+  accountId: string,
+  membership: WorkspaceBootstrapMembership,
+): string {
+  return [
+    accountId,
+    membershipId(membership),
+    normalizeRole(membership.role),
+    cleanId(membership.schoolId) || "school-none",
+    cleanId(membership.branchId) || "branch-none",
+  ].join(":");
+}
+
 function storageKey(
   accountId: string,
-  membership:
-    WorkspaceBootstrapMembership,
-) {
+  membership: WorkspaceBootstrapMembership,
+): string {
   return [
     MARKER_PREFIX,
     accountId,
     membershipId(membership),
-    cleanOptionalId(membership.schoolId) || "school-none",
-    cleanOptionalId(membership.branchId) || "branch-none",
+    cleanId(membership.schoolId) || "school-none",
+    cleanId(membership.branchId) || "branch-none",
   ].join(":");
+}
+
+function statusKey(
+  accountId: string,
+  membership: WorkspaceBootstrapMembership,
+): string {
+  return `${STATUS_PREFIX}:${workspaceIdentity(accountId, membership)}`;
 }
 
 export function getScopedWorkspaceSettingsKey(
   accountId: string,
-  membership:
-    WorkspaceBootstrapMembership,
-) {
+  membership: WorkspaceBootstrapMembership,
+): string {
   return [
     SETTINGS_CACHE_PREFIX,
     accountId,
-    cleanOptionalId(membership.schoolId) || "school-none",
-    cleanOptionalId(membership.branchId) || "branch-none",
+    cleanId(membership.schoolId) || "school-none",
+    cleanId(membership.branchId) || "branch-none",
   ].join(":");
 }
 
+function readJson<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const value = window.localStorage.getItem(key);
+    return value ? (JSON.parse(value) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(key: string, value: unknown): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Quota/private-mode failures must not interrupt Dexie writes.
+  }
+}
 
 export function readScopedWorkspaceSettingsCache(
   accountId: string,
@@ -299,178 +311,182 @@ export function readCurrentWorkspaceSettingsCache() {
   );
 }
 
-function readJson<T>(
-  key: string,
-): T | null {
+type CompletionMarker = {
+  completedAt?: number;
+  bootstrapSchemaVersion?: number;
+  includedTables?: string[];
+  tablesWithRecords?: string[];
+  tableCounts?: Record<string, number>;
+  bootstrapRevision?: string;
+};
+
+function completionMarker(
+  accountId: string,
+  membership: WorkspaceBootstrapMembership,
+): CompletionMarker | null {
+  const marker = readJson<CompletionMarker>(storageKey(accountId, membership));
   if (
-    typeof window === "undefined"
+    !marker?.completedAt ||
+    marker.bootstrapSchemaVersion !== WORKSPACE_BOOTSTRAP_SCHEMA_VERSION
   ) {
     return null;
   }
-
-  try {
-    const raw =
-      window.localStorage.getItem(
-        key,
-      );
-
-    return raw
-      ? JSON.parse(raw) as T
-      : null;
-  } catch {
-    return null;
-  }
+  return marker;
 }
 
-function writeJson(
-  key: string,
-  value: unknown,
-) {
-  if (
-    typeof window === "undefined"
-  ) {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(
-      key,
-      JSON.stringify(value),
+function updateDownloadState(
+  accountId: string,
+  membership: WorkspaceBootstrapMembership,
+  next: WorkspaceDownloadState,
+): void {
+  writeJson(statusKey(accountId, membership), next);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(WORKSPACE_BOOTSTRAP_STATUS_EVENT, {
+        detail: {
+          accountId,
+          membershipId: membershipId(membership),
+          status: next.status,
+          processed: next.processed,
+          total: next.total,
+        },
+      }),
     );
-  } catch {}
+  }
 }
 
-async function findById(
-  table: any,
-  id?: string,
-) {
+export function readWorkspaceBootstrapDownloadState(
+  membership: WorkspaceBootstrapMembership,
+): WorkspaceDownloadState | null {
+  const accountId = getAccountId();
+  if (!accountId) return null;
+
+  const saved = readJson<WorkspaceDownloadState>(statusKey(accountId, membership));
+  const marker = completionMarker(accountId, membership);
+  if (saved?.schemaVersion === WORKSPACE_BOOTSTRAP_SCHEMA_VERSION) {
+    return saved;
+  }
+  if (!marker) return null;
+
+  return {
+    status: "complete",
+    accountId,
+    membershipId: membershipId(membership),
+    schemaVersion: WORKSPACE_BOOTSTRAP_SCHEMA_VERSION,
+    updatedAt: marker.completedAt!,
+    completedAt: marker.completedAt,
+    processed: 0,
+    includedTables: marker.includedTables,
+    tablesWithRecords: marker.tablesWithRecords,
+    tableCounts: marker.tableCounts,
+  };
+}
+
+/**
+ * `complete` is only reported when this table is in a valid, complete
+ * workspace marker. Partial rows never imply a complete dataset.
+ * A full role bootstrap does NOT prove completeness for another role/scope.
+ */
+export function getWorkspaceTableAvailability(
+  membership: WorkspaceBootstrapMembership,
+  tableName: string,
+): WorkspaceTableAvailability {
+  const accountId = getAccountId();
+  if (!accountId) return "not_downloaded";
+  const marker = completionMarker(accountId, membership);
+  if (marker?.includedTables?.includes(tableName)) return "complete";
+  const state = readWorkspaceBootstrapDownloadState(membership);
+  if (!state) return "not_downloaded";
+  if (state.status === "complete") return "not_downloaded";
+  return state.status;
+}
+
+function assertWorkspaceUnchanged(
+  accountId: string,
+  membership: WorkspaceBootstrapMembership,
+): void {
+  if (getAccountId() !== accountId) {
+    throw new Error("The active account changed during workspace download.");
+  }
+  if (membership.accountId && clean(membership.accountId) !== accountId) {
+    throw new Error("Workspace membership does not belong to this account.");
+  }
+  if (typeof window === "undefined") return;
+
+  const opened = readJson<{
+    membershipId?: string;
+    membership?: WorkspaceBootstrapMembership;
+    role?: string;
+    schoolId?: string | null;
+    branchId?: string | null;
+  }>("eleeveon_open_workspace");
+
+  if (!opened) return;
+  const current = opened.membership || {
+    id: opened.membershipId,
+    role: opened.role,
+    schoolId: opened.schoolId,
+    branchId: opened.branchId,
+  };
+  if (workspaceIdentity(accountId, current) !== workspaceIdentity(accountId, membership)) {
+    throw new Error("The selected role or workspace changed during download.");
+  }
+}
+
+async function findById(table: any, id?: string) {
   if (!id) return null;
-
   try {
-    const indexed =
-      await table
-        .where("id")
-        .equals(id)
-        .first();
-
-    if (indexed) {
-      return indexed;
-    }
+    const direct = await table.get(id);
+    if (direct) return direct;
   } catch {}
-
-  const rows =
-    await table.toArray();
-
-  return (
-    rows.find(
-      (row: any) =>
-        String(
-          row.id || "",
-        ) === id,
-    ) || null
-  );
+  try {
+    return (await table.where("id").equals(id).first()) || null;
+  } catch {
+    const rows = await table.toArray();
+    return rows.find((row: any) => String(row.id || "") === id) || null;
+  }
 }
 
 async function findExistingRecord(
   tableName: string,
   table: any,
-  record:
-    WorkspaceBootstrapRecord,
+  record: WorkspaceBootstrapRecord,
 ) {
-  const permanentId =
-    cleanString(
-      record.localId ||
-        record.entityId ||
-        record.payload?.id ||
-        record.id,
-    );
+  const permanentId = clean(
+    record.localId || record.entityId || record.payload?.id || record.id,
+  );
+  const direct = await findById(table, permanentId);
+  if (direct) return direct;
 
-  const directMatch =
-    await findById(
-      table,
-      permanentId,
-    );
-
-  if (directMatch) {
-    return directMatch;
-  }
-
-  const cloudId =
-    cleanString(
-      record.cloudId ||
-        record.payload?.cloudId,
-    );
-
+  const cloudId = clean(record.cloudId || record.payload?.cloudId);
   if (cloudId) {
     try {
-      const indexed =
-        await table
-          .where("cloudId")
-          .equals(cloudId)
-          .first();
-
-      if (indexed) {
-        return indexed;
-      }
-    } catch {}
-
-    const rows =
-      await table.toArray();
-
-    const cloudMatch =
-      rows.find(
-        (row: any) =>
-          String(
-            row.cloudId || "",
-          ) === cloudId,
-      );
-
-    if (cloudMatch) {
-      return cloudMatch;
+      const indexed = await table.where("cloudId").equals(cloudId).first();
+      if (indexed) return indexed;
+    } catch {
+      const rows = await table.toArray();
+      const match = rows.find((row: any) => String(row.cloudId || "") === cloudId);
+      if (match) return match;
     }
   }
 
-  if (
-    tableName ===
-    "mediaAssets"
-  ) {
-    const identityKey =
-      cleanString(
-        record.payload
-          ?.ownerIdentityKey,
-      );
-
+  if (tableName === "mediaAssets") {
+    const identityKey = clean(record.payload?.ownerIdentityKey);
     if (identityKey) {
       try {
-        const indexed =
-          await table
-            .where(
-              "ownerIdentityKey",
-            )
-            .equals(
-              identityKey,
-            )
-            .first();
-
-        if (indexed) {
-          return indexed;
-        }
-      } catch {}
-
-      const rows =
-        await table.toArray();
-
-      const exact =
-        rows.find(
+        const indexed = await table
+          .where("ownerIdentityKey")
+          .equals(identityKey)
+          .first();
+        if (indexed && indexed.accountId === record.accountId) return indexed;
+      } catch {
+        const rows = await table.toArray();
+        const match = rows.find(
           (row: any) =>
-            row.accountId ===
-              record.accountId &&
-            row.ownerIdentityKey ===
-              identityKey,
+            row.accountId === record.accountId &&
+            row.ownerIdentityKey === identityKey,
         );
-
-      if (exact) {
-        return exact;
+        if (match) return match;
       }
     }
   }
@@ -479,316 +495,142 @@ async function findExistingRecord(
 }
 
 function cleanIncomingPayload(
-  record:
-    WorkspaceBootstrapRecord,
+  record: WorkspaceBootstrapRecord,
   permanentId: string,
 ) {
-  const payload = {
-    ...(record.payload ||
-      {}),
-  };
-
+  const payload = { ...(record.payload || {}) };
   for (const key of [
-    "blob",
-    "file",
-    "originalFile",
-    "optimizedFile",
-    "localBlob",
-    "localBlobData",
-    "previewUrl",
-    "objectUrl",
-    "localObjectUrl",
-    "dataUrl",
-    "base64",
+    "blob", "file", "originalFile", "optimizedFile", "localBlob",
+    "localBlobData", "previewUrl", "objectUrl", "localObjectUrl",
+    "dataUrl", "base64",
   ]) {
     delete payload[key];
   }
-
-  payload.id =
-    permanentId;
-
+  payload.id = permanentId;
   return payload;
 }
 
 async function applyLocalFirstRecord(
-  record:
-    WorkspaceBootstrapRecord,
+  record: WorkspaceBootstrapRecord,
   accountId: string,
   fallbackDeviceId: string,
-) {
-  const table =
-    (db as any)[
-      record.tableName
-    ];
+): Promise<boolean> {
+  const table = (db as any)[record.tableName];
+  if (!table) return false;
 
-  if (!table) {
-    return false;
+  const existing = await findExistingRecord(record.tableName, table, record);
+  const permanentId = clean(
+    existing?.id || record.localId || record.entityId || record.payload?.id || record.id,
+  );
+  if (!permanentId) {
+    throw new Error(`Workspace record for "${record.tableName}" has no permanent ID.`);
   }
 
-  const existing =
-    await findExistingRecord(
-      record.tableName,
-      table,
-      record,
-    );
-
-  const permanentId =
-    cleanString(
-      existing?.id ||
-        record.localId ||
-        record.entityId ||
-        record.payload?.id ||
-        record.id,
-    );
-
-  if (!permanentId) {
-    throw new Error(
-      `Workspace bootstrap record for "${record.tableName}" has no permanent localId.`,
-    );
+  // A role bootstrap is a pull, not authority to overwrite local pending work.
+  if (
+    existing?.synced === SYNC_STATUS_VALUE.PENDING ||
+    existing?.synced === SYNC_STATUS_VALUE.ERROR ||
+    existing?.synced === SYNC_STATUS_VALUE.CONFLICT
+  ) {
+    return false;
   }
 
   const incoming = {
-    ...cleanIncomingPayload(
-      record,
-      permanentId,
-    ),
-    cloudId:
-      cleanString(
-        record.cloudId ||
-          record.payload
-            ?.cloudId,
-      ) ??
-      undefined,
+    ...cleanIncomingPayload(record, permanentId),
+    id: permanentId,
+    cloudId: clean(record.cloudId || record.payload?.cloudId) ?? undefined,
     accountId,
-    deviceId:
-      record.deviceId ||
-      record.payload
-        ?.deviceId ||
-      fallbackDeviceId,
-    version:
-      Number(
-        record.version ||
-          record.payload
-            ?.version ||
-          1,
-      ),
-    updatedAt:
-      Number(
-        record.updatedAt ||
-          record.payload
-            ?.updatedAt ||
-          Date.now(),
-      ),
-    isDeleted:
-      Boolean(
-        record.isDeleted ||
-        record.payload
-          ?.isDeleted,
-      ),
-    synced:
-      SYNC_STATUS_VALUE.SYNCED,
-    syncError:
-      undefined,
+    deviceId: record.deviceId || record.payload?.deviceId || fallbackDeviceId,
+    version: Number(record.version ?? record.payload?.version ?? 1),
+    updatedAt: Number(record.updatedAt ?? record.payload?.updatedAt ?? Date.now()),
+    isDeleted: Boolean(record.isDeleted || record.payload?.isDeleted),
+    synced: SYNC_STATUS_VALUE.SYNCED,
+    syncError: undefined,
   };
 
-  const currentVersion =
-    Number(
-      existing?.version ||
-        0,
-    );
-
-  const currentUpdatedAt =
-    Number(
-      existing?.updatedAt ||
-        0,
-    );
-
+  const oldVersion = Number(existing?.version || 0);
+  const oldUpdated = Number(existing?.updatedAt || 0);
   if (
     existing &&
-    (
-      currentVersion >
-        incoming.version ||
-      (
-        currentVersion ===
-          incoming.version &&
-        currentUpdatedAt >
-          incoming.updatedAt
-      )
-    )
+    (oldVersion > incoming.version ||
+      (oldVersion === incoming.version && oldUpdated > incoming.updatedAt))
   ) {
     return false;
   }
 
-  await table.put({
-    ...incoming,
-    id: permanentId,
-  });
-
+  await table.put(incoming);
   return true;
 }
 
-async function applyCacheRecord(
-  record: any,
-  accountId: string,
-) {
-  if (
-    !record?.tableName ||
-    !isBackendCacheTable(
-      record.tableName,
-    )
-  ) {
+async function applyCacheRecord(record: any, accountId: string) {
+  if (!record?.tableName || !isBackendCacheTable(record.tableName)) {
     return false;
   }
-
-  const table =
-    (db as any)[
-      record.tableName
-    ];
-
-  if (!table) {
-    return false;
+  const table = (db as any)[record.tableName];
+  if (!table) return false;
+  const payload = { ...(record.payload || {}) };
+  const id = clean(record.id || payload.id || (
+    record.tableName === "accounts" ? accountId : null
+  ));
+  if (!id) return false;
+  payload.id = id;
+  if (!payload.accountId && record.tableName !== "subscriptionPlans") {
+    payload.accountId = accountId;
   }
-
-  const payload = {
-    ...(record.payload ||
-      {}),
-  };
-
-  const id =
-    record.id ||
-    payload.id ||
-    record.id ||
-    payload.id ||
-    (
-      record.tableName ===
-      "accounts"
-        ? accountId
-        : undefined
-    );
-
-  if (!id) {
-    return false;
-  }
-
-  payload.id =
-    String(id);
-
-  if (
-    !payload.accountId &&
-    record.tableName !==
-      "subscriptionPlans"
-  ) {
-    payload.accountId =
-      accountId;
-  }
-
   if (record.isDeleted) {
-    await table.delete(
-      String(id),
-    );
-
+    await table.delete(id);
     return true;
   }
-
-  await table.put(
-    payload,
-  );
-
+  await table.put(payload);
   return true;
 }
 
 async function actualWorkspaceReady(
   accountId: string,
-  membership:
-    WorkspaceBootstrapMembership,
+  membership: WorkspaceBootstrapMembership,
 ) {
-  const role =
-    normalizeRole(
-      membership.role,
-    );
+  const scope = appearanceScopeForRole(normalizeRole(membership.role));
+  if (scope === "platform" || scope === "account") return true;
 
-  const appearanceScope =
-    appearanceScopeForRole(role);
+  const schoolId = cleanId(membership.schoolId);
+  const branchId = cleanId(membership.branchId);
+  if (!schoolId) return false;
 
-  if (
-    appearanceScope === "platform" ||
-    appearanceScope === "account"
-  ) {
-    return true;
-  }
+  const schools: any[] = (await (db as any).schools?.toArray?.()) || [];
+  const schoolFound = schools.some(
+    (row: any) =>
+      row.accountId === accountId &&
+      !row.isDeleted &&
+      String(row.id || row.entityId || "") === schoolId,
+  );
+  if (scope === "school") return schoolFound;
+  if (!schoolFound || !branchId) return false;
 
-  const schoolId =
-    cleanOptionalId(membership.schoolId);
+  const branchTable = (db as any).branches;
+  const settingsTable = (db as any).schoolBranchSettings;
+  if (!branchTable || !settingsTable) return false;
 
-  const branchId =
-    cleanOptionalId(membership.branchId);
-
-  if (!schoolId) {
-    return false;
-  }
-
-  if (appearanceScope === "school") {
-    const schools = await (db as any).schools?.toArray?.() || [];
-    return schools.some(
-      (row: any) =>
-        row.accountId === accountId &&
-        !row.isDeleted &&
-        String(row.id || row.entityId || "") === schoolId,
-    );
-  }
-
-  if (!branchId) {
-    return false;
-  }
-
-  const branchTable =
-    (db as any).branches;
-
-  const settingsTable =
-    (db as any)
-      .schoolBranchSettings;
-
-  if (
-    !branchTable ||
-    !settingsTable
-  ) {
-    return false;
-  }
-
-  const [
-    branches,
-    settings,
-  ] = await Promise.all([
+  const [branches, settings] = await Promise.all([
     branchTable.toArray(),
     settingsTable.toArray(),
   ]);
-
-  const branchExists =
+  return (
     branches.some(
       (row: any) =>
-        row.accountId ===
-          accountId &&
+        row.accountId === accountId &&
         !row.isDeleted &&
         String(row.id || row.entityId || "") === branchId &&
         String(row.schoolId || "") === schoolId,
-    );
-
-  const settingsExist =
+    ) &&
     settings.some(
       (row: any) =>
-        row.accountId ===
-          accountId &&
+        row.accountId === accountId &&
         !row.isDeleted &&
         String(row.schoolId || "") === schoolId &&
         String(row.branchId || "") === branchId,
-    );
-
-  return (
-    branchExists &&
-    settingsExist
+    )
   );
 }
-
 
 async function readCommittedWorkspaceSummary(
   accountId: string,
@@ -796,10 +638,10 @@ async function readCommittedWorkspaceSummary(
 ) {
   const role = normalizeRole(membership.role);
   const appearanceScope = appearanceScopeForRole(role);
-  const schoolId = cleanOptionalId(membership.schoolId);
-  const branchId = cleanOptionalId(membership.branchId);
+  const schoolId = cleanId(membership.schoolId);
+  const branchId = cleanId(membership.branchId);
 
-  const [schools, branches, settingsRows] = await Promise.all([
+  const [schools, branches, settingsRows]: any[] = await Promise.all([
     (db as any).schools?.toArray?.() || [],
     (db as any).branches?.toArray?.() || [],
     (db as any).schoolBranchSettings?.toArray?.() || [],
@@ -824,7 +666,7 @@ async function readCommittedWorkspaceSummary(
       ) || null
     : null;
 
-  const exactSettings =
+  const settings =
     appearanceScope === "branch" && schoolId && branchId
       ? settingsRows
           .filter(
@@ -835,151 +677,183 @@ async function readCommittedWorkspaceSummary(
               String(row.branchId || "") === branchId,
           )
           .sort(
-            (left: any, right: any) =>
-              Number(right.updatedAt || 0) - Number(left.updatedAt || 0),
+            (a: any, b: any) =>
+              Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
           )[0] || null
       : null;
 
   const cached = readScopedWorkspaceSettingsCache(accountId, membership);
-  const settings = exactSettings ||
+  const resolvedSettings =
+    settings ||
     (cached?.appearanceScope === appearanceScope ? cached.settings : null);
 
   return {
     appearanceScope,
     school,
     branch,
-    settings,
+    settings: resolvedSettings,
     workspace: {
       appearanceScope,
       school,
       branch,
-      settings,
+      settings: resolvedSettings,
       academicPeriod: null,
     },
   };
 }
 
+function isFullTableRegistryRequired(role: string): boolean {
+  return [
+    "super_admin", "admin", "school_admin", "branch_admin", "accountant",
+  ].includes(role);
+}
+
 export async function isWorkspaceLocallyReady(
-  membership:
-    WorkspaceBootstrapMembership,
+  membership: WorkspaceBootstrapMembership,
 ) {
-  const accountId =
-    assertAccountId();
+  const accountId = assertAccountId();
+  const marker = completionMarker(accountId, membership);
+  if (!marker) return false;
 
-  const marker =
-    readJson<{
-      completedAt?: number;
-      bootstrapRevision?: string;
-      bootstrapSchemaVersion?: number;
-      includedTables?: string[];
-    }>(
-      storageKey(
-        accountId,
-        membership,
-      ),
-    );
-
-  if (
-    !marker?.completedAt ||
-    marker.bootstrapSchemaVersion !==
-      WORKSPACE_BOOTSTRAP_SCHEMA_VERSION
-  ) {
-    return false;
-  }
-
-  const role =
-    normalizeRole(
-      membership.role,
-    );
-
-  if (
-    [
-      "super_admin",
-      "admin",
-      "school_admin",
-      "branch_admin",
-      "accountant",
-    ].includes(role)
-  ) {
-    const included =
-      new Set(
-        marker.includedTables ||
-          [],
-      );
-
-    const complete =
-      LOCAL_FIRST_SYNC_TABLES.every(
-        (table) =>
-          included.has(table),
-      );
-
-    if (!complete) {
+  if (isFullTableRegistryRequired(normalizeRole(membership.role))) {
+    const included = new Set(marker.includedTables || []);
+    if (!LOCAL_FIRST_SYNC_TABLES.every((table) => included.has(table))) {
       return false;
     }
   }
 
-  return actualWorkspaceReady(
-    accountId,
-    membership,
-  );
+  return actualWorkspaceReady(accountId, membership);
 }
 
+type BootstrapItem =
+  | { kind: "record"; value: WorkspaceBootstrapRecord }
+  | { kind: "cache"; value: NonNullable<WorkspaceBootstrapResponse["cacheRecords"]>[number] }
+  | { kind: "quarantine"; value: NonNullable<WorkspaceBootstrapResponse["quarantineRecords"]>[number] };
+
+/**
+ * Each chunk uses its own atomic transaction. Earlier committed chunks remain
+ * locally available if the next chunk fails; no completeness marker is written.
+ */
+async function applyBatch(
+  batch: BootstrapItem[],
+  accountId: string,
+  deviceId: string,
+): Promise<{
+  applied: number;
+  cacheApplied: number;
+  quarantined: number;
+  changedTables: Set<string>;
+}> {
+  const tables = new Set<any>();
+  const quarantineTable = (db as any).syncQuarantine;
+  if (quarantineTable) tables.add(quarantineTable);
+
+  for (const item of batch) {
+    if (item.kind === "quarantine") continue;
+    const tableName = item.value.tableName;
+    const allowed = item.kind === "record"
+      ? isSyncTable(tableName)
+      : isBackendCacheTable(tableName);
+    if (allowed && (db as any)[tableName]) {
+      tables.add((db as any)[tableName]);
+    }
+  }
+
+  let applied = 0;
+  let cacheApplied = 0;
+  let quarantined = 0;
+  const changedTables = new Set<string>();
+
+  if (!tables.size) {
+    return { applied, cacheApplied, quarantined, changedTables };
+  }
+
+  await db.transaction("rw", [...tables], async () => {
+    for (const item of batch) {
+      if (item.kind === "quarantine") {
+        const malformed = item.value;
+        await quarantineSyncRecord({
+          source: "pull",
+          accountId,
+          tableName: malformed.record?.tableName,
+          entityId: malformed.record?.entityId,
+          id: malformed.record?.id,
+          reason: malformed.reason || "Backend quarantined a malformed record.",
+          payload: malformed.record || malformed,
+        });
+        quarantined++;
+      } else if (item.kind === "record") {
+        const record = item.value;
+        const integrity = validatePullRecord(record, accountId);
+        if (!integrity.ok) {
+          await quarantineSyncRecord({
+            source: "pull",
+            accountId,
+            tableName: record.tableName,
+            entityId: record.entityId,
+            id: record.id,
+            reason: integrityReason(integrity.issues),
+            payload: record,
+          });
+          quarantined++;
+          continue;
+        }
+        if (
+          isSyncTable(record.tableName) &&
+          await applyLocalFirstRecord(record, accountId, deviceId)
+        ) {
+          applied++;
+          changedTables.add(record.tableName);
+        }
+      } else if (item.kind === "cache") {
+        if (await applyCacheRecord(item.value, accountId)) {
+          cacheApplied++;
+          changedTables.add(item.value.tableName);
+        }
+      }
+    }
+  });
+
+  return { applied, cacheApplied, quarantined, changedTables };
+}
+
+/**
+ * Fetch and apply an entire selected-role workspace in the background.
+ * NOTE: Network request is still ONE bundle, not paginated.
+ */
 export async function bootstrapSelectedWorkspace(
-  membership:
-    WorkspaceBootstrapMembership,
+  membership: WorkspaceBootstrapMembership,
   options?: {
     force?: boolean;
     allowCached?: boolean;
-    onProgress?: (
-      progress:
-        WorkspaceBootstrapProgress,
-    ) => void;
+    onProgress?: (progress: WorkspaceBootstrapProgress) => void;
   },
 ): Promise<WorkspaceBootstrapResult> {
-  const accountId =
-    assertAccountId();
-
-  const deviceId =
-    getDeviceId();
-
-  const role =
-    normalizeRole(
-      membership.role,
-    );
+  const accountId = assertAccountId();
+  const deviceId = getDeviceId();
+  const role = normalizeRole(membership.role);
+  assertWorkspaceUnchanged(accountId, membership);
 
   options?.onProgress?.({
-    stage:
-      "checking-cache",
-    title:
-      "Checking saved workspace…",
-    detail:
-      "Looking for a complete local workspace bundle.",
+    stage: "checking-cache",
+    title: "Checking saved workspace…",
+    detail: "Checking complete locally saved records.",
     percent: 8,
   });
 
   if (
-    options?.allowCached !==
-      false &&
+    options?.allowCached !== false &&
     !options?.force &&
-    await isWorkspaceLocallyReady(
-      membership,
-    )
+    await isWorkspaceLocallyReady(membership)
   ) {
+    const summary = await readCommittedWorkspaceSummary(accountId, membership);
+    const marker = completionMarker(accountId, membership);
     options?.onProgress?.({
       stage: "ready",
-      title:
-        "Workspace ready",
-      detail:
-        "Opening from protected offline data.",
+      title: "Workspace ready",
+      detail: "Using previously downloaded offline records.",
       percent: 100,
     });
-
-    const cachedSummary =
-      await readCommittedWorkspaceSummary(
-        accountId,
-        membership,
-      );
-
     return {
       ready: true,
       fromCache: true,
@@ -987,494 +861,264 @@ export async function bootstrapSelectedWorkspace(
       cacheApplied: 0,
       quarantined: 0,
       changedTables: [],
-      completedAt: Date.now(),
-      appearanceScope:
-        cachedSummary.appearanceScope,
-      school: cachedSummary.school,
-      branch: cachedSummary.branch,
-      settings: cachedSummary.settings,
-      workspace: cachedSummary.workspace,
+      completedAt: marker?.completedAt || Date.now(),
+      bootstrapRevision: marker?.bootstrapRevision,
+      ...summary,
     };
   }
 
-  if (
-    typeof navigator !==
-      "undefined" &&
-    !navigator.onLine
-  ) {
+  if (typeof navigator !== "undefined" && !navigator.onLine) {
     throw new Error(
-      "This workspace has not finished its first download and the device is offline. Connect to the internet and try again.",
+      "Workspace data has not finished downloading and this device is offline.",
     );
   }
 
-  options?.onProgress?.({
-    stage: "requesting",
-    title:
-      "Preparing workspace…",
-    detail:
-      "Downloading all permitted workspace data for this role.",
-    percent: 18,
-  });
-
-  const response =
-    await syncHttp<WorkspaceBootstrapResponse>(
-      WORKSPACE_BOOTSTRAP_ENDPOINT,
-      {
-        method: "POST",
-        body: {
-          accountId,
-          deviceId,
-          membershipId:
-            cleanString(
-              membership.id,
-            ),
-          role,
-          schoolId:
-            positiveNumber(
-              membership.schoolId,
-            ),
-          branchId:
-            positiveNumber(
-              membership.branchId,
-            ),
-          teacherId:
-            positiveNumber(
-              membership.teacherId,
-            ),
-          studentId:
-            positiveNumber(
-              membership.studentId,
-            ),
-          parentId:
-            positiveNumber(
-              membership.parentId,
-            ),
-        },
-      },
-    );
-
-  if (
-    !response?.ok ||
-    response.accountId !==
-      accountId
-  ) {
-    throw new Error(
-      "The workspace bootstrap response did not match the active account.",
-    );
-  }
-
-  if (response.truncated) {
-    throw new Error(
-      "The server returned an incomplete workspace bundle. The portal was not opened.",
-    );
-  }
-
-  if (
-    response.bootstrapSchemaVersion !==
-      WORKSPACE_BOOTSTRAP_SCHEMA_VERSION
-  ) {
-    throw new Error(
-      "The server workspace-bootstrap version does not match this application build.",
-    );
-  }
-
-
-  const responseWorkspace = {
-    ...(response.workspace || {}),
-    appearanceScope:
-      response.workspace?.appearanceScope ||
-      appearanceScopeForRole(role),
-    school:
-      response.school ??
-      response.workspace?.school ??
-      null,
-    branch:
-      response.branch ??
-      response.workspace?.branch ??
-      null,
-    settings:
-      response.schoolBranchSettings ??
-      response.workspace?.settings ??
-      null,
-  } satisfies NonNullable<WorkspaceBootstrapResponse["workspace"]>;
-
-  response.workspace = responseWorkspace;
-  response.bootstrapRevision =
-    response.bootstrapRevision ||
-    response.revision;
-  response.includedTables =
-    response.includedTables ||
-    response.requiredTables ||
-    [];
-
-  if (
-    [
-      "super_admin",
-      "admin",
-      "school_admin",
-      "branch_admin",
-      "accountant",
-    ].includes(role)
-  ) {
-    const included =
-      new Set(
-        response.includedTables ||
-          [],
-      );
-
-    const missing =
-      LOCAL_FIRST_SYNC_TABLES.filter(
-        (table) =>
-          !included.has(table),
-      );
-
-    if (missing.length) {
-      throw new Error(
-        `The workspace response omitted required tables: ${missing.join(", ")}.`,
-      );
-    }
-  }
-
-  options?.onProgress?.({
-    stage: "applying",
-    title:
-      "Applying workspace data…",
-    detail:
-      "Saving the complete workspace bundle safely.",
-    percent: 30,
-    current: 0,
-    total:
-      Number(response.totalRecords || 0),
-  });
-
-  const records =
-    Array.isArray(
-      response.records,
-    )
-      ? response.records
-      : [];
-
-  const cacheRecords =
-    Array.isArray(
-      response.cacheRecords,
-    )
-      ? response.cacheRecords
-      : [];
-
-  const serverQuarantine =
-    Array.isArray(
-      response.quarantineRecords,
-    )
-      ? response.quarantineRecords
-      : [];
-
+  const startedAt = Date.now();
+  let processed = 0;
+  let total = 0;
   let applied = 0;
   let cacheApplied = 0;
   let quarantined = 0;
-  let processed = 0;
+  const changedTables = new Set<string>();
 
-  const totalToApply = Math.max(
-    1,
-    Number(response.totalRecords || records.length + cacheRecords.length),
-  );
+  const saveState = (
+    status: WorkspaceDownloadStatus,
+    extra: Partial<WorkspaceDownloadState> = {},
+  ) => {
+    updateDownloadState(accountId, membership, {
+      status,
+      accountId,
+      membershipId: membershipId(membership),
+      schemaVersion: WORKSPACE_BOOTSTRAP_SCHEMA_VERSION,
+      startedAt,
+      updatedAt: Date.now(),
+      processed,
+      total: total || undefined,
+      ...extra,
+    });
+  };
 
-  const emitApplyProgress = () => {
-    const ratio = Math.min(1, processed / totalToApply);
+  try {
+    saveState("downloading");
     options?.onProgress?.({
-      stage: "applying",
-      title: "Applying workspace data…",
-      detail: `Saved ${processed.toLocaleString()} of ${totalToApply.toLocaleString()} records`,
-      percent: Math.min(96, Math.round(48 + ratio * 48)),
-      current: processed,
-      total: totalToApply,
+      stage: "requesting",
+      title: "Downloading workspace data…",
+      detail: "Fetching all records permitted for this role.",
+      percent: 18,
     });
-  };
 
-  const changedTables =
-    new Set<string>(
-      response.changedTables ||
-        [],
-    );
-
-  const transactionTables =
-    [
-      ...new Set([
-        ...records.map(
-          (record) =>
-            record.tableName,
-        ),
-        ...cacheRecords.map(
-          (record) =>
-            record.tableName,
-        ),
-        "syncQuarantine",
-      ]),
-    ]
-      .map(
-        (tableName) =>
-          (db as any)[
-            tableName
-          ],
-      )
-      .filter(Boolean);
-
-  await db.transaction(
-    "rw",
-    transactionTables,
-    async () => {
-      for (
-        const malformed of
-        serverQuarantine
-      ) {
-        await quarantineSyncRecord({
-          source: "pull",
-          accountId,
-          tableName:
-            malformed.record
-              ?.tableName,
-          entityId:
-            malformed.record
-              ?.entityId,
-          id:
-            malformed.record
-              ?.id,
-          reason:
-            malformed.reason ||
-            "The backend quarantined a malformed workspace record.",
-          payload:
-            malformed.record ||
-            malformed,
-        });
-
-        quarantined += 1;
-      }
-
-      for (
-        const record of
-        records
-      ) {
-        processed += 1;
-        if (processed === 1 || processed % 25 === 0 || processed === totalToApply) {
-          emitApplyProgress();
-        }
-
-        const integrity =
-          validatePullRecord(
-            record,
-            accountId,
-          );
-
-        if (!integrity.ok) {
-          await quarantineSyncRecord({
-            source: "pull",
-            accountId,
-            tableName:
-              record.tableName,
-            entityId:
-              record.entityId,
-            id:
-              record.id,
-            reason:
-              integrityReason(
-                integrity.issues,
-              ),
-            payload: record,
-          });
-
-          quarantined += 1;
-          continue;
-        }
-
-        if (
-          !isSyncTable(
-            record.tableName,
-          )
-        ) {
-          continue;
-        }
-
-        if (
-          await applyLocalFirstRecord(
-            record,
-            accountId,
-            deviceId,
-          )
-        ) {
-          applied += 1;
-          changedTables.add(
-            record.tableName,
-          );
-        }
-      }
-
-      for (
-        const record of
-        cacheRecords
-      ) {
-        processed += 1;
-        if (processed === 1 || processed % 25 === 0 || processed === totalToApply) {
-          emitApplyProgress();
-        }
-
-        if (
-          await applyCacheRecord(
-            record,
-            accountId,
-          )
-        ) {
-          cacheApplied += 1;
-          changedTables.add(
-            record.tableName,
-          );
-        }
-      }
-    },
-  );
-
-  const completedAt =
-    Date.now();
-
-  writeJson(
-    storageKey(
-      accountId,
-      membership,
-    ),
-    {
-      accountId,
-      membershipId:
-        membershipId(
-          membership,
-        ),
-      schoolId:
-        positiveNumber(
-          membership.schoolId,
-        ),
-      branchId:
-        positiveNumber(
-          membership.branchId,
-        ),
-      bootstrapSchemaVersion:
-        response.bootstrapSchemaVersion,
-      includedTables:
-        response.includedTables ||
-        [],
-      tablesWithRecords:
-        response.tablesWithRecords ||
-        [],
-      bootstrapRevision:
-        response.bootstrapRevision,
-      changedTables:
-        [...changedTables],
-      completedAt,
-    },
-  );
-
-  const committedSummary =
-    await readCommittedWorkspaceSummary(
-      accountId,
-      membership,
-    );
-
-  const cacheEnvelope: ScopedWorkspaceSettingsCache = {
-    accountId,
-    schoolId:
-      cleanOptionalId(membership.schoolId) || null,
-    branchId:
-      cleanOptionalId(membership.branchId) || null,
-    role,
-    appearanceScope:
-      committedSummary.appearanceScope,
-    settings:
-      committedSummary.settings,
-    cachedAt: completedAt,
-    bootstrapRevision:
-      response.bootstrapRevision,
-  };
-
-  writeJson(
-    getScopedWorkspaceSettingsKey(
-      accountId,
-      membership,
-    ),
-    cacheEnvelope,
-  );
-
-  // This pointer is scoped and self-describing. Consumers must still verify
-  // account/school/branch/role before treating it as effective settings.
-  writeJson(
-    CURRENT_WORKSPACE_SETTINGS_KEY,
-    cacheEnvelope,
-  );
-
-  if (
-    changedTables.size
-  ) {
-    publishSyncPullCompleted({
-      accountId,
-      changedTables:
-        [...changedTables],
+    // IMPORTANT: the deployed endpoint has no page/cursor request contract yet.
+    const response = await syncHttp<WorkspaceBootstrapResponse>(ENDPOINT, {
+      method: "POST",
+      body: {
+        accountId,
+        deviceId,
+        membershipId: clean(membership.id),
+        role,
+        schoolId: cleanId(membership.schoolId),
+        branchId: cleanId(membership.branchId),
+        teacherId: cleanId(membership.teacherId),
+        studentId: cleanId(membership.studentId),
+        parentId: cleanId(membership.parentId),
+      },
     });
-  }
 
-  options?.onProgress?.({
-    stage: "ready",
-    title:
-      "Workspace ready",
-    detail:
-      "All permitted workspace tables have been saved. Opening the selected portal.",
-    percent: 100,
-    current:
-      applied + cacheApplied,
-    total:
-      Number(response.totalRecords || records.length + cacheRecords.length),
-  });
+    assertWorkspaceUnchanged(accountId, membership);
+    if (!response?.ok || response.accountId !== accountId) {
+      throw new Error("Workspace bootstrap response does not match this account.");
+    }
+    if (response.truncated || response.completed === false) {
+      throw new Error("The server returned an incomplete workspace bundle.");
+    }
+    if (response.bootstrapSchemaVersion !== WORKSPACE_BOOTSTRAP_SCHEMA_VERSION) {
+      throw new Error("The backend bootstrap schema does not match this app build.");
+    }
+    if (normalizeRole(response.role) !== role) {
+      throw new Error("The server returned data for a different role.");
+    }
+    for (const key of ["schoolId", "branchId", "teacherId", "studentId", "parentId"] as const) {
+      if (
+        cleanId(response[key]) &&
+        cleanId(membership[key]) &&
+        cleanId(response[key]) !== cleanId(membership[key])
+      ) {
+        throw new Error(`Workspace bootstrap ${key} does not match this membership.`);
+      }
+    }
 
-  return {
-    ready: true,
-    fromCache: false,
-    applied,
-    cacheApplied,
-    quarantined,
-    changedTables:
-      [...changedTables],
-    bootstrapRevision:
-      response.bootstrapRevision,
-    completedAt,
-    appearanceScope:
-      committedSummary.appearanceScope,
-    school: committedSummary.school,
-    branch: committedSummary.branch,
-    settings: committedSummary.settings,
-    workspace: {
+    const includedTables = response.includedTables || response.requiredTables || [];
+    if (isFullTableRegistryRequired(role)) {
+      const covered = new Set(includedTables);
+      const missing = LOCAL_FIRST_SYNC_TABLES.filter((table) => !covered.has(table));
+      if (missing.length) {
+        throw new Error(`Bootstrap response omitted required tables: ${missing.join(", ")}.`);
+      }
+    }
+
+    const responseWorkspace: NonNullable<WorkspaceBootstrapResponse["workspace"]> = {
       ...(response.workspace || {}),
-      ...committedSummary.workspace,
-      academicPeriod:
-        response.workspace?.academicPeriod ||
-        null,
-    },
-  };
+      appearanceScope: response.workspace?.appearanceScope || appearanceScopeForRole(role),
+      school: response.school ?? response.workspace?.school ?? null,
+      branch: response.branch ?? response.workspace?.branch ?? null,
+      settings: response.schoolBranchSettings ?? response.workspace?.settings ?? null,
+    };
+    response.workspace = responseWorkspace;
+    const bootstrapRevision = response.bootstrapRevision || response.revision;
+
+    const items: BootstrapItem[] = [
+      ...(response.quarantineRecords || []).map(
+        (value): BootstrapItem => ({ kind: "quarantine", value }),
+      ),
+      ...(response.records || []).map(
+        (value): BootstrapItem => ({ kind: "record", value }),
+      ),
+      ...(response.cacheRecords || []).map(
+        (value): BootstrapItem => ({ kind: "cache", value }),
+      ),
+    ];
+
+    total = items.length;
+    saveState("downloading", {
+      includedTables,
+      tablesWithRecords: response.tablesWithRecords || [],
+      tableCounts: response.tableCounts,
+    });
+
+    // Do not claim full coverage just because the first batch was stored.
+    // Each batch commits atomically, and sends its own data-change event.
+    for (let offset = 0; offset < items.length; offset += BATCH_SIZE) {
+      assertWorkspaceUnchanged(accountId, membership);
+      const batch = items.slice(offset, offset + BATCH_SIZE);
+      const result = await applyBatch(batch, accountId, deviceId);
+      processed += batch.length;
+      applied += result.applied;
+      cacheApplied += result.cacheApplied;
+      quarantined += result.quarantined;
+      for (const table of result.changedTables) changedTables.add(table);
+
+      if (result.changedTables.size) {
+        publishSyncPullCompleted({
+          accountId,
+          changedTables: [...result.changedTables],
+        });
+      }
+
+      saveState("partial", {
+        includedTables,
+        tablesWithRecords: response.tablesWithRecords || [],
+        tableCounts: response.tableCounts,
+      });
+
+      options?.onProgress?.({
+        stage: "applying",
+        title: "Preparing offline records…",
+        detail: `Saved ${processed.toLocaleString()} of ${total.toLocaleString()} items`,
+        percent: Math.min(96, Math.round(30 + (processed / Math.max(1, total)) * 66)),
+        current: processed,
+        total,
+        tableName: batch.reduce<string | undefined>(
+          (found, item) => found || (item.kind === "quarantine" ? undefined : item.value.tableName),
+          undefined,
+        ),
+      });
+
+      // Yield AFTER the Dexie transaction commits so the portal can paint.
+      if (offset + BATCH_SIZE < items.length) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    assertWorkspaceUnchanged(accountId, membership);
+    if (quarantined > 0 || Number(response.quarantinedCount || 0) > 0) {
+      throw new Error(
+        `Workspace download contained ${Math.max(quarantined, Number(response.quarantinedCount || 0))} quarantined records; it was not marked complete.`,
+      );
+    }
+
+    const completedAt = Date.now();
+    const summary = await readCommittedWorkspaceSummary(accountId, membership);
+    if (!await actualWorkspaceReady(accountId, membership)) {
+      throw new Error("The downloaded workspace is missing essential school, branch or settings records.");
+    }
+    assertWorkspaceUnchanged(accountId, membership);
+
+    writeJson(storageKey(accountId, membership), {
+      accountId,
+      membershipId: membershipId(membership),
+      schoolId: cleanId(membership.schoolId),
+      branchId: cleanId(membership.branchId),
+      bootstrapSchemaVersion: WORKSPACE_BOOTSTRAP_SCHEMA_VERSION,
+      includedTables,
+      tablesWithRecords: response.tablesWithRecords || [],
+      tableCounts: response.tableCounts,
+      bootstrapRevision,
+      changedTables: [...changedTables],
+      completedAt,
+    });
+
+    const cacheEnvelope: ScopedWorkspaceSettingsCache = {
+      accountId,
+      schoolId: cleanId(membership.schoolId),
+      branchId: cleanId(membership.branchId),
+      role,
+      appearanceScope: summary.appearanceScope,
+      settings: summary.settings,
+      cachedAt: completedAt,
+      bootstrapRevision,
+    };
+    writeJson(getScopedWorkspaceSettingsKey(accountId, membership), cacheEnvelope);
+    writeJson(CURRENT_WORKSPACE_SETTINGS_KEY, cacheEnvelope);
+
+    saveState("complete", {
+      completedAt,
+      includedTables,
+      tablesWithRecords: response.tablesWithRecords || [],
+      tableCounts: response.tableCounts,
+    });
+
+    options?.onProgress?.({
+      stage: "ready",
+      title: "Workspace data ready",
+      detail: "All permitted records have been saved for offline use.",
+      percent: 100,
+      current: processed,
+      total,
+    });
+
+    return {
+      ready: true,
+      fromCache: false,
+      applied,
+      cacheApplied,
+      quarantined,
+      changedTables: [...changedTables],
+      bootstrapRevision,
+      completedAt,
+      appearanceScope: summary.appearanceScope,
+      school: summary.school,
+      branch: summary.branch,
+      settings: summary.settings,
+      workspace: {
+        ...responseWorkspace,
+        ...summary.workspace,
+        academicPeriod: responseWorkspace.academicPeriod || null,
+      },
+    };
+  } catch (error) {
+    saveState("failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
 }
 
 export function clearWorkspaceBootstrapMarker(
-  membership:
-    WorkspaceBootstrapMembership,
-) {
-  const accountId =
-    assertAccountId();
-
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return;
-  }
-
+  membership: WorkspaceBootstrapMembership,
+): void {
+  const accountId = assertAccountId();
+  if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(
-      storageKey(
-        accountId,
-        membership,
-      ),
-    );
+    window.localStorage.removeItem(storageKey(accountId, membership));
+    window.localStorage.removeItem(statusKey(accountId, membership));
   } catch {}
 }

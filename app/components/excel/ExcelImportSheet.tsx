@@ -650,14 +650,21 @@ export default function ExcelImportSheet({
           );
           left: 0;
           z-index: 120;
+
           display: flex;
           align-items: center;
           justify-content: center;
           box-sizing: border-box;
           padding: 12px;
           overflow: hidden;
-          background: rgba(15, 23, 42, 0.48);
-          backdrop-filter: blur(5px);
+          background:
+            color-mix(
+              in srgb,
+              #020617 62%,
+              transparent
+            );
+          -webkit-backdrop-filter: blur(10px) saturate(0.92);
+          backdrop-filter: blur(10px) saturate(0.92);
         }
 
         .excel-import-overlay *,
@@ -933,11 +940,121 @@ export default function ExcelImportSheet({
           }
         }
 
-        @media (prefers-color-scheme: dark) {
+        
+          .excel-import-close {
+            width: 38px !important;
+            height: 38px !important;
+            border: 1px solid rgba(15, 23, 42, 0.16) !important;
+            border-radius: 999px !important;
+            background: rgba(15, 23, 42, 0.06) !important;
+            color: #0f172a !important;
+            box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08) !important;
+            opacity: 1 !important;
+            font-weight: 900 !important;
+          }
+
+          .excel-import-close:hover:not(:disabled) {
+            background: rgba(15, 23, 42, 0.1) !important;
+            border-color: rgba(15, 23, 42, 0.24) !important;
+          }
+
+          .excel-import-close:disabled {
+            opacity: 0.45 !important;
+          }
+
+@media (prefers-color-scheme: dark) {
           .excel-import-overlay {
-            background: rgba(2, 6, 23, 0.72);
+            background:
+              color-mix(
+                in srgb,
+                #020617 78%,
+                transparent
+              );
+          }
+
+          .excel-import-close {
+            background: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+            border-color: rgba(255, 255, 255, 0.22) !important;
+            box-shadow:
+              0 4px 16px rgba(0, 0, 0, 0.28),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
+            opacity: 1 !important;
+          }
+
+          .excel-import-close:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.18) !important;
+            border-color: rgba(255, 255, 255, 0.32) !important;
           }
         }
+
+          /* Mobile tap reliability */
+          .excel-import-overlay {
+            touch-action: manipulation;
+          }
+
+          .excel-import-sheet {
+            pointer-events: auto;
+          }
+
+          .excel-import-close,
+          .excel-import-footer button,
+          .excel-import-body button,
+          .excel-import-body input,
+          .excel-import-body select,
+          .excel-import-body textarea,
+          .excel-import-body label {
+            position: relative;
+            z-index: 2;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+            pointer-events: auto;
+          }
+
+          .excel-import-close {
+            min-width: 44px;
+            width: 44px !important;
+            height: 44px !important;
+          }
+
+          .excel-import-footer {
+            position: relative;
+            z-index: 4;
+            pointer-events: auto;
+          }
+
+          .excel-import-footer button {
+            min-height: 46px;
+            min-width: 92px;
+          }
+
+          .excel-import-body button {
+            min-height: 44px;
+          }
+
+          .excel-import-body input,
+          .excel-import-body select,
+          .excel-import-body textarea {
+            min-height: 44px;
+          }
+
+          @media (max-width: 520px) {
+            .excel-import-footer {
+              display: flex;
+              gap: 8px;
+              flex-wrap: wrap;
+            }
+
+            .excel-import-footer button {
+              flex: 1 1 120px;
+              min-height: 48px;
+            }
+
+            .excel-import-body button {
+              min-height: 46px;
+            }
+          }
+
       `}</style>
 
     </div>

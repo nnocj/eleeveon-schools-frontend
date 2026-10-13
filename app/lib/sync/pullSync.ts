@@ -1,4 +1,3 @@
-
 /**
  * app/lib/sync/pullSync.ts
  * --------------------------------------------------------------------------
@@ -34,13 +33,10 @@ import { db } from "../db";
 import {
   assertAccountId,
   getAccountId,
-  clearLastSyncCursor,
   forceFullSyncNextRun,
   getDeviceId,
-  getPullPosition,
   type PullResponse,
   type SyncPullCursor,
-  setLastSyncCursor,
   SYNC_ENDPOINTS,
   SYNC_STATUS_VALUE,
 } from "./syncConfig";
@@ -548,17 +544,92 @@ async function applyPulledRecord(input: {
 }
 
 /**
- * Separate cursors for filtered pulls. The global cursor is never read or
- * written by a table-filtered request. The key reuses syncConfig's existing
- * account+environment scoping; the stored table list guards hash collisions.
+ * Selected-workspace cursor isolation.
+ *
+ * A cursor is scoped by account+environment (syncStorage), membership ID,
+ * and the exact sorted requested table set. An account-wide cursor CANNOT be
+ * reused by a teacher/parent/student membership after a role switch.
+ *
+ * Version 2 deliberately does not import the former account-wide checkpoint;
+ * the first run re-downloads all records permitted to the selected membership.
  */
-type FilterCursorState = {
-  version: 1;
+export type PullMembershipSelection = {
+  membershipId: string;
+  role: string;
+  schoolId?: string;
+  branchId?: string;
+  teacherId?: string;
+  studentId?: string;
+  parentId?: string;
+};
+
+type PullCursorState = {
+  version: 2;
+  membershipId: string;
   tables: string[];
   cursor: SyncPullCursor | null;
   completed: boolean;
   updatedAt: number;
 };
+
+function pullIdentity(value: unknown): string | undefined {
+  const parsed = String(value ?? "").trim();
+  return parsed || undefined;
+}
+
+export function readSelectedPullMembership(
+  accountId = assertAccountId(),
+): PullMembershipSelection {
+  if (typeof window === "undefined") {
+    throw new Error("Workspace synchronization requires a browser session.");
+  }
+  let opened: any = null;
+  try {
+    const raw = window.localStorage.getItem("eleeveon_open_workspace");
+    if (raw) opened = JSON.parse(raw);
+  } catch {
+    // Selected membership is checked below; malformed local state is denied.
+  }
+  let member = opened?.membership;
+  if (!member) {
+    try {
+      const raw = window.localStorage.getItem("activeMembership");
+      if (raw) member = JSON.parse(raw);
+    } catch {
+      // No usable membership.
+    }
+  }
+  const membershipId = pullIdentity(member?.id || opened?.membershipId);
+  const role = pullIdentity(member?.role || opened?.role);
+  if (!membershipId || !role) {
+    throw new Error("Select your active workspace role before synchronizing.");
+  }
+  if (member?.accountId && String(member.accountId) !== accountId) {
+    throw new Error("The selected workspace membership belongs to another account.");
+  }
+  const fields = ["schoolId", "branchId", "teacherId", "studentId", "parentId"] as const;
+  const scope: PullMembershipSelection = { membershipId, role };
+  for (const field of fields) {
+    const value = pullIdentity(member?.[field] ?? opened?.[field]);
+    if (value) scope[field] = value;
+  }
+  return scope;
+}
+
+function assertSelectedPullMembership(
+  expected: PullMembershipSelection,
+  accountId: string,
+): void {
+  const current = readSelectedPullMembership(accountId);
+  if (current.membershipId !== expected.membershipId || current.role !== expected.role) {
+    throw new Error("The selected role changed during synchronization.");
+  }
+  for (const field of ["schoolId", "branchId", "teacherId", "studentId", "parentId"] as const) {
+    if (current[field] !== expected[field]) {
+      throw new Error("The selected workspace scope changed during synchronization.");
+    }
+  }
+}
 
 function canonicalTables(input: string[] | undefined): string[] {
   const tables = [...new Set((input || []).map((name) => String(name).trim()).filter(Boolean))].sort();
@@ -568,54 +639,66 @@ function canonicalTables(input: string[] | undefined): string[] {
   return tables;
 }
 
-function filterCursorKey(accountId: string, tables: string[]): string {
+function pullCursorKey(accountId: string, membershipId: string, tables: string[]): string {
+  // Store the whole membership UUID and table-set hash; the payload itself
+  // contains the tables to prevent accidental reuse after hash collisions.
   let hash = 2166136261;
-  const signature = tables.join("\u001f");
-  for (let i = 0; i < signature.length; i++) {
-    hash = Math.imul(hash ^ signature.charCodeAt(i), 16777619);
+  for (const character of tables.join("\u001f")) {
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
   }
+  const group = tables.length ? "filtered" : "all";
   return accountScopedStorageKey(
-    `eleeveon_module_pull_cursor_v1_${(hash >>> 0).toString(16)}`,
+    `selected_pull_cursor_v2_${encodeURIComponent(membershipId)}_${group}_${(hash >>> 0).toString(16)}`,
     accountId,
   );
 }
 
-function readFilterPosition(accountId: string, tables: string[]): SyncPullCursor | null {
-  const raw = getLocalStorageItem(filterCursorKey(accountId, tables));
+function readScopedPullPosition(
+  accountId: string,
+  membershipId: string,
+  tables: string[],
+): SyncPullCursor | null {
+  const raw = getLocalStorageItem(pullCursorKey(accountId, membershipId, tables));
   if (!raw) return null;
+  let saved: PullCursorState;
   try {
-    const saved = JSON.parse(raw) as FilterCursorState;
-    if (
-      saved.version !== 1 ||
-      JSON.stringify(saved.tables) !== JSON.stringify(tables)
-    ) {
-      // Never reuse a cursor for another requested table set.
-      throw new Error("A filtered sync cursor does not match its tables.");
-    }
-    return normalizeCursor(saved.cursor);
-  } catch (error) {
-    throw new Error(
-      `Filtered sync checkpoint is invalid: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    saved = JSON.parse(raw) as PullCursorState;
+  } catch {
+    throw new Error("Selected-workspace pull cursor is not valid JSON.");
   }
+  if (
+    saved.version !== 2 || saved.membershipId !== membershipId ||
+    JSON.stringify(saved.tables) !== JSON.stringify(tables)
+  ) {
+    throw new Error("Selected-workspace pull cursor does not match this membership and table set.");
+  }
+  return normalizeCursor(saved.cursor);
 }
 
-function saveFilterPosition(
+function writeScopedPullPosition(
   accountId: string,
+  membershipId: string,
   tables: string[],
   cursor: SyncPullCursor | null,
   completed: boolean,
 ): void {
-  const state: FilterCursorState = {
-    version: 1, tables, cursor, completed, updatedAt: Date.now(),
+  const state: PullCursorState = {
+    version: 2, membershipId, tables, cursor, completed, updatedAt: Date.now(),
   };
-  setLocalStorageItem(filterCursorKey(accountId, tables), JSON.stringify(state));
+  setLocalStorageItem(
+    pullCursorKey(accountId, membershipId, tables),
+    JSON.stringify(state),
+  );
 }
 
-export function clearFilteredPullCursor(tableNames: string[], accountId = assertAccountId()): void {
+export function clearFilteredPullCursor(
+  tableNames: string[],
+  accountId = assertAccountId(),
+): void {
   const tables = canonicalTables(tableNames);
   if (!tables.length) throw new Error("Specify at least one table to clear its filtered cursor.");
-  removeLocalStorageItem(filterCursorKey(accountId, tables));
+  const membership = readSelectedPullMembership(accountId);
+  removeLocalStorageItem(pullCursorKey(accountId, membership.membershipId, tables));
 }
 
 export function getFilteredPullCursor(
@@ -624,7 +707,8 @@ export function getFilteredPullCursor(
 ): SyncPullCursor | null {
   const tables = canonicalTables(tableNames);
   if (!tables.length) return null;
-  return readFilterPosition(accountId, tables);
+  const membership = readSelectedPullMembership(accountId);
+  return readScopedPullPosition(accountId, membership.membershipId, tables);
 }
 
 export type PullSyncOptions = {
@@ -644,18 +728,17 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
     throw new Error("Refusing to pull a different account into this session.");
   }
   const deviceId = getDeviceId();
+  const membership = readSelectedPullMembership(accountId);
   const tables = canonicalTables(options.tableNames);
   const filtered = tables.length > 0;
   const pageLimit = Math.min(2_000, Math.max(1, Math.floor(Number(options.limit) || DEFAULT_PULL_PAGE_LIMIT)));
-  const globalPosition = filtered ? null : getPullPosition(accountId);
   const cursorBefore = options.full
     ? null
-    : filtered
-      ? readFilterPosition(accountId, tables)
-      : globalPosition!.cursor;
-  const legacySinceBefore = filtered || options.full ? 0 : globalPosition!.since;
+    : readScopedPullPosition(accountId, membership.membershipId, tables);
+  // Membership-scoped checkpoints begin at zero, never a legacy account cursor.
+  const legacySinceBefore = 0;
   let workingCursor = cursorBefore;
-  let useLegacySince = !filtered && !workingCursor && legacySinceBefore > 0;
+  let useLegacySince = false;
   let pulled = 0;
   let skipped = 0;
   let cacheUpdated = 0;
@@ -669,7 +752,10 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
       if (getAccountId() !== accountId) {
         throw new Error("Account changed during pull; page traversal cancelled.");
       }
-      const body: Record<string, any> = { accountId, deviceId, limit: pageLimit };
+      assertSelectedPullMembership(membership, accountId);
+      const body: Record<string, any> = {
+        accountId, deviceId, limit: pageLimit, ...membership,
+      };
       if (filtered) body.tableNames = tables;
       if (workingCursor) {
         body.cursorUpdatedAt = workingCursor.updatedAt;
@@ -682,6 +768,11 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
       });
       if (getAccountId() !== accountId) {
         throw new Error("Account changed while receiving the pull response.");
+      }
+      assertSelectedPullMembership(membership, accountId);
+      if ((response as any).membershipId &&
+          String((response as any).membershipId) !== membership.membershipId) {
+        throw new Error("The backend pull response belongs to a different membership.");
       }
       pages++;
       const changedTables = new Set<string>();
@@ -703,6 +794,7 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
         if (getAccountId() !== accountId) {
           throw new Error("Account changed while applying pull records.");
         }
+        assertSelectedPullMembership(membership, accountId);
         const applied = await applyPulledRecord({ record, accountId, deviceId });
         pulled += applied.pulled;
         skipped += applied.skipped;
@@ -734,6 +826,7 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
         break;
       }
       await options.onPageApplied?.();
+      assertSelectedPullMembership(membership, accountId);
       if (getAccountId() !== accountId) {
         throw new Error("Account changed after applying a pull page.");
       }
@@ -744,11 +837,12 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
       if (changedTables.size) {
         publishSyncPullCompleted({ accountId, changedTables: [...changedTables] });
       }
-      // Only filtered cursors checkpoint after each *fully applied* page.
-      // The global cursor advances only after the full account pull completes.
-      if (filtered) {
-        saveFilterPosition(accountId, tables, workingCursor, !response.hasMore);
-      }
+      // Each checkpoint belongs exclusively to this selected membership.
+      // Persist it only after all records in this page were applied.
+      writeScopedPullPosition(
+        accountId, membership.membershipId, tables,
+        workingCursor, !response.hasMore,
+      );
       if (!response.hasMore) {
         completed = true;
         break;
@@ -763,10 +857,6 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
     if (pages >= MAX_PULL_PAGES_PER_RUN && !completed && !yielded && !errors.length) {
       errors.push("Pull exceeded maximum pages before reaching completion.");
     }
-    if (completed && !errors.length && !filtered) {
-      if (workingCursor) setLastSyncCursor(workingCursor, accountId);
-      else clearLastSyncCursor(accountId);
-    }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
@@ -774,9 +864,7 @@ export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncR
   return {
     pulled, skipped, errors, cacheUpdated, accountId,
     cursorBefore,
-    cursorAfter: filtered
-      ? (errors.length ? cursorBefore : workingCursor)
-      : completed && !errors.length ? workingCursor : cursorBefore,
+    cursorAfter: errors.length ? cursorBefore : workingCursor,
     legacySinceBefore, pages,
     completed: completed && errors.length === 0,
     yielded: yielded && errors.length === 0,

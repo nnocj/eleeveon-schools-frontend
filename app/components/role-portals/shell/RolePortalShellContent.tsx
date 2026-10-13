@@ -4,7 +4,7 @@
 /**
  * app/components/role-portals/shell/RolePortalShellContent.tsx
  * --------------------------------------------------------------------------
- * ROLE PORTAL SHELL - RUNTIME IMPLEMENTATION
+ * ROLE PORTAL SHELL — NON-BLOCKING WORKSPACE ENTRY
  * --------------------------------------------------------------------------
  *
  * Responsibilities:
@@ -12,18 +12,20 @@
  * - Access checks and selected workspace resolution
  * - Appearance readiness
  * - Realtime and synchronization state
+ * - Non-blocking role-wide workspace preparation
  * - Hub indicator loading
  * - Sidebar, header, account drawer and active route rendering
- * - Workspace switching
+ * - Fast role switching
  * - Original in-memory navigate(key) behavior
  *
- * Portal overlay boundaries are now owned by:
+ * Portal overlay boundaries are owned by:
  * ./PortalOverlayBoundaries.css
  *
  * The stylesheet is imported through PortalContent.tsx.
  *
  * IMPORTANT:
- * Browser/Android history support is not added in this version.
+ * Browser/Android history support is not introduced here.
+ * Full workspace downloads are not required before portal entry.
  */
 
 import React, {
@@ -60,8 +62,8 @@ import { useSyncContext } from "../../../context/sync-context";
 import { useWorkspaceTransition } from "../../workspace";
 
 import {
-  bootstrapSelectedWorkspace,
-} from "../../../lib/sync/workspaceBootstrap";
+  prepareRoleWorkspaceInBackground,
+} from "./roleWorkspaceBackgroundSync";
 
 import {
   usePortalAppearanceReadiness,
@@ -586,17 +588,28 @@ function RolePortalShellContent({
     protectedProfilePortal,
   ]);
 
+  /**
+   * ACCESS REDIRECTION
+   *
+   * The previous implementation waited for initialSyncDone
+   * before deciding whether the user could access the portal.
+   *
+   * Synchronization completion is no longer an access condition.
+   * We now use restored authentication and membership state.
+   */
   useEffect(() => {
     if (
       accountRestoring ||
+      accountLoading ||
+      !membershipRestored ||
       contextLoading
     ) {
       return;
     }
 
     if (
-      !authenticated ||
-      !accountId
+      sessionVerified &&
+      (!authenticated || !accountId)
     ) {
       router.replace("/login");
       return;
@@ -604,7 +617,7 @@ function RolePortalShellContent({
 
     if (
       sessionVerified &&
-      initialSyncDone &&
+      authenticated &&
       !canAccess
     ) {
       router.replace("/select-role");
@@ -613,7 +626,7 @@ function RolePortalShellContent({
 
     if (
       sessionVerified &&
-      initialSyncDone &&
+      authenticated &&
       (
         (requireSchool && !effectiveSchoolId) ||
         (requireBranch && !effectiveBranchId)
@@ -623,9 +636,10 @@ function RolePortalShellContent({
     }
   }, [
     accountRestoring,
+    accountLoading,
+    membershipRestored,
     contextLoading,
     sessionVerified,
-    initialSyncDone,
     authenticated,
     accountId,
     canAccess,
@@ -674,6 +688,83 @@ function RolePortalShellContent({
     switchingMembershipId,
     setSwitchingMembershipId,
   ] = useState<string | null>(null);
+
+  /**
+   * NON-BLOCKING ROLE-WIDE OFFLINE PREPARATION
+   *
+   * This runs after the user has entered an authorized portal.
+   *
+   * It does not participate in the portal's loading gate.
+   * The existing local Dexie records remain available.
+   *
+   * The helper avoids duplicate same-workspace bootstraps
+   * and checks that the requested role is still active
+   * before starting queued work.
+   *
+   * Connectivity restoration triggers another attempt.
+   */
+  useEffect(() => {
+    if (
+      !authenticated ||
+      !sessionVerified ||
+      !accountId ||
+      !membershipRestored ||
+      !canAccess ||
+      !selectedMembership ||
+      !appearanceMatchesRole ||
+      !databaseContext.ready ||
+      Boolean(switchingMembershipId)
+    ) {
+      return;
+    }
+
+    const membership = selectedMembership;
+    let disposed = false;
+
+    const start = () => {
+      if (disposed) {
+        return;
+      }
+
+      void prepareRoleWorkspaceInBackground(
+        membership,
+      );
+    };
+
+    // Give the portal the opportunity to paint first.
+    // The full workspace download is no longer on the
+    // navigation-critical path.
+    const timer = window.setTimeout(
+      start,
+      150,
+    );
+
+    window.addEventListener(
+      "online",
+      start,
+    );
+
+    return () => {
+      disposed = true;
+
+      window.clearTimeout(timer);
+
+      window.removeEventListener(
+        "online",
+        start,
+      );
+    };
+  }, [
+    authenticated,
+    sessionVerified,
+    accountId,
+    membershipRestored,
+    canAccess,
+    selectedMembership,
+    appearanceMatchesRole,
+    databaseContext.ready,
+    switchingMembershipId,
+  ]);
 
   const [isOnline, setIsOnline] = useState(true);
   const [hubUnreadCount, setHubUnreadCount] = useState(0);
@@ -1217,9 +1308,26 @@ function RolePortalShellContent({
     });
   };
 
+  /**
+   * FAST ROLE SWITCHING
+   *
+   * Only essential identity and appearance initialization
+   * takes place before navigation.
+   *
+   * The expensive workspace bootstrap, institution refresh
+   * and account refresh are no longer required to finish
+   * before the next role portal opens.
+   *
+   * Role-wide download will start inside the destination
+   * portal through the background preparation effect.
+   */
   const switchMembership = async (
     membership: UserMembership,
   ) => {
+    if (switchingMembershipId) {
+      return;
+    }
+
     const normalized =
       normalizeMembership(membership) ||
       membership;
@@ -1234,14 +1342,12 @@ function RolePortalShellContent({
           mode: "role-switch",
           membership: normalized,
           title: "Switching workspace…",
-
           detail:
-            "Preparing the selected role and downloading its permitted data.",
+            "Activating your selected role and workspace.",
         },
 
         async ({
           setStage,
-          setBootstrapProgress,
         }) => {
           setStage("access", {
             detail:
@@ -1261,58 +1367,51 @@ function RolePortalShellContent({
 
           await setActiveMembership(opened);
 
-          const scope = appearanceScopeForRole(
-            opened.role,
-          );
+          /*
+           * No workspace bulk download here.
+           *
+           * applyForMembership uses the exact selected
+           * membership and hydrates saved/default settings.
+           * This avoids refreshing the previous role by mistake.
+           */
+          setStage("appearance", {
+            detail:
+              "Applying your role's appearance and branding.",
+          });
+
+          const applied =
+            await themeContext.applyForMembership(
+              opened,
+            );
+
+          const expected =
+            appearanceIdentityFor({
+              role: opened.role,
+              accountId: opened.accountId,
+              schoolId: opened.schoolId,
+              branchId: opened.branchId,
+            });
 
           if (
-            scope === "school" ||
-            scope === "branch"
+            !applied ||
+            !appearanceIdentityMatches(
+              applied,
+              expected,
+            )
           ) {
-            await bootstrapSelectedWorkspace(
-              opened,
-              {
-                force: true,
-                allowCached: false,
-                onProgress: setBootstrapProgress,
-              },
+            throw new Error(
+              "The selected workspace appearance could not be applied.",
             );
           }
-
-          setStage("institution");
-
-          await refreshInstitution();
-
-          setStage("settings");
-
-          await refreshSettings();
-
-          setStage("branding");
-
-          await refreshAccount({
-            background: true,
-            reason: "membership-change",
-          });
-
-          setStage("appearance");
-
-          await themeContext.refreshTheme();
-
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() =>
-              window.requestAnimationFrame(
-                () => resolve(),
-              ),
-            );
-          });
 
           completeMembershipTransition();
 
           setAccountDrawerOpen(false);
+          setSidebarOpen(false);
 
           setStage("dashboard", {
             detail:
-              `Opening the ${roleLabel(opened.role)} workspace with its prepared local data.`,
+              `Opening the ${roleLabel(opened.role)} workspace.`,
           });
 
           window.location.replace(
@@ -1324,7 +1423,7 @@ function RolePortalShellContent({
       const message =
         error instanceof Error
           ? error.message
-          : "Failed to prepare the selected workspace.";
+          : "Failed to open the selected workspace.";
 
       failMembershipTransition(message);
 

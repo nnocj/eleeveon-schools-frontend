@@ -1,936 +1,983 @@
 "use client";
 
-
-
 /**
-
- * app/components/excel/ExcelImportSheet.tsx
-
+ * app/components/excel/ExcelExportSheet.tsx
  * --------------------------------------------------------------------------
-
- * ELEEVEON EXCEL — IMPORT WORKFLOW SHEET
-
+ * ELEEVEON EXCEL — EXPORT / TEMPLATE ACTION SHEET
  * --------------------------------------------------------------------------
-
  *
-
- * Generic reusable shell around an Excel import workflow.
-
+ * Generic reusable sheet for:
+ * - Download template
+ * - Export current records
+ * - Export register
+ * - Export term totals
+ * - Export assessment sheet
  *
-
- * It does NOT parse workbooks itself.
-
- * It does NOT know about students, attendance or assessments.
-
- *
-
- * Domain pages control:
-
- * - current step;
-
- * - parsing;
-
- * - sheet selection;
-
- * - mappings;
-
- * - validation;
-
- * - import commit.
-
+ * The caller supplies the actual export actions.
  */
 
-
-
 import type {
-
   ReactNode,
-
 } from "react";
 
-
-
 import {
-
   useEffect,
-
 } from "react";
 
 import { createPortal } from "react-dom";
 
+export interface ExcelExportAction {
+  key: string;
 
+  title: string;
 
-export type ExcelImportStep =
+  description?: string;
 
-  | "file"
+  badge?: string;
 
-  | "sheet"
+  disabled?: boolean;
 
-  | "mapping"
+  onClick: () =>
+    | void
+    | Promise<void>;
+}
 
-  | "preview"
-
-  | "result";
-
-
-
-export interface ExcelImportSheetProps {
-
+export interface ExcelExportSheetProps {
   open: boolean;
-
-
 
   onClose: () => void;
 
-
-
   title?: string;
-
-
 
   subtitle?: string;
 
+  actions: ExcelExportAction[];
 
+  busyKey?: string | null;
 
-  step?: ExcelImportStep;
+  headerContent?: ReactNode;
 
-
-
-  children: ReactNode;
-
-
-
-  footer?: ReactNode;
-
-
-
-  busy?: boolean;
-
-
-
-  preventCloseWhileBusy?: boolean;
-
-
-
-  width?: number;
-
-
+  footerContent?: ReactNode;
 
   className?: string;
-
 }
 
-
-
-const STEP_ORDER: ExcelImportStep[] =
-
-  [
-
-    "file",
-
-    "sheet",
-
-    "mapping",
-
-    "preview",
-
-    "result",
-
-  ];
-
-
-
-const STEP_LABELS: Record<
-
-  ExcelImportStep,
-
-  string
-
-> = {
-
-  file: "File",
-
-  sheet: "Sheet",
-
-  mapping: "Match",
-
-  preview: "Preview",
-
-  result: "Done",
-
-};
-
-
-
-export default function ExcelImportSheet({
-
+export default function ExcelExportSheet({
   open,
-
   onClose,
-
-  title = "Import from Excel",
-
+  title = "Excel",
   subtitle =
-
-    "Review the workbook before anything is added to Eleeveon.",
-
-  step = "file",
-
-  children,
-
-  footer,
-
-  busy = false,
-
-  preventCloseWhileBusy = true,
-
-  width = 760,
-
+    "Choose what you want to download.",
+  actions,
+  busyKey = null,
+  headerContent,
+  footerContent,
   className = "",
-
-}: ExcelImportSheetProps) {
-
+}: ExcelExportSheetProps) {
   useEffect(() => {
-
     if (!open) {
-
       return;
-
     }
-
-
 
     const previousOverflow =
-
       document.body.style
-
         .overflow;
 
-
-
     document.body.style.overflow =
-
       "hidden";
 
-
-
-    return createPortal(
-    () => {
-
+    return () => {
       document.body.style.overflow =
-
         previousOverflow;
-
     };
-
   }, [open]);
 
-
-
   useEffect(() => {
-
     if (!open) {
-
       return;
-
     }
 
-
-
     const onKeyDown = (
-
       event: KeyboardEvent,
-
     ) => {
-
       if (
-
-        event.key !==
-
-        "Escape"
-
+        event.key ===
+          "Escape" &&
+        !busyKey
       ) {
-
-        return;
-
+        onClose();
       }
-
-
-
-      if (
-
-        busy &&
-
-        preventCloseWhileBusy
-
-      ) {
-
-        return;
-
-      }
-
-
-
-      onClose();
-
     };
-
-
 
     window.addEventListener(
-
       "keydown",
-
       onKeyDown,
-
     );
 
-
-
     return () => {
-
       window.removeEventListener(
-
         "keydown",
-
         onKeyDown,
-
       );
-
     };
-
   }, [
-
-    busy,
-
+    busyKey,
     onClose,
-
     open,
-
-    preventCloseWhileBusy,
-
   ]);
-
-
 
   if (!open || typeof document === "undefined") {
     return null;
   }
 
-
-
-  const currentIndex =
-
-    STEP_ORDER.indexOf(
-
-      step,
-
-    );
-
-
-
-  const canClose =
-
-    !busy ||
-
-    !preventCloseWhileBusy;
-
-
-
-  return (
-
-    <div
-
-      className={[
-
-        "excel-import-overlay",
-
-        className,
-
-      ]
-
-        .filter(Boolean)
-
-        .join(" ")}
-
-      role="presentation"
-
-      onMouseDown={(
-
-        event,
-
-      ) => {
-
-        if (
-
-          event.target !==
-
-          event.currentTarget
-
-        ) {
-
-          return;
-
-        }
-
-
-
-        if (canClose) {
-
-          onClose();
-
-        }
-
-      }}
-
-    >
-
-      <section
-
-        className="excel-import-sheet"
-
-        role="dialog"
-
-        aria-modal="true"
-
-        aria-label={title}
-
-        style={{
-
-          maxWidth: `${width}px`,
-
+  return createPortal(
+    (
+      <div
+        className={[
+          "excel-export-overlay",
+          className,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        onMouseDown={(
+          event,
+        ) => {
+          if (
+            event.target ===
+              event.currentTarget &&
+            !busyKey
+          ) {
+            onClose();
+          }
         }}
-
       >
-
-        <header className="excel-import-header">
-
-          <div className="excel-import-heading">
-
-            <h2>
-
-              {title}
-
-            </h2>
-
-
-
-            <p>
-
-              {subtitle}
-
-            </p>
-
-          </div>
-
-
-
-          <button
-
-            type="button"
-
-            className="excel-import-close"
-
-            aria-label="Close"
-
-            disabled={!canClose}
-
-            onClick={
-
-              onClose
-
-            }
-
-          >
-
-            ×
-
-          </button>
-
-        </header>
-
-
-
-        <div className="excel-import-progress">
-
-          {STEP_ORDER.map(
-
-            (
-
-              item,
-
-              index,
-
-            ) => {
-
-              const complete =
-
-                index <
-
-                currentIndex;
-
-
-
-              const active =
-
-                index ===
-
-                currentIndex;
-
-
-
-              return (
-
-                <div
-
-                  key={item}
-
-                  className={[
-
-                    "excel-import-progress-step",
-
-                    complete
-
-                      ? "complete"
-
-                      : "",
-
-                    active
-
-                      ? "active"
-
-                      : "",
-
-                  ]
-
-                    .filter(Boolean)
-
-                    .join(" ")}
-
-                >
-
-                  <span>
-
-                    {complete
-
-                      ? "✓"
-
-                      : index +
-
-                        1}
-
-                  </span>
-
-
-
-                  <small>
-
-                    {
-
-                      STEP_LABELS[
-
-                        item
-
-                      ]
-
-                    }
-
-                  </small>
-
-                </div>
-
-              );
-
-            },
-
+        <section
+          className="excel-export-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+        >
+          <header className="excel-export-header">
+            <div>
+              <h2>
+                {title}
+              </h2>
+
+              <p>
+                {subtitle}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              aria-label="Close"
+              disabled={
+                Boolean(
+                  busyKey,
+                )
+              }
+              onClick={
+                onClose
+              }
+            >
+              ×
+            </button>
+          </header>
+
+          {headerContent && (
+            <div className="excel-export-extra">
+              {
+                headerContent
+              }
+            </div>
           )}
 
-        </div>
+          <div className="excel-export-actions">
+            {actions.map(
+              (action) => {
+                const busy =
+                  busyKey ===
+                  action.key;
 
+                const blocked =
+                  Boolean(
+                    busyKey,
+                  ) &&
+                  !busy;
 
+                return (
+                  <button
+                    key={
+                      action.key
+                    }
+                    type="button"
+                    className="excel-export-action"
+                    disabled={
+                      action.disabled ||
+                      blocked ||
+                      busy
+                    }
+                    onClick={async () => {
+                      await action.onClick();
+                    }}
+                  >
+                    <span className="excel-export-icon">
+                      {busy
+                        ? "…"
+                        : "XLS"}
+                    </span>
 
-        <div className="excel-import-body">
+                    <span className="excel-export-copy">
+                      <span className="excel-export-title-row">
+                        <strong>
+                          {
+                            action.title
+                          }
+                        </strong>
 
-          {children}
+                        {action.badge && (
+                          <small>
+                            {
+                              action.badge
+                            }
+                          </small>
+                        )}
+                      </span>
 
-        </div>
+                      {action.description && (
+                        <span className="excel-export-description">
+                          {
+                            action.description
+                          }
+                        </span>
+                      )}
+                    </span>
 
-
-
-        {footer && (
-
-          <footer className="excel-import-footer">
-
-            {footer}
-
-          </footer>
-
-        )}
-
-
-
-        {busy && (
-
-          <div
-
-            className="excel-import-busy"
-
-            aria-live="polite"
-
-          >
-
-            <span className="excel-import-spinner" />
-
-
-
-            <span>
-
-              Working…
-
-            </span>
-
+                    <span className="excel-export-chevron">
+                      →
+                    </span>
+                  </button>
+                );
+              },
+            )}
           </div>
 
-        )}
+          {footerContent && (
+            <footer className="excel-export-footer">
+              {
+                footerContent
+              }
+            </footer>
+          )}
 
-      </section>
+          <style jsx>{`
+            .excel-export-overlay {
+              --eds-bg: var(--bg, var(--background, #f7f8fb));
+              --eds-surface: var(
+                --surface,
+                var(--card, var(--card-bg, #ffffff))
+              );
+              --eds-surface-soft: var(
+                --surface-2,
+                var(
+                  --muted-surface,
+                  color-mix(
+                    in srgb,
+                    var(--eds-surface) 92%,
+                    var(--eds-text) 8%
+                  )
+                )
+              );
+              --eds-text: var(
+                --text,
+                var(--foreground, #172033)
+              );
+              --eds-text-muted: var(
+                --muted,
+                var(
+                  --muted-foreground,
+                  color-mix(
+                    in srgb,
+                    var(--eds-text) 62%,
+                    transparent
+                  )
+                )
+              );
+              --eds-border: var(
+                --border,
+                color-mix(
+                  in srgb,
+                  var(--eds-text) 14%,
+                  transparent
+                )
+              );
+              --eds-accent: var(
+                --primary-color,
+                #2563eb
+              );
+              --eds-accent-soft: color-mix(
+                in srgb,
+                var(--eds-accent) 12%,
+                var(--eds-surface)
+              );
 
+              color-scheme: light dark;
+              color: var(--eds-text);
 
+              position: fixed;
 
-      <style jsx>{`
-        .excel-import-overlay {
-          --eds-bg: var(--bg, var(--background, #f7f8fb));
-          --eds-surface: var(--surface, var(--card, var(--card-bg, #ffffff)));
-          --eds-surface-soft: var(
-            --surface-2,
-            var(
-              --muted-surface,
-              color-mix(in srgb, var(--eds-surface) 92%, var(--eds-text) 8%)
-            )
-          );
-          --eds-text: var(--text, var(--foreground, #172033));
-          --eds-text-muted: var(
-            --muted,
-            var(
-              --muted-foreground,
-              color-mix(in srgb, var(--eds-text) 62%, transparent)
-            )
-          );
-          --eds-border: var(
-            --border,
-            color-mix(in srgb, var(--eds-text) 14%, transparent)
-          );
-          --eds-accent: var(--primary-color, #2563eb);
-          --eds-accent-soft: color-mix(
-            in srgb,
-            var(--eds-accent) 12%,
-            var(--eds-surface)
-          );
-          color-scheme: light dark;
-          color: var(--eds-text);
-          position: fixed;
-          top: calc(
-            var(--eds-shell-top-offset, 0px) +
-            var(--portal-header-height, 48px)
-          );
-          right: 0;
-          bottom: calc(
-            64px +
-            env(safe-area-inset-bottom, 0px)
-          );
-          left: 0;
-          z-index: 120;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          box-sizing: border-box;
-          padding: 12px;
-          overflow: hidden;
-          background: rgba(15, 23, 42, 0.48);
-          backdrop-filter: blur(5px);
-        }
+              top: calc(
+                var(
+                    --eds-shell-top-offset,
+                    0px
+                  ) +
+                  var(
+                    --portal-header-height,
+                    48px
+                  )
+              );
 
-        .excel-import-overlay *,
-        .excel-import-overlay *::before,
-        .excel-import-overlay *::after {
-          box-sizing: border-box;
-        }
+              right: 0;
 
-        .excel-import-overlay button,
-        .excel-import-overlay input,
-        .excel-import-overlay select,
-        .excel-import-overlay textarea {
-          font: inherit;
-        }
+              bottom: calc(
+                64px +
+                  env(
+                    safe-area-inset-bottom,
+                    0px
+                  )
+              );
 
-        .excel-import-overlay input,
-        .excel-import-overlay select,
-        .excel-import-overlay textarea {
-          background: var(--eds-surface);
-          color: var(--eds-text);
-          border-color: var(--eds-border);
-        }
+              left: 0;
 
-        .excel-import-overlay input::placeholder,
-        .excel-import-overlay textarea::placeholder {
-          color: var(--eds-text-muted);
-          opacity: 1;
-        }
+              z-index: 120;
 
-        .excel-import-overlay select option {
-          background: var(--eds-surface);
-          color: var(--eds-text);
-        }
+              display: flex;
 
-        .excel-import-overlay strong,
-        .excel-import-overlay h1,
-        .excel-import-overlay h2,
-        .excel-import-overlay h3 {
-          color: var(--eds-text);
-        }
+              align-items: center;
 
-        .excel-import-overlay small,
-        .excel-import-overlay p,
-        .excel-import-overlay label > span {
-          color: var(--eds-text-muted);
-        }
+              justify-content: center;
 
-        .excel-import-overlay button:not(:disabled) {
-          border-color: var(--eds-border);
-        }
+              box-sizing: border-box;
 
-        .excel-import-overlay button.secondary,
-        .excel-import-overlay button:not(.primary):not([class*="primary"]) {
-          background: var(--eds-surface-soft);
-          color: var(--eds-text);
-        }
+              padding: 12px;
 
-        .excel-import-overlay button.primary,
-        .excel-import-overlay button[class*="primary"] {
-          background: var(--eds-accent);
-          color: #ffffff;
-          border-color: var(--eds-accent);
-        }
+              overflow: hidden;
 
-        .excel-import-sheet {
-          position: relative;
-          width: 100%;
-          max-height: min(860px, calc(100% - 8px));
-          min-height: 0;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          border: 1px solid var(--eds-border, #e2e8f0);
-          border-radius: 22px;
-          background: var(--eds-bg, #f7f8fa);
-          color: var(--eds-text, #172033);
-          box-shadow: 0 26px 80px rgba(15, 23, 42, 0.24);
-        }
+              background:
+                rgba(
+                  15,
+                  23,
+                  42,
+                  0.48
+                );
 
-        .excel-import-header {
-          flex: 0 0 auto;
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 18px 18px 12px;
-          border-bottom: 1px solid var(--eds-border, #e2e8f0);
-          background: var(--eds-surface, #ffffff);
-        }
+              backdrop-filter:
+                blur(5px);
+            }
 
-        .excel-import-heading {
-          min-width: 0;
-        }
+            .excel-export-overlay *,
+            .excel-export-overlay *::before,
+            .excel-export-overlay *::after {
+              box-sizing: border-box;
+            }
 
-        .excel-import-heading h2 {
-          margin: 0;
-          font-size: 18px;
-          line-height: 1.2;
-          color: var(--eds-text, #172033);
-        }
+            .excel-export-overlay button,
+            .excel-export-overlay input,
+            .excel-export-overlay select,
+            .excel-export-overlay textarea {
+              font: inherit;
+            }
 
-        .excel-import-heading p {
-          margin: 5px 0 0;
-          max-width: 620px;
-          font-size: 11px;
-          line-height: 1.5;
-          color: var(--eds-text-muted, #64748b);
-        }
+            .excel-export-overlay input,
+            .excel-export-overlay select,
+            .excel-export-overlay textarea {
+              background:
+                var(
+                  --eds-surface
+                );
 
-        .excel-import-close {
-          flex: 0 0 auto;
-          width: 36px;
-          height: 36px;
-          border: 1px solid var(--eds-border, #e2e8f0);
-          border-radius: 50%;
-          display: grid;
-          place-items: center;
-          background: var(--eds-surface-soft, #f1f5f9);
-          color: var(--eds-text, #172033);
-          cursor: pointer;
-          font-size: 22px;
-          line-height: 1;
-        }
+              color:
+                var(
+                  --eds-text
+                );
 
-        .excel-import-close:disabled {
-          opacity: 0.45;
-          cursor: not-allowed;
-        }
+              border-color:
+                var(
+                  --eds-border
+                );
+            }
 
-        .excel-import-progress {
-          flex: 0 0 auto;
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 4px;
-          padding: 10px 18px 13px;
-          border-bottom: 1px solid var(--eds-border, #e2e8f0);
-          background: var(--eds-surface, #ffffff);
-        }
+            .excel-export-overlay input::placeholder,
+            .excel-export-overlay textarea::placeholder {
+              color:
+                var(
+                  --eds-text-muted
+                );
 
-        .excel-import-progress-step {
-          min-width: 0;
-          display: flex;
-          align-items: center;
-          gap: 5px;
-          color: var(--eds-text-muted, #94a3b8);
-        }
+              opacity: 1;
+            }
 
-        .excel-import-progress-step span {
-          flex: 0 0 auto;
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          display: grid;
-          place-items: center;
-          background: var(--eds-surface-soft, #f1f5f9);
-          font-size: 9px;
-          font-weight: 800;
-        }
+            .excel-export-overlay select option {
+              background:
+                var(
+                  --eds-surface
+                );
 
-        .excel-import-progress-step small {
-          min-width: 0;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-size: 9px;
-          font-weight: 700;
-        }
+              color:
+                var(
+                  --eds-text
+                );
+            }
 
-        .excel-import-progress-step.active,
-        .excel-import-progress-step.complete {
-          color: var(--eds-accent, #315efb);
-        }
+            .excel-export-overlay strong,
+            .excel-export-overlay h1,
+            .excel-export-overlay h2,
+            .excel-export-overlay h3 {
+              color:
+                var(
+                  --eds-text
+                );
+            }
 
-        .excel-import-progress-step.active span,
-        .excel-import-progress-step.complete span {
-          background: var(--eds-accent-soft, #eaf0ff);
-          color: var(--eds-accent, #315efb);
-        }
+            .excel-export-overlay small,
+            .excel-export-overlay p {
+              color:
+                var(
+                  --eds-text-muted
+                );
+            }
 
-        .excel-import-body {
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow-y: auto;
-          overscroll-behavior: contain;
-          -webkit-overflow-scrolling: touch;
-          padding: 16px 18px 20px;
-          background: var(--eds-bg, #f7f8fa);
-          color: var(--eds-text, #172033);
-        }
+            .excel-export-sheet {
+              width:
+                min(
+                  560px,
+                  calc(
+                    100vw -
+                      24px
+                  )
+                );
 
-        .excel-import-footer {
-          flex: 0 0 auto;
-          padding: 12px 18px;
-          border-top: 1px solid var(--eds-border, #e2e8f0);
-          background: var(--eds-surface, #ffffff);
-        }
+              max-width: 100%;
 
-        .excel-import-busy {
-          position: absolute;
-          inset: 0;
-          z-index: 10;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 9px;
-          background: color-mix(
-            in srgb,
-            var(--eds-surface) 88%,
-            transparent
-          );
-          backdrop-filter: blur(2px);
-          color: var(--eds-text, #172033);
-          font-size: 12px;
-          font-weight: 700;
-        }
+              max-height:
+                min(
+                  720px,
+                  calc(
+                    100% -
+                      8px
+                  )
+                );
 
-        .excel-import-spinner {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          border: 2px solid var(--eds-border, #d7deea);
-          border-top-color: var(--eds-accent, #315efb);
-          animation: excel-spin 0.7s linear infinite;
-        }
+              min-height: 0;
 
-        @keyframes excel-spin {
-          to {
-            transform: rotate(360deg);
-          }
-        }
+              display: flex;
 
-        @media (min-width: 980px) {
-          .excel-import-overlay {
-            left: var(--portal-content-left, 0px);
-            bottom: 0;
-            padding: 20px;
-          }
-        }
+              flex-direction:
+                column;
 
-        @media (max-width: 520px) {
-          .excel-import-overlay {
-            padding: 10px;
-          }
+              overflow:
+                hidden;
 
-          .excel-import-sheet {
-            max-width: calc(100vw - 20px) !important;
-            max-height: calc(100% - 4px);
-            border-radius: 20px;
-          }
+              border:
+                1px solid
+                var(
+                  --eds-border,
+                  #e2e8f0
+                );
 
-          .excel-import-header {
-            padding: 14px 14px 10px;
-          }
+              border-radius:
+                22px;
 
-          .excel-import-progress {
-            padding: 9px 14px 10px;
-          }
+              background:
+                var(
+                  --eds-bg,
+                  #f7f8fa
+                );
 
-          .excel-import-body {
-            padding: 14px;
-          }
+              color:
+                var(
+                  --eds-text,
+                  #172033
+                );
 
-          .excel-import-footer {
-            padding: 10px 14px;
-          }
+              box-shadow:
+                0 24px 70px
+                rgba(
+                  15,
+                  23,
+                  42,
+                  0.26
+                );
+            }
 
-          .excel-import-progress-step {
-            justify-content: center;
-          }
+            .excel-export-header {
+              flex:
+                0 0 auto;
 
-          .excel-import-progress-step small {
-            display: none;
-          }
-        }
+              display:
+                flex;
 
-        @media (prefers-color-scheme: dark) {
-          .excel-import-overlay {
-            background: rgba(2, 6, 23, 0.72);
-          }
-        }
-      `}</style>
+              align-items:
+                flex-start;
 
-    </div>
+              justify-content:
+                space-between;
+
+              gap:
+                16px;
+
+              padding:
+                17px;
+
+              border-bottom:
+                1px solid
+                var(
+                  --eds-border,
+                  #e2e8f0
+                );
+
+              background:
+                var(
+                  --eds-surface,
+                  #ffffff
+                );
+            }
+
+            .excel-export-header h2 {
+              margin:
+                0;
+
+              font-size:
+                17px;
+
+              color:
+                var(
+                  --eds-text,
+                  #172033
+                );
+            }
+
+            .excel-export-header p {
+              margin:
+                4px 0 0;
+
+              font-size:
+                11px;
+
+              line-height:
+                1.45;
+
+              color:
+                var(
+                  --eds-text-muted,
+                  #64748b
+                );
+            }
+
+            .excel-export-header button {
+              flex:
+                0 0 auto;
+
+              width:
+                34px;
+
+              height:
+                34px;
+
+              border:
+                1px solid
+                var(
+                  --eds-border,
+                  #e2e8f0
+                );
+
+              border-radius:
+                50%;
+
+              display:
+                grid;
+
+              place-items:
+                center;
+
+              background:
+                var(
+                  --eds-surface-soft,
+                  #f1f5f9
+                );
+
+              color:
+                var(
+                  --eds-text,
+                  #172033
+                );
+
+              cursor:
+                pointer;
+
+              font-size:
+                21px;
+            }
+
+            .excel-export-header button:disabled {
+              opacity:
+                0.45;
+
+              cursor:
+                not-allowed;
+            }
+
+            .excel-export-extra {
+              flex:
+                0 0 auto;
+
+              padding:
+                14px 16px 0;
+
+              background:
+                var(
+                  --eds-bg,
+                  #f7f8fa
+                );
+            }
+
+            .excel-export-actions {
+              flex:
+                1 1 auto;
+
+              min-height:
+                0;
+
+              display:
+                flex;
+
+              flex-direction:
+                column;
+
+              gap:
+                8px;
+
+              padding:
+                14px 16px;
+
+              overflow-y:
+                auto;
+
+              overscroll-behavior:
+                contain;
+
+              -webkit-overflow-scrolling:
+                touch;
+            }
+
+            .excel-export-action {
+              width:
+                100%;
+
+              min-height:
+                68px;
+
+              flex:
+                0 0 auto;
+
+              display:
+                flex;
+
+              align-items:
+                center;
+
+              gap:
+                11px;
+
+              border:
+                1px solid
+                var(
+                  --eds-border,
+                  #e2e8f0
+                );
+
+              border-radius:
+                15px;
+
+              padding:
+                11px;
+
+              background:
+                var(
+                  --eds-surface,
+                  #ffffff
+                );
+
+              color:
+                var(
+                  --eds-text,
+                  #172033
+                );
+
+              text-align:
+                left;
+
+              cursor:
+                pointer;
+            }
+
+            .excel-export-action:hover:not(
+                :disabled
+              ) {
+              border-color:
+                var(
+                  --eds-accent,
+                  #315efb
+                );
+            }
+
+            .excel-export-action:disabled {
+              opacity:
+                0.5;
+
+              cursor:
+                not-allowed;
+            }
+
+            .excel-export-icon {
+              flex:
+                0 0 auto;
+
+              width:
+                42px;
+
+              height:
+                42px;
+
+              border-radius:
+                12px;
+
+              display:
+                grid;
+
+              place-items:
+                center;
+
+              background:
+                var(
+                  --eds-accent-soft,
+                  #edf2ff
+                );
+
+              color:
+                var(
+                  --eds-accent,
+                  #315efb
+                );
+
+              font-size:
+                10px;
+
+              font-weight:
+                800;
+
+              letter-spacing:
+                0.06em;
+            }
+
+            .excel-export-copy {
+              min-width:
+                0;
+
+              flex:
+                1;
+
+              display:
+                flex;
+
+              flex-direction:
+                column;
+
+              gap:
+                3px;
+            }
+
+            .excel-export-title-row {
+              display:
+                flex;
+
+              align-items:
+                center;
+
+              flex-wrap:
+                wrap;
+
+              gap:
+                7px;
+            }
+
+            .excel-export-title-row strong {
+              min-width:
+                0;
+
+              overflow-wrap:
+                anywhere;
+
+              font-size:
+                12px;
+            }
+
+            .excel-export-title-row small {
+              flex:
+                0 0 auto;
+
+              padding:
+                3px 6px;
+
+              border-radius:
+                999px;
+
+              background:
+                var(
+                  --eds-surface-soft,
+                  #f1f5f9
+                );
+
+              color:
+                var(
+                  --eds-text-muted,
+                  #64748b
+                );
+
+              font-size:
+                9px;
+
+              font-weight:
+                700;
+            }
+
+            .excel-export-description {
+              font-size:
+                10px;
+
+              line-height:
+                1.45;
+
+              color:
+                var(
+                  --eds-text-muted,
+                  #64748b
+                );
+            }
+
+            .excel-export-chevron {
+              flex:
+                0 0 auto;
+
+              color:
+                var(
+                  --eds-text-muted,
+                  #94a3b8
+                );
+            }
+
+            .excel-export-footer {
+              flex:
+                0 0 auto;
+
+              padding:
+                0 16px 16px;
+
+              border-top:
+                1px solid
+                var(
+                  --eds-border,
+                  #e2e8f0
+                );
+
+              background:
+                var(
+                  --eds-surface,
+                  #ffffff
+                );
+            }
+
+            @media (
+              min-width: 980px
+            ) {
+              .excel-export-overlay {
+                left:
+                  var(
+                    --portal-content-left,
+                    0px
+                  );
+
+                bottom:
+                  0;
+
+                padding:
+                  20px;
+              }
+            }
+
+            @media (
+              max-width: 520px
+            ) {
+              .excel-export-overlay {
+                padding:
+                  10px;
+              }
+
+              .excel-export-sheet {
+                width:
+                  calc(
+                    100vw -
+                      20px
+                  );
+
+                max-height:
+                  calc(
+                    100% -
+                      4px
+                  );
+
+                border-radius:
+                  20px;
+              }
+
+              .excel-export-header {
+                padding:
+                  15px
+                  14px
+                  12px;
+              }
+
+              .excel-export-actions {
+                padding:
+                  12px
+                  14px;
+              }
+
+              .excel-export-footer {
+                padding:
+                  0
+                  14px
+                  12px;
+              }
+            }
+
+            @media (
+              prefers-color-scheme:
+                dark
+            ) {
+              .excel-export-overlay {
+                background:
+                  rgba(
+                    2,
+                    6,
+                    23,
+                    0.7
+                  );
+              }
+            }
+          `}</style>
+        </section>
+      </div>
     ),
     document.body,
   );

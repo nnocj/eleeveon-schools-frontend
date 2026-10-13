@@ -66,6 +66,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../context/settings-context";
 import {
@@ -584,6 +585,101 @@ function Empty({
       <h3>{title}</h3>
       <p>{text}</p>
     </section>
+  );
+}
+
+function ViewportModal({
+  children,
+  onClose,
+  className = "ba-sheet-backdrop",
+  closeOnBackdrop = true,
+  closeOnEscape = true,
+}: {
+  children: React.ReactNode;
+  onClose?: () => void;
+  className?: string;
+  closeOnBackdrop?: boolean;
+  closeOnEscape?: boolean;
+}) {
+  const [themeStyle, setThemeStyle] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    const source =
+      document.querySelector(".students-page") ||
+      document.documentElement;
+    const computed = window.getComputedStyle(source);
+    const names = [
+      "--ba-primary",
+      "--ba-primary-text",
+      "--card-bg",
+      "--surface",
+      "--surface-2",
+      "--text",
+      "--foreground",
+      "--muted",
+      "--muted-foreground",
+      "--border",
+      "--bg",
+      "--background",
+      "--input-bg",
+      "--input-text",
+      "--input-border",
+      "--font-family",
+      "--font-size",
+    ];
+
+    const nextTheme: Record<string, string> = {};
+    names.forEach((name) => {
+      const value = computed.getPropertyValue(name).trim();
+      if (value) nextTheme[name] = value;
+    });
+    setThemeStyle(nextTheme as React.CSSProperties);
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!closeOnEscape || !onClose) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeOnEscape, onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className={className}
+      style={themeStyle}
+      role="presentation"
+      onPointerDown={(event) => {
+        if (
+          closeOnBackdrop &&
+          onClose &&
+          event.target === event.currentTarget
+        ) {
+          onClose();
+        }
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 
@@ -3633,14 +3729,19 @@ function FilterSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet">
+    <ViewportModal onClose={onClose} className="ba-sheet-backdrop">
+      <section
+        className="ba-sheet"
+        role="dialog"
+        aria-modal="true"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-sheet-head">
           <div>
             <h2>Filters</h2>
             <p>Choose only what you need. The list updates after applying.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close filters">
+          <button type="button" className="ba-modal-close" onClick={onClose} aria-label="Close filters">
             ✕
           </button>
         </div>
@@ -3718,7 +3819,7 @@ function FilterSheet({
           </button>
         </div>
       </section>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -3736,14 +3837,19 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
+    <ViewportModal onClose={onClose} className="ba-sheet-backdrop">
+      <section
+        className="ba-sheet small"
+        role="dialog"
+        aria-modal="true"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-sheet-head">
           <div>
             <h2>More</h2>
             <p>Advanced views are here so the main page stays simple.</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">
+          <button type="button" className="ba-modal-close" onClick={onClose} aria-label="Close menu">
             ✕
           </button>
         </div>
@@ -3802,7 +3908,7 @@ function MoreSheet({
           </button>
         </div>
       </section>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -3824,8 +3930,13 @@ function ActionSheet({
   const row: any = item.row;
 
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
+    <ViewportModal onClose={onClose} className="ba-sheet-backdrop">
+      <section
+        className="ba-sheet small"
+        role="dialog"
+        aria-modal="true"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-sheet-profile">
           <div>
             <h2>{row.fullName || "Student"}</h2>
@@ -3835,6 +3946,7 @@ function ActionSheet({
           </div>
           <button
             type="button"
+            className="ba-modal-close"
             onClick={onClose}
             aria-label="Close student actions"
           >
@@ -3912,7 +4024,7 @@ function ActionSheet({
           </button>
         </div>
       </section>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -4093,8 +4205,12 @@ function StudentModal({
   };
 
   return (
-    <div className="ba-modal-backdrop">
-      <form className="ba-modal" onSubmit={save}>
+    <ViewportModal onClose={() => setModalOpen(false)} className="ba-modal-backdrop">
+      <form
+        className="ba-modal"
+        onSubmit={save}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Student" : "Add Student"}</h2>
@@ -4102,6 +4218,7 @@ function StudentModal({
           </div>
           <button
             type="button"
+            className="ba-modal-close"
             onClick={() => setModalOpen(false)}
             aria-label="Close student form"
           >
@@ -4643,7 +4760,7 @@ function StudentModal({
           </button>
         </div>
       </form>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -4680,8 +4797,13 @@ function EnrollmentManagerSheet({
   );
 
   return (
-    <div className="ba-sheet-backdrop enrollment-manager-layer" role="dialog" aria-modal="true">
-      <section className="ba-sheet enrollment-manager-sheet">
+    <ViewportModal onClose={onClose} className="ba-sheet-backdrop enrollment-manager-layer">
+      <section
+        className="ba-sheet enrollment-manager-sheet"
+        role="dialog"
+        aria-modal="true"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-sheet-profile">
           <div className="enrollment-manager-profile">
             <Avatar name={student.fullName || "Student"} photo={item.photoUrl} primary={primary} />
@@ -4690,7 +4812,7 @@ function EnrollmentManagerSheet({
               <p>{student.admissionNumber || "No admission number"} · {enrollments.length} enrollment{enrollments.length === 1 ? "" : "s"}</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close enrollment manager">✕</button>
+          <button type="button" className="ba-modal-close" onClick={onClose} aria-label="Close enrollment manager">✕</button>
         </div>
 
         <div className="enrollment-manager-current">
@@ -4774,7 +4896,7 @@ function EnrollmentManagerSheet({
           )}
         </div>
       </section>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -4804,14 +4926,18 @@ function EnrollmentEditorModal({
   const row: any = student.row;
 
   return (
-    <div className="ba-modal-backdrop enrollment-editor-layer">
-      <form className="ba-modal enrollment-editor-modal" onSubmit={save}>
+    <ViewportModal onClose={onClose} className="ba-modal-backdrop enrollment-editor-layer">
+      <form
+        className="ba-modal enrollment-editor-modal"
+        onSubmit={save}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-modal-head">
           <div>
             <h2>{form.id ? "Edit Enrollment" : "Enroll Student"}</h2>
             <p>{row.fullName || "Student"} · {row.admissionNumber || "No admission number"}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close enrollment form">✕</button>
+          <button type="button" className="ba-modal-close" onClick={onClose} aria-label="Close enrollment form">✕</button>
         </div>
 
         <section className="ba-form-section">
@@ -4917,7 +5043,7 @@ function EnrollmentEditorModal({
           </button>
         </div>
       </form>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -4948,12 +5074,16 @@ function CameraCaptureModal({
       : `Take ${entityLabel} Cover Photo`;
 
   return (
-    <div
+    <ViewportModal
+      onClose={close}
       className="ba-modal-backdrop camera-backdrop"
-      role="dialog"
-      aria-modal="true"
     >
-      <section className="ba-camera-modal">
+      <section
+        className="ba-camera-modal"
+        role="dialog"
+        aria-modal="true"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <div className="ba-modal-head">
           <div>
             <h2>{title}</h2>
@@ -4962,7 +5092,7 @@ function CameraCaptureModal({
               compressed and saved as a media asset.
             </p>
           </div>
-          <button type="button" onClick={close} aria-label="Close camera">
+          <button type="button" className="ba-modal-close" onClick={close} aria-label="Close camera">
             ✕
           </button>
         </div>
@@ -5003,7 +5133,7 @@ function CameraCaptureModal({
           </button>
         </div>
       </section>
-    </div>
+    </ViewportModal>
   );
 }
 
@@ -7209,70 +7339,243 @@ const css = `
 
 
 /* ============================================================
-   PORTAL-SAFE CENTERED MODALS
-   Keep every dialog inside the usable workspace between the
-   fixed portal header and the mobile bottom navigation.
+   STUDENTS — TRUE FULL-VIEWPORT PORTALED MODALS
+
+   These BA dialogs are rendered through ViewportModal directly under
+   document.body. Their position is therefore independent of student-list
+   length, table scroll position, transformed shell ancestors, the portal
+   header, and the mobile bottom navigation.
    ============================================================ */
 .ba-sheet-backdrop,
-.ba-modal-backdrop,
-[class*="excel"][class*="backdrop"] {
-  top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
-  right: 0 !important;
-  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
-  left: 0 !important;
-  width: auto !important;
-  height: auto !important;
-  min-height: 0 !important;
-  box-sizing: border-box !important;
+.ba-modal-backdrop {
+  --ba-card: var(--card-bg, var(--surface, #ffffff));
+  --ba-text: var(--text, var(--foreground, #111827));
+  --ba-muted: var(--muted, var(--muted-foreground, #64748b));
+  --ba-border: var(--border, rgba(15, 23, 42, .12));
+
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  min-width: 100vw !important;
+  min-height: 100dvh !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 2147482000 !important;
+
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  padding: 10px !important;
+
+  box-sizing: border-box !important;
+  padding:
+    max(10px, env(safe-area-inset-top, 0px))
+    10px
+    max(10px, env(safe-area-inset-bottom, 0px)) !important;
   overflow: hidden !important;
-  z-index: 58 !important;
+
+  background: rgba(2, 6, 23, .68) !important;
+  -webkit-backdrop-filter: blur(11px) saturate(.9);
+  backdrop-filter: blur(11px) saturate(.9);
 }
 
-.ba-sheet,
-.ba-modal,
-.ba-camera-modal,
-[class*="excel"][class*="sheet"]:not([class*="backdrop"]),
-[class*="excel"][class*="modal"]:not([class*="backdrop"]) {
-  margin: 0 auto !important;
-  max-height: calc(100% - 4px) !important;
-  max-width: calc(100% - 2px) !important;
+.ba-sheet-backdrop .ba-sheet {
+  position: relative;
+  width: min(760px, calc(100vw - 20px)) !important;
+  max-width: calc(100vw - 20px) !important;
+  max-height: calc(100dvh - 20px) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
   overflow-x: hidden !important;
   overflow-y: auto !important;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  scroll-padding-bottom: 88px;
+  scroll-padding-bottom: 90px;
+  border: 1px solid var(--ba-border) !important;
+  border-radius: 24px !important;
+  background: var(--ba-card) !important;
+  color: var(--ba-text) !important;
+  box-shadow: 0 28px 90px rgba(2, 6, 23, .34) !important;
 }
 
-.ba-sheet-actions,
-.ba-modal-actions {
-  bottom: 0 !important;
-  z-index: 3;
+.ba-sheet-backdrop .ba-sheet.small {
+  width: min(520px, calc(100vw - 20px)) !important;
 }
 
-@media (min-width: 980px) {
+.ba-modal-backdrop .ba-modal {
+  position: relative;
+  width: min(980px, calc(100vw - 20px)) !important;
+  max-width: calc(100vw - 20px) !important;
+  max-height: calc(100dvh - 20px) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 96px;
+  border: 1px solid var(--ba-border) !important;
+  border-radius: 24px !important;
+  background: var(--ba-card) !important;
+  color: var(--ba-text) !important;
+  box-shadow: 0 28px 90px rgba(2, 6, 23, .36) !important;
+}
+
+.ba-modal-backdrop .ba-camera-modal {
+  position: relative;
+  width: min(720px, calc(100vw - 20px)) !important;
+  max-width: calc(100vw - 20px) !important;
+  max-height: calc(100dvh - 20px) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--ba-border) !important;
+  border-radius: 24px !important;
+  background: var(--ba-card) !important;
+  color: var(--ba-text) !important;
+  box-shadow: 0 28px 90px rgba(2, 6, 23, .38) !important;
+}
+
+/* Keep the heading and X reachable while a long form scrolls internally. */
+.ba-sheet-backdrop .ba-sheet-head,
+.ba-sheet-backdrop .ba-sheet-profile,
+.ba-modal-backdrop .ba-modal-head {
+  position: sticky;
+  top: -14px;
+  z-index: 8;
+  margin: -14px -14px 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--ba-border);
+  background: var(--ba-card);
+}
+
+.ba-sheet-backdrop .ba-sheet-head h2,
+.ba-sheet-backdrop .ba-sheet-profile h2,
+.ba-modal-backdrop .ba-modal-head h2,
+.ba-sheet-backdrop .ba-sheet-head p,
+.ba-sheet-backdrop .ba-sheet-profile p,
+.ba-modal-backdrop .ba-modal-head p {
+  color: inherit;
+}
+
+/* Explicit portal-safe close button styling. */
+.ba-sheet-backdrop .ba-modal-close,
+.ba-modal-backdrop .ba-modal-close {
+  position: relative;
+  z-index: 10;
+  flex: 0 0 auto;
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 0 !important;
+  border: 1px solid var(--ba-border) !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--ba-text) 6%, var(--ba-card)) !important;
+  color: var(--ba-text) !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  font-size: 20px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  cursor: pointer;
+  pointer-events: auto !important;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ba-sheet-backdrop .ba-modal-close:hover,
+.ba-modal-backdrop .ba-modal-close:hover {
+  background: color-mix(in srgb, var(--ba-primary) 10%, var(--ba-card)) !important;
+  border-color: color-mix(in srgb, var(--ba-primary) 38%, var(--ba-border)) !important;
+}
+
+/* Inputs/selects need explicit surfaces because the dialogs now live under body. */
+.ba-sheet-backdrop input,
+.ba-sheet-backdrop select,
+.ba-sheet-backdrop textarea,
+.ba-modal-backdrop input,
+.ba-modal-backdrop select,
+.ba-modal-backdrop textarea {
+  background: var(--input-bg, var(--ba-card)) !important;
+  color: var(--input-text, var(--ba-text)) !important;
+  border-color: var(--input-border, var(--ba-border)) !important;
+}
+
+.ba-sheet-backdrop select option,
+.ba-modal-backdrop select option {
+  background: var(--ba-card);
+  color: var(--ba-text);
+}
+
+/* Keep action buttons visible while the inner form scrolls. */
+.ba-sheet-backdrop .ba-sheet-actions,
+.ba-modal-backdrop .ba-modal-actions {
+  position: sticky !important;
+  bottom: -14px !important;
+  z-index: 7;
+  margin: 14px -14px -14px !important;
+  padding: 12px 14px 14px !important;
+  border-top: 1px solid var(--ba-border);
+  background: var(--ba-card) !important;
+}
+
+/* Preserve the intended nested-dialog order. */
+.enrollment-manager-layer {
+  z-index: 2147482100 !important;
+}
+
+.enrollment-editor-layer {
+  z-index: 2147482200 !important;
+}
+
+.camera-backdrop {
+  z-index: 2147482300 !important;
+}
+
+@media (prefers-color-scheme: dark) {
   .ba-sheet-backdrop,
-  .ba-modal-backdrop,
-  [class*="excel"][class*="backdrop"] {
-    top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    left: var(--portal-content-left, 0px) !important;
-    max-width: calc(100vw - var(--portal-content-left, 0px)) !important;
-    padding: 18px !important;
-    z-index: 80 !important;
+  .ba-modal-backdrop {
+    background: rgba(2, 6, 23, .80) !important;
   }
 }
 
 @media (max-width: 520px) {
-  .ba-sheet,
-  .ba-modal,
-  .ba-camera-modal {
-    width: min(100%, 760px) !important;
-    border-radius: 22px !important;
+  .ba-sheet-backdrop,
+  .ba-modal-backdrop {
+    padding:
+      max(8px, env(safe-area-inset-top, 0px))
+      8px
+      max(8px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .ba-sheet-backdrop .ba-sheet,
+  .ba-modal-backdrop .ba-modal,
+  .ba-modal-backdrop .ba-camera-modal {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100dvh - 16px) !important;
+    border-radius: 20px !important;
+  }
+
+  .ba-sheet-backdrop .ba-sheet-head,
+  .ba-sheet-backdrop .ba-sheet-profile,
+  .ba-modal-backdrop .ba-modal-head {
+    top: -12px;
+    margin: -12px -12px 12px;
+    padding: 12px;
+  }
+
+  .ba-sheet-backdrop .ba-sheet-actions,
+  .ba-modal-backdrop .ba-modal-actions {
+    bottom: -12px !important;
+    margin: 12px -12px -12px !important;
+    padding: 10px 12px 12px !important;
   }
 }
 /* ============================================================

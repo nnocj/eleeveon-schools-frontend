@@ -1,3 +1,4 @@
+
 /**
  * app/lib/sync/syncStorage.ts
  * --------------------------------------------------------------------------
@@ -88,7 +89,7 @@ export function removeLocalStorageItem(key: string) {
 
 export function buildAccountSyncStorageKey(
   accountId: string,
-  name: ScopedSyncName,
+  name: ScopedSyncName | (string & {}),
   environment: SyncEnvironment = getSyncEnvironment(),
 ) {
   if (!accountId?.trim()) {
@@ -171,6 +172,28 @@ export function migrateLegacySyncStorageForAccount(accountId: string) {
 export function clearAccountSyncStorage(accountId: string) {
   if (!accountId) return;
 
+  // Remove ordinary scoped keys AND dynamic filtered pull checkpoints.
+  const prefix = [
+    SYNC_STORAGE_PREFIX,
+    safeSegment(getSyncEnvironment()),
+    safeSegment(accountId),
+    "",
+  ].join(":");
+
+  if (typeof window !== "undefined") {
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i);
+        if (key?.startsWith(prefix)) keys.push(key);
+      }
+      for (const key of keys) removeLocalStorageItem(key);
+      return;
+    } catch {
+      // Fall through to fixed-key cleanup in restricted browsing modes.
+    }
+  }
+
   for (const name of Object.values(SCOPED_SYNC_NAMES)) {
     removeAccountSyncStorage(accountId, name);
   }
@@ -247,4 +270,27 @@ export function releaseSyncLock(accountId: string, owner: string) {
   if (!current || current.owner === owner || current.expiresAt <= Date.now()) {
     removeAccountSyncStorage(accountId, SCOPED_SYNC_NAMES.SYNC_LOCK);
   }
+}
+
+/**
+ * Compatibility helper for dynamically named, account-scoped storage keys.
+ *
+ * New filtered pull cursors call accountScopedStorageKey(name, accountId),
+ * whereas the existing API is buildAccountSyncStorageKey(accountId, name).
+ * Keep both public APIs so older sync modules are unaffected.
+ */
+export function accountScopedStorageKey(
+  name: string,
+  accountId: string,
+  environment: SyncEnvironment = getSyncEnvironment(),
+): string {
+  if (!name?.trim()) {
+    throw new Error("A synchronization storage key name is required.");
+  }
+
+  return buildAccountSyncStorageKey(
+    accountId,
+    name,
+    environment,
+  );
 }

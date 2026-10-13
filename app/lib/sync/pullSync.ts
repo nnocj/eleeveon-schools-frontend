@@ -1,3 +1,4 @@
+
 /**
  * app/lib/sync/pullSync.ts
  * --------------------------------------------------------------------------
@@ -7,6 +8,11 @@
  * - backend `localId` is the permanent Dexie entity UUID;
  * - backend `cloudId` is the Prisma SyncRecord UUID;
  * - pulled records never replace the permanent local entity `id` with `cloudId`.
+ *
+ * Coordinator upgrade:
+ * - filtered pulls use independent account+environment table-set checkpoints;
+ * - the runner can yield after applying a page, then resume later;
+ * - page completion callbacks keep the cross-tab sync lock alive.
  *
  * Phase 4:
  * - uses the stable compound cursor: updatedAt + id;
@@ -27,6 +33,7 @@ import { db } from "../db";
 
 import {
   assertAccountId,
+  getAccountId,
   clearLastSyncCursor,
   forceFullSyncNextRun,
   getDeviceId,
@@ -39,6 +46,13 @@ import {
 } from "./syncConfig";
 
 import { syncHttp } from "./syncHttp";
+import {
+  accountScopedStorageKey,
+  getLocalStorageItem,
+  setLocalStorageItem,
+  removeLocalStorageItem,
+} from "./syncStorage";
+import { publishSyncPullCompleted } from "./syncEvents";
 import {
   isBackendCacheTable,
   isPullSyncTable,
@@ -74,6 +88,8 @@ export type PullSyncResult = {
   legacySinceBefore: number;
   pages: number;
   completed: boolean;
+  yielded?: boolean;
+  filtered?: boolean;
 };
 
 function cleanIncomingPayload(
@@ -162,91 +178,60 @@ async function findById(
   );
 }
 
-async function findExistingMediaAsset(
-  table: any,
-  record: any,
-) {
+async function findExistingMediaAsset(table: any, record: any) {
   const payload = record.payload || {};
-  const localId = record.localId || payload.id;
-
+  const localId = String(record.localId || payload.id || "").trim();
+  const accountId = String(record.accountId || payload.accountId || "").trim();
   const byId = await findById(table, localId);
-  if (byId) return byId;
+  if (byId && String(byId.accountId || "") === accountId) return byId;
 
-  const rows = await table.toArray();
-
-  const activeRows = rows.filter(
-    (row: any) => !row.isDeleted,
-  );
-
-  const accountId = payload.accountId || record.accountId;
-  const ownerTable = payload.ownerTable;
-  const fieldKey = payload.fieldKey;
-  const ownerTempKey = payload.ownerTempKey;
-  const ownerId = payload.ownerId ?? record.localId;
-
-  if (hasValue(ownerTempKey)) {
-    const match = activeRows.find(
-      (row: any) =>
-        (!hasValue(accountId) ||
-          sameValue(row.accountId, accountId)) &&
-        (!hasValue(ownerTable) ||
-          sameValue(row.ownerTable, ownerTable)) &&
-        (!hasValue(fieldKey) ||
-          sameValue(row.fieldKey, fieldKey)) &&
-        sameValue(row.ownerTempKey, ownerTempKey),
-    );
-
-    if (match) return match;
-  }
-
-  if (hasValue(ownerId)) {
-    const match = activeRows.find(
-      (row: any) =>
-        (!hasValue(accountId) ||
-          sameValue(row.accountId, accountId)) &&
-        (!hasValue(ownerTable) ||
-          sameValue(row.ownerTable, ownerTable)) &&
-        (!hasValue(fieldKey) ||
-          sameValue(row.fieldKey, fieldKey)) &&
-        sameValue(row.ownerId, ownerId),
-    );
-
-    if (match) return match;
-  }
-
-  if (
-    hasValue(ownerId) &&
-    hasValue(ownerTable) &&
-    hasValue(fieldKey)
-  ) {
-    const match = activeRows.find(
-      (row: any) =>
-        (!hasValue(accountId) ||
-          sameValue(row.accountId, accountId)) &&
-        sameValue(row.ownerTable, ownerTable) &&
-        sameValue(row.fieldKey, fieldKey) &&
-        sameValue(row.ownerId, ownerId),
-    );
-
-    if (match) return match;
-  }
-
-  const payloadId = payload.id;
-
-  if (hasValue(payloadId)) {
-    const candidate = await table
-      .get(Number(payloadId))
-      .catch(() => null);
-
-    if (
-      candidate &&
-      hasValue(localId) &&
-      sameValue(candidate.id, localId)
-    ) {
-      return candidate;
+  const cloudId = String(record.cloudId || payload.cloudId || "").trim();
+  if (cloudId) {
+    try {
+      const byCloud = await table.where("cloudId").equals(cloudId).first();
+      if (byCloud && String(byCloud.accountId || "") === accountId) return byCloud;
+    } catch {
+      // Legacy media stores may not have a cloudId index.
     }
   }
 
+  const rows: any[] = await table.toArray();
+  if (cloudId) {
+    const match = rows.find((row) =>
+      String(row.accountId || "") === accountId &&
+      String(row.cloudId || "") === cloudId,
+    );
+    if (match) return match;
+  }
+
+  const fieldKey = String(payload.fieldKey || "").trim();
+  // Gallery assets share an owner and field: NEVER collapse their siblings.
+  if (["gallery", "schoolGalleryImages"].includes(fieldKey)) return null;
+
+  const identity = String(payload.ownerIdentityKey || "").trim();
+  if (identity) {
+    const match = rows.find((row) =>
+      String(row.accountId || "") === accountId &&
+      !row.isDeleted &&
+      String(row.ownerIdentityKey || "") === identity,
+    );
+    if (match) return match;
+  }
+
+  const ownerTable = String(payload.ownerTable || "").trim();
+  const ownerId = String(payload.ownerId || "").trim();
+  const ownerTempKey = String(payload.ownerTempKey || "").trim();
+  if (ownerTable && fieldKey && (ownerId || ownerTempKey)) {
+    return rows.find((row) =>
+      String(row.accountId || "") === accountId &&
+      !row.isDeleted &&
+      String(row.ownerTable || "") === ownerTable &&
+      String(row.fieldKey || "") === fieldKey &&
+      (ownerId
+        ? String(row.ownerId || "") === ownerId
+        : String(row.ownerTempKey || "") === ownerTempKey),
+    ) || null;
+  }
   return null;
 }
 
@@ -502,6 +487,13 @@ async function applyPulledRecord(input: {
     };
 
     if (existingId != null) {
+      if (
+        existing?.synced === SYNC_STATUS_VALUE.PENDING ||
+        existing?.synced === SYNC_STATUS_VALUE.ERROR ||
+        existing?.synced === SYNC_STATUS_VALUE.CONFLICT
+      ) {
+        return { pulled: 0, skipped: 1, cacheUpdated: 0, errors };
+      }
       const winner = resolveConflict(
         existing,
         incoming,
@@ -555,256 +547,245 @@ async function applyPulledRecord(input: {
   }
 }
 
-export async function pullSync(options?: {
+/**
+ * Separate cursors for filtered pulls. The global cursor is never read or
+ * written by a table-filtered request. The key reuses syncConfig's existing
+ * account+environment scoping; the stored table list guards hash collisions.
+ */
+type FilterCursorState = {
+  version: 1;
+  tables: string[];
+  cursor: SyncPullCursor | null;
+  completed: boolean;
+  updatedAt: number;
+};
+
+function canonicalTables(input: string[] | undefined): string[] {
+  const tables = [...new Set((input || []).map((name) => String(name).trim()).filter(Boolean))].sort();
+  if (tables.length > 100 || tables.some((name) => !isSyncTable(name))) {
+    throw new Error("Filtered pulls accept only registered local-first SyncRecord tables.");
+  }
+  return tables;
+}
+
+function filterCursorKey(accountId: string, tables: string[]): string {
+  let hash = 2166136261;
+  const signature = tables.join("\u001f");
+  for (let i = 0; i < signature.length; i++) {
+    hash = Math.imul(hash ^ signature.charCodeAt(i), 16777619);
+  }
+  return accountScopedStorageKey(
+    `eleeveon_module_pull_cursor_v1_${(hash >>> 0).toString(16)}`,
+    accountId,
+  );
+}
+
+function readFilterPosition(accountId: string, tables: string[]): SyncPullCursor | null {
+  const raw = getLocalStorageItem(filterCursorKey(accountId, tables));
+  if (!raw) return null;
+  try {
+    const saved = JSON.parse(raw) as FilterCursorState;
+    if (
+      saved.version !== 1 ||
+      JSON.stringify(saved.tables) !== JSON.stringify(tables)
+    ) {
+      // Never reuse a cursor for another requested table set.
+      throw new Error("A filtered sync cursor does not match its tables.");
+    }
+    return normalizeCursor(saved.cursor);
+  } catch (error) {
+    throw new Error(
+      `Filtered sync checkpoint is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function saveFilterPosition(
+  accountId: string,
+  tables: string[],
+  cursor: SyncPullCursor | null,
+  completed: boolean,
+): void {
+  const state: FilterCursorState = {
+    version: 1, tables, cursor, completed, updatedAt: Date.now(),
+  };
+  setLocalStorageItem(filterCursorKey(accountId, tables), JSON.stringify(state));
+}
+
+export function clearFilteredPullCursor(tableNames: string[], accountId = assertAccountId()): void {
+  const tables = canonicalTables(tableNames);
+  if (!tables.length) throw new Error("Specify at least one table to clear its filtered cursor.");
+  removeLocalStorageItem(filterCursorKey(accountId, tables));
+}
+
+export function getFilteredPullCursor(
+  tableNames: string[],
+  accountId = assertAccountId(),
+): SyncPullCursor | null {
+  const tables = canonicalTables(tableNames);
+  if (!tables.length) return null;
+  return readFilterPosition(accountId, tables);
+}
+
+export type PullSyncOptions = {
   full?: boolean;
   accountId?: string;
   limit?: number;
   tableNames?: string[];
-}): Promise<PullSyncResult> {
-  const activeAccountId = assertAccountId();
+  /** Cooperative preemption: stop AFTER committing the current page. */
+  shouldYield?: () => boolean;
+  /** The runner can refresh its cross-tab lock after each committed page. */
+  onPageApplied?: () => void | Promise<void>;
+};
 
-  const accountId =
-    options?.accountId ||
-    activeAccountId;
-
-  if (accountId !== activeAccountId) {
-    throw new Error(
-      "Refusing to pull a different account into the active session.",
-    );
+export async function pullSync(options: PullSyncOptions = {}): Promise<PullSyncResult> {
+  const accountId = assertAccountId();
+  if (options.accountId && options.accountId !== accountId) {
+    throw new Error("Refusing to pull a different account into this session.");
   }
-
   const deviceId = getDeviceId();
-
-  const storedPosition = getPullPosition(accountId);
-
-  const cursorBefore = options?.full
+  const tables = canonicalTables(options.tableNames);
+  const filtered = tables.length > 0;
+  const pageLimit = Math.min(2_000, Math.max(1, Math.floor(Number(options.limit) || DEFAULT_PULL_PAGE_LIMIT)));
+  const globalPosition = filtered ? null : getPullPosition(accountId);
+  const cursorBefore = options.full
     ? null
-    : storedPosition.cursor;
-
-  const legacySinceBefore = options?.full
-    ? 0
-    : storedPosition.since;
-
+    : filtered
+      ? readFilterPosition(accountId, tables)
+      : globalPosition!.cursor;
+  const legacySinceBefore = filtered || options.full ? 0 : globalPosition!.since;
   let workingCursor = cursorBefore;
-  let useLegacySince =
-    !workingCursor &&
-    legacySinceBefore > 0;
-
-  const errors: string[] = [];
-
+  let useLegacySince = !filtered && !workingCursor && legacySinceBefore > 0;
   let pulled = 0;
   let skipped = 0;
   let cacheUpdated = 0;
   let pages = 0;
   let completed = false;
+  let yielded = false;
+  const errors: string[] = [];
 
   try {
     while (pages < MAX_PULL_PAGES_PER_RUN) {
-      const body: Record<string, any> = {
-        accountId,
-        deviceId,
-        limit:
-          options?.limit ||
-          DEFAULT_PULL_PAGE_LIMIT,
-      };
-
-      if (options?.tableNames?.length) {
-        body.tableNames = options.tableNames;
+      if (getAccountId() !== accountId) {
+        throw new Error("Account changed during pull; page traversal cancelled.");
       }
-
+      const body: Record<string, any> = { accountId, deviceId, limit: pageLimit };
+      if (filtered) body.tableNames = tables;
       if (workingCursor) {
-        body.cursorUpdatedAt =
-          workingCursor.updatedAt;
-        body.cursorId =
-          workingCursor.id;
-      } else if (useLegacySince) {
-        body.since =
-          legacySinceBefore;
+        body.cursorUpdatedAt = workingCursor.updatedAt;
+        body.cursorId = workingCursor.id;
       } else {
-        body.since = 0;
+        body.since = useLegacySince ? legacySinceBefore : 0;
       }
-
-      const response =
-        await syncHttp<PullResponse>(
-          SYNC_ENDPOINTS.PULL,
-          {
-            method: "POST",
-            body,
-          },
-        );
-
+      const response = await syncHttp<PullResponse>(SYNC_ENDPOINTS.PULL, {
+        method: "POST", body,
+      });
+      if (getAccountId() !== accountId) {
+        throw new Error("Account changed while receiving the pull response.");
+      }
       pages++;
-
-      const quarantinedFromServer =
-        Array.isArray((response as any).quarantineRecords)
-          ? (response as any).quarantineRecords
-          : [];
-
-      for (const malformed of quarantinedFromServer) {
+      const changedTables = new Set<string>();
+      const quarantine = Array.isArray((response as any).quarantineRecords)
+        ? (response as any).quarantineRecords
+        : [];
+      for (const malformed of quarantine) {
         await quarantineSyncRecord({
-          source: "pull",
-          accountId:
-            malformed?.record?.accountId ||
-            accountId,
-          tableName:
-            malformed?.record?.tableName,
-          entityId:
-            malformed?.record?.localId,
-          id:
-            malformed?.record?.cloudId ||
-            undefined,
-          reason:
-            malformed?.reason ||
-            "The backend identified a malformed synchronization record.",
-          payload:
-            malformed?.record ||
-            malformed,
+          source: "pull", accountId,
+          tableName: malformed?.record?.tableName,
+          entityId: malformed?.record?.localId,
+          id: malformed?.record?.cloudId,
+          reason: malformed?.reason || "Backend rejected an invalid synchronization record.",
+          payload: malformed?.record || malformed,
         });
-
         skipped++;
       }
-
       for (const record of response.records || []) {
-        const result = await applyPulledRecord({
-          record,
-          accountId,
-          deviceId,
-        });
-
-        pulled += result.pulled;
-        skipped += result.skipped;
-        cacheUpdated +=
-          result.cacheUpdated;
-        errors.push(...result.errors);
+        if (getAccountId() !== accountId) {
+          throw new Error("Account changed while applying pull records.");
+        }
+        const applied = await applyPulledRecord({ record, accountId, deviceId });
+        pulled += applied.pulled;
+        skipped += applied.skipped;
+        cacheUpdated += applied.cacheUpdated;
+        errors.push(...applied.errors);
+        if (applied.pulled > 0 && record.tableName) changedTables.add(record.tableName);
       }
-
       const cacheRecords = [
         ...(response.cacheRecords || []),
         ...(response.platformRecords || []),
       ];
-
       if (cacheRecords.length) {
-        const cache =
-          await applyPlatformCacheRecords(
-            cacheRecords,
-          );
-
+        const cache = await applyPlatformCacheRecords(cacheRecords);
         cacheUpdated += cache.updated;
         skipped += cache.skipped;
         errors.push(...cache.errors);
+        if (cache.updated > 0) {
+          for (const item of cacheRecords) if (item.tableName) changedTables.add(item.tableName);
+        }
       }
-
-      if (errors.length) {
+      if (errors.length) break;
+      const nextCursor = normalizeCursor(response.nextCursor);
+      if (response.hasMore && !nextCursor) {
+        errors.push("The server returned hasMore without a valid continuation cursor.");
         break;
       }
-
-      const nextCursor =
-        normalizeCursor(
-          response.nextCursor,
-        );
-
-      if (
-        response.hasMore &&
-        !nextCursor
-      ) {
-        errors.push(
-          "The sync server reported another page but did not return a valid next cursor.",
-        );
+      if (response.hasMore && sameCursor(workingCursor, nextCursor)) {
+        errors.push("The pull cursor did not advance; stopped to prevent a loop.");
         break;
       }
-
-      if (
-        response.hasMore &&
-        sameCursor(
-          nextCursor,
-          workingCursor,
-        )
-      ) {
-        errors.push(
-          "The sync cursor did not advance. Pull stopped to prevent an infinite loop.",
-        );
-        break;
+      await options.onPageApplied?.();
+      if (getAccountId() !== accountId) {
+        throw new Error("Account changed after applying a pull page.");
       }
-
       if (nextCursor) {
         workingCursor = nextCursor;
         useLegacySince = false;
       }
-
+      if (changedTables.size) {
+        publishSyncPullCompleted({ accountId, changedTables: [...changedTables] });
+      }
+      // Only filtered cursors checkpoint after each *fully applied* page.
+      // The global cursor advances only after the full account pull completes.
+      if (filtered) {
+        saveFilterPosition(accountId, tables, workingCursor, !response.hasMore);
+      }
       if (!response.hasMore) {
         completed = true;
         break;
       }
-    }
-
-    if (
-      pages >= MAX_PULL_PAGES_PER_RUN &&
-      !completed &&
-      !errors.length
-    ) {
-      errors.push(
-        "Pull stopped after the maximum page count to prevent an infinite loop.",
-      );
-    }
-
-    /**
-     * Critical Phase 4 rule:
-     *
-     * Persist only after every requested page has been applied successfully.
-     * If page 4 fails after pages 1–3 succeeded, the stored cursor remains at
-     * the original position. The next run safely replays pages 1–3; conflict
-     * resolution and cloud IDs make those applications idempotent.
-     */
-    if (
-      completed &&
-      !errors.length
-    ) {
-      if (workingCursor) {
-        setLastSyncCursor(
-          workingCursor,
-          accountId,
-        );
-      } else {
-        // A successful full pull with no records must remove any stale cursor.
-        clearLastSyncCursor(accountId);
+      if (options.shouldYield?.()) {
+        yielded = true;
+        break;
       }
+      // Keep rendering responsive between network pages.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
-  } catch (error: any) {
-    errors.push(
-      error?.message ||
-        String(error),
-    );
+    if (pages >= MAX_PULL_PAGES_PER_RUN && !completed && !yielded && !errors.length) {
+      errors.push("Pull exceeded maximum pages before reaching completion.");
+    }
+    if (completed && !errors.length && !filtered) {
+      if (workingCursor) setLastSyncCursor(workingCursor, accountId);
+      else clearLastSyncCursor(accountId);
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
   }
 
   return {
-    pulled,
-    skipped,
-    errors,
-    cacheUpdated,
-    accountId,
-
+    pulled, skipped, errors, cacheUpdated, accountId,
     cursorBefore,
-    cursorAfter:
-      completed &&
-      !errors.length
-        ? workingCursor
-        : cursorBefore,
-
-    legacySinceBefore,
-    pages,
-    completed:
-      completed &&
-      errors.length === 0,
+    cursorAfter: filtered
+      ? (errors.length ? cursorBefore : workingCursor)
+      : completed && !errors.length ? workingCursor : cursorBefore,
+    legacySinceBefore, pages,
+    completed: completed && errors.length === 0,
+    yielded: yielded && errors.length === 0,
+    filtered,
   };
 }
 
 export async function repairSync(): Promise<PullSyncResult> {
   const accountId = assertAccountId();
-
   forceFullSyncNextRun(accountId);
-
-  return pullSync({
-    full: true,
-    accountId,
-  });
+  return pullSync({ full: true, accountId });
 }

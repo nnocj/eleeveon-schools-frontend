@@ -13,6 +13,7 @@
  * - Appearance readiness
  * - Realtime and synchronization state
  * - Non-blocking role-wide workspace preparation
+ * - Safe active-page sync priority for account-wide roles
  * - Hub indicator loading
  * - Sidebar, header, account drawer and active route rendering
  * - Fast role switching
@@ -48,6 +49,8 @@ import { useRealtime } from "../../../context/realtime-context";
 import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
+import { requestPrioritySync } from "../../../lib/sync/runSync";
+import { isSyncTable } from "../../../lib/sync/syncTables";
 import { useWindowChrome } from "../../../context/window-chrome-context";
 
 import SyncStatusSheet from "../../SyncStatusSheet";
@@ -122,6 +125,125 @@ import {
   selectedMemberMeta,
   selectedMemberName,
 } from "./rolePortalIdentity";
+
+/**
+ * Active-page synchronization priorities.
+ *
+ * The sidebar route key and user-facing label identify the CURRENT module.
+ * These dependency lists use registered local-first table names only. They
+ * are intentionally small enough to fetch quickly while the existing
+ * role-wide workspace bootstrap continues independently in the background.
+ *
+ * IMPORTANT SECURITY BOUNDARY:
+ * The current /sync/pull backend checks account membership, but not yet the
+ * precise selected-membership + profile scope. Until it is fixed, automatic
+ * priority pulls MUST be limited to genuinely account-wide roles. Other roles
+ * continue to receive their permitted records via role-scoped bootstrap.
+ */
+const PRIORITY_SYNC_ACCOUNT_ROLES = new Set([
+  "super_admin",
+  "developer",
+  "platform_team",
+]);
+
+const PRIORITY_TABLE_GROUPS = {
+  foundation: [
+    "schools", "branches", "academicPeriods", "classes",
+  ],
+  people: [
+    "students", "studentEnrollments", "studentParents", "parents", "teachers",
+  ],
+  assessment: [
+    "gradingSystems", "gradeRules", "assessmentStructures",
+    "assessmentStructureItems", "assessmentApplicabilities",
+    "assessmentComponents", "assessmentEntries", "computedResults",
+    "classes", "classSubjects", "subjects", "students",
+    "studentEnrollments", "academicPeriods",
+  ],
+  attendance: [
+    "attendance", "studentAttendanceSummaries", "teacherAttendance",
+    "attendanceSessions", "students", "teachers", "classes",
+    "studentEnrollments", "academicPeriods",
+  ],
+  reports: [
+    "reportCards", "reportCardItems", "reportCardTemplates",
+    "reportCardTemplateSettings", "reportCardTemplateAssignments",
+    "studentReportSnapshots", "computedResults", "assessmentEntries",
+    "students", "studentEnrollments", "classes", "academicPeriods",
+  ],
+  timetable: [
+    "scheduleTimetables", "scheduleSessions", "scheduleResources",
+    "scheduleConflicts", "classes", "subjects", "teachers", "classTeachers",
+  ],
+  finance: [
+    "feeStructures", "payments", "incomes", "expenses",
+    "studentFeeInvoices", "studentFeeInvoiceItems", "studentFeePayments",
+    "currencies", "schoolCurrencySettings",
+  ],
+  communication: [
+    "announcements", "announcementRecipients", "messageThreads",
+    "messages", "communicationLogs",
+  ],
+  settings: ["schoolBranchSettings", "schools", "branches"],
+} as const;
+
+/** Map portal route/label aliases without changing the existing nav keys. */
+function tablesForPortalRoute(routeKey: string, label?: string): string[] {
+  const key = routeKey.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const visible = String(label || "").toLowerCase();
+  const text = `${key} ${visible}`;
+
+  // No bulk data request for generic dashboard, hub, or local preferences.
+  if (
+    !key ||
+    key === "__eleeveon_center__" ||
+    /dashboard|^home$|hub|localsettings|syncstatus/.test(key)
+  ) {
+    return [];
+  }
+
+  let selected: readonly string[];
+  if (/assessment|broadsheet|grade|grading|computedresult/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.assessment;
+  } else if (/attendance|rollcall/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.attendance;
+  } else if (/studentreport|teacherreport|report|transcript|result|promotion|cumulative|progress|performance/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.reports;
+  } else if (/fee|finance|invoice|payment|income|expense|payroll|salary/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.finance;
+  } else if (/message|notice|announcement|communicat/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.communication;
+  } else if (/setting|appearance|branchprofile|schoolprofile|teacherprofile|studentprofile|parentprofile/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.settings;
+  } else if (/schedule|timetable|calendar/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.timetable;
+  } else if (/subject|class|curriculum|academicstructure|academicperiod|course|assignment/.test(text)) {
+    selected = [
+      ...PRIORITY_TABLE_GROUPS.foundation,
+      "subjects", "classSubjects", "classTeachers", "studentEnrollments",
+      "academicStructures", "programs", "curriculums", "assignments",
+    ];
+  } else if (/student|enrollment|enrolment|learner|admission/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.people;
+  } else if (/teacher|staff|personnel|parent/.test(text)) {
+    selected = PRIORITY_TABLE_GROUPS.people;
+  } else if (isSyncTable(routeKey)) {
+    selected = [routeKey];
+  } else {
+    // Unknown modules deliberately do not trigger an account-wide sweep.
+    return [];
+  }
+
+  return [...new Set(selected)].filter(isSyncTable);
+}
+
+function canonicalPriorityRole(role: unknown): string {
+  const normalized = String(role || "")
+    .toLowerCase().trim().replace(/-/g, "_");
+  return normalized === "owner" || normalized === "school_owner"
+    ? "super_admin"
+    : normalized;
+}
 
 function RolePortalShellContent({
   portalTitle,
@@ -767,6 +889,122 @@ function RolePortalShellContent({
   ]);
 
   const [isOnline, setIsOnline] = useState(true);
+
+  /** Non-blocking status text; never used to gate portal navigation. */
+  const [priorityPreparing, setPriorityPreparing] = useState<string | null>(null);
+  const priorityAttemptedAt = useRef(new Map<string, number>());
+
+  const activeModuleLabel = labels[tab] || tab;
+  const activeModuleTables = useMemo(
+    () => tablesForPortalRoute(tab, activeModuleLabel),
+    [tab, activeModuleLabel],
+  );
+
+  // One stable primitive key per selected account/workspace, not an object
+  // reference that could change on every context refresh.
+  const priorityWorkspaceKey = selectedMembership
+    ? [
+        accountId || "",
+        membershipKey(selectedMembership),
+        effectiveSchoolId || "",
+        effectiveBranchId || "",
+        canonicalPriorityRole(selectedMembership.role),
+      ].join("|")
+    : "";
+
+  /**
+   * ACTIVE-PAGE PRIORITY SYNC
+   *
+   * Runs after the portal has painted and does not block route navigation.
+   * The existing background bootstrap always continues to fetch ALL tables.
+   *
+   * /sync/pull is currently account-scoped, not selected-profile-scoped.
+   * Do not trigger it automatically for teacher/student/parent/branch/school
+   * scoped roles until backend membership authorization is implemented.
+   */
+  useEffect(() => {
+    const selectedRole = canonicalPriorityRole(selectedMembership?.role);
+    if (
+      !authenticated ||
+      !sessionVerified ||
+      !accountId ||
+      !membershipRestored ||
+      !canAccess ||
+      !appearanceMatchesRole ||
+      !databaseContext.ready ||
+      !isOnline ||
+      Boolean(switchingMembershipId) ||
+      !priorityWorkspaceKey ||
+      !PRIORITY_SYNC_ACCOUNT_ROLES.has(selectedRole) ||
+      activeModuleTables.length === 0
+    ) {
+      setPriorityPreparing(null);
+      return;
+    }
+
+    let disposed = false;
+    const requestKey = [
+      priorityWorkspaceKey,
+      tab,
+      activeModuleTables.join(","),
+    ].join("|");
+    const lastAttempt = priorityAttemptedAt.current.get(requestKey) || 0;
+    // Reopening a page within this short window reuses recently pulled data.
+    if (Date.now() - lastAttempt < 30_000) return;
+
+    const timer = window.setTimeout(() => {
+      if (disposed || !navigator.onLine) return;
+      // Also check the persisted workspace to avoid a stale queued request
+      // being scheduled while the user is switching roles.
+      const opened = readOpenWorkspaceSession();
+      if (
+        opened?.membershipId &&
+        opened.membershipId !== membershipKey(selectedMembership!)
+      ) {
+        return;
+      }
+      priorityAttemptedAt.current.set(requestKey, Date.now());
+      setPriorityPreparing(activeModuleLabel);
+
+      void requestPrioritySync(activeModuleTables).then((result) => {
+        if (disposed) return;
+        if (!result.ok) {
+          // Failed work can be retried on the next navigation or reconnect.
+          priorityAttemptedAt.current.delete(requestKey);
+          console.warn("[portal] Active-module priority sync did not complete:", result.errors);
+        }
+      }).catch((error) => {
+        if (disposed) return;
+        priorityAttemptedAt.current.delete(requestKey);
+        console.warn("[portal] Active-module priority sync failed:", error);
+      }).finally(() => {
+        if (!disposed) setPriorityPreparing(null);
+      });
+    }, 220);
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      setPriorityPreparing(null);
+    };
+  }, [
+    authenticated,
+    sessionVerified,
+    accountId,
+    membershipRestored,
+    canAccess,
+    appearanceMatchesRole,
+    databaseContext.ready,
+    isOnline,
+    switchingMembershipId,
+    selectedMembership?.role,
+    priorityWorkspaceKey,
+    tab,
+    activeModuleLabel,
+    activeModuleTables,
+  ]);
+
+
   const [hubUnreadCount, setHubUnreadCount] = useState(0);
   const [hubHasAttention, setHubHasAttention] = useState(false);
 
@@ -1748,6 +1986,16 @@ function RolePortalShellContent({
         />
 
         <PortalContent>
+          {priorityPreparing && (
+            <div
+              className="role-priority-sync-note"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="role-priority-sync-dot" aria-hidden="true" />
+              Updating {priorityPreparing} for offline use…
+            </div>
+          )}
           <ActiveComponent
             navigate={navigate}
             context={portalRuntimeContext}
@@ -1805,6 +2053,42 @@ const css = `
   to {
     transform: rotate(360deg);
   }
+}
+
+.role-priority-sync-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, rgba(100,116,139,.18));
+  border-radius: 999px;
+  color: var(--muted, #64748b);
+  background: var(--surface, #ffffff);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.role-priority-sync-dot {
+  display: block;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary-color, #2f6fed);
+  animation: rolePriorityPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes rolePriorityPulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .role-priority-sync-dot { animation: none; }
 }
 
 .background-refresh-indicator {

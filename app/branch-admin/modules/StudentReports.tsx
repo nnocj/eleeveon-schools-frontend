@@ -25,10 +25,10 @@
  * - no teacher membership, teacher profile or class-teacher gate is required
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useSettings } from "../../context/settings-context";
-import { useActiveBranch } from "../../context/active-branch-context";
+import { useSettings } from "../../../context/settings-context";
+import { useActiveBranch } from "../../../context/active-branch-context";
 
 import {
   db,
@@ -57,7 +57,7 @@ import {
   Subject,
   Teacher,
   SchoolBranchSetting,
-} from "../../lib/db/db";
+} from "../../../lib/db/db";
 
 import {
   MediaOwners,
@@ -65,36 +65,37 @@ import {
   getMediaObjectUrl,
   getOwnerFieldMediaAsset,
   revokeMediaObjectUrl,
-} from "../../lib/media/mediaAssetUtils";
+} from "../../../lib/media/mediaAssetUtils";
 
-import ReportAnalytics from "./reports/components/ReportAnalytics";
-import StudentReportCard from "./reports/components/StudentReportCard";
-import { printReportTarget } from "./reports/components/ReportExportTools";
+import ReportAnalytics from "./components/ReportAnalytics";
+import StudentReportCard from "./components/StudentReportCard";
+import { printReportTarget } from "./components/ReportExportTools";
 
-import { buildReportEngineOutput } from "./reports/engine/report-engine";
+import { buildReportEngineOutput } from "./engine/report-engine";
 
 import type {
   ReportEngineDataset,
   ReportFiltersState,
   ReportMode,
-} from "./reports/engine/report-types";
+} from "./engine/report-types";
 
 import type {
   ReportCardTemplateAssignmentLike,
   ReportCardTemplateLike,
   ReportCardTemplateSettingsLike,
   StudentReportTemplateSettings,
-} from "./reports/shared/ReportTemplateTypes";
+} from "./shared/ReportTemplateTypes";
 
 import {
   DEFAULT_STUDENT_REPORT_TEMPLATE_SETTINGS,
   mergeStudentReportTemplateSettings,
   normalizeStudentReportTemplateDefinition,
-} from "./reports/shared/ReportTemplateTypes";
+} from "./shared/ReportTemplateTypes";
 
-import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
-import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
-import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../../hooks/useBranchTableRevision";
+import { useRegisterBranchWorkspaceToolbar } from "../../../components/role-portals/shell/BranchWorkspaceToolbar";
 const TemplateAwareStudentReportCard =
   StudentReportCard as React.ComponentType<any>;
 
@@ -274,6 +275,8 @@ export default function StudentReports() {
 
   const { loading: pageLoading, setLoading: setPageLoading } =
     useBackgroundLoader();
+  const initialScopeAppliedRef = useRef<string>("");
+  const [loadedScopeWorkspace, setLoadedScopeWorkspace] = useState("");
   const [mode, setMode] = useState<ReportMode>("student-report");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -463,6 +466,7 @@ export default function StudentReports() {
       !branchId
     ) {
       clearState();
+      setLoadedScopeWorkspace("");
       setPageLoading(false);
       return;
     }
@@ -853,9 +857,11 @@ export default function StudentReports() {
       setReportCardTemplates(scopedReportCardTemplates);
       setReportCardTemplateSettings(scopedReportCardTemplateSettings);
       setReportCardTemplateAssignments(scopedReportCardTemplateAssignments);
+      setLoadedScopeWorkspace([accountId, schoolId, branchId].join(":"));
     } catch (error) {
       console.error("Failed to load report data:", error);
       clearState();
+      setLoadedScopeWorkspace("");
     } finally {
       setPageLoading(false);
     }
@@ -872,48 +878,92 @@ export default function StudentReports() {
     dataRevision,
   ]);
 
-  useEffect(() => {
-    setFilters((prev) => {
-      const nextBranchId = branchId || undefined;
-      const branchChanged = prev.branchId !== nextBranchId;
+  // Select one *coherent* reporting scope rather than picking three unrelated
+  // dropdown defaults. An active enrollment or a configured class subject can
+  // establish the structure + period + class combination.
+  const availableReportScopes = useMemo(() => {
+    type Scope = { academicStructureId: string; academicPeriodId: string; classId: string };
+    const byKey = new Map<string, Scope>();
+    const structureIds = new Set(academicStructures.map((row) => idOf(row.id)));
+    const classIds = new Set(classes.map((row) => idOf(row.id)));
+    const periodById = new Map(academicPeriods.map((row) => [idOf(row.id), row]));
 
-      return {
-        ...prev,
-        branchId: nextBranchId,
-        academicStructureId: branchChanged
-          ? currentAcademicStructureId
-          : prev.academicStructureId || currentAcademicStructureId,
-        academicPeriodId: branchChanged
-          ? currentAcademicPeriodId
-          : prev.academicPeriodId || currentAcademicPeriodId,
-        classId: branchChanged ? undefined : prev.classId,
-        classSubjectId: branchChanged ? undefined : prev.classSubjectId,
-        studentId: branchChanged ? undefined : prev.studentId,
-      };
+    const addScope = (structureId: unknown, periodId: unknown, classId: unknown) => {
+      const sid = idOf(structureId);
+      const pid = idOf(periodId);
+      const cid = idOf(classId);
+      if (!sid || !pid || !cid || !structureIds.has(sid) || !classIds.has(cid)) return;
+      const period: any = periodById.get(pid);
+      if (!period || (period.academicStructureId && idOf(period.academicStructureId) !== sid)) return;
+      const scope: Scope = { academicStructureId: sid, academicPeriodId: pid, classId: cid };
+      byKey.set(`${sid}:${pid}:${cid}`, scope);
+    };
+
+    studentEnrollments.forEach((row: any) => {
+      if (row.isDeleted || row.status !== "active") return;
+      addScope(row.academicStructureId, row.academicPeriodId, row.classId);
     });
-  }, [branchId, currentAcademicStructureId, currentAcademicPeriodId]);
+    classSubjects.forEach((row: any) => {
+      if (row.isDeleted || row.active === false) return;
+      // A class subject without a period cannot establish a complete scope.
+      addScope(row.academicStructureId, row.academicPeriodId, row.classId);
+    });
+    return [...byKey.values()];
+  }, [academicStructures, academicPeriods, classes, studentEnrollments, classSubjects]);
 
   useEffect(() => {
-    if (!filters.academicStructureId) {
-      const fallbackId =
-        currentAcademicStructureId || firstExistingId(academicStructures);
-      if (fallbackId)
-        setFilters((prev) => ({ ...prev, academicStructureId: fallbackId }));
-    }
-  }, [
-    filters.academicStructureId,
-    currentAcademicStructureId,
-    academicStructures,
-  ]);
+    setFilters((prev) => prev.branchId === (branchId || undefined)
+      ? prev
+      : {
+          ...prev, branchId: branchId || undefined,
+          academicStructureId: undefined, academicPeriodId: undefined,
+          classId: undefined, classSubjectId: undefined, studentId: undefined,
+        });
+  }, [branchId]);
 
   useEffect(() => {
-    if (!filters.academicPeriodId) {
-      const fallbackId =
-        currentAcademicPeriodId || firstExistingId(academicPeriods);
-      if (fallbackId)
-        setFilters((prev) => ({ ...prev, academicPeriodId: fallbackId }));
-    }
-  }, [filters.academicPeriodId, currentAcademicPeriodId, academicPeriods]);
+    const workspaceKey = [accountId, schoolId, branchId].join(":");
+    if (!accountId || !schoolId || !branchId ||
+        loadedScopeWorkspace !== workspaceKey ||
+        !availableReportScopes.length ||
+        initialScopeAppliedRef.current === workspaceKey) return;
+    // Apply a default only once per workspace. Later manual Clear must remain cleared.
+    initialScopeAppliedRef.current = workspaceKey;
+    const preferred = [...availableReportScopes].sort((a, b) =>
+      Number(b.academicStructureId === currentAcademicStructureId && b.academicPeriodId === currentAcademicPeriodId) -
+      Number(a.academicStructureId === currentAcademicStructureId && a.academicPeriodId === currentAcademicPeriodId) ||
+      Number(b.academicStructureId === currentAcademicStructureId) - Number(a.academicStructureId === currentAcademicStructureId) ||
+      Number(b.academicPeriodId === currentAcademicPeriodId) - Number(a.academicPeriodId === currentAcademicPeriodId)
+    )[0];
+    if (!preferred) return;
+    setFilters((prev) => ({
+      ...prev, branchId: branchId || undefined,
+      academicStructureId: preferred.academicStructureId,
+      academicPeriodId: preferred.academicPeriodId,
+      classId: preferred.classId,
+      classSubjectId: undefined,
+      studentId: undefined,
+    }));
+  }, [accountId, schoolId, branchId, availableReportScopes, loadedScopeWorkspace,
+      currentAcademicStructureId, currentAcademicPeriodId]);
+
+
+  // All three selections are required, and their existing records must match.
+  // A manual complete selection is allowed even before any assessments are entered.
+  const hasCompleteReportScope = Boolean(
+    loadedScopeWorkspace === [accountId, schoolId, branchId].join(":") &&
+    filters.academicStructureId && filters.academicPeriodId && filters.classId &&
+    academicStructures.some((row) => idOf(row.id) === idOf(filters.academicStructureId)) &&
+    classes.some((row) => idOf(row.id) === idOf(filters.classId)) &&
+    academicPeriods.some((row: any) =>
+      idOf(row.id) === idOf(filters.academicPeriodId) &&
+      (!row.academicStructureId || idOf(row.academicStructureId) === idOf(filters.academicStructureId)))
+  );
+
+  const selectablePeriods = useMemo(() => academicPeriods.filter((row: any) =>
+    !filters.academicStructureId || !row.academicStructureId ||
+    idOf(row.academicStructureId) === idOf(filters.academicStructureId)),
+    [academicPeriods, filters.academicStructureId]);
 
   const lockedBranches = useMemo(() => {
     return activeBranch && idOf(activeBranch.id) === branchId
@@ -1094,8 +1144,10 @@ export default function StudentReports() {
   );
 
   const output = useMemo(
-    () => buildReportEngineOutput(dataset, filters),
-    [dataset, filters],
+    () => hasCompleteReportScope
+      ? buildReportEngineOutput(dataset, filters)
+      : { classReports: [], studentReport: undefined, warnings: [] },
+    [dataset, filters, hasCompleteReportScope],
   );
 
   const hasCoreSetup = Boolean(
@@ -1190,7 +1242,7 @@ export default function StudentReports() {
         : 0;
   const warningCount = output.warnings.length;
   const canPrint =
-    hasCoreSetup &&
+    hasCompleteReportScope && hasCoreSetup &&
     (mode === "class-reports"
       ? output.classReports.length > 0
       : Boolean(output.studentReport));
@@ -1404,16 +1456,18 @@ export default function StudentReports() {
     };
   }
 
+  // Branch Admin V4 toolbar; actual printable report target stays unchanged.
+  useRegisterBranchWorkspaceToolbar("reportsWorkspace", {
+    add: () => setFilterOpen(true),
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    print: () => triggerReportPrint(),
+    more: () => setMoreOpen(true),
+  });
+
   const renderActiveReport = () => {
-    if (!hasCoreSetup) {
-      return (
-        <Empty
-          icon="📄"
-          title="Reports need academic data first"
-          text="Add academic periods, classes, students, enrollments, class subjects, assessment entries, or computed results before generating publishable reports."
-        />
-      );
-    }
+    // Never display a template or a placeholder card without the complete scope.
+    if (!hasCompleteReportScope || !hasCoreSetup) return null;
 
     if (mode === "class-reports") {
       return output.classReports.length ? (
@@ -1429,15 +1483,10 @@ export default function StudentReports() {
             pageBreakAfter={index < output.classReports.length - 1}
           />
         ))
-      ) : (
-        <TemplateAwareStudentReportCard
-          dataset={undefined}
-          template={activeReportTemplate}
-          settings={activeReportTemplateSettings}
-        />
-      );
+      ) : null;
     }
 
+    if (!output.studentReport) return null;
     return (
       <TemplateAwareStudentReportCard
         dataset={
@@ -1512,140 +1561,64 @@ export default function StudentReports() {
     >
       <style>{css}</style>
 
-      <section
-        className="ba-search-card report-no-print"
-        aria-label="Student report search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search reports..."
-            aria-label="Search student reports"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={triggerReportPrint}
-          aria-label="Print report"
-          title="Print"
-          disabled={!canPrint}
-        >
-          ⎙
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open report filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
-      {activeFilterCount > 0 && (
-        <section
-          className="ba-filter-chips report-no-print"
-          aria-label="Active report filters"
-        >
-          {filters.academicStructureId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicStructureId: undefined,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Structure: {selectedStructureName} ×
-            </button>
-          )}
-          {filters.academicPeriodId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Period: {selectedPeriodName} ×
-            </button>
-          )}
-          {filters.classId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Class: {selectedClassName} ×
-            </button>
-          )}
-          {filters.studentId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, studentId: undefined }))
-              }
-            >
-              Student: {selectedStudentName} ×
-            </button>
-          )}
-          {mode !== "student-report" && (
-            <button type="button" onClick={() => setMode("student-report")}>
-              Mode: Class Batch ×
-            </button>
-          )}
+      {!hasCompleteReportScope && (
+        <section className="ba-v6-scope-picker report-no-print" aria-label="Select reporting context">
+          <label>
+            <span>Academic structure</span>
+            <select value={filters.academicStructureId || ""} onChange={(event) =>
+              setFilters((prev) => ({ ...prev,
+                academicStructureId: event.target.value || undefined,
+                academicPeriodId: undefined, classId: undefined,
+                classSubjectId: undefined, studentId: undefined }))}>
+              <option value="">Structure</option>
+              {academicStructures.map((row: any) =>
+                <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Academic period</span>
+            <select value={filters.academicPeriodId || ""} onChange={(event) =>
+              setFilters((prev) => ({ ...prev,
+                academicPeriodId: event.target.value || undefined,
+                classId: undefined, classSubjectId: undefined, studentId: undefined }))}>
+              <option value="">Period</option>
+              {selectablePeriods.map((row: any) =>
+                <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Class</span>
+            <select value={filters.classId || ""} onChange={(event) =>
+              setFilters((prev) => ({ ...prev, classId: event.target.value || undefined,
+                classSubjectId: undefined, studentId: undefined }))}>
+              <option value="">Class</option>
+              {filteredClasses.map((row: any) =>
+                <option key={String(row.id)} value={String(row.id)}>{row.name}</option>)}
+            </select>
+          </label>
         </section>
       )}
-
-      <section className="ba-print-card">
-        <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
-          {renderActiveReport()}
-        </div>
-      </section>
+      {hasCompleteReportScope && (
+        <section className="ba-print-card">
+          <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
+            {renderActiveReport()}
+          </div>
+        </section>
+      )}
 
       {filterOpen && (
         <FilterSheet
           mode={mode}
           filters={filters}
           academicStructures={academicStructures}
-          academicPeriods={academicPeriods}
+          academicPeriods={selectablePeriods}
           filteredClasses={visibleClasses}
           filteredClassSubjects={filteredClassSubjects}
           filteredStudents={visibleStudents}
           setMode={setMode}
           setFilters={setFilters}
+          search={search}
+          setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
       )}
@@ -1748,6 +1721,8 @@ function FilterSheet({
   filteredStudents,
   setMode,
   setFilters,
+  search,
+  setSearch,
   onClose,
 }: {
   mode: ReportMode;
@@ -1759,6 +1734,8 @@ function FilterSheet({
   filteredStudents: Student[];
   setMode: (mode: ReportMode) => void;
   setFilters: React.Dispatch<React.SetStateAction<ReportFiltersState>>;
+  search: string;
+  setSearch: (value: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -1772,7 +1749,7 @@ function FilterSheet({
           <div>
             <h2>Filters</h2>
             <p>
-              Choose the report scope. The branch and class access stay locked to your class-teacher assignment.
+              Select academic structure, period and class to generate reports for the active branch.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close filters">
@@ -1781,6 +1758,9 @@ function FilterSheet({
         </div>
 
         <div className="ba-form compact">
+          <label className="ba-v4-find"><span>Search</span>
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a student, subject or class" />
+          </label>
           <label>
             <span>Report Mode</span>
             <select
@@ -3573,5 +3553,85 @@ const css = `
     font-size: 13px;
   }
 }
+
+
+/* Role-portal modal/sheet containment -------------------------------- */
+@media (min-width:980px){
+  .ba-sheet-backdrop,
+  .ba-modal-backdrop{
+    position:fixed;
+    top:var(--eds-shell-top-offset,0px) !important;
+    right:0 !important;
+    bottom:0 !important;
+    left:var(--portal-content-left,0px) !important;
+    inset:auto 0 0 var(--portal-content-left,0px) !important;
+    width:auto;
+    height:auto;
+    max-width:calc(100vw - var(--portal-content-left,0px));
+    min-width:0;
+    overflow-x:hidden;
+  }
+
+  .ba-sheet,
+  .ba-modal{
+    min-width:0;
+    max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
+  }
+}
+
+
+/* V4 records workspace: neutral surface, efficient scroll, no duplicated toolbars. */
+.ba-page.student-reports-page, .ba-page.report-remarks-page { min-height:0; padding:3px 4px 18px; background:transparent; overflow-x:clip; }
+.ba-page.student-reports-page .ba-search-card, .ba-page.report-remarks-page .ba-search-card,
+.ba-page.report-remarks-page .ba-summary-line { display:none; }
+.ba-page.student-reports-page .ba-print-card,
+.ba-page.report-remarks-page .ba-remark-card,
+.ba-page.report-remarks-page .ba-student-row,
+.ba-page.report-remarks-page .ba-list,
+.ba-page.report-remarks-page .ba-sheet {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 83%,var(--bg,#f3f5f8) 17%);
+  border-color:var(--border,rgba(15,23,42,.13));
+  box-shadow:none;
+}
+.ba-page.student-reports-page .ba-print-card { margin:0; padding:5px; border-radius:11px; box-shadow:none; }
+.ba-page.student-reports-page .ba-print-zone { padding:3px; overflow-x:auto; overscroll-behavior-inline:contain; }
+.ba-page.report-remarks-page .ba-remark-card { margin-top:0; box-shadow:none; border-radius:11px; }
+.ba-page.report-remarks-page .ba-student-row { border-radius:9px; box-shadow:none; transform:none; }
+.ba-page.report-remarks-page .ba-list { gap:6px; }
+.ba-page.report-remarks-page .ba-student-row:hover { transform:none; }
+.ba-page .ba-v4-find { display:grid; gap:5px; grid-column:1/-1; font-size:12px; font-weight:700; color:var(--muted,#64748b); }
+.ba-page .ba-v4-find input { min-height:40px; padding:0 10px; border-radius:9px; background:var(--input-bg,var(--surface,#fff)); color:var(--text,#111827); }
+@media(max-width:760px){
+ .ba-page.student-reports-page,.ba-page.report-remarks-page{padding:0 1px 14px;}
+ .ba-page.student-reports-page .ba-print-card{padding:3px;border-radius:9px;}
+ .ba-page.report-remarks-page .ba-remark-card{padding:9px;}
+}
+@media print {
+  .ba-page.student-reports-page,.ba-page.report-remarks-page,
+  .ba-page.student-reports-page .ba-print-card,
+  .ba-page.student-reports-page .ba-print-zone {
+    background:#fff!important;box-shadow:none!important;border:0!important;
+    margin:0!important;padding:0!important;overflow:visible!important;
+  }
+}
+
+/* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
+
+.student-reports-page {background:var(--bg,var(--background,#f2f4f7));padding:5px;min-height:0;}
+.student-reports-page .ba-print-card {margin:0; padding:5px; border-radius:13px;
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);box-shadow:none;}
+/* Printed report templates are intentionally NOT restyled; only the preview frame changes. */
+.student-reports-page .ba-print-zone {border-radius:10px;}
+.ba-v6-scope-picker {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;align-items:end;
+  padding:8px;border:1px solid var(--border,#d4dae3);border-radius:12px;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);}
+.ba-v6-scope-picker label {min-width:0;display:grid;gap:4px;}
+.ba-v6-scope-picker label span {font-size:10px;color:var(--muted,#64748b);font-weight:700;}
+.ba-v6-scope-picker select {width:100%;min-width:0;min-height:38px;padding:0 8px;border-radius:9px;
+  background:var(--input-bg,var(--surface,#fff));border:1px solid var(--border,#d4dae3);
+  color:var(--text,#182235);font-size:12px;}
+@media(max-width:639px){.student-reports-page {padding:3px;}.ba-v6-scope-picker {grid-template-columns:1fr;}}
+@media print {.ba-v6-scope-picker{display:none!important;}}
 
 `;

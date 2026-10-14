@@ -3433,4 +3433,38 @@ const css = `
 }
 @media(min-width:1120px){.ae-page .ae-list.ae-entry-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
 @media(prefers-reduced-motion:reduce){.ae-page *, .ae-page *::before,.ae-page *::after{scroll-behavior:auto!important;animation-duration:0.01ms!important;transition-duration:0.01ms!important;}}
+
+/* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
+
+.ae-page {
+  --ae-bg:var(--bg,var(--background,#f2f4f7));
+  --ae-card:var(--card-bg,var(--surface,#fff));
+  --ae-panel:color-mix(in srgb,var(--ae-card) 91%,var(--ae-text,#182235) 9%);
+  --ae-border:color-mix(in srgb,var(--border,#d4dae3) 85%,var(--ae-text,#182235) 15%);
+  background:var(--ae-bg); padding:5px; min-height:0;
+}
+.ae-page .ae-score-card,.ae-page .ae-table-card,.ae-page .ae-analysis,
+.ae-page .ae-picker-list .student-row,.ae-page .ae-list:not(.ae-picker-list) .student-row {
+  background:color-mix(in srgb,var(--ae-card) 93%,var(--ae-text) 7%);
+  border:1px solid var(--ae-border); box-shadow:none; border-radius:13px;
+}
+.ae-page .ae-picker-list .student-row {min-height:130px;}
+.ae-page .ae-table-card {padding:4px; margin-top:2px;}
+.ae-page .ae-table-scroll {border-radius:10px;}
+.ae-page .ae-table-scroll table {background:color-mix(in srgb,var(--ae-card) 95%,var(--ae-text) 5%);}
+.ae-page .ae-table-scroll th {position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--ae-card) 85%,var(--ae-text) 15%);}
+.ae-page .ae-table-scroll tbody tr:nth-child(even) {background:color-mix(in srgb,var(--ae-card) 89%,var(--ae-text) 11%);}
+.ae-page .ae-table-scroll tbody tr:nth-child(odd) {background:color-mix(in srgb,var(--ae-card) 95%,var(--ae-text) 5%);}
+.ae-page .ae-table-scroll td {background:transparent;}
+.ae-page .ae-score-grid label {background:color-mix(in srgb,var(--ae-card) 89%,var(--ae-text) 11%);border-radius:9px;}
+.ae-page .ae-portrait {box-shadow:none;border-radius:12px;}
+.ae-page .ae-score-card {box-shadow:none;}
+.ae-page .ae-entry-topbar {margin-bottom:5px;}
+.ae-page .ae-entry-topbar button {background:var(--ae-panel);}
+.ae-page .ae-entry-topbar .ae-entry-save {background:var(--ae-primary);color:#fff;}
+.ae-page .ae-analysis {box-shadow:none;}
+@media(min-width:1024px){.ae-page .ae-list.ae-entry-list {grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:639px){.ae-page {padding:3px;}}
+@media(prefers-reduced-motion:reduce){.ae-page .student-row,.ae-page .ae-score-card {transition:none;}}
+
 `;

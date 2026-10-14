@@ -17,23 +17,12 @@
  * - ClassSubject -> AssessmentApplicability -> AssessmentStructureItems -> AssessmentEntry
  */
 
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-
 import { useRouter } from "next/navigation";
 
-import {
-  useSettings,
-} from "../../context/settings-context";
-
-import {
-  useActiveBranch,
-} from "../../context/active-branch-context";
+import { useSettings } from "../../context/settings-context";
+import { useActiveBranch } from "../../context/active-branch-context";
 
 import {
   db,
@@ -64,70 +53,47 @@ import {
   listActiveLocal,
 } from "../../lib/sync/syncUtils";
 
-import {
-  useBackgroundLoader,
-} from "../../hooks/useBackgroundLoader";
-
-import {
-  useBranchWorkspaceScope,
-} from "../../hooks/useBranchWorkspaceScope";
-
-import {
-  useBranchTableRevision,
-} from "../../hooks/useBranchTableRevision";
-
+import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import {
   projectAssessmentEntryColumns,
   type AssessmentEntryProjection,
 } from "../../lib/assessments";
 
-import ExcelFilePicker
-  from "../../components/excel/ExcelFilePicker";
-
-import ExcelColumnMappingEditor
-  from "../../components/excel/ExcelColumnMapping";
-
-import ExcelImportPreview
-  from "../../components/excel/ExcelImportPreview";
-
+import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
+import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
+import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
 import ExcelImportSheet, {
   type ExcelImportStep,
 } from "../../components/excel/ExcelImportSheet";
-
-import ExcelExportSheet
-  from "../../components/excel/ExcelExportSheet";
+import ExcelExportSheet from "../../components/excel/ExcelExportSheet";
 
 import type {
   ExcelColumnMapping,
   ParsedExcelWorkbook,
 } from "../../lib/excel/excelTypes";
-
 import {
   detectLikelyHeaderRow,
   getParsedSheet,
   parseExcelFile,
   sheetToRecords,
 } from "../../lib/excel/excelWorkbook";
-
 import {
   ASSESSMENT_STUDENT_FIELDS,
   parseAssessmentWorkbookMetadata,
   parseControlledAssessmentWorkbook,
   parseExternalAssessmentSheet,
 } from "../../lib/excel/assessments/assessmentExcelParser";
-
 import {
   validateAssessmentExcelImport,
 } from "../../lib/excel/assessments/assessmentExcelValidator";
-
 import {
   importAssessmentExcel,
 } from "../../lib/excel/assessments/assessmentExcelImporter";
-
 import {
   downloadAssessmentExcelTemplate,
 } from "../../lib/excel/assessments/assessmentExcelTemplate";
-
 import type {
   AssessmentExcelContext,
   AssessmentExcelImportResult,
@@ -135,37 +101,12 @@ import type {
   AssessmentExcelProjectedColumn,
   AssessmentExcelValidationResult,
 } from "../../lib/excel/assessments/assessmentExcelTypes";
-
-type ViewMode =
-  | "cards"
-  | "table"
-  | "summary";
-
-type ToastTone =
-  | "success"
-  | "error"
-  | "info";
-
-type ReadinessFilter =
-  | "all"
-  | "ready"
-  | "missing";
-
-type CompletionFilter =
-  | "all"
-  | "complete"
-  | "partial"
-  | "empty";
-
-type ScoreValue =
-  | number
-  | "";
-
-type ScoreMap =
-  Record<
-    string,
-    ScoreValue
-  >;
+type ViewMode = "cards" | "table" | "summary";
+type ToastTone = "success" | "error" | "info";
+type ReadinessFilter = "all" | "ready" | "missing";
+type CompletionFilter = "all" | "complete" | "partial" | "empty";
+type ScoreValue = number | "";
+type ScoreMap = Record<string, ScoreValue>;
 
 type TenantRow = {
   accountId?: string | null;
@@ -195,14 +136,11 @@ type ClassSubjectOption = {
 type StudentScoreRow = {
   student: Student;
   enrollment: StudentEnrollment;
-
   rowEntered: number;
   rowExpected: number;
-
   rawTotal: number;
   weightedTotal: number;
   percentage: number;
-
   grade?: string;
   remark?: string;
   gpa?: number;
@@ -211,10 +149,8 @@ type StudentScoreRow = {
 type ClassEntryView = {
   id: string;
   row: Class;
-
   name: string;
   code: string;
-
   subjectCount: number;
   readyCount: number;
   missingCount: number;
@@ -224,618 +160,176 @@ type ClassEntryView = {
 type ClassSubjectEntryView = {
   id: string;
   option: ClassSubjectOption;
-
   studentCount: number;
   itemCount: number;
-
   entered: number;
   expected: number;
   completion: number;
 };
 
-const idOf = (
-  value: any,
-): string => {
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return "";
-  }
-
-  return String(
-    value,
-  ).trim();
+const idOf = (v: any): string => {
+  if (v === undefined || v === null) return "";
+  return String(v).trim();
 };
 
-const sameId = (
-  a: any,
-  b: any,
-) =>
-  String(
-    a ?? "",
-  ) ===
-  String(
-    b ?? "",
-  );
-
-const safeLower = (
-  value: any,
-) =>
-  String(
-    value || "",
-  )
+const sameId = (a: any, b: any) => String(a ?? "") === String(b ?? "");
+const safeLower = (v: any) =>
+  String(v || "")
     .toLowerCase()
     .trim();
+const tableSafe = (name: string) => (db as any)[name];
+const scoreKey = (studentId?: string, itemId?: string) =>
+  `${studentId || ""}-${itemId || ""}`;
 
-const tableSafe = (
-  name: string,
-) =>
-  (db as any)[
-    name
-  ];
-
-const scoreKey = (
-  studentId?: string,
-  itemId?: string,
-) =>
-  `${
-    studentId || ""
-  }-${
-    itemId || ""
-  }`;
-
-const isActiveRow = (
-  row: any,
-) =>
-  !row?.isDeleted &&
-  row?.active !== false;
+const isActiveRow = (row: any) => !row?.isDeleted && row?.active !== false;
 
 function Chip({
   children,
   tone = "gray",
 }: {
-  children:
-    React.ReactNode;
-
-  tone?:
-    | "green"
-    | "red"
-    | "blue"
-    | "gray"
-    | "orange"
-    | "purple";
+  children: React.ReactNode;
+  tone?: "green" | "red" | "blue" | "gray" | "orange" | "purple";
 }) {
-  return (
-    <span
-      className={`ae-chip ${tone}`}
-    >
-      {children}
-    </span>
-  );
+  return <span className={`ae-chip ${tone}`}>{children}</span>;
 }
 
 function SliderIcon() {
   return (
-    <svg
-      className="ae-slider-icon"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
+    <svg className="ae-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M4 7h9" />
       <path d="M17 7h3" />
-
-      <circle
-        cx="15"
-        cy="7"
-        r="2"
-      />
-
+      <circle cx="15" cy="7" r="2" />
       <path d="M4 17h3" />
       <path d="M11 17h9" />
-
-      <circle
-        cx="9"
-        cy="17"
-        r="2"
-      />
+      <circle cx="9" cy="17" r="2" />
     </svg>
   );
 }
 
 export default function AssessmentEntries() {
-  const dataRevision =
-    useBranchTableRevision([
-      "students",
-      "classes",
-      "subjects",
-      "teachers",
-      "academicStructures",
-      "academicPeriods",
-      "organizations",
-      "curriculums",
-      "curriculumPathways",
-      "curriculumSubjects",
-      "classSubjects",
-      "assessmentApplicabilities",
-      "assessmentStructures",
-      "assessmentStructureItems",
-      "assessmentEntries",
-      "gradingStructures",
-      "gradeRules",
-      "studentEnrollments",
-    ]);
+  const dataRevision = useBranchTableRevision([
+    "students",
+    "classes",
+    "subjects",
+    "teachers",
+    "academicStructures",
+    "academicPeriods",
+    "organizations",
+    "curriculums",
+    "curriculumPathways",
+    "curriculumSubjects",
+    "classSubjects",
+    "assessmentApplicabilities",
+    "assessmentStructures",
+    "assessmentStructureItems",
+    "assessmentEntries",
+    "gradingStructures",
+    "gradeRules",
+    "studentEnrollments",
+  ]);
 
-  const router =
-    useRouter();
-
-  const {
-    settings,
-    loading:
-      settingsLoading,
-  } = useSettings();
-
-  const {
-    activeBranch,
-  } =
-    useActiveBranch();
-
-  const workspace =
-    useBranchWorkspaceScope();
-
+  const router = useRouter();
+  const { settings, loading: settingsLoading } = useSettings();
+  const { activeBranch } = useActiveBranch();
+  const workspace = useBranchWorkspaceScope();
   const {
     accountId,
     schoolId,
     branchId,
     authenticated,
-    restoring:
-      accountLoading,
-    branchLoading:
-      contextLoading,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
   } = workspace;
 
-  const primary =
-    settings?.primaryColor ||
-    "var(--primary-color, #2563eb)";
+  const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const {
-    loading,
-    setLoading,
-  } =
-    useBackgroundLoader();
+  const { loading, setLoading } = useBackgroundLoader();
+  const [saving, setSaving] = useState(false);
+  const [sessionStarted, setSessionStarted] = useState(false);
+  const [toast, setToast] = useState<{
+    tone: ToastTone;
+    message: string;
+  } | null>(null);
 
-  const [
-    saving,
-    setSaving,
-  ] =
-    useState(false);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [academicStructures, setAcademicStructures] = useState<
+    AcademicStructure[]
+  >([]);
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [curriculums, setCurriculums] = useState<Curriculum[]>([]);
+  const [pathways, setPathways] = useState<CurriculumPathway[]>([]);
+  const [curriculumSubjects, setCurriculumSubjects] = useState<
+    CurriculumSubject[]
+  >([]);
+  const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
+  const [applicabilities, setApplicabilities] = useState<
+    AssessmentApplicability[]
+  >([]);
+  const [structures, setStructures] = useState<AssessmentStructure[]>([]);
+  const [items, setItems] = useState<AssessmentStructureItem[]>([]);
+  const [entries, setEntries] = useState<AssessmentEntry[]>([]);
+  const [gradings, setGradings] = useState<GradingStructure[]>([]);
+  const [rules, setRules] = useState<GradeRule[]>([]);
+  const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
 
-  const [
-    sessionStarted,
-    setSessionStarted,
-  ] =
-    useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [search, setSearch] = useState("");
+  const [classSubjectId, setClassSubjectId] = useState("all");
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
+  const [filterClassId, setFilterClassId] = useState("all");
+  const [filterSubjectId, setFilterSubjectId] = useState("all");
+  const [filterPeriodId, setFilterPeriodId] = useState("all");
+  const [filterReadiness, setFilterReadiness] =
+    useState<ReadinessFilter>("all");
+  const [filterCompletion, setFilterCompletion] =
+    useState<CompletionFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [scores, setScores] = useState<ScoreMap>({});
 
-  const [
-    toast,
-    setToast,
-  ] =
-    useState<{
-      tone: ToastTone;
-      message: string;
-    } | null>(
-      null,
-    );
+  // Excel interoperability: controlled Eleeveon assessment sheets and external school workbooks.
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
+  const [excelExportBusyKey, setExcelExportBusyKey] = useState<string | null>(null);
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [excelImportStep, setExcelImportStep] = useState<ExcelImportStep>("file");
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelWorkbook, setExcelWorkbook] = useState<ParsedExcelWorkbook | null>(null);
+  const [excelSheetName, setExcelSheetName] = useState("");
+  const [excelHeaderRowIndex, setExcelHeaderRowIndex] = useState(0);
+  const [excelIdentityMappings, setExcelIdentityMappings] = useState<ExcelColumnMapping[]>([]);
+  const [excelParsedImport, setExcelParsedImport] = useState<AssessmentExcelParsedImport | null>(null);
+  const [excelValidation, setExcelValidation] = useState<AssessmentExcelValidationResult | null>(null);
+  const [excelImportResult, setExcelImportResult] = useState<AssessmentExcelImportResult | null>(null);
+  const [excelBusy, setExcelBusy] = useState(false);
 
-  const [
-    students,
-    setStudents,
-  ] =
-    useState<
-      Student[]
-    >([]);
+  useEffect(() => {
+    if (accountLoading || contextLoading) return;
+    if (!authenticated || !accountId) router.replace("/login");
+    else if (!schoolId || !branchId) router.replace("/account");
+  }, [
+    accountLoading,
+    contextLoading,
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    router,
+  ]);
 
-  const [
-    classes,
-    setClasses,
-  ] =
-    useState<
-      Class[]
-    >([]);
-
-  const [
-    subjects,
-    setSubjects,
-  ] =
-    useState<
-      Subject[]
-    >([]);
-
-  const [
-    teachers,
-    setTeachers,
-  ] =
-    useState<
-      Teacher[]
-    >([]);
-
-  const [
-    academicStructures,
-    setAcademicStructures,
-  ] =
-    useState<
-      AcademicStructure[]
-    >([]);
-
-  const [
-    periods,
-    setPeriods,
-  ] =
-    useState<
-      AcademicPeriod[]
-    >([]);
-
-  const [
-    organizations,
-    setOrganizations,
-  ] =
-    useState<
-      Organization[]
-    >([]);
-
-  const [
-    curriculums,
-    setCurriculums,
-  ] =
-    useState<
-      Curriculum[]
-    >([]);
-
-  const [
-    pathways,
-    setPathways,
-  ] =
-    useState<
-      CurriculumPathway[]
-    >([]);
-
-  const [
-    curriculumSubjects,
-    setCurriculumSubjects,
-  ] =
-    useState<
-      CurriculumSubject[]
-    >([]);
-
-  const [
-    classSubjects,
-    setClassSubjects,
-  ] =
-    useState<
-      ClassSubject[]
-    >([]);
-
-  const [
-    applicabilities,
-    setApplicabilities,
-  ] =
-    useState<
-      AssessmentApplicability[]
-    >([]);
-
-  const [
-    structures,
-    setStructures,
-  ] =
-    useState<
-      AssessmentStructure[]
-    >([]);
-
-  const [
-    items,
-    setItems,
-  ] =
-    useState<
-      AssessmentStructureItem[]
-    >([]);
-
-  const [
-    entries,
-    setEntries,
-  ] =
-    useState<
-      AssessmentEntry[]
-    >([]);
-
-  const [
-    gradings,
-    setGradings,
-  ] =
-    useState<
-      GradingStructure[]
-    >([]);
-
-  const [
-    rules,
-    setRules,
-  ] =
-    useState<
-      GradeRule[]
-    >([]);
-
-  const [
-    enrollments,
-    setEnrollments,
-  ] =
-    useState<
-      StudentEnrollment[]
-    >([]);
-
-  const [
-    viewMode,
-    setViewMode,
-  ] =
-    useState<ViewMode>(
-      "cards",
-    );
-
-  const [
-    search,
-    setSearch,
-  ] =
-    useState("");
-
-  const [
-    classSubjectId,
-    setClassSubjectId,
-  ] =
-    useState("all");
-
-  const [
-    selectedClassId,
-    setSelectedClassId,
-  ] =
-    useState<string>(
-      "",
-    );
-
-  const [
-    filterClassId,
-    setFilterClassId,
-  ] =
-    useState("all");
-
-  const [
-    filterSubjectId,
-    setFilterSubjectId,
-  ] =
-    useState("all");
-
-  const [
-    filterPeriodId,
-    setFilterPeriodId,
-  ] =
-    useState("all");
-
-  const [
-    filterReadiness,
-    setFilterReadiness,
-  ] =
-    useState<ReadinessFilter>(
-      "all",
-    );
-
-  const [
-    filterCompletion,
-    setFilterCompletion,
-  ] =
-    useState<CompletionFilter>(
-      "all",
-    );
-
-  const [
-    filterOpen,
-    setFilterOpen,
-  ] =
-    useState(false);
-
-  const [
-    moreOpen,
-    setMoreOpen,
-  ] =
-    useState(false);
-
-  const [
-    scores,
-    setScores,
-  ] =
-    useState<ScoreMap>(
-      {},
-    );
-
-  /*
-   * Excel interoperability:
-   * controlled Eleeveon assessment
-   * sheets and external school
-   * workbooks.
-   */
-
-  const [
-    excelExportOpen,
-    setExcelExportOpen,
-  ] =
-    useState(false);
-
-  const [
-    excelExportBusyKey,
-    setExcelExportBusyKey,
-  ] =
-    useState<
-      string | null
-    >(null);
-
-  const [
-    excelImportOpen,
-    setExcelImportOpen,
-  ] =
-    useState(false);
-
-  const [
-    excelImportStep,
-    setExcelImportStep,
-  ] =
-    useState<ExcelImportStep>(
-      "file",
-    );
-
-  const [
-    excelFile,
-    setExcelFile,
-  ] =
-    useState<
-      File | null
-    >(null);
-
-  const [
-    excelWorkbook,
-    setExcelWorkbook,
-  ] =
-    useState<
-      ParsedExcelWorkbook
-      | null
-    >(null);
-
-  const [
-    excelSheetName,
-    setExcelSheetName,
-  ] =
-    useState("");
-
-  const [
-    excelHeaderRowIndex,
-    setExcelHeaderRowIndex,
-  ] =
-    useState(0);
-
-  const [
-    excelIdentityMappings,
-    setExcelIdentityMappings,
-  ] =
-    useState<
-      ExcelColumnMapping[]
-    >([]);
-
-  const [
-    excelParsedImport,
-    setExcelParsedImport,
-  ] =
-    useState<
-      AssessmentExcelParsedImport
-      | null
-    >(null);
-
-  const [
-    excelValidation,
-    setExcelValidation,
-  ] =
-    useState<
-      AssessmentExcelValidationResult
-      | null
-    >(null);
-
-  const [
-    excelImportResult,
-    setExcelImportResult,
-  ] =
-    useState<
-      AssessmentExcelImportResult
-      | null
-    >(null);
-
-  const [
-    excelBusy,
-    setExcelBusy,
-  ] =
-    useState(false);
-
-  useEffect(
-    () => {
-      if (
-        accountLoading ||
-        contextLoading
-      ) {
-        return;
-      }
-
-      if (
-        !authenticated ||
-        !accountId
-      ) {
-        router.replace(
-          "/login",
-        );
-      } else if (
-        !schoolId ||
-        !branchId
-      ) {
-        router.replace(
-          "/account",
-        );
-      }
-    },
-    [
-      accountLoading,
-      contextLoading,
-      authenticated,
-      accountId,
-      schoolId,
-      branchId,
-      router,
-    ],
-  );
-
-  const sameTenant = (
-    row: TenantRow,
-  ) =>
-    (
-      !row.accountId ||
-      row.accountId ===
-        accountId
-    ) &&
-    (
-      !row.schoolId ||
-      sameId(
-        row.schoolId,
-        schoolId,
-      )
-    ) &&
-    (
-      !row.branchId ||
-      sameId(
-        row.branchId,
-        branchId,
-      )
-    ) &&
+  const sameTenant = (row: TenantRow) =>
+    (!row.accountId || row.accountId === accountId) &&
+    (!row.schoolId || sameId(row.schoolId, schoolId)) &&
+    (!row.branchId || sameId(row.branchId, branchId)) &&
     !row.isDeleted;
 
-  const showToast = (
-    tone: ToastTone,
-    message: string,
-  ) => {
-    setToast({
-      tone,
-      message,
-    });
-
+  const showToast = (tone: ToastTone, message: string) => {
+    setToast({ tone, message });
     window.setTimeout(
-      () =>
-        setToast(
-          (current) =>
-            current?.message ===
-            message
-              ? null
-              : current,
-        ),
+      () => setToast((c) => (c?.message === message ? null : c)),
       4200,
     );
   };
@@ -860,3972 +354,1279 @@ export default function AssessmentEntries() {
     setRules([]);
     setEnrollments([]);
     setScores({});
-    setSessionStarted(
-      false,
-    );
+    setSessionStarted(false);
   };
 
-  const load =
-    async () => {
-      if (
-        !authenticated ||
-        !accountId ||
-        !schoolId ||
-        !branchId
-      ) {
-        clearData();
-        setLoading(
-          false,
-        );
-
-        return;
-      }
-
-      try {
-        setLoading(
-          true,
-        );
-
-        const tenant = {
-          accountId,
-          schoolId:
-            schoolId,
-          branchId:
-            branchId,
-        } as any;
-
-        const [
-          studentRows,
-          classRows,
-          subjectRows,
-          teacherRows,
-          academicStructureRows,
-          periodRows,
-          organizationRows,
-          curriculumRows,
-          pathwayRows,
-          curriculumSubjectRows,
-          classSubjectRows,
-          applicabilityRows,
-          structureRows,
-          itemRows,
-          entryRows,
-          gradingRows,
-          ruleRows,
-          enrollmentRows,
-        ] =
-          await Promise.all(
-            [
-              tableSafe(
-                "students",
-              )?.toArray?.() ||
-                [],
-
-              listActiveLocal(
-                "classes",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "subjects",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "teachers",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "academicStructures",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "academicPeriods",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "organizations",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "curriculums",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "curriculumPathways",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "curriculumSubjects",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "classSubjects",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "assessmentApplicabilities",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "assessmentStructures",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "assessmentStructureItems",
-                tenant,
-              ),
-
-              tableSafe(
-                "assessmentEntries",
-              )?.toArray?.() ||
-                [],
-
-              listActiveLocal(
-                "gradingStructures",
-                tenant,
-              ),
-
-              listActiveLocal(
-                "gradeRules",
-                tenant,
-              ),
-
-              tableSafe(
-                "studentEnrollments",
-              )?.toArray?.() ||
-                [],
-            ],
-          );
-
-        setStudents(
-          (
-            studentRows as Student[]
-          )
-            .filter(
-              (row) =>
-                sameTenant(
-                  row as TenantRow,
-                ),
-            )
-            .filter(
-              (
-                row: any,
-              ) =>
-                ![
-                  "withdrawn",
-                  "deleted",
-                  "archived",
-                ].includes(
-                  safeLower(
-                    row.status,
-                  ),
-                ),
-            )
-            .sort(
-              (
-                a: any,
-                b: any,
-              ) =>
-                String(
-                  a.fullName ||
-                    "",
-                ).localeCompare(
-                  String(
-                    b.fullName ||
-                      "",
-                  ),
-                ),
-            ),
-        );
-
-        setClasses(
-          (
-            classRows as Class[]
-          ).sort(
-            (
-              a: any,
-              b: any,
-            ) =>
-              String(
-                a.name ||
-                  "",
-              ).localeCompare(
-                String(
-                  b.name ||
-                    "",
-                ),
-              ),
-          ),
-        );
-
-        setSubjects(
-          (
-            subjectRows as Subject[]
-          ).sort(
-            (
-              a: any,
-              b: any,
-            ) =>
-              String(
-                a.name ||
-                  "",
-              ).localeCompare(
-                String(
-                  b.name ||
-                    "",
-                ),
-              ),
-          ),
-        );
-
-        setTeachers(
-          (
-            teacherRows as Teacher[]
-          ).sort(
-            (
-              a: any,
-              b: any,
-            ) =>
-              String(
-                a.fullName ||
-                  "",
-              ).localeCompare(
-                String(
-                  b.fullName ||
-                    "",
-                ),
-              ),
-          ),
-        );
-
-        setAcademicStructures(
-          academicStructureRows as AcademicStructure[],
-        );
-
-        setPeriods(
-          periodRows as AcademicPeriod[],
-        );
-
-        setOrganizations(
-          organizationRows as Organization[],
-        );
-
-        setCurriculums(
-          curriculumRows as Curriculum[],
-        );
-
-        setPathways(
-          pathwayRows as CurriculumPathway[],
-        );
-
-        setCurriculumSubjects(
-          curriculumSubjectRows as CurriculumSubject[],
-        );
-
-        setClassSubjects(
-          (
-            classSubjectRows as ClassSubject[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setApplicabilities(
-          (
-            applicabilityRows as AssessmentApplicability[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setStructures(
-          (
-            structureRows as AssessmentStructure[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setItems(
-          (
-            itemRows as AssessmentStructureItem[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setEntries(
-          (
-            entryRows as AssessmentEntry[]
-          ).filter(
-            (row) =>
-              sameTenant(
-                row as TenantRow,
-              ) &&
-              !row.isDeleted,
-          ),
-        );
-
-        setGradings(
-          (
-            gradingRows as GradingStructure[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setRules(
-          (
-            ruleRows as GradeRule[]
-          ).filter(
-            isActiveRow,
-          ),
-        );
-
-        setEnrollments(
-          (
-            enrollmentRows as StudentEnrollment[]
-          ).filter(
-            (row) =>
-              sameTenant(
-                row as TenantRow,
-              ) &&
-              !row.isDeleted,
-          ),
-        );
-      } catch (
-        error
-      ) {
-        console.error(
-          error,
-        );
-
-        clearData();
-
-        showToast(
-          "error",
-          "Failed to load assessment entries.",
-        );
-      } finally {
-        setLoading(
-          false,
-        );
-      }
-    };
-
-  useEffect(
-    () => {
-      if (
-        accountLoading ||
-        settingsLoading ||
-        contextLoading
-      ) {
-        return;
-      }
-
-      load();
-
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    },
-    [
-      authenticated,
-      accountId,
-      schoolId,
-      branchId,
-      accountLoading,
-      settingsLoading,
-      contextLoading,
-      dataRevision,
-    ],
-  );
-
-  const classMap =
-    useMemo(
-      () =>
-        new Map(
-          classes.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        classes,
-      ],
-    );
-
-  const subjectMap =
-    useMemo(
-      () =>
-        new Map(
-          subjects.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        subjects,
-      ],
-    );
-
-  const teacherMap =
-    useMemo(
-      () =>
-        new Map(
-          teachers.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        teachers,
-      ],
-    );
-
-  const academicStructureMap =
-    useMemo(
-      () =>
-        new Map(
-          academicStructures.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        academicStructures,
-      ],
-    );
-
-  const periodMap =
-    useMemo(
-      () =>
-        new Map(
-          periods.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        periods,
-      ],
-    );
-
-  const organizationMap =
-    useMemo(
-      () =>
-        new Map(
-          organizations.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        organizations,
-      ],
-    );
-
-  const curriculumSubjectMap =
-    useMemo(
-      () =>
-        new Map(
-          curriculumSubjects.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        curriculumSubjects,
-      ],
-    );
-
-  const curriculumMap =
-    useMemo(
-      () =>
-        new Map(
-          curriculums.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        curriculums,
-      ],
-    );
-
-  const pathwayMap =
-    useMemo(
-      () =>
-        new Map(
-          pathways.map(
-            (
-              row: any,
-            ) => [
-              idOf(
-                row.id,
-              ),
-              row,
-            ],
-          ),
-        ),
-      [
-        pathways,
-      ],
-    );
-
-  const applicabilityMap =
-    useMemo(
-      () => {
-        const map =
-          new Map<
-            string,
-            AssessmentApplicability
-          >();
-
-        applicabilities.forEach(
-          (
-            row: any,
-          ) => {
-            if (
-              idOf(
-                row.classSubjectId,
-              ) &&
-              row.active !==
-                false &&
-              !row.isDeleted
-            ) {
-              map.set(
-                idOf(
-                  row.classSubjectId,
-                ),
-                row,
-              );
-            }
-          },
-        );
-
-        return map;
-      },
-      [
-        applicabilities,
-      ],
-    );
-
-  const classSubjectOptions =
-    useMemo<
-      ClassSubjectOption[]
-    >(
-      () => {
-        return classSubjects
-          .map(
-            (
-              row: any,
-            ) => {
-              const id =
-                idOf(
-                  row.id,
-                );
-
-              const cls:
-                any =
-                classMap.get(
-                  idOf(
-                    row.classId,
-                  ),
-                );
-
-              const subj:
-                any =
-                subjectMap.get(
-                  idOf(
-                    row.subjectId,
-                  ),
-                );
-
-              const teacher:
-                any =
-                row.teacherId
-                  ? teacherMap.get(
-                      idOf(
-                        row.teacherId,
-                      ),
-                    )
-                  : undefined;
-
-              const academicStructure:
-                any =
-                academicStructureMap.get(
-                  idOf(
-                    row.academicStructureId,
-                  ),
-                );
-
-              const period:
-                any =
-                row.academicPeriodId
-                  ? periodMap.get(
-                      idOf(
-                        row.academicPeriodId,
-                      ),
-                    )
-                  : undefined;
-
-              const curriculumSubject:
-                any =
-                curriculumSubjectMap.get(
-                  idOf(
-                    row.curriculumSubjectId,
-                  ),
-                );
-
-              const curriculum:
-                any =
-                curriculumSubject
-                  ? curriculumMap.get(
-                      idOf(
-                        curriculumSubject.curriculumId,
-                      ),
-                    )
-                  : undefined;
-
-              const pathway:
-                any =
-                curriculumSubject?.pathwayId
-                  ? pathwayMap.get(
-                      idOf(
-                        curriculumSubject.pathwayId,
-                      ),
-                    )
-                  : undefined;
-
-              const subjectName =
-                row.name ||
-                subj?.name ||
-                "Unknown Subject";
-
-              const subjectCode =
-                row.code ||
-                subj?.code ||
-                "";
-
-              const className =
-                cls?.name ||
-                "Unknown Class";
-
-              const academicPeriodName =
-                period?.name ||
-                "All Periods";
-
-              const ready =
-                !!applicabilityMap.get(
-                  id,
-                );
-
-              return {
-                id,
-                row,
-                className,
-                subjectName,
-                subjectCode,
-
-                teacherName:
-                  teacher?.fullName ||
-                  "No teacher assigned",
-
-                academicStructureName:
-                  academicStructure?.name ||
-                  "Unknown structure",
-
-                academicPeriodName,
-
-                curriculumName:
-                  curriculum?.name ||
-                  "No curriculum",
-
-                pathwayName:
-                  pathway?.name ||
-                  "No pathway",
-
-                organizationId:
-                  curriculumSubject?.organizationId,
-
-                ready,
-
-                display:
-                  `${className} • ${subjectName}${
-                    subjectCode
-                      ? ` (${subjectCode})`
-                      : ""
-                  } • ${academicPeriodName}`,
-              };
-            },
-          )
-          .filter(
-            (
-              option,
-            ) =>
-              Boolean(
-                option.id,
-              ),
-          )
-          .filter(
-            (
-              option,
-            ) =>
-              filterClassId ===
-                "all" ||
-              sameId(
-                option.row
-                  .classId,
-                filterClassId,
-              ),
-          )
-          .filter(
-            (
-              option,
-            ) =>
-              filterSubjectId ===
-                "all" ||
-              sameId(
-                option.row
-                  .subjectId,
-                filterSubjectId,
-              ),
-          )
-          .filter(
-            (
-              option,
-            ) =>
-              filterPeriodId ===
-                "all" ||
-              sameId(
-                option.row
-                  .academicPeriodId ||
-                  "",
-                filterPeriodId,
-              ),
-          )
-          .filter(
-            (
-              option,
-            ) =>
-              filterReadiness ===
-                "all" ||
-              (
-                filterReadiness ===
-                "ready"
-                  ? option.ready
-                  : !option.ready
-              ),
-          )
-          .sort(
-            (
-              a,
-              b,
-            ) =>
-              a.display.localeCompare(
-                b.display,
-              ),
-          );
-      },
-      [
-        classSubjects,
-        classMap,
-        subjectMap,
-        teacherMap,
-        academicStructureMap,
-        periodMap,
-        curriculumSubjectMap,
-        curriculumMap,
-        pathwayMap,
-        applicabilityMap,
-        filterClassId,
-        filterSubjectId,
-        filterPeriodId,
-        filterReadiness,
-      ],
-    );
-
-  const selectedClass =
-    useMemo(
-      () =>
-        selectedClassId
-          ? (
-              classMap.get(
-                idOf(
-                  selectedClassId,
-                ),
-              ) as any
-            )
-          : null,
-      [
-        classMap,
-        selectedClassId,
-      ],
-    );
-
-  const selectedClassSubjectOptions =
-    useMemo(
-      () => {
-        if (
-          !selectedClassId
-        ) {
-          return [];
-        }
-
-        return classSubjectOptions.filter(
-          (
-            option,
-          ) =>
-            sameId(
-              (
-                option.row as any
-              ).classId,
-              selectedClassId,
-            ),
-        );
-      },
-      [
-        classSubjectOptions,
-        selectedClassId,
-      ],
-    );
-
-  const classSubjectEntryViews =
-    useMemo<
-      ClassSubjectEntryView[]
-    >(
-      () => {
-        return selectedClassSubjectOptions.map(
-          (
-            option,
-          ) => {
-            const app =
-              applicabilityMap.get(
-                option.id,
-              ) as any;
-
-            const optionItems =
-              app?.assessmentStructureId
-                ? items.filter(
-                    (
-                      row: any,
-                    ) =>
-                      sameId(
-                        row.assessmentStructureId,
-                        app.assessmentStructureId,
-                      ) &&
-                      isActiveRow(
-                        row,
-                      ),
-                  )
-                : [];
-
-            const periodId =
-              idOf(
-                (
-                  option.row as any
-                ).academicPeriodId,
-              );
-
-            const studentCount =
-              enrollments.filter(
-                (
-                  row: any,
-                ) => {
-                  if (
-                    !sameId(
-                      row.classId,
-                      (
-                        option.row as any
-                      ).classId,
-                    )
-                  ) {
-                    return false;
-                  }
-
-                  if (
-                    !sameId(
-                      row.academicStructureId,
-                      (
-                        option.row as any
-                      ).academicStructureId,
-                    )
-                  ) {
-                    return false;
-                  }
-
-                  if (
-                    periodId &&
-                    !sameId(
-                      row.academicPeriodId,
-                      periodId,
-                    )
-                  ) {
-                    return false;
-                  }
-
-                  return (
-                    row.status ===
-                      "active" &&
-                    !row.isDeleted
-                  );
-                },
-              ).length;
-
-            const expected =
-              studentCount *
-              optionItems.length;
-
-            const entered =
-              entries.filter(
-                (
-                  entry: any,
-                ) => {
-                  if (
-                    !sameId(
-                      entry.classSubjectId,
-                      option.id,
-                    )
-                  ) {
-                    return false;
-                  }
-
-                  if (
-                    !app ||
-                    !sameId(
-                      entry.assessmentStructureId ||
-                        "",
-                      app.assessmentStructureId,
-                    )
-                  ) {
-                    return false;
-                  }
-
-                  return (
-                    !entry.isDeleted &&
-                    entry.score !==
-                      undefined &&
-                    entry.score !==
-                      null &&
-                    entry.score !==
-                      ""
-                  );
-                },
-              ).length;
-
-            const completion =
-              expected
-                ? Math.round(
-                    (
-                      Math.min(
-                        entered,
-                        expected,
-                      ) /
-                      expected
-                    ) *
-                      100,
-                  )
-                : 0;
-
-            return {
-              id:
-                option.id,
-
-              option,
-
-              studentCount,
-
-              itemCount:
-                optionItems.length,
-
-              entered,
-              expected,
-              completion,
-            };
-          },
-        );
-      },
-      [
-        selectedClassSubjectOptions,
-        applicabilityMap,
-        items,
-        enrollments,
-        entries,
-      ],
-    );
-
-  const classCards =
-    useMemo<
-      ClassEntryView[]
-    >(
-      () => {
-        const term =
-          search
-            .trim()
-            .toLowerCase();
-
-        return classes
-          .filter(
-            isActiveRow,
-          )
-          .map(
-            (
-              classRow: any,
-            ) => {
-              const id =
-                idOf(
-                  classRow.id,
-                );
-
-              const options =
-                classSubjectOptions.filter(
-                  (
-                    option,
-                  ) =>
-                    sameId(
-                      (
-                        option.row as any
-                      ).classId,
-                      id,
-                    ),
-                );
-
-              const readyCount =
-                options.filter(
-                  (
-                    option,
-                  ) =>
-                    option.ready,
-                ).length;
-
-              const studentIds =
-                new Set(
-                  enrollments
-                    .filter(
-                      (
-                        row: any,
-                      ) =>
-                        sameId(
-                          row.classId,
-                          id,
-                        ) &&
-                        row.status ===
-                          "active" &&
-                        !row.isDeleted,
-                    )
-                    .map(
-                      (
-                        row: any,
-                      ) =>
-                        idOf(
-                          row.studentId,
-                        ),
-                    )
-                    .filter(
-                      Boolean,
-                    ),
-                );
-
-              return {
-                id,
-                row:
-                  classRow,
-
-                name:
-                  classRow.name ||
-                  `Class ${id}`,
-
-                code:
-                  classRow.code ||
-                  "",
-
-                subjectCount:
-                  options.length,
-
-                readyCount,
-
-                missingCount:
-                  Math.max(
-                    0,
-                    options.length -
-                      readyCount,
-                  ),
-
-                studentCount:
-                  studentIds.size,
-              };
-            },
-          )
-          .filter(
-            (
-              item,
-            ) =>
-              !term ||
-              `${item.name} ${item.code} ${item.subjectCount} subjects`
-                .toLowerCase()
-                .includes(
-                  term,
-                ),
-          )
-          .sort(
-            (
-              a,
-              b,
-            ) =>
-              a.name.localeCompare(
-                b.name,
-              ),
-          );
-      },
-      [
-        classes,
-        classSubjectOptions,
-        enrollments,
-        search,
-      ],
-    );
-
-  const selectedOption =
-    useMemo(
-      () => {
-        const selectedId =
-          idOf(
-            classSubjectId,
-          );
-
-        return classSubjectOptions.find(
-          (
-            option,
-          ) =>
-            sameId(
-              option.id,
-              selectedId,
-            ),
-        );
-      },
-      [
-        classSubjectOptions,
-        classSubjectId,
-      ],
-    );
-
-  const currentClassSubject =
-    selectedOption?.row;
-
-  const applicability =
-    useMemo(
-      () =>
-        selectedOption
-          ? applicabilityMap.get(
-              selectedOption.id,
-            )
-          : undefined,
-      [
-        applicabilityMap,
-        selectedOption,
-      ],
-    );
-
-  const assessmentStructure =
-    useMemo(
-      () =>
-        structures.find(
-          (
-            row: any,
-          ) =>
-            sameId(
-              row.id,
-              applicability?.assessmentStructureId,
-            ),
-        ),
-      [
-        structures,
-        applicability,
-      ],
-    );
-
-  const gradingSystem =
-    useMemo(
-      () =>
-        gradings.find(
-          (
-            row: any,
-          ) =>
-            sameId(
-              row.id,
-              applicability?.gradingStructureId,
-            ),
-        ),
-      [
-        gradings,
-        applicability,
-      ],
-    );
-
-  /*
-   * Keep the complete hierarchy for
-   * validation and calculation, but
-   * expose only direct-entry
-   * leaves/explicit direct parents.
-   */
-
-  const structureHierarchyItems =
-    useMemo(
-      () => {
-        if (
-          !applicability?.assessmentStructureId
-        ) {
-          return [];
-        }
-
-        return items.filter(
-          (
-            row: any,
-          ) =>
-            sameId(
-              row.assessmentStructureId,
-              applicability.assessmentStructureId,
-            ) &&
-            isActiveRow(
-              row,
-            ),
-        );
-      },
-      [
-        items,
-        applicability,
-      ],
-    );
-
-  const entryProjection =
-    useMemo<
-      AssessmentEntryProjection
-    >(
-      () => {
-        if (
-          !applicability?.assessmentStructureId
-        ) {
-          return {
-            structureId:
-              "",
-
-            columns:
-              [],
-
-            groups:
-              [],
-
-            hiddenCalculatedNodes:
-              [],
-
-            warnings:
-              [],
-          };
-        }
-
-        return projectAssessmentEntryColumns(
-          {
-            items:
-              structureHierarchyItems,
-
-            structureId:
-              idOf(
-                applicability.assessmentStructureId,
-              ),
-
-            existingEntries:
-              entries,
-          },
-        );
-      },
-      [
-        structureHierarchyItems,
-        applicability,
-        entries,
-      ],
-    );
-
-  const structureItems =
-    useMemo<
-      AssessmentStructureItem[]
-    >(
-      () => {
-        const itemById =
-          new Map(
-            structureHierarchyItems.map(
-              (
-                item,
-              ) => [
-                idOf(
-                  (
-                    item as any
-                  ).id,
-                ),
-                item,
-              ],
-            ),
-          );
-
-        return entryProjection.columns
-          .map(
-            (
-              column,
-            ) => {
-              const item =
-                itemById.get(
-                  column.itemId,
-                );
-
-              if (
-                !item
-              ) {
-                return null;
-              }
-
-              return {
-                ...item,
-
-                __entryPathLabels:
-                  column.pathLabels,
-
-                __entryDepth:
-                  column.depth,
-
-                __entryGroupLabel:
-                  column
-                    .pathLabels
-                    .length >
-                  1
-                    ? column.pathLabels
-                        .slice(
-                          0,
-                          -1,
-                        )
-                        .join(
-                          " · ",
-                        )
-                    : "",
-
-                __entryCompactLabel:
-                  column.pathLabels.join(
-                    " · ",
-                  ),
-              } as AssessmentStructureItem;
-            },
-          )
-          .filter(
-            (
-              item,
-            ): item is AssessmentStructureItem =>
-              Boolean(
-                item,
-              ),
-          );
-      },
-      [
-        structureHierarchyItems,
-        entryProjection,
-      ],
-    );
-
-  const gradeRules =
-    useMemo(
-      () => {
-        if (
-          !gradingSystem?.id
-        ) {
-          return [];
-        }
-
-        return rules
-          .filter(
-            (
-              row: any,
-            ) =>
-              sameId(
-                row.gradingStructureId,
-                gradingSystem.id,
-              ) &&
-              isActiveRow(
-                row,
-              ),
-          )
-          .sort(
-            (
-              a: any,
-              b: any,
-            ) =>
-              Number(
-                b.minScore ||
-                  0,
-              ) -
-              Number(
-                a.minScore ||
-                  0,
-              ),
-          );
-      },
-      [
-        rules,
-        gradingSystem,
-      ],
-    );
-
-  const assessmentExcelProjectedColumns =
-    useMemo<
-      AssessmentExcelProjectedColumn[]
-    >(
-      () => {
-        return (
-          structureItems as any[]
-        ).map(
-          (
-            item,
-            index,
-          ) => ({
-            itemId:
-              idOf(
-                item.id,
-              ),
-
-            label:
-              entryCompactLabel(
-                item,
-              ) ||
-              item.name ||
-              `Assessment ${
-                index + 1
-              }`,
-
-            compactLabel:
-              item.__entryCompactLabel ||
-              item.name ||
-              undefined,
-
-            groupLabel:
-              item.__entryGroupLabel ||
-              undefined,
-
-            pathLabels:
-              Array.isArray(
-                item.__entryPathLabels,
-              )
-                ? item.__entryPathLabels
-                : [
-                    item.name ||
-                      `Assessment ${
-                        index +
-                        1
-                      }`,
-                  ],
-
-            maxScore:
-              Math.max(
-                1,
-                Number(
-                  item.maxScore ||
-                    100,
-                ),
-              ),
-
-            /*
-             * IMPORTANT:
-             * Hierarchy projection may provide
-             * contributionWeight rather than
-             * legacy weight.
-             */
-            weight:
-              Number(
-                item.contributionWeight ??
-                  item.weight ??
-                  0,
-              ),
-
-            order:
-              Number(
-                item.order ??
-                  index,
-              ),
-          }),
-        );
-      },
-      [
-        structureItems,
-      ],
-    );
-
-  const assessmentExcelContext =
-    useMemo<
-      AssessmentExcelContext
-      | null
-    >(
-      () => {
-        if (
-          !currentClassSubject ||
-          !selectedOption ||
-          !applicability
-        ) {
-          return null;
-        }
-
-        return {
-          accountId:
-            idOf(
-              accountId,
-            ),
-
-          schoolId:
-            idOf(
-              schoolId,
-            ),
-
-          branchId:
-            idOf(
-              branchId,
-            ),
-
-          classSubjectId:
-            idOf(
-              (
-                currentClassSubject as any
-              ).id,
-            ),
-
-          classId:
-            idOf(
-              (
-                currentClassSubject as any
-              ).classId,
-            ),
-
-          subjectId:
-            idOf(
-              (
-                currentClassSubject as any
-              ).subjectId,
-            ),
-
-          academicStructureId:
-            idOf(
-              (
-                currentClassSubject as any
-              ).academicStructureId,
-            ),
-
-          academicPeriodId:
-            idOf(
-              (
-                currentClassSubject as any
-              ).academicPeriodId,
-            ),
-
-          assessmentStructureId:
-            idOf(
-              applicability.assessmentStructureId,
-            ),
-
-          gradingStructureId:
-            idOf(
-              applicability.gradingStructureId,
-            ) ||
-            undefined,
-
-          organizationId:
-            idOf(
-              applicability.organizationId ||
-                selectedOption.organizationId,
-            ) ||
-            undefined,
-
-          branchName:
-            (
-              activeBranch as any
-            )?.name ||
-            undefined,
-
-          className:
-            selectedOption.className,
-
-          subjectName:
-            selectedOption.subjectName,
-
-          subjectCode:
-            selectedOption.subjectCode,
-
-          academicStructureName:
-            selectedOption.academicStructureName,
-
-          academicPeriodName:
-            selectedOption.academicPeriodName,
-
-          assessmentStructureName:
-            (
-              assessmentStructure as any
-            )?.name ||
-            undefined,
-        };
-      },
-      [
-        currentClassSubject,
-        selectedOption,
-        applicability,
+  const load = async () => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      clearData();
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const tenant = {
         accountId,
-        schoolId,
-        branchId,
-        activeBranch,
-        assessmentStructure,
-      ],
-    );
+        schoolId: schoolId,
+        branchId: branchId,
+      } as any;
+      const [
+        studentRows,
+        classRows,
+        subjectRows,
+        teacherRows,
+        academicStructureRows,
+        periodRows,
+        organizationRows,
+        curriculumRows,
+        pathwayRows,
+        curriculumSubjectRows,
+        classSubjectRows,
+        applicabilityRows,
+        structureRows,
+        itemRows,
+        entryRows,
+        gradingRows,
+        ruleRows,
+        enrollmentRows,
+      ] = await Promise.all([
+        tableSafe("students")?.toArray?.() || [],
+        listActiveLocal("classes", tenant),
+        listActiveLocal("subjects", tenant),
+        listActiveLocal("teachers", tenant),
+        listActiveLocal("academicStructures", tenant),
+        listActiveLocal("academicPeriods", tenant),
+        listActiveLocal("organizations", tenant),
+        listActiveLocal("curriculums", tenant),
+        listActiveLocal("curriculumPathways", tenant),
+        listActiveLocal("curriculumSubjects", tenant),
+        listActiveLocal("classSubjects", tenant),
+        listActiveLocal("assessmentApplicabilities", tenant),
+        listActiveLocal("assessmentStructures", tenant),
+        listActiveLocal("assessmentStructureItems", tenant),
+        tableSafe("assessmentEntries")?.toArray?.() || [],
+        listActiveLocal("gradingStructures", tenant),
+        listActiveLocal("gradeRules", tenant),
+        tableSafe("studentEnrollments")?.toArray?.() || [],
+      ]);
 
-  const relevantEntries =
-    useMemo(
-      () => {
-        if (
-          !currentClassSubject ||
-          !applicability
-        ) {
-          return [];
-        }
-
-        const academicPeriodId =
-          idOf(
-            (
-              currentClassSubject as any
-            ).academicPeriodId,
-          );
-
-        return entries.filter(
-          (
-            entry: any,
-          ) => {
-            if (
-              !sameId(
-                entry.classSubjectId,
-                (
-                  currentClassSubject as any
-                ).id,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              !sameId(
-                entry.classId,
-                (
-                  currentClassSubject as any
-                ).classId,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              !sameId(
-                entry.subjectId,
-                (
-                  currentClassSubject as any
-                ).subjectId,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              !sameId(
-                entry.academicStructureId ||
-                  "",
-                (
-                  currentClassSubject as any
-                ).academicStructureId,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              !sameId(
-                entry.academicPeriodId ||
-                  "",
-                academicPeriodId,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              !sameId(
-                entry.assessmentStructureId ||
-                  "",
-                applicability.assessmentStructureId,
-              )
-            ) {
-              return false;
-            }
-
-            if (
-              applicability.gradingStructureId &&
-              !sameId(
-                entry.gradingStructureId ||
-                  "",
-                applicability.gradingStructureId,
-              )
-            ) {
-              return false;
-            }
-
-            return (
-              !entry.isDeleted
-            );
-          },
-        );
-      },
-      [
-        entries,
-        currentClassSubject,
-        applicability,
-      ],
-    );
-
-  useEffect(
-    () => {
-      if (
-        !currentClassSubject ||
-        !applicability
-      ) {
-        setScores(
-          {},
-        );
-
-        setSessionStarted(
-          false,
-        );
-
-        return;
-      }
-
-      const nextScores:
-        ScoreMap =
-        {};
-
-      relevantEntries.forEach(
-        (
-          entry: any,
-        ) => {
-          nextScores[
-            scoreKey(
-              idOf(
-                entry.studentId,
+      setStudents(
+        (studentRows as Student[])
+          .filter((r) => sameTenant(r as TenantRow))
+          .filter(
+            (r: any) =>
+              !["withdrawn", "deleted", "archived"].includes(
+                safeLower(r.status),
               ),
-              idOf(
-                entry.assessmentStructureItemId,
-              ),
-            )
-          ] =
-            Number(
-              entry.score ||
-                0,
-            );
-        },
+          )
+          .sort((a: any, b: any) =>
+            String(a.fullName || "").localeCompare(String(b.fullName || "")),
+          ),
       );
+      setClasses(
+        (classRows as Class[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setSubjects(
+        (subjectRows as Subject[]).sort((a: any, b: any) =>
+          String(a.name || "").localeCompare(String(b.name || "")),
+        ),
+      );
+      setTeachers(
+        (teacherRows as Teacher[]).sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")),
+        ),
+      );
+      setAcademicStructures(academicStructureRows as AcademicStructure[]);
+      setPeriods(periodRows as AcademicPeriod[]);
+      setOrganizations(organizationRows as Organization[]);
+      setCurriculums(curriculumRows as Curriculum[]);
+      setPathways(pathwayRows as CurriculumPathway[]);
+      setCurriculumSubjects(curriculumSubjectRows as CurriculumSubject[]);
+      setClassSubjects(
+        (classSubjectRows as ClassSubject[]).filter(isActiveRow),
+      );
+      setApplicabilities(
+        (applicabilityRows as AssessmentApplicability[]).filter(isActiveRow),
+      );
+      setStructures(
+        (structureRows as AssessmentStructure[]).filter(isActiveRow),
+      );
+      setItems((itemRows as AssessmentStructureItem[]).filter(isActiveRow));
+      setEntries(
+        (entryRows as AssessmentEntry[]).filter(
+          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
+        ),
+      );
+      setGradings((gradingRows as GradingStructure[]).filter(isActiveRow));
+      setRules((ruleRows as GradeRule[]).filter(isActiveRow));
+      setEnrollments(
+        (enrollmentRows as StudentEnrollment[]).filter(
+          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
+        ),
+      );
+    } catch (error) {
+      console.error(error);
+      clearData();
+      showToast("error", "Failed to load assessment entries.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      setScores(
-        nextScores,
-      );
+  useEffect(() => {
+    if (accountLoading || settingsLoading || contextLoading) return;
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    authenticated,
+    accountId,
+    schoolId,
+    branchId,
+    accountLoading,
+    settingsLoading,
+    contextLoading,
+    dataRevision,
+  ]);
 
-      setSessionStarted(
-        false,
-      );
-    },
-    [
-      currentClassSubject,
-      applicability,
-      relevantEntries,
-    ],
+  const classMap = useMemo(
+    () => new Map(classes.map((r: any) => [idOf(r.id), r])),
+    [classes],
+  );
+  const subjectMap = useMemo(
+    () => new Map(subjects.map((r: any) => [idOf(r.id), r])),
+    [subjects],
+  );
+  const teacherMap = useMemo(
+    () => new Map(teachers.map((r: any) => [idOf(r.id), r])),
+    [teachers],
+  );
+  const academicStructureMap = useMemo(
+    () => new Map(academicStructures.map((r: any) => [idOf(r.id), r])),
+    [academicStructures],
+  );
+  const periodMap = useMemo(
+    () => new Map(periods.map((r: any) => [idOf(r.id), r])),
+    [periods],
+  );
+  const organizationMap = useMemo(
+    () => new Map(organizations.map((r: any) => [idOf(r.id), r])),
+    [organizations],
+  );
+  const curriculumSubjectMap = useMemo(
+    () => new Map(curriculumSubjects.map((r: any) => [idOf(r.id), r])),
+    [curriculumSubjects],
+  );
+  const curriculumMap = useMemo(
+    () => new Map(curriculums.map((r: any) => [idOf(r.id), r])),
+    [curriculums],
+  );
+  const pathwayMap = useMemo(
+    () => new Map(pathways.map((r: any) => [idOf(r.id), r])),
+    [pathways],
   );
 
-  const enrolledStudents =
-    useMemo(
-      () => {
-        if (
-          !currentClassSubject
-        ) {
-          return [];
-        }
+  const applicabilityMap = useMemo(() => {
+    const m = new Map<string, AssessmentApplicability>();
+    applicabilities.forEach((row: any) => {
+      if (idOf(row.classSubjectId) && row.active !== false && !row.isDeleted)
+        m.set(idOf(row.classSubjectId), row);
+    });
+    return m;
+  }, [applicabilities]);
 
-        const periodId =
-          idOf(
-            (
-              currentClassSubject as any
-            ).academicPeriodId,
-          );
-
-        return students
-          .map(
-            (
-              student: any,
-            ) => {
-              const enrollment =
-                enrollments.find(
-                  (
-                    row: any,
-                  ) => {
-                    if (
-                      !sameId(
-                        row.studentId,
-                        student.id,
-                      )
-                    ) {
-                      return false;
-                    }
-
-                    if (
-                      !sameId(
-                        row.classId,
-                        (
-                          currentClassSubject as any
-                        ).classId,
-                      )
-                    ) {
-                      return false;
-                    }
-
-                    if (
-                      !sameId(
-                        row.academicStructureId,
-                        (
-                          currentClassSubject as any
-                        ).academicStructureId,
-                      )
-                    ) {
-                      return false;
-                    }
-
-                    if (
-                      periodId &&
-                      !sameId(
-                        row.academicPeriodId,
-                        periodId,
-                      )
-                    ) {
-                      return false;
-                    }
-
-                    return (
-                      row.status ===
-                      "active"
-                    );
-                  },
-                );
-
-              return enrollment
-                ? {
-                    student,
-                    enrollment,
-                  }
-                : undefined;
-            },
-          )
-          .filter(
-            Boolean,
-          ) as {
-            student:
-              Student;
-
-            enrollment:
-              StudentEnrollment;
-          }[];
-      },
-      [
-        students,
-        enrollments,
-        currentClassSubject,
-      ],
-    );
-
-  const existingEntryMap =
-    useMemo(
-      () => {
-        const map =
-          new Map<
-            string,
-            AssessmentEntry
-          >();
-
-        relevantEntries.forEach(
-          (
-            entry: any,
-          ) =>
-            map.set(
-              scoreKey(
-                idOf(
-                  entry.studentId,
-                ),
-                idOf(
-                  entry.assessmentStructureItemId,
-                ),
-              ),
-              entry,
-            ),
+  const classSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
+    return classSubjects
+      .map((row: any) => {
+        const id = idOf(row.id);
+        const cls: any = classMap.get(idOf(row.classId));
+        const subj: any = subjectMap.get(idOf(row.subjectId));
+        const teacher: any = row.teacherId
+          ? teacherMap.get(idOf(row.teacherId))
+          : undefined;
+        const academicStructure: any = academicStructureMap.get(
+          idOf(row.academicStructureId),
         );
-
-        return map;
-      },
-      [
-        relevantEntries,
-      ],
-    );
-
-  /*
-   * ==========================================================
-   * LIVE SCORE / GRADE / REMARK CALCULATION
-   * ==========================================================
-   *
-   * Important fixes:
-   *
-   * 1. contributionWeight is used when present.
-   * 2. Legacy weight remains supported.
-   * 3. Weighted structures are normalized to 0–100.
-   * 4. Structures without weights fall back to raw percentage.
-   * 5. Grade boundaries tolerate tiny floating-point differences.
-   * 6. Recalculation happens immediately whenever scores changes.
-   */
-
-  const studentScoreRows =
-    useMemo<
-      StudentScoreRow[]
-    >(
-      () => {
-        return enrolledStudents.map(
-          ({
-            student,
-            enrollment,
-          }) => {
-            let rawTotal =
-              0;
-
-            let maxTotal =
-              0;
-
-            let weightedEarned =
-              0;
-
-            let totalWeight =
-              0;
-
-            let rowEntered =
-              0;
-
-            for (
-              const item
-              of structureItems as any[]
-            ) {
-              const value =
-                scores[
-                  scoreKey(
-                    idOf(
-                      (
-                        student as any
-                      ).id,
-                    ),
-                    idOf(
-                      item.id,
-                    ),
-                  )
-                ];
-
-              const hasScore =
-                value !==
-                  "" &&
-                value !==
-                  undefined &&
-                value !==
-                  null &&
-                Number.isFinite(
-                  Number(
-                    value,
-                  ),
-                );
-
-              const score =
-                hasScore
-                  ? Number(
-                      value,
-                    )
-                  : 0;
-
-              const maxScore =
-                Math.max(
-                  1,
-                  Number(
-                    item.maxScore ||
-                      100,
-                  ),
-                );
-
-              const configuredWeight =
-                Number(
-                  item.contributionWeight ??
-                    item.weight ??
-                    0,
-                );
-
-              const weight =
-                Number.isFinite(
-                  configuredWeight,
-                )
-                  ? Math.max(
-                      0,
-                      configuredWeight,
-                    )
-                  : 0;
-
-              if (
-                hasScore
-              ) {
-                rowEntered +=
-                  1;
-              }
-
-              rawTotal +=
-                score;
-
-              maxTotal +=
-                maxScore;
-
-              if (
-                weight > 0
-              ) {
-                weightedEarned +=
-                  (
-                    score /
-                    maxScore
-                  ) *
-                  weight;
-
-                totalWeight +=
-                  weight;
-              }
-            }
-
-            const calculatedPercentage =
-              totalWeight >
-              0
-                ? (
-                    weightedEarned /
-                    totalWeight
-                  ) *
-                  100
-                : maxTotal >
-                    0
-                  ? (
-                      rawTotal /
-                      maxTotal
-                    ) *
-                    100
-                  : 0;
-
-            const percentage =
-              Number(
-                calculatedPercentage.toFixed(
-                  2,
-                ),
-              );
-
-            const weightedTotal =
-              Number(
-                weightedEarned.toFixed(
-                  2,
-                ),
-              );
-
-            const matchedRule =
-              gradeRules.find(
-                (
-                  rule: any,
-                ) => {
-                  const first =
-                    Number(
-                      rule.minScore ??
-                        0,
-                    );
-
-                  const second =
-                    Number(
-                      rule.maxScore ??
-                        100,
-                    );
-
-                  const safeFirst =
-                    Number.isFinite(
-                      first,
-                    )
-                      ? first
-                      : 0;
-
-                  const safeSecond =
-                    Number.isFinite(
-                      second,
-                    )
-                      ? second
-                      : 100;
-
-                  const min =
-                    Math.min(
-                      safeFirst,
-                      safeSecond,
-                    );
-
-                  const max =
-                    Math.max(
-                      safeFirst,
-                      safeSecond,
-                    );
-
-                  const epsilon =
-                    0.0001;
-
-                  return (
-                    percentage +
-                      epsilon >=
-                      min &&
-                    percentage -
-                      epsilon <=
-                      max
-                  );
-                },
-              );
-
-            return {
-              student,
-              enrollment,
-
-              rowEntered,
-
-              rowExpected:
-                structureItems.length,
-
-              rawTotal:
-                Number(
-                  rawTotal.toFixed(
-                    2,
-                  ),
-                ),
-
-              weightedTotal,
-
-              percentage,
-
-              grade:
-                matchedRule?.grade,
-
-              remark:
-                matchedRule?.remark,
-
-              gpa:
-                matchedRule?.gpa,
-            };
-          },
+        const period: any = row.academicPeriodId
+          ? periodMap.get(idOf(row.academicPeriodId))
+          : undefined;
+        const curriculumSubject: any = curriculumSubjectMap.get(
+          idOf(row.curriculumSubjectId),
         );
-      },
-      [
-        enrolledStudents,
-        structureItems,
-        scores,
-        gradeRules,
-      ],
-    );
-
-  const filteredRows =
-    useMemo(
-      () => {
-        const query =
-          search
-            .trim()
-            .toLowerCase();
-
-        return studentScoreRows.filter(
-          (
-            item,
-          ) => {
-            if (
-              filterCompletion !==
-              "all"
-            ) {
-              const entered =
-                item.rowEntered;
-
-              const expected =
-                item.rowExpected;
-
-              if (
-                filterCompletion ===
-                  "empty" &&
-                entered !==
-                  0
-              ) {
-                return false;
-              }
-
-              if (
-                filterCompletion ===
-                  "partial" &&
-                !(
-                  entered >
-                    0 &&
-                  entered <
-                    expected
-                )
-              ) {
-                return false;
-              }
-
-              if (
-                filterCompletion ===
-                  "complete" &&
-                !(
-                  expected >
-                    0 &&
-                  entered >=
-                    expected
-                )
-              ) {
-                return false;
-              }
-            }
-
-            if (
-              !query
-            ) {
-              return true;
-            }
-
-            const student:
-              any =
-              item.student;
-
-            return `${student.fullName || ""} ${student.admissionNumber || ""} ${item.grade || ""} ${item.remark || ""}`
-              .toLowerCase()
-              .includes(
-                query,
-              );
-          },
-        );
-      },
-      [
-        studentScoreRows,
-        search,
-        filterCompletion,
-      ],
-    );
-
-  const completionStats =
-    useMemo(
-      () => {
-        const expected =
-          studentScoreRows.length *
-          structureItems.length;
-
-        let entered =
-          0;
-
-        studentScoreRows.forEach(
-          (
-            row,
-          ) => {
-            entered +=
-              row.rowEntered;
-          },
-        );
-
-        const completion =
-          expected
-            ? Math.round(
-                (
-                  entered /
-                  expected
-                ) *
-                  100,
-              )
-            : 0;
-
-        const completeStudents =
-          studentScoreRows.filter(
-            (
-              row,
-            ) =>
-              row.rowExpected >
-                0 &&
-              row.rowEntered >=
-                row.rowExpected,
-          ).length;
+        const curriculum: any = curriculumSubject
+          ? curriculumMap.get(idOf(curriculumSubject.curriculumId))
+          : undefined;
+        const pathway: any = curriculumSubject?.pathwayId
+          ? pathwayMap.get(idOf(curriculumSubject.pathwayId))
+          : undefined;
+        const subjectName = row.name || subj?.name || "Unknown Subject";
+        const subjectCode = row.code || subj?.code || "";
+        const className = cls?.name || "Unknown Class";
+        const academicPeriodName = period?.name || "All Periods";
+        const ready = !!applicabilityMap.get(id);
 
         return {
-          expected,
-          entered,
-          completion,
-          completeStudents,
+          id,
+          row,
+          className,
+          subjectName,
+          subjectCode,
+          teacherName: teacher?.fullName || "No teacher assigned",
+          academicStructureName: academicStructure?.name || "Unknown structure",
+          academicPeriodName,
+          curriculumName: curriculum?.name || "No curriculum",
+          pathwayName: pathway?.name || "No pathway",
+          organizationId: curriculumSubject?.organizationId,
+          ready,
+          display: `${className} • ${subjectName}${subjectCode ? ` (${subjectCode})` : ""} • ${academicPeriodName}`,
         };
-      },
-      [
-        studentScoreRows,
-        structureItems,
-      ],
+      })
+      .filter((option) => Boolean(option.id))
+      .filter(
+        (option) =>
+          filterClassId === "all" || sameId(option.row.classId, filterClassId),
+      )
+      .filter(
+        (option) =>
+          filterSubjectId === "all" ||
+          sameId(option.row.subjectId, filterSubjectId),
+      )
+      .filter(
+        (option) =>
+          filterPeriodId === "all" ||
+          sameId(option.row.academicPeriodId || "", filterPeriodId),
+      )
+      .filter(
+        (option) =>
+          filterReadiness === "all" ||
+          (filterReadiness === "ready" ? option.ready : !option.ready),
+      )
+      .sort((a, b) => a.display.localeCompare(b.display));
+  }, [
+    classSubjects,
+    classMap,
+    subjectMap,
+    teacherMap,
+    academicStructureMap,
+    periodMap,
+    curriculumSubjectMap,
+    curriculumMap,
+    pathwayMap,
+    applicabilityMap,
+    filterClassId,
+    filterSubjectId,
+    filterPeriodId,
+    filterReadiness,
+  ]);
+
+  const selectedClass = useMemo(
+    () =>
+      selectedClassId ? (classMap.get(idOf(selectedClassId)) as any) : null,
+    [classMap, selectedClassId],
+  );
+
+  const selectedClassSubjectOptions = useMemo(() => {
+    if (!selectedClassId) return [];
+    return classSubjectOptions.filter((option) =>
+      sameId((option.row as any).classId, selectedClassId),
+    );
+  }, [classSubjectOptions, selectedClassId]);
+
+  const classSubjectEntryViews = useMemo<ClassSubjectEntryView[]>(() => {
+    return selectedClassSubjectOptions.map((option) => {
+      const app = applicabilityMap.get(option.id) as any;
+      const optionItems = app?.assessmentStructureId
+        ? items.filter(
+            (row: any) =>
+              sameId(row.assessmentStructureId, app.assessmentStructureId) &&
+              isActiveRow(row),
+          )
+        : [];
+      const periodId = idOf((option.row as any).academicPeriodId);
+      const studentCount = enrollments.filter((row: any) => {
+        if (!sameId(row.classId, (option.row as any).classId)) return false;
+        if (
+          !sameId(
+            row.academicStructureId,
+            (option.row as any).academicStructureId,
+          )
+        )
+          return false;
+        if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
+        return row.status === "active" && !row.isDeleted;
+      }).length;
+      const expected = studentCount * optionItems.length;
+      const entered = entries.filter((entry: any) => {
+        if (!sameId(entry.classSubjectId, option.id)) return false;
+        if (
+          !app ||
+          !sameId(entry.assessmentStructureId || "", app.assessmentStructureId)
+        )
+          return false;
+        return (
+          !entry.isDeleted &&
+          entry.score !== undefined &&
+          entry.score !== null &&
+          entry.score !== ""
+        );
+      }).length;
+      const completion = expected
+        ? Math.round((Math.min(entered, expected) / expected) * 100)
+        : 0;
+      return {
+        id: option.id,
+        option,
+        studentCount,
+        itemCount: optionItems.length,
+        entered,
+        expected,
+        completion,
+      };
+    });
+  }, [
+    selectedClassSubjectOptions,
+    applicabilityMap,
+    items,
+    enrollments,
+    entries,
+  ]);
+
+  const classCards = useMemo<ClassEntryView[]>(() => {
+    const term = search.trim().toLowerCase();
+    return classes
+      .filter(isActiveRow)
+      .map((classRow: any) => {
+        const id = idOf(classRow.id);
+        const options = classSubjectOptions.filter((option) =>
+          sameId((option.row as any).classId, id),
+        );
+        const readyCount = options.filter((option) => option.ready).length;
+        const studentIds = new Set(
+          enrollments
+            .filter(
+              (row: any) =>
+                sameId(row.classId, id) &&
+                row.status === "active" &&
+                !row.isDeleted,
+            )
+            .map((row: any) => idOf(row.studentId))
+            .filter(Boolean),
+        );
+        return {
+          id,
+          row: classRow,
+          name: classRow.name || `Class ${id}`,
+          code: classRow.code || "",
+          subjectCount: options.length,
+          readyCount,
+          missingCount: Math.max(0, options.length - readyCount),
+          studentCount: studentIds.size,
+        };
+      })
+      .filter(
+        (item) =>
+          !term ||
+          `${item.name} ${item.code} ${item.subjectCount} subjects`
+            .toLowerCase()
+            .includes(term),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [classes, classSubjectOptions, enrollments, search]);
+
+  const selectedOption = useMemo(() => {
+    const selectedId = idOf(classSubjectId);
+    return classSubjectOptions.find((option) => sameId(option.id, selectedId));
+  }, [classSubjectOptions, classSubjectId]);
+
+  const currentClassSubject = selectedOption?.row;
+  const applicability = useMemo(
+    () =>
+      selectedOption ? applicabilityMap.get(selectedOption.id) : undefined,
+    [applicabilityMap, selectedOption],
+  );
+  const assessmentStructure = useMemo(
+    () =>
+      structures.find((row: any) =>
+        sameId(row.id, applicability?.assessmentStructureId),
+      ),
+    [structures, applicability],
+  );
+  const gradingSystem = useMemo(
+    () =>
+      gradings.find((row: any) =>
+        sameId(row.id, applicability?.gradingStructureId),
+      ),
+    [gradings, applicability],
+  );
+  /**
+   * Keep the complete hierarchy for validation and calculation, but expose
+   * only direct-entry leaves/explicit direct parents to the score-entry UI.
+   */
+  const structureHierarchyItems = useMemo(() => {
+    if (!applicability?.assessmentStructureId) return [];
+
+    return items.filter(
+      (row: any) =>
+        sameId(
+          row.assessmentStructureId,
+          applicability.assessmentStructureId,
+        ) && isActiveRow(row),
+    );
+  }, [items, applicability]);
+
+  const entryProjection = useMemo<AssessmentEntryProjection>(() => {
+    if (!applicability?.assessmentStructureId) {
+      return {
+        structureId: "",
+        columns: [],
+        groups: [],
+        hiddenCalculatedNodes: [],
+        warnings: [],
+      };
+    }
+
+    return projectAssessmentEntryColumns({
+      items: structureHierarchyItems,
+      structureId: idOf(applicability.assessmentStructureId),
+      existingEntries: entries,
+    });
+  }, [structureHierarchyItems, applicability, entries]);
+
+  /**
+   * Existing entry components expect AssessmentStructureItem rows. Decorate
+   * the projected rows with display-only hierarchy metadata while preserving
+   * the permanent item id used by assessmentEntries.
+   */
+  const structureItems = useMemo<AssessmentStructureItem[]>(() => {
+    const itemById = new Map(
+      structureHierarchyItems.map((item) => [idOf((item as any).id), item]),
     );
 
-  const activeFilterCount =
-    useMemo(
-      () => {
-        return [
-          filterClassId,
-          filterSubjectId,
-          filterPeriodId,
-          filterReadiness,
-          filterCompletion,
-        ].filter(
-          (
-            value,
-          ) =>
-            value !==
-            "all",
-        ).length;
-      },
-      [
-        filterClassId,
-        filterSubjectId,
-        filterPeriodId,
-        filterReadiness,
-        filterCompletion,
-      ],
-    );
+    return entryProjection.columns
+      .map((column) => {
+        const item = itemById.get(column.itemId);
+        if (!item) return null;
 
-  const contextSubtitle =
-    selectedOption
-      ? `${selectedOption.className} · ${selectedOption.academicStructureName} · ${selectedOption.academicPeriodName}`
-      : activeBranch?.name ||
-        "Selected branch";
+        return {
+          ...item,
+          __entryPathLabels: column.pathLabels,
+          __entryDepth: column.depth,
+          __entryGroupLabel:
+            column.pathLabels.length > 1
+              ? column.pathLabels.slice(0, -1).join(" · ")
+              : "",
+          __entryCompactLabel: column.pathLabels.join(" · "),
+        } as AssessmentStructureItem;
+      })
+      .filter((item): item is AssessmentStructureItem => Boolean(item));
+  }, [structureHierarchyItems, entryProjection]);
+  const gradeRules = useMemo(() => {
+    if (!gradingSystem?.id) return [];
+    return rules
+      .filter(
+        (row: any) =>
+          sameId(row.gradingStructureId, gradingSystem.id) && isActiveRow(row),
+      )
+      .sort(
+        (a: any, b: any) => Number(b.minScore || 0) - Number(a.minScore || 0),
+      );
+  }, [rules, gradingSystem]);
+
+
+  const assessmentExcelProjectedColumns = useMemo<
+    AssessmentExcelProjectedColumn[]
+  >(() => {
+    return (structureItems as any[]).map((item, index) => ({
+      itemId: idOf(item.id),
+      label: entryCompactLabel(item) || item.name || `Assessment ${index + 1}`,
+      compactLabel: item.__entryCompactLabel || item.name || undefined,
+      groupLabel: item.__entryGroupLabel || undefined,
+      pathLabels: Array.isArray(item.__entryPathLabels)
+        ? item.__entryPathLabels
+        : [item.name || `Assessment ${index + 1}`],
+      maxScore: Math.max(1, Number(item.maxScore || 100)),
+      weight: Number(item.weight || 0),
+      order: Number(item.order ?? index),
+    }));
+  }, [structureItems]);
+
+  const assessmentExcelContext = useMemo<AssessmentExcelContext | null>(() => {
+    if (!currentClassSubject || !selectedOption || !applicability) return null;
+
+    return {
+      accountId: idOf(accountId),
+      schoolId: idOf(schoolId),
+      branchId: idOf(branchId),
+      classSubjectId: idOf((currentClassSubject as any).id),
+      classId: idOf((currentClassSubject as any).classId),
+      subjectId: idOf((currentClassSubject as any).subjectId),
+      academicStructureId: idOf((currentClassSubject as any).academicStructureId),
+      academicPeriodId: idOf((currentClassSubject as any).academicPeriodId),
+      assessmentStructureId: idOf(applicability.assessmentStructureId),
+      gradingStructureId: idOf(applicability.gradingStructureId) || undefined,
+      organizationId:
+        idOf(applicability.organizationId || selectedOption.organizationId) || undefined,
+      branchName: (activeBranch as any)?.name || undefined,
+      className: selectedOption.className,
+      subjectName: selectedOption.subjectName,
+      subjectCode: selectedOption.subjectCode,
+      academicStructureName: selectedOption.academicStructureName,
+      academicPeriodName: selectedOption.academicPeriodName,
+      assessmentStructureName: (assessmentStructure as any)?.name || undefined,
+    };
+  }, [
+    currentClassSubject,
+    selectedOption,
+    applicability,
+    accountId,
+    schoolId,
+    branchId,
+    activeBranch,
+    assessmentStructure,
+  ]);
+
+  const relevantEntries = useMemo(() => {
+    if (!currentClassSubject || !applicability) return [];
+    const academicPeriodId = idOf(
+      (currentClassSubject as any).academicPeriodId,
+    );
+    return entries.filter((entry: any) => {
+      if (!sameId(entry.classSubjectId, (currentClassSubject as any).id))
+        return false;
+      if (!sameId(entry.classId, (currentClassSubject as any).classId))
+        return false;
+      if (!sameId(entry.subjectId, (currentClassSubject as any).subjectId))
+        return false;
+      if (
+        !sameId(
+          entry.academicStructureId || "",
+          (currentClassSubject as any).academicStructureId,
+        )
+      )
+        return false;
+      if (!sameId(entry.academicPeriodId || "", academicPeriodId)) return false;
+      if (
+        !sameId(
+          entry.assessmentStructureId || "",
+          applicability.assessmentStructureId,
+        )
+      )
+        return false;
+      if (
+        applicability.gradingStructureId &&
+        !sameId(entry.gradingStructureId || "", applicability.gradingStructureId)
+      )
+        return false;
+      return !entry.isDeleted;
+    });
+  }, [entries, currentClassSubject, applicability]);
+
+  useEffect(() => {
+    if (!currentClassSubject || !applicability) {
+      setScores({});
+      setSessionStarted(false);
+      return;
+    }
+
+    const nextScores: ScoreMap = {};
+    relevantEntries.forEach((entry: any) => {
+      nextScores[
+        scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId))
+      ] = Number(entry.score || 0);
+    });
+    setScores(nextScores);
+    setSessionStarted(false);
+  }, [currentClassSubject, applicability, relevantEntries]);
+
+  const enrolledStudents = useMemo(() => {
+    if (!currentClassSubject) return [];
+    const periodId = idOf((currentClassSubject as any).academicPeriodId);
+    return students
+      .map((student: any) => {
+        const enrollment = enrollments.find((row: any) => {
+          if (!sameId(row.studentId, student.id)) return false;
+          if (!sameId(row.classId, (currentClassSubject as any).classId))
+            return false;
+          if (
+            !sameId(
+              row.academicStructureId,
+              (currentClassSubject as any).academicStructureId,
+            )
+          )
+            return false;
+          if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
+          return row.status === "active";
+        });
+        return enrollment ? { student, enrollment } : undefined;
+      })
+      .filter(Boolean) as { student: Student; enrollment: StudentEnrollment }[];
+  }, [students, enrollments, currentClassSubject]);
+
+  const existingEntryMap = useMemo(() => {
+    const m = new Map<string, AssessmentEntry>();
+    relevantEntries.forEach((entry: any) =>
+      m.set(
+        scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId)),
+        entry,
+      ),
+    );
+    return m;
+  }, [relevantEntries]);
+
+  const studentScoreRows = useMemo<StudentScoreRow[]>(() => {
+    return enrolledStudents.map(({ student, enrollment }) => {
+      let rawTotal = 0;
+      let weightedTotal = 0;
+      let maxTotal = 0;
+      let rowEntered = 0;
+
+      for (const item of structureItems as any[]) {
+        const value =
+          scores[scoreKey(idOf((student as any).id), idOf(item.id))];
+        const hasScore = value !== "" && value !== undefined && value !== null;
+        const score = hasScore ? Number(value) : 0;
+        const maxScore = Math.max(1, Number(item.maxScore || 100));
+        const weight = Number(item.weight || 0);
+
+        if (hasScore) rowEntered += 1;
+        rawTotal += score;
+        maxTotal += maxScore;
+        weightedTotal += (score / maxScore) * weight;
+      }
+
+      const percentage = structureItems.length
+        ? Number(weightedTotal.toFixed(2))
+        : maxTotal
+          ? Number(((rawTotal / maxTotal) * 100).toFixed(2))
+          : 0;
+      const matchedRule = gradeRules.find(
+        (rule: any) =>
+          percentage >= Number(rule.minScore || 0) &&
+          percentage <= Number(rule.maxScore || 100),
+      );
+
+      return {
+        student,
+        enrollment,
+        rowEntered,
+        rowExpected: structureItems.length,
+        rawTotal: Number(rawTotal.toFixed(2)),
+        weightedTotal: Number(weightedTotal.toFixed(2)),
+        percentage,
+        grade: matchedRule?.grade,
+        remark: matchedRule?.remark,
+        gpa: matchedRule?.gpa,
+      };
+    });
+  }, [enrolledStudents, structureItems, scores, gradeRules]);
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return studentScoreRows.filter((item) => {
+      if (filterCompletion !== "all") {
+        const entered = item.rowEntered;
+        const expected = item.rowExpected;
+        if (filterCompletion === "empty" && entered !== 0) return false;
+        if (
+          filterCompletion === "partial" &&
+          !(entered > 0 && entered < expected)
+        )
+          return false;
+        if (
+          filterCompletion === "complete" &&
+          !(expected > 0 && entered >= expected)
+        )
+          return false;
+      }
+      if (!q) return true;
+      const s: any = item.student;
+      return `${s.fullName || ""} ${s.admissionNumber || ""} ${item.grade || ""} ${item.remark || ""}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [studentScoreRows, search, filterCompletion]);
+
+  const completionStats = useMemo(() => {
+    const expected = studentScoreRows.length * structureItems.length;
+    let entered = 0;
+    studentScoreRows.forEach((row) => (entered += row.rowEntered));
+    const completion = expected ? Math.round((entered / expected) * 100) : 0;
+    const completeStudents = studentScoreRows.filter(
+      (row) => row.rowExpected > 0 && row.rowEntered >= row.rowExpected,
+    ).length;
+    return { expected, entered, completion, completeStudents };
+  }, [studentScoreRows, structureItems]);
+
+  const activeFilterCount = useMemo(() => {
+    return [
+      filterClassId,
+      filterSubjectId,
+      filterPeriodId,
+      filterReadiness,
+      filterCompletion,
+    ].filter((v) => v !== "all").length;
+  }, [
+    filterClassId,
+    filterSubjectId,
+    filterPeriodId,
+    filterReadiness,
+    filterCompletion,
+  ]);
+
+  const contextSubtitle = selectedOption
+    ? `${selectedOption.className} · ${selectedOption.academicStructureName} · ${selectedOption.academicPeriodName}`
+    : activeBranch?.name || "Selected branch";
 
   const updateScore = (
-    studentId:
-      string,
-
-    item:
-      AssessmentStructureItem,
-
-    value:
-      string,
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
   ) => {
-    const key =
-      scoreKey(
-        studentId,
-        idOf(
-          (
-            item as any
-          ).id,
-        ),
-      );
-
-    if (
-      value ===
-      ""
-    ) {
-      setScores(
-        (
-          previous,
-        ) => ({
-          ...previous,
-          [key]:
-            "",
-        }),
-      );
-
+    const key = scoreKey(studentId, idOf((item as any).id));
+    if (value === "") {
+      setScores((prev) => ({ ...prev, [key]: "" }));
       return;
     }
-
-    const number =
-      Number(
-        value,
-      );
-
-    if (
-      Number.isNaN(
-        number,
-      )
-    ) {
-      return;
-    }
-
-    const sanitized =
-      Math.max(
-        0,
-        Math.min(
-          number,
-          Number(
-            (
-              item as any
-            ).maxScore ||
-              100,
-          ),
-        ),
-      );
-
-    /*
-     * React state update causes studentScoreRows
-     * to recalculate immediately, which in turn
-     * refreshes grade + remark before Save.
-     */
-    setScores(
-      (
-        previous,
-      ) => ({
-        ...previous,
-        [key]:
-          sanitized,
-      }),
+    const num = Number(value);
+    if (Number.isNaN(num)) return;
+    const sanitized = Math.max(
+      0,
+      Math.min(num, Number((item as any).maxScore || 100)),
     );
+    setScores((prev) => ({ ...prev, [key]: sanitized }));
   };
 
-  const startSession =
-    () => {
-      if (
-        !authenticated ||
-        !accountId ||
-        !schoolId ||
-        !branchId
-      ) {
-        return showToast(
-          "error",
-          "Sign in and select a school branch first.",
-        );
-      }
+  const startSession = () => {
+    if (!authenticated || !accountId || !schoolId || !branchId)
+      return showToast("error", "Sign in and select a school branch first.");
+    if (!currentClassSubject)
+      return showToast("error", "Select a class subject first.");
+    if (!applicability)
+      return showToast(
+        "error",
+        "No assessment applicability is configured for this class subject.",
+      );
+    if (!structureItems.length)
+      return showToast(
+        "error",
+        "The selected assessment structure has no active items.",
+      );
+    if (!studentScoreRows.length)
+      return showToast(
+        "error",
+        "No active student enrollment was found for this class subject.",
+      );
+    setSessionStarted(true);
+    showToast("success", "Score entry session started.");
+  };
 
-      if (
-        !currentClassSubject
-      ) {
-        return showToast(
-          "error",
-          "Select a class subject first.",
-        );
-      }
-
-      if (
-        !applicability
-      ) {
-        return showToast(
-          "error",
-          "No assessment applicability is configured for this class subject.",
-        );
-      }
-
-      if (
-        !structureItems.length
-      ) {
-        return showToast(
-          "error",
-          "The selected assessment structure has no active items.",
-        );
-      }
-
-      if (
-        !studentScoreRows.length
-      ) {
-        return showToast(
-          "error",
-          "No active student enrollment was found for this class subject.",
-        );
-      }
-
-      setSessionStarted(
-        true,
+  const saveEntries = async () => {
+    if (!sessionStarted)
+      return showToast("error", "Start the score entry session first.");
+    if (!authenticated || !accountId || !schoolId || !branchId)
+      return showToast("error", "Sign in and select a school branch first.");
+    if (!currentClassSubject || !applicability)
+      return showToast(
+        "error",
+        "Select a valid class subject with assessment applicability.",
       );
 
-      showToast(
-        "success",
-        "Score entry session started.",
+    try {
+      setSaving(true);
+      const academicPeriodId = idOf(
+        (currentClassSubject as any).academicPeriodId,
       );
-    };
+      let savedCount = 0;
+      let clearedCount = 0;
+      let lockedCount = 0;
 
-  const saveEntries =
-    async () => {
-      if (
-        !sessionStarted
-      ) {
-        return showToast(
-          "error",
-          "Start the score entry session first.",
-        );
-      }
+      for (const row of studentScoreRows) {
+        const studentId = idOf((row.student as any).id);
+        if (!studentId) continue;
 
-      if (
-        !authenticated ||
-        !accountId ||
-        !schoolId ||
-        !branchId
-      ) {
-        return showToast(
-          "error",
-          "Sign in and select a school branch first.",
-        );
-      }
+        for (const item of structureItems as any[]) {
+          const itemId = idOf(item.id);
+          const key = scoreKey(studentId, itemId);
+          const value = scores[key];
+          const existing: any = existingEntryMap.get(key);
 
-      if (
-        !currentClassSubject ||
-        !applicability
-      ) {
-        return showToast(
-          "error",
-          "Select a valid class subject with assessment applicability.",
-        );
-      }
-
-      try {
-        setSaving(
-          true,
-        );
-
-        const academicPeriodId =
-          idOf(
-            (
-              currentClassSubject as any
-            ).academicPeriodId,
-          );
-
-        let savedCount =
-          0;
-
-        let clearedCount =
-          0;
-
-        let lockedCount =
-          0;
-
-        for (
-          const row
-          of studentScoreRows
-        ) {
-          const studentId =
-            idOf(
-              (
-                row.student as any
-              ).id,
-            );
-
-          if (
-            !studentId
-          ) {
+          if (existing?.locked) {
+            lockedCount += 1;
             continue;
           }
 
-          for (
-            const item
-            of structureItems as any[]
-          ) {
-            const itemId =
-              idOf(
-                item.id,
-              );
-
-            const key =
-              scoreKey(
-                studentId,
-                itemId,
-              );
-
-            const value =
-              scores[
-                key
-              ];
-
-            const existing:
-              any =
-              existingEntryMap.get(
-                key,
-              );
-
-            if (
-              existing?.locked
-            ) {
-              lockedCount +=
-                1;
-
-              continue;
+          if (value === "" || value === undefined || value === null) {
+            if (existing?.id) {
+              await softDeleteLocal("assessmentEntries", idOf(existing.id));
+              clearedCount += 1;
             }
-
-            if (
-              value ===
-                "" ||
-              value ===
-                undefined ||
-              value ===
-                null
-            ) {
-              if (
-                existing?.id
-              ) {
-                await softDeleteLocal(
-                  "assessmentEntries",
-                  idOf(
-                    existing.id,
-                  ),
-                );
-
-                clearedCount +=
-                  1;
-              }
-
-              continue;
-            }
-
-            const payload:
-              Partial<AssessmentEntry> =
-              {
-                accountId,
-
-                schoolId:
-                  schoolId,
-
-                branchId:
-                  branchId,
-
-                classSubjectId:
-                  idOf(
-                    (
-                      currentClassSubject as any
-                    ).id,
-                  ),
-
-                organizationId:
-                  applicability.organizationId ||
-                  selectedOption?.organizationId,
-
-                academicStructureId:
-                  idOf(
-                    (
-                      currentClassSubject as any
-                    ).academicStructureId,
-                  ),
-
-                academicPeriodId,
-
-                gradingStructureId:
-                  applicability.gradingStructureId,
-
-                assessmentStructureId:
-                  applicability.assessmentStructureId,
-
-                assessmentStructureItemId:
-                  itemId,
-
-                studentId,
-
-                classId:
-                  idOf(
-                    (
-                      currentClassSubject as any
-                    ).classId,
-                  ),
-
-                subjectId:
-                  idOf(
-                    (
-                      currentClassSubject as any
-                    ).subjectId,
-                  ),
-
-                score:
-                  Number(
-                    value,
-                  ),
-
-                /*
-                 * These values come from
-                 * the live recalculated row.
-                 */
-                grade:
-                  row.grade,
-
-                remark:
-                  row.remark,
-
-                published:
-                  false,
-
-                locked:
-                  false,
-
-                active:
-                  true,
-
-                isDeleted:
-                  false,
-              } as Partial<AssessmentEntry>;
-
-            if (
-              existing?.id
-            ) {
-              await updateLocal(
-                "assessmentEntries",
-                idOf(
-                  existing.id,
-                ),
-                payload as AssessmentEntry,
-              );
-            } else {
-              await createLocal(
-                "assessmentEntries",
-                payload as AssessmentEntry,
-              );
-            }
-
-            savedCount +=
-              1;
+            continue;
           }
-        }
 
-        await load();
-
-        setSessionStarted(
-          false,
-        );
-
-        showToast(
-          "success",
-          `Saved ${savedCount} score${
-            savedCount ===
-            1
-              ? ""
-              : "s"
-          }${
-            clearedCount
-              ? ` · cleared ${clearedCount}`
-              : ""
-          }${
-            lockedCount
-              ? ` · skipped ${lockedCount} locked`
-              : ""
-          }.`,
-        );
-      } catch (
-        error
-      ) {
-        console.error(
-          error,
-        );
-
-        showToast(
-          "error",
-          "Failed to save assessment scores.",
-        );
-      } finally {
-        setSaving(
-          false,
-        );
-      }
-    };
-
-  const assessmentExcelStudents =
-    () =>
-      enrolledStudents.map(
-        ({
-          student,
-        }: any) => ({
-          id:
-            idOf(
-              student.id,
+          const payload: Partial<AssessmentEntry> = {
+            accountId,
+            schoolId: schoolId,
+            branchId: branchId,
+            classSubjectId: idOf((currentClassSubject as any).id),
+            organizationId:
+              applicability.organizationId || selectedOption?.organizationId,
+            academicStructureId: idOf(
+              (currentClassSubject as any).academicStructureId,
             ),
+            academicPeriodId,
+            gradingStructureId: applicability.gradingStructureId,
+            assessmentStructureId: applicability.assessmentStructureId,
+            assessmentStructureItemId: itemId,
+            studentId,
+            classId: idOf((currentClassSubject as any).classId),
+            subjectId: idOf((currentClassSubject as any).subjectId),
+            score: Number(value),
+            grade: row.grade,
+            remark: row.remark,
+            published: false,
+            locked: false,
+            active: true,
+            isDeleted: false,
+          } as Partial<AssessmentEntry>;
 
-          fullName:
-            student.fullName ||
-            "Unnamed student",
-
-          admissionNumber:
-            student.admissionNumber ||
-            undefined,
-
-          active:
-            student.active,
-
-          isDeleted:
-            student.isDeleted,
-        }),
-      );
-
-  const assessmentExcelEnrollments =
-    () =>
-      enrollments.map(
-        (
-          row: any,
-        ) => ({
-          id:
-            idOf(
-              row.id,
-            ),
-
-          studentId:
-            idOf(
-              row.studentId,
-            ),
-
-          classId:
-            idOf(
-              row.classId,
-            ),
-
-          academicStructureId:
-            idOf(
-              row.academicStructureId,
-            ),
-
-          academicPeriodId:
-            idOf(
-              row.academicPeriodId,
-            ) ||
-            undefined,
-
-          status:
-            row.status,
-
-          isDeleted:
-            row.isDeleted,
-        }),
-      );
-
-  const assessmentExcelExistingEntries =
-    () =>
-      relevantEntries.map(
-        (
-          row: any,
-        ) => ({
-          id:
-            idOf(
-              row.id,
-            ),
-
-          accountId:
-            idOf(
-              row.accountId,
-            ) ||
-            undefined,
-
-          schoolId:
-            idOf(
-              row.schoolId,
-            ) ||
-            undefined,
-
-          branchId:
-            idOf(
-              row.branchId,
-            ) ||
-            undefined,
-
-          classSubjectId:
-            idOf(
-              row.classSubjectId,
-            ) ||
-            undefined,
-
-          organizationId:
-            idOf(
-              row.organizationId,
-            ) ||
-            undefined,
-
-          academicStructureId:
-            idOf(
-              row.academicStructureId,
-            ) ||
-            undefined,
-
-          academicPeriodId:
-            idOf(
-              row.academicPeriodId,
-            ) ||
-            undefined,
-
-          gradingStructureId:
-            idOf(
-              row.gradingStructureId,
-            ) ||
-            undefined,
-
-          assessmentStructureId:
-            idOf(
-              row.assessmentStructureId,
-            ) ||
-            undefined,
-
-          assessmentStructureItemId:
-            idOf(
-              row.assessmentStructureItemId,
-            ) ||
-            undefined,
-
-          studentId:
-            idOf(
-              row.studentId,
-            ) ||
-            undefined,
-
-          classId:
-            idOf(
-              row.classId,
-            ) ||
-            undefined,
-
-          subjectId:
-            idOf(
-              row.subjectId,
-            ) ||
-            undefined,
-
-          score:
-            row.score ===
-              undefined ||
-            row.score ===
-              null
-              ? undefined
-              : Number(
-                  row.score,
-                ),
-
-          grade:
-            row.grade,
-
-          remark:
-            row.remark,
-
-          published:
-            row.published,
-
-          locked:
-            row.locked,
-
-          active:
-            row.active,
-
-          isDeleted:
-            row.isDeleted,
-        }),
-      );
-
-  const assessmentExcelGradeRules =
-    () =>
-      gradeRules.map(
-        (
-          row: any,
-          index,
-        ) => ({
-          id:
-            idOf(
-              row.id,
-            ) ||
-            undefined,
-
-          minScore:
-            Number(
-              row.minScore ||
-                0,
-            ),
-
-          maxScore:
-            Number(
-              row.maxScore ||
-                100,
-            ),
-
-          grade:
-            row.grade ||
-            "",
-
-          remark:
-            row.remark ||
-            undefined,
-
-          gpa:
-            row.gpa ===
-              undefined ||
-            row.gpa ===
-              null
-              ? undefined
-              : Number(
-                  row.gpa,
-                ),
-
-          order:
-            Number(
-              row.order ??
-                index,
-            ),
-        }),
-      );
-
-  const ensureAssessmentExcelContext =
-    () => {
-      if (
-        !assessmentExcelContext ||
-        !selectedOption ||
-        !applicability
-      ) {
-        showToast(
-          "error",
-          "Select a ready class subject before using Excel.",
-        );
-
-        return null;
-      }
-
-      if (
-        !assessmentExcelProjectedColumns.length
-      ) {
-        showToast(
-          "error",
-          "This assessment structure has no directly enterable score columns.",
-        );
-
-        return null;
-      }
-
-      if (
-        !enrolledStudents.length
-      ) {
-        showToast(
-          "error",
-          "No active students are enrolled in this assessment context.",
-        );
-
-        return null;
-      }
-
-      return assessmentExcelContext;
-    };
-
-  const buildCurrentAssessmentScoreMatrix =
-    () => {
-      const matrix:
-        Record<
-          string,
-          Record<
-            string,
-            number | undefined
-          >
-        > =
-        {};
-
-      enrolledStudents.forEach(
-        ({
-          student,
-        }: any) => {
-          const studentId =
-            idOf(
-              student.id,
+          if (existing?.id)
+            await updateLocal(
+              "assessmentEntries",
+              idOf(existing.id),
+              payload as AssessmentEntry,
             );
+          else
+            await createLocal("assessmentEntries", payload as AssessmentEntry);
+          savedCount += 1;
+        }
+      }
 
-          if (
-            !studentId
-          ) {
-            return;
-          }
+      await load();
+      setSessionStarted(false);
+      showToast(
+        "success",
+        `Saved ${savedCount} score${savedCount === 1 ? "" : "s"}${clearedCount ? ` · cleared ${clearedCount}` : ""}${
+          lockedCount ? ` · skipped ${lockedCount} locked` : ""
+        }.`,
+      );
+    } catch (error) {
+      console.error(error);
+      showToast("error", "Failed to save assessment scores.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
-          matrix[
-            studentId
-          ] =
-            {};
+  const assessmentExcelStudents = () =>
+    enrolledStudents.map(({ student }: any) => ({
+      id: idOf(student.id),
+      fullName: student.fullName || "Unnamed student",
+      admissionNumber: student.admissionNumber || undefined,
+      active: student.active,
+      isDeleted: student.isDeleted,
+    }));
 
-          assessmentExcelProjectedColumns.forEach(
-            (
-              column,
-            ) => {
-              const value =
-                scores[
-                  scoreKey(
-                    studentId,
-                    column.itemId,
-                  )
-                ];
+  const assessmentExcelEnrollments = () =>
+    enrollments.map((row: any) => ({
+      id: idOf(row.id),
+      studentId: idOf(row.studentId),
+      classId: idOf(row.classId),
+      academicStructureId: idOf(row.academicStructureId),
+      academicPeriodId: idOf(row.academicPeriodId) || undefined,
+      status: row.status,
+      isDeleted: row.isDeleted,
+    }));
 
-              matrix[
-                studentId
-              ][
-                column.itemId
-              ] =
-                value ===
-                  "" ||
-                value ===
-                  undefined ||
-                value ===
-                  null
-                  ? undefined
-                  : Number(
-                      value,
-                    );
-            },
-          );
+  const assessmentExcelExistingEntries = () =>
+    relevantEntries.map((row: any) => ({
+      id: idOf(row.id),
+      accountId: idOf(row.accountId) || undefined,
+      schoolId: idOf(row.schoolId) || undefined,
+      branchId: idOf(row.branchId) || undefined,
+      classSubjectId: idOf(row.classSubjectId) || undefined,
+      organizationId: idOf(row.organizationId) || undefined,
+      academicStructureId: idOf(row.academicStructureId) || undefined,
+      academicPeriodId: idOf(row.academicPeriodId) || undefined,
+      gradingStructureId: idOf(row.gradingStructureId) || undefined,
+      assessmentStructureId: idOf(row.assessmentStructureId) || undefined,
+      assessmentStructureItemId: idOf(row.assessmentStructureItemId) || undefined,
+      studentId: idOf(row.studentId) || undefined,
+      classId: idOf(row.classId) || undefined,
+      subjectId: idOf(row.subjectId) || undefined,
+      score: row.score === undefined || row.score === null ? undefined : Number(row.score),
+      grade: row.grade,
+      remark: row.remark,
+      published: row.published,
+      locked: row.locked,
+      active: row.active,
+      isDeleted: row.isDeleted,
+    }));
+
+  const assessmentExcelGradeRules = () =>
+    gradeRules.map((row: any, index) => ({
+      id: idOf(row.id) || undefined,
+      minScore: Number(row.minScore || 0),
+      maxScore: Number(row.maxScore || 100),
+      grade: row.grade || "",
+      remark: row.remark || undefined,
+      gpa: row.gpa === undefined || row.gpa === null ? undefined : Number(row.gpa),
+      order: Number(row.order ?? index),
+    }));
+
+  const ensureAssessmentExcelContext = () => {
+    if (!assessmentExcelContext || !selectedOption || !applicability) {
+      showToast("error", "Select a ready class subject before using Excel.");
+      return null;
+    }
+    if (!assessmentExcelProjectedColumns.length) {
+      showToast("error", "This assessment structure has no directly enterable score columns.");
+      return null;
+    }
+    if (!enrolledStudents.length) {
+      showToast("error", "No active students are enrolled in this assessment context.");
+      return null;
+    }
+    return assessmentExcelContext;
+  };
+
+  const buildCurrentAssessmentScoreMatrix = () => {
+    const matrix: Record<string, Record<string, number | undefined>> = {};
+
+    enrolledStudents.forEach(({ student }: any) => {
+      const studentId = idOf(student.id);
+      if (!studentId) return;
+      matrix[studentId] = {};
+
+      assessmentExcelProjectedColumns.forEach((column) => {
+        const value = scores[scoreKey(studentId, column.itemId)];
+        matrix[studentId][column.itemId] =
+          value === "" || value === undefined || value === null
+            ? undefined
+            : Number(value);
+      });
+    });
+
+    return matrix;
+  };
+
+  const handleAssessmentTemplateDownload = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      setExcelExportBusyKey("template");
+      await Promise.resolve(
+        downloadAssessmentExcelTemplate({
+          context,
+          students: assessmentExcelStudents(),
+          projectedColumns: assessmentExcelProjectedColumns,
+        }),
+      );
+      showToast("success", "Assessment template downloaded.");
+    } catch (error: any) {
+      console.error("Failed to download assessment template:", error);
+      showToast("error", error?.message || "Failed to download assessment template.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const handleAssessmentCurrentExport = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      setExcelExportBusyKey("export");
+      await Promise.resolve(
+        downloadAssessmentExcelTemplate({
+          context,
+          students: assessmentExcelStudents(),
+          projectedColumns: assessmentExcelProjectedColumns,
+          scores: buildCurrentAssessmentScoreMatrix(),
+          fileName: `Eleeveon Assessment - ${selectedOption?.className || "Class"} - ${selectedOption?.subjectName || "Subject"}.xlsx`,
+        }),
+      );
+      showToast("success", "Current assessment sheet exported.");
+    } catch (error: any) {
+      console.error("Failed to export assessment sheet:", error);
+      showToast("error", error?.message || "Failed to export assessment sheet.");
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const resetAssessmentExcelImport = () => {
+    setExcelFile(null);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelHeaderRowIndex(0);
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+    setExcelImportStep("file");
+  };
+
+  const openAssessmentExcelImport = () => {
+    if (!ensureAssessmentExcelContext()) return;
+    setMoreOpen(false);
+    setExcelExportOpen(false);
+    resetAssessmentExcelImport();
+    setExcelImportOpen(true);
+  };
+
+  const closeAssessmentExcelImport = () => {
+    if (excelBusy) return;
+    setExcelImportOpen(false);
+    resetAssessmentExcelImport();
+  };
+
+  const setAssessmentExcelSheet = (
+    workbook: ParsedExcelWorkbook,
+    sheetName: string,
+  ) => {
+    setExcelSheetName(sheetName);
+    const sheet = getParsedSheet(workbook, sheetName);
+    setExcelHeaderRowIndex(sheet ? detectLikelyHeaderRow(sheet) : 0);
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+  };
+
+  const handleAssessmentExcelFileChange = async (file: File | null) => {
+    setExcelFile(file);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelIdentityMappings([]);
+    setExcelParsedImport(null);
+    setExcelValidation(null);
+    setExcelImportResult(null);
+
+    if (!file) {
+      setExcelImportStep("file");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+      const workbook = await parseExcelFile(file);
+      const metadata = parseAssessmentWorkbookMetadata(workbook).metadata;
+      const preferredName = metadata?.sheetName;
+      const firstSheet =
+        (preferredName ? getParsedSheet(workbook, preferredName) : undefined) ||
+        workbook.sheets.find((sheet) => sheet.name !== "_Eleeveon_Metadata");
+
+      if (!firstSheet) {
+        throw new Error("The workbook does not contain a usable assessment worksheet.");
+      }
+
+      setExcelWorkbook(workbook);
+      setAssessmentExcelSheet(workbook, firstSheet.name);
+      setExcelImportStep("sheet");
+    } catch (error: any) {
+      console.error("Failed to open assessment workbook:", error);
+      showToast("error", error?.message || "Failed to open Excel workbook.");
+      setExcelFile(null);
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const validateParsedAssessmentImport = (
+    parsed: AssessmentExcelParsedImport,
+  ) => {
+    const context = assessmentExcelContext;
+    if (!context) {
+      throw new Error("The assessment context is no longer available.");
+    }
+
+    const validation = validateAssessmentExcelImport({
+      parsed,
+      context,
+      projectedColumns: assessmentExcelProjectedColumns,
+      students: assessmentExcelStudents(),
+      enrollments: assessmentExcelEnrollments(),
+      existingEntries: assessmentExcelExistingEntries(),
+      options: {
+        lockedEntrySeverity: "error",
+        allowNameMatch: true,
+      },
+    });
+
+    setExcelParsedImport(parsed);
+    setExcelValidation(validation);
+    setExcelImportStep("preview");
+  };
+
+  const prepareAssessmentExcelImport = () => {
+    if (!excelWorkbook || !excelSheetName) {
+      showToast("error", "Choose an assessment worksheet first.");
+      return;
+    }
+
+    const context = ensureAssessmentExcelContext();
+    if (!context) return;
+
+    try {
+      const metadata = parseAssessmentWorkbookMetadata(excelWorkbook).metadata;
+
+      if (metadata) {
+        const parsed = parseControlledAssessmentWorkbook({
+          workbook: excelWorkbook,
+          sheetName: excelSheetName,
+          headerRowIndex: excelHeaderRowIndex,
+        });
+        validateParsedAssessmentImport(parsed);
+        return;
+      }
+
+      const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+      if (!sheet) {
+        throw new Error("The selected worksheet could not be found.");
+      }
+
+      const parsed = parseExternalAssessmentSheet({
+        sheet,
+        projectedColumns: assessmentExcelProjectedColumns,
+        headerRowIndex: excelHeaderRowIndex,
+      });
+
+      if (!parsed.metadataColumns.length) {
+        throw new Error(
+          "No assessment score columns could be matched. Use an Eleeveon assessment template or keep assessment headings aligned with the current assessment structure.",
+        );
+      }
+
+      setExcelParsedImport(parsed);
+      setExcelIdentityMappings(parsed.mappings);
+      setExcelValidation(null);
+      setExcelImportStep("mapping");
+    } catch (error: any) {
+      console.error("Failed to prepare assessment workbook:", error);
+      showToast("error", error?.message || "Failed to prepare assessment workbook.");
+    }
+  };
+
+  const reviewExternalAssessmentImport = () => {
+    if (!excelWorkbook || !excelSheetName) return;
+
+    const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+    if (!sheet) {
+      showToast("error", "The selected worksheet could not be found.");
+      return;
+    }
+
+    try {
+      const parsed = parseExternalAssessmentSheet({
+        sheet,
+        projectedColumns: assessmentExcelProjectedColumns,
+        headerRowIndex: excelHeaderRowIndex,
+        identityMappings: excelIdentityMappings,
+      });
+
+      if (!parsed.metadataColumns.length) {
+        throw new Error("No assessment score columns are mapped to the current structure.");
+      }
+
+      validateParsedAssessmentImport(parsed);
+    } catch (error: any) {
+      console.error("Failed to review external assessment workbook:", error);
+      showToast("error", error?.message || "Failed to review assessment workbook.");
+    }
+  };
+
+  const commitAssessmentExcelImport = async () => {
+    const context = ensureAssessmentExcelContext();
+    if (!context || !excelValidation || !excelParsedImport) return;
+
+    if (!excelValidation.validRows) {
+      showToast("error", "There are no valid score cells ready to import.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const result = await importAssessmentExcel(
+        excelValidation,
+        context,
+        {
+          updateExisting: true,
+          clearExistingWhenBlank:
+            excelParsedImport.kind === "eleeveon-assessment",
+          lockedEntrySeverity: "error",
+          allowNameMatch: true,
+        },
+        {
+          projectedColumns: assessmentExcelProjectedColumns,
+          gradeRules: assessmentExcelGradeRules(),
+          existingEntries: assessmentExcelExistingEntries(),
         },
       );
 
-      return matrix;
-    };
+      setExcelImportResult(result);
+      setExcelImportStep("result");
+      setSessionStarted(false);
+      await load();
 
-  const handleAssessmentTemplateDownload =
-    async () => {
-      const context =
-        ensureAssessmentExcelContext();
-
-      if (
-        !context
-      ) {
-        return;
-      }
-
-      try {
-        setExcelExportBusyKey(
-          "template",
-        );
-
-        await Promise.resolve(
-          downloadAssessmentExcelTemplate(
-            {
-              context,
-
-              students:
-                assessmentExcelStudents(),
-
-              projectedColumns:
-                assessmentExcelProjectedColumns,
-            },
-          ),
-        );
-
-        showToast(
-          "success",
-          "Assessment template downloaded.",
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to download assessment template:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to download assessment template.",
-        );
-      } finally {
-        setExcelExportBusyKey(
-          null,
-        );
-      }
-    };
-
-  const handleAssessmentCurrentExport =
-    async () => {
-      const context =
-        ensureAssessmentExcelContext();
-
-      if (
-        !context
-      ) {
-        return;
-      }
-
-      try {
-        setExcelExportBusyKey(
-          "export",
-        );
-
-        await Promise.resolve(
-          downloadAssessmentExcelTemplate(
-            {
-              context,
-
-              students:
-                assessmentExcelStudents(),
-
-              projectedColumns:
-                assessmentExcelProjectedColumns,
-
-              scores:
-                buildCurrentAssessmentScoreMatrix(),
-
-              fileName:
-                `Eleeveon Assessment - ${
-                  selectedOption?.className ||
-                  "Class"
-                } - ${
-                  selectedOption?.subjectName ||
-                  "Subject"
-                }.xlsx`,
-            },
-          ),
-        );
-
-        showToast(
-          "success",
-          "Current assessment sheet exported.",
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to export assessment sheet:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to export assessment sheet.",
-        );
-      } finally {
-        setExcelExportBusyKey(
-          null,
-        );
-      }
-    };
-
-  const resetAssessmentExcelImport =
-    () => {
-      setExcelFile(
-        null,
+      showToast(
+        result.failed ? "info" : "success",
+        `Assessment import finished: ${result.created} created, ${result.updated} updated${result.deleted ? `, ${result.deleted} cleared` : ""}.`,
       );
-
-      setExcelWorkbook(
-        null,
-      );
-
-      setExcelSheetName(
-        "",
-      );
-
-      setExcelHeaderRowIndex(
-        0,
-      );
-
-      setExcelIdentityMappings(
-        [],
-      );
-
-      setExcelParsedImport(
-        null,
-      );
-
-      setExcelValidation(
-        null,
-      );
-
-      setExcelImportResult(
-        null,
-      );
-
-      setExcelImportStep(
-        "file",
-      );
-    };
-
-  const openAssessmentExcelImport =
-    () => {
-      if (
-        !ensureAssessmentExcelContext()
-      ) {
-        return;
-      }
-
-      setMoreOpen(
-        false,
-      );
-
-      setExcelExportOpen(
-        false,
-      );
-
-      resetAssessmentExcelImport();
-
-      setExcelImportOpen(
-        true,
-      );
-    };
-
-  const closeAssessmentExcelImport =
-    () => {
-      if (
-        excelBusy
-      ) {
-        return;
-      }
-
-      setExcelImportOpen(
-        false,
-      );
-
-      resetAssessmentExcelImport();
-    };
-
-  const setAssessmentExcelSheet =
-    (
-      workbook:
-        ParsedExcelWorkbook,
-
-      sheetName:
-        string,
-    ) => {
-      setExcelSheetName(
-        sheetName,
-      );
-
-      const sheet =
-        getParsedSheet(
-          workbook,
-          sheetName,
-        );
-
-      setExcelHeaderRowIndex(
-        sheet
-          ? detectLikelyHeaderRow(
-              sheet,
-            )
-          : 0,
-      );
-
-      setExcelIdentityMappings(
-        [],
-      );
-
-      setExcelParsedImport(
-        null,
-      );
-
-      setExcelValidation(
-        null,
-      );
-    };
-
-  const handleAssessmentExcelFileChange =
-    async (
-      file:
-        File | null,
-    ) => {
-      setExcelFile(
-        file,
-      );
-
-      setExcelWorkbook(
-        null,
-      );
-
-      setExcelSheetName(
-        "",
-      );
-
-      setExcelIdentityMappings(
-        [],
-      );
-
-      setExcelParsedImport(
-        null,
-      );
-
-      setExcelValidation(
-        null,
-      );
-
-      setExcelImportResult(
-        null,
-      );
-
-      if (
-        !file
-      ) {
-        setExcelImportStep(
-          "file",
-        );
-
-        return;
-      }
-
-      try {
-        setExcelBusy(
-          true,
-        );
-
-        const workbook =
-          await parseExcelFile(
-            file,
-          );
-
-        const metadata =
-          parseAssessmentWorkbookMetadata(
-            workbook,
-          ).metadata;
-
-        const preferredName =
-          metadata?.sheetName;
-
-        const firstSheet =
-          (
-            preferredName
-              ? getParsedSheet(
-                  workbook,
-                  preferredName,
-                )
-              : undefined
-          ) ||
-          workbook.sheets.find(
-            (
-              sheet,
-            ) =>
-              sheet.name !==
-              "_Eleeveon_Metadata",
-          );
-
-        if (
-          !firstSheet
-        ) {
-          throw new Error(
-            "The workbook does not contain a usable assessment worksheet.",
-          );
-        }
-
-        setExcelWorkbook(
-          workbook,
-        );
-
-        setAssessmentExcelSheet(
-          workbook,
-          firstSheet.name,
-        );
-
-        setExcelImportStep(
-          "sheet",
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to open assessment workbook:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to open Excel workbook.",
-        );
-
-        setExcelFile(
-          null,
-        );
-      } finally {
-        setExcelBusy(
-          false,
-        );
-      }
-    };
-
-  const validateParsedAssessmentImport =
-    (
-      parsed:
-        AssessmentExcelParsedImport,
-    ) => {
-      const context =
-        assessmentExcelContext;
-
-      if (
-        !context
-      ) {
-        throw new Error(
-          "The assessment context is no longer available.",
-        );
-      }
-
-      const validation =
-        validateAssessmentExcelImport(
-          {
-            parsed,
-            context,
-
-            projectedColumns:
-              assessmentExcelProjectedColumns,
-
-            students:
-              assessmentExcelStudents(),
-
-            enrollments:
-              assessmentExcelEnrollments(),
-
-            existingEntries:
-              assessmentExcelExistingEntries(),
-
-            options: {
-              lockedEntrySeverity:
-                "error",
-
-              allowNameMatch:
-                true,
-            },
-          },
-        );
-
-      setExcelParsedImport(
-        parsed,
-      );
-
-      setExcelValidation(
-        validation,
-      );
-
-      setExcelImportStep(
-        "preview",
-      );
-    };
-
-  const prepareAssessmentExcelImport =
-    () => {
-      if (
-        !excelWorkbook ||
-        !excelSheetName
-      ) {
-        showToast(
-          "error",
-          "Choose an assessment worksheet first.",
-        );
-
-        return;
-      }
-
-      const context =
-        ensureAssessmentExcelContext();
-
-      if (
-        !context
-      ) {
-        return;
-      }
-
-      try {
-        const metadata =
-          parseAssessmentWorkbookMetadata(
-            excelWorkbook,
-          ).metadata;
-
-        if (
-          metadata
-        ) {
-          const parsed =
-            parseControlledAssessmentWorkbook(
-              {
-                workbook:
-                  excelWorkbook,
-
-                sheetName:
-                  excelSheetName,
-
-                headerRowIndex:
-                  excelHeaderRowIndex,
-              },
-            );
-
-          validateParsedAssessmentImport(
-            parsed,
-          );
-
-          return;
-        }
-
-        const sheet =
-          getParsedSheet(
-            excelWorkbook,
-            excelSheetName,
-          );
-
-        if (
-          !sheet
-        ) {
-          throw new Error(
-            "The selected worksheet could not be found.",
-          );
-        }
-
-        const parsed =
-          parseExternalAssessmentSheet(
-            {
-              sheet,
-
-              projectedColumns:
-                assessmentExcelProjectedColumns,
-
-              headerRowIndex:
-                excelHeaderRowIndex,
-            },
-          );
-
-        if (
-          !parsed.metadataColumns.length
-        ) {
-          throw new Error(
-            "No assessment score columns could be matched. Use an Eleeveon assessment template or keep assessment headings aligned with the current assessment structure.",
-          );
-        }
-
-        setExcelParsedImport(
-          parsed,
-        );
-
-        setExcelIdentityMappings(
-          parsed.mappings,
-        );
-
-        setExcelValidation(
-          null,
-        );
-
-        setExcelImportStep(
-          "mapping",
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to prepare assessment workbook:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to prepare assessment workbook.",
-        );
-      }
-    };
-
-  const reviewExternalAssessmentImport =
-    () => {
-      if (
-        !excelWorkbook ||
-        !excelSheetName
-      ) {
-        return;
-      }
-
-      const sheet =
-        getParsedSheet(
-          excelWorkbook,
-          excelSheetName,
-        );
-
-      if (
-        !sheet
-      ) {
-        showToast(
-          "error",
-          "The selected worksheet could not be found.",
-        );
-
-        return;
-      }
-
-      try {
-        const parsed =
-          parseExternalAssessmentSheet(
-            {
-              sheet,
-
-              projectedColumns:
-                assessmentExcelProjectedColumns,
-
-              headerRowIndex:
-                excelHeaderRowIndex,
-
-              identityMappings:
-                excelIdentityMappings,
-            },
-          );
-
-        if (
-          !parsed.metadataColumns.length
-        ) {
-          throw new Error(
-            "No assessment score columns are mapped to the current structure.",
-          );
-        }
-
-        validateParsedAssessmentImport(
-          parsed,
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to review external assessment workbook:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to review assessment workbook.",
-        );
-      }
-    };
-
-  const commitAssessmentExcelImport =
-    async () => {
-      const context =
-        ensureAssessmentExcelContext();
-
-      if (
-        !context ||
-        !excelValidation ||
-        !excelParsedImport
-      ) {
-        return;
-      }
-
-      if (
-        !excelValidation.validRows
-      ) {
-        showToast(
-          "error",
-          "There are no valid score cells ready to import.",
-        );
-
-        return;
-      }
-
-      try {
-        setExcelBusy(
-          true,
-        );
-
-        const result =
-          await importAssessmentExcel(
-            excelValidation,
-            context,
-            {
-              updateExisting:
-                true,
-
-              clearExistingWhenBlank:
-                excelParsedImport.kind ===
-                "eleeveon-assessment",
-
-              lockedEntrySeverity:
-                "error",
-
-              allowNameMatch:
-                true,
-            },
-            {
-              projectedColumns:
-                assessmentExcelProjectedColumns,
-
-              gradeRules:
-                assessmentExcelGradeRules(),
-
-              existingEntries:
-                assessmentExcelExistingEntries(),
-            },
-          );
-
-        setExcelImportResult(
-          result,
-        );
-
-        setExcelImportStep(
-          "result",
-        );
-
-        setSessionStarted(
-          false,
-        );
-
-        await load();
-
-        showToast(
-          result.failed
-            ? "info"
-            : "success",
-
-          `Assessment import finished: ${result.created} created, ${result.updated} updated${
-            result.deleted
-              ? `, ${result.deleted} cleared`
-              : ""
-          }.`,
-        );
-      } catch (
-        error: any
-      ) {
-        console.error(
-          "Failed to import assessment workbook:",
-          error,
-        );
-
-        showToast(
-          "error",
-          error?.message ||
-            "Failed to import assessment workbook.",
-        );
-      } finally {
-        setExcelBusy(
-          false,
-        );
-      }
-    };
-
-  const clearFilters =
-    () => {
-      setFilterClassId(
-        "all",
-      );
-
-      setFilterSubjectId(
-        "all",
-      );
-
-      setFilterPeriodId(
-        "all",
-      );
-
-      setFilterReadiness(
-        "all",
-      );
-
-      setFilterCompletion(
-        "all",
-      );
-    };
-
-  if (
-    accountLoading ||
-    contextLoading ||
-    settingsLoading ||
-    loading
-  ) {
+    } catch (error: any) {
+      console.error("Failed to import assessment workbook:", error);
+      showToast("error", error?.message || "Failed to import assessment workbook.");
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const clearFilters = () => {
+    setFilterClassId("all");
+    setFilterSubjectId("all");
+    setFilterPeriodId("all");
+    setFilterReadiness("all");
+    setFilterCompletion("all");
+  };
+
+  if (accountLoading || contextLoading || settingsLoading || loading) {
     return (
       <State
-        primary={
-          primary
-        }
+        primary={primary}
         title="Opening Assessment Entries..."
         text="Checking branch classes, class subjects, students, assessment structures, and saved scores."
       />
     );
   }
 
-  if (
-    !authenticated ||
-    !accountId
-  ) {
+  if (!authenticated || !accountId) {
     return (
       <State
-        primary={
-          primary
-        }
+        primary={primary}
         title="Redirecting to login..."
         text="You must sign in before entering assessment scores."
       />
     );
   }
 
-  if (
-    !schoolId ||
-    !branchId
-  ) {
+  if (!schoolId || !branchId) {
     return (
       <main
         className="ae-page"
-        style={
-          {
-            "--ae-primary":
-              primary,
-          } as React.CSSProperties
-        }
+        style={{ "--ae-primary": primary } as React.CSSProperties}
       >
-        <style>
-          {css}
-        </style>
-
-        <section
-          className="ae-state"
-        >
-          <h2>
-            No branch workspace selected
-          </h2>
-
+        <style>{css}</style>
+        <section className="ae-state">
+          <h2>No branch workspace selected</h2>
           <p>
-            Assessment entries belong to your selected teacher workspace.
-            Use Select Role again if the wrong school or branch is active.
+            Assessment entries belong to your selected teacher workspace. Use Select Role again if the wrong school or branch is active.
           </p>
-
           <button
             type="button"
             className="ae-state-button"
-            onClick={() =>
-              router.push(
-                "/account",
-              )
-            }
+            onClick={() => router.push("/account")}
           >
             Go to Account Setup
           </button>
@@ -4834,35 +1635,20 @@ export default function AssessmentEntries() {
     );
   }
 
+
   return (
     <main
       className="ae-page"
-      style={
-        {
-          "--ae-primary":
-            primary,
-        } as React.CSSProperties
-      }
+      style={{ "--ae-primary": primary } as React.CSSProperties}
     >
-      <style>
-        {css}
-      </style>
+      <style>{css}</style>
 
       {toast && (
-        <section
-          className={`ae-toast ${toast.tone}`}
-        >
-          {
-            toast.message
-          }
-
+        <section className={`ae-toast ${toast.tone}`}>
+          {toast.message}
           <button
             type="button"
-            onClick={() =>
-              setToast(
-                null,
-              )
-            }
+            onClick={() => setToast(null)}
             aria-label="Close notification"
           >
             ✕
@@ -4874,31 +1660,15 @@ export default function AssessmentEntries() {
         className="ae-search-card"
         aria-label="Assessment entry search and actions"
       >
-        <label
-          className="ae-search"
-        >
-          <span>
-            ⌕
-          </span>
-
+        <label className="ae-search">
+          <span>⌕</span>
           <input
-            value={
-              search
-            }
-            onChange={(
-              event,
-            ) =>
-              setSearch(
-                event
-                  .target
-                  .value,
-              )
-            }
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder={
               !selectedClassId
                 ? "Search my classes..."
-                : classSubjectId ===
-                    "all"
+                : classSubjectId === "all"
                   ? "Search class subjects..."
                   : "Search students..."
             }
@@ -4908,741 +1678,320 @@ export default function AssessmentEntries() {
 
         <button
           type="button"
-          className={`ae-filter-button ${
-            activeFilterCount
-              ? "active"
-              : ""
-          }`}
-          onClick={() =>
-            setFilterOpen(
-              true,
-            )
-          }
+          className={`ae-filter-button ${activeFilterCount ? "active" : ""}`}
+          onClick={() => setFilterOpen(true)}
           aria-label="Open filters"
           title="Filters"
         >
           <SliderIcon />
-
-          {activeFilterCount
-            ? (
-              <b>
-                {
-                  activeFilterCount
-                }
-              </b>
-            )
-            : null}
+          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
         </button>
 
         <button
           type="button"
           className="ae-icon-button"
-          onClick={() =>
-            setMoreOpen(
-              true,
-            )
-          }
+          onClick={() => setMoreOpen(true)}
           aria-label="More options"
         >
           ⋯
         </button>
       </section>
 
-      {activeFilterCount >
-        0 &&
-        selectedClassId && (
+      {activeFilterCount > 0 && selectedClassId && (
+        <section className="ae-filter-chips" aria-label="Active filters">
+          {filterSubjectId !== "all" && (
+            <button type="button" onClick={() => setFilterSubjectId("all")}>
+              Subject:{" "}
+              {(subjectMap.get(idOf(filterSubjectId)) as any)?.name ||
+                filterSubjectId}{" "}
+              ×
+            </button>
+          )}
+          {filterPeriodId !== "all" && (
+            <button type="button" onClick={() => setFilterPeriodId("all")}>
+              Period:{" "}
+              {(periodMap.get(idOf(filterPeriodId)) as any)?.name ||
+                filterPeriodId}{" "}
+              ×
+            </button>
+          )}
+          {filterReadiness !== "all" && (
+            <button type="button" onClick={() => setFilterReadiness("all")}>
+              {filterReadiness === "ready" ? "Ready only" : "Missing setup"} ×
+            </button>
+          )}
+          {filterCompletion !== "all" && (
+            <button type="button" onClick={() => setFilterCompletion("all")}>
+              Completion: {filterCompletion} ×
+            </button>
+          )}
+        </section>
+      )}
+
+      {!selectedClassId ? (
+        <section className="ae-list ae-picker-list">
+          {classCards.map((item) => (
+            <ClassPickerRow
+              key={String(item.id)}
+              item={item}
+              onOpen={() => {
+                setSelectedClassId(String(item.id));
+                setFilterClassId(String(item.id));
+                setClassSubjectId("all");
+                setSearch("");
+              }}
+            />
+          ))}
+          {!classCards.length && (
+            <Empty
+              icon="🏫"
+              title="No classes available"
+              text="No active class subjects are available in the selected branch."
+            />
+          )}
+        </section>
+      ) : classSubjectId === "all" ? (
+        <>
           <section
-            className="ae-filter-chips"
-            aria-label="Active filters"
+            className="ae-filter-chips class-breadcrumb"
+            aria-label="Selected class"
           >
-            {filterSubjectId !==
-              "all" && (
-              <button
-                type="button"
-                onClick={() =>
-                  setFilterSubjectId(
-                    "all",
-                  )
-                }
-              >
-                Subject:{" "}
-                {
-                  (
-                    subjectMap.get(
-                      idOf(
-                        filterSubjectId,
-                      ),
-                    ) as any
-                  )?.name ||
-                  filterSubjectId
-                }{" "}
-                ×
-              </button>
-            )}
-
-            {filterPeriodId !==
-              "all" && (
-              <button
-                type="button"
-                onClick={() =>
-                  setFilterPeriodId(
-                    "all",
-                  )
-                }
-              >
-                Period:{" "}
-                {
-                  (
-                    periodMap.get(
-                      idOf(
-                        filterPeriodId,
-                      ),
-                    ) as any
-                  )?.name ||
-                  filterPeriodId
-                }{" "}
-                ×
-              </button>
-            )}
-
-            {filterReadiness !==
-              "all" && (
-              <button
-                type="button"
-                onClick={() =>
-                  setFilterReadiness(
-                    "all",
-                  )
-                }
-              >
-                {
-                  filterReadiness ===
-                  "ready"
-                    ? "Ready only"
-                    : "Missing setup"
-                }{" "}
-                ×
-              </button>
-            )}
-
-            {filterCompletion !==
-              "all" && (
-              <button
-                type="button"
-                onClick={() =>
-                  setFilterCompletion(
-                    "all",
-                  )
-                }
-              >
-                Completion:{" "}
-                {
-                  filterCompletion
-                }{" "}
-                ×
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedClassId("");
+                setFilterClassId("all");
+                setClassSubjectId("all");
+                setSearch("");
+              }}
+            >
+              ← Classes
+            </button>
+            <button type="button" onClick={() => setFilterOpen(true)}>
+              {(selectedClass as any)?.name || "Selected class"} ·{" "}
+              {selectedClassSubjectOptions.length} class subject(s)
+            </button>
           </section>
-        )}
 
-      {!selectedClassId
-        ? (
-          <section
-            className="ae-list ae-picker-list"
-          >
-            {classCards.map(
-              (
-                item,
-              ) => (
-                <ClassPickerRow
-                  key={
-                    String(
-                      item.id,
-                    )
-                  }
-                  item={
-                    item
-                  }
-                  onOpen={() => {
-                    setSelectedClassId(
-                      String(
-                        item.id,
-                      ),
-                    );
-
-                    setFilterClassId(
-                      String(
-                        item.id,
-                      ),
-                    );
-
-                    setClassSubjectId(
-                      "all",
-                    );
-
-                    setSearch(
-                      "",
-                    );
-                  }}
-                />
-              ),
-            )}
-
-            {!classCards.length && (
+          <section className="ae-list ae-picker-list">
+            {classSubjectEntryViews.map((item) => (
+              <ClassSubjectPickerRow
+                key={String(item.id)}
+                item={item}
+                onOpen={() => {
+                  setClassSubjectId(String(item.id));
+                  setSessionStarted(false);
+                  setSearch("");
+                }}
+              />
+            ))}
+            {!classSubjectEntryViews.length && (
               <Empty
-                icon="🏫"
-                title="No classes available"
-                text="No active class subjects are available in the selected branch."
+                icon="📝"
+                title="No subjects available"
+                text="No class subjects in this class match the current filters."
               />
             )}
           </section>
-        )
-        : classSubjectId ===
-            "all"
-          ? (
-            <>
-              <section
-                className="ae-filter-chips class-breadcrumb"
-                aria-label="Selected class"
+        </>
+      ) : (
+        <>
+          <section
+            className="ae-filter-chips class-breadcrumb"
+            aria-label="Selected class subject"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setClassSubjectId("all");
+                setSessionStarted(false);
+                setSearch("");
+              }}
+            >
+              ← Class subjects
+            </button>
+            <button type="button" onClick={() => setFilterOpen(true)}>
+              {selectedOption?.className || "Class"} ·{" "}
+              {selectedOption?.subjectName || "Subject"}
+            </button>
+          </section>
+
+          {selectedOption && (
+            <section className="ae-session-strip">
+              <span
+                className={`ae-status-dot ${applicability ? "green" : "orange"}`}
+              />
+              <div>
+                <strong>{selectedOption.subjectName}</strong>
+                <small>
+                  {contextSubtitle} · {selectedOption.teacherName}
+                </small>
+              </div>
+              <button type="button" onClick={startSession}>
+                {sessionStarted ? "Active" : "Start"}
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={saveEntries}
+                disabled={!sessionStarted || saving}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedClassId(
-                      "",
-                    );
-
-                    setFilterClassId(
-                      "all",
-                    );
-
-                    setClassSubjectId(
-                      "all",
-                    );
-
-                    setSearch(
-                      "",
-                    );
-                  }}
-                >
-                  ← Classes
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilterOpen(
-                      true,
-                    )
-                  }
-                >
-                  {
-                    (
-                      selectedClass as any
-                    )?.name ||
-                    "Selected class"
-                  }{" "}
-                  ·{" "}
-                  {
-                    selectedClassSubjectOptions.length
-                  }{" "}
-                  class subject(s)
-                </button>
-              </section>
-
-              <section
-                className="ae-list ae-picker-list"
-              >
-                {classSubjectEntryViews.map(
-                  (
-                    item,
-                  ) => (
-                    <ClassSubjectPickerRow
-                      key={
-                        String(
-                          item.id,
-                        )
-                      }
-                      item={
-                        item
-                      }
-                      onOpen={() => {
-                        setClassSubjectId(
-                          String(
-                            item.id,
-                          ),
-                        );
-
-                        setSessionStarted(
-                          false,
-                        );
-
-                        setSearch(
-                          "",
-                        );
-                      }}
-                    />
-                  ),
-                )}
-
-                {!classSubjectEntryViews.length && (
-                  <Empty
-                    icon="📝"
-                    title="No subjects available"
-                    text="No class subjects in this class match the current filters."
-                  />
-                )}
-              </section>
-            </>
-          )
-          : (
-            <>
-              <section
-                className="ae-filter-chips class-breadcrumb"
-                aria-label="Selected class subject"
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    setClassSubjectId(
-                      "all",
-                    );
-
-                    setSessionStarted(
-                      false,
-                    );
-
-                    setSearch(
-                      "",
-                    );
-                  }}
-                >
-                  ← Class subjects
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilterOpen(
-                      true,
-                    )
-                  }
-                >
-                  {
-                    selectedOption?.className ||
-                    "Class"
-                  }{" "}
-                  ·{" "}
-                  {
-                    selectedOption?.subjectName ||
-                    "Subject"
-                  }
-                </button>
-              </section>
-
-              {selectedOption && (
-                <section
-                  className="ae-session-strip"
-                >
-                  <span
-                    className={`ae-status-dot ${
-                      applicability
-                        ? "green"
-                        : "orange"
-                    }`}
-                  />
-
-                  <div>
-                    <strong>
-                      {
-                        selectedOption.subjectName
-                      }
-                    </strong>
-
-                    <small>
-                      {
-                        contextSubtitle
-                      }{" "}
-                      ·{" "}
-                      {
-                        selectedOption.teacherName
-                      }
-                    </small>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={
-                      startSession
-                    }
-                  >
-                    {
-                      sessionStarted
-                        ? "Active"
-                        : "Start"
-                    }
-                  </button>
-
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={
-                      saveEntries
-                    }
-                    disabled={
-                      !sessionStarted ||
-                      saving
-                    }
-                  >
-                    {
-                      saving
-                        ? "Saving"
-                        : "Save"
-                    }
-                  </button>
-                </section>
-              )}
-
-              {selectedOption && (
-                <section
-                  className="ae-compact-meta"
-                  aria-label="Assessment context summary"
-                >
-                  {applicability
-                    ? (
-                      <Chip
-                        tone="green"
-                      >
-                        Ready
-                      </Chip>
-                    )
-                    : (
-                      <Chip
-                        tone="red"
-                      >
-                        No applicability
-                      </Chip>
-                    )}
-
-                  {assessmentStructure && (
-                    <Chip
-                      tone="blue"
-                    >
-                      {
-                        assessmentStructure.name
-                      }
-                    </Chip>
-                  )}
-
-                  {gradingSystem && (
-                    <Chip
-                      tone="purple"
-                    >
-                      {
-                        gradingSystem.name
-                      }
-                    </Chip>
-                  )}
-
-                  <Chip
-                    tone="gray"
-                  >
-                    {
-                      studentScoreRows.length
-                    }{" "}
-                    students
-                  </Chip>
-
-                  <Chip
-                    tone="gray"
-                  >
-                    {
-                      structureItems.length
-                    }{" "}
-                    items
-                  </Chip>
-
-                  <Chip
-                    tone="orange"
-                  >
-                    {
-                      completionStats.entered
-                    }
-                    /
-                    {
-                      completionStats.expected
-                    }{" "}
-                    entered
-                  </Chip>
-                </section>
-              )}
-
-              {classSubjectId !==
-                "all" &&
-                !applicability && (
-                  <Empty
-                    icon="⚠️"
-                    title="No assessment applicability"
-                    text="Go to Assessment Applicability and connect this class subject to an assessment structure and grading structure first."
-                  />
-                )}
-
-              {applicability &&
-                !structureItems.length && (
-                  <Empty
-                    icon="🧩"
-                    title="No directly enterable assessment items"
-                    text="This structure contains no active leaf or explicitly direct-entry item. Calculated parents are intentionally hidden from score entry."
-                  />
-                )}
-
-              {applicability &&
-                entryProjection
-                  .warnings
-                  .length >
-                  0 && (
-                  <section
-                    className="ae-entry-projection-warning"
-                  >
-                    <strong>
-                      Assessment hierarchy needs review
-                    </strong>
-
-                    <span>
-                      {
-                        entryProjection
-                          .warnings
-                          .length
-                      }{" "}
-                      hierarchy warning
-                      {
-                        entryProjection
-                          .warnings
-                          .length ===
-                        1
-                          ? ""
-                          : "s"
-                      }
-                      . Score entry is showing only safe, directly enterable items.
-                    </span>
-                  </section>
-                )}
-
-              {selectedOption &&
-                applicability &&
-                !!structureItems.length &&
-                !studentScoreRows.length && (
-                  <Empty
-                    icon="🎓"
-                    title="No enrolled students"
-                    text="No active student enrollment was found for this class subject, class, academic structure, and period."
-                  />
-                )}
-
-              {selectedOption &&
-                applicability &&
-                !!structureItems.length &&
-                !!studentScoreRows.length &&
-                viewMode ===
-                  "summary" && (
-                  <SummaryView
-                    rows={
-                      studentScoreRows
-                    }
-                    completion={
-                      completionStats
-                    }
-                    structureItems={
-                      structureItems
-                    }
-                    classSubjectOptions={
-                      classSubjectOptions
-                    }
-                  />
-                )}
-
-              {selectedOption &&
-                applicability &&
-                !!structureItems.length &&
-                !!studentScoreRows.length &&
-                viewMode ===
-                  "table" && (
-                  <ScoreTable
-                    rows={
-                      filteredRows
-                    }
-                    items={
-                      structureItems
-                    }
-                    scores={
-                      scores
-                    }
-                    updateScore={
-                      updateScore
-                    }
-                  />
-                )}
-
-              {selectedOption &&
-                applicability &&
-                !!structureItems.length &&
-                !!studentScoreRows.length &&
-                viewMode ===
-                  "cards" && (
-                  <section
-                    className="ae-list ae-entry-list"
-                  >
-                    {filteredRows.map(
-                      (
-                        row,
-                      ) => (
-                        <StudentScoreCard
-                          key={
-                            String(
-                              (
-                                row.student as any
-                              ).id,
-                            )
-                          }
-                          row={
-                            row
-                          }
-                          items={
-                            structureItems
-                          }
-                          scores={
-                            scores
-                          }
-                          updateScore={
-                            updateScore
-                          }
-                        />
-                      ),
-                    )}
-
-                    {!filteredRows.length && (
-                      <Empty
-                        icon="🔎"
-                        title="No student matches"
-                        text="Change your search or completion filter to see students."
-                      />
-                    )}
-                  </section>
-                )}
-            </>
+                {saving ? "Saving" : "Save"}
+              </button>
+            </section>
           )}
+
+          {selectedOption && (
+            <section className="ae-compact-meta">
+              {applicability ? (
+                <Chip tone="green">Ready</Chip>
+              ) : (
+                <Chip tone="red">No applicability</Chip>
+              )}
+              {assessmentStructure && (
+                <Chip tone="blue">{assessmentStructure.name}</Chip>
+              )}
+              {gradingSystem && <Chip tone="purple">{gradingSystem.name}</Chip>}
+              <Chip tone="gray">{studentScoreRows.length} students</Chip>
+              <Chip tone="gray">{structureItems.length} items</Chip>
+              <Chip tone="orange">
+                {completionStats.entered}/{completionStats.expected} entered
+              </Chip>
+            </section>
+          )}
+
+          {classSubjectId !== "all" && !applicability && (
+            <Empty
+              icon="⚠️"
+              title="No assessment applicability"
+              text="Go to Assessment Applicability and connect this class subject to an assessment structure and grading structure first."
+            />
+          )}
+          {applicability && !structureItems.length && (
+            <Empty
+              icon="🧩"
+              title="No directly enterable assessment items"
+              text="This structure contains no active leaf or explicitly direct-entry item. Calculated parents are intentionally hidden from score entry."
+            />
+          )}
+
+          {applicability && entryProjection.warnings.length > 0 && (
+            <section className="ae-entry-projection-warning">
+              <strong>Assessment hierarchy needs review</strong>
+              <span>
+                {entryProjection.warnings.length} hierarchy warning
+                {entryProjection.warnings.length === 1 ? "" : "s"}. Score entry is showing only safe, directly enterable items.
+              </span>
+            </section>
+          )}
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !studentScoreRows.length && (
+              <Empty
+                icon="🎓"
+                title="No enrolled students"
+                text="No active student enrollment was found for this class subject, class, academic structure, and period."
+              />
+            )}
+
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "summary" && (
+              <SummaryView
+                rows={studentScoreRows}
+                completion={completionStats}
+                structureItems={structureItems}
+                classSubjectOptions={classSubjectOptions}
+              />
+            )}
+
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "table" && (
+              <ScoreTable
+                rows={filteredRows}
+                items={structureItems}
+                scores={scores}
+                updateScore={updateScore}
+              />
+            )}
+
+          {selectedOption &&
+            applicability &&
+            !!structureItems.length &&
+            !!studentScoreRows.length &&
+            viewMode === "cards" && (
+              <section className="ae-list ae-entry-list">
+                {filteredRows.map((row) => (
+                  <StudentScoreCard
+                    key={String((row.student as any).id)}
+                    row={row}
+                    items={structureItems}
+                    scores={scores}
+                    updateScore={updateScore}
+                  />
+                ))}
+                {!filteredRows.length && (
+                  <Empty
+                    icon="🔎"
+                    title="No student matches"
+                    text="Change your search or completion filter to see students."
+                  />
+                )}
+              </section>
+            )}
+        </>
+      )}
 
       {filterOpen && (
         <FilterSheet
-          primary={
-            primary
-          }
-          classes={
-            classes
-          }
-          subjects={
-            subjects
-          }
-          periods={
-            periods
-          }
-          filterClassId={
-            filterClassId
-          }
-          filterSubjectId={
-            filterSubjectId
-          }
-          filterPeriodId={
-            filterPeriodId
-          }
-          filterReadiness={
-            filterReadiness
-          }
-          filterCompletion={
-            filterCompletion
-          }
-          setFilterClassId={
-            setFilterClassId
-          }
-          setFilterSubjectId={
-            setFilterSubjectId
-          }
-          setFilterPeriodId={
-            setFilterPeriodId
-          }
-          setFilterReadiness={
-            setFilterReadiness
-          }
-          setFilterCompletion={
-            setFilterCompletion
-          }
-          clearFilters={
-            clearFilters
-          }
-          onClose={() =>
-            setFilterOpen(
-              false,
-            )
-          }
+          classes={classes}
+          subjects={subjects}
+          periods={periods}
+          filterClassId={filterClassId}
+          filterSubjectId={filterSubjectId}
+          filterPeriodId={filterPeriodId}
+          filterReadiness={filterReadiness}
+          filterCompletion={filterCompletion}
+          setFilterClassId={setFilterClassId}
+          setFilterSubjectId={setFilterSubjectId}
+          setFilterPeriodId={setFilterPeriodId}
+          setFilterReadiness={setFilterReadiness}
+          setFilterCompletion={setFilterCompletion}
+          clearFilters={clearFilters}
+          onClose={() => setFilterOpen(false)}
         />
       )}
 
       {moreOpen && (
         <MoreSheet
-          primary={
-            primary
-          }
-          viewMode={
-            viewMode
-          }
-          setViewMode={(
-            mode,
-          ) => {
-            setViewMode(
-              mode,
-            );
-
-            setMoreOpen(
-              false,
-            );
+          viewMode={viewMode}
+          setViewMode={(mode) => {
+            setViewMode(mode);
+            setMoreOpen(false);
           }}
           onExcel={() => {
-            setMoreOpen(
-              false,
-            );
-
-            setExcelExportOpen(
-              true,
-            );
+            setMoreOpen(false);
+            setExcelExportOpen(true);
           }}
           onRefresh={async () => {
-            setMoreOpen(
-              false,
-            );
-
+            setMoreOpen(false);
             await load();
           }}
-          onClose={() =>
-            setMoreOpen(
-              false,
-            )
-          }
+          onClose={() => setMoreOpen(false)}
         />
       )}
 
       {excelExportOpen && (
         <ExcelExportSheet
-          open={
-            excelExportOpen
-          }
+          open={excelExportOpen}
           onClose={() => {
-            if (
-              !excelExportBusyKey
-            ) {
-              setExcelExportOpen(
-                false,
-              );
-            }
+            if (!excelExportBusyKey) setExcelExportOpen(false);
           }}
           title="Assessment Excel"
           subtitle={
@@ -5650,173 +1999,101 @@ export default function AssessmentEntries() {
               ? `${selectedOption.className} · ${selectedOption.subjectName}`
               : "Choose a ready class subject first."
           }
-          busyKey={
-            excelExportBusyKey
-          }
+          busyKey={excelExportBusyKey}
           actions={[
             {
-              key:
-                "import",
-
-              title:
-                "Import assessment scores",
-
+              key: "import",
+              title: "Import assessment scores",
               description:
                 "Bring back an Eleeveon score sheet or import a compatible school workbook.",
-
-              badge:
-                "Import",
-
-              disabled:
-                !assessmentExcelContext,
-
-              onClick:
-                async () =>
-                  openAssessmentExcelImport(),
+              badge: "Import",
+              disabled: !assessmentExcelContext,
+              onClick: async () => openAssessmentExcelImport(),
             },
-
             {
-              key:
-                "template",
-
-              title:
-                "Download blank score sheet",
-
+              key: "template",
+              title: "Download blank score sheet",
               description:
                 "Create the controlled workbook for this class, subject and assessment structure.",
-
-              badge:
-                `${studentScoreRows.length} students`,
-
-              disabled:
-                !assessmentExcelContext,
-
-              onClick:
-                handleAssessmentTemplateDownload,
+              badge: `${studentScoreRows.length} students`,
+              disabled: !assessmentExcelContext,
+              onClick: handleAssessmentTemplateDownload,
             },
-
             {
-              key:
-                "export",
-
-              title:
-                "Export current scores",
-
+              key: "export",
+              title: "Export current scores",
               description:
                 "Download the same controlled workbook prefilled with the scores currently in Eleeveon.",
-
-              badge:
-                `${completionStats.entered} scores`,
-
-              disabled:
-                !assessmentExcelContext,
-
-              onClick:
-                handleAssessmentCurrentExport,
+              badge: `${completionStats.entered} scores`,
+              disabled: !assessmentExcelContext,
+              onClick: handleAssessmentCurrentExport,
             },
           ]}
         />
       )}
 
       <ExcelImportSheet
-        open={
-          excelImportOpen
-        }
-        onClose={
-          closeAssessmentExcelImport
-        }
+        open={excelImportOpen}
+        onClose={closeAssessmentExcelImport}
         title="Import assessment scores"
         subtitle="Validate the workbook against the active class, subject, period and assessment structure before any score is changed."
-        step={
-          excelImportStep
-        }
-        busy={
-          excelBusy
-        }
-        width={
-          980
-        }
+        step={excelImportStep}
+        busy={excelBusy}
+        width={980}
         footer={
-          <div
-            className="assessment-excel-footer-actions"
-          >
-            {excelImportStep ===
-              "file" && (
-              <button
-                type="button"
-                className="secondary"
-                onClick={
-                  closeAssessmentExcelImport
-                }
-              >
+          <div className="assessment-excel-footer-actions">
+            {excelImportStep === "file" && (
+              <button type="button" className="secondary" onClick={closeAssessmentExcelImport}>
                 Cancel
               </button>
             )}
 
-            {excelImportStep ===
-              "sheet" && (
+            {excelImportStep === "sheet" && (
               <>
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() =>
-                    setExcelImportStep(
-                      "file",
-                    )
-                  }
+                  onClick={() => setExcelImportStep("file")}
                 >
                   Back
                 </button>
-
                 <button
                   type="button"
                   className="primary"
-                  onClick={
-                    prepareAssessmentExcelImport
-                  }
+                  onClick={prepareAssessmentExcelImport}
                 >
                   Continue
                 </button>
               </>
             )}
 
-            {excelImportStep ===
-              "mapping" && (
+            {excelImportStep === "mapping" && (
               <>
                 <button
                   type="button"
                   className="secondary"
-                  onClick={() =>
-                    setExcelImportStep(
-                      "sheet",
-                    )
-                  }
+                  onClick={() => setExcelImportStep("sheet")}
                 >
                   Back
                 </button>
-
                 <button
                   type="button"
                   className="primary"
-                  onClick={
-                    reviewExternalAssessmentImport
-                  }
+                  onClick={reviewExternalAssessmentImport}
                 >
                   Review scores
                 </button>
               </>
             )}
 
-            {excelImportStep ===
-              "preview" && (
+            {excelImportStep === "preview" && (
               <>
                 <button
                   type="button"
                   className="secondary"
                   onClick={() =>
                     setExcelImportStep(
-                      excelParsedImport?.kind ===
-                        "external-assessment"
+                      excelParsedImport?.kind === "external-assessment"
                         ? "mapping"
                         : "sheet",
                     )
@@ -5824,542 +2101,198 @@ export default function AssessmentEntries() {
                 >
                   Back
                 </button>
-
                 <button
                   type="button"
                   className="primary"
-                  disabled={
-                    !excelValidation?.validRows
-                  }
-                  onClick={
-                    commitAssessmentExcelImport
-                  }
+                  disabled={!excelValidation?.validRows}
+                  onClick={commitAssessmentExcelImport}
                 >
-                  Import{" "}
-                  {
-                    excelValidation?.validRows ||
-                    0
-                  }{" "}
-                  score cell
-                  {
-                    (
-                      excelValidation?.validRows ||
-                      0
-                    ) ===
-                    1
-                      ? ""
-                      : "s"
-                  }
+                  Import {excelValidation?.validRows || 0} score cell
+                  {(excelValidation?.validRows || 0) === 1 ? "" : "s"}
                 </button>
               </>
             )}
 
-            {excelImportStep ===
-              "result" && (
-              <button
-                type="button"
-                className="primary"
-                onClick={
-                  closeAssessmentExcelImport
-                }
-              >
+            {excelImportStep === "result" && (
+              <button type="button" className="primary" onClick={closeAssessmentExcelImport}>
                 Done
               </button>
             )}
           </div>
         }
       >
-        {excelImportStep ===
-          "file" && (
+        {excelImportStep === "file" && (
           <ExcelFilePicker
-            value={
-              excelFile
-            }
-            onChange={
-              handleAssessmentExcelFileChange
-            }
-            disabled={
-              excelBusy
-            }
+            value={excelFile}
+            onChange={handleAssessmentExcelFileChange}
+            disabled={excelBusy}
             label="Choose assessment workbook"
             description="Use an Eleeveon assessment sheet or a compatible school score workbook."
           />
         )}
 
-        {excelImportStep ===
-          "sheet" &&
-          excelWorkbook && (
-            <section
-              className="assessment-excel-stage"
-            >
-              <div
-                className="assessment-excel-stage-head"
-              >
-                <h3>
-                  Choose score worksheet
-                </h3>
-
-                <p>
-                  Eleeveon-controlled workbooks carry hidden context metadata.
-                  External workbooks are matched to the assessment columns
-                  currently shown on this page.
-                </p>
-              </div>
-
-              <div
-                className="assessment-excel-context-grid"
-              >
-                <label>
-                  <span>
-                    Worksheet
-                  </span>
-
-                  <select
-                    value={
-                      excelSheetName
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setAssessmentExcelSheet(
-                        excelWorkbook,
-                        event
-                          .target
-                          .value,
-                      )
-                    }
-                  >
-                    {excelWorkbook.sheets
-                      .filter(
-                        (
-                          sheet,
-                        ) =>
-                          sheet.name !==
-                          "_Eleeveon_Metadata",
-                      )
-                      .map(
-                        (
-                          sheet,
-                        ) => (
-                          <option
-                            key={
-                              sheet.name
-                            }
-                            value={
-                              sheet.name
-                            }
-                          >
-                            {
-                              sheet.name
-                            }
-                          </option>
-                        ),
-                      )}
-                  </select>
-                </label>
-
-                <label>
-                  <span>
-                    Header row
-                  </span>
-
-                  <input
-                    type="number"
-                    min={
-                      1
-                    }
-                    value={
-                      excelHeaderRowIndex +
-                      1
-                    }
-                    onChange={(
-                      event,
-                    ) =>
-                      setExcelHeaderRowIndex(
-                        Math.max(
-                          0,
-                          Number(
-                            event
-                              .target
-                              .value ||
-                              1,
-                          ) -
-                            1,
-                        ),
-                      )
-                    }
-                  />
-                </label>
-              </div>
-
-              <div
-                className="assessment-excel-context-card"
-              >
-                <strong>
-                  {
-                    excelFile?.name
-                  }
-                </strong>
-
-                <span>
-                  {
-                    parseAssessmentWorkbookMetadata(
-                      excelWorkbook,
-                    ).metadata
-                      ? "Controlled Eleeveon assessment workbook"
-                      : "External assessment workbook"
-                  }
-                </span>
-
-                <small>
-                  Active context:{" "}
-                  {
-                    selectedOption?.className ||
-                    "Class"
-                  }{" "}
-                  ·{" "}
-                  {
-                    selectedOption?.subjectName ||
-                    "Subject"
-                  }{" "}
-                  ·{" "}
-                  {
-                    selectedOption?.academicPeriodName ||
-                    "Period"
-                  }
-                </small>
-              </div>
-            </section>
-          )}
-
-        {excelImportStep ===
-          "mapping" &&
-          excelWorkbook && (
-            <section
-              className="assessment-excel-stage"
-            >
-              <div
-                className="assessment-excel-stage-head"
-              >
-                <h3>
-                  Match student identity columns
-                </h3>
-
-                <p>
-                  Assessment score columns are matched against the current
-                  projected assessment structure. Confirm how this external
-                  sheet identifies each student.
-                </p>
-              </div>
-
-              {(() => {
-                const sheet =
-                  getParsedSheet(
-                    excelWorkbook,
-                    excelSheetName,
-                  );
-
-                if (
-                  !sheet
-                ) {
-                  return null;
-                }
-
-                const extracted =
-                  sheetToRecords(
-                    sheet,
-                    {
-                      headerRowIndex:
-                        excelHeaderRowIndex,
-
-                      skipEmptyRows:
-                        true,
-
-                      trimStrings:
-                        true,
-                    },
-                  );
-
-                return (
-                  <>
-                    <ExcelColumnMappingEditor
-                      columns={
-                        extracted.columns
-                      }
-                      fields={
-                        ASSESSMENT_STUDENT_FIELDS
-                      }
-                      mappings={
-                        excelIdentityMappings
-                      }
-                      onChange={(
-                        next,
-                      ) => {
-                        setExcelIdentityMappings(
-                          next,
-                        );
-
-                        setExcelValidation(
-                          null,
-                        );
-                      }}
-                      disabled={
-                        excelBusy
-                      }
-                      title="Match student columns"
-                      description="Student ID is strongest, followed by Admission Number. Exact Student Name is used only when unambiguous."
-                    />
-
-                    <div
-                      className="assessment-excel-column-note"
-                    >
-                      <strong>
-                        {
-                          excelParsedImport?.metadataColumns.length ||
-                          0
-                        }{" "}
-                        score column
-                        {
-                          (
-                            excelParsedImport?.metadataColumns.length ||
-                            0
-                          ) ===
-                          1
-                            ? ""
-                            : "s"
-                        }{" "}
-                        recognized
-                      </strong>
-
-                      <span>
-                        {
-                          excelParsedImport?.metadataColumns
-                            .map(
-                              (
-                                column,
-                              ) =>
-                                column.label,
-                            )
-                            .filter(
-                              Boolean,
-                            )
-                            .join(
-                              " · ",
-                            ) ||
-                          "No score columns recognized yet."
-                        }
-                      </span>
-                    </div>
-                  </>
-                );
-              })()}
-            </section>
-          )}
-
-        {excelImportStep ===
-          "preview" &&
-          excelValidation && (
-            <ExcelImportPreview
-              validation={
-                excelValidation
-              }
-              title="Assessment import preview"
-              description="Locked or invalid score cells are not changed. Controlled Eleeveon workbooks may clear an existing unlocked score when its cell is blank; external workbooks never clear existing scores from blanks."
-              columns={[
-                {
-                  key:
-                    "studentName",
-
-                  label:
-                    "Student",
-                },
-
-                {
-                  key:
-                    "assessmentLabel",
-
-                  label:
-                    "Assessment",
-                },
-
-                {
-                  key:
-                    "score",
-
-                  label:
-                    "Score",
-
-                  render:
-                    (
-                      data: any,
-                    ) =>
-                      data.blank
-                        ? "Blank"
-                        : `${data.score ?? "—"} / ${data.maxScore}`,
-                },
-
-                {
-                  key:
-                    "assessmentStructureItemId",
-
-                  label:
-                    "Item ID",
-                },
-              ]}
-              maxRows={
-                40
-              }
-            />
-          )}
-
-        {excelImportStep ===
-          "result" &&
-          excelImportResult && (
-            <section
-              className="assessment-excel-result"
-            >
-              <div
-                className="assessment-excel-result-icon"
-              >
-                ✓
-              </div>
-
-              <h3>
-                Assessment import completed
-              </h3>
-
+        {excelImportStep === "sheet" && excelWorkbook && (
+          <section className="assessment-excel-stage">
+            <div className="assessment-excel-stage-head">
+              <h3>Choose score worksheet</h3>
               <p>
-                Scores were written through the same offline-first
-                assessmentEntries flow used by manual score entry.
+                Eleeveon-controlled workbooks carry hidden context metadata. External workbooks are matched to the assessment columns currently shown on this page.
               </p>
+            </div>
 
-              <div
-                className="assessment-excel-result-grid"
-              >
-                <span>
-                  <strong>
-                    {
-                      excelImportResult.created
-                    }
-                  </strong>
-
-                  <small>
-                    Created
-                  </small>
-                </span>
-
-                <span>
-                  <strong>
-                    {
-                      excelImportResult.updated
-                    }
-                  </strong>
-
-                  <small>
-                    Updated
-                  </small>
-                </span>
-
-                <span>
-                  <strong>
-                    {
-                      excelImportResult.deleted
-                    }
-                  </strong>
-
-                  <small>
-                    Cleared
-                  </small>
-                </span>
-
-                <span>
-                  <strong>
-                    {
-                      excelImportResult.skipped
-                    }
-                  </strong>
-
-                  <small>
-                    Skipped
-                  </small>
-                </span>
-
-                <span
-                  className={
-                    excelImportResult.failed
-                      ? "danger"
-                      : ""
+            <div className="assessment-excel-context-grid">
+              <label>
+                <span>Worksheet</span>
+                <select
+                  value={excelSheetName}
+                  onChange={(event) =>
+                    setAssessmentExcelSheet(excelWorkbook, event.target.value)
                   }
                 >
-                  <strong>
-                    {
-                      excelImportResult.failed
-                    }
-                  </strong>
+                  {excelWorkbook.sheets
+                    .filter((sheet) => sheet.name !== "_Eleeveon_Metadata")
+                    .map((sheet) => (
+                      <option key={sheet.name} value={sheet.name}>
+                        {sheet.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
 
-                  <small>
-                    Failed
-                  </small>
-                </span>
+              <label>
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) =>
+                    setExcelHeaderRowIndex(
+                      Math.max(0, Number(event.target.value || 1) - 1),
+                    )
+                  }
+                />
+              </label>
+            </div>
 
-                <span>
-                  <strong>
-                    {
-                      excelImportResult.studentsProcessed
-                    }
-                  </strong>
+            <div className="assessment-excel-context-card">
+              <strong>{excelFile?.name}</strong>
+              <span>
+                {parseAssessmentWorkbookMetadata(excelWorkbook).metadata
+                  ? "Controlled Eleeveon assessment workbook"
+                  : "External assessment workbook"}
+              </span>
+              <small>
+                Active context: {selectedOption?.className || "Class"} · {selectedOption?.subjectName || "Subject"} · {selectedOption?.academicPeriodName || "Period"}
+              </small>
+            </div>
+          </section>
+        )}
 
-                  <small>
-                    Students
-                  </small>
-                </span>
-              </div>
+        {excelImportStep === "mapping" && excelWorkbook && (
+          <section className="assessment-excel-stage">
+            <div className="assessment-excel-stage-head">
+              <h3>Match student identity columns</h3>
+              <p>
+                Assessment score columns are matched against the current projected assessment structure. Confirm how this external sheet identifies each student.
+              </p>
+            </div>
 
-              {excelImportResult.failed >
-                0 && (
-                  <div
-                    className="assessment-excel-result-errors"
-                  >
-                    {excelImportResult.rows
-                      .filter(
-                        (
-                          row,
-                        ) =>
-                          row.action ===
-                          "failed",
-                      )
-                      .slice(
-                        0,
-                        12,
-                      )
-                      .map(
-                        (
-                          row,
-                          index,
-                        ) => (
-                          <div
-                            key={`${row.rowNumber}-${row.columnIndex || 0}-${index}`}
-                          >
-                            <strong>
-                              Row{" "}
-                              {
-                                row.rowNumber
-                              }
-                            </strong>
+            {(() => {
+              const sheet = getParsedSheet(excelWorkbook, excelSheetName);
+              if (!sheet) return null;
+              const extracted = sheetToRecords(sheet, {
+                headerRowIndex: excelHeaderRowIndex,
+                skipEmptyRows: true,
+                trimStrings: true,
+              });
 
-                            <span>
-                              {
-                                row.error ||
-                                "Score import failed."
-                              }
-                            </span>
-                          </div>
-                        ),
-                      )}
+              return (
+                <>
+                  <ExcelColumnMappingEditor
+                    columns={extracted.columns}
+                    fields={ASSESSMENT_STUDENT_FIELDS}
+                    mappings={excelIdentityMappings}
+                    onChange={(next) => {
+                      setExcelIdentityMappings(next);
+                      setExcelValidation(null);
+                    }}
+                    disabled={excelBusy}
+                    title="Match student columns"
+                    description="Student ID is strongest, followed by Admission Number. Exact Student Name is used only when unambiguous."
+                  />
+
+                  <div className="assessment-excel-column-note">
+                    <strong>{excelParsedImport?.metadataColumns.length || 0} score column{(excelParsedImport?.metadataColumns.length || 0) === 1 ? "" : "s"} recognized</strong>
+                    <span>
+                      {excelParsedImport?.metadataColumns
+                        .map((column) => column.label)
+                        .filter(Boolean)
+                        .join(" · ") || "No score columns recognized yet."}
+                    </span>
                   </div>
-                )}
-            </section>
-          )}
+                </>
+              );
+            })()}
+          </section>
+        )}
+
+        {excelImportStep === "preview" && excelValidation && (
+          <ExcelImportPreview
+            validation={excelValidation}
+            title="Assessment import preview"
+            description="Locked or invalid score cells are not changed. Controlled Eleeveon workbooks may clear an existing unlocked score when its cell is blank; external workbooks never clear existing scores from blanks."
+            columns={[
+              { key: "studentName", label: "Student" },
+              { key: "assessmentLabel", label: "Assessment" },
+              {
+                key: "score",
+                label: "Score",
+                render: (data: any) =>
+                  data.blank ? "Blank" : `${data.score ?? "—"} / ${data.maxScore}`,
+              },
+              {
+                key: "assessmentStructureItemId",
+                label: "Item ID",
+              },
+            ]}
+            maxRows={40}
+          />
+        )}
+
+        {excelImportStep === "result" && excelImportResult && (
+          <section className="assessment-excel-result">
+            <div className="assessment-excel-result-icon">✓</div>
+            <h3>Assessment import completed</h3>
+            <p>
+              Scores were written through the same offline-first assessmentEntries flow used by manual score entry.
+            </p>
+
+            <div className="assessment-excel-result-grid">
+              <span><strong>{excelImportResult.created}</strong><small>Created</small></span>
+              <span><strong>{excelImportResult.updated}</strong><small>Updated</small></span>
+              <span><strong>{excelImportResult.deleted}</strong><small>Cleared</small></span>
+              <span><strong>{excelImportResult.skipped}</strong><small>Skipped</small></span>
+              <span className={excelImportResult.failed ? "danger" : ""}>
+                <strong>{excelImportResult.failed}</strong><small>Failed</small>
+              </span>
+              <span><strong>{excelImportResult.studentsProcessed}</strong><small>Students</small></span>
+            </div>
+
+            {excelImportResult.failed > 0 && (
+              <div className="assessment-excel-result-errors">
+                {excelImportResult.rows
+                  .filter((row) => row.action === "failed")
+                  .slice(0, 12)
+                  .map((row, index) => (
+                    <div key={`${row.rowNumber}-${row.columnIndex || 0}-${index}`}>
+                      <strong>Row {row.rowNumber}</strong>
+                      <span>{row.error || "Score import failed."}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </section>
+        )}
       </ExcelImportSheet>
     </main>
   );
@@ -6369,69 +2302,33 @@ function ClassPickerRow({
   item,
   onOpen,
 }: {
-  item:
-    ClassEntryView;
-
-  onOpen:
-    () => void;
+  item: ClassEntryView;
+  onOpen: () => void;
 }) {
   return (
     <button
       type="button"
       className="student-row assessment-row"
-      onClick={
-        onOpen
-      }
+      onClick={onOpen}
     >
-      <span
-        className="app-icon"
-      >
-        🏫
-      </span>
-
-      <span
-        className="student-main"
-      >
-        <strong>
-          {
-            item.name
-          }
-        </strong>
-
+      <span className="app-icon">🏫</span>
+      <span className="student-main">
+        <strong>{item.name}</strong>
         <small>
-          {
-            item.subjectCount
-          }{" "}
-          class subject(s) ·{" "}
-          {
-            item.studentCount
-          }{" "}
-          active student(s)
+          {item.subjectCount} class subject(s) · {item.studentCount} active
+          student(s)
         </small>
-
         <em>
-          {
-            item.missingCount
-              ? `${item.missingCount} missing setup`
-              : "All class subjects ready"
-          }
+          {item.missingCount
+            ? `${item.missingCount} missing setup`
+            : "All class subjects ready"}
         </em>
       </span>
-
-      <span
-        className="student-side"
-      >
+      <span className="student-side">
         <span
-          className={`status-dot-mini ${
-            item.missingCount
-              ? "orange"
-              : "green"
-          }`}
+          className={`status-dot-mini ${item.missingCount ? "orange" : "green"}`}
         />
-
-        <i>
-          ›
-        </i>
+        <i>›</i>
       </span>
     </button>
   );
@@ -6441,76 +2338,33 @@ function ClassSubjectPickerRow({
   item,
   onOpen,
 }: {
-  item:
-    ClassSubjectEntryView;
-
-  onOpen:
-    () => void;
+  item: ClassSubjectEntryView;
+  onOpen: () => void;
 }) {
-  const ready =
-    item.option.ready &&
-    item.itemCount >
-      0;
-
+  const ready = item.option.ready && item.itemCount > 0;
   return (
     <button
       type="button"
       className="student-row assessment-row"
-      onClick={
-        onOpen
-      }
+      onClick={onOpen}
     >
-      <span
-        className="app-icon"
-      >
-        📝
-      </span>
-
-      <span
-        className="student-main"
-      >
-        <strong>
-          {
-            item.option.subjectName
-          }
-        </strong>
-
+      <span className="app-icon">📝</span>
+      <span className="student-main">
+        <strong>{item.option.subjectName}</strong>
         <small>
-          {
-            item.option.teacherName
-          }{" "}
-          ·{" "}
-          {
-            item.option.academicPeriodName
-          }
+          {item.option.teacherName} · {item.option.academicPeriodName}
         </small>
-
         <em>
-          {
-            ready
-              ? `${item.studentCount} students · ${item.itemCount} items · ${item.completion}% done`
-              : "Needs applicability or assessment items"
-          }
+          {ready
+            ? `${item.studentCount} students · ${item.itemCount} items · ${item.completion}% done`
+            : "Needs applicability or assessment items"}
         </em>
       </span>
-
-      <span
-        className="student-side"
-      >
+      <span className="student-side">
         <span
-          className={`status-dot-mini ${
-            ready
-              ? item.completion >=
-                100
-                ? "green"
-                : "orange"
-              : "red"
-          }`}
+          className={`status-dot-mini ${ready ? (item.completion >= 100 ? "green" : "orange") : "red"}`}
         />
-
-        <i>
-          ›
-        </i>
+        <i>›</i>
       </span>
     </button>
   );
@@ -6521,43 +2375,20 @@ function State({
   title,
   text,
 }: {
-  primary:
-    string;
-
-  title:
-    string;
-
-  text:
-    string;
+  primary: string;
+  title: string;
+  text: string;
 }) {
   return (
     <main
       className="ae-page"
-      style={
-        {
-          "--ae-primary":
-            primary,
-        } as React.CSSProperties
-      }
+      style={{ "--ae-primary": primary } as React.CSSProperties}
     >
-      <style>
-        {css}
-      </style>
-
-      <section
-        className="ae-state"
-      >
-        <div
-          className="ae-spinner"
-        />
-
-        <h2>
-          {title}
-        </h2>
-
-        <p>
-          {text}
-        </p>
+      <style>{css}</style>
+      <section className="ae-state">
+        <div className="ae-spinner" />
+        <h2>{title}</h2>
+        <p>{text}</p>
       </section>
     </main>
   );
@@ -6567,21 +2398,13 @@ function SummaryPill({
   label,
   value,
 }: {
-  label:
-    string;
-
-  value:
-    React.ReactNode;
+  label: string;
+  value: React.ReactNode;
 }) {
   return (
     <article>
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </article>
   );
 }
@@ -6591,88 +2414,41 @@ function Empty({
   title,
   text,
 }: {
-  icon:
-    string;
-
-  title:
-    string;
-
-  text:
-    string;
+  icon: string;
+  title: string;
+  text: string;
 }) {
   return (
-    <section
-      className="ae-empty"
-    >
-      <div
-        className="ae-empty-icon"
-      >
-        {icon}
-      </div>
-
-      <h3>
-        {title}
-      </h3>
-
-      <p>
-        {text}
-      </p>
+    <section className="ae-empty">
+      <div className="ae-empty-icon">{icon}</div>
+      <h3>{title}</h3>
+      <p>{text}</p>
     </section>
   );
 }
 
 function entryPathLabels(
-  item:
-    AssessmentStructureItem,
+  item: AssessmentStructureItem,
 ): string[] {
-  const value =
-    (
-      item as AssessmentStructureItem & {
-        __entryPathLabels?:
-          unknown;
-      }
-    ).__entryPathLabels;
+  const value = (item as AssessmentStructureItem & {
+    __entryPathLabels?: unknown;
+  }).__entryPathLabels;
 
-  return Array.isArray(
-    value,
-  )
-    ? value.filter(
-        (
-          label,
-        ): label is string =>
-          typeof label ===
-          "string",
-      )
-    : [
-        item.name,
-      ];
+  return Array.isArray(value)
+    ? value.filter((label): label is string => typeof label === "string")
+    : [item.name];
 }
 
 function entryGroupLabel(
-  item:
-    AssessmentStructureItem,
+  item: AssessmentStructureItem,
 ): string {
-  return entryPathLabels(
-    item,
-  )
-    .slice(
-      0,
-      -1,
-    )
-    .join(
-      " · ",
-    );
+  return entryPathLabels(item).slice(0, -1).join(" · ");
 }
 
 function entryCompactLabel(
-  item:
-    AssessmentStructureItem,
+  item: AssessmentStructureItem,
 ): string {
-  return entryPathLabels(
-    item,
-  ).join(
-    " · ",
-  );
+  return entryPathLabels(item).join(" · ");
 }
 
 function ScoreInput({
@@ -6681,77 +2457,27 @@ function ScoreInput({
   scores,
   updateScore,
 }: {
-  studentId:
-    string;
-
-  item:
-    AssessmentStructureItem;
-
-  scores:
-    ScoreMap;
-
-  updateScore:
-    (
-      studentId:
-        string,
-
-      item:
-        AssessmentStructureItem,
-
-      value:
-        string,
-    ) => void;
+  studentId: string;
+  item: AssessmentStructureItem;
+  scores: ScoreMap;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
-  const value =
-    scores[
-      scoreKey(
-        studentId,
-        idOf(
-          (
-            item as any
-          ).id,
-        ),
-      )
-    ];
-
+  const value = scores[scoreKey(studentId, idOf((item as any).id))];
   return (
     <input
       className="ae-score-input"
       type="number"
       inputMode="decimal"
-      min={
-        0
-      }
-      max={
-        Number(
-          (
-            item as any
-          ).maxScore ||
-            100,
-        )
-      }
+      min={0}
+      max={Number((item as any).maxScore || 100)}
       step="0.01"
-      value={
-        value ??
-        ""
-      }
-      placeholder={`/${Number(
-        (
-          item as any
-        ).maxScore ||
-          100,
-      )}`}
-      onChange={(
-        event,
-      ) =>
-        updateScore(
-          studentId,
-          item,
-          event
-            .target
-            .value,
-        )
-      }
+      value={value ?? ""}
+      placeholder={`/${Number((item as any).maxScore || 100)}`}
+      onChange={(event) => updateScore(studentId, item, event.target.value)}
     />
   );
 }
@@ -6762,188 +2488,60 @@ function StudentScoreCard({
   scores,
   updateScore,
 }: {
-  row:
-    StudentScoreRow;
-
-  items:
-    AssessmentStructureItem[];
-
-  scores:
-    ScoreMap;
-
-  updateScore:
-    (
-      studentId:
-        string,
-
-      item:
-        AssessmentStructureItem,
-
-      value:
-        string,
-    ) => void;
+  row: StudentScoreRow;
+  items: AssessmentStructureItem[];
+  scores: ScoreMap;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
-  const student:
-    any =
-    row.student;
-
-  const studentId =
-    idOf(
-      student.id,
-    );
-
-  const complete =
-    row.rowExpected >
-      0 &&
-    row.rowEntered >=
-      row.rowExpected;
+  const student: any = row.student;
+  const studentId = idOf(student.id);
+  const complete = row.rowExpected > 0 && row.rowEntered >= row.rowExpected;
 
   return (
-    <article
-      className="ae-score-card"
-    >
-      <div
-        className="ae-score-head"
-      >
+    <article className="ae-score-card">
+      <div className="ae-score-head">
         <div>
-          <strong>
-            {
-              student.fullName ||
-              "Unnamed student"
-            }
-          </strong>
-
-          <span>
-            {
-              student.admissionNumber ||
-              "No admission number"
-            }
-          </span>
+          <strong>{student.fullName || "Unnamed student"}</strong>
+          <span>{student.admissionNumber || "No admission number"}</span>
         </div>
-
-        <i
-          className={
-            complete
-              ? "done"
-              : row.rowEntered
-                ? "partial"
-                : "empty"
-          }
-        >
-          {
-            complete
-              ? "Done"
-              : row.rowEntered
-                ? "Partial"
-                : "Empty"
-          }
+        <i className={complete ? "done" : row.rowEntered ? "partial" : "empty"}>
+          {complete ? "Done" : row.rowEntered ? "Partial" : "Empty"}
         </i>
       </div>
 
-      <div
-        className="ae-score-grid"
-      >
-        {items.map(
-          (
-            item: any,
-          ) => (
-            <label
-              key={
-                String(
-                  item.id,
-                )
-              }
-            >
-              <span>
-                {
-                  entryCompactLabel(
-                    item,
-                  )
-                }
-              </span>
-
-              <small>
-                {
-                  entryGroupLabel(
-                    item,
-                  )
-                    ? `${entryGroupLabel(item)} · `
-                    : ""
-                }
-                Max{" "}
-                {
-                  Number(
-                    item.maxScore ||
-                    100,
-                  )
-                }{" "}
-                · Weight{" "}
-                {
-                  Number(
-                    item.contributionWeight ??
-                    item.weight ??
-                    0,
-                  )
-                }
-              </small>
-
-              <ScoreInput
-                studentId={
-                  studentId
-                }
-                item={
-                  item
-                }
-                scores={
-                  scores
-                }
-                updateScore={
-                  updateScore
-                }
-              />
-            </label>
-          ),
-        )}
+      <div className="ae-score-grid">
+        {items.map((item: any) => (
+          <label key={String(item.id)}>
+            <span>{entryCompactLabel(item)}</span>
+            <small>
+              {entryGroupLabel(item)
+                ? `${entryGroupLabel(item)} · `
+                : ""}
+              Max {Number(item.maxScore || 100)} · Weight{" "}
+              {Number(item.contributionWeight ?? item.weight ?? 0)}
+            </small>
+            <ScoreInput
+              studentId={studentId}
+              item={item}
+              scores={scores}
+              updateScore={updateScore}
+            />
+          </label>
+        ))}
       </div>
 
-      <div
-        className="ae-result-row"
-      >
+      <div className="ae-result-row">
         <span>
-          Total:{" "}
-          <b>
-            {
-              row.weightedTotal
-            }
-          </b>
+          Total: <b>{row.weightedTotal}</b>
         </span>
-
         <span>
-          Percent:{" "}
-          <b>
-            {
-              row.percentage
-            }
-            %
-          </b>
+          Grade: <b>{row.grade || "—"}</b>
         </span>
-
-        <span>
-          Grade:{" "}
-          <b>
-            {
-              row.grade ||
-              "—"
-            }
-          </b>
-        </span>
-
-        <span>
-          {
-            row.remark ||
-            "No remark"
-          }
-        </span>
+        <span>{row.remark || "No remark"}</span>
       </div>
     </article>
   );
@@ -6955,213 +2553,70 @@ function ScoreTable({
   scores,
   updateScore,
 }: {
-  rows:
-    StudentScoreRow[];
-
-  items:
-    AssessmentStructureItem[];
-
-  scores:
-    ScoreMap;
-
-  updateScore:
-    (
-      studentId:
-        string,
-
-      item:
-        AssessmentStructureItem,
-
-      value:
-        string,
-    ) => void;
+  rows: StudentScoreRow[];
+  items: AssessmentStructureItem[];
+  scores: ScoreMap;
+  updateScore: (
+    studentId: string,
+    item: AssessmentStructureItem,
+    value: string,
+  ) => void;
 }) {
   return (
-    <section
-      className="ae-table-card"
-    >
-      <div
-        className="ae-table-scroll"
-      >
+    <section className="ae-table-card">
+      <div className="ae-table-scroll">
         <table>
           <thead>
             <tr>
-              <th>
-                Students (
-                {
-                  rows.length
-                }
-                )
-              </th>
-
-              {items.map(
-                (
-                  item: any,
-                ) => (
-                  <th
-                    key={
-                      String(
-                        item.id,
-                      )
-                    }
-                  >
-                    {entryGroupLabel(
-                      item,
-                    ) ? (
-                      <small
-                        className="ae-assessment-group"
-                      >
-                        {
-                          entryGroupLabel(
-                            item,
-                          )
-                        }
-                      </small>
-                    ) : null}
-
-                    {
-                      item.name
-                    }
-
-                    <span>
-                      /
-                      {
-                        Number(
-                          item.maxScore ||
-                          100,
-                        )
-                      }
-                    </span>
-                  </th>
-                ),
-              )}
-
-              <th>
-                Total
-              </th>
-
-              <th>
-                %
-              </th>
-
-              <th>
-                Grade
-              </th>
-
-              <th>
-                Remark
-              </th>
+              <th>Students ({rows.length})</th>
+              {items.map((item: any) => (
+                <th key={String(item.id)}>
+                  {entryGroupLabel(item) ? (
+                    <small className="ae-assessment-group">
+                      {entryGroupLabel(item)}
+                    </small>
+                  ) : null}
+                  {item.name}
+                  <span>/{Number(item.maxScore || 100)}</span>
+                </th>
+              ))}
+              <th>Total</th>
+              <th>Grade</th>
+              <th>Remark</th>
             </tr>
           </thead>
-
           <tbody>
-            {rows.map(
-              (
-                row,
-              ) => {
-                const student:
-                  any =
-                  row.student;
-
-                const studentId =
-                  idOf(
-                    student.id,
-                  );
-
-                return (
-                  <tr
-                    key={
-                      String(
-                        studentId,
-                      )
-                    }
-                  >
-                    <td>
-                      <strong>
-                        {
-                          student.fullName ||
-                          "Unnamed student"
-                        }
-                      </strong>
-
-                      <span>
-                        {
-                          student.admissionNumber ||
-                          "—"
-                        }
-                      </span>
+            {rows.map((row) => {
+              const student: any = row.student;
+              const studentId = idOf(student.id);
+              return (
+                <tr key={String(studentId)}>
+                  <td>
+                    <strong>{student.fullName || "Unnamed student"}</strong>
+                    <span>{student.admissionNumber || "—"}</span>
+                  </td>
+                  {items.map((item: any) => (
+                    <td key={String(item.id)}>
+                      <ScoreInput
+                        studentId={studentId}
+                        item={item}
+                        scores={scores}
+                        updateScore={updateScore}
+                      />
                     </td>
-
-                    {items.map(
-                      (
-                        item: any,
-                      ) => (
-                        <td
-                          key={
-                            String(
-                              item.id,
-                            )
-                          }
-                        >
-                          <ScoreInput
-                            studentId={
-                              studentId
-                            }
-                            item={
-                              item
-                            }
-                            scores={
-                              scores
-                            }
-                            updateScore={
-                              updateScore
-                            }
-                          />
-                        </td>
-                      ),
-                    )}
-
-                    <td>
-                      <b>
-                        {
-                          row.weightedTotal
-                        }
-                      </b>
-                    </td>
-
-                    <td>
-                      {
-                        row.percentage
-                      }
-                      %
-                    </td>
-
-                    <td>
-                      {
-                        row.grade ||
-                        "—"
-                      }
-                    </td>
-
-                    <td>
-                      {
-                        row.remark ||
-                        "—"
-                      }
-                    </td>
-                  </tr>
-                );
-              },
-            )}
+                  ))}
+                  <td>
+                    <b>{row.weightedTotal}</b>
+                  </td>
+                  <td>{row.grade || "—"}</td>
+                  <td>{row.remark || "—"}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-
         {!rows.length && (
-          <div
-            className="ae-empty-table"
-          >
-            No student matches your filters.
-          </div>
+          <div className="ae-empty-table">No student matches your filters.</div>
         )}
       </div>
     </section>
@@ -7174,200 +2629,65 @@ function SummaryView({
   structureItems,
   classSubjectOptions,
 }: {
-  rows:
-    StudentScoreRow[];
-
+  rows: StudentScoreRow[];
   completion: {
-    expected:
-      number;
-
-    entered:
-      number;
-
-    completion:
-      number;
-
-    completeStudents:
-      number;
+    expected: number;
+    entered: number;
+    completion: number;
+    completeStudents: number;
   };
-
-  structureItems:
-    AssessmentStructureItem[];
-
-  classSubjectOptions:
-    ClassSubjectOption[];
+  structureItems: AssessmentStructureItem[];
+  classSubjectOptions: ClassSubjectOption[];
 }) {
-  const gradeCounts =
-    useMemo(
-      () => {
-        const map =
-          new Map<
-            string,
-            number
-          >();
-
-        rows.forEach(
-          (
-            row,
-          ) =>
-            map.set(
-              row.grade ||
-                "Ungraded",
-              (
-                map.get(
-                  row.grade ||
-                    "Ungraded",
-                ) ||
-                0
-              ) +
-                1,
-            ),
-        );
-
-        return Array.from(
-          map.entries(),
-        ).sort(
-          (
-            a,
-            b,
-          ) =>
-            b[
-              1
-            ] -
-            a[
-              1
-            ],
-        );
-      },
-      [
-        rows,
-      ],
+  const gradeCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    rows.forEach((row) =>
+      map.set(
+        row.grade || "Ungraded",
+        (map.get(row.grade || "Ungraded") || 0) + 1,
+      ),
     );
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }, [rows]);
 
   return (
-    <section
-      className="ae-analysis-grid"
-    >
-      <article
-        className="ae-analysis ae-current-filter"
-      >
-        <span>
-          Completion
-        </span>
-
-        <strong>
-          {
-            completion.completion
-          }
-          %
-        </strong>
-
+    <section className="ae-analysis-grid">
+      <article className="ae-analysis ae-current-filter">
+        <span>Completion</span>
+        <strong>{completion.completion}%</strong>
         <p>
-          {
-            completion.entered
-          }{" "}
-          of{" "}
-          {
-            completion.expected
-          }{" "}
-          expected score cells entered.
+          {completion.entered} of {completion.expected} expected score cells
+          entered.
         </p>
       </article>
-
-      <article
-        className="ae-analysis ae-current-filter"
-      >
-        <span>
-          Complete Students
-        </span>
-
-        <strong>
-          {
-            completion.completeStudents
-          }
-        </strong>
-
-        <p>
-          Students with every active assessment item entered.
-        </p>
+      <article className="ae-analysis ae-current-filter">
+        <span>Complete Students</span>
+        <strong>{completion.completeStudents}</strong>
+        <p>Students with every active assessment item entered.</p>
       </article>
-
-      <article
-        className="ae-analysis ae-current-filter"
-      >
-        <span>
-          Assessment Items
-        </span>
-
-        <strong>
-          {
-            structureItems.length
-          }
-        </strong>
-
-        <p>
-          Active score components in the selected assessment structure.
-        </p>
+      <article className="ae-analysis ae-current-filter">
+        <span>Assessment Items</span>
+        <strong>{structureItems.length}</strong>
+        <p>Active score components in the selected assessment structure.</p>
       </article>
-
-      <article
-        className="ae-analysis ae-current-filter"
-      >
-        <span>
-          Class Subjects
-        </span>
-
-        <strong>
-          {
-            classSubjectOptions.length
-          }
-        </strong>
-
-        <p>
-          Class subjects currently matching your filters.
-        </p>
+      <article className="ae-analysis ae-current-filter">
+        <span>Class Subjects</span>
+        <strong>{classSubjectOptions.length}</strong>
+        <p>Class subjects currently matching your filters.</p>
       </article>
-
-      <article
-        className="ae-analysis ae-wide"
-      >
-        <span>
-          Grade Distribution
-        </span>
-
-        {gradeCounts.map(
-          ([
-            grade,
-            count,
-          ]) => (
-            <p
-              key={
-                grade
-              }
-            >
-              <b>
-                {
-                  grade
-                }
-              </b>{" "}
-              —{" "}
-              {
-                count
-              }
-            </p>
-          ),
-        )}
+      <article className="ae-analysis ae-wide">
+        <span>Grade Distribution</span>
+        {gradeCounts.map(([grade, count]) => (
+          <p key={grade}>
+            <b>{grade}</b> — {count}
+          </p>
+        ))}
       </article>
     </section>
   );
 }
 
-/* ============================================================
-   FILTER MODAL
-   ============================================================ */
-
 function FilterSheet({
-  primary,
   classes,
   subjects,
   periods,
@@ -7384,157 +2704,30 @@ function FilterSheet({
   clearFilters,
   onClose,
 }: {
-  primary:
-    string;
-
-  classes:
-    Class[];
-
-  subjects:
-    Subject[];
-
-  periods:
-    AcademicPeriod[];
-
-  filterClassId:
-    string;
-
-  filterSubjectId:
-    string;
-
-  filterPeriodId:
-    string;
-
-  filterReadiness:
-    ReadinessFilter;
-
-  filterCompletion:
-    CompletionFilter;
-
-  setFilterClassId:
-    (
-      value:
-        string,
-    ) => void;
-
-  setFilterSubjectId:
-    (
-      value:
-        string,
-    ) => void;
-
-  setFilterPeriodId:
-    (
-      value:
-        string,
-    ) => void;
-
-  setFilterReadiness:
-    (
-      value:
-        ReadinessFilter,
-    ) => void;
-
-  setFilterCompletion:
-    (
-      value:
-        CompletionFilter,
-    ) => void;
-
-  clearFilters:
-    () => void;
-
-  onClose:
-    () => void;
+  classes: Class[];
+  subjects: Subject[];
+  periods: AcademicPeriod[];
+  filterClassId: string;
+  filterSubjectId: string;
+  filterPeriodId: string;
+  filterReadiness: ReadinessFilter;
+  filterCompletion: CompletionFilter;
+  setFilterClassId: (value: string) => void;
+  setFilterSubjectId: (value: string) => void;
+  setFilterPeriodId: (value: string) => void;
+  setFilterReadiness: (value: ReadinessFilter) => void;
+  setFilterCompletion: (value: CompletionFilter) => void;
+  clearFilters: () => void;
+  onClose: () => void;
 }) {
-  useEffect(
-    () => {
-      const previousBodyOverflow =
-        document
-          .body
-          .style
-          .overflow;
-
-      const previousHtmlOverflow =
-        document
-          .documentElement
-          .style
-          .overflow;
-
-      document.body.style.overflow =
-        "hidden";
-
-      document.documentElement.style.overflow =
-        "hidden";
-
-      return () => {
-        document.body.style.overflow =
-          previousBodyOverflow;
-
-        document.documentElement.style.overflow =
-          previousHtmlOverflow;
-      };
-    },
-    [],
-  );
-
-  useEffect(
-    () => {
-      const onKeyDown =
-        (
-          event:
-            KeyboardEvent,
-        ) => {
-          if (
-            event.key ===
-            "Escape"
-          ) {
-            onClose();
-          }
-        };
-
-      window.addEventListener(
-        "keydown",
-        onKeyDown,
-      );
-
-      return () =>
-        window.removeEventListener(
-          "keydown",
-          onKeyDown,
-        );
-    },
-    [
-      onClose,
-    ],
-  );
-
-  if (
-    typeof document ===
-    "undefined"
-  ) {
-    return null;
-  }
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
       className="ae-sheet-backdrop"
-      style={
-        {
-          "--ae-primary":
-            primary,
-        } as React.CSSProperties
-      }
       role="presentation"
-      onPointerDown={(
-        event,
-      ) => {
-        if (
-          event.target ===
-          event.currentTarget
-        ) {
-          onClose();
-        }
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <section
@@ -7542,294 +2735,93 @@ function FilterSheet({
         role="dialog"
         aria-modal="true"
         aria-label="Assessment filters"
-        onPointerDown={(
-          event,
-        ) =>
-          event.stopPropagation()
-        }
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        <div
-          className="ae-sheet-head"
-        >
+        <div className="ae-sheet-head">
           <div>
-            <h2>
-              Filters
-            </h2>
-
-            <p>
-              Narrow class subjects and score completion.
-            </p>
+            <h2>Filters</h2>
+            <p>Narrow class subjects and score completion.</p>
           </div>
-
-          <button
-            type="button"
-            className="ae-sheet-close"
-            onClick={
-              onClose
-            }
-            aria-label="Close filters"
-          >
+          <button type="button" onClick={onClose}>
             ✕
           </button>
         </div>
-
-        <div
-          className="ae-form-grid"
-        >
+        <div className="ae-form-grid">
           <label>
-            <span>
-              Class
-            </span>
-
+            <span>Class</span>
             <select
-              value={
-                filterClassId
-              }
-              onChange={(
-                event,
-              ) =>
-                setFilterClassId(
-                  event
-                    .target
-                    .value,
-                )
-              }
+              value={filterClassId}
+              onChange={(e) => setFilterClassId(e.target.value)}
             >
-              <option
-                value="all"
-              >
-                All classes
-              </option>
-
-              {classes.map(
-                (
-                  row: any,
-                ) => (
-                  <option
-                    key={
-                      String(
-                        row.id,
-                      )
-                    }
-                    value={
-                      String(
-                        row.id,
-                      )
-                    }
-                  >
-                    {
-                      row.name
-                    }
-                  </option>
-                ),
-              )}
+              <option value="all">All classes</option>
+              {classes.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
-
           <label>
-            <span>
-              Subject
-            </span>
-
+            <span>Subject</span>
             <select
-              value={
-                filterSubjectId
-              }
-              onChange={(
-                event,
-              ) =>
-                setFilterSubjectId(
-                  event
-                    .target
-                    .value,
-                )
-              }
+              value={filterSubjectId}
+              onChange={(e) => setFilterSubjectId(e.target.value)}
             >
-              <option
-                value="all"
-              >
-                All subjects
-              </option>
-
-              {subjects.map(
-                (
-                  row: any,
-                ) => (
-                  <option
-                    key={
-                      String(
-                        row.id,
-                      )
-                    }
-                    value={
-                      String(
-                        row.id,
-                      )
-                    }
-                  >
-                    {
-                      row.name
-                    }
-                  </option>
-                ),
-              )}
+              <option value="all">All subjects</option>
+              {subjects.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
-
           <label>
-            <span>
-              Academic Period
-            </span>
-
+            <span>Academic Period</span>
             <select
-              value={
-                filterPeriodId
-              }
-              onChange={(
-                event,
-              ) =>
-                setFilterPeriodId(
-                  event
-                    .target
-                    .value,
-                )
-              }
+              value={filterPeriodId}
+              onChange={(e) => setFilterPeriodId(e.target.value)}
             >
-              <option
-                value="all"
-              >
-                All periods
-              </option>
-
-              {periods.map(
-                (
-                  row: any,
-                ) => (
-                  <option
-                    key={
-                      String(
-                        row.id,
-                      )
-                    }
-                    value={
-                      String(
-                        row.id,
-                      )
-                    }
-                  >
-                    {
-                      row.name
-                    }
-                  </option>
-                ),
-              )}
+              <option value="all">All periods</option>
+              {periods.map((row: any) => (
+                <option key={String(row.id)} value={String(row.id)}>
+                  {row.name}
+                </option>
+              ))}
             </select>
           </label>
-
           <label>
-            <span>
-              Setup Status
-            </span>
-
+            <span>Setup Status</span>
             <select
-              value={
-                filterReadiness
-              }
-              onChange={(
-                event,
-              ) =>
-                setFilterReadiness(
-                  event
-                    .target
-                    .value as ReadinessFilter,
-                )
+              value={filterReadiness}
+              onChange={(e) =>
+                setFilterReadiness(e.target.value as ReadinessFilter)
               }
             >
-              <option
-                value="all"
-              >
-                All
-              </option>
-
-              <option
-                value="ready"
-              >
-                Applicability ready
-              </option>
-
-              <option
-                value="missing"
-              >
-                Missing applicability
-              </option>
+              <option value="all">All</option>
+              <option value="ready">Applicability ready</option>
+              <option value="missing">Missing applicability</option>
             </select>
           </label>
-
           <label>
-            <span>
-              Score Completion
-            </span>
-
+            <span>Score Completion</span>
             <select
-              value={
-                filterCompletion
-              }
-              onChange={(
-                event,
-              ) =>
-                setFilterCompletion(
-                  event
-                    .target
-                    .value as CompletionFilter,
-                )
+              value={filterCompletion}
+              onChange={(e) =>
+                setFilterCompletion(e.target.value as CompletionFilter)
               }
             >
-              <option
-                value="all"
-              >
-                All
-              </option>
-
-              <option
-                value="empty"
-              >
-                Empty
-              </option>
-
-              <option
-                value="partial"
-              >
-                Partial
-              </option>
-
-              <option
-                value="complete"
-              >
-                Complete
-              </option>
+              <option value="all">All</option>
+              <option value="empty">Empty</option>
+              <option value="partial">Partial</option>
+              <option value="complete">Complete</option>
             </select>
           </label>
         </div>
-
-        <div
-          className="ae-sheet-actions"
-        >
-          <button
-            type="button"
-            onClick={
-              clearFilters
-            }
-          >
+        <div className="ae-sheet-actions">
+          <button type="button" onClick={clearFilters}>
             Clear
           </button>
-
-          <button
-            type="button"
-            className="ae-primary"
-            onClick={
-              onClose
-            }
-          >
+          <button type="button" className="ae-primary" onClick={onClose}>
             Apply
           </button>
         </div>
@@ -7839,127 +2831,27 @@ function FilterSheet({
   );
 }
 
-/* ============================================================
-   MORE MODAL
-   ============================================================ */
-
 function MoreSheet({
-  primary,
   viewMode,
   setViewMode,
   onExcel,
   onRefresh,
   onClose,
 }: {
-  primary:
-    string;
-
-  viewMode:
-    ViewMode;
-
-  setViewMode:
-    (
-      mode:
-        ViewMode,
-    ) => void;
-
-  onExcel:
-    () => void;
-
-  onRefresh:
-    () => void;
-
-  onClose:
-    () => void;
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  onExcel: () => void;
+  onRefresh: () => void;
+  onClose: () => void;
 }) {
-  useEffect(
-    () => {
-      const previousBodyOverflow =
-        document
-          .body
-          .style
-          .overflow;
-
-      const previousHtmlOverflow =
-        document
-          .documentElement
-          .style
-          .overflow;
-
-      document.body.style.overflow =
-        "hidden";
-
-      document.documentElement.style.overflow =
-        "hidden";
-
-      return () => {
-        document.body.style.overflow =
-          previousBodyOverflow;
-
-        document.documentElement.style.overflow =
-          previousHtmlOverflow;
-      };
-    },
-    [],
-  );
-
-  useEffect(
-    () => {
-      const onKeyDown =
-        (
-          event:
-            KeyboardEvent,
-        ) => {
-          if (
-            event.key ===
-            "Escape"
-          ) {
-            onClose();
-          }
-        };
-
-      window.addEventListener(
-        "keydown",
-        onKeyDown,
-      );
-
-      return () =>
-        window.removeEventListener(
-          "keydown",
-          onKeyDown,
-        );
-    },
-    [
-      onClose,
-    ],
-  );
-
-  if (
-    typeof document ===
-    "undefined"
-  ) {
-    return null;
-  }
+  if (typeof document === "undefined") return null;
 
   return createPortal(
     <div
       className="ae-sheet-backdrop"
-      style={
-        {
-          "--ae-primary":
-            primary,
-        } as React.CSSProperties
-      }
       role="presentation"
-      onPointerDown={(
-        event,
-      ) => {
-        if (
-          event.target ===
-          event.currentTarget
-        ) {
-          onClose();
-        }
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <section
@@ -7967,134 +2859,43 @@ function MoreSheet({
         role="dialog"
         aria-modal="true"
         aria-label="More assessment options"
-        onPointerDown={(
-          event,
-        ) =>
-          event.stopPropagation()
-        }
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        <div
-          className="ae-sheet-head"
-        >
+        <div className="ae-sheet-head">
           <div>
-            <h2>
-              More
-            </h2>
-
-            <p>
-              Change how you enter and review scores.
-            </p>
+            <h2>More</h2>
+            <p>Change how you enter and review scores.</p>
           </div>
-
-          <button
-            type="button"
-            className="ae-sheet-close"
-            onClick={
-              onClose
-            }
-            aria-label="Close more options"
-          >
+          <button type="button" onClick={onClose}>
             ✕
           </button>
         </div>
-
         <button
           type="button"
-          className={
-            viewMode ===
-            "cards"
-              ? "active"
-              : ""
-          }
-          onClick={() =>
-            setViewMode(
-              "cards",
-            )
-          }
+          className={viewMode === "cards" ? "active" : ""}
+          onClick={() => setViewMode("cards")}
         >
-          <strong>
-            Card entry
-          </strong>
-
-          <span>
-            Best for phones
-          </span>
+          Card entry <span>Best for phones</span>
         </button>
-
         <button
           type="button"
-          className={
-            viewMode ===
-            "table"
-              ? "active"
-              : ""
-          }
-          onClick={() =>
-            setViewMode(
-              "table",
-            )
-          }
+          className={viewMode === "table" ? "active" : ""}
+          onClick={() => setViewMode("table")}
         >
-          <strong>
-            Table entry
-          </strong>
-
-          <span>
-            Best for laptop/tablet
-          </span>
+          Table entry <span>Best for laptop/tablet</span>
         </button>
-
         <button
           type="button"
-          className={
-            viewMode ===
-            "summary"
-              ? "active"
-              : ""
-          }
-          onClick={() =>
-            setViewMode(
-              "summary",
-            )
-          }
+          className={viewMode === "summary" ? "active" : ""}
+          onClick={() => setViewMode("summary")}
         >
-          <strong>
-            Summary
-          </strong>
-
-          <span>
-            Completion and grade overview
-          </span>
+          Summary <span>Completion and grade overview</span>
         </button>
-
-        <button
-          type="button"
-          onClick={
-            onExcel
-          }
-        >
-          <strong>
-            Excel
-          </strong>
-
-          <span>
-            Import, template and score-sheet export
-          </span>
+        <button type="button" onClick={onExcel}>
+          Excel <span>Import, template and score-sheet export</span>
         </button>
-
-        <button
-          type="button"
-          onClick={
-            onRefresh
-          }
-        >
-          <strong>
-            Refresh data
-          </strong>
-
-          <span>
-            Reload records from IndexedDB
-          </span>
+        <button type="button" onClick={onRefresh}>
+          Refresh data <span>Reload records from IndexedDB</span>
         </button>
       </section>
     </div>,
@@ -8103,2590 +2904,201 @@ function MoreSheet({
 }
 
 const css = `
-@keyframes ae-spin {
-  to {
-    transform: rotate(360deg);
+@keyframes ae-spin { to { transform: rotate(360deg); } }
+.ae-page{--ae-bg:var(--bg,#f7f8fb);--ae-card:var(--card-bg,var(--surface,#fff));--ae-text:var(--text,#111827);--ae-muted:var(--muted,#6b7280);--ae-border:var(--border,rgba(15,23,42,.10));min-height:100dvh;width:100%;max-width:100%;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--ae-primary) 9%,transparent),transparent 30rem),var(--ae-bg);color:var(--ae-text);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}
+.ae-page *,.ae-page *::before,.ae-page *::after{box-sizing:border-box;min-width:0}.ae-page button,.ae-page input,.ae-page select{font:inherit}.ae-page button{-webkit-tap-highlight-color:transparent;cursor:pointer}.ae-page input,.ae-page select{width:100%;min-height:42px;border:1px solid var(--input-border,var(--ae-border));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--ae-card));color:var(--input-text,var(--ae-text));outline:none;font-weight:750}.ae-page input:focus,.ae-page select:focus{border-color:color-mix(in srgb,var(--ae-primary) 52%,var(--ae-border));box-shadow:0 0 0 4px color-mix(in srgb,var(--ae-primary) 12%,transparent)}
+.ae-state,.ae-search-card,.student-row,.ae-table-card,.ae-score-card,.ae-empty,.ae-analysis,.ae-sheet,.ae-session-strip,.ae-compact-meta{background:var(--ae-card);border:1px solid var(--ae-border);box-shadow:0 18px 45px rgba(15,23,42,.07)}
+.ae-search-card{position:sticky;top:0;z-index:10;display:grid;grid-template-columns:1fr auto auto;gap:7px;align-items:center;padding:8px;border-radius:22px;margin:0 auto 8px;backdrop-filter:blur(18px);max-width:1180px}.ae-search{display:flex;align-items:center;gap:8px;min-width:0;background:color-mix(in srgb,var(--ae-primary) 5%,var(--ae-card));border:1px solid var(--ae-border);border-radius:16px;padding:0 10px}.ae-search span{color:var(--ae-muted);font-weight:900}.ae-search input{height:40px;min-height:40px;border:0;background:transparent;box-shadow:none;padding:0}.ae-icon-button,.ae-filter-button{height:40px;width:40px;border:1px solid var(--ae-border);border-radius:15px;background:var(--ae-card);color:var(--ae-text);display:grid;place-items:center;position:relative;font-weight:950}.ae-filter-button.active{border-color:color-mix(in srgb,var(--ae-primary) 58%,var(--ae-border));color:var(--ae-primary);background:color-mix(in srgb,var(--ae-primary) 8%,var(--ae-card))}.ae-filter-button b{position:absolute;right:-4px;top:-4px;min-width:18px;height:18px;border-radius:99px;background:var(--ae-primary);color:#fff;font-size:11px;display:grid;place-items:center}.ae-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.ae-filter-chips{display:flex;gap:7px;overflow:auto;padding:1px 0 8px;max-width:1180px;margin:0 auto}.ae-filter-chips button{white-space:nowrap;border:1px solid var(--ae-border);background:var(--ae-card);color:var(--ae-text);border-radius:999px;padding:7px 10px;font-size:12px;font-weight:850}.class-breadcrumb button:first-child{background:color-mix(in srgb,var(--ae-primary) 10%,var(--ae-card));color:var(--ae-primary);border-color:color-mix(in srgb,var(--ae-primary) 22%,var(--ae-border))}
+.ae-list{display:grid;gap:8px;max-width:1180px;margin:0 auto}.student-row{width:100%;border-radius:18px;padding:9px 10px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;text-align:left;color:var(--ae-text)}.student-row:hover{border-color:color-mix(in srgb,var(--ae-primary) 35%,var(--ae-border));transform:translateY(-1px)}.app-icon{width:36px;height:36px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,color-mix(in srgb,var(--ae-primary) 18%,transparent),color-mix(in srgb,var(--ae-primary) 5%,transparent));font-size:18px}.student-main{display:grid;gap:1px}.student-main strong{font-size:13.5px;line-height:1.2}.student-main small,.student-main em{font-size:11.5px;color:var(--ae-muted);font-style:normal;line-height:1.25}.student-side{display:grid;justify-items:end;gap:3px;color:var(--ae-muted);font-weight:950}.status-dot-mini,.ae-status-dot{width:9px;height:9px;border-radius:99px;background:var(--ae-muted);box-shadow:0 0 0 3px color-mix(in srgb,currentColor 12%,transparent)}.status-dot-mini.green,.ae-status-dot.green{background:#16a34a}.status-dot-mini.orange,.ae-status-dot.orange{background:#f97316}.status-dot-mini.red{background:#dc2626}.status-dot-mini.gray{background:#94a3b8}
+.ae-session-strip{max-width:1180px;margin:0 auto 8px;border-radius:18px;padding:8px 9px;display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center}.ae-session-strip strong{display:block;font-size:13.5px}.ae-session-strip small{display:block;color:var(--ae-muted);font-size:11.5px;margin-top:1px}.ae-session-strip button{border:1px solid var(--ae-border);border-radius:14px;padding:8px 10px;background:var(--ae-card);color:var(--ae-text);font-weight:950}.ae-session-strip button.primary{border-color:transparent;background:var(--ae-primary);color:#fff}.ae-session-strip button:disabled{opacity:.55}.ae-compact-meta{max-width:1180px;margin:0 auto 8px;border-radius:18px;padding:7px;display:flex;gap:6px;overflow:auto}.ae-chip{white-space:nowrap;display:inline-flex;align-items:center;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:950;border:1px solid var(--ae-border);background:color-mix(in srgb,var(--ae-card) 90%,transparent)}.ae-chip.green{background:rgba(34,197,94,.12);color:#15803d}.ae-chip.red{background:rgba(239,68,68,.12);color:#b91c1c}.ae-chip.blue{background:rgba(59,130,246,.12);color:#1d4ed8}.ae-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.ae-chip.orange{background:rgba(249,115,22,.12);color:#c2410c}.ae-chip.gray{color:var(--ae-muted)}
+.ae-score-card{border-radius:18px;padding:9px}.ae-score-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}.ae-score-head strong{display:block;font-size:13.5px}.ae-score-head span{display:block;color:var(--ae-muted);font-size:11.5px;margin-top:1px}.ae-score-head i{font-style:normal;font-size:10.5px;font-weight:950;border-radius:999px;padding:4px 7px;background:rgba(148,163,184,.12)}.ae-score-head i.done{background:rgba(34,197,94,.12);color:#15803d}.ae-score-head i.partial{background:rgba(249,115,22,.12);color:#c2410c}.ae-score-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.ae-score-grid label{display:grid;gap:3px;border:1px solid var(--ae-border);border-radius:15px;padding:7px;background:color-mix(in srgb,var(--ae-primary) 3%,var(--ae-card))}.ae-score-grid span{font-size:11.5px;font-weight:950}.ae-score-grid small{font-size:10px;color:var(--ae-muted)}.ae-score-input{width:100%;height:36px;min-height:36px;border:1px solid var(--ae-border);border-radius:12px;background:var(--ae-card);color:var(--ae-text);padding:0 8px;font:inherit;font-weight:950}.ae-result-row{display:flex;gap:8px;flex-wrap:wrap;color:var(--ae-muted);font-size:11.5px;border-top:1px solid var(--ae-border);margin-top:8px;padding-top:8px}.ae-result-row b{color:var(--ae-text)}
+.ae-entry-projection-warning{max-width:1180px;margin:0 auto 10px;padding:11px 13px;border:1px solid #f59e0b;border-radius:14px;background:color-mix(in srgb,#f59e0b 10%,var(--ae-card));display:grid;gap:3px}.ae-entry-projection-warning span{font-size:12px;color:var(--ae-muted)}.ae-assessment-group{display:block!important;margin:0 0 2px!important;color:var(--ae-primary)!important;font-size:9px!important;letter-spacing:.02em;text-transform:none!important}.ae-table-card{max-width:1180px;margin:0 auto;border-radius:20px;overflow:hidden}.ae-table-scroll{overflow:auto;max-height:72dvh}table{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}th,td{border-bottom:1px solid var(--ae-border);padding:8px 9px;text-align:left;vertical-align:middle;font-size:12.5px}th{position:sticky;top:0;background:var(--ae-card);z-index:1;color:var(--ae-muted);font-size:10.5px;text-transform:uppercase}th span,td span{display:block;color:var(--ae-muted);font-size:10.5px;margin-top:1px}td .ae-score-input{min-width:84px}.ae-empty-table{padding:18px;color:var(--ae-muted);text-align:center}
+.ae-empty,.ae-state{max-width:720px;margin:10px auto;border-radius:22px;padding:22px;text-align:center}.ae-empty-icon{font-size:28px}.ae-empty h3,.ae-state h2{margin:7px 0 4px}.ae-empty p,.ae-state p{margin:0;color:var(--ae-muted);font-size:13px}.ae-spinner{width:30px;height:30px;border:3px solid rgba(148,163,184,.35);border-top-color:var(--ae-primary);border-radius:999px;margin:0 auto 10px;animation:ae-spin 1s linear infinite}.ae-state-button{margin-top:12px;border:1px solid transparent;border-radius:14px;padding:10px 12px;font-weight:950;background:var(--ae-primary);color:#fff}
+.ae-analysis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-width:1180px;margin:0 auto}.ae-analysis{border-radius:18px;padding:12px}.ae-analysis span{display:block;color:var(--ae-muted);font-size:11.5px;font-weight:950}.ae-analysis strong{font-size:26px}.ae-analysis p{margin:5px 0 0;color:var(--ae-muted);font-size:12.5px}.ae-analysis.ae-wide{grid-column:1/-1}.ae-analysis.ae-wide p{display:flex;justify-content:space-between;border-top:1px solid var(--ae-border);padding-top:7px}
+.ae-sheet-backdrop{position:fixed;inset:0;z-index:50;background:rgba(15,23,42,.48);display:flex;align-items:flex-end;justify-content:center;padding:12px}.ae-sheet{width:min(680px,100%);max-height:88dvh;overflow:auto;border-radius:26px;padding:14px}.ae-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}.ae-sheet-head h2{margin:0}.ae-sheet-head p{margin:2px 0 0;color:var(--ae-muted);font-size:13px}.ae-sheet-head button{border:1px solid var(--ae-border);background:var(--ae-card);border-radius:12px;width:36px;height:36px;color:var(--ae-text)}.ae-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ae-form-grid label{display:grid;gap:5px;font-size:12px;color:var(--ae-muted);font-weight:850}.ae-sheet-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--ae-border);padding-top:12px;margin-top:12px}.ae-sheet-actions button{border:1px solid var(--ae-border);border-radius:14px;padding:10px 12px;background:var(--ae-card);color:var(--ae-text);font-weight:950}.ae-sheet-actions .ae-primary{background:var(--ae-primary);color:#fff;border-color:transparent}.ae-more-sheet{display:grid;gap:8px}.ae-more-sheet .ae-sheet-head{margin-bottom:4px}.ae-more-sheet>button{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;text-align:left;border:1px solid var(--ae-border);background:var(--ae-card);color:var(--ae-text);border-radius:16px;padding:11px;font-weight:950}.ae-more-sheet>button span:first-child{grid-row:1/3;font-size:18px}.ae-more-sheet>button small{display:block;color:var(--ae-muted);font-size:11.5px;font-weight:700}.ae-more-sheet>button.active{border-color:var(--ae-primary);color:var(--ae-primary);background:color-mix(in srgb,var(--ae-primary) 7%,var(--ae-card))}
+.ae-toast{position:fixed;z-index:80;left:12px;right:12px;bottom:12px;max-width:720px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:18px;padding:12px 14px;color:#fff;box-shadow:0 18px 40px rgba(15,23,42,.28);font-weight:850}.ae-toast.success{background:#16a34a}.ae-toast.error{background:#dc2626}.ae-toast.info{background:#2563eb}.ae-toast button{border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:10px;width:30px;height:30px}
+@media (min-width:760px){.ae-page{padding:14px}.ae-list{grid-template-columns:repeat(2,minmax(0,1fr))}.ae-score-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.ae-sheet-backdrop{align-items:center}.ae-analysis-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (min-width:1120px){.ae-list.ae-entry-list{grid-template-columns:repeat(3,minmax(0,1fr))}.ae-list.ae-picker-list{grid-template-columns:repeat(2,minmax(0,1fr))}.ae-score-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:520px){.ae-page{padding:7px}.ae-search-card{border-radius:18px}.ae-session-strip{grid-template-columns:auto 1fr auto auto}.ae-session-strip button{padding:8px 9px}.ae-score-grid,.ae-form-grid{grid-template-columns:1fr}th,td{padding:7px}.ae-sheet{border-radius:22px}.ae-analysis-grid{grid-template-columns:1fr}}
+
+@media (min-width:980px){
+  .ae-sheet-backdrop{
+    top:var(--eds-shell-top-offset,0px);
+    right:0;
+    bottom:0;
+    left:var(--portal-content-left,0px);
+    width:auto;
+    max-width:calc(100vw - var(--portal-content-left,0px));
+    min-width:0;
+    overflow-x:hidden;
+  }
+
+  .ae-sheet{
+    min-width:0;
+    max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
   }
 }
 
-.ae-page {
-  --ae-bg: var(--bg, #f7f8fb);
-  --ae-card: var(--card-bg, var(--surface, #fff));
-  --ae-text: var(--text, #111827);
-  --ae-muted: var(--muted, #6b7280);
-  --ae-border: var(--border, rgba(15, 23, 42, .10));
 
-  min-height: 100dvh;
-  width: 100%;
-  max-width: 100%;
-
-  padding:
-    calc(
-      8px *
-      var(
-        --local-density-scale,
-        1
-      )
-    );
-
-  padding-bottom:
-    max(
-      40px,
-      env(
-        safe-area-inset-bottom
-      )
-    );
-
-  background:
-    radial-gradient(
-      circle at top left,
-      color-mix(
-        in srgb,
-        var(--ae-primary) 9%,
-        transparent
-      ),
-      transparent 30rem
-    ),
-    var(--ae-bg);
-
-  color: var(--ae-text);
-
-  font-family:
-    var(
-      --font-family,
-      system-ui,
-      -apple-system,
-      BlinkMacSystemFont,
-      "Segoe UI",
-      sans-serif
-    );
-
-  font-size:
-    var(
-      --font-size,
-      14px
-    );
-
-  overflow-x:
-    hidden;
-}
-
-.ae-page *,
-.ae-page *::before,
-.ae-page *::after {
-  box-sizing:
-    border-box;
-
-  min-width:
-    0;
-}
-
-.ae-page button,
-.ae-page input,
-.ae-page select {
-  font:
-    inherit;
-}
-
-.ae-page button {
-  -webkit-tap-highlight-color:
-    transparent;
-
-  cursor:
-    pointer;
-}
-
-.ae-page input,
-.ae-page select {
-  width:
-    100%;
-
-  min-height:
-    42px;
-
-  border:
-    1px solid
-    var(
-      --input-border,
-      var(--ae-border)
-    );
-
-  border-radius:
-    16px;
-
-  padding:
-    0 12px;
-
-  background:
-    var(
-      --input-bg,
-      var(--ae-card)
-    );
-
-  color:
-    var(
-      --input-text,
-      var(--ae-text)
-    );
-
-  outline:
-    none;
-
-  font-weight:
-    750;
-}
-
-.ae-page input:focus,
-.ae-page select:focus {
-  border-color:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 52%,
-      var(--ae-border)
-    );
-
-  box-shadow:
-    0 0 0 4px
-    color-mix(
-      in srgb,
-      var(--ae-primary) 12%,
-      transparent
-    );
-}
-
-.ae-state,
-.ae-search-card,
-.student-row,
-.ae-table-card,
-.ae-score-card,
-.ae-empty,
-.ae-analysis,
-.ae-sheet,
-.ae-session-strip,
-.ae-compact-meta {
-  background:
-    var(--ae-card);
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  box-shadow:
-    0 18px 45px
-    rgba(
-      15,
-      23,
-      42,
-      .07
-    );
-}
-
-.ae-search-card {
-  position:
-    sticky;
-
-  top:
-    0;
-
-  z-index:
-    10;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    1fr auto auto;
-
-  gap:
-    7px;
-
-  align-items:
-    center;
-
-  padding:
-    8px;
-
-  border-radius:
-    22px;
-
-  margin:
-    0 auto 8px;
-
-  backdrop-filter:
-    blur(18px);
-
-  max-width:
-    1180px;
-}
-
-.ae-search {
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  gap:
-    8px;
-
-  min-width:
-    0;
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 5%,
-      var(--ae-card)
-    );
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    16px;
-
-  padding:
-    0 10px;
-}
-
-.ae-search span {
-  color:
-    var(--ae-muted);
-
-  font-weight:
-    900;
-}
-
-.ae-search input {
-  height:
-    40px;
-
-  min-height:
-    40px;
-
-  border:
-    0;
-
-  background:
-    transparent;
-
-  box-shadow:
-    none;
-
-  padding:
-    0;
-}
-
-.ae-icon-button,
-.ae-filter-button {
-  height:
-    40px;
-
-  width:
-    40px;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    15px;
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  position:
-    relative;
-
-  font-weight:
-    950;
-}
-
-.ae-filter-button.active {
-  border-color:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 58%,
-      var(--ae-border)
-    );
-
-  color:
-    var(--ae-primary);
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 8%,
-      var(--ae-card)
-    );
-}
-
-.ae-filter-button b {
-  position:
-    absolute;
-
-  right:
-    -4px;
-
-  top:
-    -4px;
-
-  min-width:
-    18px;
-
-  height:
-    18px;
-
-  border-radius:
-    99px;
-
-  background:
-    var(--ae-primary);
-
-  color:
-    #fff;
-
-  font-size:
-    11px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-}
-
-.ae-slider-icon {
-  width:
-    21px;
-
-  height:
-    21px;
-
-  fill:
-    none;
-
-  stroke:
-    currentColor;
-
-  stroke-width:
-    2;
-
-  stroke-linecap:
-    round;
-}
-
-.ae-filter-chips {
-  display:
-    flex;
-
-  gap:
-    7px;
-
-  overflow:
-    auto;
-
-  padding:
-    1px 0 8px;
-
-  max-width:
-    1180px;
-
-  margin:
-    0 auto;
-}
-
-.ae-filter-chips button {
-  white-space:
-    nowrap;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  border-radius:
-    999px;
-
-  padding:
-    7px 10px;
-
-  font-size:
-    12px;
-
-  font-weight:
-    850;
-}
-
-.class-breadcrumb button:first-child {
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 10%,
-      var(--ae-card)
-    );
-
-  color:
-    var(--ae-primary);
-
-  border-color:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 22%,
-      var(--ae-border)
-    );
-}
-
-.ae-list {
-  display:
-    grid;
-
-  gap:
-    8px;
-
-  max-width:
-    1180px;
-
-  margin:
-    0 auto;
-}
-
-.student-row {
-  width:
-    100%;
-
-  border-radius:
-    18px;
-
-  padding:
-    9px 10px;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    auto 1fr auto;
-
-  align-items:
-    center;
-
-  gap:
-    10px;
-
-  text-align:
-    left;
-
-  color:
-    var(--ae-text);
-}
-
-.student-row:hover {
-  border-color:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 35%,
-      var(--ae-border)
-    );
-
-  transform:
-    translateY(-1px);
-}
-
-.app-icon {
-  width:
-    36px;
-
-  height:
-    36px;
-
-  border-radius:
-    14px;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(
-        in srgb,
-        var(--ae-primary) 18%,
-        transparent
-      ),
-      color-mix(
-        in srgb,
-        var(--ae-primary) 5%,
-        transparent
-      )
-    );
-
-  font-size:
-    18px;
-}
-
-.student-main {
-  display:
-    grid;
-
-  gap:
-    1px;
-}
-
-.student-main strong {
-  font-size:
-    13.5px;
-
-  line-height:
-    1.2;
-}
-
-.student-main small,
-.student-main em {
-  font-size:
-    11.5px;
-
-  color:
-    var(--ae-muted);
-
-  font-style:
-    normal;
-
-  line-height:
-    1.25;
-}
-
-.student-side {
-  display:
-    grid;
-
-  justify-items:
-    end;
-
-  gap:
-    3px;
-
-  color:
-    var(--ae-muted);
-
-  font-weight:
-    950;
-}
-
-.status-dot-mini,
-.ae-status-dot {
-  width:
-    9px;
-
-  height:
-    9px;
-
-  border-radius:
-    99px;
-
-  background:
-    var(--ae-muted);
-
-  box-shadow:
-    0 0 0 3px
-    color-mix(
-      in srgb,
-      currentColor 12%,
-      transparent
-    );
-}
-
-.status-dot-mini.green,
-.ae-status-dot.green {
-  background:
-    #16a34a;
-}
-
-.status-dot-mini.orange,
-.ae-status-dot.orange {
-  background:
-    #f97316;
-}
-
-.status-dot-mini.red {
-  background:
-    #dc2626;
-}
-
-.status-dot-mini.gray {
-  background:
-    #94a3b8;
-}
-
-.ae-session-strip {
-  max-width:
-    1180px;
-
-  margin:
-    0 auto 8px;
-
-  border-radius:
-    18px;
-
-  padding:
-    8px 9px;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    auto 1fr auto auto;
-
-  gap:
-    8px;
-
-  align-items:
-    center;
-}
-
-.ae-session-strip strong {
-  display:
-    block;
-
-  font-size:
-    13.5px;
-}
-
-.ae-session-strip small {
-  display:
-    block;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    11.5px;
-
-  margin-top:
-    1px;
-}
-
-.ae-session-strip button {
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    14px;
-
-  padding:
-    8px 10px;
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  font-weight:
-    950;
-}
-
-.ae-session-strip button.primary {
-  border-color:
-    transparent;
-
-  background:
-    var(--ae-primary);
-
-  color:
-    #fff;
-}
-
-.ae-session-strip button:disabled {
-  opacity:
-    .55;
-}
-
-.ae-compact-meta {
-  max-width:
-    1180px;
-
-  margin:
-    0 auto 8px;
-
-  border-radius:
-    18px;
-
-  padding:
-    7px;
-
-  display:
-    flex;
-
-  gap:
-    6px;
-
-  overflow:
-    auto;
-}
-
-.ae-chip {
-  white-space:
-    nowrap;
-
-  display:
-    inline-flex;
-
-  align-items:
-    center;
-
-  border-radius:
-    999px;
-
-  padding:
-    5px 8px;
-
-  font-size:
-    11px;
-
-  font-weight:
-    950;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-card) 90%,
-      transparent
-    );
-}
-
-.ae-chip.green {
-  background:
-    rgba(
-      34,
-      197,
-      94,
-      .12
-    );
-
-  color:
-    #15803d;
-}
-
-.ae-chip.red {
-  background:
-    rgba(
-      239,
-      68,
-      68,
-      .12
-    );
-
-  color:
-    #b91c1c;
-}
-
-.ae-chip.blue {
-  background:
-    rgba(
-      59,
-      130,
-      246,
-      .12
-    );
-
-  color:
-    #1d4ed8;
-}
-
-.ae-chip.purple {
-  background:
-    rgba(
-      147,
-      51,
-      234,
-      .12
-    );
-
-  color:
-    #7e22ce;
-}
-
-.ae-chip.orange {
-  background:
-    rgba(
-      249,
-      115,
-      22,
-      .12
-    );
-
-  color:
-    #c2410c;
-}
-
-.ae-chip.gray {
-  color:
-    var(--ae-muted);
-}
-
-.ae-score-card {
-  border-radius:
-    18px;
-
-  padding:
-    9px;
-}
-
-.ae-score-head {
-  display:
-    flex;
-
-  align-items:
-    flex-start;
-
-  justify-content:
-    space-between;
-
-  gap:
-    8px;
-
-  margin-bottom:
-    8px;
-}
-
-.ae-score-head strong {
-  display:
-    block;
-
-  font-size:
-    13.5px;
-}
-
-.ae-score-head span {
-  display:
-    block;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    11.5px;
-
-  margin-top:
-    1px;
-}
-
-.ae-score-head i {
-  font-style:
-    normal;
-
-  font-size:
-    10.5px;
-
-  font-weight:
-    950;
-
-  border-radius:
-    999px;
-
-  padding:
-    4px 7px;
-
-  background:
-    rgba(
-      148,
-      163,
-      184,
-      .12
-    );
-}
-
-.ae-score-head i.done {
-  background:
-    rgba(
-      34,
-      197,
-      94,
-      .12
-    );
-
-  color:
-    #15803d;
-}
-
-.ae-score-head i.partial {
-  background:
-    rgba(
-      249,
-      115,
-      22,
-      .12
-    );
-
-  color:
-    #c2410c;
-}
-
-.ae-score-grid {
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(
-        0,
-        1fr
-      )
-    );
-
-  gap:
-    7px;
-}
-
-.ae-score-grid label {
-  display:
-    grid;
-
-  gap:
-    3px;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    15px;
-
-  padding:
-    7px;
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 3%,
-      var(--ae-card)
-    );
-}
-
-.ae-score-grid span {
-  font-size:
-    11.5px;
-
-  font-weight:
-    950;
-}
-
-.ae-score-grid small {
-  font-size:
-    10px;
-
-  color:
-    var(--ae-muted);
-}
-
-.ae-score-input {
-  width:
-    100%;
-
-  height:
-    36px;
-
-  min-height:
-    36px;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    12px;
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  padding:
-    0 8px;
-
-  font:
-    inherit;
-
-  font-weight:
-    950;
-}
-
-.ae-result-row {
-  display:
-    flex;
-
-  gap:
-    8px;
-
-  flex-wrap:
-    wrap;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    11.5px;
-
-  border-top:
-    1px solid
-    var(--ae-border);
-
-  margin-top:
-    8px;
-
-  padding-top:
-    8px;
-}
-
-.ae-result-row b {
-  color:
-    var(--ae-text);
-}
-
-.ae-entry-projection-warning {
-  max-width:
-    1180px;
-
-  margin:
-    0 auto 10px;
-
-  padding:
-    11px 13px;
-
-  border:
-    1px solid
-    #f59e0b;
-
-  border-radius:
-    14px;
-
-  background:
-    color-mix(
-      in srgb,
-      #f59e0b 10%,
-      var(--ae-card)
-    );
-
-  display:
-    grid;
-
-  gap:
-    3px;
-}
-
-.ae-entry-projection-warning span {
-  font-size:
-    12px;
-
-  color:
-    var(--ae-muted);
-}
-
-.ae-assessment-group {
-  display:
-    block !important;
-
-  margin:
-    0 0 2px !important;
-
-  color:
-    var(--ae-primary) !important;
-
-  font-size:
-    9px !important;
-
-  letter-spacing:
-    .02em;
-
-  text-transform:
-    none !important;
-}
-
-.ae-table-card {
-  max-width:
-    1180px;
-
-  margin:
-    0 auto;
-
-  border-radius:
-    20px;
-
-  overflow:
-    hidden;
-}
-
-.ae-table-scroll {
-  overflow:
-    auto;
-
-  max-height:
-    72dvh;
-}
-
-table {
-  width:
-    100%;
-
-  border-collapse:
-    separate;
-
-  border-spacing:
-    0;
-
-  min-width:
-    760px;
-}
-
-th,
-td {
-  border-bottom:
-    1px solid
-    var(--ae-border);
-
-  padding:
-    8px 9px;
-
-  text-align:
-    left;
-
-  vertical-align:
-    middle;
-
-  font-size:
-    12.5px;
-}
-
-th {
-  position:
-    sticky;
-
-  top:
-    0;
-
-  background:
-    var(--ae-card);
-
-  z-index:
-    1;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    10.5px;
-
-  text-transform:
-    uppercase;
-}
-
-th span,
-td span {
-  display:
-    block;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    10.5px;
-
-  margin-top:
-    1px;
-}
-
-td .ae-score-input {
-  min-width:
-    84px;
-}
-
-.ae-empty-table {
-  padding:
-    18px;
-
-  color:
-    var(--ae-muted);
-
-  text-align:
-    center;
-}
-
-.ae-empty,
-.ae-state {
-  max-width:
-    720px;
-
-  margin:
-    10px auto;
-
-  border-radius:
-    22px;
-
-  padding:
-    22px;
-
-  text-align:
-    center;
-}
-
-.ae-empty-icon {
-  font-size:
-    28px;
-}
-
-.ae-empty h3,
-.ae-state h2 {
-  margin:
-    7px 0 4px;
-}
-
-.ae-empty p,
-.ae-state p {
-  margin:
-    0;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    13px;
-}
-
-.ae-spinner {
-  width:
-    30px;
-
-  height:
-    30px;
-
-  border:
-    3px solid
-    rgba(
-      148,
-      163,
-      184,
-      .35
-    );
-
-  border-top-color:
-    var(--ae-primary);
-
-  border-radius:
-    999px;
-
-  margin:
-    0 auto 10px;
-
-  animation:
-    ae-spin
-    1s
-    linear
-    infinite;
-}
-
-.ae-state-button {
-  margin-top:
-    12px;
-
-  border:
-    1px solid
-    transparent;
-
-  border-radius:
-    14px;
-
-  padding:
-    10px 12px;
-
-  font-weight:
-    950;
-
-  background:
-    var(--ae-primary);
-
-  color:
-    #fff;
-}
-
-.ae-analysis-grid {
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(
-        0,
-        1fr
-      )
-    );
-
-  gap:
-    8px;
-
-  max-width:
-    1180px;
-
-  margin:
-    0 auto;
-}
-
-.ae-analysis {
-  border-radius:
-    18px;
-
-  padding:
-    12px;
-}
-
-.ae-analysis span {
-  display:
-    block;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    11.5px;
-
-  font-weight:
-    950;
-}
-
-.ae-analysis strong {
-  font-size:
-    26px;
-}
-
-.ae-analysis p {
-  margin:
-    5px 0 0;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    12.5px;
-}
-
-.ae-analysis.ae-wide {
-  grid-column:
-    1 / -1;
-}
-
-.ae-analysis.ae-wide p {
-  display:
-    flex;
-
-  justify-content:
-    space-between;
-
-  border-top:
-    1px solid
-    var(--ae-border);
-
-  padding-top:
-    7px;
-}
+.assessment-excel-footer-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}.assessment-excel-footer-actions button{min-height:40px;border-radius:12px;padding:0 14px;border:1px solid var(--ae-border);font-weight:900}.assessment-excel-footer-actions button.secondary{background:var(--ae-card);color:var(--ae-text)}.assessment-excel-footer-actions button.primary{background:var(--ae-primary);border-color:var(--ae-primary);color:#fff}.assessment-excel-footer-actions button:disabled{opacity:.5;cursor:not-allowed}.assessment-excel-stage{display:grid;gap:14px}.assessment-excel-stage-head h3{margin:0;font-size:15px}.assessment-excel-stage-head p{margin:5px 0 0;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.assessment-excel-context-grid label{display:grid;gap:5px}.assessment-excel-context-grid label>span{font-size:11px;font-weight:900;color:var(--ae-muted)}.assessment-excel-context-card,.assessment-excel-column-note{display:grid;gap:3px;padding:12px;border:1px solid var(--ae-border);border-radius:14px;background:var(--ae-card)}.assessment-excel-context-card span,.assessment-excel-context-card small,.assessment-excel-column-note span{font-size:11px;color:var(--ae-muted);line-height:1.45}.assessment-excel-result{text-align:center;padding:10px 0}.assessment-excel-result-icon{width:56px;height:56px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;background:rgba(34,197,94,.13);color:#15803d;font-size:28px;font-weight:950}.assessment-excel-result h3{margin:0;font-size:17px}.assessment-excel-result>p{margin:6px auto 16px;max-width:620px;color:var(--ae-muted);font-size:12px;line-height:1.5}.assessment-excel-result-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.assessment-excel-result-grid span{padding:11px 7px;border-radius:12px;background:var(--ae-card);border:1px solid var(--ae-border)}.assessment-excel-result-grid span.danger{background:#fff1f0}.assessment-excel-result-grid strong{display:block;font-size:18px}.assessment-excel-result-grid small{display:block;margin-top:2px;color:var(--ae-muted);font-size:10px}.assessment-excel-result-errors{margin-top:14px;display:grid;gap:6px;text-align:left}.assessment-excel-result-errors div{display:grid;gap:2px;padding:9px 10px;border-radius:11px;background:#fff7f6;border:1px solid #ffd3cf}.assessment-excel-result-errors strong{font-size:11px}.assessment-excel-result-errors span{font-size:10px;color:#b42318}@media(max-width:720px){.assessment-excel-context-grid{grid-template-columns:1fr}.assessment-excel-result-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.assessment-excel-footer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.assessment-excel-footer-actions button:only-child{grid-column:1/-1}}
 
 /* ============================================================
-   BASE FILTER / MORE
+   PORTAL-SAFE CENTERED MODALS + RESPONSIVE ASSESSMENT CONTEXT
    ============================================================ */
-
-.ae-sheet-backdrop {
-  position:
-    fixed;
-
-  inset:
-    0;
-
-  z-index:
-    50;
-
-  background:
-    rgba(
-      15,
-      23,
-      42,
-      .48
-    );
-
-  display:
-    flex;
-
-  align-items:
-    flex-end;
-
-  justify-content:
-    center;
-
-  padding:
-    12px;
+.ae-sheet-backdrop,
+[class*="excel"][class*="backdrop"] {
+  top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+  right: 0 !important;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  left: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  z-index: 58 !important;
 }
 
-.ae-sheet {
-  width:
-    min(
-      680px,
-      100%
-    );
-
-  max-height:
-    88dvh;
-
-  overflow:
-    auto;
-
-  border-radius:
-    26px;
-
-  padding:
-    14px;
-}
-
-.ae-sheet-head {
-  display:
-    flex;
-
-  align-items:
-    flex-start;
-
-  justify-content:
-    space-between;
-
-  gap:
-    12px;
-
-  margin-bottom:
-    12px;
-}
-
-.ae-sheet-head h2 {
-  margin:
-    0;
-}
-
-.ae-sheet-head p {
-  margin:
-    2px 0 0;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    13px;
-}
-
-.ae-sheet-head button {
-  border:
-    1px solid
-    var(--ae-border);
-
-  background:
-    var(--ae-card);
-
-  border-radius:
-    12px;
-
-  width:
-    36px;
-
-  height:
-    36px;
-
-  color:
-    var(--ae-text);
-}
-
-.ae-form-grid {
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(
-        0,
-        1fr
-      )
-    );
-
-  gap:
-    10px;
-}
-
-.ae-form-grid label {
-  display:
-    grid;
-
-  gap:
-    5px;
-
-  font-size:
-    12px;
-
-  color:
-    var(--ae-muted);
-
-  font-weight:
-    850;
+.ae-sheet,
+[class*="excel"][class*="sheet"]:not([class*="backdrop"]),
+[class*="excel"][class*="modal"]:not([class*="backdrop"]) {
+  margin: 0 auto !important;
+  max-height: calc(100% - 4px) !important;
+  max-width: calc(100% - 2px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 84px;
 }
 
 .ae-sheet-actions {
-  display:
-    flex;
-
-  justify-content:
-    flex-end;
-
-  gap:
-    8px;
-
-  border-top:
-    1px solid
-    var(--ae-border);
-
-  padding-top:
-    12px;
-
-  margin-top:
-    12px;
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: linear-gradient(to top, var(--ae-card) 78%, transparent);
 }
 
-.ae-sheet-actions button {
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    14px;
-
-  padding:
-    10px 12px;
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  font-weight:
-    950;
+/* Replace the single horizontally-scrolling metadata line with a true
+   responsive grid so labels never sit on top of one another. */
+.ae-compact-meta {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)) !important;
+  gap: 7px !important;
+  overflow: visible !important;
+  align-items: stretch;
 }
 
-.ae-sheet-actions .ae-primary {
-  background:
-    var(--ae-primary);
-
-  color:
-    #fff;
-
-  border-color:
-    transparent;
+.ae-compact-meta .ae-chip {
+  min-width: 0;
+  width: 100%;
+  min-height: 32px;
+  justify-content: center;
+  text-align: center;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
-.ae-more-sheet {
-  display:
-    grid;
-
-  gap:
-    8px;
-}
-
-.ae-more-sheet .ae-sheet-head {
-  margin-bottom:
-    4px;
-}
-
-.ae-more-sheet > button {
-  display:
-    grid;
-
-  grid-template-columns:
-    auto 1fr;
-
-  gap:
-    2px 10px;
-
-  text-align:
-    left;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-
-  border-radius:
-    16px;
-
-  padding:
-    11px;
-
-  font-weight:
-    950;
-}
-
-.ae-more-sheet > button.active {
-  border-color:
-    var(--ae-primary);
-
-  color:
-    var(--ae-primary);
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-primary) 7%,
-      var(--ae-card)
-    );
-}
-
-.ae-toast {
-  position:
-    fixed;
-
-  z-index:
-    80;
-
-  left:
-    12px;
-
-  right:
-    12px;
-
-  bottom:
-    12px;
-
-  max-width:
-    720px;
-
-  margin:
-    0 auto;
-
-  display:
-    flex;
-
-  align-items:
-    center;
-
-  justify-content:
-    space-between;
-
-  gap:
-    10px;
-
-  border-radius:
-    18px;
-
-  padding:
-    12px 14px;
-
-  color:
-    #fff;
-
-  box-shadow:
-    0 18px 40px
-    rgba(
-      15,
-      23,
-      42,
-      .28
-    );
-
-  font-weight:
-    850;
-}
-
-.ae-toast.success {
-  background:
-    #16a34a;
-}
-
-.ae-toast.error {
-  background:
-    #dc2626;
-}
-
-.ae-toast.info {
-  background:
-    #2563eb;
-}
-
-.ae-toast button {
-  border:
-    0;
-
-  background:
-    rgba(
-      255,
-      255,
-      255,
-      .18
-    );
-
-  color:
-    #fff;
-
-  border-radius:
-    10px;
-
-  width:
-    30px;
-
-  height:
-    30px;
-}
-
-/* ============================================================
-   ASSESSMENT EXCEL PAGE CONTENT
-   ============================================================ */
-
-.assessment-excel-footer-actions {
-  display:
-    flex;
-
-  justify-content:
-    flex-end;
-
-  gap:
-    8px;
-
-  flex-wrap:
-    wrap;
-}
-
-.assessment-excel-footer-actions button {
-  min-height:
-    40px;
-
-  border-radius:
-    12px;
-
-  padding:
-    0 14px;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  font-weight:
-    900;
-}
-
-.assessment-excel-footer-actions button.secondary {
-  background:
-    var(--ae-card);
-
-  color:
-    var(--ae-text);
-}
-
-.assessment-excel-footer-actions button.primary {
-  background:
-    var(--ae-primary);
-
-  border-color:
-    var(--ae-primary);
-
-  color:
-    #fff;
-}
-
-.assessment-excel-footer-actions button:disabled {
-  opacity:
-    .5;
-
-  cursor:
-    not-allowed;
-}
-
-.assessment-excel-stage {
-  display:
-    grid;
-
-  gap:
-    14px;
-}
-
-.assessment-excel-stage-head h3 {
-  margin:
-    0;
-
-  font-size:
-    15px;
-}
-
-.assessment-excel-stage-head p {
-  margin:
-    5px 0 0;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    12px;
-
-  line-height:
-    1.5;
-}
-
-.assessment-excel-context-grid {
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(
-        0,
-        1fr
-      )
-    );
-
-  gap:
-    10px;
-}
-
-.assessment-excel-context-grid label {
-  display:
-    grid;
-
-  gap:
-    5px;
-}
-
-.assessment-excel-context-grid label > span {
-  font-size:
-    11px;
-
-  font-weight:
-    900;
-
-  color:
-    var(--ae-muted);
-}
-
-.assessment-excel-context-card,
-.assessment-excel-column-note {
-  display:
-    grid;
-
-  gap:
-    3px;
-
-  padding:
-    12px;
-
-  border:
-    1px solid
-    var(--ae-border);
-
-  border-radius:
-    14px;
-
-  background:
-    var(--ae-card);
-}
-
-.assessment-excel-context-card span,
-.assessment-excel-context-card small,
-.assessment-excel-column-note span {
-  font-size:
-    11px;
-
-  color:
-    var(--ae-muted);
-
-  line-height:
-    1.45;
-}
-
-.assessment-excel-result {
-  text-align:
-    center;
-
-  padding:
-    10px 0;
-}
-
-.assessment-excel-result-icon {
-  width:
-    56px;
-
-  height:
-    56px;
-
-  margin:
-    0 auto 10px;
-
-  border-radius:
-    50%;
-
-  display:
-    grid;
-
-  place-items:
-    center;
-
-  background:
-    rgba(
-      34,
-      197,
-      94,
-      .13
-    );
-
-  color:
-    #15803d;
-
-  font-size:
-    28px;
-
-  font-weight:
-    950;
-}
-
-.assessment-excel-result h3 {
-  margin:
-    0;
-
-  font-size:
-    17px;
-}
-
-.assessment-excel-result > p {
-  margin:
-    6px auto 16px;
-
-  max-width:
-    620px;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    12px;
-
-  line-height:
-    1.5;
-}
-
-.assessment-excel-result-grid {
-  display:
-    grid;
-
-  grid-template-columns:
-    repeat(
-      6,
-      minmax(
-        0,
-        1fr
-      )
-    );
-
-  gap:
-    8px;
-}
-
-.assessment-excel-result-grid span {
-  padding:
-    11px 7px;
-
-  border-radius:
-    12px;
-
-  background:
-    var(--ae-card);
-
-  border:
-    1px solid
-    var(--ae-border);
-}
-
-.assessment-excel-result-grid span.danger {
-  background:
-    #fff1f0;
-}
-
-.assessment-excel-result-grid strong {
-  display:
-    block;
-
-  font-size:
-    18px;
-}
-
-.assessment-excel-result-grid small {
-  display:
-    block;
-
-  margin-top:
-    2px;
-
-  color:
-    var(--ae-muted);
-
-  font-size:
-    10px;
-}
-
-.assessment-excel-result-errors {
-  margin-top:
-    14px;
-
-  display:
-    grid;
-
-  gap:
-    6px;
-
-  text-align:
-    left;
-}
-
-.assessment-excel-result-errors div {
-  display:
-    grid;
-
-  gap:
-    2px;
-
-  padding:
-    9px 10px;
-
-  border-radius:
-    11px;
-
-  background:
-    #fff7f6;
-
-  border:
-    1px solid
-    #ffd3cf;
-}
-
-.assessment-excel-result-errors strong {
-  font-size:
-    11px;
-}
-
-.assessment-excel-result-errors span {
-  font-size:
-    10px;
-
-  color:
-    #b42318;
-}
-
-/* ============================================================
-   DESKTOP / TABLET
-   ============================================================ */
-
-@media (
-  min-width:
-    760px
-) {
-  .ae-page {
-    padding:
-      14px;
-  }
-
-  .ae-list {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-
-  .ae-score-grid {
-    grid-template-columns:
-      repeat(
-        3,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-
-  .ae-analysis-grid {
-    grid-template-columns:
-      repeat(
-        4,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-}
-
-@media (
-  min-width:
-    1120px
-) {
-  .ae-list.ae-entry-list {
-    grid-template-columns:
-      repeat(
-        3,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-
-  .ae-list.ae-picker-list {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-
-  .ae-score-grid {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-}
-
-/* ============================================================
-   MOBILE MAIN CONTENT
-   ============================================================ */
-
-@media (
-  max-width:
-    560px
-) {
-  .ae-page {
-    padding:
-      7px;
-  }
-
-  .ae-search-card {
-    border-radius:
-      18px;
-  }
-
+/* Let the subject/session strip breathe on phones instead of squeezing
+   title + Start + Save into one narrow row. */
+@media (max-width: 560px) {
   .ae-session-strip {
-    grid-template-columns:
-      auto
-      minmax(
-        0,
-        1fr
-      ) !important;
-
-    align-items:
-      center;
-
-    margin-bottom:
-      4px;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    align-items: center;
   }
 
   .ae-session-strip > div {
-    min-width:
-      0;
+    min-width: 0;
   }
 
   .ae-session-strip > div strong,
   .ae-session-strip > div small {
-    overflow-wrap:
-      anywhere;
+    overflow-wrap: anywhere;
   }
 
   .ae-session-strip > button {
-    width:
-      100%;
-
-    padding:
-      7px 8px;
+    width: 100%;
   }
 
   .ae-session-strip > button:nth-last-child(2) {
-    grid-column:
-      1 / 2;
+    grid-column: 1 / 2;
   }
 
   .ae-session-strip > button:last-child {
-    grid-column:
-      2 / 3;
+    grid-column: 2 / 3;
   }
-
-  .ae-score-grid {
-    grid-template-columns:
-      1fr;
-  }
-
-  .ae-form-grid {
-    grid-template-columns:
-      1fr;
-  }
-
-  th,
-  td {
-    padding:
-      7px;
-  }
-
-  .ae-analysis-grid {
-    grid-template-columns:
-      1fr;
-  }
-
-  /*
-   * MOBILE COMPACT ASSESSMENT CONTEXT
-   *
-   * The old large chip/card section now visually disappears.
-   * Information remains as tiny horizontal text:
-   *
-   * Ready · Class Test · GES · 4 students · 5 items · 0/20 entered
-   */
 
   .ae-compact-meta {
-    display:
-      flex !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
 
-    align-items:
-      center !important;
+@media (max-width: 360px) {
+  .ae-compact-meta {
+    grid-template-columns: 1fr !important;
+  }
+}
 
-    width:
-      100% !important;
-
-    max-width:
-      1180px;
-
-    gap:
-      0 !important;
-
-    margin:
-      0 auto 4px !important;
-
-    padding:
-      0 2px 2px !important;
-
-    overflow-x:
-      auto !important;
-
-    overflow-y:
-      hidden !important;
-
-    border:
-      0 !important;
-
-    border-radius:
-      0 !important;
-
-    background:
-      transparent !important;
-
-    box-shadow:
-      none !important;
-
-    scrollbar-width:
-      none;
-
-    -webkit-overflow-scrolling:
-      touch;
+@media (min-width: 980px) {
+  .ae-sheet-backdrop,
+  [class*="excel"][class*="backdrop"] {
+    top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: var(--portal-content-left, 0px) !important;
+    max-width: calc(100vw - var(--portal-content-left, 0px)) !important;
+    padding: 18px !important;
+    z-index: 80 !important;
   }
 
-  .ae-compact-meta::-webkit-scrollbar {
-    display:
-      none;
+  .ae-compact-meta {
+    grid-template-columns: repeat(auto-fit, minmax(130px, max-content)) !important;
+    justify-content: start;
   }
 
   .ae-compact-meta .ae-chip {
-    flex:
-      0 0 auto !important;
-
-    width:
-      auto !important;
-
-    min-width:
-      0 !important;
-
-    min-height:
-      0 !important;
-
-    display:
-      inline !important;
-
-    padding:
-      0 !important;
-
-    border:
-      0 !important;
-
-    border-radius:
-      0 !important;
-
-    background:
-      transparent !important;
-
-    box-shadow:
-      none !important;
-
-    font-size:
-      9px !important;
-
-    line-height:
-      1.25 !important;
-
-    font-weight:
-      800 !important;
-
-    white-space:
-      nowrap !important;
-  }
-
-  .ae-compact-meta .ae-chip:not(:last-child)::after {
-    content:
-      " · ";
-
-    display:
-      inline;
-
-    margin:
-      0 4px;
-
-    color:
-      var(--ae-muted);
-  }
-
-  .ae-compact-meta .ae-chip.green {
-    color:
-      #16a34a !important;
-  }
-
-  .ae-compact-meta .ae-chip.red {
-    color:
-      #dc2626 !important;
-  }
-
-  .ae-compact-meta .ae-chip.blue {
-    color:
-      #2563eb !important;
-  }
-
-  .ae-compact-meta .ae-chip.purple {
-    color:
-      #9333ea !important;
-  }
-
-  .ae-compact-meta .ae-chip.orange {
-    color:
-      #ea580c !important;
+    width: auto;
+    padding-inline: 11px;
   }
 }
 
 /* ============================================================
-   ASSESSMENT EXCEL RESPONSIVE CONTENT
+   ASSESSMENT FILTER / MORE MODALS — TRUE FULL-SCREEN PORTALS
    ============================================================ */
-
-@media (
-  max-width:
-    720px
-) {
-  .assessment-excel-context-grid {
-    grid-template-columns:
-      1fr;
-  }
-
-  .assessment-excel-result-grid {
-    grid-template-columns:
-      repeat(
-        3,
-        minmax(
-          0,
-          1fr
-        )
-      );
-  }
-
-  .assessment-excel-footer-actions {
-    display:
-      grid;
-
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(
-          0,
-          1fr
-        )
-      );
-
-    width:
-      100%;
-  }
-
-  .assessment-excel-footer-actions button:only-child {
-    grid-column:
-      1 / -1;
-  }
-}
-
-/* ============================================================
-   FILTER + MORE
-   TRUE FULL-SCREEN PORTAL MODALS
-   ============================================================ */
-
 .ae-sheet-backdrop {
-  /*
-   * Because FilterSheet and MoreSheet are portaled to document.body,
-   * they define their own theme bridge rather than relying on .ae-page
-   * inheritance.
-   */
+  --ae-bg: var(--bg, #f7f8fb);
+  --ae-card: var(--card-bg, var(--surface, #ffffff));
+  --ae-text: var(--text, var(--foreground, #111827));
+  --ae-muted: var(--muted, var(--muted-foreground, #64748b));
+  --ae-border: var(--border, rgba(15, 23, 42, .12));
+  --ae-primary: var(--primary-color, #2563eb);
 
-  --ae-bg:
-    var(
-      --bg,
-      #f7f8fb
-    );
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: none !important;
+  min-height: 100dvh !important;
+  z-index: 2147482000 !important;
 
-  --ae-card:
-    var(
-      --card-bg,
-      var(
-        --surface,
-        #ffffff
-      )
-    );
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 
-  --ae-text:
-    var(
-      --text,
-      var(
-        --foreground,
-        #111827
-      )
-    );
-
-  --ae-muted:
-    var(
-      --muted,
-      var(
-        --muted-foreground,
-        #64748b
-      )
-    );
-
-  --ae-border:
-    var(
-      --border,
-      rgba(
-        15,
-        23,
-        42,
-        .12
-      )
-    );
-
-  position:
-    fixed !important;
-
-  inset:
-    0 !important;
-
-  width:
-    100vw !important;
-
-  height:
-    100dvh !important;
-
-  min-height:
-    100dvh !important;
-
-  max-width:
-    none !important;
-
-  z-index:
-    2147482000 !important;
-
-  display:
-    flex !important;
-
-  align-items:
-    center !important;
-
-  justify-content:
-    center !important;
-
-  box-sizing:
-    border-box !important;
-
-  padding-top:
-    calc(
-      var(
-        --eds-shell-top-offset,
-        0px
-      ) +
-      var(
-        --portal-header-height,
-        48px
-      ) +
-      10px
-    ) !important;
-
-  padding-right:
+  box-sizing: border-box !important;
+  padding:
+    calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px) + 10px)
+    10px
+    calc(82px + env(safe-area-inset-bottom, 0px))
     10px !important;
 
-  padding-bottom:
-    calc(
-      82px +
-      env(
-        safe-area-inset-bottom,
-        0px
-      )
-    ) !important;
-
-  padding-left:
-    10px !important;
-
-  overflow:
-    hidden !important;
+  overflow: hidden !important;
 
   background:
     color-mix(
@@ -10695,206 +3107,63 @@ td .ae-score-input {
       transparent
     ) !important;
 
-  -webkit-backdrop-filter:
-    blur(10px)
-    saturate(.92);
-
-  backdrop-filter:
-    blur(10px)
-    saturate(.92);
-
-  touch-action:
-    manipulation;
+  -webkit-backdrop-filter: blur(10px) saturate(.92);
+  backdrop-filter: blur(10px) saturate(.92);
 }
 
 .ae-sheet-backdrop .ae-sheet {
-  position:
-    relative;
+  width: min(680px, calc(100vw - 20px)) !important;
+  max-width: 100% !important;
+  max-height: calc(100% - 4px) !important;
+  min-height: 0 !important;
+  margin: 0 !important;
 
-  width:
-    min(
-      680px,
-      calc(
-        100vw -
-        20px
-      )
-    ) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 
-  max-width:
-    100% !important;
-
-  max-height:
-    calc(
-      100% -
-      4px
-    ) !important;
-
-  min-height:
-    0 !important;
-
-  margin:
-    0 !important;
-
-  padding:
-    14px !important;
-
-  overflow-x:
-    hidden !important;
-
-  overflow-y:
-    auto !important;
-
-  overscroll-behavior:
-    contain;
-
-  -webkit-overflow-scrolling:
-    touch;
-
-  scroll-padding-bottom:
-    84px;
-
-  border:
-    1px solid
-    var(
-      --ae-border
-    ) !important;
-
-  border-radius:
-    22px !important;
-
-  background:
-    var(
-      --ae-card
-    ) !important;
-
-  color:
-    var(
-      --ae-text
-    ) !important;
-
-  box-shadow:
-    0
-    26px
-    80px
-    rgba(
-      2,
-      6,
-      23,
-      .28
-    ) !important;
+  border: 1px solid var(--ae-border) !important;
+  border-radius: 22px !important;
+  background: var(--ae-card) !important;
+  color: var(--ae-text) !important;
+  box-shadow: 0 26px 80px rgba(2, 6, 23, .28) !important;
 }
 
-/* Sticky modal header */
-
 .ae-sheet-backdrop .ae-sheet-head {
-  position:
-    sticky;
+  position: sticky;
+  top: -14px;
+  z-index: 5;
 
-  top:
-    -14px;
+  margin: -14px -14px 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--ae-border);
 
-  z-index:
-    5;
-
-  display:
-    flex;
-
-  align-items:
-    flex-start;
-
-  justify-content:
-    space-between;
-
-  gap:
-    12px;
-
-  margin:
-    -14px
-    -14px
-    12px;
-
-  padding:
-    14px;
-
-  border-bottom:
-    1px solid
-    var(
-      --ae-border
-    );
-
-  background:
-    var(
-      --ae-card
-    );
+  background: var(--ae-card);
 }
 
 .ae-sheet-backdrop .ae-sheet-head h2 {
-  margin:
-    0;
-
-  color:
-    var(
-      --ae-text
-    ) !important;
+  color: var(--ae-text) !important;
 }
 
 .ae-sheet-backdrop .ae-sheet-head p {
-  margin:
-    3px 0 0;
-
-  color:
-    var(
-      --ae-muted
-    ) !important;
-
-  font-size:
-    12px;
-
-  line-height:
-    1.45;
+  color: var(--ae-muted) !important;
 }
 
-/* Visible, tappable X button */
+.ae-sheet-backdrop .ae-sheet-head > button {
+  position: relative;
+  z-index: 6;
 
-.ae-sheet-backdrop .ae-sheet-close {
-  position:
-    relative;
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
 
-  z-index:
-    6;
+  display: grid;
+  place-items: center;
 
-  flex:
-    0 0 auto;
-
-  width:
-    44px !important;
-
-  min-width:
-    44px !important;
-
-  height:
-    44px !important;
-
-  min-height:
-    44px !important;
-
-  padding:
-    0 !important;
-
-  display:
-    grid !important;
-
-  place-items:
-    center !important;
-
-  border:
-    1px solid
-    var(
-      --ae-border
-    ) !important;
-
-  border-radius:
-    999px !important;
+  border: 1px solid var(--ae-border) !important;
+  border-radius: 999px !important;
 
   background:
     color-mix(
@@ -10903,40 +3172,19 @@ td .ae-score-input {
       var(--ae-card)
     ) !important;
 
-  color:
-    var(
-      --ae-text
-    ) !important;
+  color: var(--ae-text) !important;
+  box-shadow: none !important;
 
-  box-shadow:
-    none !important;
+  font-size: 20px;
+  font-weight: 900;
 
-  opacity:
-    1 !important;
-
-  font-size:
-    20px !important;
-
-  line-height:
-    1 !important;
-
-  font-weight:
-    900 !important;
-
-  cursor:
-    pointer;
-
-  pointer-events:
-    auto !important;
-
-  touch-action:
-    manipulation;
-
-  -webkit-tap-highlight-color:
-    transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
 }
 
-.ae-sheet-backdrop .ae-sheet-close:hover {
+.ae-sheet-backdrop .ae-sheet-head > button:hover {
   background:
     color-mix(
       in srgb,
@@ -10952,311 +3200,77 @@ td .ae-score-input {
     ) !important;
 }
 
-/* Form controls */
+.ae-sheet-backdrop .ae-form-grid label {
+  color: var(--ae-muted);
+}
 
 .ae-sheet-backdrop input,
 .ae-sheet-backdrop select,
 .ae-sheet-backdrop textarea {
-  width:
-    100%;
-
-  min-height:
-    44px;
-
-  background:
-    var(
-      --ae-card
-    ) !important;
-
-  color:
-    var(
-      --ae-text
-    ) !important;
-
-  border:
-    1px solid
-    var(
-      --ae-border
-    ) !important;
-
-  pointer-events:
-    auto;
-
-  touch-action:
-    manipulation;
+  background: var(--ae-card) !important;
+  color: var(--ae-text) !important;
+  border-color: var(--ae-border) !important;
 }
 
 .ae-sheet-backdrop select option {
-  background:
-    var(
-      --ae-card
-    );
-
-  color:
-    var(
-      --ae-text
-    );
+  background: var(--ae-card);
+  color: var(--ae-text);
 }
-
-.ae-sheet-backdrop .ae-form-grid label {
-  color:
-    var(
-      --ae-muted
-    );
-}
-
-/* Filter footer */
 
 .ae-sheet-backdrop .ae-sheet-actions {
-  position:
-    sticky;
+  position: sticky;
+  bottom: -14px;
+  z-index: 4;
 
-  bottom:
-    -14px;
+  margin: 12px -14px -14px;
+  padding: 12px 14px 14px;
 
-  z-index:
-    4;
-
-  display:
-    flex;
-
-  justify-content:
-    flex-end;
-
-  gap:
-    8px;
-
-  margin:
-    12px
-    -14px
-    -14px;
-
-  padding:
-    12px
-    14px
-    14px;
-
-  border-top:
-    1px solid
-    var(
-      --ae-border
-    );
+  border-top: 1px solid var(--ae-border);
 
   background:
     linear-gradient(
       to top,
-      var(
-        --ae-card
-      ) 86%,
-      color-mix(
-        in srgb,
-        var(
-          --ae-card
-        ) 94%,
-        transparent
-      )
+      var(--ae-card) 86%,
+      color-mix(in srgb, var(--ae-card) 94%, transparent)
     );
 }
 
-.ae-sheet-backdrop
-.ae-sheet-actions
-button {
-  min-height:
-    46px;
+.ae-sheet-backdrop .ae-sheet-actions button,
+.ae-sheet-backdrop .ae-more-sheet > button {
+  min-height: 46px;
 
-  padding:
-    0 16px;
-
-  border:
-    1px solid
-    var(
-      --ae-border
-    ) !important;
-
-  border-radius:
-    14px;
-
+  border-color: var(--ae-border) !important;
   background:
     color-mix(
       in srgb,
       var(--ae-text) 4%,
       var(--ae-card)
     ) !important;
+  color: var(--ae-text) !important;
 
-  color:
-    var(
-      --ae-text
-    ) !important;
-
-  font-weight:
-    900;
-
-  pointer-events:
-    auto !important;
-
-  touch-action:
-    manipulation;
-
-  -webkit-tap-highlight-color:
-    transparent;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
 }
 
-.ae-sheet-backdrop
-.ae-sheet-actions
-.ae-primary {
-  background:
-    var(
-      --ae-primary
-    ) !important;
-
-  border-color:
-    var(
-      --ae-primary
-    ) !important;
-
-  color:
-    #ffffff !important;
+.ae-sheet-backdrop .ae-sheet-actions .ae-primary {
+  background: var(--ae-primary) !important;
+  border-color: var(--ae-primary) !important;
+  color: #ffffff !important;
 }
 
-/* More menu options */
-
-.ae-sheet-backdrop .ae-more-sheet {
-  display:
-    grid;
-
-  gap:
-    8px;
-}
-
-.ae-sheet-backdrop
-.ae-more-sheet
-> button {
-  width:
-    100%;
-
-  min-height:
-    54px;
-
-  display:
-    grid;
-
-  grid-template-columns:
-    1fr;
-
-  gap:
-    3px;
-
-  padding:
-    11px 12px;
-
-  border:
-    1px solid
-    var(
-      --ae-border
-    ) !important;
-
-  border-radius:
-    16px;
-
-  background:
-    color-mix(
-      in srgb,
-      var(--ae-text) 4%,
-      var(--ae-card)
-    ) !important;
-
-  color:
-    var(
-      --ae-text
-    ) !important;
-
-  text-align:
-    left;
-
-  pointer-events:
-    auto !important;
-
-  touch-action:
-    manipulation;
-
-  -webkit-tap-highlight-color:
-    transparent;
-}
-
-.ae-sheet-backdrop
-.ae-more-sheet
-> button
-strong {
-  color:
-    var(
-      --ae-text
-    );
-
-  font-size:
-    13px;
-
-  font-weight:
-    950;
-}
-
-.ae-sheet-backdrop
-.ae-more-sheet
-> button
-span {
-  color:
-    var(
-      --ae-muted
-    );
-
-  font-size:
-    11px;
-
-  font-weight:
-    700;
-
-  line-height:
-    1.35;
-}
-
-.ae-sheet-backdrop
-.ae-more-sheet
-> button.active {
-  border-color:
-    var(
-      --ae-primary
-    ) !important;
-
+.ae-sheet-backdrop .ae-more-sheet > button.active {
   background:
     color-mix(
       in srgb,
       var(--ae-primary) 10%,
       var(--ae-card)
     ) !important;
-
-  color:
-    var(
-      --ae-primary
-    ) !important;
+  border-color: var(--ae-primary) !important;
+  color: var(--ae-primary) !important;
 }
 
-.ae-sheet-backdrop
-.ae-more-sheet
-> button.active
-strong {
-  color:
-    var(
-      --ae-primary
-    ) !important;
-}
-
-/* ============================================================
-   DARK MODE
-   ============================================================ */
-
-@media (
-  prefers-color-scheme:
-    dark
-) {
+@media (prefers-color-scheme: dark) {
   .ae-sheet-backdrop {
     background:
       color-mix(
@@ -11266,300 +3280,117 @@ strong {
       ) !important;
   }
 
-  .ae-sheet-backdrop
-  .ae-sheet-close {
-    background:
-      rgba(
-        255,
-        255,
-        255,
-        .12
-      ) !important;
-
-    color:
-      #f8fafc !important;
-
-    border-color:
-      rgba(
-        255,
-        255,
-        255,
-        .22
-      ) !important;
-
+  .ae-sheet-backdrop .ae-sheet-head > button {
+    background: rgba(255, 255, 255, .12) !important;
+    color: #f8fafc !important;
+    border-color: rgba(255, 255, 255, .22) !important;
     box-shadow:
-      0 4px 16px
-      rgba(
-        0,
-        0,
-        0,
-        .28
-      ),
-      inset
-      0 0 0 1px
-      rgba(
-        255,
-        255,
-        255,
-        .04
-      ) !important;
+      0 4px 16px rgba(0, 0, 0, .28),
+      inset 0 0 0 1px rgba(255, 255, 255, .04) !important;
   }
 
-  .ae-sheet-backdrop
-  .ae-sheet-close:hover {
-    background:
-      rgba(
-        255,
-        255,
-        255,
-        .18
-      ) !important;
-
-    border-color:
-      rgba(
-        255,
-        255,
-        255,
-        .32
-      ) !important;
+  .ae-sheet-backdrop .ae-sheet-head > button:hover {
+    background: rgba(255, 255, 255, .18) !important;
+    border-color: rgba(255, 255, 255, .32) !important;
   }
 }
 
-/* ============================================================
-   MOBILE MODALS
-   ============================================================ */
-
-@media (
-  max-width:
-    520px
-) {
+@media (max-width: 520px) {
   .ae-sheet-backdrop {
-    padding-top:
-      calc(
-        var(
-          --eds-shell-top-offset,
-          0px
-        ) +
-        var(
-          --portal-header-height,
-          48px
-        ) +
-        8px
-      ) !important;
-
-    padding-right:
-      8px !important;
-
-    padding-bottom:
-      calc(
-        82px +
-        env(
-          safe-area-inset-bottom,
-          0px
-        )
-      ) !important;
-
-    padding-left:
+    padding:
+      calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px) + 8px)
+      8px
+      calc(82px + env(safe-area-inset-bottom, 0px))
       8px !important;
   }
 
-  .ae-sheet-backdrop
-  .ae-sheet {
-    width:
-      calc(
-        100vw -
-        16px
-      ) !important;
-
-    max-height:
-      calc(
-        100% -
-        4px
-      ) !important;
-
-    border-radius:
-      20px !important;
+  .ae-sheet-backdrop .ae-sheet {
+    width: calc(100vw - 16px) !important;
+    border-radius: 20px !important;
   }
 
-  .ae-sheet-backdrop
-  .ae-form-grid {
-    grid-template-columns:
-      1fr;
+  .ae-sheet-backdrop .ae-more-sheet > button {
+    min-height: 52px;
   }
 
-  .ae-sheet-backdrop
-  .ae-more-sheet
-  > button {
-    min-height:
-      56px;
-  }
-
-  .ae-sheet-backdrop
-  .ae-sheet-actions {
-    flex-wrap:
-      wrap;
-  }
-
-  .ae-sheet-backdrop
-  .ae-sheet-actions
-  button {
-    flex:
-      1 1 120px;
-
-    min-height:
-      48px;
-  }
-
-  .ae-sheet-backdrop
-  .ae-sheet-close {
-    width:
-      44px !important;
-
-    min-width:
-      44px !important;
-
-    height:
-      44px !important;
-
-    min-height:
-      44px !important;
+  .ae-sheet-backdrop .ae-sheet-actions button {
+    min-height: 48px;
+    flex: 1 1 120px;
   }
 }
+
 
 /* ============================================================
-   EXCEL MODALS — MATCH ASSESSMENT / BRANCH-ADMIN LANGUAGE
+   MODAL VISIBILITY HARDENING — STRONG BACKDROP + CLOSE BUTTON
+   Applies to assessment portals and shared Excel portals rendered
+   directly under document.body.
    ============================================================ */
-
-.ae-page {
-  --excel-surface:
-    var(
-      --ae-card
-    );
-
-  --excel-surface-2:
-    color-mix(
-      in srgb,
-      var(
-        --ae-card
-      ) 92%,
-      var(
-        --ae-text
-      ) 8%
-    );
-
-  --excel-text:
-    var(
-      --ae-text
-    );
-
-  --excel-muted:
-    var(
-      --ae-muted
-    );
-
-  --excel-border:
-    var(
-      --ae-border
-    );
+.ae-sheet-backdrop,
+.excel-export-overlay,
+.excel-import-overlay {
+  background: rgba(2, 6, 23, .66) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(.9) !important;
+  backdrop-filter: blur(12px) saturate(.9) !important;
 }
 
-.assessment-excel-context-card,
-.assessment-excel-column-note,
-.assessment-excel-result-grid span {
-  background:
-    var(
-      --excel-surface,
-      var(--ae-card)
-    ) !important;
-
-  color:
-    var(
-      --excel-text,
-      var(--ae-text)
-    ) !important;
-
-  border-color:
-    var(
-      --excel-border,
-      var(--ae-border)
-    ) !important;
+/* Excel is portaled outside .ae-page, so the styling must be global. */
+.excel-export-overlay,
+.excel-import-overlay {
+  isolation: isolate;
 }
 
-.assessment-excel-stage-head p,
-.assessment-excel-context-card span,
-.assessment-excel-context-card small,
-.assessment-excel-column-note span,
-.assessment-excel-result > p,
-.assessment-excel-result-grid small {
-  color:
-    var(
-      --excel-muted,
-      var(--ae-muted)
-    ) !important;
+.excel-export-close,
+.excel-import-close,
+.ae-sheet-backdrop .ae-sheet-head > button,
+.ae-sheet-backdrop .ae-modal-close {
+  position: relative !important;
+  z-index: 20 !important;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 1px solid rgba(15, 23, 42, .20) !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, .16) !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
 }
 
-.assessment-excel-context-grid input,
-.assessment-excel-context-grid select {
-  background:
-    var(
-      --input-bg,
-      var(
-        --excel-surface,
-        var(--ae-card)
-      )
-    ) !important;
-
-  color:
-    var(
-      --input-text,
-      var(
-        --excel-text,
-        var(--ae-text)
-      )
-    ) !important;
-
-  border-color:
-    var(
-      --input-border,
-      var(
-        --excel-border,
-        var(--ae-border)
-      )
-    ) !important;
+.excel-export-close:hover,
+.excel-import-close:hover,
+.ae-sheet-backdrop .ae-sheet-head > button:hover,
+.ae-sheet-backdrop .ae-modal-close:hover {
+  border-color: color-mix(in srgb, var(--ae-primary, #2563eb) 42%, rgba(15, 23, 42, .20)) !important;
+  background: color-mix(in srgb, var(--ae-primary, #2563eb) 8%, #ffffff) !important;
+  color: #111827 !important;
 }
 
-.assessment-excel-result-grid span.danger,
-.assessment-excel-result-errors div {
-  background:
-    color-mix(
-      in srgb,
-      #ef4444 8%,
-      var(
-        --excel-surface,
-        var(--ae-card)
-      )
-    ) !important;
+@media (prefers-color-scheme: dark) {
+  .ae-sheet-backdrop,
+  .excel-export-overlay,
+  .excel-import-overlay {
+    background: rgba(2, 6, 23, .78) !important;
+  }
 
-  border-color:
-    color-mix(
-      in srgb,
-      #ef4444 28%,
-      var(
-        --excel-border,
-        var(--ae-border)
-      )
-    ) !important;
+  .excel-export-close,
+  .excel-import-close,
+  .ae-sheet-backdrop .ae-sheet-head > button,
+  .ae-sheet-backdrop .ae-modal-close {
+    border-color: rgba(255, 255, 255, .22) !important;
+    background: #1f2937 !important;
+    color: #ffffff !important;
+    box-shadow: 0 5px 18px rgba(0, 0, 0, .36) !important;
+  }
 }
 
-.assessment-excel-result-errors span {
-  color:
-    color-mix(
-      in srgb,
-      #ef4444 82%,
-      var(
-        --excel-text,
-        var(--ae-text)
-      )
-    ) !important;
-}
 `;

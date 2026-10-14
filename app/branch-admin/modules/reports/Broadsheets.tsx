@@ -3712,5 +3712,18 @@ const css = `
     margin:0!important;padding:0!important;overflow:visible!important;
   }
 }
+
+/* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
+
+.student-reports-page {background:var(--bg,var(--background,#f2f4f7));padding:5px;min-height:0;}
+.student-reports-page .ba-print-card {margin:0;padding:5px;border-radius:13px;
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);box-shadow:none;}
+.student-reports-page .ba-print-zone {border-radius:10px;}
+.student-reports-page .ba-sheet,.student-reports-page .ba-card,.student-reports-page .ba-analysis {
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ box-shadow:none;border-radius:13px;}
+@media(max-width:639px){.student-reports-page{padding:3px;}}
+
 `;
  

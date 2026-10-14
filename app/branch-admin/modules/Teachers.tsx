@@ -49,6 +49,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../context/settings-context";
 import SignaturePadModal from "../../components/media/SignaturePadModal";
@@ -1598,6 +1599,21 @@ export default function TeachersPage() {
     await load();
   };
 
+  // The portal owns the action strip. All module actions stay functional.
+  useRegisterBranchWorkspaceToolbar("teachers", {
+    add: () => openCreate(),
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+
+  // Table is the efficient default on a laptop; mobile starts in cards.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+    }
+  }, []);
+
   if (accountLoading || contextLoading || settingsLoading || loading)
     return (
       <State
@@ -1654,78 +1670,6 @@ export default function TeachersPage() {
           >
             ✕
           </button>
-        </section>
-      )}
-
-      <section
-        className="ba-search-card"
-        aria-label="Teacher search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search teachers..."
-            aria-label="Search teachers"
-          />
-        </label>
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={() => openCreate()}
-          aria-label="Add teacher"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {filterOrganizationId !== "all" && (
-            <button
-              type="button"
-              onClick={() => setFilterOrganizationId("all")}
-            >
-              Organization:{" "}
-              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
-                filterOrganizationId}{" "}
-              ×
-            </button>
-          )}
-          {filterRole !== "all" && (
-            <button type="button" onClick={() => setFilterRole("all")}>
-              Role: {roleLabel(filterRole)} ×
-            </button>
-          )}
-          {filterStatus !== "all" && (
-            <button type="button" onClick={() => setFilterStatus("all")}>
-              Status: {filterStatus} ×
-            </button>
-          )}
-          {filterGender !== "all" && (
-            <button type="button" onClick={() => setFilterGender("all")}>
-              Gender: {filterGender} ×
-            </button>
-          )}
         </section>
       )}
 
@@ -1833,6 +1777,8 @@ export default function TeachersPage() {
 
       {filterOpen && (
         <FilterSheet
+          search={search}
+          setSearch={setSearch}
           organizations={organizations}
           genderOptions={genderOptions}
           filterOrganizationId={filterOrganizationId}
@@ -1992,6 +1938,8 @@ function SliderIcon() {
 }
 
 function FilterSheet({
+  search,
+  setSearch,
   organizations,
   genderOptions,
   filterOrganizationId,
@@ -2005,6 +1953,8 @@ function FilterSheet({
   clearFilters,
   onClose,
 }: {
+  search: string;
+  setSearch: (value: string) => void;
   organizations: Organization[];
   genderOptions: string[];
   filterOrganizationId: string;
@@ -2032,6 +1982,11 @@ function FilterSheet({
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
           </button>
+        </div>
+        <div className="ba-record-search-in-filter">
+          <label htmlFor="ba-records-search">Search</label>
+          <input id="ba-records-search" type="search" value={search}
+            onChange={(event) => setSearch(event.target.value)} placeholder="Search records..." />
         </div>
         <div className="ba-form compact">
           <label>
@@ -4500,4 +4455,32 @@ const css = `
   }
 }
 
+
+/* V5 — neutral, lightweight records workspace; theme-aware and low-paint. */
+.ba-page { background: var(--bg, var(--background, #f2f4f7)); padding: 5px; min-height: 0; }
+.ba-list { gap: 9px; margin-top: 2px; }
+.student-row, .ba-card, .ba-table-card, .ba-analysis {
+  background: color-mix(in srgb, var(--card-bg, var(--surface, #fff)) 93%, var(--text, #182235) 7%);
+  border: 1px solid color-mix(in srgb, var(--border, #d4dae3) 85%, var(--text, #182235) 15%);
+  box-shadow: none; border-radius: 13px; transition: border-color .12s ease;
+}
+.student-row:hover, .ba-card:hover { transform: none; box-shadow: none; }
+.ba-table-card { padding: 4px; margin-top: 2px; }
+.ba-table-scroll { border-radius: 10px; }
+.ba-table-scroll table { background: color-mix(in srgb, var(--card-bg, var(--surface,#fff)) 95%, var(--text,#182235) 5%); }
+.ba-table-scroll thead th { position: sticky; top: 0; z-index: 2;
+  background: color-mix(in srgb, var(--card-bg, var(--surface,#fff)) 85%, var(--text,#182235) 15%); }
+.ba-table-scroll tbody tr:nth-child(even) { background: color-mix(in srgb, var(--card-bg, var(--surface,#fff)) 89%, var(--text,#182235) 11%); }
+.ba-table-scroll td { background: transparent; }
+.ba-avatar { box-shadow: none; border-radius: 12px; }
+.ba-record-search-in-filter { display: grid; gap: 6px; margin: 0 0 12px; }
+.ba-record-search-in-filter label { font-size: 12px; font-weight: 700; }
+.ba-record-search-in-filter input { width: 100%; min-height: 42px; padding: 0 12px;
+  border: 1px solid var(--border, #d4dae3); border-radius: 10px;
+  background: var(--input-bg, var(--surface,#fff)); color: var(--text,#182235); }
+.ba-page .ba-search-card, .ba-page .ba-filter-chips { display: none !important; }
+.ba-page .student-row::before { display: none; }
+@media (min-width: 1024px) { .ba-list { grid-template-columns: repeat(4,minmax(0,1fr)); } }
+@media (max-width: 639px) { .ba-page { padding: 3px; } .student-row { padding: 9px; } }
+@media (prefers-reduced-motion: reduce) { .student-row, .ba-card { transition: none; } }
 `;

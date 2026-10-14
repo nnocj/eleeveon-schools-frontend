@@ -15,9 +15,10 @@ import React, {
   useState,
 } from "react";
 
-export type BranchToolbarAction = "search" | "filter" | "print" | "more";
+export type BranchToolbarAction = "add" | "search" | "filter" | "print" | "more";
 
 export type BranchToolbarHandlers = {
+  add?: () => void;
   search?: (query: string) => void;
   filter?: () => void;
   print?: () => void;
@@ -74,6 +75,7 @@ export function useRegisterBranchWorkspaceToolbar(
   useEffect(() => {
     if (!register) return;
     return register(routeKey, {
+      add: () => latest.current.add?.(),
       search: (value) => latest.current.search?.(value),
       filter: () => latest.current.filter?.(),
       print: () => latest.current.print?.(),
@@ -97,6 +99,7 @@ export function openExistingModuleAction(action: BranchToolbarAction): boolean {
   const matching = (text: string) => {
     const label = text.trim().toLowerCase();
     const candidates: Record<BranchToolbarAction, RegExp> = {
+      add: /\b(add|create|new|enroll)\b/,
       search: /\b(search|find)\b/,
       filter: /\b(filter|refine)\b/,
       print: /\b(print|printing)\b/,

@@ -313,14 +313,6 @@ export default function AssessmentEntries() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
-  useRegisterBranchWorkspaceToolbar("assessmentEntries", {
-    search: setSearch,
-    filter: () => setFilterOpen(true),
-    more: () => setMoreOpen(true),
-    // Score sheets do not have a dedicated print handler yet. Do not print
-    // the screen or bypass specialized report printing.
-  });
-
   // Excel interoperability: controlled Eleeveon assessment sheets and external school workbooks.
   const [excelExportOpen, setExcelExportOpen] = useState(false);
   const [excelExportBusyKey, setExcelExportBusyKey] = useState<string | null>(null);
@@ -1621,6 +1613,23 @@ export default function AssessmentEntries() {
     setFilterCompletion("all");
   };
 
+  // One shared action bar: adding starts score entry or opens the score-sheet
+  // import/export workflow. Search is kept inside Filters, not duplicated.
+  useRegisterBranchWorkspaceToolbar("assessmentEntries", {
+    add: () => {
+      if (classSubjectId === "all") {
+        setFilterOpen(true);
+      } else if (!sessionStarted) {
+        startSession();
+      } else {
+        setExcelExportOpen(true);
+      }
+    },
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    search: setSearch,
+  });
+
   if (accountLoading || contextLoading || settingsLoading || loading) {
     return (
       <State
@@ -1683,37 +1692,6 @@ export default function AssessmentEntries() {
           >
             ✕
           </button>
-        </section>
-      )}
-
-      {activeFilterCount > 0 && selectedClassId && (
-        <section className="ae-filter-chips" aria-label="Active filters">
-          {filterSubjectId !== "all" && (
-            <button type="button" onClick={() => setFilterSubjectId("all")}>
-              Subject:{" "}
-              {(subjectMap.get(idOf(filterSubjectId)) as any)?.name ||
-                filterSubjectId}{" "}
-              ×
-            </button>
-          )}
-          {filterPeriodId !== "all" && (
-            <button type="button" onClick={() => setFilterPeriodId("all")}>
-              Period:{" "}
-              {(periodMap.get(idOf(filterPeriodId)) as any)?.name ||
-                filterPeriodId}{" "}
-              ×
-            </button>
-          )}
-          {filterReadiness !== "all" && (
-            <button type="button" onClick={() => setFilterReadiness("all")}>
-              {filterReadiness === "ready" ? "Ready only" : "Missing setup"} ×
-            </button>
-          )}
-          {filterCompletion !== "all" && (
-            <button type="button" onClick={() => setFilterCompletion("all")}>
-              Completion: {filterCompletion} ×
-            </button>
-          )}
         </section>
       )}
 
@@ -1785,48 +1763,38 @@ export default function AssessmentEntries() {
         </>
       ) : (
         <>
-          <section
-            className="ae-filter-chips class-breadcrumb"
-            aria-label="Selected class subject"
-          >
+          <section className="ae-entry-topbar" aria-label="Selected class and scoring actions">
             <button
               type="button"
+              className="ae-entry-back"
               onClick={() => {
                 setClassSubjectId("all");
                 setSessionStarted(false);
                 setSearch("");
               }}
+              aria-label="Back to class subjects"
+              title="Class subjects"
             >
-              ← Class subjects
+              ← <span>Class subjects</span>
             </button>
-            <button type="button" onClick={() => setFilterOpen(true)}>
-              {selectedOption?.className || "Class"} ·{" "}
-              {selectedOption?.subjectName || "Subject"}
+            <span className="ae-entry-location" title={`${selectedOption?.className || "Class"} · ${selectedOption?.subjectName || "Subject"}`}>
+              {selectedOption?.className || "Class"} · {selectedOption?.subjectName || "Subject"}
+            </span>
+            <span className="ae-entry-count" title="Entered score cells" aria-live="polite">
+              {completionStats.entered}/{completionStats.expected}
+            </span>
+            <button type="button" className="ae-entry-start" onClick={startSession} disabled={sessionStarted}>
+              {sessionStarted ? "Active" : "Start"}
+            </button>
+            <button
+              type="button"
+              className="ae-entry-save"
+              onClick={saveEntries}
+              disabled={!sessionStarted || saving}
+            >
+              {saving ? "Saving" : "Save"}
             </button>
           </section>
-
-          {selectedOption && (
-            <section className="ae-session-strip">
-              <span
-                className={`ae-status-dot ${applicability ? "green" : "orange"}`}
-              />
-              <div className="ae-active-context">
-                <strong>{selectedOption.subjectName}</strong>
-                <small>{completionStats.entered}/{completionStats.expected} entered</small>
-              </div>
-              <button type="button" onClick={startSession}>
-                {sessionStarted ? "Active" : "Start"}
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={saveEntries}
-                disabled={!sessionStarted || saving}
-              >
-                {saving ? "Saving" : "Save"}
-              </button>
-            </section>
-          )}
 
           {classSubjectId !== "all" && !applicability && (
             <Empty
@@ -1923,6 +1891,8 @@ export default function AssessmentEntries() {
           classes={classes}
           subjects={subjects}
           periods={periods}
+          search={search}
+          setSearch={setSearch}
           filterClassId={filterClassId}
           filterSubjectId={filterSubjectId}
           filterPeriodId={filterPeriodId}
@@ -2683,6 +2653,8 @@ function FilterSheet({
   classes,
   subjects,
   periods,
+  search,
+  setSearch,
   filterClassId,
   filterSubjectId,
   filterPeriodId,
@@ -2699,6 +2671,8 @@ function FilterSheet({
   classes: Class[];
   subjects: Subject[];
   periods: AcademicPeriod[];
+  search: string;
+  setSearch: (value: string) => void;
   filterClassId: string;
   filterSubjectId: string;
   filterPeriodId: string;
@@ -2738,6 +2712,10 @@ function FilterSheet({
             ✕
           </button>
         </div>
+        <label className="ae-filter-search">
+          <span>Search</span>
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find student or class..." />
+        </label>
         <div className="ae-form-grid">
           <label>
             <span>Class</span>
@@ -3420,4 +3398,39 @@ const css = `
   }
 }
 
+
+/* V4: dense, neutral score-entry workspace — preserve theme and fast scrolling. */
+.ae-page { --ae-panel:color-mix(in srgb,var(--ae-card) 76%,var(--ae-bg) 24%); background:transparent; }
+.ae-page .ae-score-card, .ae-page .ae-table-card,
+.ae-page .ae-picker-list .student-row, .ae-page .ae-analysis {
+  background:var(--ae-panel); border-color:color-mix(in srgb,var(--ae-border) 85%,var(--ae-muted) 15%);
+  box-shadow:none; transform:none; transition:border-color .12s ease;
+}
+.ae-page .ae-picker-list .student-row { min-height:132px; }
+.ae-page .ae-score-grid label { background:color-mix(in srgb,var(--ae-panel) 84%,var(--ae-bg) 16%); }
+.ae-page .ae-table-scroll th { background:color-mix(in srgb,var(--ae-panel) 88%,var(--ae-bg) 12%); }
+.ae-page .ae-table-scroll tbody tr:nth-child(even) { background:color-mix(in srgb,var(--ae-panel) 79%,var(--ae-bg) 21%); }
+.ae-page .ae-table-scroll tbody tr:nth-child(odd) { background:var(--ae-panel); }
+.ae-page .ae-table-scroll tbody tr { content-visibility:visible; }
+.ae-page .ae-table-scroll td { background:transparent; }
+.ae-page .ae-entry-topbar {display:flex;align-items:center;gap:7px;min-height:37px;margin:0 0 7px;min-width:0;white-space:nowrap;}
+.ae-page .ae-entry-topbar button { flex:0 0 auto;min-height:30px;padding:5px 9px;border:1px solid var(--ae-border);border-radius:8px;background:var(--ae-panel);color:var(--ae-text);font-size:11px;font-weight:700;line-height:1.15;}
+.ae-page .ae-entry-back {max-width:130px;}
+.ae-page .ae-entry-location { flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:650;color:var(--ae-text); }
+.ae-page .ae-entry-count { flex:0 0 auto;color:var(--ae-muted);font-size:11px;font-variant-numeric:tabular-nums; }
+.ae-page .ae-entry-topbar .ae-entry-save {background:var(--ae-primary);color:#fff;border-color:transparent;}
+.ae-page .ae-entry-topbar button:disabled {opacity:.55;}
+.ae-filter-search {display:grid;gap:5px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--ae-muted);}
+.ae-filter-search input {min-height:40px;border:1px solid var(--ae-border);border-radius:10px;padding:0 11px;background:var(--ae-card);color:var(--ae-text);}
+@media(max-width:759px){
+ .ae-page .ae-entry-topbar{gap:4px;}
+ .ae-page .ae-entry-back{padding:5px 7px;max-width:35px;}
+ .ae-page .ae-entry-back span{display:none;}
+ .ae-page .ae-entry-location{font-size:11px;}
+ .ae-page .ae-entry-count{font-size:10px;}
+ .ae-page .ae-entry-topbar button{padding:5px 7px;font-size:10px;}
+ .ae-page .ae-picker-list .student-row{min-height:120px;}
+}
+@media(min-width:1120px){.ae-page .ae-list.ae-entry-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(prefers-reduced-motion:reduce){.ae-page *, .ae-page *::before,.ae-page *::after{scroll-behavior:auto!important;animation-duration:0.01ms!important;transition-duration:0.01ms!important;}}
 `;

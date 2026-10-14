@@ -95,6 +95,7 @@ import {
 import { useBackgroundLoader } from "../../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../../hooks/useBranchTableRevision";
+import { useRegisterBranchWorkspaceToolbar } from "../../../components/role-portals/shell/BranchWorkspaceToolbar";
 const TemplateAwareStudentReportCard =
   StudentReportCard as React.ComponentType<any>;
 
@@ -1404,6 +1405,15 @@ export default function StudentReports() {
     };
   }
 
+  // Branch Admin V4 toolbar; actual printable report target stays unchanged.
+  useRegisterBranchWorkspaceToolbar("reportsWorkspace", {
+    add: () => setFilterOpen(true),
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    print: () => triggerReportPrint(),
+    more: () => setMoreOpen(true),
+  });
+
   const renderActiveReport = () => {
     if (!hasCoreSetup) {
       return (
@@ -1512,123 +1522,6 @@ export default function StudentReports() {
     >
       <style>{css}</style>
 
-      <section
-        className="ba-search-card report-no-print"
-        aria-label="Student report search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search reports..."
-            aria-label="Search student reports"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={triggerReportPrint}
-          aria-label="Print report"
-          title="Print"
-          disabled={!canPrint}
-        >
-          ⎙
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open report filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
-      {activeFilterCount > 0 && (
-        <section
-          className="ba-filter-chips report-no-print"
-          aria-label="Active report filters"
-        >
-          {filters.academicStructureId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicStructureId: undefined,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Structure: {selectedStructureName} ×
-            </button>
-          )}
-          {filters.academicPeriodId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Period: {selectedPeriodName} ×
-            </button>
-          )}
-          {filters.classId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Class: {selectedClassName} ×
-            </button>
-          )}
-          {filters.studentId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, studentId: undefined }))
-              }
-            >
-              Student: {selectedStudentName} ×
-            </button>
-          )}
-          {mode !== "student-report" && (
-            <button type="button" onClick={() => setMode("student-report")}>
-              Mode: Class Batch ×
-            </button>
-          )}
-        </section>
-      )}
-
       <section className="ba-print-card">
         <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
           {renderActiveReport()}
@@ -1646,6 +1539,8 @@ export default function StudentReports() {
           filteredStudents={visibleStudents}
           setMode={setMode}
           setFilters={setFilters}
+          search={search}
+          setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
       )}
@@ -1748,6 +1643,8 @@ function FilterSheet({
   filteredStudents,
   setMode,
   setFilters,
+  search,
+  setSearch,
   onClose,
 }: {
   mode: ReportMode;
@@ -1759,6 +1656,8 @@ function FilterSheet({
   filteredStudents: Student[];
   setMode: (mode: ReportMode) => void;
   setFilters: React.Dispatch<React.SetStateAction<ReportFiltersState>>;
+  search: string;
+  setSearch: (value: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -1781,6 +1680,9 @@ function FilterSheet({
         </div>
 
         <div className="ba-form compact">
+          <label className="ba-v4-find"><span>Search</span>
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a student, subject or class" />
+          </label>
           <label>
             <span>Report Mode</span>
             <select
@@ -3599,4 +3501,39 @@ const css = `
   }
 }
 
+
+/* V4 records workspace: neutral surface, efficient scroll, no duplicated toolbars. */
+.ba-page.student-reports-page, .ba-page.report-remarks-page { min-height:0; padding:3px 4px 18px; background:transparent; overflow-x:clip; }
+.ba-page.student-reports-page .ba-search-card, .ba-page.report-remarks-page .ba-search-card,
+.ba-page.report-remarks-page .ba-summary-line { display:none; }
+.ba-page.student-reports-page .ba-print-card,
+.ba-page.report-remarks-page .ba-remark-card,
+.ba-page.report-remarks-page .ba-student-row,
+.ba-page.report-remarks-page .ba-list,
+.ba-page.report-remarks-page .ba-sheet {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 83%,var(--bg,#f3f5f8) 17%);
+  border-color:var(--border,rgba(15,23,42,.13));
+  box-shadow:none;
+}
+.ba-page.student-reports-page .ba-print-card { margin:0; padding:5px; border-radius:11px; box-shadow:none; }
+.ba-page.student-reports-page .ba-print-zone { padding:3px; overflow-x:auto; overscroll-behavior-inline:contain; }
+.ba-page.report-remarks-page .ba-remark-card { margin-top:0; box-shadow:none; border-radius:11px; }
+.ba-page.report-remarks-page .ba-student-row { border-radius:9px; box-shadow:none; transform:none; }
+.ba-page.report-remarks-page .ba-list { gap:6px; }
+.ba-page.report-remarks-page .ba-student-row:hover { transform:none; }
+.ba-page .ba-v4-find { display:grid; gap:5px; grid-column:1/-1; font-size:12px; font-weight:700; color:var(--muted,#64748b); }
+.ba-page .ba-v4-find input { min-height:40px; padding:0 10px; border-radius:9px; background:var(--input-bg,var(--surface,#fff)); color:var(--text,#111827); }
+@media(max-width:760px){
+ .ba-page.student-reports-page,.ba-page.report-remarks-page{padding:0 1px 14px;}
+ .ba-page.student-reports-page .ba-print-card{padding:3px;border-radius:9px;}
+ .ba-page.report-remarks-page .ba-remark-card{padding:9px;}
+}
+@media print {
+  .ba-page.student-reports-page,.ba-page.report-remarks-page,
+  .ba-page.student-reports-page .ba-print-card,
+  .ba-page.student-reports-page .ba-print-zone {
+    background:#fff!important;box-shadow:none!important;border:0!important;
+    margin:0!important;padding:0!important;overflow:visible!important;
+  }
+}
 `;

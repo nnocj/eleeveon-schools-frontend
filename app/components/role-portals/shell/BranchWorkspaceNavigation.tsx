@@ -2,7 +2,7 @@
 
 /**
  * Eleeveon Schools - compact reports-first Branch Admin navigation.
- * Desktop: six single-tap tabs + shared toolbar on the SAME row.
+ * Desktop: six single-tap tabs + shared Add / Filter / Print / More on the SAME row.
  * Mobile: 3 x 2 compact cards, followed by the same shared toolbar.
  * Header status/avatar use fixed dimensions and cannot resize across tabs.
  * Real module actions remain intact. Toolbar can forward to the current
@@ -29,7 +29,7 @@ type Props = {
 };
 
 const TOOLBAR_ACTIONS: Array<{ key: BranchToolbarAction; label: string }> = [
-  { key: "search", label: "Search" },
+  { key: "add", label: "Add" },
   { key: "filter", label: "Filter" },
   { key: "print", label: "Print" },
   { key: "more", label: "More" },
@@ -47,7 +47,7 @@ function ActionIcon({ name }: { name: BranchToolbarAction }) {
     strokeLinejoin: "round" as const,
     "aria-hidden": true as const,
   };
-  if (name === "search") return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>;
+  if (name === "add") return <svg {...common}><path d="M12 5v14M5 12h14"/></svg>;
   if (name === "filter") return <svg {...common}><path d="M4 7h16M7 12h10m-7 5h4"/><circle cx="8" cy="7" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/></svg>;
   if (name === "print") return <svg {...common}><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/><path d="M18 12h.01"/></svg>;
   return <svg {...common}><circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/></svg>;
@@ -66,15 +66,11 @@ export default function BranchWorkspaceNavigation({
 }: Props) {
   const toolbar = useBranchWorkspaceToolbar();
   const registered = toolbar?.handlers[activeKey];
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchText, setSearchText] = useState("");
   const [feedback, setFeedback] = useState("");
   const [avatarFailed, setAvatarFailed] = useState(false);
   const activeLabel = items.find((item) => item.key === activeKey)?.label || "Workspace";
 
   useEffect(() => {
-    setSearchOpen(false);
-    setSearchText("");
     setFeedback("");
   }, [activeKey]);
 
@@ -82,19 +78,10 @@ export default function BranchWorkspaceNavigation({
 
   const execute = (action: BranchToolbarAction) => {
     setFeedback("");
-    if (action === "search" && registered?.search) {
-      setSearchOpen((current) => !current);
-      return;
-    }
     const callback = registered?.[action];
     if (callback) {
-      if (action === "search") {
-        // Search uses a controlled search field rather than calling with an
-        // unexpected empty query.
-        setSearchOpen((current) => !current);
-      } else {
-        (callback as () => void)();
-      }
+      // The action is registered by the active module. No DOM guessing.
+      (callback as () => void)();
       return;
     }
 
@@ -112,11 +99,10 @@ export default function BranchWorkspaceNavigation({
         <button
           key={key}
           type="button"
-          className={`ba-v2-tool ${searchOpen && key === "search" ? "is-active" : ""}`}
+          className="ba-v2-tool"
           onClick={() => execute(key)}
           aria-label={`${label} in ${activeLabel}`}
           title={`${label} in ${activeLabel}`}
-          aria-pressed={key === "search" ? searchOpen : undefined}
         >
           <ActionIcon name={key}/>
         </button>
@@ -187,23 +173,6 @@ export default function BranchWorkspaceNavigation({
           <strong className="ba-v2-active-title" title={activeLabel}>{activeLabel}</strong>
           {actions}
         </div>
-        {searchOpen && registered?.search && (
-          <div className="ba-v2-search-panel">
-            <label htmlFor="ba-v2-search-input">Search {activeLabel}</label>
-            <input id="ba-v2-search-input" type="search" autoFocus
-              value={searchText} placeholder={`Search ${activeLabel.toLowerCase()}...`}
-              onChange={(event) => {
-                const value = event.target.value;
-                setSearchText(value);
-                registered.search?.(value);
-              }}/>
-            <button type="button" onClick={() => {
-              setSearchText("");
-              registered.search?.("");
-              setSearchOpen(false);
-            }} aria-label="Close search">✕</button>
-          </div>
-        )}
         {feedback && (
           <div className="ba-v2-notice" role="status">
             <span>{feedback}</span>

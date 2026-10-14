@@ -56,6 +56,8 @@ import {
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import {
   projectAssessmentEntryColumns,
   type AssessmentEntryProjection,
@@ -275,8 +277,29 @@ export default function AssessmentEntries() {
   const [gradings, setGradings] = useState<GradingStructure[]>([]);
   const [rules, setRules] = useState<GradeRule[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
+  const mediaByStudent = useEntityMediaUrls({
+    accountId,
+    ownerTable: "students",
+    rows: students,
+    fields: [{ fieldKey: "photo", mediaIdKey: "photoMediaId" }],
+  });
+  const studentPhoto = (student: Student): string | undefined => {
+    const row = student as any;
+    const raw = mediaByStudent[idOf(row.id)]?.photo || row.photo;
+    if (typeof raw !== "string" || !raw.trim() || raw.startsWith("blob:")) return undefined;
+    return raw;
+  };
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  // Desktop uses the compact table; touch-sized viewports start with cards.
+  // MatchMedia is deferred until mount to avoid SSR/hydration differences.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const useDeviceDefault = () => setViewMode(mq.matches ? "table" : "cards");
+    useDeviceDefault();
+    // Intentionally only initialize once: preserve any explicit user selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [search, setSearch] = useState("");
   const [classSubjectId, setClassSubjectId] = useState("all");
   const [selectedClassId, setSelectedClassId] = useState<string>("");
@@ -290,6 +313,13 @@ export default function AssessmentEntries() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
+  useRegisterBranchWorkspaceToolbar("assessmentEntries", {
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    // Score sheets do not have a dedicated print handler yet. Do not print
+    // the screen or bypass specialized report printing.
+  });
 
   // Excel interoperability: controlled Eleeveon assessment sheets and external school workbooks.
   const [excelExportOpen, setExcelExportOpen] = useState(false);
@@ -1656,47 +1686,6 @@ export default function AssessmentEntries() {
         </section>
       )}
 
-      <section
-        className="ae-search-card"
-        aria-label="Assessment entry search and actions"
-      >
-        <label className="ae-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={
-              !selectedClassId
-                ? "Search my classes..."
-                : classSubjectId === "all"
-                  ? "Search class subjects..."
-                  : "Search students..."
-            }
-            aria-label="Search assessment entries"
-          />
-        </label>
-
-        <button
-          type="button"
-          className={`ae-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ae-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
       {activeFilterCount > 0 && selectedClassId && (
         <section className="ae-filter-chips" aria-label="Active filters">
           {filterSubjectId !== "all" && (
@@ -1821,11 +1810,9 @@ export default function AssessmentEntries() {
               <span
                 className={`ae-status-dot ${applicability ? "green" : "orange"}`}
               />
-              <div>
+              <div className="ae-active-context">
                 <strong>{selectedOption.subjectName}</strong>
-                <small>
-                  {contextSubtitle} · {selectedOption.teacherName}
-                </small>
+                <small>{completionStats.entered}/{completionStats.expected} entered</small>
               </div>
               <button type="button" onClick={startSession}>
                 {sessionStarted ? "Active" : "Start"}
@@ -1838,25 +1825,6 @@ export default function AssessmentEntries() {
               >
                 {saving ? "Saving" : "Save"}
               </button>
-            </section>
-          )}
-
-          {selectedOption && (
-            <section className="ae-compact-meta">
-              {applicability ? (
-                <Chip tone="green">Ready</Chip>
-              ) : (
-                <Chip tone="red">No applicability</Chip>
-              )}
-              {assessmentStructure && (
-                <Chip tone="blue">{assessmentStructure.name}</Chip>
-              )}
-              {gradingSystem && <Chip tone="purple">{gradingSystem.name}</Chip>}
-              <Chip tone="gray">{studentScoreRows.length} students</Chip>
-              <Chip tone="gray">{structureItems.length} items</Chip>
-              <Chip tone="orange">
-                {completionStats.entered}/{completionStats.expected} entered
-              </Chip>
             </section>
           )}
 
@@ -1915,6 +1883,7 @@ export default function AssessmentEntries() {
             viewMode === "table" && (
               <ScoreTable
                 rows={filteredRows}
+                photoFor={studentPhoto}
                 items={structureItems}
                 scores={scores}
                 updateScore={updateScore}
@@ -1931,6 +1900,7 @@ export default function AssessmentEntries() {
                   <StudentScoreCard
                     key={String((row.student as any).id)}
                     row={row}
+                    photo={studentPhoto(row.student)}
                     items={structureItems}
                     scores={scores}
                     updateScore={updateScore}
@@ -2482,13 +2452,33 @@ function ScoreInput({
   );
 }
 
+const StudentPortrait = React.memo(function StudentPortrait({
+  name,
+  photo,
+}: {
+  name?: string;
+  photo?: string;
+}) {
+  return (
+    <span className="ae-portrait" aria-hidden="true">
+      {photo ? (
+        <img src={photo} alt="" loading="lazy" decoding="async" />
+      ) : (
+        <span>{String(name || "S").trim().slice(0, 1).toUpperCase()}</span>
+      )}
+    </span>
+  );
+});
+
 function StudentScoreCard({
   row,
+  photo,
   items,
   scores,
   updateScore,
 }: {
   row: StudentScoreRow;
+  photo?: string;
   items: AssessmentStructureItem[];
   scores: ScoreMap;
   updateScore: (
@@ -2504,7 +2494,8 @@ function StudentScoreCard({
   return (
     <article className="ae-score-card">
       <div className="ae-score-head">
-        <div>
+        <StudentPortrait name={student.fullName} photo={photo} />
+        <div className="ae-student-label">
           <strong>{student.fullName || "Unnamed student"}</strong>
           <span>{student.admissionNumber || "No admission number"}</span>
         </div>
@@ -2517,13 +2508,7 @@ function StudentScoreCard({
         {items.map((item: any) => (
           <label key={String(item.id)}>
             <span>{entryCompactLabel(item)}</span>
-            <small>
-              {entryGroupLabel(item)
-                ? `${entryGroupLabel(item)} · `
-                : ""}
-              Max {Number(item.maxScore || 100)} · Weight{" "}
-              {Number(item.contributionWeight ?? item.weight ?? 0)}
-            </small>
+            <small>/{Number(item.maxScore || 100)}</small>
             <ScoreInput
               studentId={studentId}
               item={item}
@@ -2549,11 +2534,13 @@ function StudentScoreCard({
 
 function ScoreTable({
   rows,
+  photoFor,
   items,
   scores,
   updateScore,
 }: {
   rows: StudentScoreRow[];
+  photoFor: (student: Student) => string | undefined;
   items: AssessmentStructureItem[];
   scores: ScoreMap;
   updateScore: (
@@ -2592,8 +2579,13 @@ function ScoreTable({
               return (
                 <tr key={String(studentId)}>
                   <td>
-                    <strong>{student.fullName || "Unnamed student"}</strong>
-                    <span>{student.admissionNumber || "—"}</span>
+                    <div className="ae-table-student">
+                      <StudentPortrait name={student.fullName} photo={photoFor(row.student)} />
+                      <span className="ae-student-label">
+                        <strong>{student.fullName || "Unnamed student"}</strong>
+                        <small>{student.admissionNumber || "—"}</small>
+                      </span>
+                    </div>
                   </td>
                   {items.map((item: any) => (
                     <td key={String(item.id)}>
@@ -3333,6 +3325,41 @@ const css = `
   backdrop-filter: blur(12px) saturate(.9) !important;
 }
 
+/* Branch Admin assessment — lean, neutral, scroll-efficient */
+.ae-page{min-height:0;background:transparent;padding:4px 5px 20px;overflow-x:clip}
+.ae-page .ae-search-card{display:none}
+.ae-page .student-row,.ae-page .ae-score-card,.ae-page .ae-table-card,.ae-page .ae-session-strip{box-shadow:none;background:var(--ae-card);border:1px solid var(--ae-border)}
+.ae-page .ae-list{gap:10px;align-items:stretch;max-width:none}
+.ae-page .ae-picker-list .student-row{min-height:128px;align-items:center;padding:18px 16px;border-radius:13px;transform:none;box-shadow:none}
+.ae-page .ae-picker-list .student-row:focus-visible,.ae-page .ae-picker-list .student-row:hover{border-color:var(--ae-primary)}
+.ae-page .app-icon{background:var(--ae-bg)!important;color:var(--ae-text)!important;box-shadow:none!important}
+.ae-page .ae-session-strip{padding:6px 10px;margin:4px auto 8px;border-radius:12px;min-height:44px}
+.ae-page .ae-active-context{flex:1;min-width:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ae-page .ae-active-context strong{font-size:13px}
+.ae-page .ae-active-context small{font-size:11px;color:var(--ae-muted);white-space:nowrap}
+.ae-page .ae-score-card{border-radius:13px;padding:11px;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 230px}
+.ae-page .ae-score-grid label{background:transparent;border-radius:9px;padding:6px;gap:2px}
+.ae-page .ae-score-grid small{font-size:10px}
+.ae-page .ae-score-head{align-items:center;justify-content:flex-start;gap:9px}
+.ae-page .ae-score-head i{margin-left:auto;background:var(--ae-bg);color:var(--ae-muted);font-weight:650}
+.ae-page .ae-score-head i.done,.ae-page .ae-score-head i.partial{background:var(--ae-bg);color:var(--ae-text)}
+.ae-page .ae-student-label{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.ae-page .ae-student-label strong{font-size:12.5px;line-height:1.25}
+.ae-page .ae-student-label small{font-size:10.5px;color:var(--ae-muted)}
+.ae-page .ae-portrait{width:36px;height:36px;flex:0 0 36px;border-radius:50%;border:1px solid var(--ae-border);overflow:hidden;display:grid;place-items:center;background:var(--ae-bg);color:var(--ae-muted);font-size:14px;font-weight:700}
+.ae-page .ae-portrait img{width:100%;height:100%;object-fit:cover;display:block}
+.ae-page .ae-table-student{display:flex;gap:8px;align-items:center;min-width:155px}
+.ae-page .ae-table-card{max-width:none;border-radius:12px}
+.ae-page .ae-table-scroll{max-height:none;overflow:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.ae-page .ae-table-card tr{content-visibility:auto;contain-intrinsic-size:auto 57px}
+.ae-page .ae-score-grid span{font-size:10.5px;font-weight:700}
+.ae-page .ae-result-row{font-size:10.5px}
+.ae-page .ae-compact-meta{display:none}
+.ae-page .ae-score-head .ae-student-label span{font-size:10.5px;color:var(--ae-muted)}
+@media(min-width:1120px){.ae-page .ae-list.ae-entry-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:760px){.ae-page .ae-list.ae-picker-list{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:759px){.ae-page{padding:2px 0 12px}.ae-page .ae-list.ae-picker-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.ae-page .ae-picker-list .student-row{padding:13px 10px;min-height:112px}.ae-page .ae-list.ae-entry-list{grid-template-columns:1fr}.ae-page .ae-score-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ae-page .ae-score-card{content-visibility:visible}}
+@media(max-width:380px){.ae-page .ae-list.ae-picker-list{grid-template-columns:1fr}.ae-page .ae-score-grid{grid-template-columns:1fr}}
 /* Excel is portaled outside .ae-page, so the styling must be global. */
 .excel-export-overlay,
 .excel-import-overlay {

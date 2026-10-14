@@ -363,74 +363,113 @@ const SETUP_SECTIONS: SetupSection[] = [
 ];
 
 function BranchSetupWorkspace(props: RouteProps) {
-  const [openedEditor, setOpenedEditor] = React.useState<string | null>(null);
+  // First section and its first available editor open immediately by default.
+  // No additional tap is required to see a form.
+  const [openSection, setOpenSection] = React.useState<string | null>(
+    SETUP_SECTIONS[0]?.title ?? null,
+  );
+  const [openedEditor, setOpenedEditor] = React.useState<string | null>(
+    SETUP_SECTIONS[0]?.editors[0]?.key ?? null,
+  );
+
+  function toggleSection(section: SetupSection) {
+    if (openSection === section.title) {
+      setOpenSection(null);
+      setOpenedEditor(null);
+    } else {
+      setOpenSection(section.title);
+      setOpenedEditor(section.editors[0]?.key ?? null);
+    }
+  }
 
   return (
     <div className="ba-setup-page">
+      <style>{branchWorkspaceCss}</style>
       <div className="ba-setup-intro">
         <h2>Setup & Settings</h2>
-        <p>Configure your branch for assessments and reports. Changes are saved in their existing editors.</p>
+        <p>Configure your branch for assessments and reports. Each existing editor keeps its own save operation.</p>
       </div>
-      {SETUP_SECTIONS.map((section, index) => (
-        <section className="ba-setup-section" key={section.title}>
-          <div className="ba-setup-section-head">
-            <span className="ba-setup-number">{String(index + 1).padStart(2, "0")}</span>
-            <div>
-              <h3>{section.title}</h3>
-              <p>{section.description}</p>
-            </div>
-          </div>
-          {section.editors.length > 0 && (
-            <div className="ba-contextual-actions" aria-label={`${section.title} editors`}>
-              {section.editors.map((editor) => (
-                <button
-                  type="button"
-                  key={editor.key}
-                  className={openedEditor === editor.key ? "is-active" : ""}
-                  aria-expanded={openedEditor === editor.key}
-                  onClick={() =>
-                    setOpenedEditor((current) =>
-                      current === editor.key ? null : editor.key,
-                    )
-                  }
-                >
-                  {editor.label}
-                </button>
-              ))}
-            </div>
-          )}
-          {section.editors.map(({ key, Component }) =>
-            openedEditor === key ? (
-              <div className="ba-inline-editor" key={key}>
-                <Component {...props} />
+      {SETUP_SECTIONS.map((section, index) => {
+        const isOpen = openSection === section.title;
+        const sectionId = `ba-setup-section-${index}`;
+        const ActiveEditor = section.editors.find((editor) => editor.key === openedEditor)?.Component;
+        return (
+          <section className={`ba-setup-section ${isOpen ? "is-open" : ""}`} key={section.title}>
+            <button
+              type="button"
+              className="ba-setup-section-toggle"
+              aria-expanded={isOpen}
+              aria-controls={sectionId}
+              onClick={() => toggleSection(section)}
+            >
+              <span className="ba-setup-number">{String(index + 1).padStart(2, "0")}</span>
+              <span className="ba-setup-heading-text">
+                <strong>{section.title}</strong>
+                <small>{section.description}</small>
+              </span>
+              <span className="ba-setup-chevron" aria-hidden="true">{isOpen ? "⌃" : "⌄"}</span>
+            </button>
+            {isOpen && (
+              <div className="ba-setup-expanded" id={sectionId}>
+                {section.editors.length > 1 && (
+                  <div className="ba-contextual-actions" aria-label={`${section.title} editors`}>
+                    {section.editors.map((editor) => (
+                      <button
+                        type="button"
+                        key={editor.key}
+                        className={openedEditor === editor.key ? "is-active" : ""}
+                        aria-pressed={openedEditor === editor.key}
+                        onClick={() => setOpenedEditor(editor.key)}
+                      >
+                        {editor.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {ActiveEditor ? (
+                  <div className="ba-inline-editor" key={openedEditor}>
+                    <ActiveEditor {...props} />
+                  </div>
+                ) : (
+                  <div className="ba-setup-empty-section">
+                    <p>Report presentation settings are being consolidated. Existing reporting tools remain available in Reports.</p>
+                    <button type="button" onClick={() => props.navigate("reportsWorkspace")}>Open Reports</button>
+                  </div>
+                )}
               </div>
-            ) : null,
-          )}
-        </section>
-      ))}
-      <style>{branchWorkspaceCss}</style>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }
 
 const branchWorkspaceCss = `
-.ba-workspace-wrapper, .ba-setup-page { min-width: 0; width: 100%; }
-.ba-setup-page { display: grid; gap: 12px; }
-.ba-setup-intro { padding: 4px 2px 8px; }
-.ba-setup-intro h2, .ba-setup-section h3 { margin: 0; color: var(--text, #111827); }
-.ba-setup-intro h2 { font-size: 22px; }
-.ba-setup-intro p, .ba-setup-section p { margin: 5px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted, #64748b); }
-.ba-setup-section { min-width: 0; padding: 14px; border: 1px solid var(--border, rgba(0,0,0,.1)); border-radius: 16px; background: var(--surface, #fff); }
-.ba-setup-section-head { display: flex; gap: 12px; align-items: flex-start; }
-.ba-setup-section h3 { font-size: 15px; }
-.ba-setup-number { flex: 0 0 auto; display: grid; place-items: center; min-width: 36px; height: 36px; padding: 4px; border-radius: 10px; background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, var(--surface, #fff)); color: var(--text, #111827); font-weight: 800; font-size: 12px; }
-.ba-contextual-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.ba-setup-section .ba-contextual-actions { margin: 12px 0 0 48px; }
-.ba-contextual-actions button { min-height: 37px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border, rgba(0,0,0,.14)); background: var(--surface, #fff); color: var(--text, #111827); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
-.ba-contextual-actions button.is-active { border-color: var(--primary-color, #2563eb); background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, var(--surface, #fff)); }
-.ba-contextual-actions button:focus-visible { outline: 3px solid var(--primary-color, #2563eb); outline-offset: 2px; }
-.ba-inline-editor { min-width: 0; margin-top: 14px; border-top: 1px solid var(--border, rgba(0,0,0,.1)); padding-top: 14px; }
-@media (max-width: 540px) { .ba-setup-section { padding: 10px; } .ba-setup-section .ba-contextual-actions { margin-left: 0; } }
+.ba-workspace-wrapper, .ba-setup-page { min-width:0; width:100%; }
+.ba-setup-page { display:grid; gap:10px; }
+.ba-setup-intro { padding:2px 2px 8px; }
+.ba-setup-intro h2 { margin:0; font-size:21px; color:var(--text,#111827); }
+.ba-setup-intro p { margin:5px 0 0; font-size:12px; line-height:1.5; color:var(--muted,#64748b); }
+.ba-setup-section { min-width:0; overflow:hidden; border:1px solid var(--border,rgba(0,0,0,.12)); border-radius:13px; background:var(--surface,#fff); }
+.ba-setup-section.is-open { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 38%,var(--border,rgba(0,0,0,.1))); }
+.ba-setup-section-toggle { display:flex; width:100%; min-height:58px; align-items:center; gap:10px; text-align:left; padding:10px 12px; border:0; color:var(--text,#111827); background:transparent; cursor:pointer; font:inherit; }
+.ba-setup-section-toggle:hover, .ba-setup-section.is-open .ba-setup-section-toggle { background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--surface,#fff)); }
+.ba-setup-section-toggle:focus-visible, .ba-contextual-actions button:focus-visible, .ba-setup-empty-section button:focus-visible { outline:2px solid var(--primary-color,#2563eb); outline-offset:-2px; }
+.ba-setup-number { display:grid; place-items:center; flex:0 0 32px; width:32px; height:32px; border-radius:8px; background:color-mix(in srgb,var(--primary-color,#2563eb) 10%,var(--surface,#fff)); color:var(--text,#111827); font-weight:800; font-size:11px; }
+.ba-setup-heading-text { display:grid; flex:1 1 0; min-width:0; gap:3px; }
+.ba-setup-heading-text strong { font-size:13px; font-weight:780; line-height:1.3; }
+.ba-setup-heading-text small { font-size:11px; line-height:1.35; font-weight:450; color:var(--muted,#64748b); }
+.ba-setup-chevron { flex:0 0 22px; text-align:center; font-size:22px; font-weight:700; color:var(--muted,#64748b); }
+.ba-setup-expanded { padding:12px; border-top:1px solid var(--border,rgba(0,0,0,.1)); min-width:0; }
+.ba-contextual-actions { display:flex; flex-wrap:wrap; gap:7px; margin:0 0 10px; }
+.ba-contextual-actions button, .ba-setup-empty-section button { min-height:34px; padding:7px 11px; border-radius:9px; border:1px solid var(--border,rgba(0,0,0,.14)); background:var(--surface,#fff); color:var(--text,#111827); cursor:pointer; font:inherit; font-size:12px; font-weight:700; }
+.ba-contextual-actions button.is-active { border-color:var(--primary-color,#2563eb); background:color-mix(in srgb,var(--primary-color,#2563eb) 10%,var(--surface,#fff)); }
+.ba-inline-editor { min-width:0; }
+.ba-setup-empty-section { display:grid; gap:10px; }
+.ba-setup-empty-section p { margin:0; color:var(--muted,#64748b); font-size:12px; }
+.ba-setup-empty-section button { justify-self:start; }
+@media (max-width:540px) { .ba-setup-expanded { padding:9px; } .ba-setup-section-toggle { padding:8px 9px; } }
 `;
 
 export const NAV_SECTIONS: RoleNavSection[] = [

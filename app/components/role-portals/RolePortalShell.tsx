@@ -19,6 +19,7 @@ import type { usePortalAppearanceReadiness } from "../PortalAppearanceRuntime";
 import type { AppRole, UserMembership } from "../../lib/auth/roleRedirect";
 import { WorkspaceTransitionProvider } from "../workspace";
 import RolePortalShellContent from "./shell/RolePortalShellContent";
+import { BranchWorkspaceToolbarProvider } from "./shell/BranchWorkspaceToolbar";
 
 export type RoleNavItem = {
   key: string;
@@ -95,7 +96,13 @@ export type RolePortalShellProps = {
 export default function RolePortalShell(props: RolePortalShellProps) {
   return (
     <WorkspaceTransitionProvider>
-      <RolePortalShellContent {...props} />
+      {props.navigationMode === "branch-workspace" ? (
+        <BranchWorkspaceToolbarProvider>
+          <RolePortalShellContent {...props} />
+        </BranchWorkspaceToolbarProvider>
+      ) : (
+        <RolePortalShellContent {...props} />
+      )}
     </WorkspaceTransitionProvider>
   );
 }

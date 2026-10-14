@@ -1977,6 +1977,8 @@ function RolePortalShellContent({
             onNavigate={navigate}
             branchName={resolvedWorkspaceLabel}
             online={isOnline}
+            memberImage={visibleMemberImage}
+            memberName={visibleMemberName}
             onOpenStatus={openStatusSheet}
             onOpenAccount={() => setAccountDrawerOpen(true)}
           />
@@ -4686,6 +4688,9 @@ body {
   --portal-content-left: 0px !important;
   width: 100%;
   max-width: 100%;
+  /* clip is not a scroll container; keep compact mobile navigation sticky. */
+  overflow-x: clip !important;
+  overflow-y: visible !important;
 }
 .role-shell.branch-workspace-layout .app-main,
 .role-shell.branch-workspace-layout .app-main.full {
@@ -4693,6 +4698,8 @@ body {
   width: 100%;
   max-width: 100%;
   margin-left: 0;
+  overflow-x: clip !important;
+  overflow-y: visible !important;
 }
 .role-shell.branch-workspace-layout .app-content,
 .role-shell.branch-workspace-layout .app-content-inner {

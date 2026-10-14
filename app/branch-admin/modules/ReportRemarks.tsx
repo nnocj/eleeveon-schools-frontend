@@ -4305,4 +4305,24 @@ const css = `
 .ba-page.report-remarks-page .ba-v4-remark-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto;}
 .ba-page.report-remarks-page .ba-v4-save-remark{padding:7px 11px;min-height:30px;width:auto;border-radius:8px;border:0;background:var(--ba-primary);color:#fff;font-size:12px;font-weight:750;cursor:pointer;}
 .ba-page.report-remarks-page .ba-v4-save-remark:disabled{opacity:.55;cursor:default;}
+
+/* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
+
+.report-remarks-page {background:var(--bg,var(--background,#f2f4f7));padding:5px;min-height:0;}
+.report-remarks-page .ba-student-row,.report-remarks-page .ba-remark-card,
+.report-remarks-page .ba-analysis,.report-remarks-page .ba-basis-preview,
+.report-remarks-page .ba-sheet:not(.ba-basis-sheet) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  border-radius:13px;box-shadow:none;}
+.report-remarks-page .ba-student-row:hover {transform:none;box-shadow:none;}
+.report-remarks-page .ba-student-row {min-height:64px;transition:border-color .12s ease;}
+.report-remarks-page .ba-list {margin-top:2px;gap:9px;}
+.report-remarks-page .ba-remark-card {margin-top:2px;padding:10px;}
+.report-remarks-page .ba-basis-preview {padding:7px;margin:6px 0;}
+.report-remarks-page .ba-remark-field textarea {background:var(--input-bg,var(--surface,#fff));border-radius:10px;}
+@media(min-width:1024px){.report-remarks-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:639px){.report-remarks-page{padding:3px;}}
+@media(prefers-reduced-motion:reduce){.report-remarks-page .ba-student-row{transition:none;}}
+
 `;

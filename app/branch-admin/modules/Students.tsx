@@ -7750,4 +7750,90 @@ const css = `
   }
 }
 
+
+/* ============================================================
+   MODAL VISIBILITY HARDENING — STRONG BACKDROP + CLOSE BUTTON
+   Applies to both BA portals and the shared Excel portals that
+   render directly under document.body.
+   ============================================================ */
+.ba-sheet-backdrop,
+.ba-modal-backdrop,
+.excel-export-overlay,
+.excel-import-overlay {
+  background: rgba(2, 6, 23, .66) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(.9) !important;
+  backdrop-filter: blur(12px) saturate(.9) !important;
+}
+
+/* The shared Excel components are portaled outside .students-page, so
+   these rules must NOT be scoped under .ba-page/.students-page. */
+.excel-export-overlay,
+.excel-import-overlay {
+  isolation: isolate;
+}
+
+.excel-export-close,
+.excel-import-close,
+.ba-sheet-backdrop .ba-modal-close,
+.ba-modal-backdrop .ba-modal-close,
+.ba-sheet-backdrop .ba-sheet-head > button,
+.ba-sheet-backdrop .ba-sheet-profile > button,
+.ba-modal-backdrop .ba-modal-head > button {
+  position: relative !important;
+  z-index: 20 !important;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 42px !important;
+  min-height: 42px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  border: 1px solid rgba(15, 23, 42, .20) !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  color: #111827 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, .16) !important;
+  font-size: 20px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+}
+
+.excel-export-close:hover,
+.excel-import-close:hover,
+.ba-sheet-backdrop .ba-modal-close:hover,
+.ba-modal-backdrop .ba-modal-close:hover,
+.ba-sheet-backdrop .ba-sheet-head > button:hover,
+.ba-sheet-backdrop .ba-sheet-profile > button:hover,
+.ba-modal-backdrop .ba-modal-head > button:hover {
+  border-color: color-mix(in srgb, var(--ba-primary, #2563eb) 42%, rgba(15, 23, 42, .20)) !important;
+  background: color-mix(in srgb, var(--ba-primary, #2563eb) 8%, #ffffff) !important;
+  color: #111827 !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ba-sheet-backdrop,
+  .ba-modal-backdrop,
+  .excel-export-overlay,
+  .excel-import-overlay {
+    background: rgba(2, 6, 23, .78) !important;
+  }
+
+  .excel-export-close,
+  .excel-import-close,
+  .ba-sheet-backdrop .ba-modal-close,
+  .ba-modal-backdrop .ba-modal-close,
+  .ba-sheet-backdrop .ba-sheet-head > button,
+  .ba-sheet-backdrop .ba-sheet-profile > button,
+  .ba-modal-backdrop .ba-modal-head > button {
+    border-color: rgba(255, 255, 255, .22) !important;
+    background: #1f2937 !important;
+    color: #ffffff !important;
+    box-shadow: 0 5px 18px rgba(0, 0, 0, .36) !important;
+  }
+}
+
 `;

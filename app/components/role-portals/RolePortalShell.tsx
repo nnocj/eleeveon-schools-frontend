@@ -2,25 +2,10 @@
 
 /**
  * app/components/role-portals/RolePortalShell.tsx
- * ---------------------------------------------------------
- * ROLE PORTAL SHELL - PUBLIC ENTRY
- * ---------------------------------------------------------
- *
- * PHASE 1 REFACTOR:
- * - public portal types remain exported from this file;
- * - WorkspaceTransitionProvider remains the outer provider;
- * - runtime implementation lives in shell/RolePortalShellContent.tsx;
- * - workspace/session helpers live in shell/rolePortalWorkspace.ts;
- * - identity/presentation helpers live in shell/rolePortalIdentity.ts;
- *
- * IMPORTANT:
- * This phase intentionally changes structure only.
- * Portal behavior, access rules, sync, appearance, navigation, drawers,
- * workspace switching and styling remain unchanged.
+ * Public entry for role portals. Shared authentication, membership,
+ * workspace transition and synchronization behavior is unchanged.
  */
-
 import type React from "react";
-
 import type { useAccount } from "../../context/account-context";
 import type { useSettings } from "../../context/settings-context";
 import type { useActiveBranch } from "../../context/active-branch-context";
@@ -30,20 +15,9 @@ import type { useRealtime } from "../../context/realtime-context";
 import type { useTheme } from "../../context/theme-context";
 import type { useDatabase } from "../../context/database-context";
 import type { useSyncContext } from "../../context/sync-context";
-
-import type {
-  usePortalAppearanceReadiness,
-} from "../PortalAppearanceRuntime";
-
-import type {
-  AppRole,
-  UserMembership,
-} from "../../lib/auth/roleRedirect";
-
-import {
-  WorkspaceTransitionProvider,
-} from "../workspace";
-
+import type { usePortalAppearanceReadiness } from "../PortalAppearanceRuntime";
+import type { AppRole, UserMembership } from "../../lib/auth/roleRedirect";
+import { WorkspaceTransitionProvider } from "../workspace";
 import RolePortalShellContent from "./shell/RolePortalShellContent";
 
 export type RoleNavItem = {
@@ -68,14 +42,12 @@ export type RolePortalRuntimeContext = {
   restoring: boolean;
   verifying: boolean;
   sessionVerified: boolean;
-
   membership: UserMembership | null;
   memberships: UserMembership[];
   activeRole: string | null;
   teacherId: string | null;
   studentId: string | null;
   parentId: string | null;
-
   schoolId: string | null;
   school: ReturnType<typeof useActiveBranch>["activeSchool"];
   schools: ReturnType<typeof useActiveBranch>["schools"];
@@ -83,7 +55,6 @@ export type RolePortalRuntimeContext = {
   branch: ReturnType<typeof useActiveBranch>["activeBranch"];
   branches: ReturnType<typeof useActiveBranch>["branches"];
   allBranches: ReturnType<typeof useActiveBranch>["allBranches"];
-
   settings: ReturnType<typeof useSettings>["settings"];
   theme: ReturnType<typeof useTheme>;
   database: ReturnType<typeof useDatabase>;
@@ -91,7 +62,6 @@ export type RolePortalRuntimeContext = {
   syncPanel: ReturnType<typeof useSyncContext>;
   realtime: ReturnType<typeof useRealtime>;
   appearance: ReturnType<typeof usePortalAppearanceReadiness>;
-
   refreshAccount: ReturnType<typeof useAccount>["refreshAccount"];
   refreshInstitution: ReturnType<typeof useActiveBranch>["refreshInstitution"];
   refreshSettings: ReturnType<typeof useSettings>["refreshSettings"];
@@ -106,14 +76,7 @@ export type RolePortalRouteProps = {
   context?: RolePortalRuntimeContext;
 };
 
-/**
- * Existing portal route components were created over several phases.
- * Some accept only `{ navigate }`; rebuilt routes may also accept `context`.
- *
- * Keep the route registry backward-compatible.
- */
-export type RolePortalRouteComponent =
-  React.ComponentType<any>;
+export type RolePortalRouteComponent = React.ComponentType<any>;
 
 export type RolePortalShellProps = {
   portalTitle: string;
@@ -121,23 +84,18 @@ export type RolePortalShellProps = {
   homeKey: string;
   allowedRoles: AppRole[];
   navSections: RoleNavSection[];
-  routes: Record<
-    string,
-    RolePortalRouteComponent
-  >;
+  routes: Record<string, RolePortalRouteComponent>;
   lockedContext?: boolean;
   requireSchool?: boolean;
   requireBranch?: boolean;
+  /** Existing portals default to the unchanged sidebar layout. */
+  navigationMode?: "sidebar" | "branch-workspace";
 };
 
-export default function RolePortalShell(
-  props: RolePortalShellProps,
-) {
+export default function RolePortalShell(props: RolePortalShellProps) {
   return (
     <WorkspaceTransitionProvider>
-      <RolePortalShellContent
-        {...props}
-      />
+      <RolePortalShellContent {...props} />
     </WorkspaceTransitionProvider>
   );
 }

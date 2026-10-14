@@ -1,4 +1,3 @@
-
 "use client";
 
 /**
@@ -57,6 +56,7 @@ import SyncStatusSheet from "../../SyncStatusSheet";
 import EleeveonCenter from "../EleeveonCenter";
 
 import PortalSidebar from "./PortalSidebar";
+import BranchWorkspaceNavigation from "./BranchWorkspaceNavigation";
 import PortalHeader from "./PortalHeader";
 import PortalContent from "./PortalContent";
 import AccountWorkspaceDrawer from "./AccountWorkspaceDrawer";
@@ -255,7 +255,9 @@ function RolePortalShellContent({
   lockedContext = true,
   requireSchool = true,
   requireBranch = true,
+  navigationMode = "sidebar",
 }: RolePortalShellProps) {
+  const branchWorkspaceLayout = navigationMode === "branch-workspace";
   const router = useRouter();
 
   const { runTransition } = useWorkspaceTransition();
@@ -771,6 +773,11 @@ function RolePortalShellContent({
     effectiveBranchId,
     router,
   ]);
+
+  const directNavItems = useMemo(() =>
+    navSections.flatMap((section) => section.items),
+    [navSections],
+  );
 
   const labels = useMemo(() => {
     const out: Record<string, string> = {};
@@ -1309,9 +1316,13 @@ function RolePortalShellContent({
       realtimeConnected,
       initialSyncDone,
       realtimeStatus: realtimeStatus.status,
-      sidebarHidden,
+      sidebarHidden: branchWorkspaceLayout || sidebarHidden,
 
       onToggleSidebar: () => {
+        if (branchWorkspaceLayout) {
+          document.getElementById("ba-workspace-navigation")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
         if (sidebarHidden) {
           setSidebarHidden(false);
           setSidebarOpen(true);
@@ -1343,6 +1354,7 @@ function RolePortalShellContent({
     resolvedWorkspaceLabel,
     setWindowChromeIdentity,
     sidebarHidden,
+    branchWorkspaceLayout,
     visibleMemberImage,
     visibleMemberMeta,
     visibleMemberName,
@@ -1781,6 +1793,7 @@ function RolePortalShellContent({
     <main
       className={[
         "role-shell",
+        branchWorkspaceLayout && "branch-workspace-layout",
         sidebarHidden &&
           "portal-sidebar-hidden",
       ]
@@ -1803,7 +1816,7 @@ function RolePortalShellContent({
             "48px",
 
           "--portal-content-left":
-            sidebarHidden
+            branchWorkspaceLayout || sidebarHidden
               ? "0px"
               : `${sidebarWidth}px`,
 
@@ -1854,6 +1867,7 @@ function RolePortalShellContent({
         />
       ) : null}
 
+      {!branchWorkspaceLayout && (
       <PortalSidebar
         open={sidebarOpen}
         hidden={sidebarHidden}
@@ -1884,6 +1898,7 @@ function RolePortalShellContent({
           handleSidebarResizeStart
         }
       />
+      )}
 
       <AccountWorkspaceDrawer
         open={accountDrawerOpen}
@@ -1952,9 +1967,20 @@ function RolePortalShellContent({
 
       <section
         className={`app-main ${
-          sidebarHidden ? "full" : ""
+          branchWorkspaceLayout || sidebarHidden ? "full" : ""
         }`}
       >
+        {branchWorkspaceLayout ? (
+          <BranchWorkspaceNavigation
+            items={directNavItems}
+            activeKey={tab}
+            onNavigate={navigate}
+            branchName={resolvedWorkspaceLabel}
+            online={isOnline}
+            onOpenStatus={openStatusSheet}
+            onOpenAccount={() => setAccountDrawerOpen(true)}
+          />
+        ) : (
         <PortalHeader
           activeLabel={activeLabel}
           workspaceLabel={
@@ -1984,6 +2010,7 @@ function RolePortalShellContent({
             setAccountDrawerOpen(true)
           }
         />
+        )}
 
         <PortalContent>
           {priorityPreparing && (
@@ -4653,4 +4680,37 @@ body {
  * PortalOverlayBoundaries.css now owns the shared
  * overlay viewport and mobile navigation boundaries.
  */
+
+/* BRANCH ADMIN: optional flat navigation — other roles remain unchanged. */
+.role-shell.branch-workspace-layout {
+  --portal-content-left: 0px !important;
+  width: 100%;
+  max-width: 100%;
+}
+.role-shell.branch-workspace-layout .app-main,
+.role-shell.branch-workspace-layout .app-main.full {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0;
+}
+.role-shell.branch-workspace-layout .app-content,
+.role-shell.branch-workspace-layout .app-content-inner {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+@media (min-width: 980px) {
+  .role-shell.branch-workspace-layout {
+    display: block !important;
+    grid-template-columns: none !important;
+    overflow: visible !important;
+  }
+  .role-shell.branch-workspace-layout .app-main,
+  .role-shell.branch-workspace-layout .app-main.full {
+    display: flex;
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
 `;

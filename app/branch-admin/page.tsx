@@ -2,753 +2,483 @@
 
 /**
  * app/branch-admin/page.tsx
- * ---------------------------------------------------------
- * BRANCH ADMIN PORTAL
- * ---------------------------------------------------------
- *
- * Branch-scoped operational workspace for school management.
- *
- * Updated for the newer DB direction:
- * - Administration
- * - Daily operations
- * - Communication
- * - Curriculum / Academic setup
- * - Assessment / Grading setup
- * - Academic records
- * - Finance / payroll
- * - Branch control
- * - Local display settings
- *
- * IMPORTANT:
- * This page is compile-safe even when some modules are not written yet.
- * Missing modules use temporary placeholder pages so navigation will not crash.
- * Replace the placeholder routes with real module imports as we write them.
- *
- * Dashboard note:
- * - BranchAdminDashboard receives NAV_SECTIONS from this page.
- * - Adding/removing/reordering nav items here automatically changes dashboard cards.
- *
- * Workspace and synchronization alignment:
- * - RolePortalShell opens this portal from the selected workspace session.
- * - Live account/branch context is authoritative; stored workspace values are
- *   used only as a recovery fallback.
- * - Entering the portal requests a role-selection sync. Phase 5 single-flight
- *   behavior makes this safe even when startup/focus/online sync is active.
- * - Child modules are reactive through the Phase 6/7 Dexie revision system.
+ * BRANCH ADMIN — REPORTS-FIRST WORKSPACE
+ * Six direct destinations, Assessments as home, no standalone dashboard.
+ * Other module source files and DB tables are left untouched.
+ * Existing branch-scoped sync and workspace settings remain in place.
  */
-
 import React, { useEffect, useRef } from "react";
-
-import RolePortalShell, {
-  type RoleNavSection,
-} from "../components/role-portals/RolePortalShell";
-
+import RolePortalShell, { type RoleNavSection } from "../components/role-portals/RolePortalShell";
 import { BRANCH_ADMIN_ROLES } from "../lib/auth/roleRedirect";
-
 import LocalSettings from "../components/role-portals/LocalSettings";
-
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useActiveBranch } from "../context/active-branch-context";
 import { runSync } from "../lib/sync/syncEngine";
 
-// ======================================================
-// DASHBOARD
-// ======================================================
-
-import BranchAdminDashboard from "./modules/BranchAdminDashboard";
-
-// ======================================================
-// ADMINISTRATION
-// ======================================================
-
+// Main report-focused destinations
 import Students from "./modules/Students";
 import Teachers from "./modules/Teachers";
 import Parents from "./modules/Parents";
 import Classes from "./modules/Classes";
-//import StudentEnrollments from "./modules/StudentEnrollments";
+import AssessmentEntries from "./modules/AssessmentEntries";
+import StudentReports from "./modules/reports/StudentReports";
+import Broadsheets from "./modules/reports/Broadsheets";
+import ReportRemarks from "./modules/ReportRemarks";
 
-// These can be replaced with real imports when their files are ready.
-// import Classsubjects from "./modules/Classsubjects";
-// import Studentenrollments from "./modules/Studentenrollments";
-
-// ======================================================
-// DAILY OPERATIONS
-// ======================================================
-
-import Studentattendance from "./modules/StudentAttendance";
-import Teacherattendance from "./modules/TeacherAttendance";
-
-// These can be replaced with real imports when their files are ready.
-import Announcements from "./modules/Announcements";
-import Messages from "./modules/Messages";
-
-//time table and calendar modules can be added here when ready
-import BranchTimetable from "./modules/BranchTimetable";
-import Calendar from "./modules/Calendar";
-import ClassTimetable from "./modules/ClassTimetable";
-import ExamTimetable from "./modules/ExamTimetable";
-import TeacherTimetable from "./modules/TeacherTimetable";
-
-import ResourceTimetable from "./modules/ResourceTimetable";
-
-import Organizations from "./modules/Organizations";
-// ======================================================
-// ACADEMIC SETUP
-// ======================================================
-
-import AcademicSystems from "./modules/AcademicSystems"
+// Existing academic setup editors; included in one Setup workspace.
+import AcademicSystems from "./modules/AcademicSystems";
 import CurriculumSystems from "./modules/CurriculumSystems";
 import SubjectSetup from "./modules/SubjectSetup";
-import CourseOutline from "./modules/CourseOutline";
-
-// ======================================================
-// ASSESSMENT + GRADING
-// ======================================================
-
 import AssessmentSystems from "./modules/AssessmentSystems";
 import Assessmentapplicability from "./modules/Assessmentapplicability";
 import GradingSystems from "./modules/ZRGradingSystems";
-
-// ======================================================
-// ACADEMIC RECORDS
-// ======================================================
-
-import StudentReports from "./modules/reports/StudentReports";
-import AssessmentEntries from "./modules/AssessmentEntries";
-import ReportRemarks from "./modules/ReportRemarks";
-import Broadsheets from "./modules/reports/Broadsheets";
-import Promotion from "./modules/Promotion";
-import CumulativeRecords from "./modules/CumulativeRecords";
-import AcademicProgress from "./modules/AcademicProgress";
-
-// ======================================================
-// FINANCE
-// ======================================================
-
-// Replace placeholders with these imports when the files are ready.
-import Fees from "./modules/Fees";
-import Incomes from "./modules/Incomes";
-import Expenses from "./modules/Expenses";
-import Payroll from "./modules/Payroll";
-import WithdrawMoney from "./modules/WithdrawMoney";
-import SchoolPayoutSettings from "./modules/SchoolPayoutSettings";
-import BranchWallet from "./modules/BranchWallet";
-import Settlements from "./modules/Settlements";
-
-// ======================================================
-// BRANCH CONTROL
-// ======================================================
-
 import Branchsettings from "./modules/Branchsettings";
-
-// Replace placeholders with these imports when the files are ready.
 import Usersroles from "./modules/Usersroles";
-// import Syncstatus from "./modules/Syncstatus";
 
-// ======================================================
-// PLACEHOLDER MODULE
-// ======================================================
-
-import IdentityOverview from "./modules/IdentityOverview";
-import IdentityCredentials from "./modules/IdentityCredentials";
-import IdentityDevices from "./modules/IdentityDevices";
-import IdentityAccessPoints from "./modules/IdentityAccessPoints";
-import IdentityActivity from "./modules/IdentityActivity";
-import IdentityCards from "./modules/IdentityCards";
-import StudentPickup from "./modules/StudentPickup";
-import Visitors from "./modules/Visitors";
-import SchoolTransport from "./modules/SchoolTransport";
-import EmergencyRollCall from "./modules/EmergencyRollCall";
-
-type RouteProps = {
-  navigate: (key: string) => void;
-};
+type RouteProps = { navigate: (key: string) => void };
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
 type OpenWorkspaceSession = {
+
   membership?: Record<string, any> | null;
+
   schoolId?: string | null;
+
   branchId?: string | null;
+
   role?: string | null;
+
 };
 
 function safeRead(key: string) {
+
   if (typeof window === "undefined") return null;
 
   try {
+
     return (
+
       window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
+
     );
+
   } catch {
+
     return null;
+
   }
+
 }
 
 function safeJson<T>(key: string): T | null {
+
   const raw = safeRead(key);
+
   if (!raw) return null;
 
   try {
+
     return JSON.parse(raw) as T;
+
   } catch {
+
     return null;
+
   }
+
 }
 
 function toPositiveNumber(value: unknown): number | null {
+
   if (value === null || value === undefined || value === "") return null;
+
   const parsed = Number(value);
+
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+
 }
 
 function firstPositiveNumber(...values: unknown[]) {
+
   for (const value of values) {
+
     const parsed = toPositiveNumber(value);
+
     if (parsed) return parsed;
+
   }
 
   return null;
+
 }
 
 function readOpenWorkspaceSession() {
+
   return safeJson<OpenWorkspaceSession>(OPEN_WORKSPACE_KEY);
+
 }
 
 function readStoredActiveMembership() {
+
   return safeJson<Record<string, any>>("activeMembership");
+
 }
 
 function selectedWorkspaceSchoolId(args: {
+
   activeSchoolId?: any;
+
   activeSchool?: any;
+
   settings?: any;
+
 }) {
+
   const workspace = readOpenWorkspaceSession();
+
   const membership = workspace?.membership || readStoredActiveMembership();
 
   return firstPositiveNumber(
+
     // Live provider state is authoritative.
+
     args.activeSchoolId,
+
     args.activeSchool?.id,
+
     args.settings?.schoolId,
 
     // Stored values are recovery fallbacks only.
+
     workspace?.schoolId,
+
     membership?.schoolId,
+
     membership?.school?.id,
+
     safeRead("activeSchoolId"),
+
   );
+
 }
 
 function selectedWorkspaceBranchId(args: {
+
   activeBranchId?: any;
+
   activeBranch?: any;
+
   settings?: any;
+
 }) {
+
   const workspace = readOpenWorkspaceSession();
+
   const membership = workspace?.membership || readStoredActiveMembership();
 
   return firstPositiveNumber(
+
     // Live provider state is authoritative.
+
     args.activeBranchId,
+
     args.activeBranch?.id,
+
     args.settings?.branchId,
 
     // Stored values are recovery fallbacks only.
+
     workspace?.branchId,
+
     membership?.branchId,
+
     membership?.schoolBranchId,
+
     membership?.branch?.id,
+
     safeRead("activeBranchId"),
+
   );
+
 }
-
-function PlaceholderModule({
-  title,
-  description,
-  icon,
-  nextStep,
-}: {
-  title: string;
-  description: string;
-  icon: string;
-  nextStep: string;
-}) {
-  return (
-    <main className="ba-placeholder-page">
-      <style>{placeholderCss}</style>
-
-      <section className="ba-placeholder-card">
-        <div className="ba-placeholder-icon">{icon}</div>
-
-        <div>
-          <p>Module placeholder</p>
-          <h2>{title}</h2>
-          <span>{description}</span>
-        </div>
-
-        <div className="ba-placeholder-note">
-          <strong>Next step</strong>
-          <span>{nextStep}</span>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-// ======================================================
-// LOCAL SETTINGS WRAPPER
-// ======================================================
 
 function BranchAdminLocalSettingsPage() {
+
   const { accountId } = useAccount();
+
   const { settings } = useSettings();
 
   const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
+
     useActiveBranch();
 
   return (
+
     <LocalSettings
+
       portalName="Branch Admin Portal"
+
       roleKey="branch-admin"
+
       accountId={accountId}
+
       schoolId={selectedWorkspaceSchoolId({
+
         activeSchoolId,
+
         activeSchool,
+
         settings,
+
       })}
+
       branchId={selectedWorkspaceBranchId({
+
         activeBranchId,
+
         activeBranch,
+
         settings,
+
       })}
+
       primaryColor={settings?.primaryColor || "var(--primary-color, #2563eb)"}
+
       branchFontSize={(settings as any)?.fontSize}
+
       inline={true}
+
     />
+
+  );
+
+}
+
+// REPORTS — ONE WORKSPACE, CONTEXTUAL ACTIONS
+// ======================================================
+
+type ReportsView = "reports" | "broadsheets" | "remarks";
+
+function BranchReportsWorkspace(props: RouteProps) {
+  const [view, setView] = React.useState<ReportsView>("reports");
+  // Normalize mixed component prop signatures for the shared route contract.
+  // A module that does not use `navigate` can safely ignore this prop.
+  const CurrentView: React.ComponentType<RouteProps> =
+    view === "broadsheets"
+      ? Broadsheets
+      : view === "remarks"
+        ? ReportRemarks
+        : StudentReports;
+
+  return (
+    <div className="ba-workspace-wrapper">
+      <style>{branchWorkspaceCss}</style>
+      <div className="ba-contextual-actions" aria-label="Report actions">
+        {([
+          ["reports", "Student reports"],
+          ["broadsheets", "Broadsheets"],
+          ["remarks", "Remarks"],
+        ] as const).map(([key, label]) => (
+          <button
+            type="button"
+            key={key}
+            className={view === key ? "is-active" : ""}
+            aria-pressed={view === key}
+            onClick={() => setView(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <CurrentView {...props} />
+    </div>
   );
 }
 
 // ======================================================
-// DASHBOARD WRAPPER
+// SETUP — FIRST-PASS UNIFIED WORKSPACE
+// Existing editors remain functional until their fields are
+// progressively merged into independent-save form sections.
 // ======================================================
 
-function BranchAdminDashboardPage(props: RouteProps) {
-  return <BranchAdminDashboard {...props} navSections={NAV_SECTIONS} />;
+type SetupEditor = {
+  key: string;
+  label: string;
+  Component: React.ComponentType<any>;
+};
+
+type SetupSection = {
+  title: string;
+  description: string;
+  editors: SetupEditor[];
+};
+
+const SETUP_SECTIONS: SetupSection[] = [
+  {
+    title: "Academic Period & Branch",
+    description: "Academic years, terms and branch details",
+    editors: [
+      { key: "academicSystems", label: "Academic periods", Component: AcademicSystems },
+      { key: "branchSettings", label: "Branch settings", Component: Branchsettings },
+    ],
+  },
+  {
+    title: "Curriculum & Subjects",
+    description: "Curricula and available subjects",
+    editors: [
+      { key: "curriculumSystems", label: "Curriculum", Component: CurriculumSystems },
+      { key: "subjectSetup", label: "Subjects", Component: SubjectSetup },
+    ],
+  },
+  {
+    title: "Assessment Structure",
+    description: "Assessment items, weights and applicability",
+    editors: [
+      { key: "assessmentSystems", label: "Assessment structure", Component: AssessmentSystems },
+      { key: "assessmentApplicability", label: "Applicability", Component: Assessmentapplicability },
+    ],
+  },
+  {
+    title: "Grading & Calculations",
+    description: "Grade rules and grading schemes",
+    editors: [
+      { key: "gradingSystems", label: "Grading rules", Component: GradingSystems },
+    ],
+  },
+  {
+    title: "Report Configuration",
+    description: "Report formats and remarks are available in Reports while we consolidate the template settings.",
+    editors: [],
+  },
+  {
+    title: "Access & Preferences",
+    description: "Staff access and personal display preferences",
+    editors: [
+      { key: "usersRoles", label: "Users & roles", Component: Usersroles },
+      { key: "localSettings", label: "Display settings", Component: BranchAdminLocalSettingsPage },
+    ],
+  },
+];
+
+function BranchSetupWorkspace(props: RouteProps) {
+  const [openedEditor, setOpenedEditor] = React.useState<string | null>(null);
+
+  return (
+    <div className="ba-setup-page">
+      <div className="ba-setup-intro">
+        <h2>Setup & Settings</h2>
+        <p>Configure your branch for assessments and reports. Changes are saved in their existing editors.</p>
+      </div>
+      {SETUP_SECTIONS.map((section, index) => (
+        <section className="ba-setup-section" key={section.title}>
+          <div className="ba-setup-section-head">
+            <span className="ba-setup-number">{String(index + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{section.title}</h3>
+              <p>{section.description}</p>
+            </div>
+          </div>
+          {section.editors.length > 0 && (
+            <div className="ba-contextual-actions" aria-label={`${section.title} editors`}>
+              {section.editors.map((editor) => (
+                <button
+                  type="button"
+                  key={editor.key}
+                  className={openedEditor === editor.key ? "is-active" : ""}
+                  aria-expanded={openedEditor === editor.key}
+                  onClick={() =>
+                    setOpenedEditor((current) =>
+                      current === editor.key ? null : editor.key,
+                    )
+                  }
+                >
+                  {editor.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {section.editors.map(({ key, Component }) =>
+            openedEditor === key ? (
+              <div className="ba-inline-editor" key={key}>
+                <Component {...props} />
+              </div>
+            ) : null,
+          )}
+        </section>
+      ))}
+      <style>{branchWorkspaceCss}</style>
+    </div>
+  );
 }
 
-// ======================================================
-// NAVIGATION
-// ======================================================
+const branchWorkspaceCss = `
+.ba-workspace-wrapper, .ba-setup-page { min-width: 0; width: 100%; }
+.ba-setup-page { display: grid; gap: 12px; }
+.ba-setup-intro { padding: 4px 2px 8px; }
+.ba-setup-intro h2, .ba-setup-section h3 { margin: 0; color: var(--text, #111827); }
+.ba-setup-intro h2 { font-size: 22px; }
+.ba-setup-intro p, .ba-setup-section p { margin: 5px 0 0; font-size: 13px; line-height: 1.5; color: var(--muted, #64748b); }
+.ba-setup-section { min-width: 0; padding: 14px; border: 1px solid var(--border, rgba(0,0,0,.1)); border-radius: 16px; background: var(--surface, #fff); }
+.ba-setup-section-head { display: flex; gap: 12px; align-items: flex-start; }
+.ba-setup-section h3 { font-size: 15px; }
+.ba-setup-number { flex: 0 0 auto; display: grid; place-items: center; min-width: 36px; height: 36px; padding: 4px; border-radius: 10px; background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, var(--surface, #fff)); color: var(--text, #111827); font-weight: 800; font-size: 12px; }
+.ba-contextual-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.ba-setup-section .ba-contextual-actions { margin: 12px 0 0 48px; }
+.ba-contextual-actions button { min-height: 37px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border, rgba(0,0,0,.14)); background: var(--surface, #fff); color: var(--text, #111827); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.ba-contextual-actions button.is-active { border-color: var(--primary-color, #2563eb); background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, var(--surface, #fff)); }
+.ba-contextual-actions button:focus-visible { outline: 3px solid var(--primary-color, #2563eb); outline-offset: 2px; }
+.ba-inline-editor { min-width: 0; margin-top: 14px; border-top: 1px solid var(--border, rgba(0,0,0,.1)); padding-top: 14px; }
+@media (max-width: 540px) { .ba-setup-section { padding: 10px; } .ba-setup-section .ba-contextual-actions { margin-left: 0; } }
+`;
 
 export const NAV_SECTIONS: RoleNavSection[] = [
   {
-    title: "Branch Home",
+    title: "Workspaces",
     defaultOpen: true,
     items: [
-      {
-        key: "branchAdminDashboard",
-        label: "Dashboard",
-        icon: "🏠",
-      },
-    ],
-  },
-  {
-    title: " Setup",
-    defaultOpen: false,
-    items: [
-      {
-        key: "organizations",
-        label: "Organizations",
-        icon: "🏢",
-      },
-      {
-        key: "academicSystems",
-        label: "Academic System",
-        icon: "🧱",
-      },
-      {
-        key: "curriculumSystems",
-        label: "Curriculum System",
-        icon: "📚",
-      },
-      {
-        key: "classes",
-        label: "Classes",
-        icon: "🏫",
-      },
-      {
-        key: "subjectSetup",
-        label: "Subject Setup",
-        icon: "📖",
-      },
-
-      {
-        key: "assessmentSystems",
-        label: "Assessment System",
-        icon: "🏗️",
-      },
-
-      {
-        key: "gradingSystems",
-        label: "Grading System",
-        icon: "🎓",
-      },
-      {
-        key: "assessmentApplicability",
-        label: "Assessment Applicability",
-        icon: "✅",
-      },
-      {
-        key: "courseOutline",
-        label: "Course Outline",
-        icon: "🗂️",
-      },
-    ],
-  },
-
-  {
-    title: "Academic Records",
-    defaultOpen: false,
-    items: [
-      {
-        key: "assessmentEntries",
-        label: "Assessment Entries",
-        icon: "📝",
-      },
-      {
-        key: "studentReports",
-        label: "Student Reports",
-        icon: "📄",
-      },
-      {
-        key: "reportRemarks",
-        label: "Report Remarks",
-        icon: "📝",
-      },
-      {
-        key: "broadsheets",
-        label: "Broadsheets",
-        icon: "📊",
-      },
-      {
-        key: "promotion",
-        label: "Promotion",
-        icon: "🚀",
-      },
-      {
-        key: "cumulativeRecords",
-        label: "Cumulative Records",
-        icon: "📚",
-      },
-      {
-        key: "academicProgress",
-        label: "Academic Progress",
-        icon: "📈",
-      },
-    ],
-  },
-
-  {
-    title: "Administration",
-    defaultOpen:false,
-    items: [
-      {
-        key: "students",
-        label: "Students",
-        icon: "🧑‍🎓",
-      },
-      {
-        key: "teachers",
-        label: "Teachers",
-        icon: "👨‍🏫",
-      },
-      {
-        key: "parents",
-        label: "Parents",
-        icon: "👨‍👩‍👧",
-      },
-     
-    ],
-  },
-  {
-  title: "Identity & Safety",
-  defaultOpen: false,
-  items: [
-    {
-      key: "identityOverview",
-      label: "Identity Overview",
-      icon: "🆔",
-    },
-    {
-      key: "identityCredentials",
-      label: "Credentials",
-      icon: "🔑",
-    },
-    {
-      key: "identityDevices",
-      label: "Devices",
-      icon: "📱",
-    },
-    {
-      key: "identityAccessPoints",
-      label: "Access Points",
-      icon: "🚪",
-    },
-    {
-      key: "identityActivity",
-      label: "Activity",
-      icon: "📜",
-    },
-    {
-      key: "identityCards",
-      label: "Identity Cards",
-      icon: "💳",
-    },
-    {
-      key: "studentPickup",
-      label: "Student Pickup",
-      icon: "🚸",
-    },
-    {
-      key: "visitors",
-      label: "Visitors",
-      icon: "👥",
-    },
-    {
-      key: "schoolTransport",
-      label: "School Transport",
-      icon: "🚌",
-    },
-    {
-      key: "emergencyRollCall",
-      label: "Emergency Roll Call",
-      icon: "🚨",
-    },
-  ],
-},
-
-  {
-    title: "Attendance",
-    defaultOpen: false,
-    items: [
-      {
-        key: "studentAttendance",
-        label: "Student Attendance",
-        icon: "📅",
-      },
-      {
-        key: "teacherAttendance",
-        label: "Teacher Attendance",
-        icon: "🕒",
-      },
-    ],
-  },
-  {
-    title: "Communication",
-    defaultOpen: false,
-    items: [
-      {
-        key: "announcements",
-        label: "Announcements",
-        icon: "📣",
-      },
-      {
-        key: "messages",
-        label: "Messages",
-        icon: "💬",
-      },
-    ],
-  },
-
-  {
-    title: "Calendar & Timetable",
-    defaultOpen: false,
-    items: [
-      {
-        key: "calendar",
-        label: "Calendar",
-        icon: "📆",
-      },
-      {
-        key: "branchTimetable",
-        label: "Branch Timetable",
-        icon: "📆",
-      },
-      {
-        key: "classTimetable",
-        label: "Class Timetable",
-        icon: "📚",
-      },
-      {
-        key: "teacherTimetable",
-        label: "Teacher Timetable",
-        icon: "👩‍🏫",
-      },
-      {
-        key: "examTimetable",
-        label: "Exam Timetable",
-        icon: "📝",
-      },
-      {
-        key: "resourceTimetable",
-        label: "Resource Timetable",
-        icon: "📅",
-      },
-    ],
-  },
-
-  {
-    title: "Finance",
-    defaultOpen: false,
-    items: [
-      {
-        key: "fees",
-        label: "Fees",
-        icon: "💳",
-      },
-      {
-        key: "incomes",
-        label: "Incomes",
-        icon: "💰",
-      },
-      {
-        key: "expenses",
-        label: "Expenses",
-        icon: "📉",
-      },
-      {
-        key: "payroll",
-        label: "Teacher Payroll",
-        icon: "🧾",
-      },
-      {
-        key: "withdrawMoney",
-        label: "Withdraw Money",
-        icon: "💸",
-      },
-      {
-        key: "schoolPayoutSettings",
-        label: "Payout Settings",
-        icon: "⚙️",
-      },
-      {
-        key: "branchWallet",
-        label: "Branch Wallet",
-        icon: "👛",
-      },
-    ],
-  },
-
-  {
-    title: "Branch Control",
-    defaultOpen: false,
-    items: [
-      {
-        key: "branchSettings",
-        label: "Branch Settings",
-        icon: "⚙️",
-      },
-      {
-        key: "usersRoles",
-        label: "Users & Roles",
-        icon: "🔐",
-      },
-      {
-        key: "localSettings",
-        label: "Local Settings",
-        icon: "🌓",
-      },
+      { key: "assessmentEntries", label: "Assessments", icon: "📝" },
+      { key: "reportsWorkspace", label: "Reports", icon: "📄" },
+      { key: "students", label: "Students", icon: "👥" },
+      { key: "classes", label: "Classes", icon: "🏫" },
+      { key: "teachers", label: "Teachers", icon: "👩‍🏫" },
+      { key: "setupWorkspace", label: "Setup", icon: "⚙️" },
     ],
   },
 ];
 
 // ======================================================
-// ROUTES
-// ======================================================
 
+// Main routes + legacy contextual routes used by existing modules.
+// No finance, identity, transport, attendance or communication modules
+// are imported into this initial reports-focused Branch Admin bundle.
 const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
-  // Dashboard
-  branchAdminDashboard: BranchAdminDashboardPage,
-
-  // Administration
+  assessmentEntries: AssessmentEntries,
+  reportsWorkspace: BranchReportsWorkspace,
   students: Students,
-  teachers: Teachers,
-  parents: Parents,
   classes: Classes,
-  subjectSetup: SubjectSetup,
+  teachers: Teachers,
+  setupWorkspace: BranchSetupWorkspace,
 
-  identityOverview: IdentityOverview,
-  identityCredentials: IdentityCredentials,
-  identityDevices: IdentityDevices,
-  identityAccessPoints: IdentityAccessPoints,
-  identityActivity: IdentityActivity,
-  identityCards: IdentityCards,
-  studentPickup: StudentPickup,
-  visitors: Visitors,
-  schoolTransport: SchoolTransport,
-  emergencyRollCall: EmergencyRollCall,
-  
-  resourceTimetable: ResourceTimetable,
-
-  // Daily Work
-  studentAttendance: Studentattendance,
-  teacherAttendance: Teacherattendance,
-
-  //communication
-  announcements: Announcements,
-  messages: Messages,
-
-  //timetable and calendar
-  branchTimetable: BranchTimetable,
-  calendar: Calendar,
-  classTimetable: ClassTimetable,
-  teacherTimetable: TeacherTimetable,
-  examTimetable: ExamTimetable,
-  organizations: Organizations,
-
-  // Academic / Curriculum Setup
+  // Kept for any existing contextual calls to navigate("...").
+  parents: Parents,
+  studentReports: StudentReports,
+  broadsheets: Broadsheets,
+  reportRemarks: ReportRemarks,
   academicSystems: AcademicSystems,
   curriculumSystems: CurriculumSystems,
-  courseOutline: CourseOutline,
-
-  // Assessment / Grading
-  assessmentEntries: AssessmentEntries,
+  subjectSetup: SubjectSetup,
   assessmentSystems: AssessmentSystems,
   assessmentApplicability: Assessmentapplicability,
   gradingSystems: GradingSystems,
-
-  // Records
-  studentReports: StudentReports,
-  reportRemarks: ReportRemarks,
-  broadsheets: Broadsheets,
-  promotion: Promotion,
-  cumulativeRecords: CumulativeRecords,
-  academicProgress: AcademicProgress,
-
-  // Finance
-  fees: Fees,
-  incomes: Incomes,
-  expenses: Expenses,
-  payroll: Payroll,
-  withdrawMoney: WithdrawMoney,
-  schoolPayoutSettings: SchoolPayoutSettings,
-  branchWallet: BranchWallet,
-  settlements: Settlements,
-
-  // Control
   branchSettings: Branchsettings,
   usersRoles: Usersroles,
   localSettings: BranchAdminLocalSettingsPage,
 };
 
-// ======================================================
-// PAGE
-// ======================================================
-
 export default function BranchAdminPage() {
+
   const { authenticated, accountId, loading: accountLoading } = useAccount();
 
   const { activeSchoolId, activeBranchId } = useActiveBranch();
@@ -756,150 +486,101 @@ export default function BranchAdminPage() {
   const lastRoleEntrySyncKeyRef = useRef<string | null>(null);
 
   /**
+
    * Request fresh branch data when this selected workspace opens.
+
    *
+
    * This does not create a competing operation. Phase 5 runSync() returns the
+
    * currently active shared Promise when startup, focus, visibility, online,
+
    * timer, or another role-entry trigger is already synchronizing.
+
    */
+
   useEffect(() => {
+
     if (
+
       accountLoading ||
+
       !authenticated ||
+
       !accountId ||
+
       !activeSchoolId ||
+
       !activeBranchId
+
     ) {
+
       return;
+
     }
 
     const syncKey = [accountId, activeSchoolId, activeBranchId].join(":");
 
     if (lastRoleEntrySyncKeyRef.current === syncKey) {
+
       return;
+
     }
 
     lastRoleEntrySyncKeyRef.current = syncKey;
 
     void runSync({
+
       includePlatformCache: true,
+
       trigger: "role-selection",
+
     }).catch((error) => {
+
       console.error("[branch-admin] role-entry sync failed", error);
+
     });
+
   }, [
+
     accountLoading,
+
     authenticated,
+
     accountId,
+
     activeSchoolId,
+
     activeBranchId,
+
   ]);
 
   return (
+
     <RolePortalShell
+
       portalTitle="Branch Admin Portal"
-      portalSubtitle="Branch operations, academics, finance and administration"
-      homeKey="branchAdminDashboard"
+
+      portalSubtitle="Assessments, reports and essential school setup"
+
+      homeKey="assessmentEntries"
+
       allowedRoles={BRANCH_ADMIN_ROLES}
+
       navSections={NAV_SECTIONS}
+      navigationMode="branch-workspace"
+
       routes={ROUTES}
+
       lockedContext={true}
+
       requireSchool={true}
+
       requireBranch={true}
+
     />
+
   );
+
 }
 
-// ======================================================
-// PLACEHOLDER CSS
-// ======================================================
-
-const placeholderCss = `
-.ba-placeholder-page {
-  min-height: 100%;
-  width: 100%;
-  display: grid;
-  place-items: center;
-  padding: calc(12px * var(--local-density-scale, 1));
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent), transparent 32rem),
-    var(--bg, #f7f8fb);
-  color: var(--text, #111111);
-  font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
-}
-
-.ba-placeholder-card {
-  width: min(620px, 100%);
-  display: grid;
-  gap: 14px;
-  padding: 18px;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 18% 0%, color-mix(in srgb, var(--primary-color, #2563eb) 16%, transparent), transparent 22rem),
-    var(--card-bg, var(--surface, #ffffff));
-  border: 1px solid var(--border, rgba(0,0,0,.10));
-  box-shadow: var(--shell-shadow, 0 24px 70px rgba(15,23,42,.10));
-}
-
-.ba-placeholder-icon {
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  border-radius: 22px;
-  background: var(--primary-color, #2563eb);
-  color: #ffffff;
-  font-size: 26px;
-  box-shadow: 0 14px 32px color-mix(in srgb, var(--primary-color, #2563eb) 26%, transparent);
-}
-
-.ba-placeholder-card p {
-  margin: 0;
-  color: var(--primary-color, #2563eb);
-  font-size: 10px;
-  font-weight: 1000;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.ba-placeholder-card h2 {
-  margin: 2px 0 0;
-  color: var(--text, #111111);
-  font-size: clamp(22px, 5vw, 32px);
-  font-weight: 1000;
-  letter-spacing: -.06em;
-  line-height: 1;
-}
-
-.ba-placeholder-card span {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted, #64748b);
-  font-size: 13px;
-  line-height: 1.55;
-  font-weight: 750;
-}
-
-.ba-placeholder-note {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--primary-color, #2563eb) 8%, var(--surface, #ffffff));
-  border: 1px solid color-mix(in srgb, var(--primary-color, #2563eb) 18%, var(--border, rgba(0,0,0,.10)));
-}
-
-.ba-placeholder-note strong {
-  color: var(--text, #111111);
-  font-size: 13px;
-  font-weight: 1000;
-}
-
-.ba-placeholder-note span {
-  margin: 0;
-  color: var(--muted, #64748b);
-  font-size: 12px;
-  line-height: 1.55;
-  font-weight: 750;
-}
-`;

@@ -342,20 +342,29 @@ function Avatar({
   photo?: string;
   primary: string;
 }) {
+  // Photo URLs are resolved from the existing offline-first mediaAssets hook.
+  // If an image is missing or fails, show a stable initials fallback instead.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const validPhoto = typeof photo === "string" && photo.trim() && failedUrl !== photo;
+
   return (
-    <div
+    <span
       className="ba-avatar"
-      style={{
-        background: photo
-          ? `url(${photo}) center/cover`
-          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
-      }}
+      style={{ background: primary }}
+      aria-label={name || "Class"}
     >
-      {!photo &&
-        String(name || "CL")
-          .slice(0, 2)
-          .toUpperCase()}
-    </div>
+      {validPhoto ? (
+        <img
+          src={photo}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedUrl(photo!)}
+        />
+      ) : (
+        String(name || "CL").slice(0, 2).toUpperCase()
+      )}
+    </span>
   );
 }
 
@@ -1315,7 +1324,7 @@ export default function ClassesPage() {
       rows: filteredRows.map((item) => {
         const row: any = item.row;
         return {
-          class: { text: row.name || "Unnamed class", detail: item.overCapacity ? "Over capacity" : undefined, image: item.photoUrl },
+          class: { text: row.name || "Unnamed class", detail: item.overCapacity ? "Over capacity" : undefined, image: item.photoUrl || item.bannerImageUrl },
           code: row.code || "—",
           level: row.level || "—",
           organization: item.organizationName,
@@ -1588,7 +1597,7 @@ function ClassListItem({
     <button type="button" className="student-row" onClick={onOpen}>
       <Avatar
         name={row.name}
-        photo={item.photoUrl || safeRecordMediaValue(row.photo)}
+        photo={item.photoUrl || item.bannerImageUrl || safeRecordMediaValue(row.photo) || safeRecordMediaValue(row.bannerImage)}
         primary={primary}
       />
 
@@ -1921,10 +1930,19 @@ function TableView({
               return (
                 <tr key={String(item.id)}>
                   <td>
-                    <strong>{row.name}</strong>
-                    <span>
-                      {item.overCapacity ? "Over capacity" : "Class grouping"}
-                    </span>
+                    <div className="ba-table-person">
+                      <Avatar
+                        name={row.name || "Class"}
+                        photo={item.photoUrl || item.bannerImageUrl || safeRecordMediaValue(row.photo) || safeRecordMediaValue(row.bannerImage)}
+                        primary="var(--ba-primary, #64748b)"
+                      />
+                      <div className="ba-table-person-details">
+                        <strong>{row.name || "Unnamed class"}</strong>
+                        <span>
+                          {item.overCapacity ? "Over capacity" : "Class grouping"}
+                        </span>
+                      </div>
+                    </div>
                   </td>
                   <td>{row.code || "—"}</td>
                   <td>{row.level || "—"}</td>
@@ -3752,4 +3770,50 @@ const css = `
   .ba-page .ba-table-scroll td { padding: 8px 9px; }
 }
 
+
+/* V11 — photos in both cards and tables (matching Students). */
+.ba-page .ba-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  color: #fff;
+  isolation: isolate;
+}
+.ba-page .ba-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: inherit;
+  flex: 1 1 auto;
+}
+.ba-page .ba-table-person {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 160px;
+}
+.ba-page .ba-table-person .ba-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.ba-page .ba-table-person-details {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.ba-page .ba-table-person-details > strong,
+.ba-page .ba-table-person-details > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 `;

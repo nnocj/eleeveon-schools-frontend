@@ -4,7 +4,7 @@
  * Branch Admin report viewing surface.
  *
  * - A4 portrait at 794 CSS pixels; landscape at 1122 CSS pixels (96 dpi).
- * - Default: actual A4 size on desktop, fit available width on phones.
+ * - Default: 100% A4 on laptop AND phone, with horizontal scrolling.
  * - Each preview can scroll horizontally AND vertically after zooming.
  * - A single control in the Reports subtab row manages every preview.
  * - The report print zone stays unscaled in the source DOM for existing export tools.
@@ -19,7 +19,7 @@ import React, {
   useState,
 } from "react";
 
-type ZoomChoice = "auto" | "fit" | number;
+type ZoomChoice = "fit" | number;
 type ZoomContextValue = {
   zoom: ZoomChoice;
   setZoom: (next: ZoomChoice) => void;
@@ -36,7 +36,7 @@ export function BranchReportZoomProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [zoom, setZoom] = useState<ZoomChoice>("auto");
+  const [zoom, setZoom] = useState<ZoomChoice>(1);
   const [effective, setEffectiveState] = useState(1);
   const setEffective = useCallback((value: number) => {
     if (!Number.isFinite(value) || value <= 0) return;
@@ -56,7 +56,6 @@ export function BranchReportZoomControls() {
   const zoomContext = useContext(ZoomContext);
   if (!zoomContext) return null;
   const { zoom, setZoom, effective } = zoomContext;
-  const currentPercentage = Math.round(effective * 100);
   const choices = [30, 40, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
   const selectedValue = typeof zoom === "number" ? String(Math.round(zoom * 100)) : zoom;
   const hasCustom = typeof zoom === "number" && !choices.includes(Math.round(zoom * 100));
@@ -77,12 +76,11 @@ export function BranchReportZoomControls() {
         value={selectedValue}
         onChange={(event) => {
           const next = event.target.value;
-          setZoom(next === "auto" || next === "fit" ? next : clampZoom(Number(next) / 100));
+          setZoom(next === "fit" ? "fit" : clampZoom(Number(next) / 100));
         }}
       >
-        <option value="auto">Auto · {currentPercentage}%</option>
         <option value="fit">Fit width</option>
-        {hasCustom && <option value={selectedValue}>{typeof zoom === "number" ? Math.round(zoom * 100) : currentPercentage}%</option>}
+        {hasCustom && <option value={selectedValue}>{Math.round(Number(zoom) * 100)}%</option>}
         {choices.map((percent) => <option key={percent} value={String(percent)}>{percent}%</option>)}
       </select>
       <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => nudge(1)}>+</button>
@@ -102,7 +100,7 @@ export default function BranchReportPreview({
   children,
 }: Props) {
   const zoomContext = useContext(ZoomContext);
-  const requestedZoom = zoomContext?.zoom ?? "auto";
+  const requestedZoom = zoomContext?.zoom ?? 1;
   const publishEffective = zoomContext?.setEffective;
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -118,17 +116,13 @@ export default function BranchReportPreview({
       const pageWidth = Math.max(naturalWidth, content.scrollWidth, printZone?.scrollWidth || 0);
       const pageHeight = Math.max(1, content.scrollHeight, printZone?.scrollHeight || 0);
       // CSS px is the same 96-dpi unit used by the report templates.
-      // Desktop shows a true 100%-size A4 sheet; phones open fitted to width.
+      // 100% means actual A4 CSS size on EVERY screen, including phones.
+      // Phones can pan horizontally and vertically instead of silently shrinking.
       const viewportWidth = Math.max(1, viewport.clientWidth - 1);
-      const isPhone = window.matchMedia("(max-width: 767px)").matches;
       const fit = Math.min(2, viewportWidth / pageWidth);
       const scale = typeof requestedZoom === "number"
         ? clampZoom(requestedZoom)
-        : requestedZoom === "fit"
-          ? fit // explicitly selected Fit can enlarge on a wide monitor
-          : isPhone
-            ? Math.min(1, fit) // automatic mobile width fit
-            : 1; // automatic desktop is an A4-sized document
+        : fit; // optional Fit width is deliberate, never the default
       const nextWidth = Math.max(1, Math.ceil(pageWidth * scale));
       const nextHeight = Math.max(1, Math.ceil(pageHeight * scale));
       setLayout((prev) =>
@@ -167,10 +161,11 @@ export default function BranchReportPreview({
           scrollbar-width:thin; scrollbar-color:var(--border,#aab4c2) transparent;
         }
         .ba-fit-stage { position:relative; margin-inline:auto; box-sizing:border-box; }
+        .ba-fit-viewport { touch-action:pan-x pan-y; }
         .ba-fit-content { position:absolute; top:0; left:0; transform-origin:top left; box-sizing:border-box; }
         .ba-fit-content > .ba-print-zone { box-sizing:border-box; width:100%; padding:0!important; overflow:visible!important; }
         .ba-fit-viewport:focus-visible { outline:2px solid var(--primary-color,#2563eb); outline-offset:-2px; }
-        @media (max-width:767px) { .ba-fit-viewport { max-height:calc(100dvh - 154px); } }
+        @media (max-width:640px) { .ba-fit-viewport { max-height:calc(100dvh - 192px); } }
         @media print {
           .ba-fit-viewport { max-height:none!important; width:auto!important; height:auto!important; overflow:visible!important; }
           .ba-fit-stage { width:auto!important; height:auto!important; margin:0!important; }

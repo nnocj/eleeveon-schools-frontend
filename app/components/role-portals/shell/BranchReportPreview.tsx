@@ -6,7 +6,8 @@
  * - A4 portrait at 794 CSS pixels; landscape at 1122 CSS pixels (96 dpi).
  * - Responsive defaults: 100% A4 on laptops/desktops, Fit width on phones/tablets.
  * - A manual zoom choice overrides the responsive default until unmount.
- * - Each preview can scroll horizontally AND vertically after zooming.
+ * - Horizontal panning stays in the A4 preview; V19 .app-content owns vertical scrolling.
+ * - No independent vertical scroll viewport or fixed preview max-height.
  * - A single control in the Reports subtab row manages every preview.
  * - The report print zone stays unscaled in the source DOM for existing export tools.
  */
@@ -173,13 +174,20 @@ export default function BranchReportPreview({
   }, [naturalWidth, printZoneId, requestedZoom, publishEffective]);
 
   return (
-    <div className="ba-fit-viewport" ref={viewportRef} aria-label="Scrollable report preview" tabIndex={0}>
+    <div className="ba-fit-viewport" ref={viewportRef} aria-label="Report preview — scroll the workspace vertically, or pan this document horizontally" tabIndex={0}>
       <style>{`
         .ba-fit-viewport {
           position:relative; width:100%; max-width:100%; min-width:0;
-          max-height:calc(100dvh - 168px);
-          overflow-x:auto; overflow-y:auto;
-          overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
+          /* V20: let the shared V19 .app-content pane handle ALL vertical
+             document/batch scrolling. This preview only owns sideways panning.
+             Without a height cap, its full natural height contributes to the
+             parent scroller. overflow-y:visible computes as auto alongside
+             overflow-x:auto, but has no independent scroll range. */
+          max-height:none; height:auto; min-height:0;
+          overflow-x:auto; overflow-y:visible;
+          overscroll-behavior-x:contain;
+          overscroll-behavior-y:auto;
+          -webkit-overflow-scrolling:touch;
           scrollbar-width:auto;
           scrollbar-color:var(--ba-primary,var(--primary-color,#2563eb)) var(--surface-secondary,rgba(100,116,139,.17));
           border-radius:6px;
@@ -216,7 +224,8 @@ export default function BranchReportPreview({
         .ba-fit-content { position:absolute; top:0; left:0; transform-origin:top left; box-sizing:border-box; }
         .ba-fit-content > .ba-print-zone { box-sizing:border-box; width:100%; padding:0!important; overflow:visible!important; }
         .ba-fit-viewport:focus-visible { outline:2px solid var(--primary-color,#2563eb); outline-offset:-2px; }
-        @media (max-width:640px) { .ba-fit-viewport { max-height:calc(100dvh - 192px); } }
+        /* Mobile shares the exact same page-height behavior as desktop.
+           The existing responsive Fit width zoom still applies below 980px. */
         @media print {
           .ba-fit-viewport { max-height:none!important; width:auto!important; height:auto!important; overflow:visible!important; }
           .ba-fit-stage { width:auto!important; height:auto!important; margin:0!important; }

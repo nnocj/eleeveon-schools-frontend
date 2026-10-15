@@ -293,7 +293,15 @@ function BranchReportsWorkspace(props: RouteProps) {
                 key={key}
                 className={view === key ? "is-active" : ""}
                 aria-pressed={view === key}
-                onClick={() => setView(key)}
+                onClick={() => {
+                  setView(key);
+                  // Switch report categories at the top without disturbing
+                  // the persistent portal navigation or browser scroll.
+                  const pane = document.querySelector<HTMLElement>(
+                    ".role-shell.workspace-locked-scroll .app-content",
+                  );
+                  if (pane) pane.scrollTop = 0;
+                }}
               >
                 {label}
               </button>
@@ -452,7 +460,11 @@ const branchWorkspaceCss = `
 .ba-reports-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
 .ba-reports-workspace .ba-report-subtabs {
   display:flex; align-items:center; gap:6px; flex-wrap:nowrap;
-  min-width:0; width:100%; margin:0; padding:0 0 3px;
+  min-width:0; width:100%; margin:0; padding:4px 0 5px;
+  position:sticky; top:0; z-index:22;
+  background:var(--eds-shell-bg,var(--bg,var(--surface,#fff)));
+  border-bottom:1px solid var(--border,rgba(15,23,42,.10));
+  backdrop-filter:blur(12px);
 }
 .ba-report-subtab-list { display:flex; flex:1 1 auto; min-width:0; gap:4px;
   overflow-x:auto; scrollbar-width:thin; overscroll-behavior-x:contain; white-space:nowrap; }
@@ -685,4 +697,3 @@ export default function BranchAdminPage() {
   );
 
 }
-

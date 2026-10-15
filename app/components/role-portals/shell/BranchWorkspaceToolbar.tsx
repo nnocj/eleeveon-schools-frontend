@@ -74,12 +74,15 @@ export function useRegisterBranchWorkspaceToolbar(
 
   useEffect(() => {
     if (!register) return;
+    // Only register genuinely supplied actions: an omitted print handler must
+    // reach the general table printer rather than becoming a silent no-op.
+    const available = latest.current;
     return register(routeKey, {
-      add: () => latest.current.add?.(),
-      search: (value) => latest.current.search?.(value),
-      filter: () => latest.current.filter?.(),
-      print: () => latest.current.print?.(),
-      more: () => latest.current.more?.(),
+      ...(available.add ? { add: () => latest.current.add?.() } : {}),
+      ...(available.search ? { search: (value: string) => latest.current.search?.(value) } : {}),
+      ...(available.filter ? { filter: () => latest.current.filter?.() } : {}),
+      ...(available.print ? { print: () => latest.current.print?.() } : {}),
+      ...(available.more ? { more: () => latest.current.more?.() } : {}),
     });
   }, [register, routeKey]);
 }

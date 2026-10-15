@@ -7817,5 +7817,107 @@ const css = `
 @media (min-width: 1024px) { .ba-list { grid-template-columns: repeat(4,minmax(0,1fr)); } }
 @media (max-width: 639px) { .ba-page { padding: 3px; } .student-row { padding: 9px; } }
 @media (prefers-reduced-motion: reduce) { .student-row, .ba-card { transition: none; } }
+
+/* ================================================================
+   V9 — ASSESSMENT-ENTRIES-ALIGNED FULL-WIDTH RECORDS
+   The parent portal owns the sidebar width. Do not place a second
+   1180px cap inside the module; use every pixel of its content area.
+   Only workspace content is affected: modal/sheet sizes are preserved.
+   ================================================================ */
+.ba-page {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 5px;
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  overflow-x: clip;
+}
+
+.ba-page .ba-list,
+.ba-page .ba-table-card,
+.ba-page .ba-analysis-grid,
+.ba-page .ba-filter-chips,
+.ba-page .ba-summary-line,
+.ba-page .students-map-view,
+.ba-page .teachers-map-view {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* Mirror the efficient Assessment Entries list rhythm. */
+.ba-page .ba-list {
+  gap: 9px;
+  margin-top: 2px;
+  align-items: stretch;
+}
+.ba-page .ba-list > .student-row {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 10px;
+}
+
+/* Stretch the table's OUTER card and its horizontal scroll viewport.
+   Only the table scrolls horizontally when its columns need more room. */
+.ba-page .ba-table-card {
+  display: block;
+  padding: 4px;
+  margin-top: 2px;
+  overflow: visible;
+}
+.ba-page .ba-table-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 10px;
+}
+.ba-page .ba-table-scroll table {
+  width: 100%;
+  margin: 0;
+}
+.ba-page .ba-table-scroll th,
+.ba-page .ba-table-scroll td {
+  padding: 9px 10px;
+}
+
+.ba-page .ba-analysis-grid {
+  margin-top: 2px;
+  gap: 9px;
+}
+
+/* Keep 1 on small phones, 2 on tablets, and at most 4 on desktops.
+   Container queries would be a separate change; preserve V5 view logic. */
+@media (min-width: 680px) and (max-width: 1023px) {
+  .ba-page .ba-list { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (min-width: 1024px) {
+  .ba-page .ba-list { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+@media (max-width: 679px) {
+  .ba-page .ba-list { grid-template-columns: minmax(0,1fr); }
+}
+@media (max-width: 639px) {
+  .ba-page {
+    padding: 3px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+  .ba-page .ba-list { gap: 7px; }
+  .ba-page .ba-list > .student-row { padding: 9px; }
+  .ba-page .ba-table-scroll th,
+  .ba-page .ba-table-scroll td { padding: 8px 9px; }
+}
+
 `;
 /**/

@@ -28,6 +28,7 @@
 import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { useRouter } from "next/navigation";
 
 import { useSettings } from "../../context/settings-context";
@@ -1294,12 +1295,48 @@ export default function ClassesPage() {
     await load();
   };
 
+
+  const printClassesTable = () => {
+    printBranchTable({
+      title: "Class Records",
+      subtitle: `Current branch · ${filteredRows.length} matching classes`,
+      columns: [
+        { key: "class", label: "Classes" },
+        { key: "code", label: "Code" },
+        { key: "level", label: "Level" },
+        { key: "organization", label: "Organization" },
+        { key: "teacher", label: "Class Teacher" },
+        { key: "students", label: "Students" },
+        { key: "subjects", label: "Subjects" },
+        { key: "capacity", label: "Capacity" },
+        { key: "status", label: "Status" },
+        { key: "updated", label: "Updated" },
+      ],
+      rows: filteredRows.map((item) => {
+        const row: any = item.row;
+        return {
+          class: { text: row.name || "Unnamed class", detail: item.overCapacity ? "Over capacity" : undefined, image: item.photoUrl },
+          code: row.code || "—",
+          level: row.level || "—",
+          organization: item.organizationName,
+          teacher: item.classTeacherName,
+          students: item.studentCount,
+          subjects: item.subjectCount,
+          capacity: item.capacity ? { text: `${item.studentCount}/${item.capacity}`, detail: `${item.capacityUsed}% used` } : "Not set",
+          status: item.overCapacity ? "Over Capacity" : statusLabel(item.active),
+          updated: timeText(row.updatedAt || row.createdAt),
+        };
+      }),
+    });
+  };
+
   // The portal owns the action strip. All module actions stay functional.
   useRegisterBranchWorkspaceToolbar("classes", {
     add: () => openCreate(),
     search: setSearch,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
+    print: printClassesTable,
   });
 
   // Table is the efficient default on a laptop; mobile starts in cards.

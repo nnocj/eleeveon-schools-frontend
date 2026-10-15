@@ -1482,6 +1482,7 @@ export default function StudentReports() {
             template={activeReportTemplate}
             settings={activeReportTemplateSettings}
             compact
+            mobilePreview={false}
             pageBreakAfter={index < output.classReports.length - 1}
           />
         ))
@@ -1496,6 +1497,7 @@ export default function StudentReports() {
         }
         template={activeReportTemplate}
         settings={activeReportTemplateSettings}
+        mobilePreview={false}
         pageBreakAfter={false}
       />
     );

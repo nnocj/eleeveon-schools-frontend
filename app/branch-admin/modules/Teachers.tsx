@@ -51,6 +51,7 @@
 import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../context/settings-context";
 import SignaturePadModal from "../../components/media/SignaturePadModal";
@@ -1600,12 +1601,52 @@ export default function TeachersPage() {
     await load();
   };
 
+
+  const printTeachersTable = () => {
+    printBranchTable({
+      title: "Teacher Records",
+      subtitle: `Current branch · ${filteredRows.length} matching teachers`,
+      columns: [
+        { key: "teacher", label: "Teachers" },
+        { key: "role", label: "Role" },
+        { key: "organization", label: "Organization" },
+        { key: "contact", label: "Contact" },
+        { key: "qualification", label: "Qualification" },
+        { key: "salary", label: "Salary" },
+        { key: "assignments", label: "Assignments" },
+        { key: "subjects", label: "Class Subjects" },
+        { key: "classTeacher", label: "Class Teacher" },
+        { key: "attendance", label: "Attendance" },
+        { key: "status", label: "Status" },
+        { key: "updated", label: "Updated" },
+      ],
+      rows: filteredRows.map((item) => {
+        const row: any = item.row;
+        return {
+          teacher: { text: row.fullName || "Unnamed teacher", detail: row.gender || undefined, image: item.photoUrl },
+          role: roleLabel(row.role),
+          organization: item.organizationName,
+          contact: { text: row.phone || "—", detail: row.email || undefined },
+          qualification: row.qualification || "—",
+          salary: moneyText(row.salary),
+          assignments: item.assignmentCount,
+          subjects: item.classSubjectCount,
+          classTeacher: item.classTeacherCount,
+          attendance: item.attendanceCount,
+          status: item.active ? "Active" : "Inactive",
+          updated: timeText(row.updatedAt || row.createdAt),
+        };
+      }),
+    });
+  };
+
   // The portal owns the action strip. All module actions stay functional.
   useRegisterBranchWorkspaceToolbar("teachers", {
     add: () => openCreate(),
     search: setSearch,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
+    print: printTeachersTable,
   });
 
   // Table is the efficient default on a laptop; mobile starts in cards.

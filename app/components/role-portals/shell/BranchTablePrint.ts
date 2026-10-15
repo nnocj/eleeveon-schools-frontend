@@ -9,6 +9,7 @@
  * - Wide tables become consecutive readable column groups, repeating the
  *   identity/name column on each group instead of shrinking text to 5pt.
  * - Long tables continue automatically on additional A4 sheets.
+ * - Every section fills the A4 printable width inside consistent safe margins.
  * - No Edit/Delete/action column, application chrome, modals or background.
  */
 
@@ -94,8 +95,10 @@ type PrintLayout = {
 function chooseLayout(options: BranchTablePrintOptions, columns: BranchPrintColumn[]): PrintLayout {
   const rawWidths = columns.map(c => columnWidthMm(c, options.rows));
   const rawTotal = rawWidths.reduce((a,b) => a+b, 0);
-  const portraitWidth = 194; // A4 210mm, 8mm margins
-  const landscapeWidth = 281; // A4 297mm, 8mm margins
+  // A4 width minus the 12mm safe margin on EACH side.
+  // Keep these values aligned with the @page CSS declaration.
+  const portraitWidth = 186; // 210mm - 24mm
+  const landscapeWidth = 273; // 297mm - 24mm
   const forcedLandscape = options.orientation === "landscape";
   const forcedPortrait = options.orientation === "portrait";
   const landscape = forcedLandscape || (!forcedPortrait && rawTotal > portraitWidth * 1.12);
@@ -132,6 +135,52 @@ function chooseLayout(options: BranchTablePrintOptions, columns: BranchPrintColu
   return { landscape, widthMm:available, groups, fontPt:landscape ? 8.6 : 9 };
 }
 
+/**
+ * Spread columns right across the printable area without compromising the
+ * compact content-aware relative widths. Short numeric columns grow much less
+ * than long name/detail columns, but the table always spans its printable width.
+ * If a group was compressed for readability, preserve its proportions.
+ */
+function fillPrintableWidth(
+  naturalWidths: number[],
+  columns: BranchPrintColumn[],
+  printableWidthMm: number,
+): number[] {
+  if (!naturalWidths.length) return [];
+  const total = naturalWidths.reduce((sum, width) => sum + Math.max(0, width), 0);
+  if (!total) return naturalWidths.map(() => printableWidthMm / naturalWidths.length);
+
+  if (total >= printableWidthMm - 0.001) {
+    const factor = printableWidthMm / total;
+    return naturalWidths.map(width => Math.max(0, width) * factor);
+  }
+
+  const remaining = printableWidthMm - total;
+  const weights = naturalWidths.map((width, index) => {
+    const label = columns[index]?.label || "";
+    const compact = width <= 19 || /^(id|no\.?|#|age|sex|gender|level|class code|status|count|total|grade|score|%|position|capacity)$/i.test(label.trim());
+    // Proportional growth favours wide content fields over tiny status fields.
+    return Math.pow(Math.max(8, width), 1.15) * (compact ? 0.52 : 1);
+  });
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  return naturalWidths.map((width, index) =>
+    width + remaining * weights[index] / weightTotal,
+  );
+}
+
+/** Convert millimetre widths to percentages, avoiding a rounding gap. */
+function widthPercentages(widths: number[]): number[] {
+  const total = widths.reduce((sum, value) => sum + value, 0);
+  if (!total) return widths.map(() => 100 / widths.length);
+  let used = 0;
+  return widths.map((value, index) => {
+    if (index === widths.length - 1) return Math.max(0, 100 - used);
+    const percent = Math.round((value / total) * 100000) / 1000;
+    used += percent;
+    return percent;
+  });
+}
+
 export function buildBranchTablePrintHTML(options: BranchTablePrintOptions): string {
   const columns = options.columns.filter(c => c.key && !/^actions?$|^controls?$/i.test(c.label.trim())
     && !/^actions?$|^controls?$/i.test(c.key.trim()));
@@ -142,8 +191,8 @@ export function buildBranchTablePrintHTML(options: BranchTablePrintOptions): str
     dateStyle: "medium", timeStyle: "short",
   }).format(new Date());
   const parts = groups.map((group,index) => {
-    const sectionWidth = Math.min(layout.widthMm, group.totalWidthMm);
-    const widths = group.widthsMm.map(w => (w / group.totalWidthMm * sectionWidth));
+    const expandedWidths = fillPrintableWidth(group.widthsMm, group.columns, layout.widthMm);
+    const percentages = widthPercentages(expandedWidths);
     const heading = group.columns.map(col => `<th scope="col">${escapeHTML(col.label)}</th>`).join("");
     const entries = options.rows.map(row =>
       `<tr>${group.columns.map(col => `<td>${renderCell(row[col.key])}</td>`).join("")}</tr>`,
@@ -152,7 +201,7 @@ export function buildBranchTablePrintHTML(options: BranchTablePrintOptions): str
       <header><div><h1>${escapeHTML(options.title)}${groups.length>1 ? ` · Part ${index+1}/${groups.length}` : ""}</h1>
       ${options.subtitle ? `<p>${escapeHTML(options.subtitle)}</p>` : ""}</div>
       <div class="meta">${options.rows.length} record${options.rows.length===1?"":"s"}<br>${escapeHTML(timestamp)}</div></header>
-      <table style="width:${sectionWidth.toFixed(2)}mm"><colgroup>${widths.map(w => `<col style="width:${w.toFixed(2)}mm" />`).join("")}</colgroup>
+      <table><colgroup>${percentages.map(w => `<col style="width:${w.toFixed(3)}%" />`).join("")}</colgroup>
       <thead><tr>${heading}</tr></thead><tbody>${entries ||
         `<tr><td colspan="${group.columns.length}" class="no-data">No matching records</td></tr>`}</tbody></table>
       ${groups.length>1 ? `<p class="section-note">Column section ${index+1}/${groups.length} · Identity column repeated</p>` : ""}
@@ -162,23 +211,24 @@ export function buildBranchTablePrintHTML(options: BranchTablePrintOptions): str
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>${escapeHTML(options.title)} — Eleeveon Schools</title>
   <style>
-    @page { size:A4 ${landscape?"landscape":"portrait"}; margin:8mm; }
+    /* Reliable white-paper border on all four sides, including long tables. */
+    @page { size:A4 ${landscape?"landscape":"portrait"}; margin:12mm; }
     *,*::before,*::after{box-sizing:border-box}
     html,body{margin:0;padding:0;background:#fff;color:#1f2937;font-family:Arial,Helvetica,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     body{font-size:${fontPt.toFixed(2)}pt;line-height:1.22}
     .screen-actions{display:flex;position:sticky;top:0;z-index:2;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;background:#152237;color:#fff}
     .screen-actions p{margin:0;font-size:12px}.screen-actions button{background:#fff;color:#152237;border:0;padding:9px 17px;border-radius:7px;font-weight:700;cursor:pointer}
     main{padding:12px;max-width:1400px;margin:auto}
-    .print-section{break-before:auto;page-break-before:auto}
+    .print-section{width:100%;break-before:auto;page-break-before:auto}
     .print-section.continued{break-before:page;page-break-before:always}
-    header{display:flex;justify-content:space-between;align-items:flex-end;gap:15px;border-bottom:1px solid #334155;padding-bottom:5px;margin-bottom:6px}
+    header{display:flex;justify-content:space-between;align-items:flex-end;gap:15px;border-bottom:1px solid #334155;padding-bottom:3mm;margin-bottom:3mm}
     h1{font-size:12pt;letter-spacing:-.2px;margin:0;font-weight:700;color:#172333}
     header p{font-size:8pt;color:#475569;margin:2px 0 0}
     .meta{text-align:right;font-size:7pt;color:#475569;line-height:1.35;white-space:nowrap}
-    table{border-collapse:collapse;table-layout:fixed;border:1px solid #cbd5e1;max-width:100%}
+    table{width:100%;min-width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid #cbd5e1;max-width:100%;margin:0}
     thead{display:table-header-group}
     tbody tr{break-inside:avoid;page-break-inside:avoid}
-    th,td{overflow-wrap:anywhere;word-break:normal;vertical-align:top;text-align:left;border-bottom:1px solid #d3dae4;border-right:1px solid #e2e8f0;padding:3px 4px}
+    th,td{overflow-wrap:anywhere;word-break:normal;vertical-align:top;text-align:left;border-bottom:1px solid #d3dae4;border-right:1px solid #e2e8f0;padding:1.15mm 1.6mm}
     th{background:#e9eef4;color:#172333;font-size:${Math.max(7.4,fontPt-.2).toFixed(2)}pt;font-weight:700;line-height:1.23}
     tbody tr:nth-child(even) td{background:#f6f8fb}
     .cell-content{display:flex;gap:4px;align-items:flex-start}
@@ -188,9 +238,9 @@ export function buildBranchTablePrintHTML(options: BranchTablePrintOptions): str
     .no-data{text-align:center;padding:18px;color:#64748b}
     .section-note{font-size:7pt;color:#64748b;margin:5px 0 0}
     @media screen{body{background:#eef1f5}main{background:#fff;box-shadow:0 10px 40px #0001;min-height:80vh;margin:24px auto;padding:24px}.print-section.continued{margin-top:25px;padding-top:12px;border-top:2px dashed #cbd5e1}}
-    @media print{.screen-actions{display:none!important}main{padding:0;margin:0;box-shadow:none}.print-section.continued{margin-top:0;padding:0;border:0}a{text-decoration:none;color:inherit}}
+    @media print{.screen-actions{display:none!important}html,body,main{width:100%!important;max-width:none!important}main{padding:0!important;margin:0!important;box-shadow:none}.print-section.continued{margin-top:0;padding:0;border:0}a{text-decoration:none;color:inherit}}
   </style></head><body>
-  <div class="screen-actions"><p>A4 ${landscape?"landscape":"portrait"} · ${options.rows.length} rows · ${groups.length} column group${groups.length===1?"":"s"} · Photos included when available</p>
+  <div class="screen-actions"><p>A4 ${landscape?"landscape":"portrait"} · 12mm page margins · full-width columns · ${options.rows.length} rows · ${groups.length} column group${groups.length===1?"":"s"} · Photos included when available</p>
   <div><button type="button" onclick="window.print()">Print / Save as PDF</button> <button type="button" onclick="window.close()">Close</button></div></div>
   <main>${parts.join("")}</main></body></html>`;
 }

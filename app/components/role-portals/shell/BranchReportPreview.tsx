@@ -158,9 +158,38 @@ export default function BranchReportPreview({
           max-height:calc(100dvh - 168px);
           overflow-x:auto; overflow-y:auto;
           overscroll-behavior:contain; -webkit-overflow-scrolling:touch;
-          scrollbar-width:thin; scrollbar-color:var(--border,#aab4c2) transparent;
+          scrollbar-width:auto;
+          scrollbar-color:var(--ba-primary,var(--primary-color,#2563eb)) var(--surface-secondary,rgba(100,116,139,.17));
+          border-radius:6px;
+        }
+        /* Distinct, branch-coloured scrollbars for long report batches. */
+        .ba-fit-viewport::-webkit-scrollbar { width:13px; height:13px; }
+        .ba-fit-viewport::-webkit-scrollbar-track {
+          background:var(--surface-secondary,rgba(100,116,139,.16)); border-radius:10px;
+        }
+        .ba-fit-viewport::-webkit-scrollbar-thumb {
+          background:var(--ba-primary,var(--primary-color,#2563eb));
+          border:2px solid var(--surface-secondary,#e2e8f0); border-radius:10px;
+        }
+        .ba-fit-viewport::-webkit-scrollbar-thumb:hover {
+          background:var(--ba-primary,var(--primary-color,#1d4ed8));
+        }
+        .ba-fit-viewport::-webkit-scrollbar-corner {
+          background:var(--surface-secondary,rgba(100,116,139,.16));
         }
         .ba-fit-stage { position:relative; margin-inline:auto; box-sizing:border-box; }
+        /* Lock the actual print-paper geometry on narrow phones.
+           Never let the mobile viewport turn A4 into a reflowed card. */
+        @media screen {
+          .ba-fit-content[data-a4-paper="portrait"] :is(.src-a4-page,.student-report-card-page,.classic-formal-template-page,.print-page) {
+            width:210mm!important; min-width:210mm!important; max-width:210mm!important;
+            min-height:297mm!important; box-sizing:border-box!important; flex-shrink:0!important;
+          }
+          .ba-fit-content[data-a4-paper="landscape"] :is(.bs-router-page,.print-page) {
+            width:297mm!important; min-width:297mm!important; max-width:297mm!important;
+            min-height:210mm!important; box-sizing:border-box!important; flex-shrink:0!important;
+          }
+        }
         .ba-fit-viewport { touch-action:pan-x pan-y; }
         .ba-fit-content { position:absolute; top:0; left:0; transform-origin:top left; box-sizing:border-box; }
         .ba-fit-content > .ba-print-zone { box-sizing:border-box; width:100%; padding:0!important; overflow:visible!important; }
@@ -175,6 +204,7 @@ export default function BranchReportPreview({
       <div className="ba-fit-stage" style={{ width: layout.width, height: layout.height }}>
         <div
           className="ba-fit-content"
+          data-a4-paper={naturalWidth >= 1000 ? "landscape" : "portrait"}
           ref={contentRef}
           style={{ width: naturalWidth, transform: `scale(${layout.scale})` }}
         >

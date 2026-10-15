@@ -449,20 +449,29 @@ function Avatar({
   photo?: string;
   primary: string;
 }) {
+  // Photo URLs are resolved from the existing offline-first mediaAssets hook.
+  // If an image is missing or fails, show a stable initials fallback instead.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const validPhoto = typeof photo === "string" && photo.trim() && failedUrl !== photo;
+
   return (
-    <div
+    <span
       className="ba-avatar"
-      style={{
-        background: photo
-          ? `url(${photo}) center/cover`
-          : `linear-gradient(135deg, ${primary}, rgba(15,23,42,.9))`,
-      }}
+      style={{ background: primary }}
+      aria-label={name || "Teacher"}
     >
-      {!photo &&
-        String(name || "T")
-          .slice(0, 1)
-          .toUpperCase()}
-    </div>
+      {validPhoto ? (
+        <img
+          src={photo}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFailedUrl(photo!)}
+        />
+      ) : (
+        String(name || "T").slice(0, 1).toUpperCase()
+      )}
+    </span>
   );
 }
 
@@ -2307,8 +2316,17 @@ function TableView({
               return (
                 <tr key={String(item.id)}>
                   <td>
-                    <strong>{row.fullName}</strong>
-                    <span>{row.gender || "No gender set"}</span>
+                    <div className="ba-table-person">
+                      <Avatar
+                        name={row.fullName || "Teacher"}
+                        photo={item.photoUrl || safeRecordMediaValue(row.photo)}
+                        primary="var(--ba-primary, #64748b)"
+                      />
+                      <div className="ba-table-person-details">
+                        <strong>{row.fullName || "Unnamed teacher"}</strong>
+                        <span>{row.gender || "No gender set"}</span>
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <Chip tone={roleTone(row.role)}>{roleLabel(row.role)}</Chip>
@@ -4637,4 +4655,50 @@ const css = `
   .ba-page .ba-table-scroll td { padding: 8px 9px; }
 }
 
+
+/* V11 — photos in both cards and tables (matching Students). */
+.ba-page .ba-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  color: #fff;
+  isolation: isolate;
+}
+.ba-page .ba-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: inherit;
+  flex: 1 1 auto;
+}
+.ba-page .ba-table-person {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 160px;
+}
+.ba-page .ba-table-person .ba-avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.ba-page .ba-table-person-details {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.ba-page .ba-table-person-details > strong,
+.ba-page .ba-table-person-details > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 `;

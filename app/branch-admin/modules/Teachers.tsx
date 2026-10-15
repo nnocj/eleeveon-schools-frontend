@@ -48,6 +48,7 @@
  * - lets SchoolMap own marker selection, details, and location editing
  */
 
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { useRouter } from "next/navigation";
@@ -1776,6 +1777,7 @@ export default function TeachersPage() {
       )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           search={search}
           setSearch={setSearch}
@@ -1792,8 +1794,10 @@ export default function TeachersPage() {
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           viewMode={viewMode}
           summary={summary}
@@ -1807,8 +1811,10 @@ export default function TeachersPage() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
       {selectedItem && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setSelectedItem(null)}>
         <ActionSheet
           item={selectedItem}
           openEdit={openEdit}
@@ -1816,8 +1822,10 @@ export default function TeachersPage() {
           toggleActive={toggleActive}
           onClose={() => setSelectedItem(null)}
         />
+        </BranchViewportPortal>
       )}
-      {modalOpen && (
+      {modalOpen && !signaturePadOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setModalOpen(false)}>
         <TeacherModal
           form={form}
           saving={saving}
@@ -1829,6 +1837,7 @@ export default function TeachersPage() {
           openSignaturePad={openSignaturePad}
           save={save}
         />
+        </BranchViewportPortal>
       )}
 
       <SignaturePadModal
@@ -1842,6 +1851,7 @@ export default function TeachersPage() {
       />
 
       {cameraOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => closeCamera()}>
         <CameraCaptureModal
           field={cameraField}
           videoRef={cameraVideoRef}
@@ -1853,6 +1863,7 @@ export default function TeachersPage() {
           close={closeCamera}
           entityLabel={TEACHER_MEDIA_ENTITY_LABEL}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );

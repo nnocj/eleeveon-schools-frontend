@@ -4,7 +4,8 @@
  * Branch Admin report viewing surface.
  *
  * - A4 portrait at 794 CSS pixels; landscape at 1122 CSS pixels (96 dpi).
- * - Default: 100% A4 on laptop AND phone, with horizontal scrolling.
+ * - Responsive defaults: 100% A4 on laptops/desktops, Fit width on phones/tablets.
+ * - A manual zoom choice overrides the responsive default until unmount.
  * - Each preview can scroll horizontally AND vertically after zooming.
  * - A single control in the Reports subtab row manages every preview.
  * - The report print zone stays unscaled in the source DOM for existing export tools.
@@ -13,6 +14,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -36,7 +38,27 @@ export function BranchReportZoomProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const [zoom, setZoom] = useState<ZoomChoice>(1);
+  // Keep the responsive default separate from the user's explicit choice.
+  // When the user has not selected a zoom, narrower screens use Fit width;
+  // laptop/desktop workspaces remain at the natural A4 100% size.
+  const [userZoom, setUserZoom] = useState<ZoomChoice | null>(null);
+  const [compactScreen, setCompactScreen] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 979px)");
+    const syncScreenSize = () => setCompactScreen(media.matches);
+    syncScreenSize();
+    // Older mobile browsers expose addListener/removeListener instead.
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", syncScreenSize);
+      return () => media.removeEventListener("change", syncScreenSize);
+    }
+    media.addListener(syncScreenSize);
+    return () => media.removeListener(syncScreenSize);
+  }, []);
+
+  const zoom: ZoomChoice = userZoom ?? (compactScreen ? "fit" : 1);
+  const setZoom = useCallback((next: ZoomChoice) => setUserZoom(next), []);
   const [effective, setEffectiveState] = useState(1);
   const setEffective = useCallback((value: number) => {
     if (!Number.isFinite(value) || value <= 0) return;
@@ -116,13 +138,13 @@ export default function BranchReportPreview({
       const pageWidth = Math.max(naturalWidth, content.scrollWidth, printZone?.scrollWidth || 0);
       const pageHeight = Math.max(1, content.scrollHeight, printZone?.scrollHeight || 0);
       // CSS px is the same 96-dpi unit used by the report templates.
-      // 100% means actual A4 CSS size on EVERY screen, including phones.
-      // Phones can pan horizontally and vertically instead of silently shrinking.
+      // 100% always means natural A4 size. Fit width is the responsive default
+      // on phone/tablet viewports; the user may still choose 100% to pan around.
       const viewportWidth = Math.max(1, viewport.clientWidth - 1);
       const fit = Math.min(2, viewportWidth / pageWidth);
       const scale = typeof requestedZoom === "number"
         ? clampZoom(requestedZoom)
-        : fit; // optional Fit width is deliberate, never the default
+        : fit; // responsive default for narrow workspaces; selectable on any device
       const nextWidth = Math.max(1, Math.ceil(pageWidth * scale));
       const nextHeight = Math.max(1, Math.ceil(pageHeight * scale));
       setLayout((prev) =>

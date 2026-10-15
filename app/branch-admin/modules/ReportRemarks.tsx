@@ -34,6 +34,7 @@
  * - Compact student rows with inline remark editor.
  */
 
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { useSettings } from "../../context/settings-context";
@@ -2487,6 +2488,7 @@ export default function ReportRemarks() {
         )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           viewMode={viewMode}
           setViewMode={setViewMode}
@@ -2508,9 +2510,11 @@ export default function ReportRemarks() {
           setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {basisOpen && (
+        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setBasisOpen(false)}>
         <RemarksBasisSheet
           metric={basisMetric}
           setMetric={changeBasisMetric}
@@ -2547,9 +2551,11 @@ export default function ReportRemarks() {
             setBasisOpen(false)
           }
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           onRefresh={async () => {
             setMoreOpen(false);
@@ -2576,6 +2582,7 @@ export default function ReportRemarks() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );

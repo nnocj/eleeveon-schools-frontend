@@ -26,6 +26,7 @@ import StudentReports from "./modules/reports/StudentReports";
 import Broadsheets from "./modules/reports/Broadsheets";
 import ReportRemarks from "./modules/ReportRemarks";
 import StudentAttendance from "./modules/StudentAttendance";
+import { BranchReportZoomProvider, BranchReportZoomControls } from "../components/role-portals/shell/BranchReportPreview";
 
 // Existing academic setup editors; included in one Setup workspace.
 import AcademicSystems from "./modules/AcademicSystems";
@@ -276,28 +277,33 @@ function BranchReportsWorkspace(props: RouteProps) {
           : StudentReports;
 
   return (
-    <div className="ba-workspace-wrapper">
-      <style>{branchWorkspaceCss}</style>
-      <div className="ba-contextual-actions" aria-label="Report actions">
-        {([
-          ["reports", "Student reports"],
-          ["broadsheets", "Broadsheets"],
-          ["remarks", "Remarks"],
-          ["attendance", "Attendance"],
-        ] as const).map(([key, label]) => (
-          <button
-            type="button"
-            key={key}
-            className={view === key ? "is-active" : ""}
-            aria-pressed={view === key}
-            onClick={() => setView(key)}
-          >
-            {label}
-          </button>
-        ))}
+    <BranchReportZoomProvider>
+      <div className="ba-workspace-wrapper ba-reports-workspace">
+        <style>{branchWorkspaceCss}</style>
+        <div className="ba-contextual-actions ba-report-subtabs report-no-print" aria-label="Report views">
+          <div className="ba-report-subtab-list" role="group" aria-label="Select report view">
+            {([
+              ["reports", "Student Report"],
+              ["broadsheets", "Broadsheets"],
+              ["remarks", "Remarks"],
+              ["attendance", "Attendance"],
+            ] as const).map(([key, label]) => (
+              <button
+                type="button"
+                key={key}
+                className={view === key ? "is-active" : ""}
+                aria-pressed={view === key}
+                onClick={() => setView(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {(view === "reports" || view === "broadsheets") && <BranchReportZoomControls />}
+        </div>
+        <CurrentView {...props} />
       </div>
-      <CurrentView {...props} />
-    </div>
+    </BranchReportZoomProvider>
   );
 }
 
@@ -442,6 +448,44 @@ function BranchSetupWorkspace(props: RouteProps) {
 
 const branchWorkspaceCss = `
 .ba-workspace-wrapper, .ba-setup-page { min-width:0; width:100%; }
+/* V14: report previews start immediately below the subtabs; full available width. */
+.ba-reports-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
+.ba-reports-workspace .ba-report-subtabs {
+  display:flex; align-items:center; gap:6px; flex-wrap:nowrap;
+  min-width:0; width:100%; margin:0; padding:0 0 3px;
+}
+.ba-report-subtab-list { display:flex; flex:1 1 auto; min-width:0; gap:4px;
+  overflow-x:auto; scrollbar-width:thin; overscroll-behavior-x:contain; white-space:nowrap; }
+.ba-reports-workspace .ba-report-subtab-list button { flex:0 0 auto; min-height:31px;
+  border-radius:7px; padding:4px 9px; font-size:11px; }
+.ba-global-report-zoom { flex:0 0 auto; display:flex; align-items:center; gap:3px;
+  margin-left:auto; white-space:nowrap; }
+.ba-global-report-zoom button,.ba-global-report-zoom select {
+  box-sizing:border-box; height:31px; min-height:31px; border:1px solid var(--border,rgba(0,0,0,.14));
+  border-radius:7px; background:var(--surface,#fff); color:var(--text,#111827); font:inherit;
+  font-size:12px; font-weight:650; padding:0 5px; cursor:pointer;
+}
+.ba-global-report-zoom button { width:29px; min-width:29px; font-size:19px; }
+.ba-global-report-zoom select { width:103px; max-width:103px; }
+.ba-reports-workspace > .student-reports-page,
+.ba-reports-workspace > .ba-page { width:100%!important; max-width:none!important; min-width:0;
+  padding:0!important; margin:0!important; background:transparent; }
+.ba-reports-workspace .student-reports-page .ba-print-card { width:100%; max-width:none;
+  margin:0!important; padding:0!important; border:0!important; border-radius:0!important;
+  background:transparent!important; overflow:visible; box-shadow:none!important; }
+.ba-reports-workspace .student-reports-page .ba-print-zone { width:100%; padding:0!important; }
+.ba-reports-workspace .ba-print-head,
+.ba-reports-workspace .ba-report-toolbar { display:none!important; }
+@media(max-width:540px) {
+ .ba-reports-workspace .ba-report-subtab-list button { font-size:10.5px; padding:3px 7px; }
+ .ba-global-report-zoom select { width:88px; max-width:88px; font-size:11px; }
+ .ba-global-report-zoom button { width:27px; min-width:27px; }
+}
+@media print {
+ .ba-reports-workspace .ba-report-subtabs { display:none!important; }
+ .ba-reports-workspace .student-reports-page .ba-print-card { overflow:visible!important; }
+}
+
 .ba-setup-page { display:grid; gap:8px; padding-top:1px; }
 .ba-setup-intro { padding:2px 2px 8px; }
 .ba-setup-intro h2 { margin:0; font-size:21px; color:var(--text,#111827); }

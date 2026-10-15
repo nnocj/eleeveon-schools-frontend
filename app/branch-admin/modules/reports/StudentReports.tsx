@@ -3640,4 +3640,13 @@ const css = `
 @media(max-width:639px){.student-reports-page {padding:3px;}.ba-v6-scope-picker {grid-template-columns:1fr;}}
 @media print {.ba-v6-scope-picker{display:none!important;}}
 
+
+/* V14: printable document uses the full available preview canvas, without a chrome/header card. */
+.ba-page.student-reports-page { width:100%; max-width:none; padding:0; margin:0; overflow:visible; }
+.ba-page.student-reports-page > .ba-print-card { width:100%; max-width:none; min-width:0;
+  padding:0!important; margin:0!important; border:0!important; border-radius:0!important;
+  background:transparent!important; box-shadow:none!important; overflow:visible!important; }
+.ba-page.student-reports-page .ba-fit-viewport { width:100%; max-width:100%; }
+.ba-page.student-reports-page .ba-print-head, .ba-page.student-reports-page .ba-report-toolbar { display:none!important; }
+@media print { .ba-page.student-reports-page .ba-fit-viewport { max-height:none!important; overflow:visible!important; } }
 `;

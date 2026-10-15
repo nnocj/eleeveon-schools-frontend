@@ -1632,7 +1632,7 @@ export default function TeachersPage() {
       rows: filteredRows.map((item) => {
         const row: any = item.row;
         return {
-          teacher: { text: row.fullName || "Unnamed teacher", detail: row.gender || undefined, image: item.photoUrl },
+          teacher: { text: row.fullName || "Unnamed teacher", detail: row.gender || undefined, image: item.photoUrl || safeRecordMediaValue(row.photo) },
           role: roleLabel(row.role),
           organization: item.organizationName,
           contact: { text: row.phone || "—", detail: row.email || undefined },

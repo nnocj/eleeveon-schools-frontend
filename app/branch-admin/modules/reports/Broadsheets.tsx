@@ -400,6 +400,17 @@ export default function Broadsheets() {
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Choose a populated subject/period once per selected branch, unless the
+  // school administrator has deliberately selected their own filters.
+  const automaticSubjectScopeRef = React.useRef("");
+  const manualSubjectScopeRef = React.useRef(false);
+
+  const setFiltersFromUser: React.Dispatch<React.SetStateAction<ReportFiltersState>> =
+    (next) => {
+      manualSubjectScopeRef.current = true;
+      setFilters(next);
+    };
+
 
   const [filters, setFilters] = useState<ReportFiltersState>({
     branchId: branchId || undefined,
@@ -986,6 +997,11 @@ export default function Broadsheets() {
   }, [authenticated, accountId, schoolId, branchId, dataRevision]);
 
   useEffect(() => {
+    automaticSubjectScopeRef.current = "";
+    manualSubjectScopeRef.current = false;
+  }, [accountId, schoolId, branchId]);
+
+  useEffect(() => {
     setFilters((prev) => {
       const nextBranchId = branchId || undefined;
       const branchChanged = prev.branchId !== nextBranchId;
@@ -1231,6 +1247,108 @@ export default function Broadsheets() {
       engineAssessmentSettings,
     ],
   );
+
+  /**
+   * A subject broadsheet cannot render until one class subject is selected.
+   * On first load of a branch, find a real class/term/subject with student rows
+   * instead of choosing the first period or subject (which may be empty).
+   * Never manufacture placeholder records or overwrite a user's filter choice.
+   */
+  useEffect(() => {
+    const scope = [accountId, schoolId, branchId].join(":");
+    if (!accountId || !schoolId || !branchId || pageLoading ||
+        !academicPeriods.length || !classSubjects.length || !studentEnrollments.length ||
+        automaticSubjectScopeRef.current === scope || manualSubjectScopeRef.current) return;
+
+    // If the saved/default selection already produces rows, respect it.
+    if (filters.classSubjectId &&
+        Array.isArray(output.subjectBroadsheet?.students) &&
+        output.subjectBroadsheet.students.length > 0) {
+      automaticSubjectScopeRef.current = scope;
+      return;
+    }
+
+    const enrollmentCounts = new Map<string, number>();
+    studentEnrollments.forEach((row) => {
+      if ((row as any).isDeleted || row.status !== "active") return;
+      const key = [idOf(row.classId), idOf(row.academicStructureId), idOf(row.academicPeriodId)].join(":");
+      enrollmentCounts.set(key, (enrollmentCounts.get(key) || 0) + 1);
+    });
+
+    const entryCounts = new Map<string, number>();
+    assessmentEntries.forEach((row) => {
+      if ((row as any).isDeleted) return;
+      const key = [idOf(row.classSubjectId), idOf(row.academicPeriodId)].join(":");
+      entryCounts.set(key, (entryCounts.get(key) || 0) + 1);
+    });
+
+    const candidates: Array<{ filters: ReportFiltersState; priority: number }> = [];
+    classSubjects.forEach((classSubject) => {
+      if ((classSubject as any).isDeleted || classSubject.active === false) return;
+      const classId = idOf(classSubject.classId);
+      const subjectId = idOf(classSubject.id);
+      if (!classId || !subjectId || !classes.some((c) => idOf(c.id) === classId)) return;
+      academicPeriods.forEach((period) => {
+        if ((period as any).isDeleted || (period as any).active === false) return;
+        const periodId = idOf(period.id);
+        const structureId = idOf(classSubject.academicStructureId) || idOf((period as any).academicStructureId);
+        if (!periodId || !structureId) return;
+        if (idOf(classSubject.academicPeriodId) && idOf(classSubject.academicPeriodId) !== periodId) return;
+        if (idOf((period as any).academicStructureId) && idOf((period as any).academicStructureId) !== structureId) return;
+        const count = enrollmentCounts.get([classId, structureId, periodId].join(":")) || 0;
+        if (!count) return;
+        const scores = entryCounts.get([subjectId, periodId].join(":")) || 0;
+        const priority = scores * 1000 + count * 10 +
+          (periodId === idOf(filters.academicPeriodId) ? 5 : 0) +
+          (structureId === idOf(filters.academicStructureId) ? 3 : 0) +
+          (classId === idOf(filters.classId) ? 2 : 0);
+        candidates.push({
+          priority,
+          filters: {
+            ...filters,
+            branchId: branchId || undefined,
+            academicStructureId: structureId,
+            academicPeriodId: periodId,
+            classId,
+            classSubjectId: subjectId,
+            studentId: undefined,
+          },
+        });
+      });
+    });
+
+    candidates.sort((a, b) => b.priority - a.priority);
+    // Verify the actual engine output. Merely having a class subject is not
+    // sufficient: it may not have students or enough data to form a report.
+    for (const candidate of candidates.slice(0, 24)) {
+      try {
+        const test = buildReportEngineOutput(dataset, candidate.filters, engineAssessmentSettings);
+        if (Array.isArray(test.subjectBroadsheet?.students) && test.subjectBroadsheet.students.length > 0) {
+          automaticSubjectScopeRef.current = scope;
+          setFilters((prev) => ({
+            ...prev,
+            branchId: candidate.filters.branchId,
+            academicStructureId: candidate.filters.academicStructureId,
+            academicPeriodId: candidate.filters.academicPeriodId,
+            classId: candidate.filters.classId,
+            classSubjectId: candidate.filters.classSubjectId,
+            studentId: undefined,
+          }));
+          return;
+        }
+      } catch (error) {
+        console.warn("Skipping incomplete default broadsheet candidate:", error);
+      }
+    }
+    // No populated candidate: retain the school's filter state and show the
+    // existing empty report rather than pretending a result exists.
+    automaticSubjectScopeRef.current = scope;
+  }, [
+    accountId, schoolId, branchId, pageLoading, academicPeriods, classSubjects,
+    classes, studentEnrollments, assessmentEntries, dataset, filters,
+    engineAssessmentSettings, output.subjectBroadsheet,
+  ]);
+
 
   const cumulativeDataset: CumulativeReportEngineDataset = useMemo(
     () => ({
@@ -1691,7 +1809,7 @@ export default function Broadsheets() {
           subjects={subjects}
           classes={classes}
           setMode={setMode}
-          setFilters={setFilters}
+          setFilters={setFiltersFromUser}
           search={search}
           setSearch={setSearch}
           onClose={() => setFilterOpen(false)}

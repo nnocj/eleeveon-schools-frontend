@@ -2,8 +2,8 @@
 
 /**
  * app/branch-admin/page.tsx
- * BRANCH ADMIN — REPORTS-FIRST WORKSPACE
- * Six direct destinations, Assessments as home, no standalone dashboard.
+ * BRANCH ADMIN — ENTER SCORES + ATTENDANCE WORKSPACE
+ * Six direct destinations, Enter Scores as home; Student Attendance in Reports.
  * Other module source files and DB tables are left untouched.
  * Existing branch-scoped sync and workspace settings remain in place.
  */
@@ -25,6 +25,7 @@ import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
 import Broadsheets from "./modules/reports/Broadsheets";
 import ReportRemarks from "./modules/ReportRemarks";
+import StudentAttendance from "./modules/StudentAttendance";
 
 // Existing academic setup editors; included in one Setup workspace.
 import AcademicSystems from "./modules/AcademicSystems";
@@ -259,7 +260,7 @@ function BranchAdminLocalSettingsPage() {
 // REPORTS — ONE WORKSPACE, CONTEXTUAL ACTIONS
 // ======================================================
 
-type ReportsView = "reports" | "broadsheets" | "remarks";
+type ReportsView = "reports" | "broadsheets" | "remarks" | "attendance";
 
 function BranchReportsWorkspace(props: RouteProps) {
   const [view, setView] = React.useState<ReportsView>("reports");
@@ -270,7 +271,9 @@ function BranchReportsWorkspace(props: RouteProps) {
       ? Broadsheets
       : view === "remarks"
         ? ReportRemarks
-        : StudentReports;
+        : view === "attendance"
+          ? StudentAttendance
+          : StudentReports;
 
   return (
     <div className="ba-workspace-wrapper">
@@ -280,6 +283,7 @@ function BranchReportsWorkspace(props: RouteProps) {
           ["reports", "Student reports"],
           ["broadsheets", "Broadsheets"],
           ["remarks", "Remarks"],
+          ["attendance", "Attendance"],
         ] as const).map(([key, label]) => (
           <button
             type="button"
@@ -363,14 +367,9 @@ const SETUP_SECTIONS: SetupSection[] = [
 ];
 
 function BranchSetupWorkspace(props: RouteProps) {
-  // First section and its first available editor open immediately by default.
-  // No additional tap is required to see a form.
-  const [openSection, setOpenSection] = React.useState<string | null>(
-    SETUP_SECTIONS[0]?.title ?? null,
-  );
-  const [openedEditor, setOpenedEditor] = React.useState<string | null>(
-    SETUP_SECTIONS[0]?.editors[0]?.key ?? null,
-  );
+  // All sections start collapsed, and editing begins only on a deliberate tap.
+  const [openSection, setOpenSection] = React.useState<string | null>(null);
+  const [openedEditor, setOpenedEditor] = React.useState<string | null>(null);
 
   function toggleSection(section: SetupSection) {
     if (openSection === section.title) {
@@ -385,10 +384,6 @@ function BranchSetupWorkspace(props: RouteProps) {
   return (
     <div className="ba-setup-page">
       <style>{branchWorkspaceCss}</style>
-      <div className="ba-setup-intro">
-        <h2>Setup & Settings</h2>
-        <p>Configure your branch for assessments and reports. Each existing editor keeps its own save operation.</p>
-      </div>
       {SETUP_SECTIONS.map((section, index) => {
         const isOpen = openSection === section.title;
         const sectionId = `ba-setup-section-${index}`;
@@ -447,11 +442,11 @@ function BranchSetupWorkspace(props: RouteProps) {
 
 const branchWorkspaceCss = `
 .ba-workspace-wrapper, .ba-setup-page { min-width:0; width:100%; }
-.ba-setup-page { display:grid; gap:10px; }
+.ba-setup-page { display:grid; gap:8px; padding-top:1px; }
 .ba-setup-intro { padding:2px 2px 8px; }
 .ba-setup-intro h2 { margin:0; font-size:21px; color:var(--text,#111827); }
 .ba-setup-intro p { margin:5px 0 0; font-size:12px; line-height:1.5; color:var(--muted,#64748b); }
-.ba-setup-section { min-width:0; overflow:hidden; border:1px solid var(--border,rgba(0,0,0,.12)); border-radius:13px; background:var(--surface,#fff); }
+.ba-setup-section { min-width:0; overflow:hidden; border:1px solid var(--border,rgba(0,0,0,.12)); border-radius:13px; background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%); box-shadow:none; }
 .ba-setup-section.is-open { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 38%,var(--border,rgba(0,0,0,.1))); }
 .ba-setup-section-toggle { display:flex; width:100%; min-height:58px; align-items:center; gap:10px; text-align:left; padding:10px 12px; border:0; color:var(--text,#111827); background:transparent; cursor:pointer; font:inherit; }
 .ba-setup-section-toggle:hover, .ba-setup-section.is-open .ba-setup-section-toggle { background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--surface,#fff)); }
@@ -477,7 +472,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
     title: "Workspaces",
     defaultOpen: true,
     items: [
-      { key: "assessmentEntries", label: "Assessments", icon: "📝" },
+      { key: "assessmentEntries", label: "Enter Scores", icon: "📝" },
       { key: "reportsWorkspace", label: "Reports", icon: "📄" },
       { key: "students", label: "Students", icon: "👥" },
       { key: "classes", label: "Classes", icon: "🏫" },
@@ -490,8 +485,8 @@ export const NAV_SECTIONS: RoleNavSection[] = [
 // ======================================================
 
 // Main routes + legacy contextual routes used by existing modules.
-// No finance, identity, transport, attendance or communication modules
-// are imported into this initial reports-focused Branch Admin bundle.
+// Finance, transport, teacher attendance and communication modules remain
+// outside this compact Branch Admin workspace. Student Attendance lives in Reports.
 const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   assessmentEntries: AssessmentEntries,
   reportsWorkspace: BranchReportsWorkspace,
@@ -505,6 +500,7 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   studentReports: StudentReports,
   broadsheets: Broadsheets,
   reportRemarks: ReportRemarks,
+  studentAttendance: StudentAttendance,
   academicSystems: AcademicSystems,
   curriculumSystems: CurriculumSystems,
   subjectSetup: SubjectSetup,
@@ -600,7 +596,7 @@ export default function BranchAdminPage() {
 
       portalTitle="Branch Admin Portal"
 
-      portalSubtitle="Assessments, reports and essential school setup"
+      portalSubtitle="Enter scores, student attendance and reports"
 
       homeKey="assessmentEntries"
 

@@ -27,6 +27,8 @@ type Props = {
   onOpenAccount: () => void;
 };
 
+// Built-in route recognized by RolePortalShellContent for every role.
+const HUB_KEY = "__eleeveon_center__";
 const PIN_KEY = "eleeveon_branch_admin_pin_cards";
 const ACTIONS: Array<{ key: BranchToolbarAction; label: string }> = [
   { key: "add", label: "Add" },
@@ -53,7 +55,7 @@ export default function BranchWorkspaceNavigation({
 }: Props) {
   const toolbar = useBranchWorkspaceToolbar();
   const registered = toolbar?.handlers[activeKey];
-  const activeLabel = items.find((item) => item.key === activeKey)?.label || "Workspace";
+  const activeLabel = activeKey === HUB_KEY ? "Eleeveon Hub" : items.find((item) => item.key === activeKey)?.label || "Workspace";
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [feedback, setFeedback] = useState("");
@@ -147,6 +149,11 @@ export default function BranchWorkspaceNavigation({
             aria-label={`Open sync status — ${online ? "online" : "offline"}`} title={`Sync ${online ? "online" : "offline"}`}>
             <span className={`ba-v7-dot ${online ? "is-online" : "is-offline"}`} aria-hidden="true" />
             <span className="ba-v7-status-name">{online ? "Online" : "Offline"}</span>
+          </button>
+          <button type="button" className="ba-v7-status ba-v12-hub" onClick={() => navigateTo(HUB_KEY)}
+            aria-label="Open Eleeveon Hub" title="Eleeveon Hub"
+            aria-current={activeKey === HUB_KEY ? "page" : undefined}>
+            <span aria-hidden="true">✉</span><span className="ba-v7-status-name">Hub</span>
           </button>
           <button type="button" className="ba-v7-avatar" onClick={onOpenAccount} aria-label="Open account and workspace">
             {memberImage && !avatarFailed ? (

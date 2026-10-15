@@ -50,6 +50,8 @@
  * Golden cleanup: top row stays Search + Print + Filter + More only.
  */
 
+import BranchViewportPortal from "../../../components/role-portals/shell/BranchViewportPortal";
+import BranchReportPreview from "../../../components/role-portals/shell/BranchReportPreview";
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../../context/settings-context";
@@ -1669,12 +1671,13 @@ export default function Broadsheets() {
       <style>{css}</style>
 
       <section className="ba-print-card">
-        <div id={BROADSHEET_PRINT_ZONE_ID} className="ba-print-zone">
+        <BranchReportPreview printZoneId={BROADSHEET_PRINT_ZONE_ID} naturalWidth={1122}>
           {renderActiveReport()}
-        </div>
+        </BranchReportPreview>
       </section>
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           mode={mode}
           filters={filters}
@@ -1690,9 +1693,11 @@ export default function Broadsheets() {
           setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           mode={mode}
           setMode={(nextMode) => {
@@ -1709,6 +1714,7 @@ export default function Broadsheets() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );

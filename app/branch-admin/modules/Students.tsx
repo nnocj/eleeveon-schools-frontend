@@ -67,6 +67,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../context/settings-context";
@@ -2769,12 +2770,51 @@ export default function StudentsPage() {
     await load();
   };
 
+
+  const printStudentsTable = () => {
+    const columns = [
+      { key: "student", label: "Students" },
+      { key: "admission", label: "Admission No." },
+      { key: "class", label: "Class" },
+      { key: "organization", label: "Organization" },
+      { key: "gender", label: "Gender" },
+      { key: "age", label: "Age" },
+      { key: "parent", label: "Parent" },
+      { key: "phone", label: "Phone" },
+      { key: "enrollments", label: "Enrollments" },
+      { key: "status", label: "Status" },
+      { key: "updated", label: "Updated" },
+    ];
+    printBranchTable({
+      title: "Student Records",
+      subtitle: `Current branch · ${filteredRows.length} matching students`,
+      columns,
+      rows: filteredRows.map((item) => {
+        const row: any = item.row;
+        return {
+          student: { text: row.fullName || "Unnamed student", detail: row.address || undefined, image: item.photoUrl },
+          admission: row.admissionNumber || "—",
+          class: item.className,
+          organization: item.organizationName,
+          gender: row.gender || "—",
+          age: row.age ?? "—",
+          parent: row.parentName || "—",
+          phone: row.parentPhone || "—",
+          enrollments: item.enrollmentCount,
+          status: statusLabel(row.status),
+          updated: timeText(row.updatedAt || row.createdAt),
+        };
+      }),
+    });
+  };
+
   // The portal owns the action strip. All module actions stay functional.
   useRegisterBranchWorkspaceToolbar("students", {
     add: () => openCreate(),
     search: setSearch,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
+    print: printStudentsTable,
   });
 
   // Table is the efficient default on a laptop; mobile starts in cards.

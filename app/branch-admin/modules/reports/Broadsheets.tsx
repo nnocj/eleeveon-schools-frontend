@@ -1583,6 +1583,9 @@ export default function Broadsheets() {
       showWatermark: activeBroadsheetSettings.showBroadsheetWatermark,
       generatedAt: new Date(),
       pageBreakAfter: false,
+      // V15: let the one shared Reports toolbar handle zoom.
+      // The template returns its unscaled A4 page with no local toolbar.
+      mobilePreview: false,
     };
 
     if (mode === "subject-broadsheet") {

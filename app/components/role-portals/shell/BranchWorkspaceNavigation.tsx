@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { RoleNavItem } from "../RolePortalShell";
+import { printVisibleBranchTable } from "./BranchTablePrint";
 import {
   openExistingModuleAction,
   useBranchWorkspaceToolbar,
@@ -94,6 +95,14 @@ export default function BranchWorkspaceNavigation({
     setFeedback("");
     const callback = registered?.[action];
     if (callback) { (callback as () => void)(); return; }
+    // Reports (including Remarks and Attendance) deliberately retain their
+    // dedicated official printing/export engines, never this generic printer.
+    const reportsKeys = new Set(["reportsWorkspace", "studentReports", "broadsheets", "reportRemarks", "studentAttendance"]);
+    if (action === "print" && !reportsKeys.has(activeKey)) {
+      if (printVisibleBranchTable(activeLabel)) return;
+      setFeedback("No table is visible to print in this section.");
+      return;
+    }
     if (!openExistingModuleAction(action)) {
       setFeedback(`${action.charAt(0).toUpperCase()+action.slice(1)} isn't available in ${activeLabel} yet.`);
     }

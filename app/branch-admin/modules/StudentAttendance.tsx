@@ -3,7 +3,7 @@
 /**
  * app/branch-admin/modules/StudentAttendance.tsx
  * --------------------------------------------------------------------------
- * ELEEVEON STUDENT ATTENDANCE — PHASE 10 ROUTE INTEGRATION
+ * ELEEVEON STUDENT ATTENDANCE — BRANCH ADMIN V8.1
  *
  * Route responsibilities:
  * - active account, school, branch and membership resolution;
@@ -12,11 +12,12 @@
  * - tenant filtering and route-specific state.
  *
  * Visual standard:
- * - compact search toolbar;
+ * - uses the Branch Admin shared Add / Filter / Print / More toolbar;
  * - no permanent title, hero, mode row or summary cards;
  * - setup lives in the slider sheet;
  * - views and bulk actions live in the More sheet;
- * - compact row cards, table and analytics modes.
+ * - compact row cards, table and analytics modes;
+ * - original Excel import, export, template and register engines retained.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -48,6 +49,8 @@ import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { PermissionGate } from "../../components/shared/PermissionGate";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 
 import * as XLSX from "xlsx";
 
@@ -362,6 +365,12 @@ export default function StudentAttendance() {
 
   const [entryMode, setEntryMode] = useState<EntryMode>("daily");
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  // Match the records modules: tables on laptop/desktop and cards on phones.
+  // The device sets the initial view only; the user's More-menu selection wins.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setViewMode(window.matchMedia("(min-width: 768px)").matches ? "table" : "cards");
+  }, []);
   const [structureId, setStructureId] = useState(
     String(settings?.currentAcademicStructureId || ""),
   );
@@ -1019,6 +1028,9 @@ export default function StudentAttendance() {
         }
         continue;
       }
+
+      // Do not rewrite unchanged marks: each updateLocal creates sync work.
+      if (existing?.id && existing.status === status) continue;
 
       const payload: Partial<Attendance> = {
         accountId: accountId ?? undefined,
@@ -1720,6 +1732,25 @@ export default function StudentAttendance() {
     );
   };
 
+  // The Reports workspace owns the shared navigation while Attendance is open.
+  // Also register the legacy direct-route key for compatibility with older links.
+  const attendanceToolbarHandlers = {
+    add: () => {
+      // Attendance has no standalone record-creation form: choose a register
+      // context and record the class rather than inserting an empty row.
+      setEntryMode("daily");
+      setFilterOpen(true);
+    },
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    // No browser print fallback: the existing workbook/register export is the
+    // attendance document action and preserves its proper formatting.
+    print: () => openAttendanceExcelExport(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("reportsWorkspace", attendanceToolbarHandlers);
+  useRegisterBranchWorkspaceToolbar("studentAttendance", attendanceToolbarHandlers);
+
   if (
     accountLoading ||
     contextLoading ||
@@ -1776,7 +1807,7 @@ export default function StudentAttendance() {
       }
     >
       <main
-        className="ba-page"
+        className="ba-page attendance-workspace"
         style={
           {
             "--ba-primary": primary,
@@ -1797,97 +1828,52 @@ export default function StudentAttendance() {
           </section>
         ) : null}
 
-        <section className="ba-search-card">
+        <div className="attendance-work-row" aria-label="Attendance context and saving">
           <button
             type="button"
-            className={`status-dot-mini ${
-              entryMode === "daily"
-                ? dailySummary.total &&
-                  dailySummary.completion === 100
-                  ? "green"
-                  : dailySummary.marked
-                    ? "orange"
-                    : "gray"
-                : termSummary.total &&
-                    termSummary.completed === termSummary.total
-                  ? "green"
-                  : termSummary.completed
-                    ? "orange"
-                    : "gray"
-            }`}
-            aria-label="Open attendance status"
-            onClick={() => setStatusOpen(true)}
-          />
-
-          <label className="ba-search">
-            <span>⌕</span>
-            <input
-              value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
-              placeholder={
-                entryMode === "daily"
-                  ? "Search attendance..."
-                  : "Search term totals..."
-              }
-            />
-          </label>
-
-          <button
-            type="button"
-            className="ba-save-inline"
-            onClick={save}
-            disabled={saving || !canEdit}
-          >
-            {saving ? "..." : "Save"}
-          </button>
-
-          <button
-            type="button"
-            className={`ba-filter-button ${
-              activeFilterCount ? "active" : ""
-            }`}
+            className="attendance-context"
             onClick={() => setFilterOpen(true)}
-            aria-label="Open attendance filters"
+            aria-label="Select attendance structure, period, class and date"
+            title="Change class, term or date"
           >
-            <SliderIcon />
-            {activeFilterCount ? (
-              <b>{activeFilterCount}</b>
-            ) : null}
+            <span className="attendance-context-class">
+              {classId ? selectedClassName : "Select class"}
+            </span>
+            <span className="attendance-context-period">
+              {entryMode === "daily" ? date : "Term totals"}
+            </span>
+            <span aria-hidden="true">⌄</span>
           </button>
-
           <button
             type="button"
-            className="ba-icon-button"
-            onClick={() => setMoreOpen(true)}
-            aria-label="Open more actions"
+            className={`attendance-progress status-dot-mini ${
+              entryMode === "daily"
+                ? dailySummary.total && dailySummary.completion === 100
+                  ? "green"
+                  : dailySummary.marked ? "orange" : "gray"
+                : termSummary.total && termSummary.completed === termSummary.total
+                  ? "green"
+                  : termSummary.completed ? "orange" : "gray"
+            }`}
+            onClick={() => setStatusOpen(true)}
+            title="Attendance progress"
+            aria-label="View attendance status"
           >
-            ⋯
+            {entryMode === "daily"
+              ? `${dailySummary.marked}/${dailySummary.total}`
+              : `${termSummary.completed}/${termSummary.total}`}
           </button>
-        </section>
-
-        {classId || structureId || periodId ? (
-          <section className="ba-filter-chips">
-            {classId ? (
-              <span>Class: {selectedClassName}</span>
-            ) : null}
-            {structureId ? (
-              <span>{selectedStructureName}</span>
-            ) : null}
-            {periodId ? (
-              <span>{selectedPeriodName}</span>
-            ) : null}
-            {entryMode === "daily" && date ? (
-              <span>{date}</span>
-            ) : null}
-            <span>
-              {entryMode === "daily"
-                ? "Daily Register"
-                : "Term Totals"}
-            </span>
-          </section>
-        ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              className="ba-save-inline"
+              onClick={save}
+              disabled={saving || !structureId || !periodId || !classId}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          ) : null}
+        </div>
 
         {viewMode === "analytics" ? (
           <AnalyticsView
@@ -1924,9 +1910,7 @@ export default function StudentAttendance() {
                     <span className="attendance-main">
                       <strong>{item.name}</strong>
                       <small>{item.admissionNumber}</small>
-                      <em>
-                        {selectedClassName} · {date}
-                      </em>
+
                     </span>
 
                     <span className="attendance-status-actions">
@@ -2077,6 +2061,8 @@ export default function StudentAttendance() {
 
         {filterOpen ? (
           <FilterSheet
+            search={search}
+            onSearch={setSearch}
             entryMode={entryMode}
             structureId={structureId}
             periodId={periodId}
@@ -2090,7 +2076,6 @@ export default function StudentAttendance() {
             bulkScope={bulkScope}
             onEntryMode={(value) => {
               setEntryMode(value);
-              setViewMode("cards");
               if (value === "termTotals") {
                 setStatusFilter("all");
               }
@@ -3027,6 +3012,8 @@ function TermTable({
 }
 
 function FilterSheet(props: {
+  search: string;
+  onSearch: (value: string) => void;
   entryMode: EntryMode;
   structureId: string;
   periodId: string;
@@ -3055,6 +3042,16 @@ function FilterSheet(props: {
       text="Choose the register type and working context."
       onClose={props.onClose}
     >
+      <div className="attendance-search-in-filter">
+        <label htmlFor="attendance-student-search">Search students</label>
+        <input
+          id="attendance-student-search"
+          type="search"
+          value={props.search}
+          onChange={(event) => props.onSearch(event.target.value)}
+          placeholder="Name or admission number"
+        />
+      </div>
       <div className="filter-section">
         <span className="filter-section-label">
           Register Type
@@ -3499,17 +3496,23 @@ function Sheet({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="ba-sheet-backdrop"
-      role="presentation"
-      onMouseDown={onClose}
+    <BranchViewportPortal
+      themeSourceClass=".attendance-workspace"
+      onEscape={onClose}
     >
-      <section
-        className="ba-sheet"
-        role="dialog"
-        aria-modal="true"
-        onMouseDown={(event) => event.stopPropagation()}
+      <div
+        className="ba-sheet-backdrop"
+        role="presentation"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
       >
+        <section
+          className="ba-sheet"
+          role="dialog"
+          aria-modal="true"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
         <div className="ba-sheet-head">
           <div>
             <h2>{title}</h2>
@@ -3524,9 +3527,10 @@ function Sheet({
           </button>
         </div>
 
-        {children}
-      </section>
-    </div>
+          {children}
+        </section>
+      </div>
+    </BranchViewportPortal>
   );
 }
 
@@ -4738,4 +4742,161 @@ button.status-dot-mini{cursor:pointer}
   border-color: var(--input-border, var(--excel-border)) !important;
 }
 
+
+/* ============================================================
+   V8.1 — compact attendance records, aligned with Students/Classes V5.
+   No gradient, repeated filter chips, floating shadows or hover translations.
+   ============================================================ */
+.attendance-workspace {
+  --ba-page-bg: var(--bg,var(--background,#f2f4f7));
+  --ba-surface: color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  --ba-surface-2: color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 88%,var(--text,#182235) 12%);
+  --ba-border: color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  display:block;
+  min-height:0;
+  padding:5px;
+  background:var(--ba-page-bg);
+}
+.attendance-workspace .attendance-work-row {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:7px;
+  min-width:0;
+  margin:0 0 9px;
+}
+.attendance-workspace .attendance-context {
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 3px;
+  border:0;
+  background:transparent;
+  color:var(--ba-text);
+  font:inherit;
+  font-size:12px;
+  text-align:left;
+  cursor:pointer;
+}
+.attendance-workspace .attendance-context-class {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12px;
+  font-weight:800;
+}
+.attendance-workspace .attendance-context-period {
+  color:var(--ba-muted);
+  font-size:11px;
+  white-space:nowrap;
+}
+.attendance-workspace .attendance-progress {
+  flex:0 0 auto;
+  width:auto;
+  height:30px;
+  min-width:43px;
+  padding:0 8px;
+  border:1px solid var(--ba-border);
+  border-radius:8px;
+  box-shadow:none;
+  color:var(--ba-text);
+  background:var(--ba-surface-2);
+  font-size:11px;
+  font-weight:750;
+  cursor:pointer;
+}
+.attendance-workspace .ba-save-inline {
+  flex:0 0 auto;
+  height:31px;
+  padding:0 13px;
+  border-radius:8px;
+  background:var(--ba-primary);
+  border-color:var(--ba-primary);
+  color:var(--ba-primary-text,#fff);
+  font-size:11px;
+  box-shadow:none;
+}
+.attendance-workspace .ba-list {
+  grid-template-columns:repeat(1,minmax(0,1fr));
+  gap:9px;
+  margin:0;
+}
+.attendance-workspace .attendance-row,
+.attendance-workspace .term-row,
+.attendance-workspace .ba-table-card,
+.attendance-workspace .ba-analysis {
+  background:var(--ba-surface);
+  border:1px solid var(--ba-border);
+  border-radius:13px;
+  box-shadow:none;
+  transition:border-color .12s ease;
+}
+.attendance-workspace .attendance-row:hover,
+.attendance-workspace .term-row:hover {
+  transform:none;
+  box-shadow:none;
+}
+.attendance-workspace .attendance-row { padding:10px;gap:9px; }
+.attendance-workspace .attendance-main strong,
+.attendance-workspace .term-student strong {
+  font-size:12.5px;
+  font-weight:800;
+}
+.attendance-workspace .attendance-main small,
+.attendance-workspace .term-student small { font-size:10px; }
+.attendance-workspace .ba-avatar { width:36px;height:36px;border-radius:11px;box-shadow:none; }
+.attendance-workspace .attendance-status-actions button { height:30px;width:30px;border-radius:8px;font-size:11px; }
+.attendance-workspace .term-row { padding:10px; }
+.attendance-workspace .term-input-grid label span { font-size:10px;letter-spacing:0; }
+.attendance-workspace .term-input-grid input { font-size:12px; }
+.attendance-workspace .ba-table-card { padding:4px;overflow:hidden; }
+.attendance-workspace .ba-table-scroll { border-radius:10px; }
+.attendance-workspace .ba-table-scroll table { background:var(--ba-surface);font-size:11px; }
+.attendance-workspace .ba-table-scroll th {
+  position:sticky;top:0;z-index:2;
+  background:var(--ba-surface-2);
+  font-size:10px;
+  letter-spacing:.025em;
+}
+.attendance-workspace .ba-table-scroll td { background:transparent; font-size:11px; }
+.attendance-workspace .ba-table-scroll tbody tr:nth-child(even) { background:var(--ba-surface-2); }
+.attendance-workspace .ba-table-scroll tbody tr:hover td { background:transparent; }
+.attendance-workspace .ba-table-scroll td .ba-avatar { width:31px;height:31px; }
+.attendance-workspace .ba-analysis strong { color:var(--ba-text); }
+.attendance-search-in-filter { display:grid;gap:6px;margin:0 0 12px; }
+.attendance-search-in-filter label { color:var(--ba-muted);font-size:12px;font-weight:750; }
+.attendance-search-in-filter input {
+  width:100%;min-height:38px;padding:7px 10px;
+  border:1px solid var(--ba-border);border-radius:9px;
+  background:var(--ba-surface);color:var(--ba-text);
+  font-size:13px;outline:none;
+}
+/* Excel dialog stays on the shared Excel component's own theme layer. */
+@media(min-width:680px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(min-width:980px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+@media(min-width:1240px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(4,minmax(0,1fr)); }
+}
+@media(max-width:640px){
+  .attendance-workspace { padding:3px; }
+  .attendance-workspace .attendance-row { grid-template-columns:auto minmax(0,1fr) auto; }
+  .attendance-workspace .attendance-status-actions { grid-column:auto; }
+  .attendance-workspace .attendance-status-actions button { width:27px;height:27px; }
+  .attendance-workspace .attendance-context-period { font-size:10px; }
+  .attendance-workspace .attendance-context-class { font-size:11px; }
+  .attendance-workspace .term-input-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:370px){
+  .attendance-workspace .attendance-row {grid-template-columns:32px minmax(0,1fr);}
+  .attendance-workspace .attendance-status-actions {grid-column:1/-1;justify-content:flex-end;}
+}
+@media(prefers-reduced-motion:reduce){
+  .attendance-workspace * {transition:none !important;animation:none !important;}
+}
 `;

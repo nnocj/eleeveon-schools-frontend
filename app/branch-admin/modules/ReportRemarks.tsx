@@ -58,6 +58,7 @@ import {
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import {
   buildClassReports,
@@ -70,7 +71,8 @@ import type {
 } from "./reports/engine/report-types";
 
 
-type ViewMode = "single" | "group" | "analytics";
+type ViewMode = "cards" | "table" | "analytics";
+type StudentScope = "class" | "group";
 type RemarkFilter =
   | "all"
   | "missing"
@@ -284,6 +286,7 @@ type StudentRemarkRow = {
   reportCard?: ReportCard;
   computedReport?: ComputedStudentReport;
   draft: RemarkDraft;
+  rowKey: string;
 };
 
 function idOf(value: unknown): string {
@@ -547,7 +550,15 @@ export default function ReportRemarks() {
   const [classId, setClassId] = useState<string | undefined>();
   const [studentId, setStudentId] = useState<string | undefined>();
 
-  const [viewMode, setViewMode] = useState<ViewMode>("single");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [scopeMode, setScopeMode] = useState<StudentScope>("class");
+  const [editing, setEditing] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const defaultScopeRef = useRef("");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setViewMode(window.matchMedia("(min-width: 768px)").matches ? "table" : "cards");
+  }, []);
   const [remarkFilter, setRemarkFilter] = useState<RemarkFilter>("all");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -998,6 +1009,54 @@ export default function ReportRemarks() {
     teacherClassIds,
   ]);
 
+  // First entry only: prefer an existing saved report, then an enrolled class.
+  // A subsequent manual filter or a local sync refresh will not change the user's selection.
+  useEffect(() => {
+    const scopeKey = [selectedAccountId, schoolId, branchId].join(":");
+    if (!scopeKey || !schoolId || !branchId || !classes.length || !academicPeriods.length || !academicStructures.length) return;
+    if (defaultScopeRef.current === scopeKey) return;
+    const settingsYear = idOf(settings?.currentAcademicStructureId);
+    const settingsTerm = idOf(settings?.currentAcademicPeriodId);
+    const choices = new Map<string, {year:string;term:string;cls:string; reports:number; pupils:number}>();
+    const add = (row:any, reports:boolean) => {
+      const year=idOf(row.academicStructureId), term=idOf(row.academicPeriodId), cls=idOf(row.classId);
+      if (!year || !term || !cls || !classes.some(c=>sameId(c.id,cls)) || !academicPeriods.some(p=>sameId(p.id,term) && sameId(p.academicStructureId,year))) return;
+      const key=[year,term,cls].join(":");
+      const current=choices.get(key) || {year,term,cls,reports:0,pupils:0};
+      if(reports) current.reports++; else current.pupils++;
+      choices.set(key,current);
+    };
+    enrollments.filter(e=>e.status !== "withdrawn" && e.isDeleted !== true).forEach(e=>add(e,false));
+    reportCards.filter(r=>cleanText(r.classTeacherRemark) || cleanText(r.headTeacherRemark)).forEach(r=>add(r,true));
+    const ranked=[...choices.values()].sort((a,b)=>
+      Number(b.reports>0)-Number(a.reports>0) ||
+      b.reports-a.reports || b.pupils-a.pupils ||
+      Number(b.year===settingsYear && b.term===settingsTerm)-Number(a.year===settingsYear && a.term===settingsTerm) ||
+      a.cls.localeCompare(b.cls)
+    );
+    const winner=ranked[0];
+    if (winner) {
+      setAcademicStructureId(winner.year);
+      setAcademicPeriodId(winner.term);
+      setClassId(winner.cls);
+    } else {
+      const validYear = academicStructures.find(y=>sameId(y.id,settingsYear)) || academicStructures[0];
+      const validTerm = academicPeriods.find(t=>sameId(t.id,settingsTerm) && sameId(t.academicStructureId,validYear.id)) ||
+        academicPeriods.find(t=>sameId(t.academicStructureId,validYear.id));
+      setAcademicStructureId(idOf(validYear.id)||undefined);
+      setAcademicPeriodId(idOf(validTerm?.id)||undefined);
+      setClassId(idOf(classes[0]?.id)||undefined);
+    }
+    defaultScopeRef.current=scopeKey;
+  }, [selectedAccountId, schoolId, branchId, classes, academicPeriods, academicStructures, enrollments, reportCards, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
+
+  const mediaByStudentId = useEntityMediaUrls({
+    accountId: selectedAccountId,
+    ownerTable: "students",
+    rows: students,
+    fields: [{ fieldKey: "photo", mediaIdKey: "photoMediaId" }],
+  });
+
   const reportCardMap = useMemo(() => {
     const map = new Map<string, ReportCard>();
 
@@ -1093,61 +1152,39 @@ export default function ReportRemarks() {
       ],
     );
 
-  const computedClassReports =
-    useMemo(() => {
-      if (
-        !branchId ||
-        !academicStructureId ||
-        !academicPeriodId ||
-        !classId
-      ) {
-        return [] as ComputedStudentReport[];
-      }
-
-      const filters:
-        ReportFiltersState = {
+  const computedClassReports = useMemo(() => {
+    if (!branchId || !academicStructureId || !academicPeriodId) {
+      return [] as ComputedStudentReport[];
+    }
+    const classIds = scopeMode === "group"
+      ? availableClasses.map((item) => idOf(item.id)).filter(Boolean)
+      : classId ? [classId] : [];
+    const result: ComputedStudentReport[] = [];
+    for (const candidateClassId of classIds) {
+      const filters: ReportFiltersState = {
         branchId,
         academicStructureId,
         academicPeriodId,
-        classId,
+        classId: candidateClassId,
         sortMode: "position",
       };
-
       try {
-        return buildClassReports(
-          reportEngineDataset,
-          filters,
-        );
+        for (const report of buildClassReports(reportEngineDataset, filters)) {
+          result.push(Object.assign({}, report, { _remarksClassId: candidateClassId }));
+        }
       } catch (error) {
-        console.error(
-          "Failed to compute report remark basis values:",
-          error,
-        );
-
-        return [] as ComputedStudentReport[];
+        console.warn("Could not compute remarks for class", candidateClassId, error);
       }
-    }, [
-      academicPeriodId,
-      academicStructureId,
-      branchId,
-      classId,
-      reportEngineDataset,
-    ]);
+    }
+    return result;
+  }, [branchId, academicStructureId, academicPeriodId, classId, scopeMode, availableClasses, reportEngineDataset]);
 
-  const computedReportMap =
-    useMemo(
-      () =>
-        new Map(
-          computedClassReports.map(
-            (report) => [
-              report.studentId,
-              report,
-            ],
-          ),
-        ),
-      [computedClassReports],
-    );
-
+  const computedReportMap = useMemo(() => new Map(
+    computedClassReports.map(report => [
+      `${idOf((report as any)._remarksClassId)}:${idOf(report.studentId)}`,
+      report,
+    ] as const),
+  ), [computedClassReports]);
 
   const intelligentBasis =
     useMemo<{
@@ -1803,15 +1840,16 @@ export default function ReportRemarks() {
   ]);
 
   const studentRows = useMemo<StudentRemarkRow[]>(() => {
-    if (!academicStructureId || !academicPeriodId || !classId) return [];
+    if (!academicStructureId || !academicPeriodId || (scopeMode === "class" && !classId)) return [];
 
+    const seenRows = new Set<string>();
     return enrollments
       .filter((row) => {
         return (
           row.status !== "withdrawn" &&
           sameId(row.academicStructureId, academicStructureId) &&
           sameId(row.academicPeriodId, academicPeriodId) &&
-          sameId(row.classId, classId)
+          (scopeMode === "group" || sameId(row.classId, classId))
         );
       })
       .map((enrollment) => {
@@ -1827,11 +1865,11 @@ export default function ReportRemarks() {
 
         const reportCard =
           reportCardMap.get(key);
-        const computedReport =
-          computedReportMap.get(
-            student.id,
-          );
-        const draft = drafts[student.id] || {
+        const computedReport = computedReportMap.get(`${idOf(enrollment.classId)}:${idOf(student.id)}`);
+        const rowKey = reportCardKey(student.id, enrollment.classId, enrollment.academicStructureId, enrollment.academicPeriodId);
+        if (seenRows.has(rowKey)) return undefined;
+        seenRows.add(rowKey);
+        const draft = drafts[rowKey] || {
           reportCardId: reportCard?.id,
           classTeacherRemark: reportCard?.classTeacherRemark || "",
           headTeacherRemark: reportCard?.headTeacherRemark || "",
@@ -1844,6 +1882,7 @@ export default function ReportRemarks() {
           reportCard,
           computedReport,
           draft,
+          rowKey,
         };
       })
       .filter(Boolean) as StudentRemarkRow[];
@@ -1851,6 +1890,7 @@ export default function ReportRemarks() {
     academicPeriodId,
     academicStructureId,
     classId,
+    scopeMode,
     drafts,
     computedReportMap,
     enrollments,
@@ -1861,61 +1901,40 @@ export default function ReportRemarks() {
 
   const visibleRows = useMemo(() => {
     const query = search.trim().toLowerCase();
+    return studentRows.filter(row => {
+      const complete = !!row.draft.classTeacherRemark.trim() && !!row.draft.headTeacherRemark.trim();
+      if (remarkFilter === "missing" && complete) return false;
+      if (remarkFilter === "complete" && !complete) return false;
+      if (remarkFilter === "published" && !row.draft.published) return false;
+      if (remarkFilter === "unpublished" && row.draft.published) return false;
+      return !query || `${row.student.fullName || ""} ${row.student.admissionNumber || ""}`.toLowerCase().includes(query);
+    }).sort((a,b) => cleanText(a.student.fullName).localeCompare(cleanText(b.student.fullName)));
+  }, [studentRows, search, remarkFilter]);
 
-    return studentRows
-      .filter((row) => {
-        const draft = row.draft;
-        const complete =
-          !!row.draft.classTeacherRemark.trim() &&
-          !!row.draft.headTeacherRemark.trim();
-
-        if (viewMode === "single" && studentId && row.student.id !== studentId)
-          return false;
-        if (remarkFilter === "missing" && complete) return false;
-        if (remarkFilter === "complete" && !complete) return false;
-        if (remarkFilter === "published" && !draft.published) return false;
-        if (remarkFilter === "unpublished" && draft.published) return false;
-
-        if (!query) return true;
-
-        return `${row.student.fullName || ""} ${row.student.admissionNumber || ""}`
-          .toLowerCase()
-          .includes(query);
-      })
-      .sort((a, b) =>
-        cleanText(a.student.fullName).localeCompare(
-          cleanText(b.student.fullName),
-        ),
-      );
-  }, [remarkFilter, search, studentId, studentRows, viewMode]);
-
-  const selectedRow = useMemo(() => {
-    if (!studentId) return visibleRows[0];
-    return studentRows.find((row) => row.student.id === studentId);
-  }, [studentId, studentRows, visibleRows]);
+  const selectedRow = useMemo(() => (
+    studentRows.find(row => row.student.id === studentId) || visibleRows[0]
+  ), [studentId, studentRows, visibleRows]);
 
   useEffect(() => {
-    if (!academicStructureId || !academicPeriodId || !classId) {
+    if (!academicStructureId || !academicPeriodId) {
       setDrafts({});
       return;
     }
-
-    const next: DraftMap = {};
-
-    studentRows.forEach((row) => {
-      if (!row.student.id) return;
-
-      next[row.student.id] = {
-        reportCardId: row.reportCard?.id,
-        classTeacherRemark: row.reportCard?.classTeacherRemark || "",
-        headTeacherRemark: row.reportCard?.headTeacherRemark || "",
-        published: !!row.reportCard?.published,
-      };
+    setDrafts(current => {
+      const next: DraftMap = {};
+      studentRows.forEach(row => {
+        next[row.rowKey] = editing && current[row.rowKey] ? current[row.rowKey] : {
+          reportCardId: row.reportCard?.id,
+          classTeacherRemark: row.reportCard?.classTeacherRemark || "",
+          headTeacherRemark: row.reportCard?.headTeacherRemark || "",
+          published: !!row.reportCard?.published,
+        };
+      });
+      return next;
     });
-
-    setDrafts(next);
+    // Source records change only on a new class/scope or a successful reload.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academicStructureId, academicPeriodId, classId, reportCards.length]);
+  }, [academicStructureId, academicPeriodId, classId, scopeMode, reportCards]);
 
   const summary = useMemo(() => {
     const total = studentRows.length;
@@ -1950,17 +1969,15 @@ export default function ReportRemarks() {
       academicStructureId,
       academicPeriodId,
       classId,
-      studentId,
+      scopeMode === "group" ? "group" : undefined,
       remarkFilter !== "all" ? remarkFilter : undefined,
-      viewMode !== "single" ? viewMode : undefined,
     ].filter(Boolean).length;
   }, [
     academicPeriodId,
     academicStructureId,
     classId,
     remarkFilter,
-    studentId,
-    viewMode,
+    scopeMode,
   ]);
 
   const selectedStructureName = labelOf(
@@ -2075,9 +2092,7 @@ export default function ReportRemarks() {
     let skippedExisting = 0;
 
     candidates.forEach((row) => {
-      const sid =
-        row.student.id || "";
-
+      const sid = row.rowKey;
       if (!sid) return;
 
       const value =
@@ -2155,7 +2170,7 @@ export default function ReportRemarks() {
     const next: DraftMap = { ...drafts };
 
     visibleRows.forEach((row) => {
-      const sid = row.student.id || "";
+      const sid = row.rowKey;
       const current = next[sid] || row.draft || defaultDraft();
 
       next[sid] = {
@@ -2180,7 +2195,7 @@ export default function ReportRemarks() {
     const next: DraftMap = { ...drafts };
 
     visibleRows.forEach((row) => {
-      const sid = row.student.id || "";
+      const sid = row.rowKey;
       next[sid] = {
         ...(next[sid] || row.draft || defaultDraft()),
         published,
@@ -2190,85 +2205,71 @@ export default function ReportRemarks() {
     setDrafts(next);
   };
 
-  const saveRows = async (rows: StudentRemarkRow[]) => {
-    if (!authenticated || !selectedAccountId) return alert("Sign in first.");
-    if (!schoolId) return alert("Select school first.");
-    if (!branchId) return alert("Select branch first.");
-    if (!academicStructureId) return alert("Select academic structure.");
-    if (!academicPeriodId) return alert("Select academic period.");
-    if (!classId) return alert("Select class.");
-    if (!rows.length) return alert("No students to save.");
+  const isChanged = (row: StudentRemarkRow) => {
+    const draft = drafts[row.rowKey] || row.draft;
+    return cleanText(draft.classTeacherRemark) !== cleanText(row.reportCard?.classTeacherRemark) ||
+      cleanText(draft.headTeacherRemark) !== cleanText(row.reportCard?.headTeacherRemark) ||
+      !!draft.published !== !!row.reportCard?.published;
+  };
 
+  const dirtyCount = studentRows.filter(isChanged).length;
+
+  const openFilters = () => {
+    if (editing && dirtyCount && !window.confirm("You have unsaved remarks. Discard these changes and change the report filters?")) return;
+    setEditing(false);
+    setFilterOpen(true);
+  };
+
+  const saveRows = async (rows: StudentRemarkRow[]) => {
+    if (!authenticated || !selectedAccountId || !schoolId || !branchId) return alert("Select an authorized school branch.");
+    if (!academicStructureId || !academicPeriodId) return alert("Select an academic year and term.");
+    const changed = rows.filter(isChanged);
+    if (!changed.length) { setEditing(false); return; }
     try {
       setSaving(true);
-
-      for (const row of rows) {
-        const sid = row.student.id;
-        if (!sid) continue;
-
-        const draft = drafts[sid] || row.draft || defaultDraft();
-        const existing =
-          row.reportCard ||
-          reportCardMap.get(
-            reportCardKey(sid, classId, academicStructureId, academicPeriodId),
-          );
-
+      for (const row of changed) {
+        const sid = idOf(row.student.id);
+        const cid = idOf(row.enrollment.classId);
+        if (!sid || !cid) continue;
+        const draft = drafts[row.rowKey] || row.draft;
+        const classRemark = cleanText(draft.classTeacherRemark);
+        const headRemark = cleanText(draft.headTeacherRemark);
+        const existing = row.reportCard || reportCardMap.get(row.rowKey);
         if (existing?.id) {
           await updateLocal("reportCards" as any, String(existing.id), {
-            accountId: selectedAccountId,
-            schoolId: schoolId,
-            branchId: branchId,
-            classTeacherRemark: draft.classTeacherRemark.trim() || undefined,
-            headTeacherRemark: draft.headTeacherRemark.trim() || undefined,
+            accountId: selectedAccountId, schoolId, branchId,
+            classTeacherRemark: classRemark || undefined,
+            headTeacherRemark: headRemark || undefined,
             published: draft.published,
           } as Partial<ReportCard>);
-        } else {
-          await createLocal(
-            "reportCards" as any,
-            {
-              accountId: selectedAccountId,
-              schoolId: schoolId,
-              branchId: branchId,
-              studentId: sid,
-              classId: classId,
-              academicStructureId: academicStructureId,
-              academicPeriodId: academicPeriodId,
-              total: 0,
-              average: 0,
-              classTeacherRemark: draft.classTeacherRemark.trim() || undefined,
-              headTeacherRemark: draft.headTeacherRemark.trim() || undefined,
-              published: draft.published,
-            } as Partial<ReportCard>,
-          );
+        } else if (classRemark || headRemark || draft.published) {
+          await createLocal("reportCards" as any, {
+            accountId: selectedAccountId, schoolId, branchId,
+            studentId: sid, classId: cid, academicStructureId, academicPeriodId,
+            total: Number(row.computedReport?.total || 0),
+            average: Number(row.computedReport?.average || 0),
+            classTeacherRemark: classRemark || undefined,
+            headTeacherRemark: headRemark || undefined,
+            published: draft.published,
+          } as Partial<ReportCard>);
         }
       }
-
+      setEditing(false);
       await load();
-      alert("Report remarks saved.");
     } catch (error) {
       console.error("Failed to save report remarks:", error);
-      alert("Failed to save report remarks.");
+      alert("Could not save all remarks. Review and retry.");
     } finally {
       setSaving(false);
     }
   };
 
-  const saveCurrent = async () => {
-    if (viewMode === "single") {
-      if (!selectedRow) return alert("Select a student first.");
-      await saveRows([selectedRow]);
-      return;
-    }
-
-    await saveRows(visibleRows);
-  };
-
-  // Branch Admin V4 toolbar: select another student through Add, save via
-  // the existing remark editor. Filtering/search remains available in Filter.
+  // The latest shared toolbar adapter registers only real actions.
+  // The + button configures Remarks Basis; the filter chooses class/group.
   useRegisterBranchWorkspaceToolbar("reportsWorkspace", {
-    add: () => setFilterOpen(true),
+    add: () => { setEditing(true); setBasisOpen(true); },
     search: setSearch,
-    filter: () => setFilterOpen(true),
+    filter: openFilters,
     more: () => setMoreOpen(true),
   });
 
@@ -2303,287 +2304,126 @@ export default function ReportRemarks() {
   }
 
   return (
-    <main
-      className="ba-page report-remarks-page"
-      style={
-        {
-          "--ba-primary": primary,
-          "--primary-color": primary,
-        } as React.CSSProperties
-      }
-    >
+    <main className={`ba-page report-remarks-page ${viewMode === "cards" ? "rr-force-cards" : viewMode === "table" ? "rr-force-table" : ""}`} style={{"--ba-primary":primary,"--primary-color":primary} as React.CSSProperties}>
       <style>{css}</style>
+      <header className="rr-command-row report-no-print">
+        <button type="button" className="rr-context" onClick={openFilters} aria-label="Choose group, class and term">
+          <strong>{scopeMode === "group" ? "All classes" : selectedClassName}</strong>
+          <span>{selectedPeriodName} · {visibleRows.length} shown</span><i aria-hidden="true">⌄</i>
+        </button>
+        <span className="rr-count" title="Completed remarks">{summary.complete}/{summary.total}</span>
+        <button type="button" className="rr-primary" onClick={editing ? () => void saveRows(studentRows) : () => setEditing(true)}
+          disabled={saving || (!editing && !studentRows.length)}>
+          {saving ? "Saving…" : editing ? `Save${dirtyCount ? ` (${dirtyCount})` : ""}` : "Start"}
+        </button>
+        {editing && <button type="button" className="rr-secondary" onClick={() => {
+          if (dirtyCount && !window.confirm("Discard unsaved remark changes?")) return;
+          setDrafts(Object.fromEntries(studentRows.map(row => [row.rowKey, {
+            reportCardId: row.reportCard?.id,
+            classTeacherRemark: row.reportCard?.classTeacherRemark || "",
+            headTeacherRemark: row.reportCard?.headTeacherRemark || "",
+            published: !!row.reportCard?.published,
+          }]))); setEditing(false);
+        }}>Cancel</button>}
+      </header>
 
-      {viewMode === "analytics" && (
-        <section className="ba-filter-chips">
-          <SummaryChip label="Students" value={summary.total} />
-          <SummaryChip label="Class remarks" value={summary.classRemarked} />
-          <SummaryChip label="Head remarks" value={summary.headRemarked} />
-          <SummaryChip label="Complete" value={summary.complete} />
-          <SummaryChip label="Missing" value={summary.missing} />
-          <SummaryChip label="Published" value={summary.published} />
-          <SummaryChip label="Done" value={`${summary.completion}%`} />
-        </section>
-      )}
-
-      {viewMode === "group" && (
-        <section className="ba-remark-card">
-          <div className="ba-remark-head">
-            <div>
-              <h3>Group tools</h3>
-              <p>Apply remarks to the students currently shown.</p>
+      {viewMode === "analytics" ? <section className="rr-analytics">
+        {[["Students", summary.total], ["Class remarks", summary.classRemarked], ["Head remarks", summary.headRemarked],
+          ["Complete", summary.complete], ["Missing", summary.missing], ["Published", summary.published],
+          ["Completion", `${summary.completion}%`]].map(([label, value]) => <article key={label}><small>{label}</small><strong>{value}</strong></article>)}
+      </section> : <>
+        <div className="rr-table-wrap">
+          <table className="rr-table" aria-label="Report remarks for students">
+            <colgroup><col className="rr-col-student"/><col className="rr-col-basis"/><col/><col/><col className="rr-col-status"/></colgroup>
+            <thead><tr><th>Student</th><th>Basis</th><th>Class teacher remark</th><th>Headteacher remark</th><th>Status</th></tr></thead>
+            <tbody>{visibleRows.map(row => {
+              const id = row.rowKey, draft = drafts[id] || row.draft;
+              const value = basisValueForRow(row, basisMetric);
+              const band = matchingBasisRule(value, basisRules);
+              return <tr key={id} className={studentId === row.student.id ? "rr-row-selected" : ""}>
+                <td><div className="rr-person"><StudentPhoto student={row.student} photo={mediaByStudentId[idOf(row.student.id)]?.photo}/>
+                  <div><button type="button" className="rr-select-student" title="Select student for remarks basis" onClick={()=>setStudentId(idOf(row.student.id))}>{row.student.fullName || "Unnamed student"}</button>
+                  <small>{row.student.admissionNumber || "No ID"} · {classMap.get(row.enrollment.classId)?.name || "Class"}</small></div></div></td>
+                <td><span className="rr-basis-value">{value === undefined ? "—" : `${Number(value.toFixed(1))}${basisMetric === "attendance" ? "%" : ""}`}</span>
+                  <small>{band?.label || basisMetric}</small></td>
+                <td><textarea aria-label={`Class teacher remark for ${row.student.fullName}`} rows={2} readOnly={!editing} value={draft.classTeacherRemark}
+                  onChange={e=>updateDraft(id,{classTeacherRemark:e.target.value})} placeholder={editing?"Enter class teacher remark":"—"}/></td>
+                <td><textarea aria-label={`Headteacher remark for ${row.student.fullName}`} rows={2} readOnly={!editing} value={draft.headTeacherRemark}
+                  onChange={e=>updateDraft(id,{headTeacherRemark:e.target.value})} placeholder={editing?"Enter headteacher remark":"—"}/></td>
+                <td><label className="rr-published"><input type="checkbox" disabled={!editing} checked={!!draft.published}
+                  onChange={e=>updateDraft(id,{published:e.target.checked})}/><span>Published</span></label>
+                  <span className={`rr-state ${draft.classTeacherRemark.trim() && draft.headTeacherRemark.trim()?"ready":"missing"}`}>
+                    {draft.classTeacherRemark.trim() && draft.headTeacherRemark.trim()?"Complete":"Incomplete"}
+                  </span>
+                </td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+        <section className="rr-mobile-cards" aria-label="Student remarks cards">{visibleRows.map(row => {
+          const id = row.rowKey, draft = drafts[id] || row.draft;
+          const value = basisValueForRow(row,basisMetric);
+          const band = matchingBasisRule(value,basisRules);
+          return <article key={id} className={`rr-card ${studentId===row.student.id ? "rr-row-selected" : ""}`}>
+            <div className="rr-card-head"><StudentPhoto student={row.student} photo={mediaByStudentId[idOf(row.student.id)]?.photo}/>
+              <div className="rr-card-person"><button type="button" className="rr-select-student" title="Select student for remarks basis" onClick={()=>setStudentId(idOf(row.student.id))}>{row.student.fullName || "Unnamed student"}</button>
+                <small>{row.student.admissionNumber || "No ID"} · {classMap.get(row.enrollment.classId)?.name || "Class"}</small></div>
+              <span className="rr-card-basis" title={`Based on ${basisMetric}`}>{value === undefined ? "—" : Number(value.toFixed(1))}{basisMetric === "attendance" && value !== undefined ? "%" : ""}<small>{band?.label || basisMetric}</small></span>
             </div>
-            <label className="ba-publish-line">
-              <input
-                type="checkbox"
-                checked={bulkOverwrite}
-                onChange={(event) => setBulkOverwrite(event.target.checked)}
-              />
-              Overwrite
-            </label>
-          </div>
+            <div className="rr-card-fields">
+              <label>Class teacher<textarea rows={2} readOnly={!editing} value={draft.classTeacherRemark} placeholder={editing?"Write a remark…":"—"}
+                onChange={e=>updateDraft(id,{classTeacherRemark:e.target.value})}/></label>
+              <label>Headteacher<textarea rows={2} readOnly={!editing} value={draft.headTeacherRemark} placeholder={editing?"Write a remark…":"—"}
+                onChange={e=>updateDraft(id,{headTeacherRemark:e.target.value})}/></label>
+            </div>
+            <div className="rr-card-foot"><span className={`rr-state ${draft.classTeacherRemark.trim() && draft.headTeacherRemark.trim()?"ready":"missing"}`}>
+              {draft.classTeacherRemark.trim() && draft.headTeacherRemark.trim()?"Complete":"Incomplete"}</span>
+              <label className="rr-published"><input type="checkbox" disabled={!editing} checked={!!draft.published}
+                onChange={e=>updateDraft(id,{published:e.target.checked})}/>Published</label>
+            </div>
+          </article>;
+        })}</section>
+      </>}
+      {!studentRows.length && <Empty text="There are no enrolled students for this class or term. Use Filter to choose another class/group."/>}
+      {studentRows.length > 0 && !visibleRows.length && <Empty text="No students match the current search and status filters."/>}
 
-          <div className="ba-remark-grid two">
-            <label className="ba-remark-field">
-              <span>
-                <b>Class Teacher Remark</b>
-                <em>{countWords(bulkClassRemark)} words</em>
-              </span>
-              <textarea
-                value={bulkClassRemark}
-                onChange={(event) => setBulkClassRemark(event.target.value)}
-                placeholder="Class teacher remark..."
-              />
-            </label>
-
-            <label className="ba-remark-field">
-              <span>
-                <b>Head Teacher Remark</b>
-                <em>{countWords(bulkHeadRemark)} words</em>
-              </span>
-              <textarea
-                value={bulkHeadRemark}
-                onChange={(event) => setBulkHeadRemark(event.target.value)}
-                placeholder="Head teacher / principal remark..."
-              />
-            </label>
-          </div>
-
-          <div className="ba-sheet-actions">
-            <button type="button" onClick={applyBulkRemarks}>
-              Apply to shown
-            </button>
-            <button type="button" onClick={() => togglePublishShown(true)}>
-              Publish shown
-            </button>
-            <button type="button" onClick={() => togglePublishShown(false)}>
-              Unpublish shown
-            </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => saveRows(visibleRows)}
-              disabled={saving}
-            >
-              {saving ? "Saving..." : "Save shown"}
-            </button>
-          </div>
-        </section>
-      )}
-
-      {viewMode === "single" && selectedRow && (
-        <RemarkEditor
-          row={selectedRow}
-          className={classId ? classMap.get(classId)?.name : undefined}
-          draft={drafts[selectedRow.student.id || ""] || selectedRow.draft}
-          updateDraft={updateDraft}
-          canEditHeadRemark
-          canPublish
-          onSave={saveCurrent}
-          saving={saving}
-          basisMetric={basisMetric}
-          basisValue={basisValueForRow(
-            selectedRow,
-            basisMetric,
-          )}
-          basisRule={matchingBasisRule(
-            basisValueForRow(
-              selectedRow,
-              basisMetric,
-            ),
-            basisRules,
-          )}
-        />
-      )}
-
-      {viewMode === "group" && (
-        <section className="ba-list">
-          {visibleRows.map((row) => (
-            <button
-              key={row.student.id}
-              type="button"
-              className={`ba-student-row ${studentId === row.student.id ? "active" : ""}`}
-              onClick={() => {
-                setStudentId(row.student.id || undefined);
-                setViewMode("single");
-              }}
-            >
-              <span className="ba-avatar">
-                {cleanText(row.student.fullName).slice(0, 1).toUpperCase() ||
-                  "S"}
-              </span>
-              <span className="ba-student-main">
-                <strong>{row.student.fullName}</strong>
-                <small>
-                  {row.student.admissionNumber || "No admission no."} ·{" "}
-                  {classMap.get(row.enrollment.classId)?.name || "Class"}
-                </small>
-                <em>
-                  {row.draft.classTeacherRemark
-                    ? "Class remark entered"
-                    : "Class remark missing"}
-                  {" · "}
-                  {(() => {
-                    const value =
-                      basisValueForRow(
-                        row,
-                        basisMetric,
-                      );
-                    const rule =
-                      matchingBasisRule(
-                        value,
-                        basisRules,
-                      );
-
-                    return value === undefined
-                      ? `No ${basisMetric}`
-                      : `${basisMetric === "average"
-                          ? "Avg"
-                          : basisMetric === "total"
-                            ? "Total"
-                            : basisMetric === "position"
-                              ? "Position"
-                              : "Attendance"} ${basisMetric === "position" ? Math.round(value) : value.toFixed(1)}${basisMetric === "attendance" ? "%" : ""}${rule ? ` · ${rule.label}` : ""}`;
-                  })()}
-                </em>
-              </span>
-              <span className="ba-student-side">
-                <Chip tone={row.draft.classTeacherRemark ? "green" : "orange"}>
-                  {row.draft.classTeacherRemark ? "Ready" : "Missing"}
-                </Chip>
-                <i>›</i>
-              </span>
-            </button>
-          ))}
-        </section>
-      )}
-
-      {!studentRows.length && viewMode !== "analytics" && (
-        <Empty text="Choose academic structure, academic period and class to load students for report remarks." />
-      )}
-      {studentRows.length > 0 &&
-        !visibleRows.length &&
-        viewMode === "group" && (
-          <Empty text="No students match the current filters." />
-        )}
-
-      {filterOpen && (
-        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setFilterOpen(false)}>
+      {filterOpen && <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={()=>setFilterOpen(false)}>
         <FilterSheet
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          remarkFilter={remarkFilter}
-          setRemarkFilter={setRemarkFilter}
-          academicStructureId={academicStructureId}
-          setAcademicStructureId={setAcademicStructureId}
-          academicPeriodId={academicPeriodId}
-          setAcademicPeriodId={setAcademicPeriodId}
-          classId={classId}
-          setClassId={setClassId}
-          studentId={studentId}
-          setStudentId={setStudentId}
-          academicStructures={academicStructures}
-          academicPeriods={filteredPeriods}
-          classes={availableClasses}
-          students={studentRows.map((row) => row.student)}
-          search={search}
-          setSearch={setSearch}
-          onClose={() => setFilterOpen(false)}
-        />
-        </BranchViewportPortal>
-      )}
-
-      {basisOpen && (
-        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setBasisOpen(false)}>
-        <RemarksBasisSheet
-          metric={basisMetric}
-          setMetric={changeBasisMetric}
-          target={basisTarget}
-          setTarget={setBasisTarget}
-          overwrite={basisOverwrite}
-          setOverwrite={setBasisOverwrite}
-          rules={basisRules}
-          source={basisSource}
-          updateRule={updateBasisRule}
-          addRule={addBasisRule}
-          removeRule={removeBasisRule}
-          selectedRow={selectedRow}
-          shownCount={visibleRows.length}
-          applySelected={() =>
-            applyRemarksBasis(
-              "selected",
-            )
-          }
-          applyShown={() =>
-            applyRemarksBasis("shown")
-          }
-          resetRules={() => {
-            lastDerivedBasisSignatureRef.current =
-              "";
-            setBasisRules(
-              intelligentBasis.rules,
-            );
-            setBasisSource(
-              intelligentBasis.source,
-            );
-          }}
-          onClose={() =>
-            setBasisOpen(false)
-          }
-        />
-        </BranchViewportPortal>
-      )}
-
-      {moreOpen && (
-        <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={() => setMoreOpen(false)}>
-        <MoreSheet
-          onRefresh={async () => {
-            setMoreOpen(false);
-            await load();
-          }}
-          onSingle={() => {
-            setViewMode("single");
-            setMoreOpen(false);
-          }}
-          onGroup={() => {
-            setViewMode("group");
-            setMoreOpen(false);
-          }}
-          onAnalytics={() => {
-            setViewMode("analytics");
-            setMoreOpen(false);
-          }}
-          onRemarksBasis={() => {
-            setMoreOpen(false);
-            window.requestAnimationFrame(() => {
-              lastDerivedBasisSignatureRef.current = "";
-              setBasisOpen(true);
-            });
-          }}
-          onClose={() => setMoreOpen(false)}
-        />
-        </BranchViewportPortal>
-      )}
+          viewMode={viewMode} setViewMode={setViewMode}
+          scopeMode={scopeMode} setScopeMode={next=>{setScopeMode(next);setEditing(false);}}
+          remarkFilter={remarkFilter} setRemarkFilter={setRemarkFilter}
+          academicStructureId={academicStructureId} setAcademicStructureId={setAcademicStructureId}
+          academicPeriodId={academicPeriodId} setAcademicPeriodId={setAcademicPeriodId}
+          classId={classId} setClassId={setClassId} studentId={studentId} setStudentId={setStudentId}
+          academicStructures={academicStructures} academicPeriods={filteredPeriods}
+          classes={availableClasses} students={studentRows.map(row=>row.student)}
+          search={search} setSearch={setSearch} onClose={()=>setFilterOpen(false)} />
+      </BranchViewportPortal>}
+      {basisOpen && <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={()=>setBasisOpen(false)}>
+        <RemarksBasisSheet metric={basisMetric} setMetric={changeBasisMetric} target={basisTarget} setTarget={setBasisTarget}
+          overwrite={basisOverwrite} setOverwrite={setBasisOverwrite} rules={basisRules} source={basisSource}
+          updateRule={updateBasisRule} addRule={addBasisRule} removeRule={removeBasisRule}
+          selectedRow={selectedRow} shownCount={visibleRows.length} applySelected={()=>{applyRemarksBasis("selected");setEditing(true);setBasisOpen(false);}}
+          applyShown={()=>{applyRemarksBasis("shown");setEditing(true);setBasisOpen(false);}}
+          resetRules={()=>{lastDerivedBasisSignatureRef.current="";setBasisRules(intelligentBasis.rules);setBasisSource(intelligentBasis.source);}}
+          onClose={()=>setBasisOpen(false)}/>
+      </BranchViewportPortal>}
+      {bulkOpen && <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={()=>setBulkOpen(false)}>
+        <BulkRemarksSheet classRemark={bulkClassRemark} setClassRemark={setBulkClassRemark}
+          headRemark={bulkHeadRemark} setHeadRemark={setBulkHeadRemark} overwrite={bulkOverwrite}
+          setOverwrite={setBulkOverwrite} shownCount={visibleRows.length} onApply={()=>{applyBulkRemarks();setEditing(true);setBulkOpen(false);}}
+          onClose={()=>setBulkOpen(false)}/>
+      </BranchViewportPortal>}
+      {moreOpen && <BranchViewportPortal themeSourceClass=".report-remarks-page" onEscape={()=>setMoreOpen(false)}>
+        <MoreSheet onRefresh={async()=>{setMoreOpen(false);await load();}}
+          onCards={()=>{setViewMode("cards");setMoreOpen(false);}}
+          onTable={()=>{setViewMode("table");setMoreOpen(false);}}
+          onAnalytics={()=>{setViewMode("analytics");setMoreOpen(false);}}
+          onBulk={()=>{setMoreOpen(false);setBulkOpen(true);}}
+          onPublishShown={(value)=>{togglePublishShown(value);setEditing(true);setMoreOpen(false);}}
+          onRemarksBasis={()=>{setMoreOpen(false);setEditing(true);setBasisOpen(true);}}
+          onClose={()=>setMoreOpen(false)}/>
+      </BranchViewportPortal>}
     </main>
   );
 }
@@ -2617,135 +2457,23 @@ function State({
   );
 }
 
-function RemarkEditor({
-  row,
-  className,
-  draft,
-  updateDraft,
-  canEditHeadRemark,
-  canPublish,
-  onSave,
-  saving,
-  basisMetric,
-  basisValue,
-  basisRule,
-}: {
-  row: StudentRemarkRow;
-  className?: string;
-  draft: RemarkDraft;
-  updateDraft: (studentIdValue: string, patch: Partial<RemarkDraft>) => void;
-  canEditHeadRemark: boolean;
-  canPublish: boolean;
-  onSave: () => void | Promise<void>;
-  saving: boolean;
-  basisMetric: RemarkBasisMetric;
-  basisValue?: number;
-  basisRule?: RemarkBasisRule;
-}) {
-  const sid = row.student.id || "";
-  const complete =
-    !!draft.classTeacherRemark.trim() &&
-    (!canEditHeadRemark || !!draft.headTeacherRemark.trim());
-
-  return (
-    <section className="ba-remark-card">
-      <div className="ba-remark-head">
-        <div>
-          <h3>{row.student.fullName}</h3>
-          <p>
-            {row.student.admissionNumber || "No admission no."}
-            {className ? ` · ${className}` : ""}
-          </p>
-        </div>
-        <div className="ba-v4-remark-actions">
-          <Chip tone={complete ? "green" : "orange"}>
-            {complete ? "Complete" : "Needs remarks"}
-          </Chip>
-          <button type="button" className="ba-v4-save-remark" onClick={onSave} disabled={saving}>
-            {saving ? "Saving" : "Save"}
-          </button>
-        </div>
-      </div>
-
-      <section className="ba-basis-preview">
-        <span>
-          <b>Remarks basis</b>
-          <small>
-            {basisMetric === "average"
-              ? "Average score"
-              : basisMetric === "total"
-                ? "Total score"
-                : basisMetric === "position"
-                  ? "Overall position"
-                  : "Attendance percentage"}
-          </small>
-        </span>
-
-        <strong>
-          {basisValue === undefined
-            ? "No score"
-            : basisValue.toFixed(1)}
-        </strong>
-
-        <em>
-          {basisRule?.label ||
-            "No matching band"}
-        </em>
-      </section>
-
-      <div
-        className={canEditHeadRemark ? "ba-remark-grid two" : "ba-remark-grid"}
-      >
-        <label className="ba-remark-field">
-          <span>
-            <b>Class Teacher Remark</b>
-            <em>{countWords(draft.classTeacherRemark)} words</em>
-          </span>
-          <textarea
-            value={draft.classTeacherRemark || ""}
-            onChange={(event) =>
-              updateDraft(sid, { classTeacherRemark: event.target.value })
-            }
-            placeholder="Enter class teacher remark..."
-          />
-        </label>
-
-        {canEditHeadRemark && (
-          <label className="ba-remark-field">
-            <span>
-              <b>Head Teacher Remark</b>
-              <em>{countWords(draft.headTeacherRemark)} words</em>
-            </span>
-            <textarea
-              value={draft.headTeacherRemark || ""}
-              onChange={(event) =>
-                updateDraft(sid, { headTeacherRemark: event.target.value })
-              }
-              placeholder="Enter head teacher / principal remark..."
-            />
-          </label>
-        )}
-      </div>
-
-      {canPublish && (
-        <label className="ba-publish-line">
-          <input
-            type="checkbox"
-            checked={!!draft.published}
-            onChange={(event) =>
-              updateDraft(sid, { published: event.target.checked })
-            }
-          />
-          Publish this report card
-        </label>
-      )}
-    </section>
-  );
+function StudentPhoto({student, photo}: {student: Student;photo?:string}) {
+  const name = cleanText(student.fullName);
+  const fallback = cleanText((student as any).photo);
+  const valid = (value:string) => value.startsWith("https://") || value.startsWith("http://") || value.startsWith("blob:") || value.startsWith("data:image/");
+  const src = (photo && valid(photo) ? photo : "") || (valid(fallback) ? fallback : "");
+  const [failed, setFailed] = useState(false);
+  useEffect(()=>setFailed(false),[src]);
+  return <span className="rr-avatar" aria-label={`${name} photograph`}>
+    {src && !failed ? <img src={src} alt={name} onError={()=>setFailed(true)}/> : <b aria-hidden="true">{name.slice(0,1).toUpperCase() || "S"}</b>}
+  </span>;
 }
 
 function FilterSheet(props: {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
+  scopeMode: StudentScope;
+  setScopeMode: (scope: StudentScope) => void;
   remarkFilter: RemarkFilter;
   setRemarkFilter: (filter: RemarkFilter) => void;
   academicStructureId?: string;
@@ -2788,19 +2516,12 @@ function FilterSheet(props: {
             <input type="search" value={props.search} onChange={(e) => props.setSearch(e.target.value)} placeholder="Name or admission number" />
           </label>
           <label>
-            <span>View Mode</span>
-            <select
-              value={props.viewMode}
-              onChange={(event) =>
-                props.setViewMode(event.target.value as ViewMode)
-              }
-            >
-              <option value="single">Single student</option>
-              <option value="group">Group remarks</option>
-              <option value="analytics">Analytics</option>
+            <span>Students</span>
+            <select value={props.scopeMode} onChange={e=>props.setScopeMode(e.target.value as StudentScope)}>
+              <option value="class">One class</option>
+              <option value="group">Group · all classes in this term</option>
             </select>
           </label>
-
           <label>
             <span>Academic Structure</span>
             <select
@@ -2844,7 +2565,7 @@ function FilterSheet(props: {
             </select>
           </label>
 
-          <label>
+          {props.scopeMode === "class" && <label>
             <span>Class</span>
             <select
               value={props.classId || ""}
@@ -2860,26 +2581,7 @@ function FilterSheet(props: {
                 </option>
               ))}
             </select>
-          </label>
-
-          {props.viewMode === "single" && (
-            <label>
-              <span>Student</span>
-              <select
-                value={props.studentId || ""}
-                onChange={(event) =>
-                  props.setStudentId(idOf(event.target.value) || undefined)
-                }
-              >
-                <option value="">Auto select</option>
-                {props.students.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.fullName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          </label>}
 
           <label>
             <span>Remark Filter</span>
@@ -2921,380 +2623,83 @@ function FilterSheet(props: {
 }
 
 
-function RemarksBasisSheet({
-  metric,
-  setMetric,
-  target,
-  setTarget,
-  overwrite,
-  setOverwrite,
-  rules,
-  source,
-  updateRule,
-  addRule,
-  removeRule,
-  selectedRow,
-  shownCount,
-  applySelected,
-  applyShown,
-  resetRules,
-  onClose,
-}: {
+function RemarksBasisSheet({metric,setMetric,target,setTarget,overwrite,setOverwrite,rules,source,
+  updateRule,addRule,removeRule,selectedRow,shownCount,applySelected,applyShown,resetRules,onClose}: {
   metric: RemarkBasisMetric;
-  setMetric: (
-    metric: RemarkBasisMetric,
-  ) => void;
+  setMetric: (metric:RemarkBasisMetric)=>void;
   target: RemarkBasisTarget;
-  setTarget: (
-    target: RemarkBasisTarget,
-  ) => void;
-  overwrite: boolean;
-  setOverwrite: (
-    overwrite: boolean,
-  ) => void;
-  rules: RemarkBasisRule[];
-  source: RemarkBasisSource;
-  updateRule: (
-    id: string,
-    patch: Partial<RemarkBasisRule>,
-  ) => void;
-  addRule: () => void;
-  removeRule: (
-    id: string,
-  ) => void;
-  selectedRow?: StudentRemarkRow;
-  shownCount: number;
-  applySelected: () => void;
-  applyShown: () => void;
-  resetRules: () => void;
-  onClose: () => void;
+  setTarget: (target:RemarkBasisTarget)=>void;
+  overwrite:boolean;setOverwrite:(value:boolean)=>void;
+  rules:RemarkBasisRule[];source:RemarkBasisSource;
+  updateRule:(id:string,patch:Partial<RemarkBasisRule>)=>void;
+  addRule:()=>void;removeRule:(id:string)=>void;
+  selectedRow?:StudentRemarkRow;shownCount:number;
+  applySelected:()=>void;applyShown:()=>void;resetRules:()=>void;onClose:()=>void;
 }) {
-  return (
-    <div
-      className="ba-sheet-backdrop ba-basis-backdrop portal-contained-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Remarks basis"
-    >
-      <section className="ba-sheet ba-basis-sheet">
-        <div className="ba-sheet-head">
-          <div>
-            <h2>Remarks basis</h2>
-            <p>
-              Generate consistent remarks from report-card scores. Review the generated text before saving.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close remarks basis"
-          >
-            ✕
-          </button>
-        </div>
-
-        <section className="ba-basis-source">
-          <span aria-hidden="true">
-            ∑
-          </span>
-
-          <div>
-            <strong>
-              {source.title}
-            </strong>
-            <small>
-              {source.detail}
-            </small>
-          </div>
-        </section>
-
-        <div className="ba-basis-controls">
-          <label>
-            <span>Base remarks on</span>
-            <select
-              value={metric}
-              onChange={(event) =>
-                setMetric(
-                  event.target
-                    .value as RemarkBasisMetric,
-                )
-              }
-            >
-              <option value="average">
-                Average score
-              </option>
-              <option value="total">
-                Total score
-              </option>
-              <option value="position">
-                Overall class position
-              </option>
-              <option value="attendance">
-                Attendance percentage
-              </option>
-            </select>
-            <small className="ba-basis-field-note">
-              Bands update automatically from the selected class, grading structure and report calculations.
-            </small>
-          </label>
-
-          <label>
-            <span>Write generated text to</span>
-            <select
-              value={target}
-              onChange={(event) =>
-                setTarget(
-                  event.target
-                    .value as RemarkBasisTarget,
-                )
-              }
-            >
-              <option value="headTeacherRemark">
-                Head teacher remark
-              </option>
-              <option value="classTeacherRemark">
-                Class teacher remark
-              </option>
-            </select>
-          </label>
-
-          <label className="ba-basis-overwrite">
-            <input
-              type="checkbox"
-              checked={overwrite}
-              onChange={(event) =>
-                setOverwrite(
-                  event.target.checked,
-                )
-              }
-            />
-            <span>
-              <b>Overwrite existing remarks</b>
-              <small>
-                Leave off to preserve remarks already entered manually.
-              </small>
-            </span>
-          </label>
-        </div>
-
-        <div className="ba-basis-rule-list">
-          {rules.map(
-            (rule, index) => (
-              <article
-                key={rule.id}
-                className="ba-basis-rule"
-              >
-                <div className="ba-basis-rule-head">
-                  <strong>
-                    Band {index + 1}
-                  </strong>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      removeRule(rule.id)
-                    }
-                    disabled={
-                      rules.length <= 1
-                    }
-                    aria-label={`Remove ${rule.label}`}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="ba-basis-rule-grid">
-                  <label>
-                    <span>Label</span>
-                    <input
-                      value={rule.label}
-                      onChange={(event) =>
-                        updateRule(
-                          rule.id,
-                          {
-                            label:
-                              event.target
-                                .value,
-                          },
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    <span>Minimum</span>
-                    <input
-                      type="number"
-                      value={rule.minimum}
-                      onChange={(event) =>
-                        updateRule(
-                          rule.id,
-                          {
-                            minimum:
-                              normalizeBasisNumber(
-                                event.target
-                                  .value,
-                              ),
-                          },
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    <span>Maximum</span>
-                    <input
-                      type="number"
-                      value={rule.maximum}
-                      onChange={(event) =>
-                        updateRule(
-                          rule.id,
-                          {
-                            maximum:
-                              normalizeBasisNumber(
-                                event.target
-                                  .value,
-                                100,
-                              ),
-                          },
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-
-                <label className="ba-basis-remark">
-                  <span>Remark</span>
-                  <textarea
-                    value={rule.remark}
-                    onChange={(event) =>
-                      updateRule(
-                        rule.id,
-                        {
-                          remark:
-                            event.target
-                              .value,
-                        },
-                      )
-                    }
-                    placeholder="Remark generated for students in this score band..."
-                  />
-                </label>
-              </article>
-            ),
-          )}
-        </div>
-
-        <div className="ba-basis-secondary-actions">
-          <button
-            type="button"
-            onClick={addRule}
-          >
-            + Add band
-          </button>
-
-          <button
-            type="button"
-            onClick={resetRules}
-          >
-            Recalculate system bands
-          </button>
-        </div>
-
-        <div className="ba-basis-apply">
-          <button
-            type="button"
-            onClick={applySelected}
-            disabled={!selectedRow}
-          >
-            Apply to selected
-            <small>
-              {selectedRow?.student
-                .fullName ||
-                "No student selected"}
-            </small>
-          </button>
-
-          <button
-            type="button"
-            className="primary"
-            onClick={applyShown}
-            disabled={!shownCount}
-          >
-            Apply to shown
-            <small>
-              {shownCount} student
-              {shownCount === 1
-                ? ""
-                : "s"}
-            </small>
-          </button>
-        </div>
-      </section>
-    </div>
-  );
+  return <div className="ba-sheet-backdrop ba-basis-backdrop portal-contained-modal" role="dialog" aria-modal="true" aria-label="Remarks basis">
+    <section className="ba-sheet ba-basis-sheet rr-basis-modal">
+      <header className="ba-sheet-head rr-modal-head"><div><h2>Remarks basis</h2><p>{source.title} · {rules.length} bands</p></div>
+        <button type="button" aria-label="Close remarks basis" onClick={onClose}>✕</button></header>
+      <div className="rr-basis-config">
+        <label>Use scores from<select value={metric} onChange={e=>setMetric(e.target.value as RemarkBasisMetric)}>
+          <option value="average">Average</option><option value="total">Total</option>
+          <option value="position">Class position</option><option value="attendance">Attendance</option>
+        </select></label>
+        <label>Generate for<select value={target} onChange={e=>setTarget(e.target.value as RemarkBasisTarget)}>
+          <option value="headTeacherRemark">Headteacher</option><option value="classTeacherRemark">Class teacher</option>
+        </select></label>
+        <label className="rr-check"><input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)}/>Overwrite existing</label>
+      </div>
+      <p className="rr-source-note">{source.detail} {selectedRow ? `Selected: ${selectedRow.student.fullName}.` : ""}</p>
+      <section className="rr-basis-list" aria-label="Remark bands">{rules.map((rule,index)=><details className="rr-band" key={rule.id}>
+        <summary><strong>{rule.label || `Band ${index+1}`}</strong><small>{rule.minimum}–{rule.maximum} · {rule.remark || "No remark yet"}</small><span aria-hidden="true">⌄</span></summary>
+        <div className="rr-band-body"><label>Label<input value={rule.label} onChange={e=>updateRule(rule.id,{label:e.target.value})}/></label>
+          <div className="rr-band-numbers"><label>Minimum<input type="number" value={rule.minimum} onChange={e=>updateRule(rule.id,{minimum:normalizeBasisNumber(e.target.value)})}/></label>
+          <label>Maximum<input type="number" value={rule.maximum} onChange={e=>updateRule(rule.id,{maximum:normalizeBasisNumber(e.target.value,100)})}/></label></div>
+          <label>Remark<textarea rows={2} value={rule.remark} onChange={e=>updateRule(rule.id,{remark:e.target.value})}/></label>
+          <button type="button" className="rr-link" disabled={rules.length<=1} onClick={()=>removeRule(rule.id)}>Remove band</button>
+        </div></details>)}</section>
+      <div className="rr-basis-utils"><button type="button" onClick={addRule}>+ Add band</button><button type="button" onClick={resetRules}>Recalculate bands</button></div>
+      <footer className="rr-modal-actions">
+        <button type="button" onClick={onClose}>Close</button>
+        <button type="button" onClick={applySelected} disabled={!selectedRow}>Apply selected</button>
+        <button type="button" className="primary" onClick={applyShown} disabled={!shownCount}>Apply to {shownCount} shown</button>
+      </footer>
+    </section>
+  </div>;
 }
 
-function MoreSheet({
-  onRefresh,
-  onSingle,
-  onGroup,
-  onAnalytics,
-  onRemarksBasis,
-  onClose,
-}: {
-  onRefresh: () => void | Promise<void>;
-  onSingle: () => void;
-  onGroup: () => void;
-  onAnalytics: () => void;
-  onRemarksBasis: () => void;
-  onClose: () => void;
+function BulkRemarksSheet({classRemark,setClassRemark,headRemark,setHeadRemark,overwrite,setOverwrite,shownCount,onApply,onClose}:{
+  classRemark:string;setClassRemark:(v:string)=>void;headRemark:string;setHeadRemark:(v:string)=>void;
+  overwrite:boolean;setOverwrite:(v:boolean)=>void;shownCount:number;onApply:()=>void;onClose:()=>void;
 }) {
-  return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
-        <div className="ba-sheet-head">
-          <div>
-            <h2>More</h2>
-            <p>Quick report remarks actions.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">
-            ✕
-          </button>
-        </div>
-
-        <div className="ba-menu-list">
-          <button type="button" onClick={onRefresh}>
-            <span>↻</span>
-            <b>Refresh</b>
-            <small>Reload local report remark records</small>
-          </button>
-          <button type="button" onClick={onSingle}>
-            <span>👤</span>
-            <b>Single student</b>
-            <small>Edit one selected student</small>
-          </button>
-          <button type="button" onClick={onGroup}>
-            <span>👥</span>
-            <b>Group remarks</b>
-            <small>Apply or save remarks in batches</small>
-          </button>
-          <button type="button" onClick={onAnalytics}>
-            <span>📊</span>
-            <b>Analytics</b>
-            <small>View completion and publishing status</small>
-          </button>
-          <button type="button" onClick={onRemarksBasis}>
-            <span>⚖</span>
-            <b>Remarks basis</b>
-            <small>Generate individual or group remarks from score bands</small>
-          </button>
-        </div>
-      </section>
-    </div>
-  );
+  return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small rr-bulk-modal">
+    <header className="ba-sheet-head"><div><h2>Group remarks</h2><p>Apply to {shownCount} currently shown students.</p></div>
+      <button type="button" aria-label="Close group remarks" onClick={onClose}>✕</button></header>
+    <div className="ba-form"><label>Class teacher<textarea rows={3} value={classRemark} onChange={e=>setClassRemark(e.target.value)}/></label>
+      <label>Headteacher<textarea rows={3} value={headRemark} onChange={e=>setHeadRemark(e.target.value)}/></label>
+      <label className="rr-check"><input type="checkbox" checked={overwrite} onChange={e=>setOverwrite(e.target.checked)}/>Overwrite existing text</label></div>
+    <footer className="rr-modal-actions"><button type="button" onClick={onClose}>Cancel</button>
+      <button type="button" className="primary" disabled={!shownCount} onClick={onApply}>Apply to shown</button></footer>
+  </section></div>;
 }
+
+function MoreSheet({onRefresh,onCards,onTable,onAnalytics,onBulk,onPublishShown,onRemarksBasis,onClose}: {
+  onRefresh:()=>void|Promise<void>;onCards:()=>void;onTable:()=>void;onAnalytics:()=>void;
+  onBulk:()=>void;onPublishShown:(value:boolean)=>void;onRemarksBasis:()=>void;onClose:()=>void;
+}) { return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+  <section className="ba-sheet small"><header className="ba-sheet-head"><h2>More</h2>
+    <button type="button" onClick={onClose} aria-label="Close menu">✕</button></header>
+  <div className="ba-menu-list">
+    <button type="button" onClick={onCards}><span>▦</span><b>Cards</b><small>Compact mobile-friendly rows</small></button>
+    <button type="button" onClick={onTable}><span>▤</span><b>Table</b><small>Editable desktop-style list</small></button>
+    <button type="button" onClick={onAnalytics}><span>◫</span><b>Analytics</b><small>Remarks completion statistics</small></button>
+    <button type="button" onClick={onBulk}><span>👥</span><b>Group remark entry</b><small>Apply one remark to many students</small></button>
+    <button type="button" onClick={()=>onPublishShown(true)}><span>✓</span><b>Publish shown</b><small>Mark current reports as published (save afterward)</small></button>
+    <button type="button" onClick={()=>onPublishShown(false)}><span>○</span><b>Unpublish shown</b><small>Mark current reports unpublished (save afterward)</small></button>
+    <button type="button" onClick={onRemarksBasis}><span>∑</span><b>Remarks basis</b><small>Generate from grades or attendance</small></button>
+    <button type="button" onClick={onRefresh}><span>↻</span><b>Refresh</b><small>Reload saved local records</small></button>
+  </div></section></div>; }
 
 function SliderIcon() {
   return (
@@ -4332,4 +3737,92 @@ const css = `
 @media(max-width:639px){.report-remarks-page{padding:3px;}}
 @media(prefers-reduced-motion:reduce){.report-remarks-page .ba-student-row{transition:none;}}
 
+
+
+/* V22 — Assessment-style responsive editable remarks records. */
+.report-remarks-page { --rr-border:var(--border,rgba(15,23,42,.15)); background:transparent!important; overflow:visible!important; padding:2px 3px 22px!important; }
+.report-remarks-page .rr-command-row{display:flex;align-items:center;gap:7px;padding:2px 0 8px;min-width:0;flex-wrap:wrap;}
+.report-remarks-page .rr-context{display:flex;align-items:center;gap:7px;max-width:100%;min-width:0;min-height:35px;flex:1 1 180px;text-align:left;
+ border:1px solid var(--rr-border);border-radius:9px;padding:5px 9px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#172235) 7%);color:var(--text,#111827);cursor:pointer;}
+.rr-context strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%;}
+.rr-context span{font-size:11px;color:var(--muted,#64748b);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rr-context i{margin-left:auto;font-style:normal;color:var(--ba-primary);font-size:13px;}
+.rr-count{font-size:11px;font-weight:750;white-space:nowrap;color:var(--muted,#64748b)}
+.report-remarks-page .rr-primary,.report-remarks-page .rr-secondary{border:1px solid var(--ba-primary);min-height:34px;padding:6px 13px;border-radius:8px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;}
+.report-remarks-page .rr-primary{color:white;background:var(--ba-primary)}
+.report-remarks-page .rr-secondary{color:var(--ba-primary);background:transparent}
+.report-remarks-page .rr-primary:disabled{opacity:.55;cursor:not-allowed}
+.rr-table-wrap{width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;border:1px solid var(--rr-border);border-radius:10px;background:var(--card-bg,var(--surface,#fff));scrollbar-color:var(--ba-primary) color-mix(in srgb,var(--ba-primary) 12%,transparent);scrollbar-width:thin}
+.rr-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:12px;color:var(--text,#111827)}
+.rr-col-student{width:22%}.rr-col-basis{width:10%}.rr-col-status{width:12%}
+.rr-table thead th{padding:10px 9px;text-align:left;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 88%,var(--ba-primary) 12%);border-bottom:1px solid var(--rr-border);font-size:11px;font-weight:800;white-space:nowrap;}
+.rr-table tbody td{padding:7px 8px;vertical-align:middle;border-bottom:1px solid var(--rr-border);background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 96%,var(--text,#1b2235) 4%);}
+.rr-table tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 91%,var(--text,#1b2235) 9%)}
+.rr-table tbody tr:last-child td{border-bottom:0}.rr-table tbody tr:hover td{background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 94%,var(--ba-primary) 6%)}
+.rr-person,.rr-card-head{display:flex;align-items:center;gap:8px;min-width:0}.rr-person>div,.rr-card-person{min-width:0;flex:1}
+.rr-person strong,.rr-card-person strong{display:block;font-weight:800;font-size:12px;white-space:normal;line-height:1.35;overflow-wrap:anywhere}
+.rr-person small,.rr-card-person small{display:block;font-size:10px;color:var(--muted,#64748b);line-height:1.35;margin-top:3px;overflow-wrap:anywhere}
+.rr-avatar{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border-radius:9px;overflow:hidden;background:color-mix(in srgb,var(--ba-primary) 18%,var(--card-bg,#fff));color:var(--ba-primary);font-size:14px;}
+.rr-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.rr-table td small{display:block;color:var(--muted,#64748b);font-size:10px;line-height:1.4;}
+.rr-basis-value{font-weight:800;font-size:12px}
+.report-remarks-page .rr-table textarea,.report-remarks-page .rr-card textarea{resize:vertical;min-height:48px;max-width:100%;width:100%;padding:7px 9px;border:1px solid var(--rr-border);border-radius:7px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#111827);font-weight:500;font-size:11px;line-height:1.4;box-shadow:none;}
+.report-remarks-page textarea[readonly]{resize:none;overflow:hidden;background:transparent;border-color:transparent;padding:5px 2px;cursor:default;}
+.report-remarks-page textarea[readonly]:focus{box-shadow:none;border-color:transparent;}
+.rr-published{display:inline-flex;align-items:center;gap:5px;color:var(--text,#111827);font-size:10px;font-weight:650;white-space:nowrap;}
+.report-remarks-page .rr-published input{flex:0 0 15px;width:15px;height:15px;min-height:15px;accent-color:var(--ba-primary);}
+.rr-state{display:inline-block;margin-top:6px;border-radius:5px;padding:3px 6px;font-size:9px;font-weight:750;white-space:nowrap;}
+.rr-state.ready{color:#15803d;background:rgba(22,163,74,.12)}.rr-state.missing{color:#b45309;background:rgba(245,158,11,.12)}
+.rr-mobile-cards{display:none;gap:7px;}.rr-card{padding:10px;border:1px solid var(--rr-border);border-radius:10px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 94%,var(--text,#182235) 6%);min-width:0;}
+.rr-card-basis{margin-left:auto;flex:0 0 auto;display:grid;justify-items:end;gap:3px;font-weight:800;color:var(--ba-primary);font-size:13px;}
+.rr-card-basis small{font-weight:550;color:var(--muted,#64748b);font-size:9px;max-width:82px;text-align:right;overflow:hidden;text-overflow:ellipsis;}
+.rr-card-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:9px;}
+.rr-card-fields label{display:grid;gap:3px;color:var(--muted,#64748b);font-size:10px;font-weight:800;}
+.rr-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;}
+.rr-card-foot .rr-state{margin:0}.rr-analytics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.rr-analytics article{padding:12px;border:1px solid var(--rr-border);border-radius:10px;background:var(--card-bg,var(--surface,#fff));display:grid;gap:7px;}
+.rr-analytics small{font-size:10px;color:var(--muted,#64748b)}.rr-analytics strong{font-size:21px;color:var(--ba-primary)}
+/* Compact modal, with short header and collapsible editable bands. */
+.ba-basis-backdrop .rr-basis-modal{width:min(650px,100%);padding:10px;max-height:min(86dvh,760px);border-radius:13px;overflow-y:auto;background:var(--card-bg,var(--surface,#fff));}
+.rr-basis-modal .rr-modal-head{position:sticky;top:-10px;z-index:3;margin:-10px -10px 6px;padding:9px 11px;border-bottom:1px solid var(--rr-border);background:var(--card-bg,var(--surface,#fff));}
+.rr-basis-modal .rr-modal-head h2{font-size:15px;letter-spacing:normal}.rr-basis-modal .rr-modal-head p{font-size:10px;margin:2px 0 0;line-height:1.2}
+.rr-basis-modal .rr-modal-head button{width:32px;height:32px;min-height:32px;background:var(--surface,#fff);color:var(--text,#111827);border:1px solid var(--rr-border);}
+.rr-basis-config{display:grid;grid-template-columns:1fr 1fr auto;gap:7px;align-items:end}
+.rr-basis-config>label{min-width:0;display:grid;gap:4px;color:var(--muted,#64748b);font-size:10px;font-weight:800;}
+.rr-basis-config select{width:100%;min-height:34px;border-radius:7px;padding:3px 5px;font-size:11px;}
+.rr-basis-config .rr-check{display:flex;align-items:center;gap:5px;min-height:34px;white-space:nowrap;color:var(--text,#111827)}
+.rr-check input{width:16px;min-height:16px;height:16px;accent-color:var(--ba-primary);}
+.rr-source-note{margin:7px 0;color:var(--muted,#64748b);font-size:10px;line-height:1.35;}
+.rr-basis-list{display:grid;gap:5px;}
+.rr-band{border:1px solid var(--rr-border);border-radius:8px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 94%,var(--text,#182235) 6%);overflow:hidden;}
+.rr-band summary{display:grid;grid-template-columns:minmax(0,110px) minmax(0,1fr) auto;gap:7px;align-items:center;padding:8px;cursor:pointer;list-style:none;}
+.rr-band summary::-webkit-details-marker{display:none}.rr-band summary strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rr-band summary small{font-size:10px;color:var(--muted,#64748b);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rr-band[open] summary{border-bottom:1px solid var(--rr-border)}.rr-band-body{display:grid;gap:7px;padding:8px;}
+.rr-band-body label{display:grid;gap:3px;font-size:10px;color:var(--muted,#64748b);font-weight:700}.rr-band-body input{min-height:33px;border-radius:7px;padding:5px 8px;}
+.rr-band-body textarea{min-height:58px;border-radius:7px;padding:6px 8px;font-size:11px}.rr-band-numbers{display:grid;grid-template-columns:1fr 1fr;gap:7px;}
+.rr-band-body .rr-link{border:0;background:none;color:var(--ba-primary);padding:3px 0;text-align:left;font-size:10px;cursor:pointer;}
+.rr-basis-utils{display:flex;gap:7px;margin:8px 0}.rr-basis-utils button{padding:6px 9px;border:1px solid var(--rr-border);border-radius:7px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:10px;cursor:pointer;}
+.rr-modal-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:6px;position:sticky;bottom:-10px;background:var(--card-bg,var(--surface,#fff));padding:9px 0 0;border-top:1px solid var(--rr-border);margin-top:9px;}
+.rr-modal-actions button{padding:7px 10px;min-height:34px;border:1px solid var(--rr-border);background:var(--surface,#fff);color:var(--text,#111827);border-radius:7px;font-size:11px;font-weight:750;cursor:pointer;}
+.rr-modal-actions button.primary{background:var(--ba-primary);border-color:var(--ba-primary);color:#fff}.rr-modal-actions button:disabled{opacity:.45}
+.rr-bulk-modal .ba-form label{display:grid;gap:4px;font-size:11px}.rr-bulk-modal .rr-check{display:flex;gap:8px;align-items:center}
+@media(min-width:768px){.rr-mobile-cards{display:none!important}.rr-table-wrap{display:block!important}}
+@media(max-width:767px){.rr-table-wrap{display:none!important}.rr-mobile-cards{display:grid!important}.report-remarks-page .rr-command-row{gap:5px;padding-bottom:6px}.report-remarks-page .rr-context{min-height:32px;flex-basis:160px}.rr-context strong{max-width:48%}.rr-card-fields{grid-template-columns:1fr 1fr;}.ba-basis-backdrop .rr-basis-modal{max-height:calc(100dvh - 25px);}.rr-basis-config{grid-template-columns:1fr 1fr}.rr-basis-config .rr-check{grid-column:1 / -1;min-height:23px;}}
+@media(max-width:385px){.rr-card-fields{grid-template-columns:1fr}.rr-card-basis small{max-width:62px}.rr-band summary{grid-template-columns:minmax(0,85px) minmax(0,1fr) auto}}
+/* Honor manually selected Cards or Table in More menu, regardless of display width. */
+.report-remarks-page.rr-force-cards .rr-table-wrap{display:none!important}
+.report-remarks-page.rr-force-cards .rr-mobile-cards{display:grid!important}
+.report-remarks-page.rr-force-table .rr-table-wrap{display:block!important}
+.report-remarks-page.rr-force-table .rr-mobile-cards{display:none!important}
+@media print{.rr-command-row,.rr-mobile-cards,.rr-modal-actions{display:none!important}.rr-table-wrap{display:block!important;overflow:visible!important}.rr-table textarea{border:0!important;background:transparent!important;resize:none!important}.rr-table tbody td{break-inside:avoid}}
+
+.rr-select-student{display:block;padding:0;border:0;background:transparent;color:var(--text,#111827);text-align:left;font-size:12px;line-height:1.35;font-weight:800;cursor:pointer;overflow-wrap:anywhere;}
+.rr-select-student:focus-visible{outline:2px solid var(--ba-primary);outline-offset:2px;border-radius:2px}
+.rr-row-selected td:first-child{box-shadow:inset 3px 0 0 var(--ba-primary)}
+.rr-card.rr-row-selected{border-color:var(--ba-primary)!important;}
+.rr-basis-modal input,.rr-basis-modal select,.rr-basis-modal textarea,.rr-bulk-modal input,.rr-bulk-modal textarea{font:inherit;max-width:100%;color:var(--input-text,var(--text,#111827));background:var(--input-bg,var(--surface,#fff));border:1px solid var(--input-border,var(--border,rgba(0,0,0,.15)));border-radius:7px;}
+.rr-basis-modal input[type=checkbox],.rr-bulk-modal input[type=checkbox]{width:16px;min-height:16px;height:16px;accent-color:var(--ba-primary)}
+.rr-basis-modal *,.rr-bulk-modal *{box-sizing:border-box;min-width:0}
+.rr-basis-modal details summary:focus-visible{outline:2px solid var(--ba-primary);outline-offset:-2px}
 `;

@@ -25,6 +25,7 @@
  * - class teacher is saved through classTeachers, not directly on the Class row
  */
 
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { useRouter } from "next/navigation";
@@ -1431,6 +1432,7 @@ export default function ClassesPage() {
       )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           search={search}
           setSearch={setSearch}
@@ -1442,9 +1444,11 @@ export default function ClassesPage() {
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           viewMode={viewMode}
           summary={summary}
@@ -1458,9 +1462,11 @@ export default function ClassesPage() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {selectedItem && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setSelectedItem(null)}>
         <ActionSheet
           item={selectedItem}
           openEdit={openEdit}
@@ -1468,9 +1474,11 @@ export default function ClassesPage() {
           toggleActive={toggleActive}
           onClose={() => setSelectedItem(null)}
         />
+        </BranchViewportPortal>
       )}
 
       {modalOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setModalOpen(false)}>
         <ClassModal
           form={form}
           saving={saving}
@@ -1482,9 +1490,11 @@ export default function ClassesPage() {
           openCameraForField={openCameraForField}
           save={save}
         />
+        </BranchViewportPortal>
       )}
 
       {cameraOpen && (
+        <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => closeCamera()}>
         <CameraCaptureModal
           field={cameraField}
           videoRef={cameraVideoRef}
@@ -1496,6 +1506,7 @@ export default function ClassesPage() {
           close={closeCamera}
           entityLabel={CLASS_MEDIA_ENTITY_LABEL}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );

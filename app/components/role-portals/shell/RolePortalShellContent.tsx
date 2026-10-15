@@ -804,6 +804,16 @@ function RolePortalShellContent({
   }, [navSections]);
 
   const [tab, setTab] = useState(homeKey);
+
+  // V19: route changes reset ONLY the shared module scroller. The portal
+  // navigation stays in place and embedded report/table scroll positions
+  // remain independent. Do not introduce a window scroll or route reload.
+  useEffect(() => {
+    const workspacePane = document.querySelector<HTMLElement>(
+      ".role-shell.workspace-locked-scroll .app-content",
+    );
+    if (workspacePane) workspacePane.scrollTop = 0;
+  }, [tab]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -1793,6 +1803,7 @@ function RolePortalShellContent({
     <main
       className={[
         "role-shell",
+        "workspace-locked-scroll",
         branchWorkspaceLayout && "branch-workspace-layout",
         sidebarHidden &&
           "portal-sidebar-hidden",
@@ -4718,6 +4729,96 @@ body {
     display: flex;
     grid-column: auto;
     grid-row: auto;
+  }
+}
+
+/* ===============================================================
+ * V19: SHARED STICKY WORKSPACES — based on the live 15 Oct source.
+ *
+ * The existing general-purpose shell allows window scrolling; these
+ * later rules intentionally switch portal pages to one module scroller.
+ * Keep module tables/reports free to scroll horizontally inside it.
+ * =============================================================== */
+.role-shell.workspace-locked-scroll {
+  width: 100%;
+  max-width: 100%;
+  height: calc(100vh - var(--eds-shell-top-offset, 0px)) !important;
+  height: calc(100dvh - var(--eds-shell-top-offset, 0px)) !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+}
+.role-shell.workspace-locked-scroll .app-main,
+.role-shell.workspace-locked-scroll .app-main.full {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  min-width: 0;
+  overflow: hidden !important;
+}
+/* The actual BranchWorkspaceNavigation component uses .ba-v7-nav.
+ * Also reserve room for pinned cards and legacy .ba-v2-nav if present. */
+.role-shell.workspace-locked-scroll .app-main > .app-header,
+.role-shell.workspace-locked-scroll .app-main > .ba-v7-nav,
+.role-shell.workspace-locked-scroll .app-main > .ba-v2-nav,
+.role-shell.workspace-locked-scroll .app-main > .ba-v7-pinned-cards {
+  flex: 0 0 auto;
+}
+.role-shell.workspace-locked-scroll .app-content {
+  flex: 1 1 0;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  min-width: 0;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary-color, #2563eb)
+    color-mix(in srgb, var(--primary-color, #2563eb) 9%, transparent);
+}
+/* Prevent a wrapper from becoming a second scrolling ancestor: sticky
+ * Report Cards subtabs must attach to the .app-content scroller. */
+.role-shell.workspace-locked-scroll .app-content-inner,
+.role-shell.workspace-locked-scroll .shell-portal-content .app-content-inner,
+.role-shell.workspace-locked-scroll .shell-content-background {
+  min-height: 0;
+  overflow-x: visible !important;
+  overflow-y: visible !important;
+}
+.role-shell.workspace-locked-scroll .app-content::-webkit-scrollbar {
+  width: 9px;
+}
+.role-shell.workspace-locked-scroll .app-content::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 9%, transparent);
+}
+.role-shell.workspace-locked-scroll .app-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary-color, #2563eb) 70%, #64748b);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+@media (max-width: 979px) {
+  /* Non-Branch roles use a separate mobile navigation footer. */
+  .role-shell.workspace-locked-scroll:not(.branch-workspace-layout) .app-content {
+    padding-bottom: max(88px, calc(68px + env(safe-area-inset-bottom)));
+  }
+}
+@media print {
+  /* Existing report and table printers retain unrestricted pagination. */
+  .role-shell.workspace-locked-scroll,
+  .role-shell.workspace-locked-scroll .app-main,
+  .role-shell.workspace-locked-scroll .app-content,
+  .role-shell.workspace-locked-scroll .app-content-inner,
+  .role-shell.workspace-locked-scroll .shell-content-background {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 }
 `;

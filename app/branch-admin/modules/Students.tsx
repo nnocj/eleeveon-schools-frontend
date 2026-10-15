@@ -2792,7 +2792,7 @@ export default function StudentsPage() {
       rows: filteredRows.map((item) => {
         const row: any = item.row;
         return {
-          student: { text: row.fullName || "Unnamed student", detail: row.address || undefined, image: item.photoUrl },
+          student: { text: row.fullName || "Unnamed student", detail: row.address || undefined, image: item.photoUrl || safeRecordMediaValue(row.photo) },
           admission: row.admissionNumber || "—",
           class: item.className,
           organization: item.organizationName,

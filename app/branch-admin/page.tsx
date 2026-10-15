@@ -283,7 +283,7 @@ function BranchReportsWorkspace(props: RouteProps) {
         <div className="ba-contextual-actions ba-report-subtabs report-no-print" aria-label="Report views">
           <div className="ba-report-subtab-list" role="group" aria-label="Select report view">
             {([
-              ["reports", "Student Report"],
+              ["reports", "Report Cards"],
               ["broadsheets", "Broadsheets"],
               ["remarks", "Remarks"],
               ["attendance", "Attendance"],
@@ -476,11 +476,34 @@ const branchWorkspaceCss = `
 .ba-reports-workspace .student-reports-page .ba-print-zone { width:100%; padding:0!important; }
 .ba-reports-workspace .ba-print-head,
 .ba-reports-workspace .ba-report-toolbar { display:none!important; }
-@media(max-width:540px) {
- .ba-reports-workspace .ba-report-subtab-list button { font-size:10.5px; padding:3px 7px; }
- .ba-global-report-zoom select { width:88px; max-width:88px; font-size:11px; }
- .ba-global-report-zoom button { width:27px; min-width:27px; }
+/* V15 — mobile has dedicated full-width tab row, then a right-aligned zoom row. */
+@media(max-width:640px) {
+ .ba-reports-workspace .ba-report-subtabs {
+   display:flex; flex-direction:column; align-items:stretch;
+   gap:5px; width:100%; min-width:0; padding-bottom:5px;
+ }
+ .ba-reports-workspace .ba-report-subtab-list {
+   display:flex; width:100%; min-width:0; flex:0 0 auto;
+   overflow-x:auto; padding-bottom:1px;
+ }
+ .ba-reports-workspace .ba-report-subtab-list button {
+   font-size:11px; padding:4px 9px;
+ }
+ .ba-reports-workspace .ba-global-report-zoom {
+   display:flex; width:100%; flex:0 0 auto; justify-content:flex-end;
+   margin:0; padding:0;
+ }
+ .ba-reports-workspace .ba-global-report-zoom button {
+   height:32px; width:34px; min-width:34px;
+ }
+ .ba-reports-workspace .ba-global-report-zoom select {
+   height:32px; width:100px; max-width:100px; font-size:12px;
+ }
 }
+/* Failsafe for custom report templates not yet updated to respect mobilePreview. */
+.ba-reports-workspace .src-mobile-toolbar,
+.ba-reports-workspace .bs-viewer-toolbar { display:none!important; }
+
 @media print {
  .ba-reports-workspace .ba-report-subtabs { display:none!important; }
  .ba-reports-workspace .student-reports-page .ba-print-card { overflow:visible!important; }

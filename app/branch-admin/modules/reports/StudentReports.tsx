@@ -25,6 +25,8 @@
  * - no teacher membership, teacher profile or class-teacher gate is required
  */
 
+import BranchViewportPortal from "../../../components/role-portals/shell/BranchViewportPortal";
+import BranchReportPreview from "../../../components/role-portals/shell/BranchReportPreview";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSettings } from "../../../context/settings-context";
@@ -1600,13 +1602,14 @@ export default function StudentReports() {
       )}
       {hasCompleteReportScope && (
         <section className="ba-print-card">
-          <div id={STUDENT_REPORT_PRINT_ZONE_ID} className="ba-print-zone">
-            {renderActiveReport()}
-          </div>
+          <BranchReportPreview printZoneId={STUDENT_REPORT_PRINT_ZONE_ID} naturalWidth={794}>
+          {renderActiveReport()}
+        </BranchReportPreview>
         </section>
       )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           mode={mode}
           filters={filters}
@@ -1621,9 +1624,11 @@ export default function StudentReports() {
           setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           onRefresh={async () => {
             setMoreOpen(false);
@@ -1635,6 +1640,7 @@ export default function StudentReports() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );

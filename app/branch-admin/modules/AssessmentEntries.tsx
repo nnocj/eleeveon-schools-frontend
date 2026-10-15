@@ -58,6 +58,7 @@ import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import {
   projectAssessmentEntryColumns,
   type AssessmentEntryProjection,
@@ -1613,6 +1614,43 @@ export default function AssessmentEntries() {
     setFilterCompletion("all");
   };
 
+
+  const printAssessmentTable = () => {
+    if (classSubjectId === "all" || !selectedOption || !applicability || !structureItems.length) {
+      showToast("info", "Select a class subject with a scoring structure before printing.");
+      return;
+    }
+    printBranchTable({
+      title: "Assessment Scores",
+      subtitle: `${selectedOption.className} · ${selectedOption.subjectName} · ${selectedOption.academicStructureName} · ${selectedOption.academicPeriodName}`,
+      columns: [
+        { key: "student", label: "Students" },
+        ...structureItems.map((item: any) => ({
+          key: `item_${idOf(item.id)}`,
+          label: `${entryCompactLabel(item) || item.name} /${Number(item.maxScore || 100)}`,
+        })),
+        { key: "total", label: "Total" },
+        { key: "grade", label: "Grade" },
+        { key: "remark", label: "Remark" },
+      ],
+      rows: filteredRows.map((row) => {
+        const student: any = row.student;
+        const studentId = idOf(student.id);
+        const record: Record<string, any> = {
+          student: { text: student.fullName || "Unnamed student", detail: student.admissionNumber || undefined, image: studentPhoto(row.student) },
+          total: row.weightedTotal,
+          grade: row.grade || "—",
+          remark: row.remark || "—",
+        };
+        structureItems.forEach((item: any) => {
+          const score = scores[scoreKey(studentId, idOf(item.id))];
+          record[`item_${idOf(item.id)}`] = score === "" || score == null ? "—" : score;
+        });
+        return record;
+      }),
+    });
+  };
+
   // One shared action bar: adding starts score entry or opens the score-sheet
   // import/export workflow. Search is kept inside Filters, not duplicated.
   useRegisterBranchWorkspaceToolbar("assessmentEntries", {
@@ -1628,6 +1666,7 @@ export default function AssessmentEntries() {
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
     search: setSearch,
+    print: printAssessmentTable,
   });
 
   if (accountLoading || contextLoading || settingsLoading || loading) {

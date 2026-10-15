@@ -1324,7 +1324,7 @@ export default function ClassesPage() {
       rows: filteredRows.map((item) => {
         const row: any = item.row;
         return {
-          class: { text: row.name || "Unnamed class", detail: item.overCapacity ? "Over capacity" : undefined, image: item.photoUrl || item.bannerImageUrl },
+          class: { text: row.name || "Unnamed class", detail: item.overCapacity ? "Over capacity" : undefined, image: item.photoUrl || item.bannerImageUrl || safeRecordMediaValue(row.photo) || safeRecordMediaValue(row.bannerImage) },
           code: row.code || "—",
           level: row.level || "—",
           organization: item.organizationName,

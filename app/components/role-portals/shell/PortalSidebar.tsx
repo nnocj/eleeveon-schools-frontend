@@ -22,9 +22,7 @@ import type {
 
 import NavigationGroup from "./NavigationGroup";
 import SidebarWorkspace from "./SidebarWorkspace";
-
 import PortalMobileNavigation from "./PortalMobileNavigation";
-import PortalSearchBridge from "./PortalSearchBridge";
 
 export interface PortalSidebarProps {
   open: boolean;
@@ -44,7 +42,6 @@ export interface PortalSidebarProps {
   homeKey: string;
 
   sections: RoleNavSection[];
-
   openSections:
     Record<string, boolean>;
 
@@ -76,51 +73,34 @@ const ICON_ALIASES:
   > = {
     dashboard: "dashboard",
     home: "dashboard",
-
     students: "student",
     student: "student",
-
     teachers: "teacher",
     teacher: "teacher",
-
     parents: "parent",
     parent: "parent",
-
     attendance: "attendance",
-
     assessment: "assessment",
     assessments: "assessment",
-
     reports: "reports",
     report: "reports",
-
     calendar: "calendar",
     timetable: "timetable",
-
     finance: "finance",
-
     communication: "communication",
     communications: "communication",
-
     messages: "communication",
     message: "communication",
-
     announcements: "communication",
     announcement: "communication",
-
     workspace: "workspace",
-
     settings: "settings",
     setting: "settings",
-
     sync: "sync",
-
     devices: "device",
     device: "device",
-
     school: "school",
     schools: "school",
-
     branches: "branch",
     branch: "branch",
   };
@@ -211,30 +191,26 @@ export default function PortalSidebar({
 
   return (
     <>
-      {/* ==================================================
-       * DESKTOP SIDEBAR
-       * ================================================== */}
-
+      {/*
+       * DESKTOP NAVIGATION
+       * --------------------------------------------------
+       * This remains the existing sidebar experience.
+       * PortalMobileNavigation hides it below 980px.
+       */}
       <aside
         data-surface="role-sidebar"
         className={[
           "app-sidebar",
           "shell-sidebar",
           "eds-sidebar-surface",
-
-          open &&
-            "open",
-
-          hidden &&
-            "hidden",
+          open && "open",
+          hidden && "hidden",
         ]
           .filter(Boolean)
           .join(" ")}
       >
         <BrandGlow />
-
         <BrandPattern />
-
         <BrandTexture />
 
         <div className="shell-sidebar-inner">
@@ -254,6 +230,35 @@ export default function PortalSidebar({
                 onOpenHub
               }
             />
+            <button
+              type="button"
+              onClick={onOpenHub}
+              aria-label="Open Eleeveon Hub"
+              aria-current={activeTab === hubKey ? "page" : undefined}
+              className="shell-hub-direct-link"
+              style={{
+                position: "relative",
+                zIndex: 3,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+                cursor: "pointer",
+                border: "1px solid var(--border, rgba(148,163,184,.3))",
+                borderRadius: 9,
+                padding: "8px 10px",
+                marginTop: 6,
+                background: activeTab === hubKey
+                  ? "var(--surface-tertiary, rgba(148,163,184,.16))"
+                  : "var(--surface, rgba(148,163,184,.07))",
+                color: "inherit",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              <span>✉ Eleeveon Hub</span>
+              {hubUnreadCount > 0 && <span aria-label={`${hubUnreadCount} unread`}>{hubUnreadCount}</span>}
+            </button>
           </header>
 
           <nav
@@ -277,24 +282,20 @@ export default function PortalSidebar({
                   activeKey={
                     activeTab
                   }
-                  items={
-                    section.items.map(
-                      (item) => ({
-                        key:
+                  items={section.items.map(
+                    (item) => ({
+                      key:
+                        item.key,
+                      label:
+                        item.label,
+                      icon:
+                        resolveIcon(
                           item.key,
-
-                        label:
                           item.label,
-
-                        icon:
-                          resolveIcon(
-                            item.key,
-                            item.label,
-                            item.icon,
-                          ),
-                      }),
-                    )
-                  }
+                          item.icon,
+                        ),
+                    }),
+                  )}
                   onToggle={() =>
                     onToggleSection(
                       section.title,
@@ -325,33 +326,13 @@ export default function PortalSidebar({
         />
       </aside>
 
-      {/* ==================================================
-       * GLOBAL PORTAL SEARCH
-       * ==================================================
-       *
-       * PortalHeader communicates with this bridge using
-       * browser events. NAV_SECTIONS remains authoritative.
-       */}
-
-      <PortalSearchBridge
-        sections={
-          sections
-        }
-        hubKey={
-          hubKey
-        }
-        onNavigate={
-          onNavigate
-        }
-        onOpenHub={
-          onOpenHub
-        }
-      />
-
-      {/* ==================================================
+      {/*
        * MOBILE NAVIGATION
-       * ================================================== */}
-
+       * --------------------------------------------------
+       * Home / Library / Screens replaces the sidebar.
+       * It uses the exact same NAV_SECTIONS and onNavigate
+       * callback, so routes and permissions remain shared.
+       */}
       <PortalMobileNavigation
         portalTitle={
           portalTitle

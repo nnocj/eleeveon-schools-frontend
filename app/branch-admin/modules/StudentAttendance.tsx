@@ -20,7 +20,7 @@
  * - original Excel import, export, template and register engines retained.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../../context/account-context";
@@ -246,6 +246,166 @@ function statusTone(status?: AttendanceStatus) {
   return "gray";
 }
 
+/**
+ * Choose a useful opening context without creating or changing attendance data.
+ *
+ * Order of preference:
+ * 1. A real class/term containing SAVED TERM TOTALS for visible students.
+ * 2. A class/term with recorded daily attendance.
+ * 3. A class/term containing enrolled students, ready for entry.
+ *
+ * Within the same tier, prefer the school's configured current term/year.
+ * A record is only counted when its student would appear in the class roster.
+ * This mirrors StudentAttendance's existing active-enrollment/currentClassId
+ * display logic so the selected context cannot point to an empty register.
+ */
+export function chooseAttendanceOpeningScope(args: {
+  students: Student[];
+  classes: Class[];
+  structures: AcademicStructure[];
+  periods: AcademicPeriod[];
+  enrollments: StudentEnrollment[];
+  attendanceRows: Attendance[];
+  summaryRows: StudentAttendanceSummary[];
+  preferredStructureId?: string;
+  preferredPeriodId?: string;
+}): { structureId: string; periodId: string; classId: string } | null {
+  const {
+    students, classes, structures, periods, enrollments,
+    attendanceRows, summaryRows, preferredStructureId, preferredPeriodId,
+  } = args;
+
+  if (!students.length || !classes.length || !periods.length) return null;
+
+  const studentsById = new Map(
+    students.map((row: any) => [idOf(row.id), row] as const),
+  );
+  const validStructures = new Set(structures.map((row: any) => idOf(row.id)));
+  const rostersByScope = new Map<string, Set<string>>();
+  const currentClassRoster = new Map<string, Set<string>>();
+  const scopeKey = (structure: string, period: string, cls: string) =>
+    `${structure}|${period}|${cls}`;
+
+  // Current-class fallback is intentionally identical to the existing
+  // studentViews fallback, used when a student lacks a term enrollment row.
+  students.forEach((row: any) => {
+    const studentId = idOf(row.id);
+    const cls = idOf(row.currentClassId);
+    if (!studentId || !cls || !isActive(row)) return;
+    const set = currentClassRoster.get(cls) || new Set<string>();
+    set.add(studentId);
+    currentClassRoster.set(cls, set);
+  });
+
+  enrollments.forEach((row: any) => {
+    if (row.isDeleted || row.status !== "active") return;
+    const studentId = idOf(row.studentId);
+    const cls = idOf(row.classId);
+    const structure = idOf(row.academicStructureId);
+    const period = idOf(row.academicPeriodId);
+    if (!studentId || !cls || !structure || !period || !studentsById.has(studentId)) return;
+    const key = scopeKey(structure, period, cls);
+    const set = rostersByScope.get(key) || new Set<string>();
+    set.add(studentId);
+    rostersByScope.set(key, set);
+  });
+
+  const summaryIds = new Map<string, Set<string>>();
+  summaryRows.forEach((row: any) => {
+    if (row.isDeleted) return;
+    const key = scopeKey(
+      idOf(row.academicStructureId), idOf(row.academicPeriodId), idOf(row.classId),
+    );
+    const id = idOf(row.studentId);
+    if (!id) return;
+    const set = summaryIds.get(key) || new Set<string>();
+    set.add(id);
+    summaryIds.set(key, set);
+  });
+
+  const dailyIds = new Map<string, Set<string>>();
+  attendanceRows.forEach((row: any) => {
+    if (row.isDeleted) return;
+    const key = scopeKey(
+      idOf(row.academicStructureId), idOf(row.academicPeriodId), idOf(row.classId),
+    );
+    const id = idOf(row.studentId);
+    if (!id) return;
+    const set = dailyIds.get(key) || new Set<string>();
+    set.add(id);
+    dailyIds.set(key, set);
+  });
+
+  type Candidate = {
+    structureId: string;
+    periodId: string;
+    classId: string;
+    tier: number;
+    preferred: number;
+    matched: number;
+    rosterCount: number;
+    periodOrder: number;
+    className: string;
+  };
+  const candidates: Candidate[] = [];
+
+  for (const period of periods as any[]) {
+    const structureId = idOf(period.academicStructureId);
+    const periodId = idOf(period.id);
+    if (!structureId || !periodId || !validStructures.has(structureId)) continue;
+
+    for (const cls of classes as any[]) {
+      const classId = idOf(cls.id);
+      if (!classId) continue;
+      const key = scopeKey(structureId, periodId, classId);
+      const roster = new Set(rostersByScope.get(key) || []);
+      currentClassRoster.get(classId)?.forEach((id) => roster.add(id));
+      if (!roster.size) continue;
+
+      let savedTotals = 0;
+      summaryIds.get(key)?.forEach((id) => {
+        if (roster.has(id)) savedTotals += 1;
+      });
+      let savedDaily = 0;
+      dailyIds.get(key)?.forEach((id) => {
+        if (roster.has(id)) savedDaily += 1;
+      });
+
+      candidates.push({
+        structureId,
+        periodId,
+        classId,
+        tier: savedTotals ? 3 : savedDaily ? 2 : 1,
+        preferred:
+          (periodId === preferredPeriodId ? 2 : 0) +
+          (structureId === preferredStructureId ? 1 : 0),
+        matched: savedTotals || savedDaily,
+        rosterCount: roster.size,
+        periodOrder: Number(period.order || 0),
+        className: String(cls.name || ""),
+      });
+    }
+  }
+
+  candidates.sort((a, b) =>
+    b.tier - a.tier ||
+    b.preferred - a.preferred ||
+    b.matched - a.matched ||
+    b.rosterCount - a.rosterCount ||
+    b.periodOrder - a.periodOrder ||
+    a.className.localeCompare(b.className),
+  );
+
+  const best = candidates[0];
+  return best
+    ? {
+        structureId: best.structureId,
+        periodId: best.periodId,
+        classId: best.classId,
+      }
+    : null;
+}
+
 export default function StudentAttendance() {
   const router = useRouter();
   const revision = useDataRevision();
@@ -363,7 +523,7 @@ export default function StudentAttendance() {
   const [summaryRows, setSummaryRows] =
     useState<StudentAttendanceSummary[]>([]);
 
-  const [entryMode, setEntryMode] = useState<EntryMode>("daily");
+  const [entryMode, setEntryMode] = useState<EntryMode>("termTotals");
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   // Match the records modules: tables on laptop/desktop and cards on phones.
   // The device sets the initial view only; the user's More-menu selection wins.
@@ -378,6 +538,28 @@ export default function StudentAttendance() {
     String(settings?.currentAcademicPeriodId || ""),
   );
   const [classId, setClassId] = useState("");
+
+  // Automatic opening selection is only made once per selected workspace.
+  // Never replace class/year/term choices made by the user, including on sync.
+  const autoSelectedWorkspaceRef = useRef("");
+  const manuallySelectedWorkspaceRef = useRef("");
+  const attendanceWorkspaceKey = [accountId || "", schoolId, branchId].join("|");
+  const previousAttendanceWorkspaceRef = useRef(attendanceWorkspaceKey);
+  useEffect(() => {
+    if (previousAttendanceWorkspaceRef.current === attendanceWorkspaceKey) return;
+    previousAttendanceWorkspaceRef.current = attendanceWorkspaceKey;
+    // Never retain the previous school's selected year, period or class.
+    setStructureId("");
+    setPeriodId("");
+    setClassId("");
+    setEntryMode("termTotals");
+    setSearch("");
+    setStatusFilter("all");
+  }, [attendanceWorkspaceKey]);
+  const markScopeManuallySelected = () => {
+    manuallySelectedWorkspaceRef.current = attendanceWorkspaceKey;
+  };
+
   const [date, setDate] = useState(todayISO());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
@@ -494,64 +676,58 @@ export default function StudentAttendance() {
         tableSafe("studentAttendanceSummaries")?.toArray?.() || [],
       ]);
 
-      setStudents(
-        (studentRows as Student[])
-          .filter(
-            (row: any) =>
-              sameTenant(row) &&
-              !["withdrawn", "graduated"].includes(
-                String(row.status || "").toLowerCase(),
-              ),
-          )
-          .sort((a: any, b: any) =>
-            String(a.fullName || "").localeCompare(
-              String(b.fullName || ""),
-            ),
-          ),
-      );
+      const scopedStudents = (studentRows as Student[])
+        .filter((row: any) => sameTenant(row) &&
+          !["withdrawn", "graduated"].includes(String(row.status || "").toLowerCase()))
+        .sort((a: any, b: any) =>
+          String(a.fullName || "").localeCompare(String(b.fullName || "")));
+      const scopedClasses = (classRows as Class[])
+        .filter((row: any) => sameTenant(row) && isActive(row))
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
+      const scopedStructures = (structureRows as AcademicStructure[])
+        .filter((row: any) => sameTenant(row) && isActive(row))
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
+      const scopedPeriods = (periodRows as AcademicPeriod[])
+        .filter((row: any) => sameTenant(row) && isActive(row))
+        .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
+      const scopedEnrollments = (enrollmentRows as StudentEnrollment[])
+        .filter((row: any) => sameTenant(row));
+      const scopedAttendance = (attendanceData as Attendance[])
+        .filter((row: any) => sameTenant(row));
+      const scopedSummaries = (summaryData as StudentAttendanceSummary[])
+        .filter((row: any) => sameTenant(row));
 
-      setClasses(
-        (classRows as Class[])
-          .filter((row: any) => sameTenant(row) && isActive(row))
-          .sort((a: any, b: any) =>
-            String(a.name || "").localeCompare(String(b.name || "")),
-          ),
-      );
+      setStudents(scopedStudents);
+      setClasses(scopedClasses);
+      setStructures(scopedStructures);
+      setPeriods(scopedPeriods);
+      setEnrollments(scopedEnrollments);
+      setAttendanceRows(scopedAttendance);
+      setSummaryRows(scopedSummaries);
 
-      setStructures(
-        (structureRows as AcademicStructure[])
-          .filter((row: any) => sameTenant(row) && isActive(row))
-          .sort((a: any, b: any) =>
-            String(a.name || "").localeCompare(String(b.name || "")),
-          ),
-      );
-
-      setPeriods(
-        (periodRows as AcademicPeriod[])
-          .filter((row: any) => sameTenant(row) && isActive(row))
-          .sort(
-            (a: any, b: any) =>
-              Number(a.order || 0) - Number(b.order || 0),
-          ),
-      );
-
-      setEnrollments(
-        (enrollmentRows as StudentEnrollment[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
-
-      setAttendanceRows(
-        (attendanceData as Attendance[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
-
-      setSummaryRows(
-        (summaryData as StudentAttendanceSummary[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
+      // Select an existing, non-empty register immediately on first entry.
+      // Later Dexie sync/reloads must NOT override the staff's manual filters.
+      const openingKey = [accountId || "", schoolId, branchId].join("|");
+      if (autoSelectedWorkspaceRef.current !== openingKey &&
+          manuallySelectedWorkspaceRef.current !== openingKey) {
+        const opening = chooseAttendanceOpeningScope({
+          students: scopedStudents,
+          classes: scopedClasses,
+          structures: scopedStructures,
+          periods: scopedPeriods,
+          enrollments: scopedEnrollments,
+          attendanceRows: scopedAttendance,
+          summaryRows: scopedSummaries,
+          preferredStructureId: idOf(settings?.currentAcademicStructureId),
+          preferredPeriodId: idOf(settings?.currentAcademicPeriodId),
+        });
+        if (opening) {
+          setStructureId(opening.structureId);
+          setPeriodId(opening.periodId);
+          setClassId(opening.classId);
+          autoSelectedWorkspaceRef.current = openingKey;
+        }
+      }
     } catch (error) {
       console.error("Failed to load student attendance:", error);
       clearData();
@@ -592,6 +768,8 @@ export default function StudentAttendance() {
   ]);
 
   useEffect(() => {
+    if (autoSelectedWorkspaceRef.current === attendanceWorkspaceKey ||
+        manuallySelectedWorkspaceRef.current === attendanceWorkspaceKey) return;
     if (!structureId && settings?.currentAcademicStructureId) {
       setStructureId(String(settings.currentAcademicStructureId));
     }
@@ -601,6 +779,7 @@ export default function StudentAttendance() {
   }, [
     structureId,
     periodId,
+    attendanceWorkspaceKey,
     settings?.currentAcademicStructureId,
     settings?.currentAcademicPeriodId,
   ]);
@@ -1736,9 +1915,8 @@ export default function StudentAttendance() {
   // Also register the legacy direct-route key for compatibility with older links.
   const attendanceToolbarHandlers = {
     add: () => {
-      // Attendance has no standalone record-creation form: choose a register
-      // context and record the class rather than inserting an empty row.
-      setEntryMode("daily");
+      // Open the setup for the CURRENT register mode (Term Totals by default),
+      // instead of unexpectedly switching staff to Daily Register.
       setFilterOpen(true);
     },
     search: setSearch,
@@ -2081,15 +2259,20 @@ export default function StudentAttendance() {
               }
             }}
             onStructure={(value) => {
+              markScopeManuallySelected();
               setStructureId(value);
               setPeriodId("");
               setClassId("");
             }}
             onPeriod={(value) => {
+              markScopeManuallySelected();
               setPeriodId(value);
               setClassId("");
             }}
-            onClass={setClassId}
+            onClass={(value) => {
+              markScopeManuallySelected();
+              setClassId(value);
+            }}
             onDate={setDate}
             onStatus={setStatusFilter}
             onBulkDaysOpened={setBulkDaysOpened}

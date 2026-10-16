@@ -17,7 +17,7 @@
  * - ClassSubject -> AssessmentApplicability -> AssessmentStructureItems -> AssessmentEntry
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
@@ -108,6 +108,28 @@ type ViewMode = "cards" | "table" | "summary";
 type ToastTone = "success" | "error" | "info";
 type ReadinessFilter = "all" | "ready" | "missing";
 type CompletionFilter = "all" | "complete" | "partial" | "empty";
+type GenderFilter = "all" | "male" | "female";
+
+/** One Apply action controls which exact class-subject record is rendered. */
+type AssessmentFilterSelection = {
+  classId: string;
+  subjectId: string;
+  periodId: string;
+  readiness: ReadinessFilter;
+  completion: CompletionFilter;
+  gender: GenderFilter;
+  classSubjectId: string; // "auto" or an actual ClassSubject.id
+};
+
+/** Use only explicit sex/gender data; never guess from a student's name. */
+function studentGender(student: Student): GenderFilter | "unknown" {
+  const value = String(
+    (student as any).sex ?? (student as any).gender ?? "",
+  ).trim().toLowerCase();
+  if (["male", "m", "boy", "boys"].includes(value)) return "male";
+  if (["female", "f", "girl", "girls"].includes(value)) return "female";
+  return "unknown";
+}
 type ScoreValue = number | "";
 type ScoreMap = Record<string, ScoreValue>;
 
@@ -135,6 +157,20 @@ type ClassSubjectOption = {
   ready: boolean;
   display: string;
 };
+
+/** Keep the registry independent of the currently applied filters. */
+function matchesAssessmentOption(
+  option: ClassSubjectOption,
+  filters: Pick<AssessmentFilterSelection, "classId" | "subjectId" | "periodId" | "readiness">,
+): boolean {
+  return (
+    (filters.classId === "all" || sameId(option.row.classId, filters.classId)) &&
+    (filters.subjectId === "all" || sameId(option.row.subjectId, filters.subjectId)) &&
+    (filters.periodId === "all" || sameId(option.row.academicPeriodId, filters.periodId)) &&
+    (filters.readiness === "all" ||
+      (filters.readiness === "ready" ? option.ready : !option.ready))
+  );
+}
 
 type StudentScoreRow = {
   student: Student;
@@ -311,6 +347,7 @@ export default function AssessmentEntries() {
     useState<ReadinessFilter>("all");
   const [filterCompletion, setFilterCompletion] =
     useState<CompletionFilter>("all");
+  const [filterGender, setFilterGender] = useState<GenderFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [scores, setScores] = useState<ScoreMap>({});
@@ -560,7 +597,7 @@ export default function AssessmentEntries() {
     return m;
   }, [applicabilities]);
 
-  const classSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
+  const allClassSubjectOptions = useMemo<ClassSubjectOption[]>(() => {
     return classSubjects
       .map((row: any) => {
         const id = idOf(row.id);
@@ -607,25 +644,6 @@ export default function AssessmentEntries() {
         };
       })
       .filter((option) => Boolean(option.id))
-      .filter(
-        (option) =>
-          filterClassId === "all" || sameId(option.row.classId, filterClassId),
-      )
-      .filter(
-        (option) =>
-          filterSubjectId === "all" ||
-          sameId(option.row.subjectId, filterSubjectId),
-      )
-      .filter(
-        (option) =>
-          filterPeriodId === "all" ||
-          sameId(option.row.academicPeriodId || "", filterPeriodId),
-      )
-      .filter(
-        (option) =>
-          filterReadiness === "all" ||
-          (filterReadiness === "ready" ? option.ready : !option.ready),
-      )
       .sort((a, b) => a.display.localeCompare(b.display));
   }, [
     classSubjects,
@@ -638,10 +656,153 @@ export default function AssessmentEntries() {
     curriculumMap,
     pathwayMap,
     applicabilityMap,
-    filterClassId,
-    filterSubjectId,
-    filterPeriodId,
-    filterReadiness,
+  ]);
+
+  // Used for class/subject navigation lists, never for resolving the open
+  // editor. Filtering these options must not make an existing applicability
+  // disappear from the selected editor.
+  const classSubjectOptions = useMemo(
+    () => allClassSubjectOptions.filter((option) =>
+      matchesAssessmentOption(option, {
+        classId: filterClassId,
+        subjectId: filterSubjectId,
+        periodId: filterPeriodId,
+        readiness: filterReadiness,
+      }),
+    ),
+    [allClassSubjectOptions, filterClassId, filterSubjectId, filterPeriodId, filterReadiness],
+  );
+
+  /**
+   * Default assessment workspace, selected once per opened branch.
+   *
+   * Only a class subject with active enrolled students and directly enterable
+   * assessment items is considered ready. A matching current academic period
+   * is preferred, then existing score entries, then a stable alphabetical tie.
+   * Filtering, manually navigating back and switching subjects are NEVER
+   * overridden after the first automatic selection.
+   */
+  const initialAutoSelectionKeyRef = useRef("");
+  const defaultEntryOption = useMemo<ClassSubjectOption | null>(() => {
+    if (!classSubjectOptions.length || !students.length || !enrollments.length) {
+      return null;
+    }
+
+    const liveStudentIds = new Set(students.map((student) => idOf(student.id)));
+    const projectedCounts = new Map<string, number>();
+    const currentPeriodId = idOf(settings?.currentAcademicPeriodId);
+    const currentStructureId = idOf(settings?.currentAcademicStructureId);
+
+    const candidates = classSubjectOptions.flatMap((option) => {
+      const row = option.row as any;
+      const classId = idOf(row.classId);
+      const structureId = idOf(row.academicStructureId);
+      const periodId = idOf(row.academicPeriodId);
+      const applicability = applicabilityMap.get(option.id) as any;
+      const assessmentStructureId = idOf(applicability?.assessmentStructureId);
+
+      if (!option.ready || !classMap.has(classId) || !assessmentStructureId) {
+        return [];
+      }
+
+      let inputCount = projectedCounts.get(assessmentStructureId);
+      if (inputCount === undefined) {
+        const activeItems = items.filter((item: any) =>
+          isActiveRow(item) &&
+          sameId(item.assessmentStructureId, assessmentStructureId),
+        );
+        try {
+          inputCount = projectAssessmentEntryColumns({
+            items: activeItems,
+            structureId: assessmentStructureId,
+            existingEntries: entries.filter((entry: any) =>
+              !entry.isDeleted &&
+              sameId(entry.assessmentStructureId, assessmentStructureId),
+            ),
+          }).columns.length;
+        } catch {
+          inputCount = 0;
+        }
+        projectedCounts.set(assessmentStructureId, inputCount);
+      }
+      if (!inputCount) return [];
+
+      // Use the very same enrollment requirements as the score-entry roster.
+      const studentIds = new Set(
+        enrollments
+          .filter((enrollment: any) =>
+            !enrollment.isDeleted &&
+            enrollment.status === "active" &&
+            sameId(enrollment.classId, classId) &&
+            sameId(enrollment.academicStructureId, structureId) &&
+            (!periodId || sameId(enrollment.academicPeriodId, periodId)) &&
+            liveStudentIds.has(idOf(enrollment.studentId)),
+          )
+          .map((enrollment) => idOf(enrollment.studentId)),
+      );
+      if (!studentIds.size) return [];
+
+      const savedScoreCount = entries.filter((entry: any) =>
+        !entry.isDeleted &&
+        sameId(entry.classSubjectId, option.id) &&
+        studentIds.has(idOf(entry.studentId)) &&
+        entry.score !== null &&
+        entry.score !== undefined &&
+        entry.score !== "",
+      ).length;
+
+      const priority =
+        (currentPeriodId && periodId === currentPeriodId ? 10000 : 0) +
+        (currentStructureId && structureId === currentStructureId ? 5000 : 0) +
+        (savedScoreCount > 0 ? 1000 : 0) +
+        Math.min(studentIds.size, 200);
+
+      return [{ option, priority }];
+    });
+
+    candidates.sort(
+      (a, b) => b.priority - a.priority ||
+        a.option.display.localeCompare(b.option.display),
+    );
+    return candidates[0]?.option ?? null;
+  }, [
+    classSubjectOptions,
+    students,
+    enrollments,
+    applicabilityMap,
+    classMap,
+    items,
+    entries,
+    settings?.currentAcademicPeriodId,
+    settings?.currentAcademicStructureId,
+  ]);
+
+  useEffect(() => {
+    if (
+      accountLoading || settingsLoading || contextLoading || loading ||
+      !authenticated || !accountId || !schoolId || !branchId ||
+      !defaultEntryOption
+    ) return;
+
+    const workspaceKey = [accountId, schoolId, branchId].join(":");
+    if (initialAutoSelectionKeyRef.current === workspaceKey) return;
+
+    // If the user navigated manually first, do not take over their choice.
+    if (selectedClassId || classSubjectId !== "all" || filterClassId !== "all") {
+      initialAutoSelectionKeyRef.current = workspaceKey;
+      return;
+    }
+
+    initialAutoSelectionKeyRef.current = workspaceKey;
+    const nextClassId = idOf((defaultEntryOption.row as any).classId);
+    setSelectedClassId(nextClassId);
+    setFilterClassId(nextClassId);
+    setClassSubjectId(defaultEntryOption.id);
+    setSearch("");
+  }, [
+    accountLoading, settingsLoading, contextLoading, loading, authenticated,
+    accountId, schoolId, branchId, defaultEntryOption, selectedClassId,
+    classSubjectId, filterClassId,
   ]);
 
   const selectedClass = useMemo(
@@ -760,8 +921,10 @@ export default function AssessmentEntries() {
 
   const selectedOption = useMemo(() => {
     const selectedId = idOf(classSubjectId);
-    return classSubjectOptions.find((option) => sameId(option.id, selectedId));
-  }, [classSubjectOptions, classSubjectId]);
+    // Never search the filtered list: the filter sheet may change while an
+    // editor is already open. Its real ClassSubject record still exists.
+    return allClassSubjectOptions.find((option) => sameId(option.id, selectedId));
+  }, [allClassSubjectOptions, classSubjectId]);
 
   const currentClassSubject = selectedOption?.row;
   const applicability = useMemo(
@@ -1048,6 +1211,12 @@ export default function AssessmentEntries() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return studentScoreRows.filter((item) => {
+      // Gender filtering applies to the actual students being displayed in
+      // card/table view. Unspecified gender remains visible under "All".
+      if (
+        filterGender !== "all" &&
+        studentGender(item.student) !== filterGender
+      ) return false;
       if (filterCompletion !== "all") {
         const entered = item.rowEntered;
         const expected = item.rowExpected;
@@ -1069,7 +1238,7 @@ export default function AssessmentEntries() {
         .toLowerCase()
         .includes(q);
     });
-  }, [studentScoreRows, search, filterCompletion]);
+  }, [studentScoreRows, search, filterCompletion, filterGender]);
 
   const completionStats = useMemo(() => {
     const expected = studentScoreRows.length * structureItems.length;
@@ -1089,6 +1258,7 @@ export default function AssessmentEntries() {
       filterPeriodId,
       filterReadiness,
       filterCompletion,
+      filterGender,
     ].filter((v) => v !== "all").length;
   }, [
     filterClassId,
@@ -1096,6 +1266,7 @@ export default function AssessmentEntries() {
     filterPeriodId,
     filterReadiness,
     filterCompletion,
+    filterGender,
   ]);
 
   const contextSubtitle = selectedOption
@@ -1606,14 +1777,99 @@ export default function AssessmentEntries() {
     }
   };
 
-  const clearFilters = () => {
-    setFilterClassId("all");
-    setFilterSubjectId("all");
-    setFilterPeriodId("all");
-    setFilterReadiness("all");
-    setFilterCompletion("all");
+  /**
+   * Filters are navigation, not just decorations on class-card lists.
+   * Apply resolves a concrete ClassSubject from the complete branch registry,
+   * preferring one with real assessment setup and active enrolled students.
+   */
+  const applyAssessmentFilters = (next: AssessmentFilterSelection) => {
+    const candidates = allClassSubjectOptions.filter((option) =>
+      matchesAssessmentOption(option, next),
+    );
+
+    const specific = next.classSubjectId !== "auto"
+      ? candidates.find((option) => sameId(option.id, next.classSubjectId))
+      : undefined;
+    const current = candidates.find((option) => sameId(option.id, classSubjectId));
+    const preferredPeriodId = idOf(settings?.currentAcademicPeriodId);
+    const preferredStructureId = idOf(settings?.currentAcademicStructureId);
+
+    // Exact choice wins. Otherwise retain the open subject if still matching;
+    // for a new selection prefer a usable configuration, roster and term.
+    const ranked = [...candidates].sort((left, right) => {
+      const quality = (option: ClassSubjectOption) => {
+        const row = option.row as any;
+        const app = applicabilityMap.get(option.id) as any;
+        const structureId = idOf(app?.assessmentStructureId);
+        const hasItems = !!structureId && items.some((item: any) =>
+          isActiveRow(item) && sameId(item.assessmentStructureId, structureId),
+        );
+        const hasStudents = enrollments.some((enrollment: any) =>
+          enrollment.status === "active" && !enrollment.isDeleted &&
+          sameId(enrollment.classId, row.classId) &&
+          sameId(enrollment.academicStructureId, row.academicStructureId) &&
+          (!row.academicPeriodId || sameId(enrollment.academicPeriodId, row.academicPeriodId)),
+        );
+        const hasScores = entries.some((entry: any) =>
+          !entry.isDeleted && sameId(entry.classSubjectId, option.id) &&
+          entry.score !== null && entry.score !== undefined && entry.score !== "",
+        );
+        return (option.ready ? 100000 : 0) + (hasItems ? 50000 : 0) +
+          (hasStudents ? 20000 : 0) +
+          (preferredPeriodId && sameId(row.academicPeriodId, preferredPeriodId) ? 2000 : 0) +
+          (preferredStructureId && sameId(row.academicStructureId, preferredStructureId) ? 1000 : 0) +
+          (hasScores ? 100 : 0);
+      };
+      return quality(right) - quality(left) || left.display.localeCompare(right.display);
+    });
+    const sameSubjectScope = next.classId === filterClassId &&
+      next.subjectId === filterSubjectId &&
+      next.periodId === filterPeriodId &&
+      next.readiness === filterReadiness;
+    // Gender/completion-only changes keep the open subject. A new class/term/
+    // subject selection uses the best available match instead.
+    const target = specific || (sameSubjectScope ? current : undefined) || ranked[0];
+    const nextSubjectId = target?.id || "all";
+
+    // Switching a subject resets its score drafts; do not discard changes
+    // without an explicit decision from the user.
+    if (nextSubjectId !== classSubjectId && sessionStarted) {
+      const hasEdits = studentScoreRows.some((row) =>
+        structureItems.some((item: any) => {
+          const key = scoreKey(idOf((row.student as any).id), idOf(item.id));
+          const before = existingEntryMap.get(key) as any;
+          const after = scores[key];
+          const oldScore = before?.score;
+          return (after === "" || after === undefined)
+            ? oldScore !== null && oldScore !== undefined && oldScore !== ""
+            : Number(after) !== Number(oldScore);
+        }),
+      );
+      if (hasEdits && !window.confirm(
+        "You have unsaved assessment scores. Change class subject and discard those edits?",
+      )) return;
+    }
+
+    // Applying filters counts as deliberate navigation; late sync must not
+    // overwrite this with the automatic opening choice.
+    initialAutoSelectionKeyRef.current = [accountId, schoolId, branchId].join(":");
+    setFilterClassId(next.classId);
+    setFilterSubjectId(next.subjectId);
+    setFilterPeriodId(next.periodId);
+    setFilterReadiness(next.readiness);
+    setFilterCompletion(next.completion);
+    setFilterGender(next.gender);
+    setSelectedClassId(target ? idOf((target.row as any).classId) : "");
+    setClassSubjectId(nextSubjectId);
+    if (nextSubjectId !== classSubjectId) {
+      setSessionStarted(false);
+      setSearch("");
+    }
+    setFilterOpen(false);
   };
 
+  // The FilterSheet's Clear button resets its local draft. The new values
+  // are committed only when Apply is pressed, preventing accidental navigation.
 
   const printAssessmentTable = () => {
     if (classSubjectId === "all" || !selectedOption || !applicability || !structureItems.length) {
@@ -1734,7 +1990,20 @@ export default function AssessmentEntries() {
         </section>
       )}
 
-      {!selectedClassId ? (
+      {classSubjectOptions.length === 0 &&
+        (filterClassId !== "all" || filterSubjectId !== "all" ||
+         filterPeriodId !== "all" || filterReadiness !== "all") ? (
+        <section>
+          <Empty
+            icon="🔎"
+            title="No matching class subjects"
+            text="No class subject matches these filters. Choose a different class, subject or term; existing assessment setup has not been removed."
+          />
+          <div className="ae-filter-empty-action">
+            <button type="button" onClick={() => setFilterOpen(true)}>Change filters</button>
+          </div>
+        </section>
+      ) : !selectedClassId ? (
         <section className="ae-list ae-picker-list">
           {classCards.map((item) => (
             <ClassPickerRow
@@ -1835,11 +2104,18 @@ export default function AssessmentEntries() {
             </button>
           </section>
 
-          {classSubjectId !== "all" && !applicability && (
+          {classSubjectId !== "all" && !selectedOption && (
+            <Empty
+              icon="🔎"
+              title="Class subject unavailable"
+              text="The selected class subject could not be found in this branch. Choose another one through Filters."
+            />
+          )}
+          {selectedOption && !applicability && (
             <Empty
               icon="⚠️"
               title="No assessment applicability"
-              text="Go to Assessment Applicability and connect this class subject to an assessment structure and grading structure first."
+              text="This specific class subject does not yet have an active applicability. Choose a ready class subject in Filters or configure its assessment structure."
             />
           )}
           {applicability && !structureItems.length && (
@@ -1937,12 +2213,10 @@ export default function AssessmentEntries() {
           filterPeriodId={filterPeriodId}
           filterReadiness={filterReadiness}
           filterCompletion={filterCompletion}
-          setFilterClassId={setFilterClassId}
-          setFilterSubjectId={setFilterSubjectId}
-          setFilterPeriodId={setFilterPeriodId}
-          setFilterReadiness={setFilterReadiness}
-          setFilterCompletion={setFilterCompletion}
-          clearFilters={clearFilters}
+          filterGender={filterGender}
+          allOptions={allClassSubjectOptions}
+          activeClassSubjectId={classSubjectId}
+          onApply={applyAssessmentFilters}
           onClose={() => setFilterOpen(false)}
         />
       )}
@@ -2699,12 +2973,10 @@ function FilterSheet({
   filterPeriodId,
   filterReadiness,
   filterCompletion,
-  setFilterClassId,
-  setFilterSubjectId,
-  setFilterPeriodId,
-  setFilterReadiness,
-  setFilterCompletion,
-  clearFilters,
+  filterGender,
+  allOptions,
+  activeClassSubjectId,
+  onApply,
   onClose,
 }: {
   classes: Class[];
@@ -2717,14 +2989,30 @@ function FilterSheet({
   filterPeriodId: string;
   filterReadiness: ReadinessFilter;
   filterCompletion: CompletionFilter;
-  setFilterClassId: (value: string) => void;
-  setFilterSubjectId: (value: string) => void;
-  setFilterPeriodId: (value: string) => void;
-  setFilterReadiness: (value: ReadinessFilter) => void;
-  setFilterCompletion: (value: CompletionFilter) => void;
-  clearFilters: () => void;
+  filterGender: GenderFilter;
+  allOptions: ClassSubjectOption[];
+  activeClassSubjectId: string;
+  onApply: (filters: AssessmentFilterSelection) => void;
   onClose: () => void;
 }) {
+  // Edit filters locally. Cancel never changes the rendered score sheet.
+  const [draft, setDraft] = useState<AssessmentFilterSelection>(() => ({
+    classId: filterClassId,
+    subjectId: filterSubjectId,
+    periodId: filterPeriodId,
+    readiness: filterReadiness,
+    completion: filterCompletion,
+    gender: filterGender,
+    classSubjectId: activeClassSubjectId === "all" ? "auto" : activeClassSubjectId,
+  }));
+
+  const update = (patch: Partial<AssessmentFilterSelection>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+  const candidates = allOptions.filter((option) => matchesAssessmentOption(option, draft));
+  const candidateIds = new Set(candidates.map((option) => option.id));
+  const chosenId = candidateIds.has(draft.classSubjectId) ? draft.classSubjectId : "auto";
+
   if (typeof document === "undefined") return null;
 
   return createPortal(
@@ -2745,7 +3033,7 @@ function FilterSheet({
         <div className="ae-sheet-head">
           <div>
             <h2>Filters</h2>
-            <p>Narrow class subjects and score completion.</p>
+            <p>Choose class, subject, gender and score completion.</p>
           </div>
           <button type="button" onClick={onClose}>
             ✕
@@ -2759,8 +3047,8 @@ function FilterSheet({
           <label>
             <span>Class</span>
             <select
-              value={filterClassId}
-              onChange={(e) => setFilterClassId(e.target.value)}
+              value={draft.classId}
+              onChange={(e) => update({ classId: e.target.value, classSubjectId: "auto" })}
             >
               <option value="all">All classes</option>
               {classes.map((row: any) => (
@@ -2773,8 +3061,8 @@ function FilterSheet({
           <label>
             <span>Subject</span>
             <select
-              value={filterSubjectId}
-              onChange={(e) => setFilterSubjectId(e.target.value)}
+              value={draft.subjectId}
+              onChange={(e) => update({ subjectId: e.target.value, classSubjectId: "auto" })}
             >
               <option value="all">All subjects</option>
               {subjects.map((row: any) => (
@@ -2787,8 +3075,8 @@ function FilterSheet({
           <label>
             <span>Academic Period</span>
             <select
-              value={filterPeriodId}
-              onChange={(e) => setFilterPeriodId(e.target.value)}
+              value={draft.periodId}
+              onChange={(e) => update({ periodId: e.target.value, classSubjectId: "auto" })}
             >
               <option value="all">All periods</option>
               {periods.map((row: any) => (
@@ -2798,13 +3086,25 @@ function FilterSheet({
               ))}
             </select>
           </label>
+          <label className="ae-filter-exact-subject">
+            <span>Class subject to open ({candidates.length} matching)</span>
+            <select
+              value={chosenId}
+              onChange={(e) => update({ classSubjectId: e.target.value })}
+            >
+              <option value="auto">Automatically choose a ready match</option>
+              {candidates.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.display}{option.ready ? " · Ready" : " · Needs setup"}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             <span>Setup Status</span>
             <select
-              value={filterReadiness}
-              onChange={(e) =>
-                setFilterReadiness(e.target.value as ReadinessFilter)
-              }
+              value={draft.readiness}
+              onChange={(e) => update({ readiness: e.target.value as ReadinessFilter, classSubjectId: "auto" })}
             >
               <option value="all">All</option>
               <option value="ready">Applicability ready</option>
@@ -2812,12 +3112,21 @@ function FilterSheet({
             </select>
           </label>
           <label>
+            <span>Student gender</span>
+            <select
+              value={draft.gender}
+              onChange={(e) => update({ gender: e.target.value as GenderFilter })}
+            >
+              <option value="all">All students</option>
+              <option value="male">Male students</option>
+              <option value="female">Female students</option>
+            </select>
+          </label>
+          <label>
             <span>Score Completion</span>
             <select
-              value={filterCompletion}
-              onChange={(e) =>
-                setFilterCompletion(e.target.value as CompletionFilter)
-              }
+              value={draft.completion}
+              onChange={(e) => update({ completion: e.target.value as CompletionFilter })}
             >
               <option value="all">All</option>
               <option value="empty">Empty</option>
@@ -2827,11 +3136,18 @@ function FilterSheet({
           </label>
         </div>
         <div className="ae-sheet-actions">
-          <button type="button" onClick={clearFilters}>
+          <button type="button" onClick={() => setDraft({
+            classId: "all", subjectId: "all", periodId: "all",
+            readiness: "all", completion: "all", gender: "all",
+            classSubjectId: "auto",
+          })}>
             Clear
           </button>
-          <button type="button" className="ae-primary" onClick={onClose}>
-            Apply
+          <button type="button" className="ae-primary" onClick={() => onApply({
+            ...draft,
+            classSubjectId: chosenId,
+          })}>
+            Apply · Open subject
           </button>
         </div>
       </section>
@@ -3473,6 +3789,12 @@ const css = `
 @media(min-width:1120px){.ae-page .ae-list.ae-entry-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
 @media(prefers-reduced-motion:reduce){.ae-page *, .ae-page *::before,.ae-page *::after{scroll-behavior:auto!important;animation-duration:0.01ms!important;transition-duration:0.01ms!important;}}
 
+/* V25: filter-driven subject navigation; the exact ClassSubject id is offered
+   alongside class/subject/term selectors to avoid ambiguous term records. */
+.ae-filter-exact-subject { grid-column: 1 / -1; }
+.ae-filter-empty-action { display:flex;justify-content:center;margin:10px auto; }
+.ae-filter-empty-action button { padding:9px 16px;border-radius:10px;border:1px solid var(--ae-border);background:var(--ae-card);color:var(--ae-text);font-weight:750; }
+
 /* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
 
 .ae-page {
@@ -3505,5 +3827,131 @@ const css = `
 @media(min-width:1024px){.ae-page .ae-list.ae-entry-list {grid-template-columns:repeat(4,minmax(0,1fr));}}
 @media(max-width:639px){.ae-page {padding:3px;}}
 @media(prefers-reduced-motion:reduce){.ae-page .student-row,.ae-page .ae-score-card {transition:none;}}
+
+/* V23 FINAL — Mobile: one STUDENT card per row, with TWO assessment
+   item cells side by side INSIDE the card. No squeezed student cards. */
+@media (max-width: 759px) {
+  .ae-page .ae-list.ae-entry-list {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px;
+    width: 100%;
+    max-width: none;
+    align-items: stretch;
+  }
+
+  .ae-page .ae-entry-list > .ae-score-card {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 10px;
+    border-radius: 12px;
+    content-visibility: visible;
+  }
+
+  .ae-page .ae-entry-list .ae-score-head {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 8px;
+  }
+
+  .ae-page .ae-entry-list .ae-portrait {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+
+  .ae-page .ae-entry-list .ae-student-label {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .ae-page .ae-entry-list .ae-student-label strong {
+    font-size: 12px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .ae-page .ae-entry-list .ae-student-label span {
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+  .ae-page .ae-entry-list .ae-score-head i {
+    flex: 0 0 auto;
+    margin-left: auto;
+    font-size: 10px;
+  }
+
+  /* This is the requested 2-COLUMN arrangement: assessment ITEMS. */
+  .ae-page .ae-entry-list .ae-score-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ae-page .ae-entry-list .ae-score-grid label {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 4px;
+    align-content: start;
+    min-width: 0;
+    padding: 7px;
+    border-radius: 9px;
+  }
+
+  .ae-page .ae-entry-list .ae-score-grid label > span {
+    min-width: 0;
+    font-size: 10.5px;
+    line-height: 1.22;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+  }
+  .ae-page .ae-entry-list .ae-score-grid label > small {
+    align-self: start;
+    justify-self: end;
+    font-size: 9.5px;
+    white-space: nowrap;
+  }
+  .ae-page .ae-entry-list .ae-score-grid .ae-score-input {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    height: 38px;
+    padding: 0 9px;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ae-page .ae-entry-list .ae-result-row {
+    margin-top: 8px;
+    padding-top: 7px;
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+}
+
+/* Preserve two assessment-item columns even on narrow Android phones.
+   The separate class/subject picker grids are not affected. */
+@media (max-width: 380px) {
+  .ae-page .ae-list.ae-entry-list {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .ae-page .ae-entry-list .ae-score-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px;
+  }
+  .ae-page .ae-entry-list .ae-score-grid label {
+    padding: 5px;
+    gap: 3px;
+  }
+  .ae-page .ae-entry-list .ae-score-grid label > span { font-size: 10px; }
+  .ae-page .ae-entry-list .ae-score-grid label > small { font-size: 9px; }
+}
 
 `;

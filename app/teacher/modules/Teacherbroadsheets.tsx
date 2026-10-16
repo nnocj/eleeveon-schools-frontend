@@ -1,67 +1,30 @@
 "use client";
 
 /**
- * app/teacher/modules/Broadsheets.tsx
- * ---------------------------------------------------------
- * TEACHER ACADEMIC BROADSHEETS — ASSIGNED TEACHING SCOPE
- * ---------------------------------------------------------
+ * Eleeveon Schools — Teacher Broadsheets V30
+ * app/teacher/modules/Teacherbroadsheets.tsx
  *
- * No branch selector.
+ * Matches Branch Admin Broadsheets UI/behavior (V20+ report preview):
+ * - Shared A4 landscape preview, one workspace scrollbar and horizontal pan
+ * - Shared Reports toolbar: Search / Print / Filter / More
+ * - Workspace-safe filter and More sheets, coherent initial filters
+ * - Annual/class/subject templates, photos, branch branding and engine
+ * - Offline table revision refresh; gradingStructures + gradeRules
  *
- * Workspace-session aligned:
- * - reads the selected workspace session written by /select-role first
- * - falls back to ActiveMembershipProvider, then ActiveBranchContext/settings
- * - prevents broadsheets from accidentally using stale school/branch context
- *   left behind by another role or portal
- * - all broadsheet engine data reads now use the resolved workspace schoolId and branchId
- *
- * Branch header fix:
- * - mirrors StudentReports.tsx behavior
- * - resolves the locked branch from loaded branch rows / ActiveBranchContext
- * - injects branch, branchName, branchLabel and branding.branchName into output.header
- *   before SubjectBroadsheet and ClassBroadsheet render
- * - no styling, print layout, filter UI or engine logic changed
- *
- * Media asset header update:
- * - resolves broadsheet header images from mediaAssets/mediaBlobs
- * - prefers active owner-bound media over legacy string fields
- * - prevents removed/deleted branch-setting logos from reappearing on broadsheets
- * - injects resolved logo URL into the shared ReportHeader contract
- *
- * Annual broadsheet update:
- * - adds Annual Broadsheet as a selectable broadsheet mode
- * - reuses the existing cumulative AnnualBroadsheet component and cumulative engine
- * - loads StudentReportSnapshot and StudentPromotion rows for annual calculations
- *
- * Template-system upgrade:
- * - loads reportCardTemplates, reportCardTemplateSettings and assignments
- * - resolves independent subject/class/annual branch defaults
- * - routes all three outputs through BroadsheetCard compatibility wrappers
- * - supports Classic, Modern, Compact and Executive with safe Classic fallback
- *
- * Isolated print upgrade:
- * - uses ReportExportTools.printReportTarget(...)
- * - prints only #broadsheet-print-zone in A4 landscape
- * - never prints the branch-admin shell, search bar, filters or preview controls
- *
- * Media upgrade:
- * - resolves logo, watermark, background, signature and student photos
- * - injects the resolved values into broadsheet headers and student rows
- *
- * Teacher access:
- * - Subject Broadsheet: classSubjects where teacherId matches the signed-in teacher.
- * - Class and Annual Broadsheets: classTeachers where teacherId matches the signed-in teacher.
- *
- * Golden cleanup: top row stays Search + Print + Filter + More only.
+ * Teacher access is deliberately more restrictive than Branch Admin:
+ * - Subject Broadsheet: ONLY classSubjects.teacherId assigned to the teacher.
+ * - Class + Annual: ONLY classTeachers.teacherId assigned to the teacher.
+ * - Complete class subjects are included for a class-teacher broadsheet.
+ * - No teacher can edit grades or access another branch from this module.
+ *   Authorization MUST also be checked in backend & synchronization endpoints.
  */
 
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
+import BranchReportPreview from "../../components/role-portals/shell/BranchReportPreview";
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAccount } from "@/app/context/account-context";
-
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
-import { useActiveMembership } from "../../context/active-membership-context";
 
 import {
   db,
@@ -120,6 +83,9 @@ import type {
 } from "../../branch-admin/modules/reports/broadsheet-templates";
 
 import { buildReportEngineOutput } from "../../branch-admin/modules/reports/engine/report-engine";
+import {
+  resolveSubjectBroadsheetAssessmentReportSettings,
+} from "../../branch-admin/modules/reports/shared/ReportTemplateUtils";
 import { buildCumulativeReportEngineOutput } from "../../branch-admin/modules/reports/engine/cumulative-report-engine";
 
 import type {
@@ -129,8 +95,11 @@ import type {
 } from "../../branch-admin/modules/reports/engine/report-types";
 import type { CumulativeReportEngineDataset } from "../../branch-admin/modules/reports/engine/cumulative-report-types";
 
-import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useTeacherWorkspaceAccess } from "../hooks/useTeacherWorkspaceAccess";
+import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 type BroadsheetMode = ReportMode | "annual-broadsheet";
 
 type EntityId = string | number;
@@ -160,7 +129,6 @@ function firstExistingId<T extends { id?: EntityId }>(rows: T[]): string | undef
   return id || undefined;
 }
 
-const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 const BROADSHEET_PRINT_ZONE_ID = "broadsheet-print-zone";
 
 const BROADSHEET_MEDIA_OWNER_SCHOOLS = String(
@@ -209,21 +177,6 @@ function fallbackMediaValue(
   return safeRecordMediaValue(row[stringField]);
 }
 
-type OpenWorkspaceSession = {
-  membership?: Record<string, any> | null;
-  membershipId?: string | null;
-  role?: string | null;
-  schoolId?: string | null;
-  branchId?: string | null;
-  teacherId?: string | null;
-  studentId?: string | null;
-  parentId?: string | null;
-  memberName?: string | null;
-  fullName?: string | null;
-  userName?: string | null;
-  openedAt?: number;
-};
-
 function idOf(value: unknown): string {
   if (value === null || value === undefined) return "";
 
@@ -242,97 +195,6 @@ function idOf(value: unknown): string {
 
 function cleanId(value: unknown): string {
   return idOf(value);
-}
-
-function safeStorageRead(key: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    return (
-      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
-    );
-  } catch {
-    return null;
-  }
-}
-
-function safeJsonRead<T>(key: string): T | null {
-  const raw = safeStorageRead(key);
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function readOpenWorkspaceSession() {
-  return safeJsonRead<OpenWorkspaceSession>(OPEN_WORKSPACE_KEY);
-}
-
-function readStoredActiveMembership() {
-  return safeJsonRead<Record<string, any>>("activeMembership");
-}
-
-function firstLocalId(...values: unknown[]): string {
-  for (const value of values) {
-    const id = idOf(value);
-    if (id) return id;
-  }
-
-  return "";
-}
-
-function selectedWorkspaceSchoolId(args: {
-  openWorkspace?: OpenWorkspaceSession | null;
-  activeMembership?: Record<string, any> | null;
-  activeSchoolId?: unknown;
-  activeSchool?: Record<string, any> | null;
-  settings?: Record<string, any> | null;
-}) {
-  const storedMembership = readStoredActiveMembership();
-  const membership =
-    args.openWorkspace?.membership ||
-    args.activeMembership ||
-    storedMembership ||
-    null;
-
-  return firstLocalId(
-    args.openWorkspace?.schoolId,
-    membership?.schoolId,
-    membership?.school?.id,
-    args.activeSchoolId,
-    args.activeSchool?.id,
-    args.settings?.schoolId,
-    safeStorageRead("activeSchoolId"),
-  );
-}
-
-function selectedWorkspaceBranchId(args: {
-  openWorkspace?: OpenWorkspaceSession | null;
-  activeMembership?: Record<string, any> | null;
-  activeBranchId?: unknown;
-  activeBranch?: Record<string, any> | null;
-  settings?: Record<string, any> | null;
-}) {
-  const storedMembership = readStoredActiveMembership();
-  const membership =
-    args.openWorkspace?.membership ||
-    args.activeMembership ||
-    storedMembership ||
-    null;
-
-  return firstLocalId(
-    args.openWorkspace?.branchId,
-    membership?.branchId,
-    membership?.schoolBranchId,
-    membership?.branch?.id,
-    args.activeBranchId,
-    args.activeBranch?.id,
-    args.settings?.branchId,
-    safeStorageRead("activeBranchId"),
-  );
 }
 
 function labelOf<T extends { id?: EntityId; name?: string }>(
@@ -438,65 +300,60 @@ function withBranchHeader<T extends Record<string, any>>(
   } as T;
 }
 
-export default function TeacherBroadsheets() {
-  const dataRevision = useDataRevision();
+export default function Teacherbroadsheets() {
+  const dataRevision = useBranchTableRevision([
+    "schools",
+    "branches",
+    "schoolBranchSettings",
+    "academicStructures",
+    "academicPeriods",
+    "students",
+    "parents",
+    "teachers",
+    "classes",
+    "subjects",
+    "classSubjects",
+    "classTeachers",
+    "studentEnrollments",
+    "studentParents",
+    "assessmentApplicabilities",
+    "assessmentStructures",
+    "assessmentStructureItems",
+    "assessmentEntries",
+    "gradingStructures",
+    "gradeRules",
+    "attendance",
+    "studentAttendanceSummaries",
+    "computedResults",
+    "reportCards",
+    "reportCardItems",
+    "studentReportSnapshots",
+    "studentPromotions",
+    "reportCardTemplates",
+    "reportCardTemplateSettings",
+    "reportCardTemplateAssignments",
+    "mediaAssets",
+    "mediaBlobs",
+  ]);
 
   const router = useRouter();
-
-  const { accountId, loading: accountLoading, authenticated } = useAccount();
-
   const { settings, loading: settingsLoading } = useSettings();
-
   const {
     activeSchool,
-    activeSchoolId,
     activeBranch,
-    activeBranchId,
-    loading: contextLoading,
   } = useActiveBranch();
-  const { activeMembership } = useActiveMembership();
+  const workspace = useBranchWorkspaceScope();
+  const teacherAccess = useTeacherWorkspaceAccess();
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    authenticated,
+    restoring: accountLoading,
+    branchLoading: contextLoading,
+  } = workspace;
 
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = selectedWorkspaceSchoolId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeSchoolId,
-    activeSchool: activeSchool as any,
-    settings: settings as any,
-  });
-
-  const branchId = selectedWorkspaceBranchId({
-    openWorkspace,
-    activeMembership: activeMembership as any,
-    activeBranchId,
-    activeBranch: activeBranch as any,
-    settings: settings as any,
-  });
-
-  const role = String(
-    openWorkspace?.role ||
-      openWorkspace?.membership?.role ||
-      (activeMembership as any)?.role ||
-      "",
-  )
-    .trim()
-    .toLowerCase();
-
-  const teacherId = firstLocalId(
-    openWorkspace?.membership?.teacherLocalId,
-    openWorkspace?.membership?.teacherId,
-    openWorkspace?.teacherId,
-    openWorkspace?.membership?.teacher?.id,
-    (activeMembership as any)?.teacherLocalId,
-    (activeMembership as any)?.teacherId,
-    (activeMembership as any)?.teacher?.id,
-    safeStorageRead("activeTeacherId"),
-    safeStorageRead("teacherId"),
-  );
-
-  const isTeacherMembership = role === "teacher";
-
+  const teacherId = teacherAccess.teacherId;
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   /**
@@ -515,6 +372,17 @@ export default function TeacherBroadsheets() {
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Choose a populated subject/period once per selected branch, unless the
+  // school administrator has deliberately selected their own filters.
+  const automaticSubjectScopeRef = React.useRef("");
+  const manualSubjectScopeRef = React.useRef(false);
+
+  const setFiltersFromUser: React.Dispatch<React.SetStateAction<ReportFiltersState>> =
+    (next) => {
+      manualSubjectScopeRef.current = true;
+      setFilters(next);
+    };
+
 
   const [filters, setFilters] = useState<ReportFiltersState>({
     branchId: branchId || undefined,
@@ -702,14 +570,8 @@ export default function TeacherBroadsheets() {
   };
 
   const load = async () => {
-    if (
-      !authenticated ||
-      !accountId ||
-      !schoolId ||
-      !branchId ||
-      !isTeacherMembership ||
-      !teacherId
-    ) {
+    if (!authenticated || !accountId || !schoolId || !branchId ||
+        !teacherAccess.ready || !teacherAccess.permitted || !teacherId) {
       clearState();
       setPageLoading(false);
       return;
@@ -815,75 +677,25 @@ export default function TeacherBroadsheets() {
       const scopedAcademicPeriods = academicPeriodRows.filter(sameTenant);
       const scopedSettings = schoolBranchSettingRows.filter(sameTenant);
 
-      const assignedTeachingClassSubjects = classSubjectRows.filter(
-        (row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          idOf(row.teacherId) === teacherId,
+      // Active teacher assignments are the sole source of visible classes.
+      const teachingSubjectRows = classSubjectRows.filter((r: any) =>
+        sameTenant(r) && r.active !== false && idOf(r.teacherId) === teacherId,
       );
-
-      const assignedTeachingClassSubjectIds = new Set(
-        assignedTeachingClassSubjects
-          .map((row: any) => idOf(row.id))
-          .filter(Boolean),
+      const classTeacherRowsForTeacher = classTeacherRows.filter((r: any) =>
+        sameTenant(r) && r.active !== false && idOf(r.teacherId) === teacherId,
       );
-
-      const assignedTeachingClassIds = new Set(
-        assignedTeachingClassSubjects
-          .map((row: any) => idOf(row.classId))
-          .filter(Boolean),
-      );
-
-      const assignedClassTeacherRows = classTeacherRows.filter(
-        (row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          idOf(row.teacherId) === teacherId,
-      );
-
-      const assignedHomeroomClassIds = new Set(
-        assignedClassTeacherRows
-          .map((row: any) => idOf(row.classId))
-          .filter(Boolean),
-      );
-
-      const authorizedClassIds = new Set([
-        ...assignedTeachingClassIds,
-        ...assignedHomeroomClassIds,
-      ]);
-
-      const authorizedEnrollmentRows = enrollmentRows.filter(
-        (row: any) =>
-          sameTenant(row) &&
-          authorizedClassIds.has(idOf(row.classId)),
-      );
-
-      const authorizedStudentIds = new Set(
-        authorizedEnrollmentRows
-          .map((row: any) => idOf(row.studentId))
-          .filter(Boolean),
-      );
-
-      const authorizedAllClassSubjects = classSubjectRows.filter(
-        (row: any) =>
-          sameTenant(row) &&
-          row.active !== false &&
-          authorizedClassIds.has(idOf(row.classId)),
-      );
-
-      const authorizedAllClassSubjectIds = new Set(
-        authorizedAllClassSubjects
-          .map((row: any) => idOf(row.id))
-          .filter(Boolean),
-      );
-
-      const scopedReportCards = reportCardRows.filter(
-        (row: any) =>
-          sameTenant(row) &&
-          (authorizedClassIds.has(idOf(row.classId)) ||
-            authorizedStudentIds.has(idOf(row.studentId))),
-      );
-
+      const teachingClassIds = new Set<string>(teachingSubjectRows.map((r: any) => idOf(r.classId)).filter(Boolean));
+      const homeClassIds = new Set<string>(classTeacherRowsForTeacher.map((r: any) => idOf(r.classId)).filter(Boolean));
+      const authorizedClassIds = new Set<string>([...teachingClassIds, ...homeClassIds]);
+      const authorizedEnrollments = enrollmentRows.filter((r: any) =>
+        sameTenant(r) && !r.isDeleted && authorizedClassIds.has(idOf(r.classId)));
+      const authorizedStudentIds = new Set<string>(authorizedEnrollments.map((r: any) => idOf(r.studentId)).filter(Boolean));
+      // Keep colleagues' subjects to calculate a full Class/Annual broadsheet.
+      const authorizedClassSubjects = classSubjectRows.filter((r: any) =>
+        sameTenant(r) && r.active !== false && authorizedClassIds.has(idOf(r.classId)));
+      const authorizedSubjectIds = new Set<string>(authorizedClassSubjects.map((r: any) => idOf(r.id)).filter(Boolean));
+      const scopedReportCards = reportCardRows.filter((r: any) =>
+        sameTenant(r) && !r.isDeleted && authorizedClassIds.has(idOf(r.classId)));
       const nextMediaUrls: string[] = [];
 
       const currentSchoolWithMedia = currentSchool
@@ -974,7 +786,8 @@ export default function TeacherBroadsheets() {
       );
 
       const scopedStudentsWithMedia = await Promise.all(
-        studentRows.filter(sameTenant).map(async (student: any) => {
+        studentRows.filter((r: any) => sameTenant(r) &&
+          authorizedStudentIds.has(idOf(r.id))).map(async (student: any) => {
           const photo =
             (await resolveBroadsheetMediaUrl({
               ownerTable: BROADSHEET_MEDIA_OWNER_STUDENTS,
@@ -1012,111 +825,35 @@ export default function TeacherBroadsheets() {
       setAcademicStructures(academicStructureRows.filter(sameTenant));
       setAcademicPeriods(scopedAcademicPeriods);
       setStudents(scopedStudentsWithMedia as Student[]);
-      setParents(
-        parentRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            studentParentRows.some(
-              (link: any) =>
-                sameTenant(link) &&
-                authorizedStudentIds.has(idOf(link.studentId)) &&
-                idOf(link.parentId) === idOf(row.id),
-            ),
-        ),
-      );
-      setTeachers(
-        teacherRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            (idOf(row.id) === teacherId ||
-              authorizedAllClassSubjects.some(
-                (item: any) => idOf(item.teacherId) === idOf(row.id),
-              ) ||
-              assignedClassTeacherRows.some(
-                (item: any) => idOf(item.teacherId) === idOf(row.id),
-              )),
-        ),
-      );
-      setClasses(
-        classRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            row.active !== false &&
-            authorizedClassIds.has(idOf(row.id)),
-        ),
-      );
-      setSubjects(
-        subjectRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            row.active !== false &&
-            authorizedAllClassSubjects.some(
-              (item: any) => idOf(item.subjectId) === idOf(row.id),
-            ),
-        ),
-      );
-      setClassSubjects(authorizedAllClassSubjects);
-      setStudentParents(
-        studentParentRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            authorizedStudentIds.has(idOf(row.studentId)),
-        ),
-      );
-      setStudentEnrollments(authorizedEnrollmentRows);
-      setClassTeachers(assignedClassTeacherRows);
-      setAssessmentApplicabilities(
-        applicabilityRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            row.active !== false &&
-            authorizedAllClassSubjectIds.has(idOf(row.classSubjectId)),
-        ),
-      );
-      setAssessmentStructures(
-        structureRows.filter((row) => sameTenant(row) && row.active !== false),
-      );
-      setAssessmentStructureItems(
-        structureItemRows.filter(
-          (row) => sameTenant(row) && row.active !== false,
-        ),
-      );
-      setAssessmentEntries(
-        entryRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            (authorizedAllClassSubjectIds.has(idOf(row.classSubjectId)) ||
-              authorizedStudentIds.has(idOf(row.studentId))),
-        ),
-      );
-      setGradingStructures(
-        gradingRows.filter((row) => sameTenant(row) && row.active !== false),
-      );
-      setGradeRules(
-        ruleRows.filter((row) => sameTenant(row) && row.active !== false),
-      );
-      setAttendance(
-        attendanceRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            authorizedStudentIds.has(idOf(row.studentId)),
-        ),
-      );
-      setStudentAttendanceSummaries(
-        studentAttendanceSummaryRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            authorizedStudentIds.has(idOf(row.studentId)),
-        ),
-      );
-      setComputedResults(
-        computedRows.filter(
-          (row: any) =>
-            sameTenant(row) &&
-            (authorizedAllClassSubjectIds.has(idOf(row.classSubjectId)) ||
-              authorizedStudentIds.has(idOf(row.studentId))),
-        ),
-      );
+      setParents(parentRows.filter((r: any) => sameTenant(r) &&
+        studentParentRows.some((p: any) => sameTenant(p) && authorizedStudentIds.has(idOf(p.studentId)) && idOf(p.parentId) === idOf(r.id))));
+      setTeachers(teacherRows.filter((r: any) => sameTenant(r) &&
+        (idOf(r.id) === teacherId || authorizedClassSubjects.some((s: any) => idOf(s.teacherId) === idOf(r.id)) ||
+         classTeacherRows.some((s: any) => sameTenant(s) && authorizedClassIds.has(idOf(s.classId)) && idOf(s.teacherId) === idOf(r.id)))));
+      setClasses(classRows.filter((r: any) => sameTenant(r) && r.active !== false && authorizedClassIds.has(idOf(r.id))));
+      setSubjects(subjectRows.filter((r: any) => sameTenant(r) && r.active !== false &&
+        authorizedClassSubjects.some((s: any) => idOf(s.subjectId) === idOf(r.id))));
+      setClassSubjects(authorizedClassSubjects);
+      setStudentParents(studentParentRows.filter((r: any) => sameTenant(r) && authorizedStudentIds.has(idOf(r.studentId))));
+      setStudentEnrollments(authorizedEnrollments);
+      setClassTeachers(classTeacherRows.filter((r: any) => sameTenant(r) && r.active !== false && authorizedClassIds.has(idOf(r.classId))));
+      setAssessmentApplicabilities(applicabilityRows.filter((r: any) => sameTenant(r) && r.active !== false &&
+        (!r.classId || authorizedClassIds.has(idOf(r.classId))) &&
+        (!r.classSubjectId || authorizedSubjectIds.has(idOf(r.classSubjectId)))));
+      setAssessmentStructures(structureRows.filter((r: any) => sameTenant(r) && r.active !== false));
+      setAssessmentStructureItems(structureItemRows.filter((r: any) => sameTenant(r) && r.active !== false));
+      setAssessmentEntries(entryRows.filter((r: any) => sameTenant(r) && !r.isDeleted &&
+        (!r.classSubjectId || authorizedSubjectIds.has(idOf(r.classSubjectId))) &&
+        (!r.studentId || authorizedStudentIds.has(idOf(r.studentId)))));
+      setGradingStructures(gradingRows.filter((r: any) => sameTenant(r) && r.active !== false));
+      setGradeRules(ruleRows.filter((r: any) => sameTenant(r) && r.active !== false));
+      setAttendance(attendanceRows.filter((r: any) => sameTenant(r) && !r.isDeleted &&
+        (!r.studentId || authorizedStudentIds.has(idOf(r.studentId)))));
+      setStudentAttendanceSummaries(studentAttendanceSummaryRows.filter((r: any) => sameTenant(r) &&
+        (!r.studentId || authorizedStudentIds.has(idOf(r.studentId)))));
+      setComputedResults(computedRows.filter((r: any) => sameTenant(r) && !r.isDeleted &&
+        (!r.classSubjectId || authorizedSubjectIds.has(idOf(r.classSubjectId))) &&
+        (!r.studentId || authorizedStudentIds.has(idOf(r.studentId)))));
       setReportCards(scopedReportCards);
 
       setReportCardItems(
@@ -1142,16 +879,8 @@ export default function TeacherBroadsheets() {
           if (row.accountId !== accountId) return false;
           if (row.schoolId !== schoolId) return false;
           if (row.branchId !== branchId) return false;
-          if (
-            row.classId &&
-            !assignedHomeroomClassIds.has(idOf(row.classId))
-          )
-            return false;
-          if (
-            row.studentId &&
-            !authorizedStudentIds.has(idOf(row.studentId))
-          )
-            return false;
+          if (row.classId && !homeClassIds.has(idOf(row.classId))) return false;
+          if (row.studentId && !authorizedStudentIds.has(idOf(row.studentId))) return false;
           return true;
         }),
       );
@@ -1162,18 +891,9 @@ export default function TeacherBroadsheets() {
           if (row.accountId && row.accountId !== accountId) return false;
           if (row.schoolId && row.schoolId !== schoolId) return false;
           if (row.branchId && row.branchId !== branchId) return false;
-          if (
-            row.fromClassId &&
-            !assignedHomeroomClassIds.has(idOf(row.fromClassId)) &&
-            row.toClassId &&
-            !assignedHomeroomClassIds.has(idOf(row.toClassId))
-          )
-            return false;
-          if (
-            row.studentId &&
-            !authorizedStudentIds.has(idOf(row.studentId))
-          )
-            return false;
+          if (row.studentId && !authorizedStudentIds.has(idOf(row.studentId))) return false;
+          if (row.fromClassId && !homeClassIds.has(idOf(row.fromClassId)) &&
+              row.toClassId && !homeClassIds.has(idOf(row.toClassId))) return false;
           return true;
         }),
       );
@@ -1260,7 +980,12 @@ export default function TeacherBroadsheets() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authenticated, accountId, schoolId, branchId, dataRevision]);
+  }, [authenticated, accountId, schoolId, branchId, dataRevision, teacherAccess.ready, teacherAccess.permitted, teacherId]);
+
+  useEffect(() => {
+    automaticSubjectScopeRef.current = "";
+    manualSubjectScopeRef.current = false;
+  }, [accountId, schoolId, branchId, teacherId]);
 
   useEffect(() => {
     setFilters((prev) => {
@@ -1311,47 +1036,34 @@ export default function TeacherBroadsheets() {
       : branches;
   }, [activeBranch, branchId, branches]);
 
-  const teachingClassSubjectIds = useMemo(
-    () =>
-      new Set(
-        classSubjects
-          .filter((row: any) => idOf(row.teacherId) === teacherId)
-          .map((row: any) => idOf(row.id))
-          .filter(Boolean),
-      ),
-    [classSubjects, teacherId],
-  );
-
-  const teachingClassIds = useMemo(
-    () =>
-      new Set(
-        classSubjects
-          .filter((row: any) => idOf(row.teacherId) === teacherId)
-          .map((row: any) => idOf(row.classId))
-          .filter(Boolean),
-      ),
-    [classSubjects, teacherId],
-  );
-
-  const homeroomClassIds = useMemo(
-    () =>
-      new Set(
-        classTeachers
-          .filter((row: any) => idOf(row.teacherId) === teacherId)
-          .map((row: any) => idOf(row.classId))
-          .filter(Boolean),
-      ),
-    [classTeachers, teacherId],
-  );
-
-  const modeClassIds =
-    mode === "subject-broadsheet" ? teachingClassIds : homeroomClassIds;
+  const teachingClassSubjectIds = useMemo(() => new Set<string>(
+    classSubjects.filter((r: any) => idOf(r.teacherId) === teacherId)
+      .map((r: any) => idOf(r.id)).filter(Boolean)), [classSubjects, teacherId]);
+  const teachingClassIds = useMemo(() => new Set<string>(
+    classSubjects.filter((r: any) => idOf(r.teacherId) === teacherId)
+      .map((r: any) => idOf(r.classId)).filter(Boolean)), [classSubjects, teacherId]);
+  const homeroomClassIds = useMemo(() => new Set<string>(
+    classTeachers.filter((r: any) => idOf(r.teacherId) === teacherId)
+      .map((r: any) => idOf(r.classId)).filter(Boolean)), [classTeachers, teacherId]);
+  const modeClassIds = mode === "subject-broadsheet" ? teachingClassIds : homeroomClassIds;
+  useEffect(() => {
+    if (!teachingClassIds.size && homeroomClassIds.size && mode === "subject-broadsheet") {
+      setMode("class-broadsheet");
+    }
+  }, [teachingClassIds, homeroomClassIds, mode]);
+  const canSubject = teachingClassIds.size > 0;
+  const canClass = homeroomClassIds.size > 0;
+  const changeMode = (nextMode: BroadsheetMode) => {
+    setMode(nextMode);
+    // Never carry a subject-only class into a class-teacher report (or vice versa).
+    manualSubjectScopeRef.current = true;
+    setFilters((prev) => ({...prev, classId: undefined, classSubjectId: undefined, studentId: undefined}));
+  };
+  // Subject teachers cannot open the class or annual broadsheet, even via filters.
+  // Class teachers receive full-class broadsheets, regardless of subjects taught.
 
   const filteredClasses = useMemo(() => {
     const allowedClassIds = new Set<string>();
-    const modeClasses = classes.filter(
-      (row) => !!idOf(row.id) && modeClassIds.has(idOf(row.id)),
-    );
 
     studentEnrollments.forEach((row) => {
       if (row.status !== "active") return;
@@ -1384,11 +1096,9 @@ export default function TeacherBroadsheets() {
       allowedClassIds.add(idOf(row.classId));
     });
 
-    if (!filters.academicStructureId && !filters.academicPeriodId)
-      return modeClasses;
-    return modeClasses.filter(
-      (row) => !!idOf(row.id) && allowedClassIds.has(idOf(row.id)),
-    );
+    const modeClasses = classes.filter((row) => !!idOf(row.id) && modeClassIds.has(idOf(row.id)));
+    if (!filters.academicStructureId && !filters.academicPeriodId) return modeClasses;
+    return modeClasses.filter((row) => !!idOf(row.id) && allowedClassIds.has(idOf(row.id)));
   }, [
     classes,
     studentEnrollments,
@@ -1400,7 +1110,8 @@ export default function TeacherBroadsheets() {
 
   const filteredClassSubjects = useMemo(() => {
     return classSubjects.filter((row) => {
-      if (!teachingClassSubjectIds.has(idOf(row.id))) return false;
+      if (mode === "subject-broadsheet" && !teachingClassSubjectIds.has(idOf(row.id))) return false;
+      if (mode !== "subject-broadsheet" && !homeroomClassIds.has(idOf(row.classId))) return false;
       if (filters.classId && row.classId !== filters.classId) return false;
       if (
         filters.academicStructureId &&
@@ -1420,7 +1131,9 @@ export default function TeacherBroadsheets() {
     filters.classId,
     filters.academicStructureId,
     filters.academicPeriodId,
+    mode,
     teachingClassSubjectIds,
+    homeroomClassIds,
   ]);
 
   const filteredStudents = useMemo(() => {
@@ -1456,51 +1169,16 @@ export default function TeacherBroadsheets() {
     filters.academicPeriodId,
   ]);
 
-  const modeEnrollments = useMemo(
-    () =>
-      studentEnrollments.filter((row: any) =>
-        modeClassIds.has(idOf(row.classId)),
-      ),
-    [modeClassIds, studentEnrollments],
-  );
-
-  const modeStudentIds = useMemo(
-    () =>
-      new Set(
-        modeEnrollments
-          .map((row: any) => idOf(row.studentId))
-          .filter(Boolean),
-      ),
-    [modeEnrollments],
-  );
-
-  const modeClasses = useMemo(
-    () => classes.filter((row: any) => modeClassIds.has(idOf(row.id))),
-    [classes, modeClassIds],
-  );
-
-  const modeClassSubjects = useMemo(
-    () =>
-      classSubjects.filter((row: any) =>
-        mode === "subject-broadsheet"
-          ? teachingClassSubjectIds.has(idOf(row.id))
-          : homeroomClassIds.has(idOf(row.classId)),
-      ),
-    [
-      classSubjects,
-      homeroomClassIds,
-      mode,
-      teachingClassSubjectIds,
-    ],
-  );
-
-  const modeClassSubjectIds = useMemo(
-    () =>
-      new Set(
-        modeClassSubjects.map((row: any) => idOf(row.id)).filter(Boolean),
-      ),
-    [modeClassSubjects],
-  );
+  const modeEnrollments = useMemo(() => studentEnrollments.filter((r: any) =>
+    modeClassIds.has(idOf(r.classId))), [modeClassIds, studentEnrollments]);
+  const modeStudentIds = useMemo(() => new Set<string>(modeEnrollments
+    .map((r: any) => idOf(r.studentId)).filter(Boolean)), [modeEnrollments]);
+  const modeClasses = useMemo(() => classes.filter((r: any) => modeClassIds.has(idOf(r.id))), [classes, modeClassIds]);
+  const modeClassSubjects = useMemo(() => classSubjects.filter((r: any) =>
+    mode === "subject-broadsheet" ? teachingClassSubjectIds.has(idOf(r.id)) : homeroomClassIds.has(idOf(r.classId))),
+    [classSubjects, mode, teachingClassSubjectIds, homeroomClassIds]);
+  const modeClassSubjectIds = useMemo(() => new Set<string>(modeClassSubjects
+    .map((r: any) => idOf(r.id)).filter(Boolean)), [modeClassSubjects]);
 
   const dataset: ReportEngineDataset = useMemo(
     () => ({
@@ -1509,50 +1187,25 @@ export default function TeacherBroadsheets() {
       schoolBranchSettings,
       academicStructures,
       academicPeriods,
-      students: students.filter((row: any) =>
-        modeStudentIds.has(idOf(row.id)),
-      ),
+      students: students.filter((r: any) => modeStudentIds.has(idOf(r.id))),
       parents,
-      studentParents: studentParents.filter((row: any) =>
-        modeStudentIds.has(idOf(row.studentId)),
-      ),
+      studentParents: studentParents.filter((r: any) => modeStudentIds.has(idOf(r.studentId))),
       teachers,
       classes: modeClasses,
       subjects,
       classSubjects: modeClassSubjects,
       studentEnrollments: modeEnrollments,
-      classTeachers: classTeachers.filter((row: any) =>
-        homeroomClassIds.has(idOf(row.classId)),
-      ),
-      assessmentApplicabilities: assessmentApplicabilities.filter(
-        (row: any) =>
-          modeClassSubjectIds.has(idOf(row.classSubjectId)),
-      ),
+      classTeachers,
+      assessmentApplicabilities: assessmentApplicabilities.filter((r: any) => modeClassSubjectIds.has(idOf(r.classSubjectId))),
       assessmentStructures,
       assessmentStructureItems,
-      assessmentEntries: assessmentEntries.filter(
-        (row: any) =>
-          modeClassSubjectIds.has(idOf(row.classSubjectId)) ||
-          modeStudentIds.has(idOf(row.studentId)),
-      ),
+      assessmentEntries: assessmentEntries.filter((r: any) => modeClassSubjectIds.has(idOf(r.classSubjectId))),
       gradingStructures,
       gradeRules,
-      attendance: attendance.filter((row: any) =>
-        modeStudentIds.has(idOf(row.studentId)),
-      ),
-      studentAttendanceSummaries: studentAttendanceSummaries.filter(
-        (row: any) => modeStudentIds.has(idOf(row.studentId)),
-      ),
-      computedResults: computedResults.filter(
-        (row: any) =>
-          modeClassSubjectIds.has(idOf(row.classSubjectId)) ||
-          modeStudentIds.has(idOf(row.studentId)),
-      ),
-      reportCards: reportCards.filter(
-        (row: any) =>
-          modeClassIds.has(idOf(row.classId)) ||
-          modeStudentIds.has(idOf(row.studentId)),
-      ),
+      attendance: attendance.filter((r: any) => modeStudentIds.has(idOf(r.studentId))),
+      studentAttendanceSummaries: studentAttendanceSummaries.filter((r: any) => modeStudentIds.has(idOf(r.studentId))),
+      computedResults: computedResults.filter((r: any) => modeClassSubjectIds.has(idOf(r.classSubjectId))),
+      reportCards: reportCards.filter((r: any) => modeClassIds.has(idOf(r.classId))),
       reportCardItems,
     }),
     [
@@ -1581,20 +1234,154 @@ export default function TeacherBroadsheets() {
       computedResults,
       reportCards,
       reportCardItems,
-      modeStudentIds,
-      modeClasses,
-      modeClassSubjects,
-      modeEnrollments,
-      modeClassSubjectIds,
-      modeClassIds,
-      homeroomClassIds,
+      modeStudentIds, modeClasses, modeClassSubjects, modeClassSubjectIds, modeClassIds, modeEnrollments,
     ],
   );
 
+  const engineAssessmentSettings = useMemo(() => {
+    if (
+      mode !==
+      "subject-broadsheet"
+    ) {
+      return undefined;
+    }
+
+    const row =
+      reportCardTemplateSettings.find(
+        (item: any) =>
+          String(
+            item.reportType || "",
+          ) ===
+            "subject_broadsheet" &&
+          item.active !== false,
+      ) || null;
+
+    return resolveSubjectBroadsheetAssessmentReportSettings(
+      row as any,
+    );
+  }, [
+    mode,
+    reportCardTemplateSettings,
+  ]);
+
   const output = useMemo(
-    () => buildReportEngineOutput(dataset, filters),
-    [dataset, filters],
+    () =>
+      buildReportEngineOutput(
+        dataset,
+        filters,
+        engineAssessmentSettings,
+      ),
+    [
+      dataset,
+      filters,
+      engineAssessmentSettings,
+    ],
   );
+
+  /**
+   * A subject broadsheet cannot render until one class subject is selected.
+   * On first load of a branch, find a real class/term/subject with student rows
+   * instead of choosing the first period or subject (which may be empty).
+   * Never manufacture placeholder records or overwrite a user's filter choice.
+   */
+  useEffect(() => {
+    const scope = [accountId, schoolId, branchId, teacherId].join(":");
+    if (!teacherAccess.ready || !teacherAccess.permitted || mode !== "subject-broadsheet" ||
+        !accountId || !schoolId || !branchId || !teacherId || pageLoading ||
+        !academicPeriods.length || !classSubjects.length || !studentEnrollments.length ||
+        automaticSubjectScopeRef.current === scope || manualSubjectScopeRef.current) return;
+
+    // If the saved/default selection already produces rows, respect it.
+    if (filters.classSubjectId &&
+        Array.isArray(output.subjectBroadsheet?.students) &&
+        output.subjectBroadsheet.students.length > 0) {
+      automaticSubjectScopeRef.current = scope;
+      return;
+    }
+
+    const enrollmentCounts = new Map<string, number>();
+    studentEnrollments.forEach((row) => {
+      if ((row as any).isDeleted || row.status !== "active") return;
+      const key = [idOf(row.classId), idOf(row.academicStructureId), idOf(row.academicPeriodId)].join(":");
+      enrollmentCounts.set(key, (enrollmentCounts.get(key) || 0) + 1);
+    });
+
+    const entryCounts = new Map<string, number>();
+    assessmentEntries.forEach((row) => {
+      if ((row as any).isDeleted) return;
+      const key = [idOf(row.classSubjectId), idOf(row.academicPeriodId)].join(":");
+      entryCounts.set(key, (entryCounts.get(key) || 0) + 1);
+    });
+
+    const candidates: Array<{ filters: ReportFiltersState; priority: number }> = [];
+    classSubjects.forEach((classSubject) => {
+      if ((classSubject as any).isDeleted || classSubject.active === false) return;
+      const classId = idOf(classSubject.classId);
+      const subjectId = idOf(classSubject.id);
+      if (!teachingClassSubjectIds.has(subjectId)) return;
+      if (!classId || !subjectId || !classes.some((c) => idOf(c.id) === classId)) return;
+      academicPeriods.forEach((period) => {
+        if ((period as any).isDeleted || (period as any).active === false) return;
+        const periodId = idOf(period.id);
+        const structureId = idOf(classSubject.academicStructureId) || idOf((period as any).academicStructureId);
+        if (!periodId || !structureId) return;
+        if (idOf(classSubject.academicPeriodId) && idOf(classSubject.academicPeriodId) !== periodId) return;
+        if (idOf((period as any).academicStructureId) && idOf((period as any).academicStructureId) !== structureId) return;
+        const count = enrollmentCounts.get([classId, structureId, periodId].join(":")) || 0;
+        if (!count) return;
+        const scores = entryCounts.get([subjectId, periodId].join(":")) || 0;
+        const priority = scores * 1000 + count * 10 +
+          (periodId === idOf(filters.academicPeriodId) ? 5 : 0) +
+          (structureId === idOf(filters.academicStructureId) ? 3 : 0) +
+          (classId === idOf(filters.classId) ? 2 : 0);
+        candidates.push({
+          priority,
+          filters: {
+            ...filters,
+            branchId: branchId || undefined,
+            academicStructureId: structureId,
+            academicPeriodId: periodId,
+            classId,
+            classSubjectId: subjectId,
+            studentId: undefined,
+          },
+        });
+      });
+    });
+
+    candidates.sort((a, b) => b.priority - a.priority);
+    // Verify the actual engine output. Merely having a class subject is not
+    // sufficient: it may not have students or enough data to form a report.
+    for (const candidate of candidates.slice(0, 24)) {
+      try {
+        const test = buildReportEngineOutput(dataset, candidate.filters, engineAssessmentSettings);
+        if (Array.isArray(test.subjectBroadsheet?.students) && test.subjectBroadsheet.students.length > 0) {
+          automaticSubjectScopeRef.current = scope;
+          setFilters((prev) => ({
+            ...prev,
+            branchId: candidate.filters.branchId,
+            academicStructureId: candidate.filters.academicStructureId,
+            academicPeriodId: candidate.filters.academicPeriodId,
+            classId: candidate.filters.classId,
+            classSubjectId: candidate.filters.classSubjectId,
+            studentId: undefined,
+          }));
+          return;
+        }
+      } catch (error) {
+        console.warn("Skipping incomplete default broadsheet candidate:", error);
+      }
+    }
+    // No populated candidate: retain the school's filter state and show the
+    // existing empty report rather than pretending a result exists.
+    automaticSubjectScopeRef.current = scope;
+  }, [
+    accountId, schoolId, branchId, pageLoading, academicPeriods, classSubjects,
+    classes, studentEnrollments, assessmentEntries, dataset, filters,
+    engineAssessmentSettings, output.subjectBroadsheet,
+    teacherId, teacherAccess.permitted, teacherAccess.ready, mode, teachingClassSubjectIds,
+  ]);
+
 
   const cumulativeDataset: CumulativeReportEngineDataset = useMemo(
     () => ({
@@ -1603,14 +1390,14 @@ export default function TeacherBroadsheets() {
       schoolBranchSettings,
       academicStructures,
       academicPeriods,
-      students,
+      students: students.filter((r: any) => modeStudentIds.has(idOf(r.id))),
       parents,
       studentParents,
       teachers,
-      classes,
+      classes: modeClasses,
       subjects,
-      studentReportSnapshots,
-      studentPromotions,
+      studentReportSnapshots: studentReportSnapshots.filter((r: any) => modeClassIds.has(idOf(r.classId))),
+      studentPromotions: studentPromotions.filter((r: any) => (!r.fromClassId || modeClassIds.has(idOf(r.fromClassId))) || (!r.toClassId || modeClassIds.has(idOf(r.toClassId)))),
     }),
     [
       schools,
@@ -1626,6 +1413,7 @@ export default function TeacherBroadsheets() {
       subjects,
       studentReportSnapshots,
       studentPromotions,
+      modeClassIds, modeStudentIds, modeEnrollments, modeClasses, modeClassSubjects,
     ],
   );
 
@@ -1759,7 +1547,7 @@ export default function TeacherBroadsheets() {
   ]);
 
   const canPrint =
-    hasCoreSetup &&
+    hasCoreSetup && (mode === "subject-broadsheet" ? canSubject : canClass) &&
     (mode === "subject-broadsheet"
       ? Boolean(output.subjectBroadsheet)
       : mode === "class-broadsheet"
@@ -1921,12 +1709,21 @@ export default function TeacherBroadsheets() {
     });
   };
 
+  // Shared Teacher Reports toolbar; A4 print stays inside report target.
+  useRegisterBranchWorkspaceToolbar("reportsWorkspace", {
+    // Read-only Teacher Broadsheets: no Add action.
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    print: () => triggerBroadsheetPrint(),
+    more: () => setMoreOpen(true),
+  });
+
   const renderActiveReport = () => {
     if (!hasCoreSetup) {
       return (
         <Empty
           icon="📊"
-          title="Broadsheets need academic data first"
+          title="No broadsheet available"
           text="Add academic periods, classes, students, enrollments, class subjects, assessment entries, or computed results before generating broadsheets."
         />
       );
@@ -1938,6 +1735,9 @@ export default function TeacherBroadsheets() {
       showWatermark: activeBroadsheetSettings.showBroadsheetWatermark,
       generatedAt: new Date(),
       pageBreakAfter: false,
+      // V15: let the one shared Reports toolbar handle zoom.
+      // The template returns its unscaled A4 page with no local toolbar.
+      mobilePreview: false,
     };
 
     if (mode === "subject-broadsheet") {
@@ -1973,12 +1773,12 @@ export default function TeacherBroadsheets() {
     );
   };
 
-  if (accountLoading || contextLoading || settingsLoading || pageLoading) {
+  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready || pageLoading) {
     return (
       <State
         primary={primary}
-        title="Opening Teacher Broadsheets..."
-        text="Checking your teacher profile, assigned subjects, class-teacher classes, results and broadsheet records."
+        title="Opening Broadsheets..."
+        text="Checking account, assigned branch, academic result data and broadsheet records."
       />
     );
   }
@@ -1993,6 +1793,11 @@ export default function TeacherBroadsheets() {
     );
   }
 
+  if (!teacherAccess.permitted || !teacherId) {
+    return <State primary={primary} title="Teacher membership required"
+      text="Choose an active teacher membership to view assigned Broadsheets." />;
+  }
+
   if (!schoolId || !branchId) {
     return (
       <main
@@ -2003,8 +1808,8 @@ export default function TeacherBroadsheets() {
         <section className="ba-state">
           <h2>Branch workspace required</h2>
           <p>
-            Broadsheets are generated inside the selected teacher workspace.
-            Use Select Role again if the wrong branch is active.
+            Teacher Broadsheets use your selected school branch
+            workspace. Use Select Role again if the wrong branch is active.
           </p>
           <button
             type="button"
@@ -2018,36 +1823,6 @@ export default function TeacherBroadsheets() {
     );
   }
 
-  if (!isTeacherMembership) {
-    return (
-      <State
-        primary={primary}
-        title="Teacher workspace required"
-        text="This broadsheet page is available only from a teacher membership."
-      />
-    );
-  }
-
-  if (!teacherId) {
-    return (
-      <State
-        primary={primary}
-        title="Teacher profile not linked"
-        text="Your membership must be linked to a permanent teacher profile before broadsheets can be opened."
-      />
-    );
-  }
-
-  if (!classSubjects.length && !classTeachers.length) {
-    return (
-      <State
-        primary={primary}
-        title="No teaching assignment"
-        text="No class-subject or class-teacher assignment is linked to this teacher. Ask the branch administrator to complete the assignment."
-      />
-    );
-  }
-
   return (
     <main
       className="ba-page student-reports-page"
@@ -2055,159 +1830,14 @@ export default function TeacherBroadsheets() {
     >
       <style>{css}</style>
 
-      <section
-        className="ba-search-card report-no-print"
-        aria-label="Broadsheet search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search broadsheets..."
-            aria-label="Search broadsheets"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={triggerBroadsheetPrint}
-          aria-label="Print broadsheet"
-          title="Print"
-          disabled={!canPrint}
-        >
-          ⎙
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open broadsheet filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
-      {activeFilterCount > 0 && (
-        <section
-          className="ba-filter-chips report-no-print"
-          aria-label="Active broadsheet filters"
-        >
-          {mode !== "subject-broadsheet" && (
-            <button type="button" onClick={() => setMode("subject-broadsheet")}>
-              Mode:{" "}
-              {mode === "annual-broadsheet"
-                ? "Annual Broadsheet"
-                : "Class Broadsheet"}{" "}
-              ×
-            </button>
-          )}
-          {filters.academicStructureId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicStructureId: undefined,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Structure: {selectedStructureName} ×
-            </button>
-          )}
-          {filters.academicPeriodId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  academicPeriodId: undefined,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                  studentId: undefined,
-                }))
-              }
-            >
-              Period: {selectedPeriodName} ×
-            </button>
-          )}
-          {filters.classId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({
-                  ...prev,
-                  classId: undefined,
-                  classSubjectId: undefined,
-                }))
-              }
-            >
-              Class: {selectedClassName} ×
-            </button>
-          )}
-          {filters.classSubjectId && (
-            <button
-              type="button"
-              onClick={() =>
-                setFilters((prev) => ({ ...prev, classSubjectId: undefined }))
-              }
-            >
-              Subject: {selectedClassSubjectName} ×
-            </button>
-          )}
-        </section>
-      )}
-
       <section className="ba-print-card">
-        <div className="ba-print-head report-no-print">
-          <div>
-            <strong>
-              {mode === "annual-broadsheet"
-                ? "Annual Broadsheet"
-                : mode === "class-broadsheet"
-                  ? "Class Broadsheet"
-                  : "Subject Broadsheet"}
-            </strong>
-            <p>
-              {selectedStructureName} · {selectedPeriodName} ·{" "}
-              {(activeBroadsheetTemplate as any)?.name || "Classic Broadsheet"}
-            </p>
-          </div>
-          <div className="ba-report-toolbar">
-            <button
-              type="button"
-              className="primary"
-              onClick={triggerBroadsheetPrint}
-              disabled={!canPrint}
-            >
-              Print
-            </button>
-          </div>
-        </div>
-
-        <div id={BROADSHEET_PRINT_ZONE_ID} className="ba-print-zone">
+        <BranchReportPreview printZoneId={BROADSHEET_PRINT_ZONE_ID} naturalWidth={1122}>
           {renderActiveReport()}
-        </div>
+        </BranchReportPreview>
       </section>
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
           mode={mode}
           filters={filters}
@@ -2217,19 +1847,27 @@ export default function TeacherBroadsheets() {
           filteredClassSubjects={visibleClassSubjects}
           subjects={subjects}
           classes={classes}
-          setMode={setMode}
-          setFilters={setFilters}
+          setMode={changeMode}
+          allowSubject={canSubject}
+          allowClass={canClass}
+          setFilters={setFiltersFromUser}
+          search={search}
+          setSearch={setSearch}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           mode={mode}
           setMode={(nextMode) => {
-            setMode(nextMode);
+            changeMode(nextMode);
             setMoreOpen(false);
           }}
+          allowSubject={canSubject}
+          allowClass={canClass}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
@@ -2240,6 +1878,7 @@ export default function TeacherBroadsheets() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );
@@ -2310,10 +1949,16 @@ function FilterSheet({
   subjects,
   classes,
   setMode,
+  allowSubject,
+  allowClass,
   setFilters,
+  search,
+  setSearch,
   onClose,
 }: {
   mode: BroadsheetMode;
+  allowSubject: boolean;
+  allowClass: boolean;
   filters: ReportFiltersState;
   academicStructures: AcademicStructure[];
   academicPeriods: AcademicPeriod[];
@@ -2323,6 +1968,8 @@ function FilterSheet({
   classes: Class[];
   setMode: (mode: BroadsheetMode) => void;
   setFilters: React.Dispatch<React.SetStateAction<ReportFiltersState>>;
+  search: string;
+  setSearch: (value: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -2346,6 +1993,9 @@ function FilterSheet({
         </div>
 
         <div className="ba-form compact">
+          <label className="ba-v4-find"><span>Search</span>
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a student, subject or class" />
+          </label>
           <label>
             <span>Broadsheet Mode</span>
             <select
@@ -2354,9 +2004,9 @@ function FilterSheet({
                 setMode(event.target.value as BroadsheetMode)
               }
             >
-              <option value="subject-broadsheet">Subject Broadsheet</option>
-              <option value="class-broadsheet">Class Broadsheet</option>
-              <option value="annual-broadsheet">Annual Broadsheet</option>
+              {allowSubject && <option value="subject-broadsheet">Subject Broadsheet</option>}
+              {allowClass && <option value="class-broadsheet">Class Broadsheet</option>}
+              {allowClass && <option value="annual-broadsheet">Annual Broadsheet</option>}
             </select>
           </label>
 
@@ -2507,12 +2157,16 @@ function FilterSheet({
 function MoreSheet({
   mode,
   setMode,
+  allowSubject,
+  allowClass,
   onRefresh,
   onPrint,
   onClose,
 }: {
   mode: BroadsheetMode;
   setMode: (mode: BroadsheetMode) => void;
+  allowSubject: boolean;
+  allowClass: boolean;
   onRefresh: () => void | Promise<void>;
   onPrint: () => void;
   onClose: () => void;
@@ -2561,7 +2215,7 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          {options.map((option) => (
+          {options.filter((option) => option.mode === "subject-broadsheet" ? allowSubject : allowClass).map((option) => (
             <button
               key={option.mode}
               type="button"
@@ -4181,5 +3835,82 @@ const css = `
 .student-reports-page .ba-print-head p{font-size:11px;margin-top:2px}
 .student-reports-page .ba-print-zone{padding:8px}
 
+@media (min-width:980px){
+  .student-reports-page .ba-modal-backdrop,
+  .student-reports-page .ba-sheet-backdrop{
+    top:var(--eds-shell-top-offset,0px);
+    right:0;
+    bottom:0;
+    left:var(--portal-content-left,0px);
+    width:auto;
+    max-width:calc(100vw - var(--portal-content-left,0px));
+    min-width:0;
+    overflow-x:hidden;
+  }
+
+  .student-reports-page .ba-modal,
+  .student-reports-page .ba-sheet{
+    min-width:0;
+    max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
+  }
+}
+
+
+/* V4 records workspace: neutral surface, efficient scroll, no duplicated toolbars. */
+.ba-page.student-reports-page, .ba-page.report-remarks-page { min-height:0; padding:3px 4px 18px; background:transparent; overflow-x:clip; }
+.ba-page.student-reports-page .ba-search-card, .ba-page.report-remarks-page .ba-search-card,
+.ba-page.report-remarks-page .ba-summary-line { display:none; }
+.ba-page.student-reports-page .ba-print-card,
+.ba-page.report-remarks-page .ba-remark-card,
+.ba-page.report-remarks-page .ba-student-row,
+.ba-page.report-remarks-page .ba-list,
+.ba-page.report-remarks-page .ba-sheet {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 83%,var(--bg,#f3f5f8) 17%);
+  border-color:var(--border,rgba(15,23,42,.13));
+  box-shadow:none;
+}
+.ba-page.student-reports-page .ba-print-card { margin:0; padding:5px; border-radius:11px; box-shadow:none; }
+.ba-page.student-reports-page .ba-print-zone { padding:3px; overflow-x:auto; overscroll-behavior-inline:contain; }
+.ba-page.report-remarks-page .ba-remark-card { margin-top:0; box-shadow:none; border-radius:11px; }
+.ba-page.report-remarks-page .ba-student-row { border-radius:9px; box-shadow:none; transform:none; }
+.ba-page.report-remarks-page .ba-list { gap:6px; }
+.ba-page.report-remarks-page .ba-student-row:hover { transform:none; }
+.ba-page .ba-v4-find { display:grid; gap:5px; grid-column:1/-1; font-size:12px; font-weight:700; color:var(--muted,#64748b); }
+.ba-page .ba-v4-find input { min-height:40px; padding:0 10px; border-radius:9px; background:var(--input-bg,var(--surface,#fff)); color:var(--text,#111827); }
+@media(max-width:760px){
+ .ba-page.student-reports-page,.ba-page.report-remarks-page{padding:0 1px 14px;}
+ .ba-page.student-reports-page .ba-print-card{padding:3px;border-radius:9px;}
+ .ba-page.report-remarks-page .ba-remark-card{padding:9px;}
+}
+@media print {
+  .ba-page.student-reports-page,.ba-page.report-remarks-page,
+  .ba-page.student-reports-page .ba-print-card,
+  .ba-page.student-reports-page .ba-print-zone {
+    background:#fff!important;box-shadow:none!important;border:0!important;
+    margin:0!important;padding:0!important;overflow:visible!important;
+  }
+}
+
+/* V6 — quiet neutral records presentation matching Students/Teachers/Classes V5 */
+
+.student-reports-page {background:var(--bg,var(--background,#f2f4f7));padding:5px;min-height:0;}
+.student-reports-page .ba-print-card {margin:0;padding:5px;border-radius:13px;
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);box-shadow:none;}
+.student-reports-page .ba-print-zone {border-radius:10px;}
+.student-reports-page .ba-sheet,.student-reports-page .ba-card,.student-reports-page .ba-analysis {
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ box-shadow:none;border-radius:13px;}
+@media(max-width:639px){.student-reports-page{padding:3px;}}
+
+
+/* V14: printable document uses the full available preview canvas, without a chrome/header card. */
+.ba-page.student-reports-page { width:100%; max-width:none; padding:0; margin:0; overflow:visible; }
+.ba-page.student-reports-page > .ba-print-card { width:100%; max-width:none; min-width:0;
+  padding:0!important; margin:0!important; border:0!important; border-radius:0!important;
+  background:transparent!important; box-shadow:none!important; overflow:visible!important; }
+.ba-page.student-reports-page .ba-fit-viewport { width:100%; max-width:100%; }
+.ba-page.student-reports-page .ba-print-head, .ba-page.student-reports-page .ba-report-toolbar { display:none!important; }
+@media print { .ba-page.student-reports-page .ba-fit-viewport { max-height:none!important; overflow:visible!important; } }
 `;
  

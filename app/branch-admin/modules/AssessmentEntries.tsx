@@ -340,6 +340,34 @@ export default function AssessmentEntries() {
   const [search, setSearch] = useState("");
   const [classSubjectId, setClassSubjectId] = useState("all");
   const [selectedClassId, setSelectedClassId] = useState<string>("");
+
+  // V27: Class/subject navigation replaces the content inside the persistent
+  // V19 workspace scroller. Without resetting that scroller, opening a subject
+  // near the bottom of its card list can begin halfway down the student roster.
+  // Reset after React commits the new screen, before it is painted; this also
+  // handles returning to subjects/classes and changing subjects via Filters.
+  const previousAssessmentScreen = React.useRef({ selectedClassId, classSubjectId });
+  React.useLayoutEffect(() => {
+    const previous = previousAssessmentScreen.current;
+    if (
+      previous.selectedClassId === selectedClassId &&
+      previous.classSubjectId === classSubjectId
+    ) return;
+
+    previousAssessmentScreen.current = { selectedClassId, classSubjectId };
+    const workspace = document.querySelector<HTMLElement>(
+      ".role-shell.workspace-locked-scroll .app-content",
+    ) || document.querySelector<HTMLElement>(
+      ".role-shell.branch-workspace-layout .app-content",
+    );
+
+    if (workspace) {
+      workspace.scrollTop = 0;
+    } else {
+      // Fallback for legacy/direct routes that still scroll the document.
+      window.scrollTo(0, 0);
+    }
+  }, [selectedClassId, classSubjectId]);
   const [filterClassId, setFilterClassId] = useState("all");
   const [filterSubjectId, setFilterSubjectId] = useState("all");
   const [filterPeriodId, setFilterPeriodId] = useState("all");

@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * app/teacher/modules/StudentAttendance.tsx
+ * app/teacher/modules/Attendance.tsx
  * --------------------------------------------------------------------------
- * ELEEVEON TEACHER STUDENT ATTENDANCE — CLASS TEACHERS ONLY
+ * ELEEVEON TEACHER ATTENDANCE — CLASS TEACHERS ONLY, V34
  *
  * Route responsibilities:
  * - active account, school, branch and membership resolution;
@@ -12,16 +12,22 @@
  * - tenant filtering and route-specific state.
  *
  * Visual standard:
- * - compact search toolbar;
+ * - retains the exact Branch Admin V8.1 cards, tables, sheets and textures;
  * - no permanent title, hero, mode row or summary cards;
  * - setup lives in the slider sheet;
  * - views and bulk actions live in the More sheet;
- * - compact row cards, table and analytics modes.
+ * - compact row cards, table and analytics modes;
+ * - Excel import, export, template and register engines retained.
+ *
+ * TEACHER AUTHORIZATION:
+ * - Only classes assigned via ACTIVE classTeachers rows may be viewed.
+ * - Revalidates the live class-teacher assignment before local saves and Excel imports.
+ * - Teacher/branch changes clear the previous class/period selection.
+ * - NestJS and synchronization must independently enforce the same restrictions.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {verifyTeacherClassAssignment} from "../../hooks/useTeacherWorkspaceAccess";
-import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import {useTeacherWorkspaceAccess,verifyTeacherClassAssignment} from "../../hooks/useTeacherWorkspaceAccess";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../../context/account-context";
@@ -37,7 +43,6 @@ import {
   type Class,
   type ClassTeacher,
   type Student,
-  type Teacher,
   type StudentAttendanceSummary,
   type StudentEnrollment,
 } from "../../lib/db/db";
@@ -52,6 +57,66 @@ import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { PermissionGate } from "../../components/shared/PermissionGate";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
+
+import * as XLSX from "xlsx";
+
+import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
+import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
+import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
+import ExcelImportSheet, {
+  type ExcelImportStep,
+} from "../../components/excel/ExcelImportSheet";
+import ExcelExportSheet from "../../components/excel/ExcelExportSheet";
+
+import type {
+  ExcelColumnMapping,
+  ExcelParsedSheet,
+  ExcelSourceColumn,
+  ParsedExcelWorkbook,
+} from "../../lib/excel/excelTypes";
+
+import {
+  autoMapExcelColumns,
+} from "../../lib/excel/excelColumnMapper";
+
+import {
+  detectLikelyHeaderRow,
+  downloadExcelWorkbook,
+  sheetToRecords,
+} from "../../lib/excel/excelWorkbook";
+
+import {
+  ATTENDANCE_DAILY_FIELDS,
+  ATTENDANCE_TERM_FIELDS,
+  detectAttendanceDailyLayout,
+  parseDailyAttendanceSheet,
+  parseTermAttendanceSheet,
+} from "../../lib/excel/attendance/attendanceExcelParser";
+
+import {
+  validateDailyAttendanceImport,
+  validateTermAttendanceImport,
+} from "../../lib/excel/attendance/attendanceExcelValidator";
+
+import {
+  getAttendanceExcelReferenceData,
+  importDailyAttendance,
+  importTermAttendance,
+} from "../../lib/excel/attendance/attendanceExcelImporter";
+
+import {
+  buildAttendanceRegisterTemplate,
+  buildDailyAttendanceTemplate,
+  buildTermAttendanceTemplate,
+} from "../../lib/excel/attendance/attendanceExcelTemplate";
+
+import type {
+  AttendanceExcelDailyValidationResult,
+  AttendanceExcelImportResult,
+  AttendanceExcelTermValidationResult,
+} from "../../lib/excel/attendance/attendanceExcelTypes";
 
 type EntryMode = "daily" | "termTotals";
 type ViewMode = "cards" | "table" | "analytics";
@@ -189,7 +254,167 @@ function statusTone(status?: AttendanceStatus) {
   return "gray";
 }
 
-export default function TeacherStudentAttendance() {
+/**
+ * Choose a useful opening context without creating or changing attendance data.
+ *
+ * Order of preference:
+ * 1. A real class/term containing SAVED TERM TOTALS for visible students.
+ * 2. A class/term with recorded daily attendance.
+ * 3. A class/term containing enrolled students, ready for entry.
+ *
+ * Within the same tier, prefer the school's configured current term/year.
+ * A record is only counted when its student would appear in the class roster.
+ * This mirrors StudentAttendance's existing active-enrollment/currentClassId
+ * display logic so the selected context cannot point to an empty register.
+ */
+export function chooseAttendanceOpeningScope(args: {
+  students: Student[];
+  classes: Class[];
+  structures: AcademicStructure[];
+  periods: AcademicPeriod[];
+  enrollments: StudentEnrollment[];
+  attendanceRows: Attendance[];
+  summaryRows: StudentAttendanceSummary[];
+  preferredStructureId?: string;
+  preferredPeriodId?: string;
+}): { structureId: string; periodId: string; classId: string } | null {
+  const {
+    students, classes, structures, periods, enrollments,
+    attendanceRows, summaryRows, preferredStructureId, preferredPeriodId,
+  } = args;
+
+  if (!students.length || !classes.length || !periods.length) return null;
+
+  const studentsById = new Map(
+    students.map((row: any) => [idOf(row.id), row] as const),
+  );
+  const validStructures = new Set(structures.map((row: any) => idOf(row.id)));
+  const rostersByScope = new Map<string, Set<string>>();
+  const currentClassRoster = new Map<string, Set<string>>();
+  const scopeKey = (structure: string, period: string, cls: string) =>
+    `${structure}|${period}|${cls}`;
+
+  // Current-class fallback is intentionally identical to the existing
+  // studentViews fallback, used when a student lacks a term enrollment row.
+  students.forEach((row: any) => {
+    const studentId = idOf(row.id);
+    const cls = idOf(row.currentClassId);
+    if (!studentId || !cls || !isActive(row)) return;
+    const set = currentClassRoster.get(cls) || new Set<string>();
+    set.add(studentId);
+    currentClassRoster.set(cls, set);
+  });
+
+  enrollments.forEach((row: any) => {
+    if (row.isDeleted || row.status !== "active") return;
+    const studentId = idOf(row.studentId);
+    const cls = idOf(row.classId);
+    const structure = idOf(row.academicStructureId);
+    const period = idOf(row.academicPeriodId);
+    if (!studentId || !cls || !structure || !period || !studentsById.has(studentId)) return;
+    const key = scopeKey(structure, period, cls);
+    const set = rostersByScope.get(key) || new Set<string>();
+    set.add(studentId);
+    rostersByScope.set(key, set);
+  });
+
+  const summaryIds = new Map<string, Set<string>>();
+  summaryRows.forEach((row: any) => {
+    if (row.isDeleted) return;
+    const key = scopeKey(
+      idOf(row.academicStructureId), idOf(row.academicPeriodId), idOf(row.classId),
+    );
+    const id = idOf(row.studentId);
+    if (!id) return;
+    const set = summaryIds.get(key) || new Set<string>();
+    set.add(id);
+    summaryIds.set(key, set);
+  });
+
+  const dailyIds = new Map<string, Set<string>>();
+  attendanceRows.forEach((row: any) => {
+    if (row.isDeleted) return;
+    const key = scopeKey(
+      idOf(row.academicStructureId), idOf(row.academicPeriodId), idOf(row.classId),
+    );
+    const id = idOf(row.studentId);
+    if (!id) return;
+    const set = dailyIds.get(key) || new Set<string>();
+    set.add(id);
+    dailyIds.set(key, set);
+  });
+
+  type Candidate = {
+    structureId: string;
+    periodId: string;
+    classId: string;
+    tier: number;
+    preferred: number;
+    matched: number;
+    rosterCount: number;
+    periodOrder: number;
+    className: string;
+  };
+  const candidates: Candidate[] = [];
+
+  for (const period of periods as any[]) {
+    const structureId = idOf(period.academicStructureId);
+    const periodId = idOf(period.id);
+    if (!structureId || !periodId || !validStructures.has(structureId)) continue;
+
+    for (const cls of classes as any[]) {
+      const classId = idOf(cls.id);
+      if (!classId) continue;
+      const key = scopeKey(structureId, periodId, classId);
+      const roster = new Set(rostersByScope.get(key) || []);
+      currentClassRoster.get(classId)?.forEach((id) => roster.add(id));
+      if (!roster.size) continue;
+
+      let savedTotals = 0;
+      summaryIds.get(key)?.forEach((id) => {
+        if (roster.has(id)) savedTotals += 1;
+      });
+      let savedDaily = 0;
+      dailyIds.get(key)?.forEach((id) => {
+        if (roster.has(id)) savedDaily += 1;
+      });
+
+      candidates.push({
+        structureId,
+        periodId,
+        classId,
+        tier: savedTotals ? 3 : savedDaily ? 2 : 1,
+        preferred:
+          (periodId === preferredPeriodId ? 2 : 0) +
+          (structureId === preferredStructureId ? 1 : 0),
+        matched: savedTotals || savedDaily,
+        rosterCount: roster.size,
+        periodOrder: Number(period.order || 0),
+        className: String(cls.name || ""),
+      });
+    }
+  }
+
+  candidates.sort((a, b) =>
+    b.tier - a.tier ||
+    b.preferred - a.preferred ||
+    b.matched - a.matched ||
+    b.rosterCount - a.rosterCount ||
+    b.periodOrder - a.periodOrder ||
+    a.className.localeCompare(b.className),
+  );
+
+  const best = candidates[0];
+  return best
+    ? {
+        structureId: best.structureId,
+        periodId: best.periodId,
+        classId: best.classId,
+      }
+    : null;
+}
+
+export default function StudentAttendance() {
   const router = useRouter();
   const revision = useDataRevision();
   const { loading, setLoading } = useBackgroundLoader();
@@ -256,38 +481,21 @@ export default function TeacherStudentAttendance() {
   const primary =
     settings?.primaryColor || "var(--primary-color, #2563eb)";
 
-  const permissionValues = useMemo(() => {
-    const raw = membership.permissions;
-    if (Array.isArray(raw)) return raw.map(String);
-    if (raw && typeof raw === "object") {
-      return Object.entries(raw)
-        .filter(([, value]) => Boolean(value))
-        .map(([key]) => key);
-    }
-    return [];
-  }, [membership.permissions]);
-
-  const role = String(membership.role || "").toLowerCase();
-  const isTeacherMembership = role === "teacher";
-
-  const teacherId = firstId(
-    membership.teacherLocalId,
-    membership.teacherId,
-    (membership.teacher as { id?: unknown } | undefined)?.id,
-    (openWorkspace as any)?.teacherId,
-    storageValue("activeTeacherId"),
-    storageValue("teacherId"),
-  );
-
-  // Teacher portal rule:
-  // viewing and editing attendance require a teacher membership, a linked
-  // permanent teacher profile, and a classTeachers assignment for the class.
-  const canView = isTeacherMembership && Boolean(teacherId);
+  // Fail closed: use the selected Teacher Portal workspace and its assignment resolver.
+  // A teacher's subject assignment does NOT grant attendance access.
+  const teacherAccess = useTeacherWorkspaceAccess();
+  const teacherId = teacherAccess.teacherId;
+  const canView = teacherAccess.permitted &&
+    sameId(teacherAccess.accountId, accountId) &&
+    sameId(teacherAccess.schoolId, schoolId) &&
+    sameId(teacherAccess.branchId, branchId);
 
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classTeacherRows, setClassTeacherRows] = useState<ClassTeacher[]>([]);
+  // Prevent premature "no class assignment" flashes before the first Dexie load.
+  const teacherDataScopeKey = [accountId || "", schoolId, branchId, teacherId].join("|");
+  const [loadedTeacherScopeKey, setLoadedTeacherScopeKey] = useState("");
   const [structures, setStructures] = useState<AcademicStructure[]>([]);
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
@@ -297,7 +505,12 @@ export default function TeacherStudentAttendance() {
 
   const [entryMode, setEntryMode] = useState<EntryMode>("termTotals");
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
-  useEffect(()=>{if(typeof window!=="undefined")setViewMode(window.matchMedia("(min-width:768px)").matches?"table":"cards");},[]);
+  // Match the records modules: tables on laptop/desktop and cards on phones.
+  // The device sets the initial view only; the user's More-menu selection wins.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setViewMode(window.matchMedia("(min-width: 768px)").matches ? "table" : "cards");
+  }, []);
   const [structureId, setStructureId] = useState(
     String(settings?.currentAcademicStructureId || ""),
   );
@@ -305,7 +518,28 @@ export default function TeacherStudentAttendance() {
     String(settings?.currentAcademicPeriodId || ""),
   );
   const [classId, setClassId] = useState("");
-  const autoAttendanceContextRef=useRef("");
+
+  // Automatic opening selection is only made once per selected workspace.
+  // Never replace class/year/term choices made by the user, including on sync.
+  const autoSelectedWorkspaceRef = useRef("");
+  const manuallySelectedWorkspaceRef = useRef("");
+  const attendanceWorkspaceKey = [accountId || "", schoolId, branchId, teacherId].join("|");
+  const previousAttendanceWorkspaceRef = useRef(attendanceWorkspaceKey);
+  useEffect(() => {
+    if (previousAttendanceWorkspaceRef.current === attendanceWorkspaceKey) return;
+    previousAttendanceWorkspaceRef.current = attendanceWorkspaceKey;
+    // Never retain the previous school's selected year, period or class.
+    setStructureId("");
+    setPeriodId("");
+    setClassId("");
+    setEntryMode("termTotals");
+    setSearch("");
+    setStatusFilter("all");
+  }, [attendanceWorkspaceKey]);
+  const markScopeManuallySelected = () => {
+    manuallySelectedWorkspaceRef.current = attendanceWorkspaceKey;
+  };
+
   const [date, setDate] = useState(todayISO());
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] =
@@ -317,7 +551,6 @@ export default function TeacherStudentAttendance() {
   const [bulkScope, setBulkScope] = useState<BulkScope>("all");
 
   const [filterOpen, setFilterOpen] = useState(false);
-  useRegisterBranchWorkspaceToolbar("reportsWorkspace", {filter:()=>setFilterOpen(true),search:setSearch});
   const [moreOpen, setMoreOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -325,6 +558,34 @@ export default function TeacherStudentAttendance() {
     tone: ToastTone;
     message: string;
   } | null>(null);
+
+  // ------------------------------------------------------
+  // Excel interoperability workflow
+  // ------------------------------------------------------
+  const [excelImportOpen, setExcelImportOpen] = useState(false);
+  const [excelExportOpen, setExcelExportOpen] = useState(false);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelWorkbook, setExcelWorkbook] =
+    useState<ParsedExcelWorkbook | null>(null);
+  const [excelSheetName, setExcelSheetName] = useState("");
+  const [excelHeaderRowIndex, setExcelHeaderRowIndex] = useState(0);
+  const [excelColumns, setExcelColumns] = useState<ExcelSourceColumn[]>([]);
+  const [excelMappings, setExcelMappings] = useState<ExcelColumnMapping[]>([]);
+  const [excelImportStep, setExcelImportStep] =
+    useState<ExcelImportStep>("file");
+  // The preview is valid only for the exact class/period/mode it validated.
+  const [validatedImportScope, setValidatedImportScope] = useState("");
+  const [excelBusy, setExcelBusy] = useState(false);
+  const [excelDailyValidation, setExcelDailyValidation] =
+    useState<AttendanceExcelDailyValidationResult | null>(null);
+  const [excelTermValidation, setExcelTermValidation] =
+    useState<AttendanceExcelTermValidationResult | null>(null);
+  const [excelImportResult, setExcelImportResult] =
+    useState<AttendanceExcelImportResult | null>(null);
+  const [excelExportBusyKey, setExcelExportBusyKey] =
+    useState<string | null>(null);
+  const [excelRegisterStartDate, setExcelRegisterStartDate] = useState(date);
+  const [excelRegisterEndDate, setExcelRegisterEndDate] = useState(date);
 
   const mediaByStudentId = useEntityMediaUrls({
     accountId,
@@ -356,7 +617,6 @@ export default function TeacherStudentAttendance() {
   const clearData = () => {
     setStudents([]);
     setClasses([]);
-    setTeachers([]);
     setClassTeacherRows([]);
     setStructures([]);
     setPeriods([]);
@@ -366,14 +626,24 @@ export default function TeacherStudentAttendance() {
   };
 
   const load = async () => {
+    // An unresolved teacher assignment is NOT an empty authorized register.
+    // Wait for assignment hydration before marking this workspace as loaded.
+    if (!teacherAccess.ready) {
+      clearData();
+      setLoadedTeacherScopeKey("");
+      setLoading(false);
+      return;
+    }
     if (
       !authenticated ||
       !accountId ||
       !schoolId ||
       !branchId ||
-      !canView
+      !canView ||
+      !teacherAccess.ready
     ) {
       clearData();
+      setLoadedTeacherScopeKey(teacherDataScopeKey);
       setLoading(false);
       return;
     }
@@ -384,7 +654,6 @@ export default function TeacherStudentAttendance() {
       const [
         studentRows,
         classRows,
-        teacherRows,
         classTeacherData,
         structureRows,
         periodRows,
@@ -394,7 +663,6 @@ export default function TeacherStudentAttendance() {
       ] = await Promise.all([
         tableSafe("students")?.toArray?.() || [],
         tableSafe("classes")?.toArray?.() || [],
-        tableSafe("teachers")?.toArray?.() || [],
         tableSafe("classTeachers")?.toArray?.() || [],
         tableSafe("academicStructures")?.toArray?.() || [],
         tableSafe("academicPeriods")?.toArray?.() || [],
@@ -403,92 +671,76 @@ export default function TeacherStudentAttendance() {
         tableSafe("studentAttendanceSummaries")?.toArray?.() || [],
       ]);
 
-      setStudents(
-        (studentRows as Student[])
-          .filter(
-            (row: any) =>
-              sameTenant(row) &&
-              !["withdrawn", "graduated"].includes(
-                String(row.status || "").toLowerCase(),
-              ),
-          )
-          .sort((a: any, b: any) =>
-            String(a.fullName || "").localeCompare(
-              String(b.fullName || ""),
-            ),
-          ),
-      );
+      // Scope every local dataset to the selected teacher's verified classroom.
+      // The workbook import/export functions receive only these scoped rows.
+      const ownedClassTeachers = (classTeacherData as ClassTeacher[])
+        .filter((row: any) =>
+          sameTenant(row) && isActive(row) && sameId(row.teacherId, teacherId) &&
+          teacherAccess.classTeacherClassIds.has(idOf(row.classId)));
+      const ownedClassIds = new Set(
+        ownedClassTeachers.map((row: any) => idOf(row.classId)).filter(Boolean));
+      const scopedClasses = (classRows as Class[])
+        .filter((row: any) => sameTenant(row) && isActive(row) && ownedClassIds.has(idOf(row.id)))
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
+      const scopedEnrollments = (enrollmentRows as StudentEnrollment[])
+        .filter((row: any) => sameTenant(row) && ownedClassIds.has(idOf(row.classId)));
+      const eligibleStudentIds = new Set(scopedEnrollments
+        .filter((row: any) => row.isDeleted !== true && row.status !== "withdrawn")
+        .map((row: any) => idOf(row.studentId)));
+      const scopedStudents = (studentRows as Student[])
+        .filter((row: any) => sameTenant(row) &&
+          !["withdrawn", "graduated"].includes(String(row.status || "").toLowerCase()) &&
+          (eligibleStudentIds.has(idOf(row.id)) || ownedClassIds.has(idOf(row.currentClassId))))
+        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || "")));
+      const scopedStructures = (structureRows as AcademicStructure[])
+        .filter((row: any) => sameTenant(row) && isActive(row))
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
+      const scopedPeriods = (periodRows as AcademicPeriod[])
+        .filter((row: any) => sameTenant(row) && isActive(row))
+        .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
+      const scopedAttendance = (attendanceData as Attendance[])
+        .filter((row: any) => sameTenant(row) && ownedClassIds.has(idOf(row.classId)));
+      const scopedSummaries = (summaryData as StudentAttendanceSummary[])
+        .filter((row: any) => sameTenant(row) && ownedClassIds.has(idOf(row.classId)));
 
-      const scopedTeachers = (teacherRows as Teacher[]).filter(
-        (row: any) => sameTenant(row) && isActive(row),
-      );
+      setStudents(scopedStudents);
+      setClasses(scopedClasses);
+      setClassTeacherRows(ownedClassTeachers);
+      setStructures(scopedStructures);
+      setPeriods(scopedPeriods);
+      setEnrollments(scopedEnrollments);
+      setAttendanceRows(scopedAttendance);
+      setSummaryRows(scopedSummaries);
 
-      const scopedClassTeachers = (classTeacherData as ClassTeacher[]).filter(
-        (row: any) =>
-          sameTenant(row) &&
-          isActive(row) &&
-          sameId(row.teacherId, teacherId),
-      );
-
-      const assignedClassIds = new Set(
-        scopedClassTeachers.map((row: any) => idOf(row.classId)),
-      );
-
-      setTeachers(scopedTeachers);
-      setClassTeacherRows(scopedClassTeachers);
-
-      setClasses(
-        (classRows as Class[])
-          .filter(
-            (row: any) =>
-              sameTenant(row) &&
-              isActive(row) &&
-              assignedClassIds.has(idOf(row.id)),
-          )
-          .sort((a: any, b: any) =>
-            String(a.name || "").localeCompare(String(b.name || "")),
-          ),
-      );
-
-      setStructures(
-        (structureRows as AcademicStructure[])
-          .filter((row: any) => sameTenant(row) && isActive(row))
-          .sort((a: any, b: any) =>
-            String(a.name || "").localeCompare(String(b.name || "")),
-          ),
-      );
-
-      setPeriods(
-        (periodRows as AcademicPeriod[])
-          .filter((row: any) => sameTenant(row) && isActive(row))
-          .sort(
-            (a: any, b: any) =>
-              Number(a.order || 0) - Number(b.order || 0),
-          ),
-      );
-
-      setEnrollments(
-        (enrollmentRows as StudentEnrollment[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
-
-      setAttendanceRows(
-        (attendanceData as Attendance[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
-
-      setSummaryRows(
-        (summaryData as StudentAttendanceSummary[]).filter((row: any) =>
-          sameTenant(row),
-        ),
-      );
+      // Select an existing, non-empty register immediately on first entry.
+      // Later Dexie sync/reloads must NOT override the staff's manual filters.
+      const openingKey = [accountId || "", schoolId, branchId].join("|");
+      if (autoSelectedWorkspaceRef.current !== openingKey &&
+          manuallySelectedWorkspaceRef.current !== openingKey) {
+        const opening = chooseAttendanceOpeningScope({
+          students: scopedStudents,
+          classes: scopedClasses,
+          structures: scopedStructures,
+          periods: scopedPeriods,
+          enrollments: scopedEnrollments,
+          attendanceRows: scopedAttendance,
+          summaryRows: scopedSummaries,
+          preferredStructureId: idOf(settings?.currentAcademicStructureId),
+          preferredPeriodId: idOf(settings?.currentAcademicPeriodId),
+        });
+        if (opening) {
+          setStructureId(opening.structureId);
+          setPeriodId(opening.periodId);
+          setClassId(opening.classId);
+          autoSelectedWorkspaceRef.current = openingKey;
+        }
+      }
     } catch (error) {
       console.error("Failed to load student attendance:", error);
       clearData();
       notify("error", "Failed to load student attendance.");
     } finally {
+      setLoadedTeacherScopeKey(teacherDataScopeKey);
       setLoading(false);
     }
   };
@@ -521,10 +773,13 @@ export default function TeacherStudentAttendance() {
     contextLoading,
     revision,
     canView,
+    teacherAccess.ready,
     teacherId,
   ]);
 
   useEffect(() => {
+    if (autoSelectedWorkspaceRef.current === attendanceWorkspaceKey ||
+        manuallySelectedWorkspaceRef.current === attendanceWorkspaceKey) return;
     if (!structureId && settings?.currentAcademicStructureId) {
       setStructureId(String(settings.currentAcademicStructureId));
     }
@@ -534,31 +789,16 @@ export default function TeacherStudentAttendance() {
   }, [
     structureId,
     periodId,
+    attendanceWorkspaceKey,
     settings?.currentAcademicStructureId,
     settings?.currentAcademicPeriodId,
   ]);
 
-  // First opening: choose a real class-teacher enrollment, preferably one with
-  // saved term totals. Do not override manual class/term changes after selection.
-  useEffect(()=>{
-    const key=[accountId,schoolId,branchId,teacherId].join("|");
-    if(!teacherId||!classTeacherRows.length||!classes.length||!periods.length||!enrollments.length||autoAttendanceContextRef.current===key)return;
-    const owned=new Set(classTeacherRows.map((x:any)=>idOf(x.classId)));
-    const validEnrollments=enrollments.filter((e:any)=>!e.isDeleted&&e.status==="active"&&owned.has(idOf(e.classId))&&classes.some(c=>sameId((c as any).id,e.classId)));
-    if(!validEnrollments.length)return;
-    const preferredPeriod=idOf(settings?.currentAcademicPeriodId);
-    const preferredStructure=idOf(settings?.currentAcademicStructureId);
-    const ranked=validEnrollments.map((e:any)=>{
-      const summaryCount=summaryRows.filter((r:any)=>!r.isDeleted&&sameId(r.classId,e.classId)&&sameId(r.academicStructureId,e.academicStructureId)&&sameId(r.academicPeriodId,e.academicPeriodId)).length;
-      return {e,score:(summaryCount>0?100000+summaryCount:0)+(sameId(e.academicPeriodId,preferredPeriod)?1000:0)+(sameId(e.academicStructureId,preferredStructure)?100:0)};
-    }).sort((a,b)=>b.score-a.score);
-    const selected=ranked[0]?.e;
-    if(!selected)return;
-    setStructureId(idOf(selected.academicStructureId));
-    setPeriodId(idOf(selected.academicPeriodId));
-    setClassId(idOf(selected.classId));
-    autoAttendanceContextRef.current=key;
-  },[accountId,schoolId,branchId,teacherId,classTeacherRows,classes,periods,enrollments,summaryRows,settings?.currentAcademicPeriodId,settings?.currentAcademicStructureId]);
+  const assignedClassIds = useMemo(() =>
+    new Set(classTeacherRows.map((row: any) => idOf(row.classId)).filter(Boolean)),
+    [classTeacherRows]);
+  const isSelectedClassTeacher = Boolean(classId) && assignedClassIds.has(idOf(classId));
+  const canEdit = canView && teacherAccess.ready && isSelectedClassTeacher;
 
   const studentMap = useMemo(
     () =>
@@ -760,27 +1000,6 @@ export default function TeacherStudentAttendance() {
     });
     setTermDrafts(next);
   }, [studentViews]);
-
-  const assignedClassIds = useMemo(
-    () =>
-      new Set(
-        classTeacherRows
-          .filter((row: any) => sameId(row.teacherId, teacherId))
-          .map((row: any) => idOf(row.classId)),
-      ),
-    [classTeacherRows, teacherId],
-  );
-
-  const isSelectedClassTeacher =
-    Boolean(classId) && assignedClassIds.has(idOf(classId));
-
-  const teacherRecord = useMemo(
-    () =>
-      teachers.find((row: any) => sameId(row.id, teacherId)) || null,
-    [teachers, teacherId],
-  );
-
-  const canEdit = canView && isSelectedClassTeacher;
 
   const selectedClassName =
     (classMap.get(classId) as any)?.name ||
@@ -1005,6 +1224,9 @@ export default function TeacherStudentAttendance() {
         continue;
       }
 
+      // Do not rewrite unchanged marks: each updateLocal creates sync work.
+      if (existing?.id && existing.status === status) continue;
+
       const payload: Partial<Attendance> = {
         accountId: accountId ?? undefined,
         schoolId,
@@ -1100,10 +1322,10 @@ export default function TeacherStudentAttendance() {
   };
 
   const save = async () => {
-    if (!canEdit || !isSelectedClassTeacher) {
+    if (!canEdit) {
       notify(
         "error",
-        "Only the assigned class teacher can enter attendance for this class.",
+        "Only the assigned class teacher can edit attendance for this class.",
       );
       return;
     }
@@ -1138,7 +1360,9 @@ export default function TeacherStudentAttendance() {
       return;
     }
 
-    if (!await verifyTeacherClassAssignment({accountId:String(accountId),schoolId,branchId,teacherId},classId)) {
+    if (!await verifyTeacherClassAssignment({
+      accountId: String(accountId), schoolId, branchId, teacherId,
+    }, classId)) {
       notify("error", "This class is no longer assigned to you as class teacher.");
       return;
     }
@@ -1173,17 +1397,599 @@ export default function TeacherStudentAttendance() {
     }
   };
 
+
+  // ======================================================
+  // EXCEL INTEROPERABILITY
+  // ======================================================
+
+  const attendanceExcelContext = () => {
+    if (!accountId || !schoolId || !branchId) {
+      throw new Error("Select an account and branch first.");
+    }
+
+    if (!structureId || !periodId || !classId) {
+      throw new Error("Select an academic structure, academic period and class first.");
+    }
+    if (!canView || !assignedClassIds.has(idOf(classId))) {
+      throw new Error("Class-teacher assignment required for this attendance register.");
+    }
+
+    return {
+      accountId: String(accountId),
+      schoolId,
+      branchId,
+      classId,
+      academicStructureId: structureId,
+      academicPeriodId: periodId,
+      date: entryMode === "daily" ? date : undefined,
+    };
+  };
+
+  const attendanceExcelTemplateContext = () => {
+    const context = attendanceExcelContext();
+
+    return {
+      ...context,
+      schoolName:
+        String(
+          (activeSchool as { name?: unknown } | null)?.name ||
+            "",
+        ) || undefined,
+      branchName:
+        String(
+          (activeBranch as { name?: unknown } | null)?.name ||
+            "",
+        ) || undefined,
+      className: selectedClassName,
+      academicStructureName: selectedStructureName || undefined,
+      academicPeriodName: selectedPeriodName || undefined,
+    };
+  };
+
+  const attendanceExcelStudents = () =>
+    studentViews.map((item) => ({
+      id: item.id,
+      admissionNumber:
+        (item.student as any)?.admissionNumber || undefined,
+      fullName: item.name,
+    }));
+
+  const resetAttendanceExcelImport = () => {
+    setExcelFile(null);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelHeaderRowIndex(0);
+    setExcelColumns([]);
+    setExcelMappings([]);
+    setExcelDailyValidation(null);
+    setExcelTermValidation(null);
+    setExcelImportResult(null);
+    setExcelImportStep("file");
+    setValidatedImportScope("");
+    setExcelBusy(false);
+  };
+
+  const closeAttendanceExcelImport = () => {
+    if (excelBusy) return;
+    setExcelImportOpen(false);
+    resetAttendanceExcelImport();
+  };
+
+  const openAttendanceExcelImport = () => {
+    try {
+      attendanceExcelContext();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Choose the attendance context first.",
+      );
+      setFilterOpen(true);
+      return;
+    }
+
+    if (!canEdit) {
+      notify("error", "You do not have permission to import attendance.");
+      return;
+    }
+
+    setMoreOpen(false);
+    resetAttendanceExcelImport();
+    setExcelImportOpen(true);
+  };
+
+  const openAttendanceExcelExport = () => {
+    try {
+      attendanceExcelContext();
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Choose the attendance context first.",
+      );
+      setFilterOpen(true);
+      return;
+    }
+
+    setMoreOpen(false);
+    setExcelRegisterStartDate(date || todayISO());
+    setExcelRegisterEndDate(date || todayISO());
+    setExcelExportOpen(true);
+  };
+
+  const parseWorkbookFile = async (
+    file: File,
+  ): Promise<ParsedExcelWorkbook> => {
+    const buffer = await file.arrayBuffer();
+
+    const workbook = XLSX.read(buffer, {
+      type: "array",
+      cellDates: true,
+    });
+
+    const sheets: ExcelParsedSheet[] = workbook.SheetNames.map(
+      (sheetName, index) => {
+        const worksheet = workbook.Sheets[sheetName];
+
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+          header: 1,
+          raw: true,
+          defval: null,
+        }) as unknown[][];
+
+        const rows = matrix.map((row) =>
+          row.map((value) => {
+            if (
+              value === null ||
+              value === undefined ||
+              typeof value === "string" ||
+              typeof value === "number" ||
+              typeof value === "boolean" ||
+              value instanceof Date
+            ) {
+              return value;
+            }
+
+            return String(value);
+          }),
+        );
+
+        const columnCount = rows.reduce(
+          (maximum, row) => Math.max(maximum, row.length),
+          0,
+        );
+
+        return {
+          name: sheetName,
+          index,
+          rows,
+          rowCount: rows.length,
+          columnCount,
+        };
+      },
+    );
+
+    return {
+      fileName: file.name,
+      sheetNames: workbook.SheetNames,
+      sheets,
+    };
+  };
+
+  const selectedExcelSheet = () => {
+    if (!excelWorkbook) return null;
+
+    return (
+      excelWorkbook.sheets.find(
+        (sheet) => sheet.name === excelSheetName,
+      ) ||
+      excelWorkbook.sheets[0] ||
+      null
+    );
+  };
+
+  const prepareAttendanceExcelMapping = (
+    sheet: ExcelParsedSheet,
+    requestedHeaderRowIndex?: number,
+  ) => {
+    const headerRowIndex =
+      requestedHeaderRowIndex ??
+      detectLikelyHeaderRow(sheet);
+
+    const extracted = sheetToRecords(sheet, {
+      headerRowIndex,
+      skipEmptyRows: true,
+      trimStrings: true,
+    });
+
+    let fields = ATTENDANCE_TERM_FIELDS;
+
+    if (entryMode === "daily") {
+      const layout = detectAttendanceDailyLayout(extracted.columns);
+
+      fields =
+        layout === "grid"
+          ? ATTENDANCE_DAILY_FIELDS.filter(
+              (field) =>
+                field.key !== "date" &&
+                field.key !== "status",
+            )
+          : ATTENDANCE_DAILY_FIELDS;
+    }
+
+    const mappings = autoMapExcelColumns(
+      extracted.columns,
+      fields,
+    );
+
+    setExcelHeaderRowIndex(headerRowIndex);
+    setExcelColumns(extracted.columns);
+    setExcelMappings(mappings);
+  };
+
+  const handleAttendanceExcelFile = async (file: File | null) => {
+    setExcelFile(file);
+    setExcelWorkbook(null);
+    setExcelSheetName("");
+    setExcelColumns([]);
+    setExcelMappings([]);
+    setExcelDailyValidation(null);
+    setExcelTermValidation(null);
+    setExcelImportResult(null);
+    setValidatedImportScope("");
+
+    if (!file) {
+      setExcelImportStep("file");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const parsed = await parseWorkbookFile(file);
+
+      if (!parsed.sheets.length) {
+        throw new Error("This workbook does not contain any worksheets.");
+      }
+
+      const firstSheet =
+        parsed.sheets.find(
+          (sheet) =>
+            !sheet.name.toLowerCase().startsWith("_eleeveon_"),
+        ) ||
+        parsed.sheets[0];
+
+      setExcelWorkbook(parsed);
+      setExcelSheetName(firstSheet.name);
+      prepareAttendanceExcelMapping(firstSheet);
+      setExcelImportStep("sheet");
+    } catch (error) {
+      console.error("Failed to read attendance workbook:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to read the Excel workbook.",
+      );
+      setExcelFile(null);
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const continueAttendanceExcelToMapping = () => {
+    const sheet = selectedExcelSheet();
+
+    if (!sheet) {
+      notify("error", "Choose a worksheet first.");
+      return;
+    }
+
+    try {
+      prepareAttendanceExcelMapping(
+        sheet,
+        excelHeaderRowIndex,
+      );
+      setExcelImportStep("mapping");
+    } catch (error) {
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Could not prepare the worksheet columns.",
+      );
+    }
+  };
+
+  const previewAttendanceExcelImport = async () => {
+    if (!canEdit || !classId) {
+      notify("error", "Select a class you are assigned to as class teacher.");
+      return;
+    }
+    const sheet = selectedExcelSheet();
+
+    if (!sheet) {
+      notify("error", "Choose a worksheet first.");
+      return;
+    }
+
+    try {
+      setExcelBusy(true);
+
+      const context = attendanceExcelContext();
+      const reference =
+        await getAttendanceExcelReferenceData(context);
+
+      if (entryMode === "daily") {
+        const parsed = parseDailyAttendanceSheet({
+          sheet,
+          headerRowIndex: excelHeaderRowIndex,
+          mappings: excelMappings,
+          defaultDate: date,
+          ignoreBlankStatuses: true,
+        });
+
+        const validation =
+          validateDailyAttendanceImport({
+            records: parsed.records,
+            rowNumbers: parsed.rowNumbers,
+            context,
+            students: reference.students,
+            enrollments: reference.enrollments,
+          });
+
+        setExcelDailyValidation(validation);
+        setExcelTermValidation(null);
+      } else {
+        const parsed = parseTermAttendanceSheet({
+          sheet,
+          headerRowIndex: excelHeaderRowIndex,
+          mappings: excelMappings,
+        });
+
+        const validation =
+          validateTermAttendanceImport({
+            records: parsed.records,
+            rowNumbers: parsed.rowNumbers,
+            context,
+            students: reference.students,
+            enrollments: reference.enrollments,
+          });
+
+        setExcelTermValidation(validation);
+        setExcelDailyValidation(null);
+      }
+
+      setValidatedImportScope([
+        context.accountId, context.schoolId, context.branchId, context.classId,
+        context.academicStructureId, context.academicPeriodId, entryMode,
+      ].join("|"));
+      setExcelImportStep("preview");
+    } catch (error) {
+      console.error("Failed to preview attendance import:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to validate the attendance workbook.",
+      );
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const commitAttendanceExcelImport = async () => {
+    // Recheck current local assignments immediately before importing; Excel
+    // import helpers write records directly and must never bypass this guard.
+    if (!canEdit || !classId || !await verifyTeacherClassAssignment({
+      accountId: String(accountId), schoolId, branchId, teacherId,
+    }, classId)) {
+      notify("error", "Only the currently assigned class teacher can import attendance.");
+      return;
+    }
+    try {
+      setExcelBusy(true);
+
+      const context = attendanceExcelContext();
+      const currentScope = [
+        context.accountId, context.schoolId, context.branchId, context.classId,
+        context.academicStructureId, context.academicPeriodId, entryMode,
+      ].join("|");
+      if (!validatedImportScope || currentScope !== validatedImportScope) {
+        throw new Error("The selected class, period, or mode changed since Excel preview. Please preview again.");
+      }
+
+      let result: AttendanceExcelImportResult;
+
+      if (entryMode === "daily") {
+        if (!excelDailyValidation) {
+          throw new Error("Preview the daily attendance import first.");
+        }
+
+        result = await importDailyAttendance(
+          excelDailyValidation,
+          context,
+        );
+      } else {
+        if (!excelTermValidation) {
+          throw new Error("Preview the term attendance import first.");
+        }
+
+        result = await importTermAttendance(
+          excelTermValidation,
+          context,
+        );
+      }
+
+      setExcelImportResult(result);
+      setExcelImportStep("result");
+
+      await load();
+
+      notify(
+        result.failed
+          ? "info"
+          : "success",
+        `Excel import finished: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped${
+          result.failed ? `, ${result.failed} failed` : ""
+        }.`,
+      );
+    } catch (error) {
+      console.error("Failed to import attendance workbook:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to import attendance.",
+      );
+    } finally {
+      setExcelBusy(false);
+    }
+  };
+
+  const runAttendanceExcelExport = async (
+    key: string,
+    task: () => void | Promise<void>,
+  ) => {
+    try {
+      setExcelExportBusyKey(key);
+      await task();
+    } catch (error) {
+      console.error("Attendance Excel export failed:", error);
+      notify(
+        "error",
+        error instanceof Error
+          ? error.message
+          : "Failed to create the Excel workbook.",
+      );
+    } finally {
+      setExcelExportBusyKey(null);
+    }
+  };
+
+  const exportCurrentDailyAttendance = () => {
+    const context = attendanceExcelTemplateContext();
+
+    const workbook = buildDailyAttendanceTemplate({
+      context,
+      students: attendanceExcelStudents(),
+      date,
+    });
+
+    const sheet = workbook.sheets[0];
+
+    sheet.rows = studentViews.map((item) => ({
+      studentId: item.id,
+      admissionNumber:
+        (item.student as any)?.admissionNumber || "",
+      studentName: item.name,
+      date,
+      status: dailyDrafts[item.id] || "",
+    })) as any;
+
+    downloadExcelWorkbook(workbook);
+  };
+
+  const exportCurrentTermAttendance = () => {
+    const context = attendanceExcelTemplateContext();
+
+    const workbook = buildTermAttendanceTemplate({
+      context,
+      students: attendanceExcelStudents(),
+    });
+
+    const sheet = workbook.sheets[0];
+
+    sheet.rows = studentViews.map((item) => {
+      const draft =
+        termDrafts[item.id] ||
+        normalizeTermDraft();
+
+      return {
+        studentId: item.id,
+        admissionNumber:
+          (item.student as any)?.admissionNumber || "",
+        studentName: item.name,
+        daysOpened: draft.daysOpened,
+        daysPresent: draft.daysPresent,
+        timesLate: draft.timesLate,
+        daysAbsent: draft.daysAbsent,
+        attendancePercent: draft.attendancePercent,
+      };
+    }) as any;
+
+    downloadExcelWorkbook(workbook);
+  };
+
+  const downloadBlankAttendanceTemplate = () => {
+    const context = attendanceExcelTemplateContext();
+
+    if (entryMode === "daily") {
+      downloadExcelWorkbook(
+        buildDailyAttendanceTemplate({
+          context,
+          students: attendanceExcelStudents(),
+          date,
+        }),
+      );
+      return;
+    }
+
+    downloadExcelWorkbook(
+      buildTermAttendanceTemplate({
+        context,
+        students: attendanceExcelStudents(),
+      }),
+    );
+  };
+
+  const downloadAttendanceRegister = () => {
+    if (!excelRegisterStartDate || !excelRegisterEndDate) {
+      throw new Error("Choose a start and end date for the register.");
+    }
+
+    downloadExcelWorkbook(
+      buildAttendanceRegisterTemplate({
+        context: attendanceExcelTemplateContext(),
+        students: attendanceExcelStudents(),
+        startDate: excelRegisterStartDate,
+        endDate: excelRegisterEndDate,
+      }),
+    );
+  };
+
+  // The Reports workspace owns the shared navigation while Attendance is open.
+  // Also register the legacy direct-route key for compatibility with older links.
+  const attendanceToolbarHandlers = {
+    add: () => {
+      // Open the setup for the CURRENT register mode (Term Totals by default),
+      // instead of unexpectedly switching staff to Daily Register.
+      setFilterOpen(true);
+    },
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    // No browser print fallback: the existing workbook/register export is the
+    // attendance document action and preserves its proper formatting.
+    print: () => openAttendanceExcelExport(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("reportsWorkspace", attendanceToolbarHandlers);
+
   if (
     accountLoading ||
     contextLoading ||
     settingsLoading ||
+    !teacherAccess.ready ||
+    (canView && loadedTeacherScopeKey !== teacherDataScopeKey) ||
     loading
   ) {
     return (
       <RouteState
         primary={primary}
-        title="Opening Teacher Attendance Register..."
-        text="Checking your teacher profile, class-teacher assignments, enrollments and attendance records."
+        title="Opening Teacher Attendance..."
+        text="Checking your class-teacher assignments, enrolled students and saved attendance."
       />
     );
   }
@@ -1217,34 +2023,10 @@ export default function TeacherStudentAttendance() {
     );
   }
 
-  if (!isTeacherMembership) {
-    return (
-      <RouteState
-        primary={primary}
-        title="Teacher workspace required"
-        text="Student attendance entry on this page is available only from a teacher membership."
-      />
-    );
-  }
-
-  if (!teacherId) {
-    return (
-      <RouteState
-        primary={primary}
-        title="Teacher profile not linked"
-        text="Your membership must be linked to a permanent teacher profile before attendance can be entered."
-      />
-    );
-  }
-
-  if (!classTeacherRows.length) {
-    return (
-      <RouteState
-        primary={primary}
-        title="No class-teacher assignment"
-        text={`${(teacherRecord as any)?.fullName || "This teacher"} is not assigned as class teacher to any class. Subject teaching assignments do not grant attendance entry.`}
-      />
-    );
+  if (canView && !classTeacherRows.length) {
+    return <RouteState primary={primary}
+      title="No class-teacher assignment"
+      text="Attendance is available only for classes where you are assigned as class teacher. Ask your school administrator to check the assignment." />;
   }
 
   return (
@@ -1254,12 +2036,12 @@ export default function TeacherStudentAttendance() {
         <RouteState
           primary={primary}
           title="Attendance access restricted"
-          text="Only teachers with a linked teacher profile can open this attendance register."
+          text="Open the Teacher Portal with a linked teacher membership to view attendance."
         />
       }
     >
       <main
-        className="ba-page"
+        className="ba-page attendance-workspace"
         style={
           {
             "--ba-primary": primary,
@@ -1280,98 +2062,52 @@ export default function TeacherStudentAttendance() {
           </section>
         ) : null}
 
-        <section className="ba-search-card">
+        <div className="attendance-work-row" aria-label="Attendance context and saving">
           <button
             type="button"
-            className={`status-dot-mini ${
-              entryMode === "daily"
-                ? dailySummary.total &&
-                  dailySummary.completion === 100
-                  ? "green"
-                  : dailySummary.marked
-                    ? "orange"
-                    : "gray"
-                : termSummary.total &&
-                    termSummary.completed === termSummary.total
-                  ? "green"
-                  : termSummary.completed
-                    ? "orange"
-                    : "gray"
-            }`}
-            aria-label="Open attendance status"
-            onClick={() => setStatusOpen(true)}
-          />
-
-          <label className="ba-search">
-            <span>⌕</span>
-            <input
-              value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
-              placeholder={
-                entryMode === "daily"
-                  ? "Search attendance..."
-                  : "Search term totals..."
-              }
-            />
-          </label>
-
-          <button
-            type="button"
-            className="ba-save-inline"
-            onClick={save}
-            disabled={saving || !canEdit}
-          >
-            {saving ? "..." : "Save"}
-          </button>
-
-          <button
-            type="button"
-            className={`ba-filter-button ${
-              activeFilterCount ? "active" : ""
-            }`}
+            className="attendance-context"
             onClick={() => setFilterOpen(true)}
-            aria-label="Open attendance filters"
+            aria-label="Select attendance structure, period, class and date"
+            title="Change class, term or date"
           >
-            <SliderIcon />
-            {activeFilterCount ? (
-              <b>{activeFilterCount}</b>
-            ) : null}
+            <span className="attendance-context-class">
+              {classId ? selectedClassName : "Select class"}
+            </span>
+            <span className="attendance-context-period">
+              {entryMode === "daily" ? date : "Term totals"}
+            </span>
+            <span aria-hidden="true">⌄</span>
           </button>
-
           <button
             type="button"
-            className="ba-icon-button"
-            onClick={() => setMoreOpen(true)}
-            aria-label="Open more actions"
+            className={`attendance-progress status-dot-mini ${
+              entryMode === "daily"
+                ? dailySummary.total && dailySummary.completion === 100
+                  ? "green"
+                  : dailySummary.marked ? "orange" : "gray"
+                : termSummary.total && termSummary.completed === termSummary.total
+                  ? "green"
+                  : termSummary.completed ? "orange" : "gray"
+            }`}
+            onClick={() => setStatusOpen(true)}
+            title="Attendance progress"
+            aria-label="View attendance status"
           >
-            ⋯
+            {entryMode === "daily"
+              ? `${dailySummary.marked}/${dailySummary.total}`
+              : `${termSummary.completed}/${termSummary.total}`}
           </button>
-        </section>
-
-        {classId || structureId || periodId ? (
-          <section className="ba-filter-chips">
-            {classId ? (
-              <span>Class: {selectedClassName}</span>
-            ) : null}
-            {structureId ? (
-              <span>{selectedStructureName}</span>
-            ) : null}
-            {periodId ? (
-              <span>{selectedPeriodName}</span>
-            ) : null}
-            {entryMode === "daily" && date ? (
-              <span>{date}</span>
-            ) : null}
-            <span>
-              {entryMode === "daily"
-                ? "Daily Register"
-                : "Term Totals"}
-            </span>
-            <span>Class Teacher Only</span>
-          </section>
-        ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              className="ba-save-inline"
+              onClick={save}
+              disabled={saving || !structureId || !periodId || !classId}
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          ) : null}
+        </div>
 
         {viewMode === "analytics" ? (
           <AnalyticsView
@@ -1408,9 +2144,7 @@ export default function TeacherStudentAttendance() {
                     <span className="attendance-main">
                       <strong>{item.name}</strong>
                       <small>{item.admissionNumber}</small>
-                      <em>
-                        {selectedClassName} · {date}
-                      </em>
+
                     </span>
 
                     <span className="attendance-status-actions">
@@ -1561,6 +2295,8 @@ export default function TeacherStudentAttendance() {
 
         {filterOpen ? (
           <FilterSheet
+            search={search}
+            onSearch={setSearch}
             entryMode={entryMode}
             structureId={structureId}
             periodId={periodId}
@@ -1574,21 +2310,25 @@ export default function TeacherStudentAttendance() {
             bulkScope={bulkScope}
             onEntryMode={(value) => {
               setEntryMode(value);
-              setViewMode("cards");
               if (value === "termTotals") {
                 setStatusFilter("all");
               }
             }}
             onStructure={(value) => {
+              markScopeManuallySelected();
               setStructureId(value);
               setPeriodId("");
               setClassId("");
             }}
             onPeriod={(value) => {
+              markScopeManuallySelected();
               setPeriodId(value);
               setClassId("");
             }}
-            onClass={setClassId}
+            onClass={(value) => {
+              markScopeManuallySelected();
+              setClassId(value);
+            }}
             onDate={setDate}
             onStatus={setStatusFilter}
             onBulkDaysOpened={setBulkDaysOpened}
@@ -1641,6 +2381,8 @@ export default function TeacherStudentAttendance() {
               setMoreOpen(false);
               setFilterOpen(true);
             }}
+            onImportExcel={openAttendanceExcelImport}
+            onExportExcel={openAttendanceExcelExport}
             onRefresh={async () => {
               setMoreOpen(false);
               await load();
@@ -1657,6 +2399,486 @@ export default function TeacherStudentAttendance() {
             onClose={() => setStatusOpen(false)}
           />
         ) : null}
+
+        <ExcelImportSheet
+          open={excelImportOpen}
+          onClose={closeAttendanceExcelImport}
+          title={
+            entryMode === "daily"
+              ? "Import Daily Attendance"
+              : "Import Term Attendance"
+          }
+          subtitle={`${selectedClassName}${
+            selectedPeriodName ? ` · ${selectedPeriodName}` : ""
+          }`}
+          step={excelImportStep}
+          busy={excelBusy}
+          width={860}
+          footer={
+            excelImportStep === "file" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={closeAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!excelFile || !excelWorkbook || excelBusy}
+                  onClick={() => setExcelImportStep("sheet")}
+                >
+                  Continue
+                </button>
+              </div>
+            ) : excelImportStep === "sheet" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("file")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={continueAttendanceExcelToMapping}
+                  disabled={!excelSheetName || excelBusy}
+                >
+                  Match columns
+                </button>
+              </div>
+            ) : excelImportStep === "mapping" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("sheet")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={previewAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Preview import
+                </button>
+              </div>
+            ) : excelImportStep === "preview" ? (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setExcelImportStep("mapping")}
+                  disabled={excelBusy}
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={commitAttendanceExcelImport}
+                  disabled={
+                    excelBusy ||
+                    (entryMode === "daily"
+                      ? !excelDailyValidation?.valid
+                      : !excelTermValidation?.valid)
+                  }
+                >
+                  Import attendance
+                </button>
+              </div>
+            ) : (
+              <div className="attendance-excel-footer">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={closeAttendanceExcelImport}
+                  disabled={excelBusy}
+                >
+                  Done
+                </button>
+              </div>
+            )
+          }
+        >
+          {excelImportStep === "file" ? (
+            <div className="attendance-excel-stack">
+              <div className="attendance-excel-context">
+                <strong>
+                  {entryMode === "daily" ? "Daily Register" : "Term Totals"}
+                </strong>
+                <span>{selectedClassName}</span>
+                <span>{selectedPeriodName}</span>
+                {entryMode === "daily" ? <span>{date}</span> : null}
+              </div>
+
+              <ExcelFilePicker
+                value={excelFile}
+                onChange={handleAttendanceExcelFile}
+                disabled={excelBusy}
+                label="Choose attendance workbook"
+                description={
+                  entryMode === "daily"
+                    ? "Use an Eleeveon workbook or an existing daily attendance sheet."
+                    : "Use an Eleeveon workbook or an existing term-attendance sheet."
+                }
+              />
+
+              <div className="attendance-excel-note">
+                <strong>Safe import</strong>
+                <span>
+                  Nothing is changed until the workbook passes validation and
+                  you confirm the import.
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {excelImportStep === "sheet" ? (
+            <div className="attendance-excel-stack">
+              <label className="attendance-excel-field">
+                <span>Worksheet</span>
+                <select
+                  value={excelSheetName}
+                  onChange={(event) => {
+                    const nextName = event.target.value;
+                    setExcelSheetName(nextName);
+
+                    const sheet = excelWorkbook?.sheets.find(
+                      (item) => item.name === nextName,
+                    );
+
+                    if (sheet) {
+                      prepareAttendanceExcelMapping(sheet);
+                    }
+                  }}
+                >
+                  {(excelWorkbook?.sheets || []).map((sheet) => (
+                    <option key={sheet.name} value={sheet.name}>
+                      {sheet.name} · {sheet.rowCount} rows
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="attendance-excel-field">
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={Math.max(
+                    1,
+                    selectedExcelSheet()?.rowCount || 1,
+                  )}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) => {
+                    const nextIndex = Math.max(
+                      0,
+                      Number(event.target.value || 1) - 1,
+                    );
+
+                    setExcelHeaderRowIndex(nextIndex);
+
+                    const sheet = selectedExcelSheet();
+                    if (sheet) {
+                      try {
+                        prepareAttendanceExcelMapping(sheet, nextIndex);
+                      } catch {
+                        // Keep the selected row visible. The next step will
+                        // show a clear validation error if it is unusable.
+                      }
+                    }
+                  }}
+                />
+                <small>
+                  Eleeveon detected row {excelHeaderRowIndex + 1}. Change it if
+                  your column headings are on another row.
+                </small>
+              </label>
+
+              <div className="attendance-excel-note">
+                <strong>
+                  {entryMode === "daily"
+                    ? "Daily spreadsheet"
+                    : "Term totals spreadsheet"}
+                </strong>
+                <span>
+                  {entryMode === "daily"
+                    ? "Daily imports can use Student · Date · Status rows or a register with dates across the columns."
+                    : "Term totals use Days Opened, Days Present and Times Late. Eleeveon recalculates Days Absent and Attendance %."}
+                </span>
+              </div>
+            </div>
+          ) : null}
+
+          {excelImportStep === "mapping" ? (
+            <div className="attendance-excel-stack">
+              <label className="attendance-excel-field">
+                <span>Header row</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={excelHeaderRowIndex + 1}
+                  onChange={(event) => {
+                    const nextIndex = Math.max(
+                      0,
+                      Number(event.target.value || 1) - 1,
+                    );
+
+                    const sheet = selectedExcelSheet();
+
+                    if (!sheet) return;
+
+                    try {
+                      prepareAttendanceExcelMapping(sheet, nextIndex);
+                    } catch (error) {
+                      notify(
+                        "error",
+                        error instanceof Error
+                          ? error.message
+                          : "Could not read that header row.",
+                      );
+                    }
+                  }}
+                />
+              </label>
+
+              <ExcelColumnMappingEditor
+                columns={excelColumns}
+                fields={
+                  entryMode === "daily" &&
+                  detectAttendanceDailyLayout(excelColumns) === "grid"
+                    ? ATTENDANCE_DAILY_FIELDS.filter(
+                        (field) =>
+                          field.key !== "date" &&
+                          field.key !== "status",
+                      )
+                    : entryMode === "daily"
+                      ? ATTENDANCE_DAILY_FIELDS
+                      : ATTENDANCE_TERM_FIELDS
+                }
+                mappings={excelMappings}
+                onChange={setExcelMappings}
+                disabled={excelBusy}
+                title="Match attendance columns"
+                description={
+                  entryMode === "daily" &&
+                  detectAttendanceDailyLayout(excelColumns) === "grid"
+                    ? "The date columns were detected automatically. Match the student identity columns below."
+                    : "Confirm which spreadsheet columns correspond to the attendance fields."
+                }
+              />
+            </div>
+          ) : null}
+
+          {excelImportStep === "preview" && excelDailyValidation ? (
+            <ExcelImportPreview
+              validation={excelDailyValidation}
+              title="Daily attendance preview"
+              description="Check student matches, dates and statuses before importing."
+              columns={[
+                {
+                  key: "studentName",
+                  label: "Student",
+                },
+                {
+                  key: "admissionNumber",
+                  label: "Admission No.",
+                },
+                {
+                  key: "date",
+                  label: "Date",
+                },
+                {
+                  key: "status",
+                  label: "Status",
+                },
+              ]}
+            />
+          ) : null}
+
+          {excelImportStep === "preview" && excelTermValidation ? (
+            <ExcelImportPreview
+              validation={excelTermValidation}
+              title="Term attendance preview"
+              description="Days Absent and Attendance % are recalculated by Eleeveon."
+              columns={[
+                {
+                  key: "studentName",
+                  label: "Student",
+                },
+                {
+                  key: "daysOpened",
+                  label: "Opened",
+                },
+                {
+                  key: "daysPresent",
+                  label: "Present",
+                },
+                {
+                  key: "daysAbsent",
+                  label: "Absent",
+                },
+                {
+                  key: "timesLate",
+                  label: "Late",
+                },
+                {
+                  key: "attendancePercent",
+                  label: "Attendance %",
+                  render: (row) => `${row.attendancePercent}%`,
+                },
+              ]}
+            />
+          ) : null}
+
+          {excelImportStep === "result" && excelImportResult ? (
+            <div className="attendance-excel-result">
+              <div className="attendance-excel-result-icon">✓</div>
+              <h3>Attendance import complete</h3>
+              <p>
+                The workbook has been applied through Eleeveon's local-first
+                attendance records and will use the normal sync pipeline.
+              </p>
+
+              <div className="attendance-excel-result-grid">
+                <div>
+                  <strong>{excelImportResult.created}</strong>
+                  <span>Created</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.updated}</strong>
+                  <span>Updated</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.skipped}</strong>
+                  <span>Skipped</span>
+                </div>
+                <div>
+                  <strong>{excelImportResult.failed}</strong>
+                  <span>Failed</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </ExcelImportSheet>
+
+        <ExcelExportSheet
+          open={excelExportOpen}
+          onClose={() => {
+            if (!excelExportBusyKey) {
+              setExcelExportOpen(false);
+            }
+          }}
+          title={
+            entryMode === "daily"
+              ? "Daily Attendance Excel"
+              : "Term Attendance Excel"
+          }
+          subtitle={`${selectedClassName}${
+            selectedPeriodName ? ` · ${selectedPeriodName}` : ""
+          }`}
+          busyKey={excelExportBusyKey}
+          headerContent={
+            entryMode === "daily" ? (
+              <div className="attendance-excel-register-range">
+                <label>
+                  <span>Register start</span>
+                  <input
+                    type="date"
+                    value={excelRegisterStartDate}
+                    onChange={(event) =>
+                      setExcelRegisterStartDate(event.target.value)
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Register end</span>
+                  <input
+                    type="date"
+                    value={excelRegisterEndDate}
+                    onChange={(event) =>
+                      setExcelRegisterEndDate(event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+            ) : null
+          }
+          actions={
+            entryMode === "daily"
+              ? [
+                  {
+                    key: "export-current",
+                    title: "Export current daily attendance",
+                    description:
+                      "Download the current date with the statuses already entered in Eleeveon.",
+                    badge: date,
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "export-current",
+                        exportCurrentDailyAttendance,
+                      ),
+                  },
+                  {
+                    key: "blank-template",
+                    title: "Download daily template",
+                    description:
+                      "Create a clean sheet for this class and date.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "blank-template",
+                        downloadBlankAttendanceTemplate,
+                      ),
+                  },
+                  {
+                    key: "register-template",
+                    title: "Download multi-day register",
+                    description:
+                      "Create a student register with one attendance column for each date in the selected range.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "register-template",
+                        downloadAttendanceRegister,
+                      ),
+                  },
+                ]
+              : [
+                  {
+                    key: "export-current",
+                    title: "Export current term totals",
+                    description:
+                      "Download the current term totals already entered in Eleeveon.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "export-current",
+                        exportCurrentTermAttendance,
+                      ),
+                  },
+                  {
+                    key: "blank-template",
+                    title: "Download term template",
+                    description:
+                      "Create a clean term-attendance sheet for this class.",
+                    onClick: () =>
+                      runAttendanceExcelExport(
+                        "blank-template",
+                        downloadBlankAttendanceTemplate,
+                      ),
+                  },
+                ]
+          }
+        />
       </main>
     </PermissionGate>
   );
@@ -2029,6 +3251,8 @@ function TermTable({
 }
 
 function FilterSheet(props: {
+  search: string;
+  onSearch: (value: string) => void;
   entryMode: EntryMode;
   structureId: string;
   periodId: string;
@@ -2057,6 +3281,16 @@ function FilterSheet(props: {
       text="Choose the register type and working context."
       onClose={props.onClose}
     >
+      <div className="attendance-search-in-filter">
+        <label htmlFor="attendance-student-search">Search students</label>
+        <input
+          id="attendance-student-search"
+          type="search"
+          value={props.search}
+          onChange={(event) => props.onSearch(event.target.value)}
+          placeholder="Name or admission number"
+        />
+      </div>
       <div className="filter-section">
         <span className="filter-section-label">
           Register Type
@@ -2137,7 +3371,7 @@ function FilterSheet(props: {
               props.onClass(event.target.value)
             }
           >
-            <option value="">Select assigned class</option>
+            <option value="">Select class</option>
             {props.classes.map((row: any) => (
               <option
                 key={idOf(row.id)}
@@ -2242,6 +3476,8 @@ function MoreSheet(props: {
   onMarkAll: (status: AttendanceStatus) => void;
   onClearShown: () => void;
   onOpenBulkDays: () => void;
+  onImportExcel: () => void;
+  onExportExcel: () => void;
   onRefresh: () => void;
   onClose: () => void;
 }) {
@@ -2337,6 +3573,25 @@ function MoreSheet(props: {
           </div>
         </section>
       )}
+
+      <section className="more-section">
+        <span>Excel</span>
+        <div className="more-actions">
+          <button
+            type="button"
+            disabled={!props.canEdit}
+            onClick={props.onImportExcel}
+          >
+            Import attendance
+          </button>
+          <button
+            type="button"
+            onClick={props.onExportExcel}
+          >
+            Export / templates
+          </button>
+        </div>
+      </section>
 
       <section className="more-section">
         <span>System</span>
@@ -2480,17 +3735,23 @@ function Sheet({
   onClose: () => void;
 }) {
   return (
-    <div
-      className="ba-sheet-backdrop"
-      role="presentation"
-      onMouseDown={onClose}
+    <BranchViewportPortal
+      themeSourceClass=".attendance-workspace"
+      onEscape={onClose}
     >
-      <section
-        className="ba-sheet"
-        role="dialog"
-        aria-modal="true"
-        onMouseDown={(event) => event.stopPropagation()}
+      <div
+        className="ba-sheet-backdrop"
+        role="presentation"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
       >
+        <section
+          className="ba-sheet"
+          role="dialog"
+          aria-modal="true"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
         <div className="ba-sheet-head">
           <div>
             <h2>{title}</h2>
@@ -2505,9 +3766,10 @@ function Sheet({
           </button>
         </div>
 
-        {children}
-      </section>
-    </div>
+          {children}
+        </section>
+      </div>
+    </BranchViewportPortal>
   );
 }
 
@@ -3275,4 +4537,605 @@ button.status-dot-mini{cursor:pointer}
   }
 }
 
+
+/* -------------------------------------------------------
+   Excel interoperability additions
+-------------------------------------------------------- */
+.attendance-excel-stack{
+  display:grid;
+  gap:14px;
+  min-width:0;
+}
+.attendance-excel-context{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  align-items:center;
+}
+.attendance-excel-context strong,
+.attendance-excel-context span{
+  border:1px solid var(--ba-border);
+  border-radius:999px;
+  padding:5px 9px;
+  background:var(--ba-surface);
+  font-size:10px;
+}
+.attendance-excel-context strong{
+  color:var(--ba-primary);
+}
+.attendance-excel-note{
+  display:grid;
+  gap:4px;
+  padding:12px;
+  border:1px solid var(--ba-border);
+  border-radius:13px;
+  background:var(--ba-surface);
+}
+.attendance-excel-note strong{
+  font-size:11px;
+}
+.attendance-excel-note span{
+  color:var(--ba-muted);
+  font-size:10px;
+  line-height:1.5;
+}
+.attendance-excel-field{
+  display:grid;
+  gap:5px;
+}
+.attendance-excel-field>span{
+  font-size:9px;
+  font-weight:850;
+  color:var(--ba-muted);
+}
+.attendance-excel-field select,
+.attendance-excel-field input,
+.attendance-excel-register-range input{
+  width:100%;
+  min-height:40px;
+  border:1px solid var(--ba-border);
+  border-radius:11px;
+  padding:0 10px;
+  background:var(--ba-surface);
+  color:inherit;
+  font:inherit;
+  font-size:11px;
+  outline:0;
+}
+.attendance-excel-field small{
+  color:var(--ba-muted);
+  font-size:9px;
+  line-height:1.4;
+}
+.attendance-excel-field select:focus,
+.attendance-excel-field input:focus,
+.attendance-excel-register-range input:focus{
+  border-color:var(--ba-primary);
+}
+.attendance-excel-footer{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+}
+.attendance-excel-footer button{
+  min-height:38px;
+  border:1px solid var(--ba-border);
+  border-radius:11px;
+  padding:0 14px;
+  font:inherit;
+  font-size:10px;
+  font-weight:850;
+  cursor:pointer;
+}
+.attendance-excel-footer button.secondary{
+  background:var(--ba-surface);
+  color:var(--ba-text);
+}
+.attendance-excel-footer button.primary{
+  border-color:var(--ba-primary);
+  background:var(--ba-primary);
+  color:#fff;
+}
+.attendance-excel-footer button:disabled{
+  opacity:.45;
+  cursor:not-allowed;
+}
+.attendance-excel-result{
+  display:grid;
+  justify-items:center;
+  gap:8px;
+  padding:22px 10px;
+  text-align:center;
+}
+.attendance-excel-result-icon{
+  width:52px;
+  height:52px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:color-mix(in srgb,#22c55e 14%,transparent);
+  color:#15803d;
+  font-size:24px;
+  font-weight:900;
+}
+.attendance-excel-result h3{
+  margin:4px 0 0;
+  font-size:16px;
+}
+.attendance-excel-result p{
+  max-width:560px;
+  margin:0;
+  color:var(--ba-muted);
+  font-size:10px;
+  line-height:1.55;
+}
+.attendance-excel-result-grid{
+  width:min(100%,520px);
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin-top:8px;
+}
+.attendance-excel-result-grid>div{
+  padding:12px 8px;
+  border:1px solid var(--ba-border);
+  border-radius:12px;
+  background:var(--ba-surface);
+}
+.attendance-excel-result-grid strong{
+  display:block;
+  font-size:18px;
+}
+.attendance-excel-result-grid span{
+  display:block;
+  margin-top:2px;
+  color:var(--ba-muted);
+  font-size:9px;
+}
+.attendance-excel-register-range{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+}
+.attendance-excel-register-range label{
+  display:grid;
+  gap:4px;
+}
+.attendance-excel-register-range span{
+  color:var(--ba-muted);
+  font-size:9px;
+  font-weight:800;
+}
+@media(max-width:560px){
+  .attendance-excel-footer{
+    width:100%;
+  }
+  .attendance-excel-footer button{
+    flex:1;
+  }
+  .attendance-excel-result-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .attendance-excel-register-range{
+    grid-template-columns:1fr;
+  }
+}
+
+
+/* ============================================================
+   PORTAL-SAFE CENTERED MODALS
+   ============================================================ */
+.ba-sheet-backdrop,
+[class*="excel"][class*="backdrop"] {
+  top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+  right: 0 !important;
+  bottom: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+  left: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 10px !important;
+  overflow: hidden !important;
+  z-index: 58 !important;
+}
+
+.ba-sheet,
+[class*="excel"][class*="sheet"]:not([class*="backdrop"]),
+[class*="excel"][class*="modal"]:not([class*="backdrop"]) {
+  margin: 0 auto !important;
+  max-height: calc(100% - 4px) !important;
+  max-width: calc(100% - 2px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-bottom: 84px;
+}
+
+.ba-sheet-footer,
+.ba-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+}
+
+@media (min-width: 980px) {
+  .ba-sheet-backdrop,
+  [class*="excel"][class*="backdrop"] {
+    top: calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px)) !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: var(--portal-content-left, 0px) !important;
+    max-width: calc(100vw - var(--portal-content-left, 0px)) !important;
+    padding: 18px !important;
+    z-index: 80 !important;
+  }
+}
+/* ============================================================
+   EXCEL MODALS — MATCH BRANCH-ADMIN (BA) VISUAL LANGUAGE
+   Light/dark-safe surfaces, readable controls and strong contrast.
+   ============================================================ */
+.ba-page {
+  --excel-surface: var(--card-bg, var(--surface, #fff));
+  --excel-surface-2: var(--surface-2, color-mix(in srgb, var(--excel-surface) 93%, var(--text, #111827) 7%));
+  --excel-text: var(--text, #111827);
+  --excel-muted: var(--muted, color-mix(in srgb, var(--excel-text) 62%, transparent));
+  --excel-border: var(--border, color-mix(in srgb, var(--excel-text) 14%, transparent));
+  --excel-soft: color-mix(in srgb, var(--excel-text) 5%, transparent);
+}
+
+.ba-page [class^="excel-"],
+.ba-page [class*=" excel-"] {
+  color: var(--excel-text);
+}
+
+.ba-page [class*="excel-"][class*="sheet"]:not([class*="backdrop"]),
+.ba-page [class*="excel-"][class*="modal"]:not([class*="backdrop"]),
+.ba-page [class*="excel-"][class*="panel"],
+.ba-page [class*="excel-"][class*="card"] {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+  box-shadow: 0 22px 58px color-mix(in srgb, #0f172a 16%, transparent) !important;
+}
+
+.ba-page [class*="excel-"][class*="backdrop"] {
+  background: color-mix(in srgb, #0f172a 52%, transparent) !important;
+  backdrop-filter: blur(7px);
+}
+
+.ba-page [class^="excel-"] h1,
+.ba-page [class^="excel-"] h2,
+.ba-page [class^="excel-"] h3,
+.ba-page [class*=" excel-"] h1,
+.ba-page [class*=" excel-"] h2,
+.ba-page [class*=" excel-"] h3 {
+  color: var(--excel-text) !important;
+}
+
+.ba-page [class^="excel-"] p,
+.ba-page [class^="excel-"] small,
+.ba-page [class^="excel-"] label > span,
+.ba-page [class*=" excel-"] p,
+.ba-page [class*=" excel-"] small,
+.ba-page [class*=" excel-"] label > span {
+  color: var(--excel-muted) !important;
+}
+
+.ba-page [class^="excel-"] input,
+.ba-page [class^="excel-"] select,
+.ba-page [class^="excel-"] textarea,
+.ba-page [class*=" excel-"] input,
+.ba-page [class*=" excel-"] select,
+.ba-page [class*=" excel-"] textarea {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border: 1px solid var(--input-border, var(--excel-border)) !important;
+  box-shadow: none;
+}
+
+.ba-page [class^="excel-"] input:focus,
+.ba-page [class^="excel-"] select:focus,
+.ba-page [class^="excel-"] textarea:focus,
+.ba-page [class*=" excel-"] input:focus,
+.ba-page [class*=" excel-"] select:focus,
+.ba-page [class*=" excel-"] textarea:focus {
+  border-color: color-mix(in srgb, var(--ba-primary) 58%, var(--excel-border)) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ba-primary) 13%, transparent) !important;
+}
+
+.ba-page [class^="excel-"] button,
+.ba-page [class*=" excel-"] button {
+  color: var(--excel-text);
+  border-color: var(--excel-border);
+}
+
+.ba-page [class^="excel-"] button:not(.primary):not([class*="primary"]),
+.ba-page [class*=" excel-"] button:not(.primary):not([class*="primary"]) {
+  background: var(--excel-surface);
+}
+
+.ba-page [class^="excel-"] table,
+.ba-page [class*=" excel-"] table {
+  background: var(--excel-surface);
+  color: var(--excel-text);
+}
+
+.ba-page [class^="excel-"] th,
+.ba-page [class*=" excel-"] th {
+  background: var(--excel-surface-2) !important;
+  color: var(--excel-muted) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.ba-page [class^="excel-"] td,
+.ba-page [class*=" excel-"] td {
+  background: var(--excel-surface) !important;
+  color: var(--excel-text) !important;
+  border-color: var(--excel-border) !important;
+}
+
+/* Local Excel workflow blocks use the same BA surfaces. */
+.attendance-excel-stage,
+.attendance-excel-file-note,
+.attendance-excel-result,
+.attendance-excel-result-grid > span,
+.attendance-excel-result-errors > div {
+  color: var(--excel-text);
+}
+
+.attendance-excel-file-note,
+.attendance-excel-result-grid > span {
+  background: var(--excel-surface) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.attendance-excel-stage-head p,
+.attendance-excel-file-note span,
+.attendance-excel-result > p,
+.attendance-excel-result-grid small {
+  color: var(--excel-muted) !important;
+}
+
+.attendance-excel-context-grid select,
+.attendance-excel-context-grid input {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border-color: var(--input-border, var(--excel-border)) !important;
+}
+
+.attendance-excel-result-errors > div {
+  background: color-mix(in srgb, #ef4444 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, #ef4444 28%, var(--excel-border)) !important;
+}
+
+.attendance-excel-result-errors > div span {
+  color: color-mix(in srgb, #ef4444 82%, var(--excel-text)) !important;
+}
+
+/* File-picker / drop-zone styling, including dark mode. */
+.ba-page [class*="excel-"][class*="drop"],
+.ba-page [class*="excel-"][class*="picker"],
+.ba-page [class*="excel-"][class*="upload"] {
+  background: color-mix(in srgb, var(--ba-primary) 4%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ba-primary) 26%, var(--excel-border)) !important;
+  color: var(--excel-text) !important;
+}
+
+.ba-page [class*="excel-"][class*="drop"]:hover,
+.ba-page [class*="excel-"][class*="picker"]:hover,
+.ba-page [class*="excel-"][class*="upload"]:hover {
+  background: color-mix(in srgb, var(--ba-primary) 8%, var(--excel-surface)) !important;
+  border-color: color-mix(in srgb, var(--ba-primary) 48%, var(--excel-border)) !important;
+}
+
+/* Mapping and preview rows/cards. */
+.ba-page [class*="excel-"][class*="row"],
+.ba-page [class*="excel-"][class*="item"],
+.ba-page [class*="excel-"][class*="mapping"],
+.ba-page [class*="excel-"][class*="preview"] {
+  border-color: var(--excel-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ba-page [class*="excel-"][class*="backdrop"] {
+    background: rgba(2, 6, 23, .72) !important;
+  }
+}
+
+.attendance-excel-context,
+.attendance-excel-note,
+.attendance-excel-result,
+.attendance-excel-result-grid > div,
+.attendance-excel-register-range {
+  color: var(--excel-text);
+}
+
+.attendance-excel-context,
+.attendance-excel-note,
+.attendance-excel-result-grid > div {
+  background: var(--excel-surface) !important;
+  border-color: var(--excel-border) !important;
+}
+
+.attendance-excel-context span,
+.attendance-excel-note span,
+.attendance-excel-result p,
+.attendance-excel-result-grid span,
+.attendance-excel-field > span,
+.attendance-excel-field small,
+.attendance-excel-register-range span {
+  color: var(--excel-muted) !important;
+}
+
+.attendance-excel-field select,
+.attendance-excel-field input,
+.attendance-excel-register-range input {
+  background: var(--input-bg, var(--excel-surface)) !important;
+  color: var(--input-text, var(--excel-text)) !important;
+  border-color: var(--input-border, var(--excel-border)) !important;
+}
+
+
+/* ============================================================
+   V8.1 — compact attendance records, aligned with Students/Classes V5.
+   No gradient, repeated filter chips, floating shadows or hover translations.
+   ============================================================ */
+.attendance-workspace {
+  --ba-page-bg: var(--bg,var(--background,#f2f4f7));
+  --ba-surface: color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  --ba-surface-2: color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 88%,var(--text,#182235) 12%);
+  --ba-border: color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  display:block;
+  min-height:0;
+  padding:5px;
+  background:var(--ba-page-bg);
+}
+.attendance-workspace .attendance-work-row {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:7px;
+  min-width:0;
+  margin:0 0 9px;
+}
+.attendance-workspace .attendance-context {
+  flex:1 1 auto;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:5px 3px;
+  border:0;
+  background:transparent;
+  color:var(--ba-text);
+  font:inherit;
+  font-size:12px;
+  text-align:left;
+  cursor:pointer;
+}
+.attendance-workspace .attendance-context-class {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12px;
+  font-weight:800;
+}
+.attendance-workspace .attendance-context-period {
+  color:var(--ba-muted);
+  font-size:11px;
+  white-space:nowrap;
+}
+.attendance-workspace .attendance-progress {
+  flex:0 0 auto;
+  width:auto;
+  height:30px;
+  min-width:43px;
+  padding:0 8px;
+  border:1px solid var(--ba-border);
+  border-radius:8px;
+  box-shadow:none;
+  color:var(--ba-text);
+  background:var(--ba-surface-2);
+  font-size:11px;
+  font-weight:750;
+  cursor:pointer;
+}
+.attendance-workspace .ba-save-inline {
+  flex:0 0 auto;
+  height:31px;
+  padding:0 13px;
+  border-radius:8px;
+  background:var(--ba-primary);
+  border-color:var(--ba-primary);
+  color:var(--ba-primary-text,#fff);
+  font-size:11px;
+  box-shadow:none;
+}
+.attendance-workspace .ba-list {
+  grid-template-columns:repeat(1,minmax(0,1fr));
+  gap:9px;
+  margin:0;
+}
+.attendance-workspace .attendance-row,
+.attendance-workspace .term-row,
+.attendance-workspace .ba-table-card,
+.attendance-workspace .ba-analysis {
+  background:var(--ba-surface);
+  border:1px solid var(--ba-border);
+  border-radius:13px;
+  box-shadow:none;
+  transition:border-color .12s ease;
+}
+.attendance-workspace .attendance-row:hover,
+.attendance-workspace .term-row:hover {
+  transform:none;
+  box-shadow:none;
+}
+.attendance-workspace .attendance-row { padding:10px;gap:9px; }
+.attendance-workspace .attendance-main strong,
+.attendance-workspace .term-student strong {
+  font-size:12.5px;
+  font-weight:800;
+}
+.attendance-workspace .attendance-main small,
+.attendance-workspace .term-student small { font-size:10px; }
+.attendance-workspace .ba-avatar { width:36px;height:36px;border-radius:11px;box-shadow:none; }
+.attendance-workspace .attendance-status-actions button { height:30px;width:30px;border-radius:8px;font-size:11px; }
+.attendance-workspace .term-row { padding:10px; }
+.attendance-workspace .term-input-grid label span { font-size:10px;letter-spacing:0; }
+.attendance-workspace .term-input-grid input { font-size:12px; }
+.attendance-workspace .ba-table-card { padding:4px;overflow:hidden; }
+.attendance-workspace .ba-table-scroll { border-radius:10px; }
+.attendance-workspace .ba-table-scroll table { background:var(--ba-surface);font-size:11px; }
+.attendance-workspace .ba-table-scroll th {
+  position:sticky;top:0;z-index:2;
+  background:var(--ba-surface-2);
+  font-size:10px;
+  letter-spacing:.025em;
+}
+.attendance-workspace .ba-table-scroll td { background:transparent; font-size:11px; }
+.attendance-workspace .ba-table-scroll tbody tr:nth-child(even) { background:var(--ba-surface-2); }
+.attendance-workspace .ba-table-scroll tbody tr:hover td { background:transparent; }
+.attendance-workspace .ba-table-scroll td .ba-avatar { width:31px;height:31px; }
+.attendance-workspace .ba-analysis strong { color:var(--ba-text); }
+.attendance-search-in-filter { display:grid;gap:6px;margin:0 0 12px; }
+.attendance-search-in-filter label { color:var(--ba-muted);font-size:12px;font-weight:750; }
+.attendance-search-in-filter input {
+  width:100%;min-height:38px;padding:7px 10px;
+  border:1px solid var(--ba-border);border-radius:9px;
+  background:var(--ba-surface);color:var(--ba-text);
+  font-size:13px;outline:none;
+}
+/* Excel dialog stays on the shared Excel component's own theme layer. */
+@media(min-width:680px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(min-width:980px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+@media(min-width:1240px){
+  .attendance-workspace .ba-list { grid-template-columns:repeat(4,minmax(0,1fr)); }
+}
+@media(max-width:640px){
+  .attendance-workspace { padding:3px; }
+  .attendance-workspace .attendance-row { grid-template-columns:auto minmax(0,1fr) auto; }
+  .attendance-workspace .attendance-status-actions { grid-column:auto; }
+  .attendance-workspace .attendance-status-actions button { width:27px;height:27px; }
+  .attendance-workspace .attendance-context-period { font-size:10px; }
+  .attendance-workspace .attendance-context-class { font-size:11px; }
+  .attendance-workspace .term-input-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:370px){
+  .attendance-workspace .attendance-row {grid-template-columns:32px minmax(0,1fr);}
+  .attendance-workspace .attendance-status-actions {grid-column:1/-1;justify-content:flex-end;}
+}
+@media(prefers-reduced-motion:reduce){
+  .attendance-workspace * {transition:none !important;animation:none !important;}
+}
 `;

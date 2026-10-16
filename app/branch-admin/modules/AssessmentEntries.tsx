@@ -17,7 +17,7 @@
  * - ClassSubject -> AssessmentApplicability -> AssessmentStructureItems -> AssessmentEntry
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
@@ -674,136 +674,11 @@ export default function AssessmentEntries() {
   );
 
   /**
-   * Default assessment workspace, selected once per opened branch.
-   *
-   * Only a class subject with active enrolled students and directly enterable
-   * assessment items is considered ready. A matching current academic period
-   * is preferred, then existing score entries, then a stable alphabetical tie.
-   * Filtering, manually navigating back and switching subjects are NEVER
-   * overridden after the first automatic selection.
+   * V26 navigation: always enter at the root class cards on every screen size.
+   * Users can browse Class -> Subject, or use the shared Filter button to
+   * open a specific ClassSubject directly (V25 filter-owned rendering).
+   * No asynchronous data load may automatically move them into score entry.
    */
-  const initialAutoSelectionKeyRef = useRef("");
-  const defaultEntryOption = useMemo<ClassSubjectOption | null>(() => {
-    if (!classSubjectOptions.length || !students.length || !enrollments.length) {
-      return null;
-    }
-
-    const liveStudentIds = new Set(students.map((student) => idOf(student.id)));
-    const projectedCounts = new Map<string, number>();
-    const currentPeriodId = idOf(settings?.currentAcademicPeriodId);
-    const currentStructureId = idOf(settings?.currentAcademicStructureId);
-
-    const candidates = classSubjectOptions.flatMap((option) => {
-      const row = option.row as any;
-      const classId = idOf(row.classId);
-      const structureId = idOf(row.academicStructureId);
-      const periodId = idOf(row.academicPeriodId);
-      const applicability = applicabilityMap.get(option.id) as any;
-      const assessmentStructureId = idOf(applicability?.assessmentStructureId);
-
-      if (!option.ready || !classMap.has(classId) || !assessmentStructureId) {
-        return [];
-      }
-
-      let inputCount = projectedCounts.get(assessmentStructureId);
-      if (inputCount === undefined) {
-        const activeItems = items.filter((item: any) =>
-          isActiveRow(item) &&
-          sameId(item.assessmentStructureId, assessmentStructureId),
-        );
-        try {
-          inputCount = projectAssessmentEntryColumns({
-            items: activeItems,
-            structureId: assessmentStructureId,
-            existingEntries: entries.filter((entry: any) =>
-              !entry.isDeleted &&
-              sameId(entry.assessmentStructureId, assessmentStructureId),
-            ),
-          }).columns.length;
-        } catch {
-          inputCount = 0;
-        }
-        projectedCounts.set(assessmentStructureId, inputCount);
-      }
-      if (!inputCount) return [];
-
-      // Use the very same enrollment requirements as the score-entry roster.
-      const studentIds = new Set(
-        enrollments
-          .filter((enrollment: any) =>
-            !enrollment.isDeleted &&
-            enrollment.status === "active" &&
-            sameId(enrollment.classId, classId) &&
-            sameId(enrollment.academicStructureId, structureId) &&
-            (!periodId || sameId(enrollment.academicPeriodId, periodId)) &&
-            liveStudentIds.has(idOf(enrollment.studentId)),
-          )
-          .map((enrollment) => idOf(enrollment.studentId)),
-      );
-      if (!studentIds.size) return [];
-
-      const savedScoreCount = entries.filter((entry: any) =>
-        !entry.isDeleted &&
-        sameId(entry.classSubjectId, option.id) &&
-        studentIds.has(idOf(entry.studentId)) &&
-        entry.score !== null &&
-        entry.score !== undefined &&
-        entry.score !== "",
-      ).length;
-
-      const priority =
-        (currentPeriodId && periodId === currentPeriodId ? 10000 : 0) +
-        (currentStructureId && structureId === currentStructureId ? 5000 : 0) +
-        (savedScoreCount > 0 ? 1000 : 0) +
-        Math.min(studentIds.size, 200);
-
-      return [{ option, priority }];
-    });
-
-    candidates.sort(
-      (a, b) => b.priority - a.priority ||
-        a.option.display.localeCompare(b.option.display),
-    );
-    return candidates[0]?.option ?? null;
-  }, [
-    classSubjectOptions,
-    students,
-    enrollments,
-    applicabilityMap,
-    classMap,
-    items,
-    entries,
-    settings?.currentAcademicPeriodId,
-    settings?.currentAcademicStructureId,
-  ]);
-
-  useEffect(() => {
-    if (
-      accountLoading || settingsLoading || contextLoading || loading ||
-      !authenticated || !accountId || !schoolId || !branchId ||
-      !defaultEntryOption
-    ) return;
-
-    const workspaceKey = [accountId, schoolId, branchId].join(":");
-    if (initialAutoSelectionKeyRef.current === workspaceKey) return;
-
-    // If the user navigated manually first, do not take over their choice.
-    if (selectedClassId || classSubjectId !== "all" || filterClassId !== "all") {
-      initialAutoSelectionKeyRef.current = workspaceKey;
-      return;
-    }
-
-    initialAutoSelectionKeyRef.current = workspaceKey;
-    const nextClassId = idOf((defaultEntryOption.row as any).classId);
-    setSelectedClassId(nextClassId);
-    setFilterClassId(nextClassId);
-    setClassSubjectId(defaultEntryOption.id);
-    setSearch("");
-  }, [
-    accountLoading, settingsLoading, contextLoading, loading, authenticated,
-    accountId, schoolId, branchId, defaultEntryOption, selectedClassId,
-    classSubjectId, filterClassId,
-  ]);
 
   const selectedClass = useMemo(
     () =>
@@ -1850,9 +1725,7 @@ export default function AssessmentEntries() {
       )) return;
     }
 
-    // Applying filters counts as deliberate navigation; late sync must not
-    // overwrite this with the automatic opening choice.
-    initialAutoSelectionKeyRef.current = [accountId, schoolId, branchId].join(":");
+    // Filter Apply is an explicit navigation action, independent of class cards.
     setFilterClassId(next.classId);
     setFilterSubjectId(next.subjectId);
     setFilterPeriodId(next.periodId);

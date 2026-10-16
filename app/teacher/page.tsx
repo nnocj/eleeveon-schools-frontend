@@ -10,7 +10,7 @@ import Teacherremarks from "./modules/Teacherremarks";
 import Attendance from "./modules/Attendance";
 import Teacherstudents from "./modules/Teacherstudents";
 import {BranchReportZoomProvider,BranchReportZoomControls} from "../components/role-portals/shell/BranchReportPreview";
-import {useTeacherWorkspaceAccess} from "./hooks/useTeacherWorkspaceAccess";
+import {useTeacherWorkspaceAccess} from "../hooks/useTeacherWorkspaceAccess";
 
 type RouteProps={navigate:(key:string)=>void};
 type ReportView="reports"|"broadsheets"|"remarks"|"attendance";

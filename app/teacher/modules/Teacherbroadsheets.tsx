@@ -368,6 +368,11 @@ export default function Teacherbroadsheets() {
 
   const { loading: pageLoading, setLoading: setPageLoading } =
     useBackgroundLoader();
+  const [completedDataKey, setCompletedDataKey] = useState("");
+  const [dataLoadError, setDataLoadError] = useState(false);
+  const [autoScopeChecked, setAutoScopeChecked] = useState("");
+  const expectedDataKey = [accountId, schoolId, branchId, teacherAccess.teacherId, String(dataRevision)].join("::");
+  const dataLoadSettled = completedDataKey === expectedDataKey && !pageLoading;
   const [mode, setMode] = useState<BroadsheetMode>("subject-broadsheet");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -573,6 +578,7 @@ export default function Teacherbroadsheets() {
     if (!authenticated || !accountId || !schoolId || !branchId ||
         !teacherAccess.ready || !teacherAccess.permitted || !teacherId) {
       clearState();
+      setCompletedDataKey(expectedDataKey);
       setPageLoading(false);
       return;
     }
@@ -969,10 +975,13 @@ export default function Teacherbroadsheets() {
           },
         ),
       );
+      setDataLoadError(false);
     } catch (error) {
       console.error("Failed to load report data:", error);
       clearState();
+      setDataLoadError(true);
     } finally {
+      setCompletedDataKey(expectedDataKey);
       setPageLoading(false);
     }
   };
@@ -985,6 +994,7 @@ export default function Teacherbroadsheets() {
   useEffect(() => {
     automaticSubjectScopeRef.current = "";
     manualSubjectScopeRef.current = false;
+    setAutoScopeChecked("");
   }, [accountId, schoolId, branchId, teacherId]);
 
   useEffect(() => {
@@ -1295,11 +1305,12 @@ export default function Teacherbroadsheets() {
     if (filters.classSubjectId &&
         Array.isArray(output.subjectBroadsheet?.students) &&
         output.subjectBroadsheet.students.length > 0) {
-      automaticSubjectScopeRef.current = scope;
-      return;
-    }
+       automaticSubjectScopeRef.current = scope;
+       setAutoScopeChecked(scope);
+       return;
+     }
 
-    const enrollmentCounts = new Map<string, number>();
+     const enrollmentCounts = new Map<string, number>();
     studentEnrollments.forEach((row) => {
       if ((row as any).isDeleted || row.status !== "active") return;
       const key = [idOf(row.classId), idOf(row.academicStructureId), idOf(row.academicPeriodId)].join(":");
@@ -1356,8 +1367,9 @@ export default function Teacherbroadsheets() {
       try {
         const test = buildReportEngineOutput(dataset, candidate.filters, engineAssessmentSettings);
         if (Array.isArray(test.subjectBroadsheet?.students) && test.subjectBroadsheet.students.length > 0) {
-          automaticSubjectScopeRef.current = scope;
-          setFilters((prev) => ({
+           automaticSubjectScopeRef.current = scope;
+           setAutoScopeChecked(scope);
+           setFilters((prev) => ({
             ...prev,
             branchId: candidate.filters.branchId,
             academicStructureId: candidate.filters.academicStructureId,
@@ -1374,8 +1386,9 @@ export default function Teacherbroadsheets() {
     }
     // No populated candidate: retain the school's filter state and show the
     // existing empty report rather than pretending a result exists.
-    automaticSubjectScopeRef.current = scope;
-  }, [
+     automaticSubjectScopeRef.current = scope;
+     setAutoScopeChecked(scope);
+   }, [
     accountId, schoolId, branchId, pageLoading, academicPeriods, classSubjects,
     classes, studentEnrollments, assessmentEntries, dataset, filters,
     engineAssessmentSettings, output.subjectBroadsheet,
@@ -1718,13 +1731,26 @@ export default function Teacherbroadsheets() {
     more: () => setMoreOpen(true),
   });
 
+  const sheetHasContent = mode === "subject-broadsheet"
+    ? Boolean(output.subjectBroadsheet && Array.isArray(output.subjectBroadsheet.students) && output.subjectBroadsheet.students.length)
+    : mode === "class-broadsheet"
+      ? Boolean(output.classBroadsheet)
+      : Boolean(cumulativeOutput.annualBroadsheet);
+  const defaultSubjectPending = Boolean(
+    dataLoadSettled && !dataLoadError && mode === "subject-broadsheet" &&
+    !manualSubjectScopeRef.current &&
+    academicPeriods.length && classSubjects.length && studentEnrollments.length &&
+    !sheetHasContent &&
+    autoScopeChecked !== [accountId, schoolId, branchId, teacherId].join(":")
+  );
+
   const renderActiveReport = () => {
-    if (!hasCoreSetup) {
+    if (!hasCoreSetup || !sheetHasContent) {
       return (
         <Empty
           icon="📊"
-          title="No broadsheet available"
-          text="Add academic periods, classes, students, enrollments, class subjects, assessment entries, or computed results before generating broadsheets."
+          title="No broadsheet for this selection"
+          text="No prepared broadsheet is available for the selected class, subject and term. Use Filter to choose another assignment or academic period."
         />
       );
     }
@@ -1773,7 +1799,8 @@ export default function Teacherbroadsheets() {
     );
   };
 
-  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready || pageLoading) {
+  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready ||
+      !dataLoadSettled || defaultSubjectPending) {
     return (
       <State
         primary={primary}
@@ -1794,8 +1821,12 @@ export default function Teacherbroadsheets() {
   }
 
   if (!teacherAccess.permitted || !teacherId) {
-    return <State primary={primary} title="Teacher membership required"
+    return <ReportNotice primary={primary} icon="🔒" title="Teacher membership required"
       text="Choose an active teacher membership to view assigned Broadsheets." />;
+  }
+  if (dataLoadError) {
+    return <ReportNotice primary={primary} icon="⚠" title="Unable to load broadsheets"
+      text="The local academic data could not be loaded. Check synchronization or reopen Reports." />;
   }
 
   if (!schoolId || !branchId) {
@@ -1830,11 +1861,16 @@ export default function Teacherbroadsheets() {
     >
       <style>{css}</style>
 
-      <section className="ba-print-card">
-        <BranchReportPreview printZoneId={BROADSHEET_PRINT_ZONE_ID} naturalWidth={1122}>
-          {renderActiveReport()}
-        </BranchReportPreview>
-      </section>
+      {hasCoreSetup && sheetHasContent ? (
+        <section className="ba-print-card">
+          <BranchReportPreview printZoneId={BROADSHEET_PRINT_ZONE_ID} naturalWidth={1122}>
+            {renderActiveReport()}
+          </BranchReportPreview>
+        </section>
+      ) : (
+        <ReportNotice primary={primary} icon="📊" title="No broadsheet for this selection"
+          text="Choose another assigned class, subject or reporting period with available assessment results using Filter." />
+      )}
 
       {filterOpen && (
         <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setFilterOpen(false)}>
@@ -1882,6 +1918,18 @@ export default function Teacherbroadsheets() {
       )}
     </main>
   );
+}
+
+function ReportNotice({primary, icon, title, text}: {
+  primary: string; icon: string; title: string; text: string;
+}) {
+  return <>
+    <style>{css}</style>
+    <section className="teacher-report-notice" style={{"--ba-primary": primary} as React.CSSProperties} role="status">
+      <div className="teacher-report-notice-icon" aria-hidden="true">{icon}</div>
+      <h2>{title}</h2><p>{text}</p>
+    </section>
+  </>;
 }
 
 function State({
@@ -2246,6 +2294,19 @@ function MoreSheet({
 }
 
 const css = `
+/* Teacher Broadsheets V32: calm, legible empty and error states. */
+.teacher-report-notice { min-height:220px; width:min(560px,100%); margin:22px auto;
+ display:grid; place-items:center; align-content:center; gap:11px; padding:28px 22px;
+ border:1px solid var(--border,rgba(15,23,42,.12)); border-radius:22px;
+ background:var(--card-bg,var(--surface,#fff)); color:var(--text,#172033);
+ box-shadow:0 8px 24px rgba(15,23,42,.04); text-align:center; }
+.teacher-report-notice-icon { width:48px; height:48px; border-radius:16px;
+ display:grid; place-items:center; font-size:22px;
+ background:color-mix(in srgb,var(--ba-primary) 11%,var(--surface,#fff)); }
+.teacher-report-notice h2 { margin:0; font-size:17px; line-height:1.3; font-weight:800; }
+.teacher-report-notice p { margin:0; max-width:400px; font-size:13px; line-height:1.6;
+ color:var(--muted,#64748b); }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .ba-page {

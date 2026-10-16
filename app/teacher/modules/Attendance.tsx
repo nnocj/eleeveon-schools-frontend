@@ -20,7 +20,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {verifyTeacherClassAssignment} from "../hooks/useTeacherWorkspaceAccess";
+import {verifyTeacherClassAssignment} from "../../hooks/useTeacherWorkspaceAccess";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { useRouter } from "next/navigation";
 

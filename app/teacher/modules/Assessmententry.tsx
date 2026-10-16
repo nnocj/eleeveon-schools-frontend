@@ -18,7 +18,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useTeacherWorkspaceAccess, verifyTeacherSubjectAssignment, idsEqual } from "../hooks/useTeacherWorkspaceAccess";
+import { useTeacherWorkspaceAccess, verifyTeacherSubjectAssignment, idsEqual } from "../../hooks/useTeacherWorkspaceAccess";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 

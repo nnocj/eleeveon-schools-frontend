@@ -29,7 +29,7 @@ import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import {
   asId, idsEqual, useTeacherWorkspaceAccess, verifyTeacherStudentAssignment,
-} from "../hooks/useTeacherWorkspaceAccess";
+} from "../../hooks/useTeacherWorkspaceAccess";
 
 type ViewMode = "cards" | "table";
 type StudentView = {

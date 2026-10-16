@@ -25,7 +25,7 @@ import {
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
-import { asId, idsEqual, useTeacherWorkspaceAccess, verifyTeacherStudentAssignment } from "../hooks/useTeacherWorkspaceAccess";
+import { asId, idsEqual, useTeacherWorkspaceAccess, verifyTeacherStudentAssignment } from "../../hooks/useTeacherWorkspaceAccess";
 
 type StudentView = { row: Student; classLabel:string; classId:string };
 type ProfileForm = {

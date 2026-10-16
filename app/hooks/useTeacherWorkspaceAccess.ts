@@ -4,10 +4,10 @@
  * Account, school and branch come from the selected role workspace.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
-import { useActiveMembership } from "../../context/active-membership-context";
-import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
-import { db } from "../../lib/db/db";
+import { useBranchWorkspaceScope } from "./useBranchWorkspaceScope";
+import { useActiveMembership } from "../context/active-membership-context";
+import { useBranchTableRevision } from "./useBranchTableRevision";
+import { db } from "../lib/db/db";
 
 export const asId = (v: unknown) => v == null ? "" : String(v).trim();
 export const idsEqual = (a: unknown, b: unknown) => !!asId(a) && asId(a) === asId(b);

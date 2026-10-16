@@ -278,8 +278,13 @@ export default function Teacherreports() {
     useBackgroundLoader();
   const initialScopeAppliedRef = useRef<string>("");
   const [loadedScopeWorkspace, setLoadedScopeWorkspace] = useState("");
+  // Separate loading from scope selection: an initial false value from
+  // useBackgroundLoader must not render "no report" before Dexie has completed.
+  const [completedDataKey, setCompletedDataKey] = useState("");
+  const [dataLoadError, setDataLoadError] = useState(false);
   const teacherId = teacherAccess.teacherId;
   const teacherWorkspaceKey = [accountId, schoolId, branchId, teacherId].join(":");
+  const expectedDataKey = [teacherWorkspaceKey, String(dataRevision)].join("::");
   const [mode, setMode] = useState<ReportMode>("student-report");
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
@@ -473,6 +478,7 @@ export default function Teacherreports() {
     ) {
       clearState();
       setLoadedScopeWorkspace("");
+      setCompletedDataKey(expectedDataKey);
       setPageLoading(false);
       return;
     }
@@ -902,11 +908,14 @@ export default function Teacherreports() {
       setReportCardTemplateSettings(scopedReportCardTemplateSettings);
       setReportCardTemplateAssignments(scopedReportCardTemplateAssignments);
       setLoadedScopeWorkspace(teacherWorkspaceKey);
+      setDataLoadError(false);
     } catch (error) {
       console.error("Failed to load report data:", error);
       clearState();
       setLoadedScopeWorkspace("");
+      setDataLoadError(true);
     } finally {
+      setCompletedDataKey(expectedDataKey);
       setPageLoading(false);
     }
   };
@@ -995,6 +1004,10 @@ export default function Teacherreports() {
       availableReportScopes, loadedScopeWorkspace,
       currentAcademicStructureId, currentAcademicPeriodId]);
 
+
+  // A report's data fetch and automatic scope choice are two independent phases.
+  // Both must settle before the first preview or an empty-state is painted.
+  const dataLoadSettled = completedDataKey === expectedDataKey && !pageLoading;
 
   // All three selections are required, and their existing records must match.
   // A manual complete selection is allowed even before any assessments are entered.
@@ -1206,6 +1219,18 @@ export default function Teacherreports() {
       classes.length &&
       students.length,
   );
+
+  // On initial opening the data can be ready while the effect that picks the
+  // preferred class/term has not run yet. Do not show a configuration error.
+  const defaultScopePending = Boolean(
+    dataLoadSettled && !dataLoadError &&
+    loadedScopeWorkspace === teacherWorkspaceKey &&
+    availableReportScopes.length && !hasCompleteReportScope &&
+    initialScopeAppliedRef.current !== teacherWorkspaceKey
+  );
+  const reportHasContent = mode === "class-reports"
+    ? output.classReports.length > 0
+    : Boolean(output.studentReport);
 
   const reportBranch = useMemo(() => {
     return (
@@ -1551,7 +1576,8 @@ export default function Teacherreports() {
     );
   };
 
-  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready || pageLoading) {
+  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready ||
+      !dataLoadSettled || defaultScopePending) {
     return (
       <State
         primary={primary}
@@ -1574,6 +1600,10 @@ export default function Teacherreports() {
   if (!teacherAccess.permitted) {
     return <State primary={primary} title="Teacher workspace required"
       text="Open an assigned teacher membership to view report cards." />;
+  }
+  if (dataLoadError) {
+    return <ReportNotice primary={primary} icon="⚠" title="Unable to load report cards"
+      text="The local report data could not be loaded. Check the device's data and synchronization, then reopen Reports." />;
   }
 
   if (!schoolId || !branchId) {
@@ -1619,12 +1649,14 @@ export default function Teacherreports() {
       <style>{css}</style>
 
       {!classes.length ? (
-        <section className="ba-v6-scope-picker report-no-print" aria-label="No assigned classes">
-          <p>No assigned classes are available for Report Cards in this branch.
-             Ask your school administrator to assign you as a subject teacher or class teacher.</p>
-        </section>
+        <ReportNotice primary={primary} icon="📚" title="No assigned classes"
+          text="No Report Cards are available for your teacher assignments in this branch. Ask a school administrator to assign a class or subject." inline />
       ) : !hasCompleteReportScope && (
-        <section className="ba-v6-scope-picker report-no-print" aria-label="Select reporting context">
+        <section className="ba-v6-scope-picker teacher-report-picker report-no-print" aria-label="Select reporting context">
+          <div className="teacher-report-picker-intro">
+            <strong>Select a reporting class and term</strong>
+            <span>Choose an academic structure, term and an assigned class to open its report cards.</span>
+          </div>
           <label>
             <span>Academic structure</span>
             <select value={filters.academicStructureId || ""} onChange={(event) =>
@@ -1660,13 +1692,18 @@ export default function Teacherreports() {
           </label>
         </section>
       )}
-      {hasCompleteReportScope && (
-        <section className="ba-print-card">
-          <BranchReportPreview printZoneId={STUDENT_REPORT_PRINT_ZONE_ID} naturalWidth={794}>
-          {renderActiveReport()}
-        </BranchReportPreview>
-        </section>
-      )}
+       {hasCompleteReportScope && (
+         hasCoreSetup && reportHasContent ? (
+           <section className="ba-print-card">
+             <BranchReportPreview printZoneId={STUDENT_REPORT_PRINT_ZONE_ID} naturalWidth={794}>
+               {renderActiveReport()}
+             </BranchReportPreview>
+           </section>
+         ) : (
+           <ReportNotice primary={primary} icon="📄" title="No report cards for this selection"
+             text="This class and term have no report available yet. Use Filter to choose another assigned class or reporting period." inline />
+         )
+       )}
 
       {filterOpen && (
         <BranchViewportPortal themeSourceClass=".student-reports-page" onEscape={() => setFilterOpen(false)}>
@@ -1704,6 +1741,19 @@ export default function Teacherreports() {
       )}
     </main>
   );
+}
+
+function ReportNotice({primary, icon, title, text, inline = false}: {
+  primary: string; icon: string; title: string; text: string; inline?: boolean;
+}) {
+  return <>
+    <style>{css}</style>
+    <section className={`teacher-report-notice ${inline ? "is-inline" : ""}`}
+      style={{"--ba-primary": primary} as React.CSSProperties} role="status">
+      <div className="teacher-report-notice-icon" aria-hidden="true">{icon}</div>
+      <h2>{title}</h2><p>{text}</p>
+    </section>
+  </>;
 }
 
 function State({
@@ -2042,6 +2092,24 @@ function MoreSheet({
 }
 
 const css = `
+/* Teacher Reports V32: stable, non-flashing empty/error presentation. */
+.teacher-report-picker-intro {grid-column:1/-1; display:grid; gap:4px; padding:2px 2px 5px;}
+.teacher-report-picker-intro strong {font-size:14px;font-weight:850;}
+.teacher-report-picker-intro span {font-size:12px;line-height:1.5;color:var(--muted,#64748b);}
+.teacher-report-picker {margin:10px 0;}
+.teacher-report-notice { min-height:220px; width:min(560px,100%); margin:22px auto;
+ display:grid; place-items:center; align-content:center; gap:11px; padding:28px 22px;
+ border:1px solid var(--border,rgba(15,23,42,.12)); border-radius:22px;
+ background:var(--card-bg,var(--surface,#fff)); color:var(--text,#172033);
+ box-shadow:0 8px 24px rgba(15,23,42,.04); text-align:center; }
+.teacher-report-notice.is-inline { width:min(680px,100%); }
+.teacher-report-notice-icon { width:48px; height:48px; border-radius:16px;
+ display:grid; place-items:center; font-size:22px;
+ background:color-mix(in srgb,var(--ba-primary) 11%,var(--surface,#fff)); }
+.teacher-report-notice h2 { margin:0; font-size:17px; line-height:1.3; font-weight:800; }
+.teacher-report-notice p { margin:0; max-width:400px; font-size:13px; line-height:1.6;
+ color:var(--muted,#64748b); }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .ba-page {

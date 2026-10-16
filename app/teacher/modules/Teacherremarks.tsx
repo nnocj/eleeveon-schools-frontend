@@ -21,7 +21,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import {verifyTeacherClassAssignment} from "../hooks/useTeacherWorkspaceAccess";
+import {verifyTeacherClassAssignment} from "../../hooks/useTeacherWorkspaceAccess";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";

@@ -93,7 +93,7 @@ import {
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
-import { useTeacherWorkspaceAccess } from "../hooks/useTeacherWorkspaceAccess";
+import { useTeacherWorkspaceAccess } from "../../hooks/useTeacherWorkspaceAccess";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 const TemplateAwareStudentReportCard =

@@ -118,6 +118,7 @@ import {
 } from "../../components/maps";
 import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
 
+import { resolveAdmissionNumber } from "../../lib/students/admissionNumbers";
 import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
 import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
 import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
@@ -2509,6 +2510,10 @@ export default function StudentsPage() {
         ? rows.find((row: any) => sameId(row.id, form.id))
         : undefined;
 
+      const resolvedAdmission = !form.id
+        ? await resolveAdmissionNumber({ accountId, schoolId, branchId, supplied: form.admissionNumber })
+        : { admissionNumber: form.admissionNumber.trim() || undefined, provisional: false };
+
       const payload: Partial<Student> = {
         accountId,
         schoolId: schoolId,
@@ -2519,7 +2524,7 @@ export default function StudentsPage() {
         currentClassId: form.currentClassId
           ? String(form.currentClassId)
           : undefined,
-        admissionNumber: form.admissionNumber.trim() || undefined,
+        admissionNumber: resolvedAdmission.admissionNumber,
         fullName: form.fullName.trim(),
         gender: form.gender.trim() || undefined,
         age: form.age === "" ? undefined : Number(form.age),

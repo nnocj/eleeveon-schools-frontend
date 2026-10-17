@@ -66,7 +66,7 @@ import {
 
 import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
 import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
-import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
+import AssessmentExcelChangePreview, { assessmentExcelPreviewSummary } from "../../lib/excel/assessments/AssessmentExcelChangePreview";
 import ExcelImportSheet, {
   type ExcelImportStep,
 } from "../../components/excel/ExcelImportSheet";
@@ -393,6 +393,7 @@ export default function AssessmentEntries() {
   const [excelValidation, setExcelValidation] = useState<AssessmentExcelValidationResult | null>(null);
   const [excelImportResult, setExcelImportResult] = useState<AssessmentExcelImportResult | null>(null);
   const [excelBusy, setExcelBusy] = useState(false);
+  const [approveAssessmentExcelClear, setApproveAssessmentExcelClear] = useState(false);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -1455,6 +1456,7 @@ export default function AssessmentEntries() {
   };
 
   const resetAssessmentExcelImport = () => {
+    setApproveAssessmentExcelClear(false);
     setExcelFile(null);
     setExcelWorkbook(null);
     setExcelSheetName("");
@@ -1552,6 +1554,7 @@ export default function AssessmentEntries() {
       },
     });
 
+    setApproveAssessmentExcelClear(false);
     setExcelParsedImport(parsed);
     setExcelValidation(validation);
     setExcelImportStep("preview");
@@ -1638,8 +1641,20 @@ export default function AssessmentEntries() {
     const context = ensureAssessmentExcelContext();
     if (!context || !excelValidation || !excelParsedImport) return;
 
-    if (!excelValidation.validRows) {
-      showToast("error", "There are no valid score cells ready to import.");
+    const plan = assessmentExcelPreviewSummary(
+      excelValidation,
+      excelParsedImport.kind === "eleeveon-assessment",
+    );
+    if (plan.fatal.length) {
+      showToast("error", "This workbook has a blocking context or structure error.");
+      return;
+    }
+    if (plan.clear > 0 && !approveAssessmentExcelClear) {
+      showToast("error", "Review and approve clearing existing scores first.");
+      return;
+    }
+    if (!plan.totalChanges) {
+      showToast("info", "No score changes are required.");
       return;
     }
 
@@ -1652,7 +1667,7 @@ export default function AssessmentEntries() {
         {
           updateExisting: true,
           clearExistingWhenBlank:
-            excelParsedImport.kind === "eleeveon-assessment",
+            excelParsedImport.kind === "eleeveon-assessment" && approveAssessmentExcelClear,
           lockedEntrySeverity: "error",
           allowNameMatch: true,
         },
@@ -2258,11 +2273,10 @@ export default function AssessmentEntries() {
                 <button
                   type="button"
                   className="primary"
-                  disabled={!excelValidation?.validRows}
+                  disabled={!excelValidation || !!assessmentExcelPreviewSummary(excelValidation, excelParsedImport?.kind === "eleeveon-assessment").fatal.length || !assessmentExcelPreviewSummary(excelValidation, excelParsedImport?.kind === "eleeveon-assessment").totalChanges || (assessmentExcelPreviewSummary(excelValidation, excelParsedImport?.kind === "eleeveon-assessment").clear > 0 && !approveAssessmentExcelClear)}
                   onClick={commitAssessmentExcelImport}
                 >
-                  Import {excelValidation?.validRows || 0} score cell
-                  {(excelValidation?.validRows || 0) === 1 ? "" : "s"}
+                  Apply reviewed changes
                 </button>
               </>
             )}
@@ -2391,26 +2405,18 @@ export default function AssessmentEntries() {
         )}
 
         {excelImportStep === "preview" && excelValidation && (
-          <ExcelImportPreview
-            validation={excelValidation}
-            title="Assessment import preview"
-            description="Locked or invalid score cells are not changed. Controlled Eleeveon workbooks may clear an existing unlocked score when its cell is blank; external workbooks never clear existing scores from blanks."
-            columns={[
-              { key: "studentName", label: "Student" },
-              { key: "assessmentLabel", label: "Assessment" },
-              {
-                key: "score",
-                label: "Score",
-                render: (data: any) =>
-                  data.blank ? "Blank" : `${data.score ?? "—"} / ${data.maxScore}`,
-              },
-              {
-                key: "assessmentStructureItemId",
-                label: "Item ID",
-              },
-            ]}
-            maxRows={40}
-          />
+          <section style={{ display: "grid", gap: 14 }}>
+            <AssessmentExcelChangePreview
+              validation={excelValidation}
+              controlledWorkbook={excelParsedImport?.kind === "eleeveon-assessment"}
+            />
+            {assessmentExcelPreviewSummary(excelValidation, excelParsedImport?.kind === "eleeveon-assessment").clear > 0 && (
+              <label style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: 12, border: "1px solid #d97706", borderRadius: 9 }}>
+                <input type="checkbox" checked={approveAssessmentExcelClear} onChange={(event) => setApproveAssessmentExcelClear(event.target.checked)} disabled={excelBusy} />
+                <span>I have reviewed the blank cells and explicitly approve clearing the indicated existing assessment scores.</span>
+              </label>
+            )}
+          </section>
         )}
 
         {excelImportStep === "result" && excelImportResult && (

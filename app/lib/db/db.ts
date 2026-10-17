@@ -741,6 +741,7 @@ export interface LocalAppUser {
   active: boolean;
   lastLoginAt?: string | null;
   preferredLocale?: string | null;
+  preferredTheme?: "light" | "dark" | "system" | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -4081,7 +4082,19 @@ export interface NotificationTemplate extends BaseSync {
 // SETTINGS
 // ======================================================
 
+export type AdmissionNumberMode = "manual" | "automatic" | "automatic_or_manual";
+
+export interface AdmissionNumberConfiguration {
+  mode: AdmissionNumberMode;
+  prefix: string;
+  separator: string;
+  nextSequence: number;
+  padding: number;
+  scope: "branch";
+}
+
 export interface SchoolBranchSetting extends BaseSync {
+  admissionNumbers?: AdmissionNumberConfiguration;
   schoolId: string;
   branchId: string;
 

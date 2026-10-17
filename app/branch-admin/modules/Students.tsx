@@ -2525,6 +2525,14 @@ export default function StudentsPage() {
           ? String(form.currentClassId)
           : undefined,
         admissionNumber: resolvedAdmission.admissionNumber,
+        // The offline candidate becomes authoritative only after /sync/push
+        // confirms it. Preserve the last confirmed identity on edits.
+        admissionNumberProvisional: form.id
+          ? Boolean((existing as any)?.admissionNumberProvisional)
+          : resolvedAdmission.provisional,
+        admissionNumberConfirmed: form.id
+          ? Boolean((existing as any)?.admissionNumberConfirmed)
+          : false,
         fullName: form.fullName.trim(),
         gender: form.gender.trim() || undefined,
         age: form.age === "" ? undefined : Number(form.age),

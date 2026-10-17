@@ -46,6 +46,7 @@ import {
 
 import { registerSyncDevice } from "./syncDevices";
 import { serializeSyncPayload } from "./prepareSyncData";
+import { applyAdmissionSyncConfirmations } from "../students/applyAdmissionSyncConfirmations";
 
 import {
   integrityReason,
@@ -402,8 +403,25 @@ async function sendPushBatch(
       body: { accountId, deviceId, records: batch },
     });
 
-        for (const result of response.results || []) {
+    for (const result of response.results || []) {
       await applyPushResult(result, accountId, deviceId, accumulator);
+    }
+
+    // Apply authoritative student admission numbers after the normal sync
+    // success metadata has been saved. Keep confirmation errors separate from
+    // transport failures so an acknowledged batch is never pushed again merely
+    // because a local confirmation write failed.
+    if ((response.results || []).some((result) => result.tableName === "students" && result.ok)) {
+      try {
+        await applyAdmissionSyncConfirmations(
+          response.results || [],
+          accountId,
+        );
+      } catch (error) {
+        accumulator.errors.push(
+          `[sync:admissions] Could not store server-confirmed admission numbers locally: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
 
     const returnedKeys = new Set(

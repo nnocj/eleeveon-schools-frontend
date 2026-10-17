@@ -30,6 +30,8 @@ import { BranchReportZoomProvider, BranchReportZoomControls } from "../component
 
 // Existing academic setup editors; included in one Setup workspace.
 import AcademicSystems from "./modules/AcademicSystems";
+import Organizations from "./modules/Organizations";
+import ReportCardSettings from "./modules/ReportCardSettings";
 import CurriculumSystems from "./modules/CurriculumSystems";
 import SubjectSetup from "./modules/SubjectSetup";
 import AssessmentSystems from "./modules/AssessmentSystems";
@@ -335,47 +337,68 @@ type SetupSection = {
 
 const SETUP_SECTIONS: SetupSection[] = [
   {
-    title: "Academic Period & Branch",
-    description: "Academic years, terms and branch details",
+    title: "Organizations",
+    description: "Set up the organizations and academic divisions of this branch",
     editors: [
-      { key: "academicSystems", label: "Academic periods", Component: AcademicSystems },
-      { key: "branchSettings", label: "Branch settings", Component: Branchsettings },
+      { key: "organizations", label: "Organizations", Component: Organizations },
     ],
   },
   {
-    title: "Curriculum & Subjects",
-    description: "Curricula and available subjects",
+    title: "Academic System",
+    description: "Configure academic years, terms and periods",
+    editors: [
+      { key: "academicSystems", label: "Academic systems", Component: AcademicSystems },
+    ],
+  },
+  {
+    title: "Classes",
+    description: "Create and manage classes in this branch",
+    editors: [
+      { key: "classes", label: "Classes", Component: Classes },
+    ],
+  },
+  {
+    title: "Curriculum and Subjects",
+    description: "Configure curricula and their available subjects",
     editors: [
       { key: "curriculumSystems", label: "Curriculum", Component: CurriculumSystems },
       { key: "subjectSetup", label: "Subjects", Component: SubjectSetup },
     ],
   },
   {
-    title: "Assessment Structure",
-    description: "Assessment items, weights and applicability",
+    title: "Assessment System",
+    description: "Set up assessment structures, items and applicability",
     editors: [
       { key: "assessmentSystems", label: "Assessment structure", Component: AssessmentSystems },
       { key: "assessmentApplicability", label: "Applicability", Component: Assessmentapplicability },
     ],
   },
   {
-    title: "Grading & Calculations",
-    description: "Grade rules and grading schemes",
+    title: "Grading System",
+    description: "Manage grading structures, grades and rules",
     editors: [
       { key: "gradingSystems", label: "Grading rules", Component: GradingSystems },
     ],
   },
   {
     title: "Report Configuration",
-    description: "Report formats and remarks are available in Reports while we consolidate the template settings.",
-    editors: [],
+    description: "Configure report cards and reporting preferences",
+    editors: [
+      { key: "reportCardSettings", label: "Report card settings", Component: ReportCardSettings },
+    ],
   },
   {
-    title: "Access & Preferences",
-    description: "Staff access and personal display preferences",
+    title: "Branch Preferences",
+    description: "Manage branch identity, branding and operational preferences",
+    editors: [
+      { key: "branchSettings", label: "Branch settings", Component: Branchsettings },
+    ],
+  },
+  {
+    title: "Access",
+    description: "Manage users, roles and access permissions",
     editors: [
       { key: "usersRoles", label: "Users & roles", Component: Usersroles },
-      { key: "localSettings", label: "Display settings", Component: BranchAdminLocalSettingsPage },
     ],
   },
 ];
@@ -581,6 +604,8 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   reportRemarks: ReportRemarks,
   studentAttendance: StudentAttendance,
   academicSystems: AcademicSystems,
+  organizations: Organizations,
+  reportCardSettings: ReportCardSettings,
   curriculumSystems: CurriculumSystems,
   subjectSetup: SubjectSetup,
   assessmentSystems: AssessmentSystems,

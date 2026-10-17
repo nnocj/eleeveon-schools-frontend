@@ -17,6 +17,8 @@
  * - student-specific interpretation remains here.
  */
 
+import { normalizeSchoolDate } from "../excelDate";
+
 import type {
   ExcelColumnMapping,
   ExcelFieldDefinition,
@@ -150,91 +152,9 @@ function normalizeStatus(value: unknown) {
 }
 
 function normalizeDate(value: unknown) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return undefined;
-  }
-
-  if (value instanceof Date) {
-    if (!Number.isFinite(value.getTime())) {
-      return undefined;
-    }
-
-    return value
-      .toISOString()
-      .slice(0, 10);
-  }
-
-  /**
-   * Excel serial date fallback.
-   *
-   * Typical modern Excel serial dates fall well inside
-   * this range.
-   */
-  if (typeof value === "number") {
-    if (
-      value > 20_000 &&
-      value < 80_000
-    ) {
-      const excelEpoch = Date.UTC(
-        1899,
-        11,
-        30,
-      );
-
-      const parsed = new Date(
-        excelEpoch +
-          value * 86_400_000,
-      );
-
-      if (
-        Number.isFinite(
-          parsed.getTime(),
-        )
-      ) {
-        return parsed
-          .toISOString()
-          .slice(0, 10);
-      }
-    }
-  }
-
-  const raw = text(value);
-
-  if (!raw) {
-    return undefined;
-  }
-
-  /**
-   * Already normalized ISO date.
-   */
-  if (
-    /^\d{4}-\d{2}-\d{2}$/.test(raw)
-  ) {
-    return raw;
-  }
-
-  const parsed = new Date(raw);
-
-  if (
-    !Number.isFinite(
-      parsed.getTime(),
-    )
-  ) {
-    /**
-     * Preserve the original text.
-     *
-     * The validator is responsible for reporting that
-     * it could not be interpreted as a date.
-     */
-    return raw;
-  }
-
-  return parsed
-    .toISOString()
-    .slice(0, 10);
+  const parsed = normalizeSchoolDate(value);
+  // Invalid/ambiguous originals are preserved for the validator to flag.
+  return parsed.status === "valid" ? parsed.iso : parsed.original || undefined;
 }
 
 // ======================================================

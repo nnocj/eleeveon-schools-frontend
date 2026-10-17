@@ -235,6 +235,7 @@ type ReportTemplateReportType =
   | "class_broadsheet"
   | "annual_broadsheet";
 type SettingsSection =
+  | "admissionNumbers"
   | "academic"
   | "school"
   | "branch"
@@ -2428,7 +2429,7 @@ void softDeleteLocal;
 // COMPONENT
 // ======================================================
 
-export default function Branchsettings() {
+export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" | "reports" }) {
   const dataRevision = useDataRevision();
 
   const accountContext = useAccount() as any;
@@ -2482,6 +2483,9 @@ export default function Branchsettings() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [sectionOpen, setSectionOpen] = useState<SettingsSection | null>(null);
+  const [admissionDraft, setAdmissionDraft] = useState({ mode: "manual" as "manual" | "automatic" | "automatic_or_manual", prefix: "", separator: "-", nextSequence: 1, padding: 3, scope: "branch" as const });
+  const [savingAdmission, setSavingAdmission] = useState(false);
+
 
   const [school, setSchool] = useState<School | null>(null);
   const [branch, setBranch] = useState<Branch | null>(null);
@@ -2492,6 +2496,12 @@ export default function Branchsettings() {
   const [settingsRow, setSettingsRow] = useState<SchoolBranchSetting | null>(
     null,
   );
+  useEffect(() => {
+    if (!settingsRow) return;
+    const cfg = (settingsRow as any).admissionNumbers;
+    if (cfg) setAdmissionDraft({ mode: cfg.mode || "manual", prefix: cfg.prefix || "", separator: cfg.separator ?? "-", nextSequence: Math.max(1, Number(cfg.nextSequence) || 1), padding: Math.max(1, Number(cfg.padding) || 3), scope: "branch" });
+  }, [settingsRow]);
+
   const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
     [],
   );
@@ -4409,6 +4419,25 @@ export default function Branchsettings() {
     }
   };
 
+  const saveAdmissionNumbers = async () => {
+    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) return;
+    try {
+      setSavingAdmission(true);
+      const existing = (await db.schoolBranchSettings.where("branchId").equals(String(selectedBranchId)).toArray()).find((x: any) => String(x.schoolId) === String(selectedSchoolId) && !x.isDeleted);
+      if (!existing) throw new Error("Save Branch Settings once before configuring admission numbers.");
+      const previous = (existing as any).admissionNumbers;
+      const next = { ...admissionDraft, prefix: admissionDraft.prefix.trim().toUpperCase(), nextSequence: Math.max(Number(previous?.nextSequence) || 1, Number(admissionDraft.nextSequence) || 1), padding: Math.min(12, Math.max(1, Math.floor(admissionDraft.padding))) };
+      await updateLocal("schoolBranchSettings", existing.id, { admissionNumbers: next } as any);
+      publishBranchSettingsSaved({ accountId: selectedAccountId, schoolId: cleanId(selectedSchoolId), branchId: cleanId(selectedBranchId) });
+      setAdmissionDraft(next);
+      await load();
+      setSectionOpen(null);
+      setToast({ tone: "success", message: "Admission number settings saved." });
+    } catch (error: any) {
+      setToast({ tone: "error", message: error?.message || "Could not save admission number settings." });
+    } finally { setSavingAdmission(false); }
+  };
+
   const saveAll = async () => {
     if (!requireTenant()) return;
 
@@ -4892,6 +4921,14 @@ export default function Branchsettings() {
         tone: branchForm.name ? "green" : "red",
       },
       {
+        key: "admissionNumbers" as SettingsSection,
+        icon: "#",
+        title: "Admission Numbers",
+        subtitle: admissionDraft.mode === "manual" ? "Manual entry" : "Automatic numbering",
+        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${String(admissionDraft.nextSequence).padStart(admissionDraft.padding,"0")}`,
+        tone: "blue",
+      },
+      {
         key: "appearance" as SettingsSection,
         icon: "🎨",
         title: "Appearance",
@@ -4995,14 +5032,18 @@ export default function Branchsettings() {
       },
     ];
 
-    if (!searchTerm) return sections;
+    const allowed = view === "reports"
+      ? ["reportMedia", "reportTemplates"]
+      : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials"];
+    const chosen = sections.filter((section) => allowed.includes(section.key));
+    if (!searchTerm) return chosen;
 
-    return sections.filter((section) =>
+    return chosen.filter((section) =>
       `${section.title} ${section.subtitle} ${section.detail}`
         .toLowerCase()
         .includes(searchTerm),
     );
-  }, [activePeriod, activeStructure, branchForm, form, schoolForm, searchTerm]);
+  }, [activePeriod, activeStructure, branchForm, form, schoolForm, searchTerm, view, admissionDraft]);
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
     return (
@@ -5206,6 +5247,7 @@ export default function Branchsettings() {
 
       {moreOpen && (
         <MoreSheet
+          view={view}
           savingAll={savingAll}
           onSave={async () => {
             setMoreOpen(false);
@@ -5221,6 +5263,26 @@ export default function Branchsettings() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+      )}
+
+      {sectionOpen === "admissionNumbers" && (
+        <div className="ba-sheet-backdrop" role="dialog" aria-modal="true" aria-label="Admission number settings">
+          <section className="ba-sheet">
+            <div className="ba-sheet-head"><div><h2>Admission Numbers</h2><p>Numbering rules for new student records in this branch.</p></div><button type="button" onClick={() => setSectionOpen(null)} aria-label="Close">✕</button></div>
+            <div className="ba-form compact">
+              <Field label="Numbering mode"><select value={admissionDraft.mode} onChange={e => setAdmissionDraft(p => ({...p, mode: e.target.value as any}))}><option value="manual">Manual only</option><option value="automatic">Generate automatically</option><option value="automatic_or_manual">Automatic, allow manual entry</option></select></Field>
+              {admissionDraft.mode !== "manual" && <>
+                <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
+                <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
+                <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
+                <Field label="Next number"><input type="number" min={1} value={admissionDraft.nextSequence} onChange={e => setAdmissionDraft(p => ({...p,nextSequence:Math.max(1, Number(e.target.value)||1)}))}/></Field>
+                <p>Preview: <strong>{admissionDraft.prefix.trim().toUpperCase()}{admissionDraft.separator}{String(admissionDraft.nextSequence).padStart(admissionDraft.padding,"0")}</strong></p>
+              </>}
+              <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
+            </div>
+            <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={saveAdmissionNumbers}>{savingAdmission ? "Saving..." : "Save"}</button></div>
+          </section>
+        </div>
       )}
 
       {sectionOpen === "academic" && (
@@ -5746,12 +5808,14 @@ function AcademicFilterSheet({
 }
 
 function MoreSheet({
+  view = "branch",
   savingAll,
   onSave,
   onRefresh,
   openSection,
   onClose,
 }: {
+  view?: "branch" | "reports";
   savingAll: boolean;
   onSave: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
@@ -5782,6 +5846,7 @@ function MoreSheet({
       label: "Branch Identity",
       note: "Branch name, code, contact and media",
     },
+    { key: "admissionNumbers", icon: "#", label: "Admission Numbers", note: "Sequence and prefix" },
     {
       key: "appearance",
       icon: "🎨",
@@ -5846,7 +5911,7 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          {sections.map((section) => (
+          {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials"]).includes(s.key)).map((section) => (
             <button
               key={section.key}
               type="button"
@@ -6290,6 +6355,34 @@ function BranchSheet({
   );
 }
 
+function PersonalThemePreference() {
+  const [mode, setMode] = React.useState<"light" | "dark" | "system">("system");
+  React.useEffect(() => {
+    try {
+      const workspace = JSON.parse(localStorage.getItem("eleeveon_open_workspace") || "{}");
+      const membership = workspace.membership || {};
+      const userId = membership.userId || membership.appUserId || workspace.userId;
+      const accountId = membership.accountId || workspace.accountId;
+      if (!userId || !accountId) return;
+      const saved = localStorage.getItem(`eleeveon_theme:${accountId}:${userId}`);
+      if (saved === "light" || saved === "dark" || saved === "system") setMode(saved);
+    } catch {}
+  }, []);
+  const change = (value: "light" | "dark" | "system") => {
+    setMode(value);
+    try {
+      const workspace = JSON.parse(localStorage.getItem("eleeveon_open_workspace") || "{}");
+      const membership = workspace.membership || {};
+      const userId = membership.userId || membership.appUserId || workspace.userId;
+      const accountId = membership.accountId || workspace.accountId;
+      if (!userId || !accountId) return;
+      localStorage.setItem(`eleeveon_theme:${accountId}:${userId}`, value);
+      window.dispatchEvent(new CustomEvent("eleeveon-personal-theme-changed", { detail: { userId, accountId, theme: value } }));
+    } catch {}
+  };
+  return <select aria-label="My theme" value={mode} onChange={e => change(e.target.value as any)}><option value="system">Follow device</option><option value="light">Light</option><option value="dark">Dark</option></select>;
+}
+
 function AppearanceSheet({
   form,
   savingSettings,
@@ -6317,7 +6410,7 @@ function AppearanceSheet({
         <div className="ba-sheet-head">
           <div>
             <h2>Appearance</h2>
-            <p>Theme, color and font belong to this school branch only.</p>
+            <p>Brand colour and typography are shared. Your light/dark choice is personal.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close appearance">
             ✕
@@ -6325,6 +6418,7 @@ function AppearanceSheet({
         </div>
 
         <div className="ba-form compact">
+          <div className="ba-field"><label>My display mode</label><PersonalThemePreference /></div>
           <Field label="Font Family">
             <select
               value={form.fontFamily}
@@ -6361,17 +6455,7 @@ function AppearanceSheet({
             />
           </Field>
 
-          <Field label="Theme">
-            <select
-              value={form.theme}
-              onChange={(event) =>
-                updateForm("theme", event.target.value as "light" | "dark")
-              }
-            >
-              <option value="light">Light Theme</option>
-              <option value="dark">Dark Theme</option>
-            </select>
-          </Field>
+          
         </div>
 
         <div className="branch-live-preview sheet-preview" style={previewStyle}>
@@ -10633,3 +10717,5 @@ const css = `
 }
 
 `;
+/** Operational branch settings; report controls have their own module. */
+export default function Branchsettings() { return <BranchSettingsWorkspace view="branch" />; }

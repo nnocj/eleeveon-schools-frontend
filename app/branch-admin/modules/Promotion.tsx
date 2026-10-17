@@ -46,7 +46,9 @@ const savedId = (v: unknown) => {
   }
   return "";
 };
-const isEligible = (student: Student) => !student.isDeleted && student.active !== false && !["graduated", "transferred", "withdrawn"].includes(id(student.status));
+const isEligible = (student: Student) =>
+  !student.isDeleted &&
+  !["graduated", "transferred", "withdrawn"].includes(id(student.status).toLowerCase());
 
 /** Every table is independently scoped; never let another branch enter report computation. */
 async function loadPromotionDataset(context: PromotionRunRequest["context"]) {

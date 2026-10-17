@@ -471,6 +471,25 @@ export async function importAssessmentExcel(
     existingEntries?: AssessmentExcelExistingEntry[];
   },
 ): Promise<AssessmentExcelImportResult> {
+  // Do not write any score if the workbook has a global/context error.
+  // Row-level validation is not sufficient to authorize a workbook from
+  // another school, class, subject, period, or assessment structure.
+  const fatalContextIssues = validation.issues.filter((issue) =>
+    issue.severity === "error" && (
+      issue.code.startsWith("assessment.metadata_") ||
+      issue.code === "assessment.unsupported_template_version" ||
+      issue.code === "assessment.missing_controlled_metadata" ||
+      issue.code === "assessment.missing_assessment_columns" ||
+      issue.code === "assessment.changed_assessment_metadata" ||
+      issue.code === "assessment.changed_assessment_structure"
+    ),
+  );
+  if (fatalContextIssues.length) {
+    throw new Error(
+      `Assessment import blocked: ${fatalContextIssues.map((issue) => issue.message).join(" ")}`,
+    );
+  }
+
   const updateExisting =
     options.updateExisting !==
     false;

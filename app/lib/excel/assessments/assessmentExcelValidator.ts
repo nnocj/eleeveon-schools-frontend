@@ -254,20 +254,50 @@ export function matchAssessmentStudent(
       students.find(
         (candidate) =>
           !candidate.isDeleted &&
-          sameId(
-            candidate.id,
-            suppliedId,
-          ),
+          sameId(candidate.id, suppliedId),
       );
 
-    if (student) {
+    // A supplied internal identifier is authoritative. Never silently
+    // fall back to an admission number or name if it is invalid.
+    if (!student) {
       return {
-        matched: true,
-        reason:
-          "student-id",
-        student,
+        matched: false,
+        reason: "none",
+        issue: {
+          code: "assessment.student_id_not_found",
+          message: "The workbook student identifier does not match a student in this class. Re-export the sheet or review its identity columns.",
+          severity: "error",
+        },
       };
     }
+
+    const suppliedAdmission = compact(record.admissionNumber);
+    if (suppliedAdmission && suppliedAdmission !== compact(student.admissionNumber)) {
+      return {
+        matched: false,
+        reason: "none",
+        issue: {
+          code: "assessment.student_identity_conflict",
+          message: "The student identifier and admission number refer to different values. Do not import until the identity is reviewed.",
+          severity: "error",
+        },
+      };
+    }
+
+    const suppliedName = normalized(record.studentName);
+    if (suppliedName && suppliedName !== normalized(student.fullName)) {
+      return {
+        matched: false,
+        reason: "none",
+        issue: {
+          code: "assessment.student_name_conflict",
+          message: "The student name was changed or does not match the student identifier. Review the workbook before importing.",
+          severity: "error",
+        },
+      };
+    }
+
+    return { matched: true, reason: "student-id", student };
   }
 
   const admissionNumber =
@@ -289,13 +319,19 @@ export function matchAssessmentStudent(
     if (
       matches.length === 1
     ) {
-      return {
-        matched: true,
-        reason:
-          "admission-number",
-        student:
-          matches[0],
-      };
+      const student = matches[0];
+      if (record.studentName && normalized(record.studentName) !== normalized(student.fullName)) {
+        return {
+          matched: false,
+          reason: "none",
+          issue: {
+            code: "assessment.admission_name_conflict",
+            message: "Admission number and student name disagree. Review the row before importing.",
+            severity: "error",
+          },
+        };
+      }
+      return { matched: true, reason: "admission-number", student };
     }
 
     if (
@@ -317,6 +353,20 @@ export function matchAssessmentStudent(
         },
       };
     }
+  }
+
+  // If an admission number was explicitly supplied but not found, a
+  // matching name is not enough to safely identify the student.
+  if (admissionNumber) {
+    return {
+      matched: false,
+      reason: "none",
+      issue: {
+        code: "assessment.admission_number_not_found",
+        message: `Admission number "${record.admissionNumber}" did not match a student. Review it rather than matching by name.`,
+        severity: "error",
+      },
+    };
   }
 
   if (
@@ -529,6 +579,44 @@ export function validateAssessmentExcelImport(args: {
         ],
       ),
     );
+
+  if (parsed.kind === "eleeveon-assessment") {
+    if (!parsed.metadata) {
+      globalIssues.push({
+        code: "assessment.missing_controlled_metadata",
+        message: "The controlled workbook metadata is missing. Re-export the assessment sheet.",
+        severity: "error",
+      });
+    }
+    if (!parsed.metadataColumns.length) {
+      globalIssues.push({
+        code: "assessment.missing_assessment_columns",
+        message: "This workbook has no registered assessment columns.",
+        severity: "error",
+      });
+    }
+    const mappedItems = new Set<string>();
+    for (const column of parsed.metadataColumns) {
+      const current = projectedById.get(column.itemId);
+      if (!current || mappedItems.has(column.itemId) ||
+          Number(column.maxScore) !== Number(current.maxScore)) {
+        globalIssues.push({
+          code: "assessment.changed_assessment_metadata",
+          message: `An assessment item is missing, duplicated or has a changed score limit (${column.label || column.itemId}). Download a new sheet.`,
+          severity: "error",
+        });
+      }
+      mappedItems.add(column.itemId);
+    }
+    if (parsed.metadataColumns.length !== projectedColumns.length ||
+        projectedColumns.some((column) => !mappedItems.has(column.itemId))) {
+      globalIssues.push({
+        code: "assessment.changed_assessment_structure",
+        message: "The assessment structure has changed since this sheet was exported. Download a new sheet.",
+        severity: "error",
+      });
+    }
+  }
 
   const rows:
     AssessmentExcelPreparedScoreRow[] =

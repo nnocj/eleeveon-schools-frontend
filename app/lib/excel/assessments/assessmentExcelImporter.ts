@@ -708,6 +708,24 @@ export async function importAssessmentExcel(
         continue;
       }
 
+      // Identical scores are read-only for this import: do not increment
+      // versions, reset publication, or create unnecessary sync operations.
+      if (existing && Number(existing.score) === Number(row.data.score)) {
+        skipped += 1;
+        results.push({
+          rowNumber: row.rowNumber,
+          action: "skipped",
+          studentId: row.data.studentId,
+          studentName: row.data.studentName,
+          assessmentStructureItemId: row.data.assessmentStructureItemId,
+          assessmentLabel: row.data.assessmentLabel,
+          score: row.data.score,
+          entryId: existing.id,
+          issues: row.issues,
+        });
+        continue;
+      }
+
       // ==================================================
       // SCORE PAYLOAD
       // ==================================================

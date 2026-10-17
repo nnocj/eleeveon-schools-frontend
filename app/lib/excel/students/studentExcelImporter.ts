@@ -27,6 +27,8 @@ import {
   updateLocal,
 } from "../../sync/syncUtils";
 
+import { resolveAdmissionNumber } from "../../students/admissionNumbers";
+
 import type {
   ExcelValidationIssue,
 } from "../excelTypes";
@@ -99,8 +101,7 @@ function createdId(value: unknown) {
 
   return (
     idOf(value.id) ||
-    idOf(value.localId) ||
-    idOf(value.cloudId)
+    idOf(value.localId)
   );
 }
 
@@ -133,9 +134,10 @@ function errorIssue(
   };
 }
 
+/** Never infer a permanent student UUID from a name or admission number. */
 async function resolveStudentAfterCreate(
   returnedValue: unknown,
-  args: {
+  _args: {
     accountId: string;
     schoolId: string;
     branchId: string;
@@ -143,66 +145,14 @@ async function resolveStudentAfterCreate(
     fullName: string;
   },
 ) {
-  const returnedId =
-    createdId(returnedValue);
-
-  if (returnedId) {
-    return returnedId;
+  const id = createdId(returnedValue);
+  if (!id || !(await db.students.get(id))) {
+    throw new Error(
+      "Student was saved but createLocal did not return a verifiable permanent UUID. " +
+      "Review the student locally before retrying; do not import the same row again blindly.",
+    );
   }
-
-  const rows =
-    await db.students.toArray();
-
-  const admissionNumber =
-    clean(
-      args.admissionNumber,
-    ).toLowerCase();
-
-  const fullName =
-    clean(
-      args.fullName,
-    ).toLowerCase();
-
-  const match = rows
-    .filter(
-      (row: any) =>
-        !row.isDeleted &&
-        sameId(
-          row.accountId,
-          args.accountId,
-        ) &&
-        sameId(
-          row.schoolId,
-          args.schoolId,
-        ) &&
-        sameId(
-          row.branchId,
-          args.branchId,
-        ),
-    )
-    .find((row: any) => {
-      if (
-        admissionNumber &&
-        clean(
-          row.admissionNumber,
-        ).toLowerCase() ===
-          admissionNumber
-      ) {
-        return true;
-      }
-
-      return (
-        fullName &&
-        clean(
-          row.fullName,
-        ).toLowerCase() ===
-          fullName
-      );
-    });
-
-  return idOf(
-    (match as any)?.id,
-  );
+  return id;
 }
 
 function buildStudentPayload(
@@ -336,10 +286,6 @@ function enrollmentExists(
       sameId(
         row.studentId,
         args.studentId,
-      ) &&
-      sameId(
-        row.classId,
-        args.classId,
       ) &&
       sameId(
         row.academicStructureId,
@@ -567,6 +513,24 @@ export async function getStudentExcelImportReferenceData(
   };
 }
 
+/** Re-check live Dexie state; a preview can become stale before confirmation. */
+async function findCurrentAdmissionOwner(
+  context: StudentExcelImportContext,
+  number: string,
+  excludingId?: string,
+): Promise<Student | undefined> {
+  const key = number.trim().toUpperCase();
+  if (!key) return undefined;
+  const students = await db.students.where("branchId").equals(context.branchId).toArray();
+  return students.find((student) =>
+    !student.isDeleted &&
+    student.accountId === context.accountId &&
+    student.schoolId === context.schoolId &&
+    student.id !== excludingId &&
+    String(student.admissionNumber || "").trim().toUpperCase() === key,
+  );
+}
+
 export async function importValidatedStudents(
   validation: StudentExcelValidationResult,
   context: StudentExcelImportContext,
@@ -668,6 +632,13 @@ export async function importValidatedStudents(
         continue;
       }
 
+      if (existing && row.duplicate?.reason === "name" && duplicateStrategy === "update") {
+        throw new Error(
+          "An exact name match is not enough to update a student. " +
+          "Use a matching admission number or resolve this row manually."
+        );
+      }
+
       let studentId = "";
 
       let action:
@@ -691,6 +662,26 @@ export async function importValidatedStudents(
               : existing.currentClassId,
           );
 
+        const current = await db.students.get(studentId);
+        if (!current || current.isDeleted || current.accountId !== context.accountId ||
+            current.schoolId !== context.schoolId || current.branchId !== context.branchId) {
+          throw new Error("Student changed or is outside the selected workspace.");
+        }
+        // An import must never silently replace an established admission identity.
+        const incomingNumber = String(row.data.admissionNumber || "").trim();
+        const established = String(current.admissionNumber || "").trim();
+        if (incomingNumber && established &&
+            incomingNumber.toUpperCase() !== established.toUpperCase()) {
+          throw new Error("The imported admission number differs from the student's existing number.");
+        }
+        if (incomingNumber && await findCurrentAdmissionOwner(context, incomingNumber, studentId)) {
+          throw new Error("Admission number already belongs to another student.");
+        }
+        if (!incomingNumber) delete payload.admissionNumber;
+        if (established) payload.admissionNumber = established;
+        // An existing server-confirmed identity remains confirmed.
+        delete payload.admissionNumberConfirmed;
+        delete payload.admissionNumberProvisional;
         await updateLocal(
           "students",
           studentId,
@@ -710,6 +701,22 @@ export async function importValidatedStudents(
               ? resolvedClassId
               : undefined,
           );
+
+        // Resolve automatic/manual/hybrid numbering exactly like the student form.
+        // Automatic values are provisional until /sync/push confirms them.
+        const admission = await resolveAdmissionNumber({
+          accountId: context.accountId,
+          schoolId: context.schoolId,
+          branchId: context.branchId,
+          supplied: row.data.admissionNumber,
+        });
+        payload.admissionNumber = admission.admissionNumber;
+        payload.admissionNumberProvisional = admission.provisional;
+        payload.admissionNumberConfirmed = false;
+        if (admission.admissionNumber &&
+            await findCurrentAdmissionOwner(context, admission.admissionNumber)) {
+          throw new Error("Admission number already belongs to another student.");
+        }
 
         const createResult =
           await createLocal(
@@ -783,14 +790,14 @@ export async function importValidatedStudents(
         updateCurrentClass &&
         resolvedClassId
       ) {
-        await updateLocal(
-          "students",
-          studentId,
-          {
-            currentClassId:
-              resolvedClassId,
-          } as Partial<Student>,
-        );
+        const savedStudent = await db.students.get(studentId);
+        if (savedStudent?.currentClassId !== resolvedClassId) {
+          await updateLocal(
+            "students",
+            studentId,
+            { currentClassId: resolvedClassId } as Partial<Student>,
+          );
+        }
       }
 
       results.push({
@@ -805,8 +812,7 @@ export async function importValidatedStudents(
           row.data.fullName,
 
         admissionNumber:
-          row.data
-            .admissionNumber,
+          (await db.students.get(studentId))?.admissionNumber,
 
         enrollmentCreated,
 

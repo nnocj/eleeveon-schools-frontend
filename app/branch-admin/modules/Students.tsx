@@ -119,6 +119,7 @@ import {
 import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
 
 import { resolveAdmissionNumber } from "../../lib/students/admissionNumbers";
+import { processStudentPromotions, type StudentPromotionDraft } from "./Promotion";
 import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
 import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
 import ExcelImportPreview from "../../components/excel/ExcelImportPreview";
@@ -751,6 +752,9 @@ export default function StudentsPage() {
     "all",
   );
   const [filterGender, setFilterGender] = useState("all");
+  const [promotionOnly, setPromotionOnly] = useState(false);
+  const [promotionScope, setPromotionScope] = useState<{ mode: "student" | "class" | "branch"; studentId?: string; classId?: string } | null>(null);
+  const [promotionBusy, setPromotionBusy] = useState(false);
 
   // Student is the page's primary layer, so it alone is visible initially.
   const [visibleMapLayers, setVisibleMapLayers] = useState<
@@ -1299,6 +1303,7 @@ export default function StudentsPage() {
         )
           return false;
         if (filterStatus !== "all" && row.status !== filterStatus) return false;
+        if (promotionOnly && (row.status === "graduated" || row.status === "withdrawn" || row.status === "transferred" || row.isDeleted)) return false;
         if (filterGender !== "all" && row.gender !== filterGender) return false;
 
         if (!q) return true;
@@ -1321,6 +1326,7 @@ export default function StudentsPage() {
     filterGender,
     filterOrganizationId,
     filterStatus,
+    promotionOnly,
     search,
     viewRows,
   ]);
@@ -1349,8 +1355,8 @@ export default function StudentsPage() {
       filterOrganizationId,
       filterStatus,
       filterGender,
-    ].filter((v) => v !== "all").length;
-  }, [filterClassId, filterGender, filterOrganizationId, filterStatus]);
+    ].filter((v) => v !== "all").length + (promotionOnly ? 1 : 0);
+  }, [filterClassId, filterGender, filterOrganizationId, filterStatus, promotionOnly]);
 
   const genderOptions = useMemo(
     () =>
@@ -2093,6 +2099,7 @@ export default function StudentsPage() {
     setFilterOrganizationId("all");
     setFilterStatus("all");
     setFilterGender("all");
+    setPromotionOnly(false);
   };
 
   const resetStudentExcelImport = () => {
@@ -2784,6 +2791,34 @@ export default function StudentsPage() {
   };
 
 
+  // Promotion uses the same local-first records as Promotion.tsx. Selection
+  // is branch-scoped, and the dialog verifies the academic destination.
+  const openPromotion = (mode: "student" | "class" | "branch", studentId?: string, classId?: string) => {
+    if (!requireTenant()) return;
+    setSelectedItem(null);
+    setMoreOpen(false);
+    setPromotionScope({ mode, studentId, classId });
+  };
+
+  const executePromotion = async (draft: StudentPromotionDraft) => {
+    if (!authenticated || !accountId || !schoolId || !branchId) {
+      throw new Error("Selected workspace is not available.");
+    }
+    const outcome = await processStudentPromotions({
+      context: { accountId, schoolId, branchId },
+      ...draft,
+      studentIds: draft.items.map((item) => item.id),
+      sourceClassId: promotionScope?.mode === "class" ? promotionScope.classId : undefined,
+    });
+    await load();
+    if (outcome.failed) {
+      showToast("error", `${outcome.processed} processed, ${outcome.failed} failed. ${outcome.errors.slice(0, 2).join(" | ")}`);
+    } else {
+      showToast("success", `${outcome.processed} promotion decision(s) saved with report snapshots.`);
+      setPromotionScope(null);
+    }
+  };
+
   const printStudentsTable = () => {
     const columns = [
       { key: "student", label: "Students" },
@@ -2951,6 +2986,7 @@ export default function StudentsPage() {
           openEdit={openEdit}
           remove={remove}
           setStatus={setStatus}
+          onPromote={(item) => openPromotion("student", item.id)}
         />
       )}
 
@@ -3066,6 +3102,8 @@ export default function StudentsPage() {
           filterOrganizationId={filterOrganizationId}
           filterStatus={filterStatus}
           filterGender={filterGender}
+          promotionOnly={promotionOnly}
+          setPromotionOnly={setPromotionOnly}
           setFilterClassId={setFilterClassId}
           setFilterOrganizationId={setFilterOrganizationId}
           setFilterStatus={setFilterStatus}
@@ -3087,6 +3125,7 @@ export default function StudentsPage() {
             await load();
           }}
           onExcel={openStudentExcelMenu}
+          onPromotion={() => openPromotion("branch")}
           onClose={() => setMoreOpen(false)}
         />
       )}
@@ -3491,12 +3530,36 @@ export default function StudentsPage() {
         )}
       </ExcelImportSheet>
 
+      {promotionScope && (
+        <StudentPromotionSheet
+          scope={promotionScope}
+          students={viewRows}
+          classes={classes}
+          structures={academicStructures}
+          periods={periods}
+          enrollments={enrollments}
+          busy={promotionBusy}
+          onSubmit={async (draft) => {
+            try {
+              setPromotionBusy(true);
+              await executePromotion(draft);
+            } catch (error: any) {
+              showToast("error", error?.message || "Promotion failed.");
+            } finally {
+              setPromotionBusy(false);
+            }
+          }}
+          onClose={() => !promotionBusy && setPromotionScope(null)}
+        />
+      )}
+
       {selectedItem && (
         <ActionSheet
           item={selectedItem}
           openEdit={openEdit}
           remove={remove}
           setStatus={setStatus}
+          onPromote={(item) => openPromotion("student", item.id)}
           manageEnrollment={openEnrollmentManager}
           onClose={() => setSelectedItem(null)}
         />
@@ -3702,6 +3765,8 @@ function FilterSheet({
   filterOrganizationId,
   filterStatus,
   filterGender,
+  promotionOnly,
+  setPromotionOnly,
   setFilterClassId,
   setFilterOrganizationId,
   setFilterStatus,
@@ -3718,6 +3783,8 @@ function FilterSheet({
   filterOrganizationId: string;
   filterStatus: "all" | StudentStatus;
   filterGender: string;
+  promotionOnly: boolean;
+  setPromotionOnly: (value: boolean) => void;
   setFilterClassId: (value: string) => void;
   setFilterOrganizationId: (value: string) => void;
   setFilterStatus: (value: "all" | StudentStatus) => void;
@@ -3796,6 +3863,14 @@ function FilterSheet({
             </select>
           </label>
 
+          <label className="wide">
+            <span>Promotion eligibility</span>
+            <select value={promotionOnly ? "eligible" : "all"} onChange={(event) => setPromotionOnly(event.target.value === "eligible")}>
+              <option value="all">All students</option>
+              <option value="eligible">Eligible for promotion</option>
+            </select>
+          </label>
+
           <label>
             <span>Gender</span>
             <select
@@ -3830,12 +3905,14 @@ function MoreSheet({
   setViewMode,
   onRefresh,
   onExcel,
+  onPromotion,
   onClose,
 }: {
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   onRefresh: () => void | Promise<void>;
   onExcel: () => void;
+  onPromotion: () => void;
   onClose: () => void;
 }) {
   return (
@@ -3897,6 +3974,12 @@ function MoreSheet({
             <small>Class, gender, status and organization summaries</small>
           </button>
 
+          <button type="button" onClick={onPromotion}>
+            <span>⬆</span>
+            <b>Promote students</b>
+            <small>One student, an entire class or this branch</small>
+          </button>
+
           <button type="button" onClick={onExcel}>
             <span>▦</span>
             <b>Excel</b>
@@ -3919,6 +4002,7 @@ function ActionSheet({
   openEdit,
   remove,
   setStatus,
+  onPromote,
   manageEnrollment,
   onClose,
 }: {
@@ -3926,6 +4010,7 @@ function ActionSheet({
   openEdit: (row: Student) => void;
   remove: (item: StudentView) => void;
   setStatus: (item: StudentView, status: StudentStatus) => void;
+  onPromote: (item: StudentView) => void;
   manageEnrollment: (item: StudentView) => void;
   onClose: () => void;
 }) {
@@ -3992,11 +4077,11 @@ function ActionSheet({
             </button>
           )}
 
-          {row.status !== "graduated" && (
-            <button type="button" onClick={() => setStatus(item, "graduated")}>
-              <span>🎯</span>
-              <b>Graduate</b>
-              <small>Mark this student as graduated</small>
+          {row.status !== "graduated" && row.status !== "withdrawn" && row.status !== "transferred" && (
+            <button type="button" onClick={() => onPromote(item)}>
+              <span>⬆</span>
+              <b>Promote</b>
+              <small>Promote, repeat or graduate with enrollment history</small>
             </button>
           )}
 
@@ -4030,16 +4115,87 @@ function ActionSheet({
   );
 }
 
+/** Lightweight, theme-preserving promotion wizard shared by individual, class and branch actions. */
+function StudentPromotionSheet({ scope, students, classes, structures, periods, enrollments, busy, onSubmit, onClose }: {
+  scope: { mode: "student" | "class" | "branch"; studentId?: string; classId?: string };
+  students: StudentView[];
+  classes: Class[];
+  structures: AcademicStructure[];
+  periods: AcademicPeriod[];
+  enrollments: StudentEnrollment[];
+  busy: boolean;
+  onSubmit: (draft: StudentPromotionDraft) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"student" | "class" | "branch">(scope.mode);
+  const [selectedStudentId, setSelectedStudentId] = useState(scope.studentId || "");
+  const [selectedClassId, setSelectedClassId] = useState(scope.classId || "");
+  const [fromStructureId, setFromStructureId] = useState("");
+  const [fromPeriodId, setFromPeriodId] = useState("");
+  const [toStructureId, setToStructureId] = useState("");
+  const [toPeriodId, setToPeriodId] = useState("");
+  const [toClassId, setToClassId] = useState("");
+  const [decision, setDecision] = useState<"promote" | "repeat" | "graduate">("promote");
+  const [note, setNote] = useState("");
+  const [confirm, setConfirm] = useState(false);
+  const eligible = useMemo(() => students.filter((item) =>
+    !item.row.isDeleted && !["graduated", "withdrawn", "transferred"].includes(String(item.row.status))), [students]);
+  const targetStudents = useMemo(() => eligible.filter((item) => {
+    if (mode === "student") return item.id === selectedStudentId;
+    if (mode === "class") return (item.activeEnrollment?.classId || item.row.currentClassId) === selectedClassId;
+    return true;
+  }), [eligible, mode, selectedStudentId, selectedClassId]);
+  const fromPeriods = periods.filter((item) => item.academicStructureId === fromStructureId);
+  const toPeriods = periods.filter((item) => item.academicStructureId === toStructureId);
+  const sourceCandidates = useMemo(() => targetStudents.filter((item) => enrollments.some((entry) =>
+    !entry.isDeleted && entry.status === "active" && entry.studentId === item.id &&
+    entry.academicStructureId === fromStructureId && entry.academicPeriodId === fromPeriodId &&
+    (mode !== "class" || entry.classId === selectedClassId))),
+  [targetStudents, enrollments, fromStructureId, fromPeriodId, mode, selectedClassId]);
+  const destinationValid = decision === "graduate" || (!!toClassId && !!toStructureId && !!toPeriodId && toStructureId === periods.find(p => p.id === toPeriodId)?.academicStructureId);
+  const canSubmit = !busy && confirm && !!fromStructureId && !!fromPeriodId && !!sourceCandidates.length && destinationValid;
+  return (
+    <ViewportModal onClose={onClose} className="ba-sheet-backdrop" closeOnBackdrop={!busy} closeOnEscape={!busy}>
+      <section className="ba-sheet" role="dialog" aria-modal="true" onPointerDown={(event) => event.stopPropagation()}>
+        <div className="ba-sheet-head"><div><h2>Promote students</h2><p>Preserve enrollment history while moving students to the next academic period.</p></div>
+          <button type="button" className="ba-modal-close" onClick={onClose} disabled={busy} aria-label="Close promotion">✕</button></div>
+        <div className="ba-form compact">
+          <label><span>Apply to</span><select value={mode} onChange={e => {setMode(e.target.value as typeof mode);setConfirm(false);}}>
+            <option value="student">One student</option><option value="class">An entire class</option><option value="branch">All eligible students in this branch</option>
+          </select></label>
+          {mode === "student" && <label><span>Student</span><select value={selectedStudentId} onChange={e => {setSelectedStudentId(e.target.value);setConfirm(false);}}><option value="">Select student</option>{eligible.map(item => <option key={item.id} value={item.id}>{item.row.fullName} · {item.className}</option>)}</select></label>}
+          {mode === "class" && <label><span>Source class</span><select value={selectedClassId} onChange={e => {setSelectedClassId(e.target.value);setConfirm(false);}}><option value="">Select class</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
+          <label><span>Current academic structure</span><select value={fromStructureId} onChange={e => {setFromStructureId(e.target.value);setFromPeriodId("");setConfirm(false);}}><option value="">Select structure</option>{structures.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+          <label><span>Current academic period</span><select value={fromPeriodId} onChange={e => {setFromPeriodId(e.target.value);setConfirm(false);}}><option value="">Select period</option>{fromPeriods.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+          <label><span>Final decision</span><select value={decision} onChange={e => {setDecision(e.target.value as typeof decision);setConfirm(false);}}><option value="promote">Promote to next class</option><option value="repeat">Repeat in new period</option><option value="graduate">Graduate</option></select></label>
+          {decision !== "graduate" && <>
+            <label><span>Destination academic structure</span><select value={toStructureId} onChange={e => {setToStructureId(e.target.value);setToPeriodId("");setConfirm(false);}}><option value="">Select structure</option>{structures.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+            <label><span>Destination academic period</span><select value={toPeriodId} onChange={e => {setToPeriodId(e.target.value);setConfirm(false);}}><option value="">Select period</option>{toPeriods.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            <label><span>{decision === "repeat" ? "Repeat class" : "Destination class"}</span><select value={toClassId} onChange={e => {setToClassId(e.target.value);setConfirm(false);}}><option value="">Select class</option>{classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          </>}
+          <label className="wide"><span>Note (optional)</span><textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Reason or approval note" /></label>
+        </div>
+        <div className="student-detail-strip" style={{marginTop: 12}}><span><b>Eligible in selection</b>{targetStudents.length}</span><span><b>Enrolled in source</b>{sourceCandidates.length}</span><span><b>Decision</b>{decision}</span></div>
+        <p className="ba-media-hint">Branch-wide promotion applies one destination class to everyone. For different destination classes, process each source class separately. Students without matching active enrollment are skipped. A report snapshot is saved for each completed promotion decision. For different destination classes, process each source class separately.</p>
+        <label style={{display:"flex", gap:8, alignItems:"center", marginTop:12, fontSize:12}}><input type="checkbox" style={{width:18,minHeight:18,flex:"0 0 18px"}} checked={confirm} onChange={e => setConfirm(e.target.checked)} /> I have reviewed the academic period, destination and number of students.</label>
+        <div className="ba-sheet-actions"><button type="button" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="primary" disabled={!canSubmit} onClick={() => void onSubmit({items:sourceCandidates,decision,fromStructureId,fromPeriodId,toStructureId,toPeriodId,toClassId,note})}>{busy ? "Processing…" : `Process ${sourceCandidates.length} student(s)`}</button></div>
+      </section>
+    </ViewportModal>
+  );
+}
+
 function TableView({
   rows,
   openEdit,
   remove,
   setStatus,
+  onPromote,
 }: {
   rows: StudentView[];
   openEdit: (row: Student) => void;
   remove: (item: StudentView) => void;
   setStatus: (item: StudentView, status: StudentStatus) => void;
+  onPromote: (item: StudentView) => void;
 }) {
   return (
     <section className="ba-table-card">
@@ -4100,9 +4256,9 @@ function TableView({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setStatus(item, "graduated")}
+                        onClick={() => onPromote(item)}
                       >
-                        Graduate
+                        Promote
                       </button>
                       <button
                         type="button"

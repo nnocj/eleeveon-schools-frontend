@@ -27,9 +27,7 @@ import type {
   ExcelExportWorkbook,
 } from "../excelTypes";
 
-import {
-  downloadExcelWorkbook,
-} from "../excelWorkbook";
+import { downloadProtectedAssessmentWorkbook } from "./protectedAssessmentWorkbook";
 
 import type {
   AssessmentExcelContext,
@@ -504,7 +502,7 @@ export function downloadAssessmentExcelTemplate(
     typeof buildAssessmentExcelTemplate
   >[0],
 ) {
-  return downloadExcelWorkbook(
+  return downloadProtectedAssessmentWorkbook(
     buildAssessmentExcelTemplate(args),
   );
 }

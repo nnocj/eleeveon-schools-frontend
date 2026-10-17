@@ -5,6 +5,11 @@ import {
   useState,
 } from "react";
 
+import { useLocalAppearanceRuntime } from "../../LocalAppearanceRuntime";
+import { saveApplyAndAnnounceLocalPortalSettings } from "../../../lib/theme/localPortalAppearance";
+import { useAccount } from "../../../context/account-context";
+import { db } from "../../../lib/db/db";
+
 import type {
   UserMembership,
 } from "../../../lib/auth/roleRedirect";
@@ -331,6 +336,47 @@ export default function AccountWorkspaceDrawer({
   void online;
   void realtimeConnected;
 
+  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
+  const appearance = useLocalAppearanceRuntime();
+  const accountContext = useAccount();
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const [appearanceError, setAppearanceError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setWorkspaceSwitcherOpen(false);
+      setAppearanceError("");
+    }
+  }, [open]);
+
+  const selectAppearance = async (mode: "light" | "dark" | "system") => {
+    if (appearanceSaving) return;
+    setAppearanceError("");
+    // The existing LocalAppearanceRuntime owns the *exact* established palette.
+    // Do not replace or rewrite branch, school or platform branding.
+    saveApplyAndAnnounceLocalPortalSettings(
+      appearance.storageKey,
+      { ...appearance.settings, appearanceMode: mode },
+      { sharedDefaultMode: "light" },
+    );
+
+    const userId = String(accountContext.user?.id ?? "").trim();
+    if (!userId) return;
+    setAppearanceSaving(true);
+    try {
+      const existing = await db.appUsers.get(userId);
+      if (existing) {
+        // Offline AppUser cache. Server-side preference sync remains a separate concern.
+        await db.appUsers.update(userId, { preferredTheme: mode });
+      }
+    } catch {
+      // Retain the immediate working appearance, but communicate cache failure.
+      setAppearanceError("Appearance changed, but the user preference could not be saved to the local user record.");
+    } finally {
+      setAppearanceSaving(false);
+    }
+  };
+
   // ====================================================
   // DRAWER SCROLL OWNERSHIP
   // ====================================================
@@ -570,44 +616,64 @@ export default function AccountWorkspaceDrawer({
          * WORKSPACES
          * =============================================== */}
 
-        {memberships.length >
-        1 ? (
-          <AccountSection
-            title="Workspaces"
-            meta={`${memberships.length}`}
-            className="compact-workspaces-section"
-          >
-            <QuickWorkspaceSwitcher
-              memberships={
-                memberships
-              }
-              selectedMembership={
-                selectedMembership
-              }
-              identities={
-                identities
-              }
-              switchingMembershipId={
-                switchingMembershipId
-              }
-              membershipKey={
-                membershipKey
-              }
-              sameMembership={
-                sameMembership
-              }
-              roleLabel={
-                roleLabel
-              }
-              roleIcon={
-                roleIcon
-              }
-              onSwitchMembership={
-                onSwitchMembership
-              }
-            />
+        {memberships.length > 1 ? (
+          <AccountSection title="Workspaces" meta={`${memberships.length}`} className="compact-workspaces-section">
+            <button
+              type="button"
+              className="drawer-compact-switch-trigger"
+              aria-expanded={workspaceSwitcherOpen}
+              onClick={() => setWorkspaceSwitcherOpen((value) => !value)}
+            >
+              <span className="drawer-compact-switch-icon" aria-hidden="true">⇄</span>
+              <span className="drawer-compact-switch-copy">
+                <strong>{workspaceSwitcherOpen ? "Choose a workspace" : "Switch workspace"}</strong>
+                <small>{workspaceSwitcherOpen ? "Select another available role or school" : `${memberRole} · ${memberships.length} available`}</small>
+              </span>
+              <span className="drawer-compact-switch-chevron" aria-hidden="true">{workspaceSwitcherOpen ? "⌃" : "⌄"}</span>
+            </button>
+            {workspaceSwitcherOpen && (
+              <div className="drawer-compact-switch-panel">
+                <QuickWorkspaceSwitcher
+                  memberships={memberships}
+                  selectedMembership={selectedMembership}
+                  identities={identities}
+                  switchingMembershipId={switchingMembershipId}
+                  membershipKey={membershipKey}
+                  sameMembership={sameMembership}
+                  roleLabel={roleLabel}
+                  roleIcon={roleIcon}
+                  onSwitchMembership={(membership) => {
+                    setWorkspaceSwitcherOpen(false);
+                    onSwitchMembership(membership);
+                  }}
+                />
+              </div>
+            )}
           </AccountSection>
         ) : null}
+
+        <AccountSection title="Appearance" className="compact-appearance-section">
+          <div className="drawer-appearance-choices" role="group" aria-label="Personal appearance">
+            {([
+              { value: "light", label: "Light", icon: "☀" },
+              { value: "dark", label: "Dark", icon: "☾" },
+              { value: "system", label: "Default", icon: "◐" },
+            ] as const).map((choice) => (
+              <button
+                key={choice.value}
+                type="button"
+                className={`drawer-appearance-choice ${appearance.settings.appearanceMode === choice.value ? "is-selected" : ""}`}
+                aria-pressed={appearance.settings.appearanceMode === choice.value}
+                disabled={appearanceSaving}
+                onClick={() => void selectAppearance(choice.value)}
+              >
+                <span aria-hidden="true">{choice.icon}</span>
+                <small>{choice.label}</small>
+              </button>
+            ))}
+          </div>
+          {appearanceError && <p className="drawer-appearance-error" role="status">{appearanceError}</p>}
+        </AccountSection>
 
         {/* ===============================================
          * OPTIONAL UNLOCKED CONTEXT
@@ -761,6 +827,21 @@ export default function AccountWorkspaceDrawer({
 // ======================================================
 
 const css = `
+.drawer-compact-switch-trigger { width:100%; display:flex; align-items:center; gap:11px; padding:12px; border:1px solid var(--eds-border,var(--border,#d9dee8)); border-radius:16px; background:var(--eds-surface,var(--surface,#fff)); color:var(--eds-text,var(--text,#172033)); text-align:left; cursor:pointer; }
+.drawer-compact-switch-icon {display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:11px;background:color-mix(in srgb,var(--primary-color,#2563eb) 10%,var(--eds-surface,#fff));color:var(--primary-color,#2563eb);font-size:22px;}
+.drawer-compact-switch-copy {flex:1;min-width:0;display:grid;gap:3px;}
+.drawer-compact-switch-copy strong {font-size:13px;font-weight:800;}
+.drawer-compact-switch-copy small {font-size:11px;color:var(--eds-text-muted,var(--muted,#64748b));}
+.drawer-compact-switch-chevron {font-size:20px;color:var(--eds-text-muted,var(--muted,#64748b));}
+.drawer-compact-switch-panel {padding-top:10px;max-height:min(42vh,360px);overflow-y:auto;overscroll-behavior:contain;}
+.drawer-appearance-choices {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.drawer-appearance-choice {min-height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;border:1px solid var(--eds-border,var(--border,#d9dee8));border-radius:14px;background:var(--eds-surface,var(--surface,#fff));color:var(--eds-text,var(--text,#172033));cursor:pointer;}
+.drawer-appearance-choice > span {font-size:21px;line-height:1;}
+.drawer-appearance-choice small {font-size:11px;font-weight:750;}
+.drawer-appearance-choice.is-selected {border-color:var(--primary-color,#2563eb);box-shadow:inset 0 0 0 1px var(--primary-color,#2563eb);background:color-mix(in srgb,var(--primary-color,#2563eb) 8%,var(--eds-surface,#fff));}
+.drawer-appearance-choice:focus-visible,.drawer-compact-switch-trigger:focus-visible {outline:3px solid var(--primary-color,#2563eb);outline-offset:2px;}
+.drawer-appearance-error {font-size:11px;color:#b45309;margin:7px 0 0;}
+
 /*
  * =====================================================
  * DRAWER POSITION

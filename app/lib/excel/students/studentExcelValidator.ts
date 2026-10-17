@@ -18,6 +18,8 @@
  * This file performs NO Dexie/database mutations.
  */
 
+import { normalizeSchoolDate } from "../excelDate";
+
 import type {
   ExcelColumnMapping,
   ExcelSheetRecords,
@@ -205,55 +207,8 @@ function normalizeStatus(value: unknown) {
 }
 
 function dateOnly(value: unknown) {
-  if (!value) {
-    return undefined;
-  }
-
-  if (value instanceof Date) {
-    if (
-      !Number.isFinite(
-        value.getTime(),
-      )
-    ) {
-      return undefined;
-    }
-
-    return value
-      .toISOString()
-      .slice(0, 10);
-  }
-
-  const raw =
-    clean(value);
-
-  if (!raw) {
-    return undefined;
-  }
-
-  if (
-    /^\d{4}-\d{2}-\d{2}$/.test(raw)
-  ) {
-    return raw;
-  }
-
-  const parsed =
-    new Date(raw);
-
-  if (
-    !Number.isFinite(
-      parsed.getTime(),
-    )
-  ) {
-    /**
-     * Keep invalid original content so validation can tell
-     * the user which value could not be understood.
-     */
-    return raw;
-  }
-
-  return parsed
-    .toISOString()
-    .slice(0, 10);
+  const parsed = normalizeSchoolDate(value);
+  return parsed.status === "valid" ? parsed.iso : parsed.original || undefined;
 }
 
 // ======================================================
@@ -690,36 +645,26 @@ function validateStudentRecord(
     });
   }
 
-  if (
-    record.dateOfBirth
-  ) {
-    const parsed =
-      new Date(
-        `${record.dateOfBirth}T00:00:00`,
-      );
-
-    if (
-      !Number.isFinite(
-        parsed.getTime(),
-      )
-    ) {
+  if (record.dateOfBirth) {
+    const dateResult = normalizeSchoolDate(record.dateOfBirth);
+    if (dateResult.status !== "valid") {
       issues.push({
-        code:
-          "student.invalid_date_of_birth",
-
-        message:
-          "Date of Birth could not be interpreted as a valid date.",
-
-        severity:
-          "error",
-
+        code: dateResult.status === "ambiguous"
+          ? "student.ambiguous_date_of_birth"
+          : "student.invalid_date_of_birth",
+        message: dateResult.status === "ambiguous"
+          ? `Date of Birth "${record.dateOfBirth}" is ambiguous. Use DD/MM/YYYY or a written month, e.g. 14 June 2026.`
+          : `Date of Birth "${record.dateOfBirth}" is not a valid calendar date.`,
+        severity: "error",
         rowNumber,
-
-        targetKey:
-          "dateOfBirth",
-
-        value:
-          record.dateOfBirth,
+        targetKey: "dateOfBirth",
+        value: record.dateOfBirth,
+      });
+    } else if (dateResult.iso && dateResult.iso > new Date().toISOString().slice(0, 10)) {
+      issues.push({
+        code: "student.future_date_of_birth",
+        message: "Date of Birth cannot be in the future.",
+        severity: "error", rowNumber, targetKey: "dateOfBirth", value: record.dateOfBirth,
       });
     }
   }

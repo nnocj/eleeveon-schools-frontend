@@ -6,6 +6,7 @@
  * This helper does not replace regular pull/bootstrap reconciliation.
  */
 import { db } from "../db/db";
+import { SYNC_STATUS_VALUE } from "../sync/syncConfig";
 
 export type AdmissionPushResult = {
   tableName: string;
@@ -30,7 +31,7 @@ export async function applyAdmissionSyncConfirmations(
     if (!result.admissionNumberConfirmed || !confirmedNumber) continue;
     // Guard against a subsequent unsynced local edit: do not silently
     // clear its pending state. The next pull will reconcile as appropriate.
-    if (row.synced !== "synced") continue;
+    if (row.synced !== SYNC_STATUS_VALUE.SYNCED) continue;
     await db.students.update(row.id, {
       admissionNumber: confirmedNumber,
       admissionNumberProvisional: false,

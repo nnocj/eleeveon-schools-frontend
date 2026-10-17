@@ -1631,6 +1631,10 @@ export interface Student extends BaseSync, AddressFields, PersonMapLocationField
   organizationId?: string;
   currentClassId?: string;
   admissionNumber?: string;
+  /** True until an automatic number has been confirmed by the server. */
+  admissionNumberProvisional?: boolean;
+  /** True when /sync/push has registered the admission identity. */
+  admissionNumberConfirmed?: boolean;
   fullName: string;
   email?: string;
   gender?: string;

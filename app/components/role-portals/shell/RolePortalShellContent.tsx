@@ -953,6 +953,8 @@ function RolePortalShellContent({
 
   /** Non-blocking status text; never used to gate portal navigation. */
   const [priorityPreparing, setPriorityPreparing] = useState<string | null>(null);
+  const [priorityProgress, setPriorityProgress] = useState<{ done: number; total: number } | null>(null);
+  const [priorityRetry, setPriorityRetry] = useState(0);
   const priorityAttemptedAt = useRef(new Map<string, number>());
 
   const activeModuleLabel = labels[tab] || tab;
@@ -1013,8 +1015,9 @@ function RolePortalShellContent({
       activeModuleTables.join(","),
     ].join("|");
     const lastAttempt = priorityAttemptedAt.current.get(requestKey) || 0;
-    // Reopening a page within this short window reuses recently pulled data.
-    if (Date.now() - lastAttempt < 30_000) return;
+    // A manual retry advances priorityRetry and triggers this effect again;
+    // ordinary page navigation uses the short recent-attempt throttle.
+    if (Date.now() - lastAttempt < 30_000 && priorityRetry === 0) return;
 
     const timer = window.setTimeout(() => {
       if (disposed || !navigator.onLine || !selectedMembership) return;
@@ -1030,13 +1033,21 @@ function RolePortalShellContent({
       }
       priorityAttemptedAt.current.set(requestKey, Date.now());
       setPriorityPreparing(activeModuleLabel);
+      setPriorityProgress(null);
 
-      void bootstrapPriorityWorkspaceTables(selectedMembership!, activeModuleTables).catch((error) => {
+      void bootstrapPriorityWorkspaceTables(selectedMembership!, activeModuleTables, {
+        onProgress: (done, total) => {
+          if (!disposed) setPriorityProgress({ done, total });
+        },
+      }).catch((error) => {
         if (disposed) return;
         priorityAttemptedAt.current.delete(requestKey);
         console.warn("[portal] Active-module priority sync failed:", error);
       }).finally(() => {
-        if (!disposed) setPriorityPreparing(null);
+        if (!disposed) {
+          setPriorityPreparing(null);
+          setPriorityProgress(null);
+        }
       });
     }, 60);
 
@@ -1060,8 +1071,15 @@ function RolePortalShellContent({
     tab,
     activeModuleLabel,
     activeModuleTables,
+    priorityRetry,
   ]);
 
+  const retryCurrentModule = useCallback(() => {
+    if (!navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    // Retry the same module without refreshing the document or other modules.
+    priorityAttemptedAt.current.clear();
+    setPriorityRetry(value => value + 1);
+  }, [selectedMembership, activeModuleTables]);
 
   const [hubUnreadCount, setHubUnreadCount] = useState(0);
   const [hubHasAttention, setHubHasAttention] = useState(false);
@@ -2119,6 +2137,8 @@ function RolePortalShellContent({
             totalCount={moduleReadiness.totalCount}
             online={moduleReadiness.online}
             preparing={priorityPreparing !== null}
+            progress={priorityProgress}
+            onRetry={retryCurrentModule}
           />
           {priorityPreparing && (
             <div

@@ -28,9 +28,7 @@ import type {
   ExcelExportWorkbook,
 } from "../excelTypes";
 
-import {
-  downloadExcelWorkbook,
-} from "../excelWorkbook";
+import { downloadProtectedAttendanceWorkbook } from "./protectedAttendanceWorkbook";
 
 import type {
   AttendanceExcelTemplateContext,
@@ -99,47 +97,9 @@ function metadataRows(
     ]);
   }
 
-  if (context.accountId) {
-    rows.push([
-      "Eleeveon Account ID",
-      context.accountId,
-    ]);
-  }
-
-  if (context.schoolId) {
-    rows.push([
-      "Eleeveon School ID",
-      context.schoolId,
-    ]);
-  }
-
-  if (context.branchId) {
-    rows.push([
-      "Eleeveon Branch ID",
-      context.branchId,
-    ]);
-  }
-
-  if (context.classId) {
-    rows.push([
-      "Eleeveon Class ID",
-      context.classId,
-    ]);
-  }
-
-  if (context.academicStructureId) {
-    rows.push([
-      "Eleeveon Academic Structure ID",
-      context.academicStructureId,
-    ]);
-  }
-
-  if (context.academicPeriodId) {
-    rows.push([
-      "Eleeveon Academic Period ID",
-      context.academicPeriodId,
-    ]);
-  }
+  // Technical IDs are never placed in the user-visible preamble.
+  // The protected writer keeps the student ID in hidden column A so the
+  // existing parser can still match reordered student rows.
 
   return rows;
 }
@@ -560,7 +520,7 @@ export function downloadDailyAttendanceTemplate(
     typeof buildDailyAttendanceTemplate
   >[0],
 ) {
-  return downloadExcelWorkbook(
+  return downloadProtectedAttendanceWorkbook(
     buildDailyAttendanceTemplate(args),
   );
 }
@@ -570,7 +530,7 @@ export function downloadAttendanceRegisterTemplate(
     typeof buildAttendanceRegisterTemplate
   >[0],
 ) {
-  return downloadExcelWorkbook(
+  return downloadProtectedAttendanceWorkbook(
     buildAttendanceRegisterTemplate(args),
   );
 }
@@ -580,7 +540,7 @@ export function downloadTermAttendanceTemplate(
     typeof buildTermAttendanceTemplate
   >[0],
 ) {
-  return downloadExcelWorkbook(
+  return downloadProtectedAttendanceWorkbook(
     buildTermAttendanceTemplate(args),
   );
 }

@@ -35,6 +35,8 @@ import {
   toExcelInteger,
 } from "../excelUtils";
 
+import { normalizeSchoolDate } from "../excelDate";
+
 import type {
   AttendanceExcelDailyLayout,
   AttendanceExcelDailyRecord,
@@ -320,79 +322,10 @@ function mappingValue(
   ];
 }
 
-function parseDate(
-  value: unknown,
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    text(value) === ""
-  ) {
-    return undefined;
-  }
-
-  if (value instanceof Date) {
-    if (
-      !Number.isFinite(
-        value.getTime(),
-      )
-    ) {
-      return undefined;
-    }
-
-    return value
-      .toISOString()
-      .slice(0, 10);
-  }
-
-  if (
-    typeof value === "number" &&
-    value > 20_000 &&
-    value < 80_000
-  ) {
-    const excelEpoch =
-      Date.UTC(
-        1899,
-        11,
-        30,
-      );
-
-    const date =
-      new Date(
-        excelEpoch +
-          value * 86_400_000,
-      );
-
-    return Number.isFinite(
-      date.getTime(),
-    )
-      ? date
-          .toISOString()
-          .slice(0, 10)
-      : undefined;
-  }
-
-  const raw =
-    text(value);
-
-  if (
-    /^\d{4}-\d{2}-\d{2}$/.test(
-      raw,
-    )
-  ) {
-    return raw;
-  }
-
-  const parsed =
-    new Date(raw);
-
-  return Number.isFinite(
-    parsed.getTime(),
-  )
-    ? parsed
-        .toISOString()
-        .slice(0, 10)
-    : undefined;
+/** Shared school-date normalization: no locale-dependent Date.parse(). */
+function parseDate(value: unknown): string | undefined {
+  const result = normalizeSchoolDate(value);
+  return result.status === "valid" ? result.iso : undefined;
 }
 
 // ======================================================

@@ -22,6 +22,12 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "../context/account-context";
 import { useActiveMembership } from "../context/active-membership-context";
 import { useTheme } from "../context/theme-context";
+import { displayRoleLabel } from "../lib/auth/roleDisplay";
+import {
+  captureWorkspaceStorage,
+  restoreWorkspaceStorage,
+  assertSwitchTargetAvailable,
+} from "../lib/offline/roleSwitchCoordinator";
 import {
   appearanceIdentityFor,
   appearanceIdentityMatches,
@@ -92,18 +98,7 @@ function safeJson<T>(key: string): T | null {
 }
 
 function roleLabel(role: string) {
-  if (role === "developer") return "Developer";
-  if (role === "platform_team") return "Platform Team";
-  if (role === "owner") return "Owner";
-  if (role === "super_admin") return "Super Admin";
-  if (role === "branch_admin") return "Branch Admin";
-  if (role === "admin") return "School Admin";
-  if (role === "accountant") return "Accountant";
-  if (role === "teacher") return "Teacher";
-  if (role === "student") return "Student";
-  if (role === "parent") return "Parent";
-
-  return String(role || "User").replaceAll("_", " ");
+  return displayRoleLabel(role);
 }
 
 function roleIcon(role: string) {
@@ -511,12 +506,43 @@ export default function SelectRolePage() {
       return;
     }
 
+    // Never accept a candidate that is not one of this account's displayed,
+    // usable memberships. Cached data is an offline convenience, not a grant.
+    const authorized = memberships.find((candidate) =>
+      membershipKey(candidate) === id &&
+      candidate.role === normalized.role &&
+      String(candidate.schoolId || "") === String(normalized.schoolId || "") &&
+      String(candidate.branchId || "") === String(normalized.branchId || "") &&
+      String(candidate.teacherId || "") === String(normalized.teacherId || "") &&
+      String(candidate.studentId || "") === String(normalized.studentId || "") &&
+      String(candidate.parentId || "") === String(normalized.parentId || ""),
+    );
+    const currentAccountId = String(account?.id || user?.accountId || "").trim();
+    if (!authorized ||
+        (currentAccountId && normalized.accountId &&
+          String(normalized.accountId) !== currentAccountId)) {
+      setOpeningError("This role is not available for the current account.");
+      return;
+    }
+
+    const destination = getPortalPathByRole(normalized.role);
+    if (destination === "/login") {
+      setOpeningError("This role does not have a valid portal.");
+      return;
+    }
+    const previousStorage = captureWorkspaceStorage();
+    let roleStateChanged = false;
+    let navigating = false;
     setSelectingId(id);
     setOpeningError(null);
 
     try {
+      // A full-document offline navigation needs a cached destination.
+      // Perform the check BEFORE replacing the current role in storage.
+      await assertSwitchTargetAvailable(destination);
       const openedMembership =
         writeOpenedWorkspaceSession(normalized);
+      roleStateChanged = true;
 
       beginMembershipTransition(openedMembership);
 
@@ -558,9 +584,8 @@ export default function SelectRolePage() {
        */
       completeMembershipTransition();
 
-      window.location.replace(
-        getPortalPathByRole(openedMembership.role)
-      );
+      navigating = true;
+      window.location.replace(destination);
     } catch (error: unknown) {
       const message =
         error instanceof Error
@@ -572,6 +597,21 @@ export default function SelectRolePage() {
         error
       );
 
+      // If appearance or role activation failed, restore the previous
+      // locally selected workspace without wiping any Dexie records.
+      if (roleStateChanged && !navigating) {
+        restoreWorkspaceStorage(previousStorage);
+        const previousRaw = previousStorage.activeMembership;
+        if (previousRaw) {
+          try {
+            const previous = JSON.parse(previousRaw) as UserMembership;
+            await setActiveMembership(previous);
+            await applyForMembership(previous);
+          } catch (rollbackError) {
+            console.warn("Unable to restore previous role appearance:", rollbackError);
+          }
+        }
+      }
       failMembershipTransition(message);
 
       setOpeningError(message);

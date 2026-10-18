@@ -54,6 +54,7 @@ import { useWindowChrome } from "../../../context/window-chrome-context";
 import { readLastWorkspaceModule, rememberLastWorkspaceModule } from "../../../lib/offline/workspaceMemory";
 import { useOfflineTableReadiness } from "../../../hooks/useOfflineTableReadiness";
 import OfflineDataStatus from "../../offline/OfflineDataStatus";
+import { assertSwitchTargetAvailable, captureWorkspaceStorage, restoreWorkspaceStorage } from "../../../lib/offline/roleSwitchCoordinator";
 
 import SyncStatusSheet from "../../SyncStatusSheet";
 import EleeveonCenter from "../EleeveonCenter";
@@ -122,9 +123,10 @@ import {
   MEMBERSHIP_BACKUP_KEY,
 } from "./rolePortalWorkspace";
 
+import { displayRoleLabel } from "../../../lib/auth/roleDisplay";
+
 import {
   roleIcon,
-  roleLabel,
   selectedMemberMeta,
   selectedMemberName,
 } from "./rolePortalIdentity";
@@ -1338,7 +1340,7 @@ function RolePortalShellContent({
       ? "Messages, notices and support"
       : groups[tab] ?? portalSubtitle;
 
-  const resolvedMemberRole = roleLabel(
+  const resolvedMemberRole = displayRoleLabel(
     selectedMembership?.role ||
     account?.role ||
     user?.role ||
@@ -1640,9 +1642,30 @@ function RolePortalShellContent({
       membership;
 
     const id = membershipKey(normalized);
+    // A stored membership or an untrusted role label is never sufficient.
+    // Require the target to match a membership in this user's restored list.
+    const authorizedTarget = switchableMemberships.find(
+      (candidate) =>
+        membershipKey(candidate) === id &&
+        candidate.role === normalized.role &&
+        String(candidate.schoolId || "") === String(normalized.schoolId || "") &&
+        String(candidate.branchId || "") === String(normalized.branchId || "") &&
+        String(candidate.teacherId || "") === String(normalized.teacherId || "") &&
+        String(candidate.studentId || "") === String(normalized.studentId || "") &&
+        String(candidate.parentId || "") === String(normalized.parentId || ""),
+    );
+    if (!authorizedTarget || !membershipIsUsable(authorizedTarget)) {
+      console.warn("Refused role switch: membership not available in the current account.");
+      return;
+    }
 
+    const previousStorage = captureWorkspaceStorage();
+    let committedToNavigation = false;
     try {
       setSwitchingMembershipId(id);
+      // Preflight BEFORE mutating the active role: an offline document
+      // navigation must have a cached target route.
+      await assertSwitchTargetAvailable(getPortalPathByRole(normalized.role));
 
       await runTransition(
         {
@@ -1669,7 +1692,7 @@ function RolePortalShellContent({
 
           setStage("membership", {
             detail:
-              `Activating ${roleLabel(opened.role)} and its profile context.`,
+              `Activating ${displayRoleLabel(opened.role)} and its profile context.`,
           });
 
           await setActiveMembership(opened);
@@ -1718,15 +1741,31 @@ function RolePortalShellContent({
 
           setStage("dashboard", {
             detail:
-              `Opening the ${roleLabel(opened.role)} workspace.`,
+              `Opening the ${displayRoleLabel(opened.role)} workspace.`,
           });
 
+          committedToNavigation = true;
           window.location.replace(
             getPortalPathByRole(opened.role),
           );
         },
       );
     } catch (error) {
+      // Do not strand the user in the target role after a failed preflight
+      // or appearance transition. Preserve the previous stored identity.
+      if (!committedToNavigation) {
+        restoreWorkspaceStorage(previousStorage);
+        const previous = previousStorage.activeMembership;
+        if (previous) {
+          try {
+            const priorMembership = JSON.parse(previous) as UserMembership;
+            await setActiveMembership(priorMembership);
+            await themeContext.applyForMembership(priorMembership);
+          } catch (restoreError) {
+            console.warn("Previous workspace restoration needs a reload:", restoreError);
+          }
+        }
+      }
       const message =
         error instanceof Error
           ? error.message
@@ -1962,7 +2001,7 @@ function RolePortalShellContent({
         open={accountDrawerOpen}
         memberName={visibleMemberName}
         memberRole={
-          roleLabel(
+          displayRoleLabel(
             selectedMembership?.role ||
             account?.role ||
             user?.role ||

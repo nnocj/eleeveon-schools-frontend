@@ -75,7 +75,6 @@ import {
 
 import {
   detectLikelyHeaderRow,
-  downloadExcelWorkbook,
   sheetToRecords,
 } from "../../lib/excel/excelWorkbook";
 
@@ -97,6 +96,8 @@ import {
   importDailyAttendance,
   importTermAttendance,
 } from "../../lib/excel/attendance/attendanceExcelImporter";
+
+import { downloadProtectedAttendanceWorkbook } from "../../lib/excel/attendance/protectedAttendanceWorkbook";
 
 import {
   buildAttendanceRegisterTemplate,
@@ -1840,7 +1841,7 @@ export default function StudentAttendance() {
       status: dailyDrafts[item.id] || "",
     })) as any;
 
-    downloadExcelWorkbook(workbook);
+    void downloadProtectedAttendanceWorkbook(workbook);
   };
 
   const exportCurrentTermAttendance = () => {
@@ -1871,14 +1872,14 @@ export default function StudentAttendance() {
       };
     }) as any;
 
-    downloadExcelWorkbook(workbook);
+    void downloadProtectedAttendanceWorkbook(workbook);
   };
 
   const downloadBlankAttendanceTemplate = () => {
     const context = attendanceExcelTemplateContext();
 
     if (entryMode === "daily") {
-      downloadExcelWorkbook(
+      void downloadProtectedAttendanceWorkbook(
         buildDailyAttendanceTemplate({
           context,
           students: attendanceExcelStudents(),
@@ -1888,7 +1889,7 @@ export default function StudentAttendance() {
       return;
     }
 
-    downloadExcelWorkbook(
+    void downloadProtectedAttendanceWorkbook(
       buildTermAttendanceTemplate({
         context,
         students: attendanceExcelStudents(),
@@ -1901,7 +1902,7 @@ export default function StudentAttendance() {
       throw new Error("Choose a start and end date for the register.");
     }
 
-    downloadExcelWorkbook(
+    void downloadProtectedAttendanceWorkbook(
       buildAttendanceRegisterTemplate({
         context: attendanceExcelTemplateContext(),
         students: attendanceExcelStudents(),

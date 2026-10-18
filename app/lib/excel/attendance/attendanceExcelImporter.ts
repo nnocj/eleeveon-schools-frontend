@@ -147,7 +147,7 @@ export async function getAttendanceExcelReferenceData(
       .filter(
         (row: any) =>
           !row.isDeleted &&
-          row.active !== false &&
+          !["graduated", "transferred", "withdrawn"].includes(String(row.status || "").toLowerCase()) &&
           sameId(
             row.accountId,
             context.accountId,

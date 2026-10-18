@@ -35,6 +35,8 @@ import type {
   AttendanceExcelTermValidationResult,
 } from "./attendanceExcelTypes";
 
+import { normalizeSchoolDate } from "../excelDate";
+
 import {
   normalizeAttendanceStatus,
 } from "./attendanceExcelParser";
@@ -188,7 +190,7 @@ function studentIsInContext(
         studentId,
       ) &&
       !student.isDeleted &&
-      student.active !== false &&
+      !["graduated", "transferred", "withdrawn"].includes(normalizedText((student as any).status)) &&
       sameId(
         student.currentClassId,
         context.classId,
@@ -223,6 +225,21 @@ export function matchAttendanceStudent(
       );
 
     if (student) {
+      const admission = compactText(record.admissionNumber);
+      if (admission && compactText(student.admissionNumber) !== admission) {
+        return { matched: false, reason: "none", issue: {
+          code: "attendance.student_identity_conflict",
+          message: "The admission number disagrees with the protected student ID.",
+          severity: "error", targetKey: "admissionNumber",
+        }};
+      }
+      if (record.studentName && normalizedText(student.fullName) !== normalizedText(record.studentName)) {
+        return { matched: false, reason: "none", issue: {
+          code: "attendance.student_name_conflict",
+          message: "The student name disagrees with the protected student ID.",
+          severity: "error", targetKey: "studentName",
+        }};
+      }
       return {
         matched: true,
         reason:
@@ -230,6 +247,21 @@ export function matchAttendanceStudent(
         student,
       };
     }
+  }
+
+  // A supplied internal ID is authoritative. Never fall back to names if
+  // it no longer identifies a student in this tenant.
+  if (suppliedId) {
+    return {
+      matched: false,
+      reason: "none",
+      issue: {
+        code: "attendance.student_id_not_found",
+        message: "The protected Eleeveon student identifier does not match a student in this branch.",
+        severity: "error",
+        targetKey: "studentId",
+      },
+    };
   }
 
   const admissionNumber =
@@ -458,11 +490,7 @@ export function validateDailyAttendanceImport(args: {
             context.date,
         );
 
-      if (
-        !/^\d{4}-\d{2}-\d{2}$/.test(
-          date,
-        )
-      ) {
+      if (normalizeSchoolDate(date).status !== "valid") {
         issues.push({
           code:
             "attendance.invalid_date",

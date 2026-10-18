@@ -133,7 +133,6 @@ import type {
   ParsedExcelWorkbook,
 } from "../../lib/excel/excelTypes";
 import {
-  downloadExcelWorkbook,
   getParsedSheet,
   parseExcelFile,
 } from "../../lib/excel/excelWorkbook";
@@ -151,6 +150,7 @@ import {
 import {
   downloadStudentExcelTemplate,
 } from "../../lib/excel/students/studentExcelTemplate";
+import { downloadProtectedStudentWorkbook } from "../../lib/excel/students/protectedStudentWorkbook";
 import type {
   StudentExcelImportResult,
   StudentExcelValidationResult,
@@ -2209,7 +2209,7 @@ export default function StudentsPage() {
         };
       });
 
-      downloadExcelWorkbook({
+      await downloadProtectedStudentWorkbook({
         fileName: `Eleeveon Students - ${currentBranchName() || "Branch"}.xlsx`,
         sheets: [
           {
@@ -2232,7 +2232,7 @@ export default function StudentsPage() {
             rows: exportRows,
           },
         ],
-      });
+      }, { readOnly: true });
 
       showToast(
         "success",

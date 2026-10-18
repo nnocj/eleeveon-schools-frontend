@@ -51,6 +51,7 @@ import { db } from "../../../lib/db/db";
 import { requestPrioritySync } from "../../../lib/sync/runSync";
 import { isSyncTable } from "../../../lib/sync/syncTables";
 import { useWindowChrome } from "../../../context/window-chrome-context";
+import { readLastWorkspaceModule, rememberLastWorkspaceModule } from "../../../lib/offline/workspaceMemory";
 
 import SyncStatusSheet from "../../SyncStatusSheet";
 import EleeveonCenter from "../EleeveonCenter";
@@ -805,6 +806,49 @@ function RolePortalShellContent({
 
   const [tab, setTab] = useState(homeKey);
 
+  // Restore the last viewed module only after resolving the correct signed-in
+  // account and selected membership. Module memory never establishes access.
+  const moduleMemoryMembershipId = selectedMembership
+    ? membershipKey(selectedMembership)
+    : null;
+  const availableModuleKeys = navSections
+    .flatMap((section) => section.items.map((item) => item.key))
+    .join("\u001f");
+
+  useEffect(() => {
+    if (
+      !authenticated ||
+      !accountId ||
+      !canAccess ||
+      !moduleMemoryMembershipId
+    ) {
+      setTab(homeKey);
+      return;
+    }
+
+    const remembered = readLastWorkspaceModule(
+      accountId,
+      moduleMemoryMembershipId,
+    );
+
+    // Reject modules removed from this portal or no longer in its route map.
+    const allowed =
+      remembered === ELEEVEON_CENTER_KEY ||
+      (Boolean(remembered) &&
+        Object.prototype.hasOwnProperty.call(routes, remembered!) &&
+        availableModuleKeys.split("\u001f").includes(remembered!));
+
+    setTab(allowed && remembered ? remembered : homeKey);
+  }, [
+    accountId,
+    authenticated,
+    canAccess,
+    moduleMemoryMembershipId,
+    homeKey,
+    availableModuleKeys,
+  ]);
+
+
   // V19: route changes reset ONLY the shared module scroller. The portal
   // navigation stays in place and embedded report/table scroll positions
   // remain independent. Do not introduce a window scroll or route reload.
@@ -1513,7 +1557,15 @@ function RolePortalShellContent({
    * No browser history changes are introduced.
    */
   const navigate = (key: string) => {
+    if (
+      key !== ELEEVEON_CENTER_KEY &&
+      !Object.prototype.hasOwnProperty.call(routes, key)
+    ) return;
+
     setTab(key);
+    if (authenticated && canAccess && accountId && moduleMemoryMembershipId) {
+      rememberLastWorkspaceModule(accountId, moduleMemoryMembershipId, key);
+    }
     setSidebarOpen(false);
     setAccountDrawerOpen(false);
 

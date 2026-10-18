@@ -48,10 +48,12 @@ import { useRealtime } from "../../../context/realtime-context";
 import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
-import { requestPrioritySync } from "../../../lib/sync/runSync";
+import { bootstrapPriorityWorkspaceTables, arePriorityWorkspaceTablesCached } from "../../../lib/sync/workspaceBootstrap";
 import { isSyncTable } from "../../../lib/sync/syncTables";
 import { useWindowChrome } from "../../../context/window-chrome-context";
 import { readLastWorkspaceModule, rememberLastWorkspaceModule } from "../../../lib/offline/workspaceMemory";
+import { useOfflineTableReadiness } from "../../../hooks/useOfflineTableReadiness";
+import OfflineDataStatus from "../../offline/OfflineDataStatus";
 
 import SyncStatusSheet from "../../SyncStatusSheet";
 import EleeveonCenter from "../EleeveonCenter";
@@ -141,11 +143,7 @@ import {
  * priority pulls MUST be limited to genuinely account-wide roles. Other roles
  * continue to receive their permitted records via role-scoped bootstrap.
  */
-const PRIORITY_SYNC_ACCOUNT_ROLES = new Set([
-  "super_admin",
-  "developer",
-  "platform_team",
-]);
+
 
 const PRIORITY_TABLE_GROUPS = {
   foundation: [
@@ -919,7 +917,7 @@ function RolePortalShellContent({
     // navigation-critical path.
     const timer = window.setTimeout(
       start,
-      150,
+      900,
     );
 
     window.addEventListener(
@@ -961,6 +959,12 @@ function RolePortalShellContent({
     [tab, activeModuleLabel],
   );
 
+  // This is advisory, not a navigation gate: cached records stay usable.
+  // A completed priority download proves ONLY its requested tables.
+  const moduleReadiness = useOfflineTableReadiness(
+    selectedMembership, activeModuleTables, priorityPreparing !== null,
+  );
+
   // One stable primitive key per selected account/workspace, not an object
   // reference that could change on every context refresh.
   const priorityWorkspaceKey = selectedMembership
@@ -979,12 +983,10 @@ function RolePortalShellContent({
    * Runs after the portal has painted and does not block route navigation.
    * The existing background bootstrap always continues to fetch ALL tables.
    *
-   * /sync/pull is currently account-scoped, not selected-profile-scoped.
-   * Do not trigger it automatically for teacher/student/parent/branch/school
-   * scoped roles until backend membership authorization is implemented.
+   * Uses the selected-membership-authorized /sync/workspace-bootstrap route.
+   * Filtered data is never marked as a completed full-role download.
    */
   useEffect(() => {
-    const selectedRole = canonicalPriorityRole(selectedMembership?.role);
     if (
       !authenticated ||
       !sessionVerified ||
@@ -996,7 +998,6 @@ function RolePortalShellContent({
       !isOnline ||
       Boolean(switchingMembershipId) ||
       !priorityWorkspaceKey ||
-      !PRIORITY_SYNC_ACCOUNT_ROLES.has(selectedRole) ||
       activeModuleTables.length === 0
     ) {
       setPriorityPreparing(null);
@@ -1014,7 +1015,8 @@ function RolePortalShellContent({
     if (Date.now() - lastAttempt < 30_000) return;
 
     const timer = window.setTimeout(() => {
-      if (disposed || !navigator.onLine) return;
+      if (disposed || !navigator.onLine || !selectedMembership) return;
+      if (arePriorityWorkspaceTablesCached(selectedMembership, activeModuleTables)) return;
       // Also check the persisted workspace to avoid a stale queued request
       // being scheduled while the user is switching roles.
       const opened = readOpenWorkspaceSession();
@@ -1027,21 +1029,14 @@ function RolePortalShellContent({
       priorityAttemptedAt.current.set(requestKey, Date.now());
       setPriorityPreparing(activeModuleLabel);
 
-      void requestPrioritySync(activeModuleTables).then((result) => {
-        if (disposed) return;
-        if (!result.ok) {
-          // Failed work can be retried on the next navigation or reconnect.
-          priorityAttemptedAt.current.delete(requestKey);
-          console.warn("[portal] Active-module priority sync did not complete:", result.errors);
-        }
-      }).catch((error) => {
+      void bootstrapPriorityWorkspaceTables(selectedMembership!, activeModuleTables).catch((error) => {
         if (disposed) return;
         priorityAttemptedAt.current.delete(requestKey);
         console.warn("[portal] Active-module priority sync failed:", error);
       }).finally(() => {
         if (!disposed) setPriorityPreparing(null);
       });
-    }, 220);
+    }, 60);
 
     return () => {
       disposed = true;
@@ -2078,6 +2073,14 @@ function RolePortalShellContent({
         )}
 
         <PortalContent>
+          <OfflineDataStatus
+            availability={moduleReadiness.status}
+            moduleLabel={activeModuleLabel}
+            missingCount={moduleReadiness.missingCount}
+            totalCount={moduleReadiness.totalCount}
+            online={moduleReadiness.online}
+            preparing={priorityPreparing !== null}
+          />
           {priorityPreparing && (
             <div
               className="role-priority-sync-note"

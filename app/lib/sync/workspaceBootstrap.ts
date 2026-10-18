@@ -1323,6 +1323,157 @@ async function bootstrapWorkspacePages(
   }
 }
 
+
+/**
+ * PHASE 3 — SMALL, ROLE-AUTHORIZED, ACTIVE-MODULE BOOTSTRAP.
+ * This is deliberately independent of the full-workspace completion marker.
+ * Successful priority delivery NEVER claims that the entire role is offline-ready.
+ * The backend verifies JWT, selected membership and requested table allow-list.
+ */
+const priorityFlights = new Map<string, Promise<void>>();
+const PRIORITY_PREFIX = "eleeveon_workspace_priority_v1";
+
+function priorityMarkerKey(accountId: string, membership: WorkspaceBootstrapMembership, tableNames: string[]): string {
+  return `${PRIORITY_PREFIX}:${encodeURIComponent(workspaceIdentity(accountId, membership))}:${tableNames.join(",")}`;
+}
+
+export function arePriorityWorkspaceTablesCached(
+  membership: WorkspaceBootstrapMembership,
+  requestedTableNames: string[],
+): boolean {
+  const accountId = getAccountId();
+  if (!accountId) return false;
+  const tables = [...new Set(requestedTableNames)].filter(isSyncTable).sort();
+  if (!tables.length) return true;
+  const complete = completionMarker(accountId, membership);
+  if (tables.every(table => complete?.includedTables?.includes(table))) return true;
+  const saved = readJson<{ accountId: string; identity: string; tables: string[]; schemaVersion: number; completedAt: number }>(
+    priorityMarkerKey(accountId, membership, tables),
+  );
+  return Boolean(
+    saved && saved.accountId === accountId &&
+    saved.identity === workspaceIdentity(accountId, membership) &&
+    saved.schemaVersion === WORKSPACE_BOOTSTRAP_SCHEMA_VERSION &&
+    tables.every(table => saved.tables.includes(table)) && saved.completedAt,
+  );
+}
+
+export function bootstrapPriorityWorkspaceTables(
+  membership: WorkspaceBootstrapMembership,
+  requestedTableNames: string[],
+  options: { onProgress?: (processed: number, total: number) => void } = {},
+): Promise<void> {
+  const accountId = assertAccountId();
+  const tables = [...new Set(requestedTableNames)].filter(isSyncTable).sort();
+  if (!tables.length) return Promise.resolve();
+  const key = priorityMarkerKey(accountId, membership, tables);
+  const running = priorityFlights.get(key);
+  if (running) return running;
+  const task = (async () => {
+    assertWorkspaceUnchanged(accountId, membership);
+    if (arePriorityWorkspaceTablesCached(membership, tables)) return;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    const deviceId = getDeviceId();
+    let cursor: string | null = null;
+    let expectedRevision: string | null = null;
+    let processed = 0;
+    let expectedTotal: number | null = null;
+    let quarantined = 0;
+    for (let pageNumber = 0; pageNumber < MAX_NETWORK_PAGES; pageNumber++) {
+      assertWorkspaceUnchanged(accountId, membership);
+      if (typeof navigator !== "undefined" && !navigator.onLine) return;
+      const response: WorkspaceBootstrapResponse = await syncHttp<WorkspaceBootstrapResponse>(ENDPOINT, {
+        method: "POST",
+        body: {
+          accountId, deviceId,
+          membershipId: clean(membership.id),
+          role: normalizeRole(membership.role),
+          schoolId: cleanId(membership.schoolId),
+          branchId: cleanId(membership.branchId),
+          teacherId: cleanId(membership.teacherId),
+          studentId: cleanId(membership.studentId),
+          parentId: cleanId(membership.parentId),
+          tableNames: tables,
+          pageSize: NETWORK_PAGE_SIZE,
+          ...(cursor ? { cursor } : {}),
+        },
+      });
+      assertWorkspaceUnchanged(accountId, membership);
+      if (!response?.ok || response.accountId !== accountId ||
+          normalizeRole(response.role) !== normalizeRole(membership.role) ||
+          response.bootstrapSchemaVersion !== WORKSPACE_BOOTSTRAP_SCHEMA_VERSION || response.truncated) {
+        throw new Error("Priority bootstrap identity or schema validation failed.");
+      }
+      if (clean(membership.id) && response.membershipId !== clean(membership.id)) {
+        throw new Error("Priority bootstrap returned another membership.");
+      }
+      for (const field of ["schoolId", "branchId", "teacherId", "studentId", "parentId"] as const) {
+        if (cleanId(response[field]) && cleanId(membership[field]) && cleanId(response[field]) !== cleanId(membership[field])) {
+          throw new Error(`Priority bootstrap scope mismatch: ${field}.`);
+        }
+      }
+      const returnedTables = response.includedTables || response.requiredTables || [];
+      if (tables.some(table => !returnedTables.includes(table)) ||
+          returnedTables.some(table => !tables.includes(table))) {
+        throw new Error("Priority bootstrap returned unexpected table coverage.");
+      }
+      const revision = response.bootstrapRevision || response.revision;
+      if (!revision || (expectedRevision && expectedRevision !== revision)) {
+        throw new Error("WORKSPACE_SNAPSHOT_CHANGED: Retry active-module download.");
+      }
+      expectedRevision = revision;
+      if (response.pageOffset !== undefined && response.pageOffset !== processed) {
+        throw new Error("Priority bootstrap page offset mismatch.");
+      }
+      if (pageNumber === 0 && Number.isSafeInteger(response.totalRecords) && Number(response.totalRecords) >= 0) {
+        expectedTotal = Number(response.totalRecords);
+      }
+      const items: BootstrapItem[] = [
+        ...(response.quarantineRecords || []).map((value): BootstrapItem => ({kind:"quarantine",value})),
+        ...(response.records || []).map((value): BootstrapItem => ({kind:"record",value})),
+        ...(response.cacheRecords || []).map((value): BootstrapItem => ({kind:"cache",value})),
+      ];
+      for (let index = 0; index < items.length; index += BATCH_SIZE) {
+        assertWorkspaceUnchanged(accountId, membership);
+        const result = await applyBatch(items.slice(index, index + BATCH_SIZE), accountId, deviceId);
+        quarantined += result.quarantined;
+        if (result.changedTables.size) {
+          publishSyncPullCompleted({ accountId, changedTables: [...result.changedTables] });
+        }
+      }
+      quarantined += Math.max(0, Number(response.quarantinedCount || 0) - (response.quarantineRecords || []).length);
+      processed += (response.records || []).length + (response.quarantineRecords || []).length;
+      options.onProgress?.(processed, expectedTotal ?? processed);
+      if (!response.hasMore) {
+        if (response.completed === false || response.nextCursor || quarantined > 0 ||
+            (expectedTotal !== null && processed + (response.cacheRecords || []).length < expectedTotal && pageNumber === 0)) {
+          // totalRecords can include first-page platform cache; avoid treating any incomplete transfer as complete.
+          throw new Error("Priority bootstrap did not complete safely.");
+        }
+        assertWorkspaceUnchanged(accountId, membership);
+        writeJson(key, {
+          accountId, identity: workspaceIdentity(accountId, membership),
+          tables, schemaVersion: WORKSPACE_BOOTSTRAP_SCHEMA_VERSION,
+          completedAt: Date.now(), revision: expectedRevision,
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent(WORKSPACE_BOOTSTRAP_STATUS_EVENT, {
+            detail: { accountId, membershipId: membershipId(membership), status: "priority-complete", tables },
+          }));
+        }
+        return;
+      }
+      if (!response.nextCursor || !items.length) throw new Error("Priority bootstrap paging stopped prematurely.");
+      cursor = response.nextCursor;
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    }
+    throw new Error("Priority bootstrap exceeded maximum pages.");
+  })();
+  priorityFlights.set(key, task);
+  void task.finally(() => { if (priorityFlights.get(key) === task) priorityFlights.delete(key); }).catch(() => undefined);
+  return task;
+}
+
 export function clearWorkspaceBootstrapMarker(
   membership: WorkspaceBootstrapMembership,
 ): void {

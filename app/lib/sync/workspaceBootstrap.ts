@@ -1412,9 +1412,11 @@ export function bootstrapPriorityWorkspaceTables(
           throw new Error(`Priority bootstrap scope mismatch: ${field}.`);
         }
       }
-      const returnedTables = response.includedTables || response.requiredTables || [];
-      if (tables.some(table => !returnedTables.includes(table)) ||
-          returnedTables.some(table => !tables.includes(table))) {
+      const returnedTables: string[] = response.includedTables || response.requiredTables || [];
+      const requestedTableNames = new Set<string>(tables);
+      const returnedTableNames = new Set<string>(returnedTables);
+      if (tables.some(table => !returnedTableNames.has(table)) ||
+          returnedTables.some(table => !requestedTableNames.has(table))) {
         throw new Error("Priority bootstrap returned unexpected table coverage.");
       }
       const revision = response.bootstrapRevision || response.revision;

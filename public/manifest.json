@@ -5,97 +5,28 @@
   "description": "A connected, offline-first school management workspace.",
   "lang": "en",
   "dir": "ltr",
-  "start_url": "/?source=pwa&intent=workspace",
+  "start_url": "/launch",
   "scope": "/",
   "display": "standalone",
-  "display_override": [
-    "window-controls-overlay",
-    "standalone"
-  ],
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#f8fafc",
   "theme_color": "#f8fafc",
   "orientation": "any",
-  "categories": [
-    "education",
-    "productivity",
-    "business"
-  ],
-  "launch_handler": {
-    "client_mode": [
-      "navigate-existing",
-      "auto"
-    ]
-  },
+  "categories": ["education", "productivity", "business"],
+  "launch_handler": {"client_mode": ["navigate-existing", "auto"]},
   "icons": [
-    {
-      "src": "/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icons/maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "/icons/monochrome.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "monochrome"
-    }
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    {"src": "/icons/monochrome.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "monochrome"}
   ],
   "shortcuts": [
-    {
-      "name": "Open workspace",
-      "short_name": "Workspace",
-      "description": "Open the last active Eleeveon workspace.",
-      "url": "/?source=pwa&intent=workspace",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
-    },
-    {
-      "name": "Select role",
-      "short_name": "Roles",
-      "description": "Choose an available Eleeveon workspace.",
-      "url": "/select-role?source=pwa",
-      "icons": [
-        {
-          "src": "/icons/icon-192.png",
-          "sizes": "192x192",
-          "type": "image/png"
-        }
-      ]
-    }
+    {"name": "Open workspace", "short_name": "Workspace", "description": "Open the last active Eleeveon workspace.", "url": "/launch", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+    {"name": "Select role", "short_name": "Roles", "description": "Choose an available Eleeveon workspace.", "url": "/select-role?source=pwa", "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]}
   ],
   "screenshots": [
-    {
-      "src": "/design/illustrations/welcome-school.webp",
-      "sizes": "1200x750",
-      "type": "image/webp",
-      "form_factor": "wide",
-      "label": "Eleeveon Schools workspace"
-    },
-    {
-      "src": "/design/illustrations/empty-state-school.webp",
-      "sizes": "1200x750",
-      "type": "image/webp",
-      "label": "Eleeveon Schools"
-    }
+    {"src": "/design/illustrations/welcome-school.webp", "sizes": "1200x750", "type": "image/webp", "form_factor": "wide", "label": "Eleeveon Schools workspace"},
+    {"src": "/design/illustrations/empty-state-school.webp", "sizes": "1200x750", "type": "image/webp", "label": "Eleeveon Schools"}
   ],
-  "edge_side_panel": {
-    "preferred_width": 420
-  }
+  "edge_side_panel": {"preferred_width": 420}
 }

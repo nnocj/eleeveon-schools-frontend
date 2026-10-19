@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import OwnerAccountProfile from "../owner/modules/AccountProfile";
+import OwnerAccountProfile from "../owner/AccountProfile";
 import WorkspaceAppUserProfile from "../components/profile/WorkspaceAppUserProfile";
 import { useAccount } from "../context/account-context";
 

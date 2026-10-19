@@ -1557,11 +1557,17 @@ function RolePortalShellContent({
         // Re-read after committing the foundation tables, then the existing
         // role-scoped appearance identity gate must succeed before rendering.
         if (!ready) {
-          await Promise.all([
-            Promise.resolve(refreshInstitution()),
-            Promise.resolve(refreshSettings()),
-            Promise.resolve(themeContext.refreshTheme()),
-          ]);
+          // Important: these refreshes MUST be sequential. Applying the
+          // appearance before SettingsContext finishes rehydrating can lock
+          // the portal onto its account/default palette on a fresh device.
+          await Promise.resolve(refreshInstitution());
+          if (cancelled) return;
+          await Promise.resolve(refreshSettings());
+          if (cancelled) return;
+          const applied = await appearanceContext.refresh();
+          if (!applied) {
+            throw new Error("The selected workspace appearance could not be applied. Retry workspace setup.");
+          }
         }
         if (!cancelled) {
           setEntryState({ key: entryIdentity, state: "ready" });

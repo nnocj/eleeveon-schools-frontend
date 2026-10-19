@@ -74,6 +74,35 @@ function sameIdentityValue(left: unknown, right: unknown): boolean {
   return leftId === rightId;
 }
 
+/**
+ * Eleeveon brand accent is independent of the personal light/dark choice.
+ * The design-token generator also writes accent tokens, so do this AFTER
+ * both appearance/token passes. Both light and dark use the same brand.
+ *
+ * Do not change surface/background/text tokens here: those belong to the
+ * user's selected appearance mode.
+ */
+function applyWorkspaceBrandAccent(primaryColor: string) {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  const color = primaryColor.trim() || "#2f6fed";
+  const accentTokens: Record<string, string> = {
+    "--primary-color": color,
+    "--dashboard-primary": color,
+    "--branch-primary": color,
+    "--accent-color": color,
+    "--eds-primary": color,
+    "--eds-brand-primary": color,
+    "--eds-primary-soft": `color-mix(in srgb, ${color} 15%, transparent)`,
+    "--eds-primary-softer": `color-mix(in srgb, ${color} 8%, transparent)`,
+  };
+
+  for (const [name, value] of Object.entries(accentTokens)) {
+    // A theme-specific stylesheet must not reset the role brand in light mode.
+    root.style.setProperty(name, value, "important");
+  }
+}
+
 function publishWindowAppearance(
   mode: ResolvedAppearanceMode,
   primaryColor: string,
@@ -103,6 +132,10 @@ function publishWindowAppearance(
     document.documentElement,
     tokens,
   );
+
+  // The token generator may reset --eds-primary for the selected mode.
+  // Reassert the workspace accent after BOTH light and dark token passes.
+  applyWorkspaceBrandAccent(primaryColor);
 
   const root = document.documentElement;
   const computed =
@@ -186,9 +219,6 @@ export default function LocalAppearanceRuntime({
   const sharedDefaultMode = resolveSharedMode(
     sharedSettings?.appearanceMode || sharedSettings?.theme || sharedSettings?.mode || theme.mode,
   );
-  const sharedPrimaryColor = String(
-    (theme.ready ? theme.primaryColor : sharedSettings?.primaryColor) || "#2f6fed",
-  ).trim();
   const sharedFontSize = sharedSettings?.fontSize ?? theme.fontSize ?? 16;
 
   const [settings, setSettings] = useState<LocalPortalSettings>(DEFAULT_LOCAL_PORTAL_SETTINGS);
@@ -206,6 +236,14 @@ export default function LocalAppearanceRuntime({
       sameIdentityValue(theme.appliedFor.branchId, branchId)
     );
   }, [accountId, branchId, roleKey, schoolId, theme.appliedFor]);
+
+  // Use the already-applied, matching workspace brand when possible. Generic
+  // account defaults must not override a branch colour during a mode switch.
+  const sharedPrimaryColor = String(
+    (theme.ready && appearanceMatchesWorkspace
+      ? theme.appliedFor?.primaryColor || theme.primaryColor
+      : sharedSettings?.primaryColor || theme.primaryColor) || "#2f6fed",
+  ).trim();
 
   const apply = useCallback(
     (
@@ -308,6 +346,20 @@ export default function LocalAppearanceRuntime({
   useEffect(() => {
     if (!theme.ready || !appearanceMatchesWorkspace) {
       setReady(false);
+      // A previous workspace may have written !important brand values.
+      // Release them while the next workspace is being resolved.
+      if (typeof document !== "undefined") {
+        const root = document.documentElement;
+        for (const token of [
+          "--primary-color", "--dashboard-primary", "--branch-primary",
+          "--accent-color", "--eds-primary", "--eds-brand-primary",
+          "--eds-primary-soft", "--eds-primary-softer",
+        ]) {
+          if (root.style.getPropertyPriority(token) === "important") {
+            root.style.removeProperty(token);
+          }
+        }
+      }
       return;
     }
     apply();

@@ -337,13 +337,6 @@ function RolePortalShellContent({
     refreshSettings,
   } = settingsContext;
 
-  const resolvedPrimaryColor =
-    // The appearance already applied for this membership is canonical.
-    // Generic effective/account defaults must not repaint the branch in Light.
-    (themeContext.ready ? themeContext.appliedFor?.primaryColor : null) ||
-    themeContext.primaryColor ||
-    settings?.primaryColor ||
-    "#2f6fed";
 
   const resolvedFontFamily =
     themeContext.fontFamily ||
@@ -354,48 +347,6 @@ function RolePortalShellContent({
     themeContext.fontSize ||
     Number(settings?.fontSize) ||
     16;
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
-
-    const root = document.documentElement;
-
-    root.style.setProperty(
-      "--primary-color",
-      resolvedPrimaryColor,
-    );
-
-    root.style.setProperty(
-      "--dashboard-primary",
-      resolvedPrimaryColor,
-    );
-
-    root.style.setProperty(
-      "--branch-primary",
-      resolvedPrimaryColor,
-    );
-
-    root.style.setProperty(
-      "--accent-color",
-      resolvedPrimaryColor,
-    );
-
-    root.style.setProperty(
-      "--font-family",
-      resolvedFontFamily,
-    );
-
-    root.style.setProperty(
-      "--font-size",
-      `${resolvedFontSize}px`,
-    );
-  }, [
-    resolvedPrimaryColor,
-    resolvedFontFamily,
-    resolvedFontSize,
-  ]);
 
   const {
     activeSchoolId,
@@ -621,6 +572,77 @@ function RolePortalShellContent({
         expectedAppearance,
       ),
   );
+
+  // The Students module correctly reads settings.primaryColor directly.
+  // Apply that same priority to the shared portal, but only after SettingsContext
+  // confirms the values belong to this exact membership/workspace.
+  const settingsForCurrentWorkspace = Boolean(
+    expectedAppearance &&
+    settingsContext.loadedFor &&
+    settingsContext.effectiveScope === expectedScope &&
+    settingsContext.loadedFor.key === expectedAppearance.key &&
+    String(settingsContext.loadedFor.accountId || "") === String(accountId || "") &&
+    String(settingsContext.loadedFor.schoolId || "") === String(expectedAppearance.schoolId || "") &&
+    String(settingsContext.loadedFor.branchId || "") === String(expectedAppearance.branchId || ""),
+  );
+
+  const currentBranchPrimary =
+    expectedScope === "branch" && settingsForCurrentWorkspace
+      ? String(settings?.primaryColor || settingsContext.branchSettings?.primaryColor || "").trim()
+      : "";
+
+  const currentAppearancePrimary =
+    themeContext.ready &&
+    expectedAppearance &&
+    appearanceIdentityMatches(themeContext.appliedFor, expectedAppearance)
+      ? String(themeContext.appliedFor?.primaryColor || "").trim()
+      : "";
+
+  const resolvedPrimaryColor =
+    currentBranchPrimary ||
+    (settingsForCurrentWorkspace ? String(settings?.primaryColor || "").trim() : "") ||
+    currentAppearancePrimary ||
+    "#2f6fed";
+
+  const resolvedPrimaryText = (() => {
+    const value = resolvedPrimaryColor.trim();
+    const compact = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)
+      ? value.slice(1)
+      : "";
+    const hex = compact.length === 3
+      ? compact.split("").map((part) => part + part).join("")
+      : compact;
+    if (!hex) return "#ffffff";
+    const number = Number.parseInt(hex, 16);
+    const luminance = (((number >> 16) & 255) * 299 +
+      ((number >> 8) & 255) * 587 + (number & 255) * 114) / 1000;
+    return luminance > 155 ? "#111827" : "#ffffff";
+  })();
+
+  // Keep the shell, shared navigation, global menus and portaled dialogs on
+  // the same school/branch accent. Neutral light/dark surfaces remain untouched.
+  useEffect(() => {
+    if (typeof document === "undefined" || !appearanceMatchesRole) return;
+    const root = document.documentElement;
+    const accents: Record<string, string> = {
+      "--primary-color": resolvedPrimaryColor,
+      "--dashboard-primary": resolvedPrimaryColor,
+      "--branch-primary": resolvedPrimaryColor,
+      "--accent-color": resolvedPrimaryColor,
+      "--ba-primary": resolvedPrimaryColor,
+      "--ba-primary-text": resolvedPrimaryText,
+      "--eds-primary": resolvedPrimaryColor,
+      "--eds-brand-primary": resolvedPrimaryColor,
+      "--eds-primary-text": resolvedPrimaryText,
+      "--eds-primary-soft": `color-mix(in srgb, ${resolvedPrimaryColor} 15%, transparent)`,
+      "--eds-primary-softer": `color-mix(in srgb, ${resolvedPrimaryColor} 8%, transparent)`,
+    };
+    for (const [name, color] of Object.entries(accents)) {
+      root.style.setProperty(name, color, "important");
+    }
+    root.style.setProperty("--font-family", resolvedFontFamily);
+    root.style.setProperty("--font-size", `${resolvedFontSize}px`);
+  }, [appearanceMatchesRole, resolvedPrimaryColor, resolvedPrimaryText, resolvedFontFamily, resolvedFontSize]);
 
   const currentAppearanceWasRendered = Boolean(
     expectedAppearance &&
@@ -2158,6 +2180,15 @@ function RolePortalShellContent({
 
           "--accent-color":
             resolvedPrimaryColor,
+
+          "--ba-primary":
+            resolvedPrimaryColor,
+
+          "--ba-primary-text":
+            resolvedPrimaryText,
+
+          "--eds-primary-text":
+            resolvedPrimaryText,
 
           // CSS consumers in the compact workspace use the --eds-* aliases.
           // Set them on the shell as well as <html> so light-mode palettes

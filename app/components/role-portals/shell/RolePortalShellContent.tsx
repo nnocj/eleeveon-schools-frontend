@@ -48,7 +48,14 @@ import { useRealtime } from "../../../context/realtime-context";
 import { useTheme } from "../../../context/theme-context";
 import { useDatabase } from "../../../context/database-context";
 import { db } from "../../../lib/db/db";
-import { bootstrapPriorityWorkspaceTables, arePriorityWorkspaceTablesCached } from "../../../lib/sync/workspaceBootstrap";
+import {
+  bootstrapPriorityWorkspaceTables,
+  arePriorityWorkspaceTablesCached,
+  bootstrapSelectedWorkspace,
+  isWorkspaceLocallyReady,
+  type WorkspaceBootstrapProgress,
+} from "../../../lib/sync/workspaceBootstrap";
+import WorkspaceBootstrapScreen from "../../WorkspaceBootstrapScreen";
 import { isSyncTable } from "../../../lib/sync/syncTables";
 import { useWindowChrome } from "../../../context/window-chrome-context";
 import { readLastWorkspaceModule, rememberLastWorkspaceModule } from "../../../lib/offline/workspaceMemory";
@@ -1429,6 +1436,82 @@ function RolePortalShellContent({
     visibleMemberName,
   ]);
 
+  // A new browser must not treat an empty IndexedDB read as an empty school.
+  // A completed workspace snapshot is the authority for first-time entry.
+  // Existing fully initialized workspaces retain immediate cached entry.
+  const entryIdentity = selectedMembership && accountId
+    ? [accountId, membershipKey(selectedMembership),
+        effectiveSchoolId || "", effectiveBranchId || ""].join("|")
+    : "";
+  const [entryState, setEntryState] = useState<{
+    key: string;
+    state: "checking" | "ready" | "failed";
+    error?: string;
+  }>({ key: "", state: "checking" });
+  const [entryProgress, setEntryProgress] = useState<WorkspaceBootstrapProgress | null>(null);
+  const [entryRetry, setEntryRetry] = useState(0);
+
+  useEffect(() => {
+    if (!entryIdentity || !selectedMembership || !authenticated ||
+        !sessionVerified || !membershipRestored || !canAccess ||
+        accountRestoring || accountLoading || contextLoading ||
+        !databaseContext.ready || switchingMembershipId) return;
+
+    let cancelled = false;
+    const membership = selectedMembership;
+    setEntryState({ key: entryIdentity, state: "checking" });
+    setEntryProgress({ stage: "checking-cache", title: "Checking workspace records…",
+      detail: "Verifying that this school or branch was downloaded on this device.", percent: 5 });
+
+    const prepare = async () => {
+      try {
+        // Do not rely on data row counts: a genuinely empty table is valid
+        // only when a full, verified bootstrap includes that table.
+        const cached = await isWorkspaceLocallyReady(membership);
+        if (cancelled) return;
+        if (!cached) {
+          await bootstrapSelectedWorkspace(membership, {
+            allowCached: true,
+            onProgress: (value) => { if (!cancelled) setEntryProgress(value); },
+          });
+          if (cancelled) return;
+          if (!await isWorkspaceLocallyReady(membership)) {
+            throw new Error("The first workspace download did not establish complete local records or required appearance data.");
+          }
+        }
+        // Refresh appearance providers AFTER the downloaded school/branch
+        // records are committed. Their prior read might have been empty.
+        if (!cached) {
+          await Promise.all([
+            Promise.resolve(refreshInstitution()),
+            Promise.resolve(refreshSettings()),
+            Promise.resolve(themeContext.refreshTheme()),
+          ]);
+        }
+        if (!cancelled) {
+          setEntryState({ key: entryIdentity, state: "ready" });
+          setEntryProgress(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEntryState({ key: entryIdentity, state: "failed",
+            error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    };
+    void prepare();
+    return () => { cancelled = true; };
+    // Use a stable workspace identity, not the mutable membership object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryIdentity, entryRetry, authenticated, sessionVerified,
+      membershipRestored, canAccess, accountRestoring, accountLoading,
+      contextLoading, databaseContext.ready, switchingMembershipId]);
+
+  const firstDownloadReady = Boolean(entryIdentity &&
+    entryState.key === entryIdentity && entryState.state === "ready");
+  const firstDownloadFailed = Boolean(entryIdentity &&
+    entryState.key === entryIdentity && entryState.state === "failed");
+
   const hasUsableWorkspace = Boolean(
     selectedMembership &&
     canAccess,
@@ -1447,7 +1530,6 @@ function RolePortalShellContent({
   const firstAppearanceChecking = Boolean(
     hasUsableWorkspace &&
     expectedAppearance &&
-    !currentAppearanceWasRendered &&
     !appearanceMatchesRole,
   );
 
@@ -1847,6 +1929,36 @@ function RolePortalShellContent({
     },
     [sidebarWidth],
   );
+
+  // Never release a fresh/incognito workspace before its complete,
+  // membership-scoped bootstrap has finished. On failure keep Retry visible;
+  // do not open blank modules or silently use the wrong branding.
+  if (hasUsableWorkspace && entryIdentity && !firstDownloadReady) {
+    return (
+      <WorkspaceBootstrapScreen
+        progress={entryProgress}
+        error={firstDownloadFailed ? entryState.error || "Workspace preparation failed." : null}
+        onRetry={() => setEntryRetry((value) => value + 1)}
+        onCancel={() => router.push("/select-role")}
+      />
+    );
+  }
+
+  if (checking && appearanceContext.error && firstAppearanceChecking) {
+    return (
+      <WorkspaceBootstrapScreen
+        error={appearanceContext.error}
+        onRetry={() => {
+          void Promise.all([
+            Promise.resolve(refreshInstitution()),
+            Promise.resolve(refreshSettings()),
+            Promise.resolve(themeContext.refreshTheme()),
+          ]).then(() => setEntryRetry((value) => value + 1));
+        }}
+        onCancel={() => router.push("/select-role")}
+      />
+    );
+  }
 
   if (checking) {
     const preparingAppearance =

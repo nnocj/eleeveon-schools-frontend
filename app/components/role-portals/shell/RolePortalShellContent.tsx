@@ -2058,7 +2058,7 @@ function RolePortalShellContent({
         realtimeConnected={realtimeConnected}
         membershipKey={membershipKey}
         sameMembership={sameMembership}
-        roleLabel={roleLabel}
+        roleLabel={displayRoleLabel}
         roleIcon={roleIcon}
         onClose={() =>
           setAccountDrawerOpen(false)

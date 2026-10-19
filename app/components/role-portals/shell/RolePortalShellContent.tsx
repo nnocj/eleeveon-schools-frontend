@@ -53,6 +53,7 @@ import {
   arePriorityWorkspaceTablesCached,
   bootstrapSelectedWorkspace,
   isWorkspaceLocallyReady,
+  getWorkspaceTableAvailability,
   type WorkspaceBootstrapProgress,
 } from "../../../lib/sync/workspaceBootstrap";
 import WorkspaceBootstrapScreen from "../../WorkspaceBootstrapScreen";
@@ -173,11 +174,17 @@ const PRIORITY_TABLE_GROUPS = {
     "attendanceSessions", "students", "teachers", "classes",
     "studentEnrollments", "academicPeriods",
   ],
+  // A report requires its academic setup and assessment calculation inputs.
+  // A downloaded `reportCards` table by itself is not sufficient readiness.
   reports: [
     "reportCards", "reportCardItems", "reportCardTemplates",
     "reportCardTemplateSettings", "reportCardTemplateAssignments",
     "studentReportSnapshots", "computedResults", "assessmentEntries",
-    "students", "studentEnrollments", "classes", "academicPeriods",
+    "assessmentStructures", "assessmentStructureItems",
+    "assessmentApplicabilities", "gradingStructures", "gradeRules",
+    "academicStructures", "academicPeriods", "schools", "branches",
+    "schoolBranchSettings", "classes", "classSubjects", "classTeachers",
+    "subjects", "students", "studentEnrollments",
   ],
   timetable: [
     "scheduleTimetables", "scheduleSessions", "scheduleResources",
@@ -1120,7 +1127,10 @@ function RolePortalShellContent({
           throw new Error("Connect to the internet to download your assigned teaching records.");
         }
         await bootstrapSelectedWorkspace(membership, {
-          allowCached: true,
+          // A manual Retry must make a fresh authorized request, not return
+          // the same incomplete cached membership download again.
+          allowCached: priorityRetry === 0,
+          force: priorityRetry > 0,
           onProgress: (progress) => {
             if (cancelled) return;
             setPriorityProgress({ done: progress.current ?? 0, total: progress.total ?? 0 });
@@ -2011,13 +2021,43 @@ function RolePortalShellContent({
     [sidebarWidth],
   );
 
+  // Teacher uses server-authorized full-role bootstrap (not an unsafe generic
+  // priority pull). But a *workspace* completion does NOT prove every module's
+  // requested tables were included. Reports in particular need assessment
+  // structures, structure items and grading rules in addition to entries.
+  const teacherModuleDependencies = teacherWorkspace
+    ? tab === "reportsWorkspace"
+      ? [
+          "academicStructures", "academicPeriods", "classes", "classSubjects",
+          "students", "studentEnrollments", "assessmentStructures",
+          "assessmentStructureItems", "assessmentEntries", "gradingStructures",
+          "gradeRules",
+        ]
+      : tab === "teacherStudents"
+        ? ["students", "studentEnrollments", "classes", "classSubjects"]
+        : []
+    : [];
+  const teacherMissingModuleTables =
+    teacherWorkspace && selectedMembership && teacherDataState.ready
+      ? teacherModuleDependencies.filter(
+          (tableName) =>
+            getWorkspaceTableAvailability(selectedMembership, tableName) !== "complete",
+        )
+      : [];
   const teacherModuleComplete = teacherWorkspace &&
-    teacherDataState.key === priorityWorkspaceKey && teacherDataState.ready;
+    teacherDataState.key === priorityWorkspaceKey && teacherDataState.ready &&
+    teacherMissingModuleTables.length === 0;
   const moduleFullyReady = teacherWorkspace
     ? teacherModuleComplete
     : moduleReadiness.status === "complete";
   const moduleDownloadError = teacherWorkspace
-    ? (teacherDataState.key === priorityWorkspaceKey ? teacherDataState.error : null)
+    ? (teacherDataState.key === priorityWorkspaceKey
+        ? teacherDataState.error || (
+            teacherMissingModuleTables.length
+              ? `The Teacher workspace download did not include the ${activeModuleLabel} dependencies: ${teacherMissingModuleTables.join(", ")}. Retry the authorized download. If these tables are still missing, the backend Teacher bootstrap allow-list must be corrected.`
+              : null
+          )
+        : null)
     : priorityError;
   const moduleIsPreparing = teacherWorkspace
     ? (teacherDataState.key !== priorityWorkspaceKey || teacherDataState.preparing)

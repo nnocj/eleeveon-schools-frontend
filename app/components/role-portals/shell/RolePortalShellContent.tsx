@@ -51,9 +51,6 @@ import { db } from "../../../lib/db/db";
 import {
   bootstrapPriorityWorkspaceTables,
   arePriorityWorkspaceTablesCached,
-  bootstrapSelectedWorkspace,
-  isWorkspaceLocallyReady,
-  getWorkspaceTableAvailability,
   type WorkspaceBootstrapProgress,
 } from "../../../lib/sync/workspaceBootstrap";
 import WorkspaceBootstrapScreen from "../../WorkspaceBootstrapScreen";
@@ -913,6 +910,9 @@ function RolePortalShellContent({
       !selectedMembership ||
       !appearanceMatchesRole ||
       !databaseContext.ready ||
+      // Teachers download only the active module to avoid competing with
+      // a slow full-role download on first login.
+      canonicalPriorityRole(selectedMembership.role) === "teacher" ||
       Boolean(switchingMembershipId)
     ) {
       return;
@@ -976,10 +976,30 @@ function RolePortalShellContent({
   const priorityAttemptedAt = useRef(new Map<string, number>());
 
   const activeModuleLabel = labels[tab] || tab;
-  const activeModuleTables = useMemo(
-    () => tablesForPortalRoute(tab, activeModuleLabel),
-    [tab, activeModuleLabel],
-  );
+  const teacherWorkspace = canonicalPriorityRole(selectedMembership?.role) === "teacher";
+  // These are public-to-this-school academic definitions and records already
+  // authorized by the teacher membership. The backend is still authoritative.
+  // Shared grading/template definitions need the accompanying backend update.
+  const activeModuleTables = useMemo(() => {
+    if (!teacherWorkspace) return tablesForPortalRoute(tab, activeModuleLabel);
+    const base = ["classes", "classSubjects", "classTeachers", "subjects",
+      "academicPeriods", "students", "studentEnrollments"];
+    const assessment = ["academicStructures", "assessmentStructures",
+      "assessmentStructureItems", "assessmentApplicabilities", "assessmentEntries",
+      "gradingStructures", "gradeRules"];
+    if (tab === "assessmentEntry") return [...new Set([...base, ...assessment])].filter(isSyncTable);
+    if (tab === "reportsWorkspace") return [...new Set([
+      ...base, ...assessment, "computedResults", "attendance",
+      "studentAttendanceSummaries", "schoolBranchSettings",
+      "reportCardTemplates", "reportCardTemplateSettings",
+      "reportCardTemplateAssignments",
+    ])].filter(isSyncTable);
+    if (tab === "teacherStudents") return ["students", "studentEnrollments",
+      "classes", "classSubjects", "academicPeriods"].filter(isSyncTable);
+    // A new Teacher route must declare its own dependencies rather than
+    // using broad Branch Admin permissions.
+    return [];
+  }, [tab, activeModuleLabel, teacherWorkspace]);
 
   // This is advisory, not a navigation gate: cached records stay usable.
   // A completed priority download proves ONLY its requested tables.
@@ -1020,8 +1040,7 @@ function RolePortalShellContent({
       !isOnline ||
       Boolean(switchingMembershipId) ||
       !priorityWorkspaceKey ||
-      activeModuleTables.length === 0 ||
-      canonicalPriorityRole(selectedMembership?.role) === "teacher"
+      activeModuleTables.length === 0
     ) {
       setPriorityPreparing(null);
       return;
@@ -1095,65 +1114,12 @@ function RolePortalShellContent({
     priorityRetry,
   ]);
 
-  // Teacher's server authorization permits a role-specific collection of
-  // tables. A generic module list can include forbidden tables, so never send
-  // it to the priority endpoint for Teacher. Download the backend-selected,
-  // membership-scoped set instead; this remains fully server-authorized.
-  const teacherWorkspace = canonicalPriorityRole(selectedMembership?.role) === "teacher";
-  const [teacherDataState, setTeacherDataState] = useState<{
-    key: string;
-    ready: boolean;
-    error: string | null;
-    preparing: boolean;
-  }>({ key: "", ready: false, error: null, preparing: false });
-
-  useEffect(() => {
-    if (!teacherWorkspace || !priorityWorkspaceKey || !selectedMembership ||
-        !authenticated || !sessionVerified || !canAccess ||
-        !appearanceMatchesRole || !databaseContext.ready || switchingMembershipId) return;
-    let cancelled = false;
-    const key = priorityWorkspaceKey;
-    const membership = selectedMembership;
-    setTeacherDataState({ key, ready: false, error: null, preparing: true });
-    void (async () => {
-      try {
-        const cached = await isWorkspaceLocallyReady(membership);
-        if (cancelled) return;
-        if (cached) {
-          setTeacherDataState({ key, ready: true, error: null, preparing: false });
-          return;
-        }
-        if (typeof navigator !== "undefined" && !navigator.onLine) {
-          throw new Error("Connect to the internet to download your assigned teaching records.");
-        }
-        await bootstrapSelectedWorkspace(membership, {
-          // A manual Retry must make a fresh authorized request, not return
-          // the same incomplete cached membership download again.
-          allowCached: priorityRetry === 0,
-          force: priorityRetry > 0,
-          onProgress: (progress) => {
-            if (cancelled) return;
-            setPriorityProgress({ done: progress.current ?? 0, total: progress.total ?? 0 });
-          },
-        });
-        if (cancelled) return;
-        const complete = await isWorkspaceLocallyReady(membership);
-        if (!complete) throw new Error("Teacher workspace download is not complete. Retry to continue.");
-        setTeacherDataState({ key, ready: true, error: null, preparing: false });
-      } catch (error) {
-        if (cancelled) return;
-        setTeacherDataState({ key, ready: false,
-          error: error instanceof Error ? error.message : String(error), preparing: false });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [teacherWorkspace, priorityWorkspaceKey, authenticated, sessionVerified,
-      canAccess, appearanceMatchesRole, databaseContext.ready,
-      switchingMembershipId, priorityRetry]);
+  // Teachers now use precisely the same per-module download path as Branch
+  // Admins, with a small Teacher-only table group rather than the entire
+  // authorized workspace. Background role sync may continue independently.
 
   const retryCurrentModule = useCallback(() => {
     if (!navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
-    if (teacherWorkspace) setTeacherDataState({ key: priorityWorkspaceKey, ready: false, error: null, preparing: true });
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
@@ -1530,11 +1496,29 @@ function RolePortalShellContent({
   }>({ key: "", state: "checking" });
   const [entryProgress, setEntryProgress] = useState<WorkspaceBootstrapProgress | null>(null);
   const [entryRetry, setEntryRetry] = useState(0);
+  // Reject stalled requests rather than displaying an endless 0% spinner.
+  const startupDeadline = useCallback(async <T,>(
+    job: Promise<T>, taskName: string, durationMs = 30_000,
+  ): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        job,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(
+            `${taskName} took too long. Check the connection and retry.`,
+          )), durationMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }, []);
 
   useEffect(() => {
     if (!entryIdentity || !selectedMembership || !authenticated ||
         !sessionVerified || !membershipRestored || !canAccess ||
-        accountRestoring || accountLoading || contextLoading ||
+        accountRestoring || accountLoading ||
         !databaseContext.ready || switchingMembershipId) return;
 
     let cancelled = false;
@@ -1551,15 +1535,18 @@ function RolePortalShellContent({
           if (!navigator.onLine) throw new Error("Connect to the internet to initialize this workspace for the first time.");
           setEntryProgress({ stage: "requesting", title: "Downloading school appearance…",
             detail: "Getting the selected school, branch and settings before entry.", percent: 20 });
-          await bootstrapPriorityWorkspaceTables(membership, appearanceFoundationTables, {
-            onProgress: (done, total) => {
-              if (cancelled) return;
-              setEntryProgress({ stage: "applying", title: "Saving workspace identity…",
-                detail: "Preparing the correct school and branch appearance.",
-                percent: total > 0 ? Math.min(90, 20 + Math.round(70 * done / total)) : 75,
-                current: done, total });
-            },
-          });
+          await startupDeadline(
+            bootstrapPriorityWorkspaceTables(membership, appearanceFoundationTables, {
+              onProgress: (done, total) => {
+                if (cancelled) return;
+                setEntryProgress({ stage: "applying", title: "Saving workspace identity…",
+                  detail: "Preparing the correct school and branch appearance.",
+                  percent: total > 0 ? Math.min(90, 20 + Math.round(70 * done / total)) : 75,
+                  current: done, total });
+              },
+            }),
+            "Workspace identity download",
+          );
         }
         if (cancelled) return;
         if (appearanceFoundationTables.length &&
@@ -1573,11 +1560,11 @@ function RolePortalShellContent({
           // Important: these refreshes MUST be sequential. Applying the
           // appearance before SettingsContext finishes rehydrating can lock
           // the portal onto its account/default palette on a fresh device.
-          await Promise.resolve(refreshInstitution());
+          await startupDeadline(Promise.resolve(refreshInstitution()), "School and branch refresh");
           if (cancelled) return;
-          await Promise.resolve(refreshSettings());
+          await startupDeadline(Promise.resolve(refreshSettings()), "School settings refresh");
           if (cancelled) return;
-          const applied = await appearanceContext.refresh();
+          const applied = await startupDeadline(appearanceContext.refresh(), "School branding application");
           if (!applied) {
             throw new Error("The selected workspace appearance could not be applied. Retry workspace setup.");
           }
@@ -1596,12 +1583,23 @@ function RolePortalShellContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
-      contextLoading, databaseContext.ready, switchingMembershipId]);
+      databaseContext.ready, switchingMembershipId, startupDeadline]);
 
   const firstDownloadReady = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "ready");
   const firstDownloadFailed = Boolean(entryIdentity &&
     entryState.key === entryIdentity && entryState.state === "failed");
+
+  useEffect(() => {
+    if (!entryIdentity || !authenticated || firstDownloadReady || firstDownloadFailed) return;
+    const timer = window.setTimeout(() => {
+      setEntryState(current => current.state === "ready" || current.state === "failed"
+        ? current
+        : { key: entryIdentity, state: "failed",
+            error: "Workspace startup did not complete. The session, local database or school identity may not have initialized. Retry or return to role selection." });
+    }, 50_000);
+    return () => window.clearTimeout(timer);
+  }, [entryIdentity, authenticated, firstDownloadReady, firstDownloadFailed]);
 
   const hasUsableWorkspace = Boolean(
     selectedMembership &&
@@ -2021,47 +2019,11 @@ function RolePortalShellContent({
     [sidebarWidth],
   );
 
-  // Teacher uses server-authorized full-role bootstrap (not an unsafe generic
-  // priority pull). But a *workspace* completion does NOT prove every module's
-  // requested tables were included. Reports in particular need assessment
-  // structures, structure items and grading rules in addition to entries.
-  const teacherModuleDependencies = teacherWorkspace
-    ? tab === "reportsWorkspace"
-      ? [
-          "academicStructures", "academicPeriods", "classes", "classSubjects",
-          "students", "studentEnrollments", "assessmentStructures",
-          "assessmentStructureItems", "assessmentEntries", "gradingStructures",
-          "gradeRules",
-        ]
-      : tab === "teacherStudents"
-        ? ["students", "studentEnrollments", "classes", "classSubjects"]
-        : []
-    : [];
-  const teacherMissingModuleTables =
-    teacherWorkspace && selectedMembership && teacherDataState.ready
-      ? teacherModuleDependencies.filter(
-          (tableName) =>
-            getWorkspaceTableAvailability(selectedMembership, tableName) !== "complete",
-        )
-      : [];
-  const teacherModuleComplete = teacherWorkspace &&
-    teacherDataState.key === priorityWorkspaceKey && teacherDataState.ready &&
-    teacherMissingModuleTables.length === 0;
-  const moduleFullyReady = teacherWorkspace
-    ? teacherModuleComplete
-    : moduleReadiness.status === "complete";
-  const moduleDownloadError = teacherWorkspace
-    ? (teacherDataState.key === priorityWorkspaceKey
-        ? teacherDataState.error || (
-            teacherMissingModuleTables.length
-              ? `The Teacher workspace download did not include the ${activeModuleLabel} dependencies: ${teacherMissingModuleTables.join(", ")}. Retry the authorized download. If these tables are still missing, the backend Teacher bootstrap allow-list must be corrected.`
-              : null
-          )
-        : null)
-    : priorityError;
-  const moduleIsPreparing = teacherWorkspace
-    ? (teacherDataState.key !== priorityWorkspaceKey || teacherDataState.preparing)
-    : priorityPreparing !== null;
+  // Each role uses the same authoritative, module-specific priority marker.
+  // Unlike a local Dexie read, this marker proves the server completed all
+  // requested tables (including genuinely empty tables) for this membership.
+  const moduleFullyReady = moduleReadiness.status === "complete";
+  const moduleDownloadError = priorityError;
 
   // Never release a fresh/incognito workspace before its complete,
   // membership-scoped bootstrap has finished. On failure keep Retry visible;
@@ -2069,7 +2031,12 @@ function RolePortalShellContent({
   if (hasUsableWorkspace && entryIdentity && !firstDownloadReady) {
     return (
       <WorkspaceBootstrapScreen
-        progress={entryProgress}
+        progress={entryProgress || {
+          stage: "checking-cache",
+          title: "Checking selected workspace…",
+          detail: "Verifying account access and local records before downloading school identity.",
+          percent: 5,
+        }}
         error={firstDownloadFailed ? entryState.error || "Workspace preparation failed." : null}
         onRetry={() => setEntryRetry((value) => value + 1)}
         onCancel={() => router.push("/select-role")}
@@ -2436,7 +2403,7 @@ function RolePortalShellContent({
                 {priorityProgress?.total ? (
                   <small>{priorityProgress.done.toLocaleString()} / {priorityProgress.total.toLocaleString()} records</small>
                 ) : null}
-                {(moduleDownloadError || !moduleReadiness.online || (!teacherWorkspace && moduleReadiness.status === "failed")) && (
+                {(moduleDownloadError || !moduleReadiness.online || moduleReadiness.status === "failed") && (
                   <button type="button" onClick={retryCurrentModule}
                     disabled={!moduleReadiness.online}>Retry download</button>
                 )}

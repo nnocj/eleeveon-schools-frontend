@@ -290,6 +290,8 @@ export default function AssessmentEntries() {
   // synchronization refresh must not hide already visible records.
   const scopeKey = [accountId || "", schoolId || "", branchId || ""].join("|");
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
+  const [fullyLoadedScopeKey, setFullyLoadedScopeKey] = useState<string | null>(null);
+  const readGeneration = React.useRef(0);
   const [failedScopeKey, setFailedScopeKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
@@ -454,130 +456,99 @@ export default function AssessmentEntries() {
     setSessionStarted(false);
   };
 
+  // Fast path: make permitted class/subject cards visible after a small local
+  // read. Full scores, grading and reporting dependencies follow without
+  // blocking first paint. The newest read always wins.
   const load = async () => {
-    if (!authenticated || !accountId || !schoolId || !branchId) {
+    const generation = ++readGeneration.current;
+    if (!authenticated || !accountId || !schoolId || !branchId ||
+        !teacherAccess.permitted || !teacherAccess.ready) {
       clearData();
       setLoadedScopeKey(null);
+      setFullyLoadedScopeKey(null);
       setFailedScopeKey(null);
       setLoading(false);
       return;
     }
 
+    const tenant = { accountId, schoolId, branchId } as any;
+    const current = () => generation === readGeneration.current;
+    const allowedClasses = new Set(teacherAccess.allowedClassIds);
+    const allowedSubjects = new Set(teacherAccess.subjectIds);
     try {
       setLoading(true);
-      const tenant = {
-        accountId,
-        schoolId: schoolId,
-        branchId: branchId,
-      } as any;
-      const [
-        studentRows,
-        classRows,
-        subjectRows,
-        teacherRows,
-        academicStructureRows,
-        periodRows,
-        organizationRows,
-        curriculumRows,
-        pathwayRows,
-        curriculumSubjectRows,
-        classSubjectRows,
-        applicabilityRows,
-        structureRows,
-        itemRows,
-        entryRows,
-        gradingRows,
-        ruleRows,
-        enrollmentRows,
-      ] = await Promise.all([
-        tableSafe("students")?.toArray?.() || [],
+      // This first stage contains only the data required by the class picker
+      // and its subject navigation. Keep the access filter fail-closed.
+      const [classRows, subjectRows, classSubjectRows, enrollmentRows,
+        applicabilityRows, periodRows, teacherRows] = await Promise.all([
         listActiveLocal("classes", tenant),
         listActiveLocal("subjects", tenant),
-        listActiveLocal("teachers", tenant),
-        listActiveLocal("academicStructures", tenant),
+        listActiveLocal("classSubjects", tenant),
+        tableSafe("studentEnrollments")?.toArray?.() || [],
+        listActiveLocal("assessmentApplicabilities", tenant),
         listActiveLocal("academicPeriods", tenant),
+        listActiveLocal("teachers", tenant),
+      ]);
+      if (!current()) return;
+      setClasses((classRows as Class[])
+        .filter((row: any) => allowedClasses.has(idOf(row.id)))
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
+      setSubjects((subjectRows as Subject[])
+        .sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || ""))));
+      setClassSubjects((classSubjectRows as ClassSubject[])
+        .filter((row: any) => isActiveRow(row) && allowedSubjects.has(idOf(row.id))));
+      setEnrollments((enrollmentRows as StudentEnrollment[])
+        .filter((row) => sameTenant(row as TenantRow) && !row.isDeleted));
+      setApplicabilities((applicabilityRows as AssessmentApplicability[]).filter(isActiveRow));
+      setPeriods(periodRows as AcademicPeriod[]);
+      setTeachers((teacherRows as Teacher[])
+        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))));
+      setLoadedScopeKey(scopeKey);
+      setFailedScopeKey(null);
+      setLoading(false);
+
+      // The secondary batch is deliberately independent: the class list has
+      // already rendered, and a slow assessmentEntries table cannot block it.
+      const [studentRows, academicStructureRows, organizationRows,
+        curriculumRows, pathwayRows, curriculumSubjectRows,
+        structureRows, itemRows, entryRows, gradingRows, ruleRows] = await Promise.all([
+        tableSafe("students")?.toArray?.() || [],
+        listActiveLocal("academicStructures", tenant),
         listActiveLocal("organizations", tenant),
         listActiveLocal("curriculums", tenant),
         listActiveLocal("curriculumPathways", tenant),
         listActiveLocal("curriculumSubjects", tenant),
-        listActiveLocal("classSubjects", tenant),
-        listActiveLocal("assessmentApplicabilities", tenant),
         listActiveLocal("assessmentStructures", tenant),
         listActiveLocal("assessmentStructureItems", tenant),
         tableSafe("assessmentEntries")?.toArray?.() || [],
         listActiveLocal("gradingStructures", tenant),
         listActiveLocal("gradeRules", tenant),
-        tableSafe("studentEnrollments")?.toArray?.() || [],
       ]);
-
-      setStudents(
-        (studentRows as Student[])
-          .filter((r) => sameTenant(r as TenantRow))
-          .filter(
-            (r: any) =>
-              !["withdrawn", "deleted", "archived"].includes(
-                safeLower(r.status),
-              ),
-          )
-          .sort((a: any, b: any) =>
-            String(a.fullName || "").localeCompare(String(b.fullName || "")),
-          ),
-      );
-      setClasses(
-        (classRows as Class[]).filter((row:any)=>teacherAccess.allowedClassIds.has(idOf(row.id))).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || "")),
-        ),
-      );
-      setSubjects(
-        (subjectRows as Subject[]).sort((a: any, b: any) =>
-          String(a.name || "").localeCompare(String(b.name || "")),
-        ),
-      );
-      setTeachers(
-        (teacherRows as Teacher[]).sort((a: any, b: any) =>
-          String(a.fullName || "").localeCompare(String(b.fullName || "")),
-        ),
-      );
+      if (!current()) return;
+      setStudents((studentRows as Student[])
+        .filter((r) => sameTenant(r as TenantRow))
+        .filter((r: any) => !["withdrawn", "deleted", "archived"].includes(safeLower(r.status)))
+        .sort((a: any, b: any) => String(a.fullName || "").localeCompare(String(b.fullName || ""))));
       setAcademicStructures(academicStructureRows as AcademicStructure[]);
-      setPeriods(periodRows as AcademicPeriod[]);
       setOrganizations(organizationRows as Organization[]);
       setCurriculums(curriculumRows as Curriculum[]);
       setPathways(pathwayRows as CurriculumPathway[]);
       setCurriculumSubjects(curriculumSubjectRows as CurriculumSubject[]);
-      setClassSubjects(
-        (classSubjectRows as ClassSubject[]).filter((row:any)=>isActiveRow(row)&&teacherAccess.subjectIds.has(idOf(row.id))),
-      );
-      setApplicabilities(
-        (applicabilityRows as AssessmentApplicability[]).filter(isActiveRow),
-      );
-      setStructures(
-        (structureRows as AssessmentStructure[]).filter(isActiveRow),
-      );
+      setStructures((structureRows as AssessmentStructure[]).filter(isActiveRow));
       setItems((itemRows as AssessmentStructureItem[]).filter(isActiveRow));
-      setEntries(
-        (entryRows as AssessmentEntry[]).filter(
-          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
-        ),
-      );
+      setEntries((entryRows as AssessmentEntry[])
+        .filter((row) => sameTenant(row as TenantRow) && !row.isDeleted));
       setGradings((gradingRows as GradingStructure[]).filter(isActiveRow));
       setRules((ruleRows as GradeRule[]).filter(isActiveRow));
-      setEnrollments(
-        (enrollmentRows as StudentEnrollment[]).filter(
-          (r) => sameTenant(r as TenantRow) && !r.isDeleted,
-        ),
-      );
-      setLoadedScopeKey(scopeKey);
-      setFailedScopeKey(null);
+      setFullyLoadedScopeKey(scopeKey);
     } catch (error) {
-      console.error(error);
-      // A failed background refresh cannot erase data already on screen.
-      if (loadedScopeKey !== scopeKey) {
-        clearData();
-        setFailedScopeKey(scopeKey);
-      }
+      if (!current()) return;
+      console.error("Assessment Entries local read failed:", error);
+      // Never clear records or unsaved score drafts on a background failure.
+      if (loadedScopeKey !== scopeKey) setFailedScopeKey(scopeKey);
       showToast("error", "Could not refresh assessment records. Try again.");
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
   };
 
@@ -1048,9 +1019,9 @@ export default function AssessmentEntries() {
         scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId))
       ] = Number(entry.score || 0);
     });
-    setScores(nextScores);
-    setSessionStarted(false);
-  }, [currentClassSubject, applicability, relevantEntries]);
+    // Background revisions must not discard score edits already being typed.
+    if (!sessionStarted) setScores(nextScores);
+  }, [currentClassSubject, applicability, relevantEntries, sessionStarted]);
 
   const enrolledStudents = useMemo(() => {
     if (!currentClassSubject) return [];
@@ -2089,6 +2060,17 @@ export default function AssessmentEntries() {
             </button>
           </section>
 
+          {fullyLoadedScopeKey !== scopeKey && (
+            <ModuleSkeleton
+              kind="assessment"
+              view={viewMode === "table" ? "table" : "cards"}
+              count={4}
+              title="Preparing score entry…"
+              message="Loading students and assessment items saved on this device."
+            />
+          )}
+          {fullyLoadedScopeKey === scopeKey && (
+            <>
           {classSubjectId !== "all" && !selectedOption && (
             <Empty
               icon="🔎"
@@ -2183,6 +2165,8 @@ export default function AssessmentEntries() {
                 )}
               </section>
             )}
+            </>
+          )}
         </>
       )}
 

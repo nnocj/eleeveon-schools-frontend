@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import OwnerAccountProfile from "../owner/modules/AccountProfile";
-import WorkspaceAppUserProfile from "../components/profile/WorkspaceAppUserProfile";
-import { useAccount } from "../context/account-context";
+import OwnerAccountProfile from "./owner/modules/AccountProfile";
+import WorkspaceAppUserProfile from "./components/profile/WorkspaceAppUserProfile";
+import { useAccount } from "./context/account-context";
 
 function selectedRole(): string {
   if (typeof window === "undefined") return "";

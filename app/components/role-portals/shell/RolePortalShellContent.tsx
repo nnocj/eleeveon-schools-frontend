@@ -1959,14 +1959,10 @@ function RolePortalShellContent({
 
       <SyncStatusSheet />
 
-      {applyingChanges && (
-        <div
-          className="background-refresh-indicator"
-          aria-live="polite"
-        >
-          Applying new data…
-        </div>
-      )}
+      {/* Background changes are silent; sync details remain in SyncStatusSheet. */}
+      <span hidden aria-hidden="true" style={{ display: "none" }}>
+        {applyingChanges ? "Applying new data" : ""}
+      </span>
 
       {(
         sidebarOpen ||
@@ -2130,6 +2126,9 @@ function RolePortalShellContent({
         )}
 
         <PortalContent>
+          {/* Preserve readiness and retry wiring without reserving banner space.
+              Detailed status remains accessible from the existing Sync control. */}
+          <div hidden aria-hidden="true" style={{ display: "none" }}>
           <OfflineDataStatus
             availability={moduleReadiness.status}
             moduleLabel={activeModuleLabel}
@@ -2150,6 +2149,7 @@ function RolePortalShellContent({
               Updating {priorityPreparing} for offline use…
             </div>
           )}
+          </div>
           <ActiveComponent
             navigate={navigate}
             context={portalRuntimeContext}

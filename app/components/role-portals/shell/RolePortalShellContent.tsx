@@ -962,6 +962,7 @@ function RolePortalShellContent({
   const [priorityPreparing, setPriorityPreparing] = useState<string | null>(null);
   const [priorityProgress, setPriorityProgress] = useState<{ done: number; total: number } | null>(null);
   const [priorityRetry, setPriorityRetry] = useState(0);
+  const [priorityError, setPriorityError] = useState<string | null>(null);
   const priorityAttemptedAt = useRef(new Map<string, number>());
 
   const activeModuleLabel = labels[tab] || tab;
@@ -1040,6 +1041,7 @@ function RolePortalShellContent({
       }
       priorityAttemptedAt.current.set(requestKey, Date.now());
       setPriorityPreparing(activeModuleLabel);
+      setPriorityError(null);
       setPriorityProgress(null);
 
       void bootstrapPriorityWorkspaceTables(selectedMembership!, activeModuleTables, {
@@ -1049,6 +1051,7 @@ function RolePortalShellContent({
       }).catch((error) => {
         if (disposed) return;
         priorityAttemptedAt.current.delete(requestKey);
+        setPriorityError(error instanceof Error ? error.message : String(error));
         console.warn("[portal] Active-module priority sync failed:", error);
       }).finally(() => {
         if (!disposed) {
@@ -1085,6 +1088,7 @@ function RolePortalShellContent({
     if (!navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
+    setPriorityError(null);
     setPriorityRetry(value => value + 1);
   }, [selectedMembership, activeModuleTables]);
 
@@ -1436,13 +1440,21 @@ function RolePortalShellContent({
     visibleMemberName,
   ]);
 
-  // A new browser must not treat an empty IndexedDB read as an empty school.
-  // A completed workspace snapshot is the authority for first-time entry.
-  // Existing fully initialized workspaces retain immediate cached entry.
+  // STAGE A: initialize only the authenticated workspace identity and its
+  // appearance dependencies. Never confuse an empty Dexie table with a
+  // successfully downloaded (genuinely empty) table.
+  // The exact group is marked complete only by the validated backend bootstrap.
   const entryIdentity = selectedMembership && accountId
     ? [accountId, membershipKey(selectedMembership),
         effectiveSchoolId || "", effectiveBranchId || ""].join("|")
     : "";
+  const appearanceFoundationTables = useMemo(() => {
+    if (!selectedMembership) return [];
+    const scope = appearanceScopeForRole(selectedMembership.role || "");
+    if (scope === "branch") return ["schools", "branches", "schoolBranchSettings"];
+    if (scope === "school") return ["schools"];
+    return [];
+  }, [selectedMembership?.role]);
   const [entryState, setEntryState] = useState<{
     key: string;
     state: "checking" | "ready" | "failed";
@@ -1460,28 +1472,36 @@ function RolePortalShellContent({
     let cancelled = false;
     const membership = selectedMembership;
     setEntryState({ key: entryIdentity, state: "checking" });
-    setEntryProgress({ stage: "checking-cache", title: "Checking workspace records…",
-      detail: "Verifying that this school or branch was downloaded on this device.", percent: 5 });
+    setEntryProgress({ stage: "checking-cache", title: "Preparing school identity…",
+      detail: "Checking school, branch and appearance records for this workspace.", percent: 5 });
 
     const prepare = async () => {
       try {
-        // Do not rely on data row counts: a genuinely empty table is valid
-        // only when a full, verified bootstrap includes that table.
-        const cached = await isWorkspaceLocallyReady(membership);
-        if (cancelled) return;
-        if (!cached) {
-          await bootstrapSelectedWorkspace(membership, {
-            allowCached: true,
-            onProgress: (value) => { if (!cancelled) setEntryProgress(value); },
+        const ready = appearanceFoundationTables.length === 0 ||
+          arePriorityWorkspaceTablesCached(membership, appearanceFoundationTables);
+        if (!ready) {
+          if (!navigator.onLine) throw new Error("Connect to the internet to initialize this workspace for the first time.");
+          setEntryProgress({ stage: "requesting", title: "Downloading school appearance…",
+            detail: "Getting the selected school, branch and settings before entry.", percent: 20 });
+          await bootstrapPriorityWorkspaceTables(membership, appearanceFoundationTables, {
+            onProgress: (done, total) => {
+              if (cancelled) return;
+              setEntryProgress({ stage: "applying", title: "Saving workspace identity…",
+                detail: "Preparing the correct school and branch appearance.",
+                percent: total > 0 ? Math.min(90, 20 + Math.round(70 * done / total)) : 75,
+                current: done, total });
+            },
           });
-          if (cancelled) return;
-          if (!await isWorkspaceLocallyReady(membership)) {
-            throw new Error("The first workspace download did not establish complete local records or required appearance data.");
-          }
         }
-        // Refresh appearance providers AFTER the downloaded school/branch
-        // records are committed. Their prior read might have been empty.
-        if (!cached) {
+        if (cancelled) return;
+        if (appearanceFoundationTables.length &&
+            !arePriorityWorkspaceTablesCached(membership, appearanceFoundationTables)) {
+          throw new Error("School appearance download did not finish. Retry to complete setup.");
+        }
+        // Providers may already have read an empty IndexedDB on this new device.
+        // Re-read after committing the foundation tables, then the existing
+        // role-scoped appearance identity gate must succeed before rendering.
+        if (!ready) {
           await Promise.all([
             Promise.resolve(refreshInstitution()),
             Promise.resolve(refreshSettings()),
@@ -1493,15 +1513,12 @@ function RolePortalShellContent({
           setEntryProgress(null);
         }
       } catch (error) {
-        if (!cancelled) {
-          setEntryState({ key: entryIdentity, state: "failed",
-            error: error instanceof Error ? error.message : String(error) });
-        }
+        if (!cancelled) setEntryState({ key: entryIdentity, state: "failed",
+          error: error instanceof Error ? error.message : String(error) });
       }
     };
     void prepare();
     return () => { cancelled = true; };
-    // Use a stable workspace identity, not the mutable membership object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryIdentity, entryRetry, authenticated, sessionVerified,
       membershipRestored, canAccess, accountRestoring, accountLoading,
@@ -2068,6 +2085,17 @@ function RolePortalShellContent({
       }
     >
       <style>{css}</style>
+      <style>{`
+        .role-module-first-download{min-height:min(52vh,480px);display:grid;place-items:center;padding:20px}
+        .role-module-first-download-card{width:min(420px,100%);padding:28px 22px;text-align:center;display:grid;justify-items:center;gap:13px;border:1px solid var(--border,#d8dee8);border-radius:22px;background:var(--surface,#fff);color:var(--text,#182436)}
+        .role-module-first-download-card strong{font-size:17px}
+        .role-module-first-download-card p{margin:0;font-size:13px;line-height:1.6;color:var(--muted,#65748a)}
+        .role-module-first-download-card small{font-size:12px;color:var(--muted,#65748a)}
+        .role-module-first-download-card button{border:0;border-radius:12px;background:var(--primary-color,#2563eb);color:#fff;padding:11px 20px;font:inherit;font-weight:700;cursor:pointer}
+        .role-module-first-download-card button:disabled{opacity:.45;cursor:not-allowed}
+        .role-module-first-spinner{width:38px;height:38px;border-radius:50%;border:4px solid var(--border,#d8dee8);border-top-color:var(--primary-color,#2563eb);animation:role-first-spin .8s linear infinite}
+        @keyframes role-first-spin{to{transform:rotate(360deg)}}
+      `}</style>
 
       <SyncStatusSheet />
 
@@ -2262,10 +2290,33 @@ function RolePortalShellContent({
             </div>
           )}
           </div>
-          <ActiveComponent
-            navigate={navigate}
-            context={portalRuntimeContext}
-          />
+          {activeModuleTables.length > 0 && moduleReadiness.status !== "complete" ? (
+            <section className="role-module-first-download" role="status" aria-live="polite">
+              <div className="role-module-first-download-card">
+                {!priorityError && moduleReadiness.online ? (
+                  <span className="role-module-first-spinner" aria-hidden="true" />
+                ) : null}
+                <strong>{priorityError ? "Unable to prepare this module" :
+                  !moduleReadiness.online ? "Module not available offline yet" :
+                  `Preparing ${activeModuleLabel}…`}</strong>
+                <p>{priorityError || (!moduleReadiness.online
+                  ? "This module has not been downloaded on this device. Reconnect and retry."
+                  : "Downloading the records required by this module. Existing school records are not being treated as empty.")}</p>
+                {priorityProgress?.total ? (
+                  <small>{priorityProgress.done.toLocaleString()} / {priorityProgress.total.toLocaleString()} records</small>
+                ) : null}
+                {(priorityError || !moduleReadiness.online || moduleReadiness.status === "failed") && (
+                  <button type="button" onClick={retryCurrentModule}
+                    disabled={!moduleReadiness.online}>Retry download</button>
+                )}
+              </div>
+            </section>
+          ) : (
+            <ActiveComponent
+              navigate={navigate}
+              context={portalRuntimeContext}
+            />
+          )}
         </PortalContent>
       </section>
     </main>

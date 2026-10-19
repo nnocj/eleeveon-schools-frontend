@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import {
   useEffect,
   useState,
@@ -289,6 +291,7 @@ export default function AccountWorkspaceDrawer({
   void online;
   void realtimeConnected;
 
+  const router = useRouter();
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const appearance = useLocalAppearanceRuntime();
   const accountContext = useAccount();
@@ -517,9 +520,15 @@ export default function AccountWorkspaceDrawer({
           </button>
         </header>
 
-        {/* ===============================================
-         * CURRENT WORKSPACE REMOVED
-         * =============================================== */}
+        <button
+          type="button"
+          className="drawer-open-profile"
+          onClick={() => { onClose(); router.push("/profile"); }}
+        >
+          <span aria-hidden="true">👤</span>
+          <span><strong>My profile</strong><small>Personal details, login email and password</small></span>
+          <span aria-hidden="true">›</span>
+        </button>
 
         {/* ===============================================
          * WORKSPACES
@@ -736,6 +745,8 @@ export default function AccountWorkspaceDrawer({
 // ======================================================
 
 const css = `
+.drawer-open-profile{display:grid;grid-template-columns:32px minmax(0,1fr) 14px;align-items:center;gap:10px;width:100%;padding:12px;border:1px solid var(--eds-border,var(--border,#d9dee8));border-radius:14px;background:var(--eds-surface,var(--surface,#fff));color:var(--eds-text,var(--text,#172033));text-align:left;cursor:pointer}.drawer-open-profile strong,.drawer-open-profile small{display:block}.drawer-open-profile small{font-size:11px;color:var(--eds-text-muted,var(--muted,#64748b));margin-top:2px}.drawer-open-profile:focus-visible{outline:3px solid var(--primary-color,#2563eb);outline-offset:2px}
+
 .drawer-compact-switch-trigger { width:100%; display:flex; align-items:center; gap:11px; padding:12px; border:1px solid var(--eds-border,var(--border,#d9dee8)); border-radius:16px; background:var(--eds-surface,var(--surface,#fff)); color:var(--eds-text,var(--text,#172033)); text-align:left; cursor:pointer; }
 .drawer-compact-switch-icon {display:grid;place-items:center;width:36px;height:36px;flex-shrink:0;border-radius:11px;background:color-mix(in srgb,var(--primary-color,#2563eb) 10%,var(--eds-surface,#fff));color:var(--primary-color,#2563eb);font-size:22px;}
 .drawer-compact-switch-copy {flex:1;min-width:0;display:grid;gap:3px;}

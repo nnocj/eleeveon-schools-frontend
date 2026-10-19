@@ -25,7 +25,16 @@ const css = `
 .eleeveon-skeleton .esk-line{display:block;height:10px;background:var(--sk-base);border-radius:5px;max-width:100%;animation:eleeveon-sk-pulse 1.6s ease-in-out infinite alternate}
 .eleeveon-skeleton .esk-line.sm{height:7px}.eleeveon-skeleton .esk-line.lg{height:16px}
 .eleeveon-skeleton .esk-card{border:1px solid var(--sk-edge);background:var(--card-bg,var(--surface,#fff));border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:11px;min-height:104px}
-.eleeveon-skeleton .esk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:10px}
+.eleeveon-skeleton .esk-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.eleeveon-skeleton .esk-grid.esk-assessment-grid{grid-template-columns:minmax(0,1fr)}
+.eleeveon-skeleton .esk-grid.esk-picker-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.eleeveon-skeleton .esk-assessment-card{min-height:180px;padding:11px;gap:8px}
+.eleeveon-skeleton .esk-assessment-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.eleeveon-skeleton .esk-assessment-field{display:flex;flex-direction:column;gap:5px;padding:7px;border:1px solid var(--sk-edge);border-radius:9px}
+.eleeveon-skeleton .esk-assessment-result{display:flex;gap:12px;border-top:1px solid var(--sk-edge);padding-top:9px}
+.eleeveon-skeleton .esk-picker-card{min-height:130px;justify-content:center;padding:16px}
+@media (min-width:760px){.eleeveon-skeleton .esk-grid.esk-picker-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.eleeveon-skeleton .esk-grid.esk-assessment-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1024px){.eleeveon-skeleton .esk-grid.esk-assessment-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .eleeveon-skeleton .esk-row{display:flex;align-items:center;gap:10px}.eleeveon-skeleton .esk-col{flex:1;display:flex;flex-direction:column;gap:8px}
 .eleeveon-skeleton .esk-avatar{height:43px;width:43px;border-radius:11px;background:var(--sk-base);flex:0 0 auto;animation:eleeveon-sk-pulse 1.6s ease-in-out infinite alternate}
 .eleeveon-skeleton .esk-avatar.round{border-radius:50%}
@@ -38,18 +47,31 @@ const css = `
 .eleeveon-skeleton .esk-report .esk-avatar{height:55px;width:55px}
 @keyframes eleeveon-sk-pulse{from{opacity:.65}to{opacity:1}}
 @media(prefers-reduced-motion:reduce){.eleeveon-skeleton .esk-line,.eleeveon-skeleton .esk-avatar,.eleeveon-skeleton .esk-field,.eleeveon-skeleton .esk-pill{animation:none}}
-@media(max-width:580px){.eleeveon-skeleton .esk-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.eleeveon-skeleton .esk-card{padding:9px;gap:9px}.eleeveon-skeleton .esk-avatar{width:34px;height:34px}.eleeveon-skeleton .esk-report{padding:12px}.eleeveon-skeleton .esk-table td,.eleeveon-skeleton .esk-table th{padding:9px 5px}}
+@media(max-width:580px){.eleeveon-skeleton .esk-grid{gap:8px}.eleeveon-skeleton .esk-card{padding:9px;gap:9px}.eleeveon-skeleton .esk-avatar{width:34px;height:34px}.eleeveon-skeleton .esk-picker-card{padding:10px;min-height:120px}.eleeveon-skeleton .esk-report{padding:12px}.eleeveon-skeleton .esk-table td,.eleeveon-skeleton .esk-table th{padding:9px 5px}}
+@media(max-width:380px){.eleeveon-skeleton .esk-grid.esk-picker-grid{grid-template-columns:minmax(0,1fr)}}
 `;
 function Bar({ width = "70%", size = "" }: { width?: string; size?: "" | "sm" | "lg" }) {
   return <span aria-hidden="true" className={`esk-line ${size}`} style={{ width }} />;
 }
 function IdentityCard({ kind }: { kind: ModuleSkeletonKind }) {
-  const person = kind === "student" || kind === "teacher" || kind === "assessment" || kind === "attendance";
-  return <div className="esk-card" aria-hidden="true">
-    <div className="esk-row"><span className={`esk-avatar ${person ? "round" : ""}`} /><div className="esk-col"><Bar width="82%"/><Bar size="sm" width="58%"/></div>{kind === "assessment" ? <span className="esk-pill"/> : null}</div>
-    <div className="esk-divider"/>
-    {kind === "assessment" ? <div className="esk-row"><div className="esk-col"><Bar size="sm" width="70%"/><span className="esk-field"/></div><div className="esk-col"><Bar size="sm" width="60%"/><span className="esk-field"/></div><div className="esk-col"><Bar size="sm" width="60%"/><span className="esk-field"/></div></div> :
-      <><Bar size="sm" width="90%"/><Bar size="sm" width="62%"/></>}
+  if (kind === "assessment") {
+    return <div className="esk-card esk-assessment-card" aria-hidden="true">
+      <div className="esk-row">
+        <span className="esk-avatar" style={{height:36,width:36}} />
+        <div className="esk-col"><Bar width="75%"/><Bar size="sm" width="50%"/></div>
+        <span className="esk-pill" />
+      </div>
+      <div className="esk-assessment-fields">
+        {Array.from({length:2},(_,i)=><div className="esk-assessment-field" key={i}><Bar size="sm" width="74%"/><Bar size="sm" width="30%"/><span className="esk-field" style={{height:38,flex:"none"}}/></div>)}
+      </div>
+      <div className="esk-assessment-result"><Bar size="sm" width="22%"/><Bar size="sm" width="24%"/><Bar size="sm" width="32%"/></div>
+    </div>;
+  }
+  const person = kind === "student" || kind === "teacher" || kind === "attendance";
+  return <div className={`esk-card ${kind === "class" ? "esk-picker-card" : ""}`} aria-hidden="true">
+    <div className="esk-row"><span className={`esk-avatar ${person ? "round" : ""}`} /><div className="esk-col"><Bar width="82%"/><Bar size="sm" width="58%"/></div></div>
+    {kind !== "class" && <div className="esk-divider"/>}
+    <Bar size="sm" width="90%"/><Bar size="sm" width="62%"/>
   </div>;
 }
 function Sheet({ rows, columns, broadsheet }: { rows: number; columns: number; broadsheet: boolean }) {
@@ -71,6 +93,6 @@ export default function ModuleSkeleton({ kind, view="cards", count=4, title="Get
     <style>{css}</style>
     <div className="esk-header"><div className="esk-heading">{title}</div>{message && <div className="esk-note">{message}</div>}</div>
     {report ? <Report/> : sheet ? <Sheet rows={rows} columns={kind === "broadsheet" ? 7 : compact ? 3 : 5} broadsheet={kind === "broadsheet"}/> :
-      <div className="esk-grid">{Array.from({length:rows},(_,i)=><IdentityCard kind={kind} key={i}/>)}</div>}
+      <div className={`esk-grid ${kind === "assessment" ? "esk-assessment-grid" : kind === "class" ? "esk-picker-grid" : ""}`}>{Array.from({length:rows},(_,i)=><IdentityCard kind={kind} key={i}/>)}</div>}
   </section>;
 }

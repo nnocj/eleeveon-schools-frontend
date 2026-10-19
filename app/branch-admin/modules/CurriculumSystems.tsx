@@ -3,10 +3,15 @@
 /**
  * app/branch-admin/modules/CurriculumSystems.tsx
  * Unified single-file curriculum and pathway workspace.
+ * V36 — Students-style responsive setup: shared actions, compact
+ * Curriculums/Pathways switch, viewport forms, and retained offline CRUD.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
+
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
@@ -340,19 +345,6 @@ function Chip({
   return <span className={`ba-chip ${tone}`}>{children}</span>;
 }
 
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
 function Empty({
   icon,
   title,
@@ -443,6 +435,7 @@ function CurriculumsWorkspace() {
   >([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => { if (typeof window !== "undefined") setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards"); }, []);
   const [search, setSearch] = useState("");
   const [filterAcademicStructureId, setFilterAcademicStructureId] =
     useState("all");
@@ -1125,6 +1118,16 @@ function CurriculumsWorkspace() {
     }
   };
 
+  // Shared Setup actions for the currently mounted Curriculums/Pathways editor.
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", {
+    add: () => openCreate(), search: setSearch,
+    filter: () => setFilterOpen(true), more: () => setMoreOpen(true),
+  });
+  useRegisterBranchWorkspaceToolbar("curriculumSystems", {
+    add: () => openCreate(), search: setSearch,
+    filter: () => setFilterOpen(true), more: () => setMoreOpen(true),
+  });
+
   if (accountLoading || settingsLoading || contextLoading || loading) {
     return (
       <State
@@ -1186,87 +1189,10 @@ function CurriculumsWorkspace() {
         </section>
       )}
 
-      <section
-        className="ba-search-card"
-        aria-label="Curriculum search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search curriculums..."
-            aria-label="Search curriculums"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openCreate}
-          aria-label="Add curriculum"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
+      
 
       {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {filterAcademicStructureId !== "all" && (
-            <button
-              type="button"
-              onClick={() => setFilterAcademicStructureId("all")}
-            >
-              Structure:{" "}
-              {(
-                academicStructureMap.get(idOf(filterAcademicStructureId)) as any
-              )?.name || filterAcademicStructureId}{" "}
-              ×
-            </button>
-          )}
-          {filterProgramId !== "all" && (
-            <button type="button" onClick={() => setFilterProgramId("all")}>
-              Program:{" "}
-              {(programMap.get(idOf(filterProgramId)) as any)?.name ||
-                filterProgramId}{" "}
-              ×
-            </button>
-          )}
-          {filterOrganizationId !== "all" && (
-            <button
-              type="button"
-              onClick={() => setFilterOrganizationId("all")}
-            >
-              Organization:{" "}
-              {(organizationMap.get(idOf(filterOrganizationId)) as any)?.name ||
-                filterOrganizationId}{" "}
-              ×
-            </button>
-          )}
-          {filterStatus !== "active" && (
-            <button type="button" onClick={() => setFilterStatus("active")}>
-              Status: {filterStatus} ×
-            </button>
-          )}
-        </section>
+        <></>
       )}
 
       {viewMode === "summary" && (
@@ -1334,7 +1260,9 @@ function CurriculumsWorkspace() {
       )}
 
       {filterOpen && (
-        <FilterSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><FilterSheet
+          search={search}
+          setSearch={setSearch}
           academicStructures={academicStructures}
           programs={programs}
           organizations={organizations}
@@ -1348,11 +1276,11 @@ function CurriculumsWorkspace() {
           setFilterStatus={setFilterStatus}
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {moreOpen && (
-        <MoreSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><MoreSheet
           viewMode={viewMode}
           setViewMode={(mode) => {
             setViewMode(mode);
@@ -1363,22 +1291,22 @@ function CurriculumsWorkspace() {
             await load();
           }}
           onClose={() => setMoreOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {selectedItem && (
-        <ActionSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><ActionSheet
           item={selectedItem}
           openEdit={openEdit}
           toggleActive={toggleActive}
           toggleLocked={toggleLocked}
           remove={remove}
           onClose={() => setSelectedItem(null)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {modalOpen && (
-        <CurriculumModal
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><CurriculumModal
           form={form}
           saving={saving}
           academicStructures={academicStructures}
@@ -1388,7 +1316,7 @@ function CurriculumsWorkspace() {
           handleImageUpload={handleImageUpload}
           setModalOpen={setModalOpen}
           save={save}
-        />
+        /></BranchViewportPortal>
       )}
     </main>
   );
@@ -1559,6 +1487,8 @@ function TableView({
 }
 
 function FilterSheet(props: {
+  search: string;
+  setSearch: (value: string) => void;
   academicStructures: AcademicStructure[];
   programs: Program[];
   organizations: Organization[];
@@ -1586,6 +1516,7 @@ function FilterSheet(props: {
           </button>
         </div>
         <div className="ba-form compact">
+        <div className="ba-record-search-in-filter"><span>Search</span><input type="search" value={props.search} onChange={(e)=>props.setSearch(e.target.value)} placeholder="Search curriculums" /></div>
           <label>
             <span>Academic Structure</span>
             <select
@@ -1815,7 +1746,7 @@ function CurriculumModal({
   save: (event?: React.FormEvent) => void;
 }) {
   return (
-    <div className="ba-modal-backdrop">
+    <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
@@ -2013,7 +1944,7 @@ function CurriculumModal({
           </button>
         </div>
       </form>
-    </div>
+    </div></BranchViewportPortal>
   );
 }
 
@@ -2088,6 +2019,47 @@ const css = `
     max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
   }
 }
+
+
+
+/* V36 SETUP: Students visual standard; source CRUD, relationships and offline sync remain unchanged. */
+.curriculum-systems-root .ba-page {
+  width:100%;min-width:0;max-width:none;min-height:0;margin:0;
+  padding:4px 4px max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
+}
+.curriculum-systems-root .ba-page .ba-search-card,.curriculum-systems-root .ba-page .ba-filter-chips,.curriculum-systems-root .ba-page .ba-hero {display:none!important;}
+.curriculum-systems-root .ba-page .ba-list{width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;align-items:stretch;}
+.curriculum-systems-root .ba-page .ba-list > .student-row,.curriculum-systems-root .ba-page .ba-list > .curriculum-row,
+.curriculum-systems-root .ba-page .ba-list > .pathway-row,.curriculum-systems-root .ba-page .ba-list > .organization-row{width:100%;min-width:0;margin:0;padding:9px 10px;}
+.curriculum-systems-root .ba-page .student-row,.curriculum-systems-root .ba-page .organization-row,.curriculum-systems-root .ba-page .curriculum-row,
+.curriculum-systems-root .ba-page .pathway-row,.curriculum-systems-root .ba-page .ba-card,.curriculum-systems-root .ba-page .ba-table-card,.curriculum-systems-root .ba-page .ba-analysis{
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ border-radius:13px;box-shadow:none;transform:none;
+}
+.curriculum-systems-root .ba-page .student-row:hover,.curriculum-systems-root .ba-page .curriculum-row:hover,.curriculum-systems-root .ba-page .pathway-row:hover,
+.curriculum-systems-root .ba-page .organization-row:hover{transform:none;box-shadow:none;}
+.curriculum-systems-root .ba-page .ba-avatar{box-shadow:none;border-radius:12px;}
+.curriculum-systems-root .ba-page .ba-table-card{display:block;width:100%;max-width:none;min-width:0;margin:2px 0 0;padding:4px;overflow:visible;}
+.curriculum-systems-root .ba-page .ba-table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:auto;
+ overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;border-radius:10px;}
+.curriculum-systems-root .ba-page .ba-table-scroll table{width:100%;margin:0;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
+.curriculum-systems-root .ba-page .ba-table-scroll thead th{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);}
+.curriculum-systems-root .ba-page .ba-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+.curriculum-systems-root .ba-page .ba-table-scroll td{background:transparent;}
+.curriculum-systems-root .ba-page .ba-table-scroll th,.curriculum-systems-root .ba-page .ba-table-scroll td{padding:9px 10px;}
+.curriculum-systems-root .ba-page .ba-analysis-grid{width:100%;max-width:none;min-width:0;margin:2px 0 0;gap:9px;}
+.ba-record-search-in-filter{display:grid;gap:6px;margin:0 0 10px;}
+.ba-record-search-in-filter span{font-size:11px;font-weight:750;color:var(--muted,#64748b);}
+.ba-record-search-in-filter input{min-height:40px;width:100%;border:1px solid var(--border,#d4dae3);
+ border-radius:9px;padding:0 11px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#182235);}
+.ba-modal-head button,.ba-sheet-head button{opacity:1;visibility:visible;flex:0 0 auto;color:var(--text,#182235);}
+@media(min-width:680px) and (max-width:1023px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1024px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:679px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:minmax(0,1fr);}}
+@media(max-width:639px){.curriculum-systems-root .ba-page {padding:2px 2px 14px;} .curriculum-systems-root .ba-page .ba-list{gap:7px;}}
+@media(prefers-reduced-motion:reduce){.curriculum-systems-root .ba-page .student-row,.curriculum-systems-root .ba-page .curriculum-row{transition:none;}}
 
 `;
   return CurriculumsWorkspace;
@@ -2319,19 +2291,6 @@ function MiniStat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
 function CurriculumPathwaysWorkspace() {
   const dataRevision = useDataRevision();
 
@@ -2379,6 +2338,7 @@ function CurriculumPathwaysWorkspace() {
   >([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => { if (typeof window !== "undefined") setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards"); }, []);
   const [search, setSearch] = useState("");
   const [curriculumFilter, setCurriculumFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("active");
@@ -2760,6 +2720,16 @@ function CurriculumPathwaysWorkspace() {
     await load();
   };
 
+  // Shared Setup actions for the currently mounted Curriculums/Pathways editor.
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", {
+    add: () => openCreate(), search: setSearch,
+    filter: () => setFilterOpen(true), more: () => setMoreOpen(true),
+  });
+  useRegisterBranchWorkspaceToolbar("curriculumSystems", {
+    add: () => openCreate(), search: setSearch,
+    filter: () => setFilterOpen(true), more: () => setMoreOpen(true),
+  });
+
   if (accountLoading || settingsLoading || contextLoading || loading) {
     return (
       <State
@@ -2822,66 +2792,10 @@ function CurriculumPathwaysWorkspace() {
         </section>
       )}
 
-      <section
-        className="ba-search-card"
-        aria-label="Curriculum pathway search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search pathways..."
-            aria-label="Search pathways"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openCreate}
-          aria-label="Add pathway"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
+      
 
       {(curriculumFilter !== "all" || statusFilter !== "active") && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {curriculumFilter !== "all" && (
-            <button type="button" onClick={() => setCurriculumFilter("all")}>
-              Curriculum:{" "}
-              {(curriculumMap.get(idOf(curriculumFilter)) as AnyRow)?.name ||
-                curriculumFilter}{" "}
-              ×
-            </button>
-          )}
-          {statusFilter !== "active" && (
-            <button type="button" onClick={() => setStatusFilter("active")}>
-              Status: {statusFilter} ×
-            </button>
-          )}
-        </section>
+        <></>
       )}
 
       {viewMode === "summary" && (
@@ -2946,7 +2860,9 @@ function CurriculumPathwaysWorkspace() {
       )}
 
       {filterOpen && (
-        <FilterSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><FilterSheet
+          search={search}
+          setSearch={setSearch}
           curriculums={curriculums}
           curriculumFilter={curriculumFilter}
           statusFilter={statusFilter}
@@ -2954,11 +2870,11 @@ function CurriculumPathwaysWorkspace() {
           setStatusFilter={setStatusFilter}
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {moreOpen && (
-        <MoreSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><MoreSheet
           viewMode={viewMode}
           setViewMode={(mode) => {
             setViewMode(mode);
@@ -2969,28 +2885,28 @@ function CurriculumPathwaysWorkspace() {
             await load();
           }}
           onClose={() => setMoreOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {selectedItem && (
-        <ActionSheet
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><ActionSheet
           item={selectedItem}
           openEdit={openEdit}
           toggleActive={toggleActive}
           remove={remove}
           onClose={() => setSelectedItem(null)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {modalOpen && (
-        <PathwayModal
+        <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><PathwayModal
           form={form}
           saving={saving}
           curriculums={curriculums}
           setModalOpen={setModalOpen}
           updateForm={updateForm}
           save={save}
-        />
+        /></BranchViewportPortal>
       )}
     </main>
   );
@@ -3054,6 +2970,8 @@ function PathwayCard({
 }
 
 function FilterSheet({
+  search,
+  setSearch,
   curriculums,
   curriculumFilter,
   statusFilter,
@@ -3062,6 +2980,8 @@ function FilterSheet({
   clearFilters,
   onClose,
 }: {
+  search: string;
+  setSearch: (value: string) => void;
   curriculums: Curriculum[];
   curriculumFilter: string;
   statusFilter: string;
@@ -3084,6 +3004,7 @@ function FilterSheet({
         </div>
 
         <div className="ba-form compact">
+        <div className="ba-record-search-in-filter"><span>Search</span><input type="search" value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Search pathways" /></div>
           <label>
             <span>Curriculum</span>
             <select
@@ -3355,7 +3276,7 @@ function PathwayModal({
   save: (event?: React.FormEvent) => void;
 }) {
   return (
-    <div className="ba-modal-backdrop">
+    <BranchViewportPortal themeSourceClass=".curriculum-systems-root .ba-page"><div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
@@ -3443,7 +3364,7 @@ function PathwayModal({
           </button>
         </div>
       </form>
-    </div>
+    </div></BranchViewportPortal>
   );
 }
 
@@ -3520,6 +3441,47 @@ const css = `
   }
 }
 
+
+
+/* V36 SETUP: Students visual standard; source CRUD, relationships and offline sync remain unchanged. */
+.curriculum-systems-root .ba-page {
+  width:100%;min-width:0;max-width:none;min-height:0;margin:0;
+  padding:4px 4px max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
+}
+.curriculum-systems-root .ba-page .ba-search-card,.curriculum-systems-root .ba-page .ba-filter-chips,.curriculum-systems-root .ba-page .ba-hero {display:none!important;}
+.curriculum-systems-root .ba-page .ba-list{width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;align-items:stretch;}
+.curriculum-systems-root .ba-page .ba-list > .student-row,.curriculum-systems-root .ba-page .ba-list > .curriculum-row,
+.curriculum-systems-root .ba-page .ba-list > .pathway-row,.curriculum-systems-root .ba-page .ba-list > .organization-row{width:100%;min-width:0;margin:0;padding:9px 10px;}
+.curriculum-systems-root .ba-page .student-row,.curriculum-systems-root .ba-page .organization-row,.curriculum-systems-root .ba-page .curriculum-row,
+.curriculum-systems-root .ba-page .pathway-row,.curriculum-systems-root .ba-page .ba-card,.curriculum-systems-root .ba-page .ba-table-card,.curriculum-systems-root .ba-page .ba-analysis{
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ border-radius:13px;box-shadow:none;transform:none;
+}
+.curriculum-systems-root .ba-page .student-row:hover,.curriculum-systems-root .ba-page .curriculum-row:hover,.curriculum-systems-root .ba-page .pathway-row:hover,
+.curriculum-systems-root .ba-page .organization-row:hover{transform:none;box-shadow:none;}
+.curriculum-systems-root .ba-page .ba-avatar{box-shadow:none;border-radius:12px;}
+.curriculum-systems-root .ba-page .ba-table-card{display:block;width:100%;max-width:none;min-width:0;margin:2px 0 0;padding:4px;overflow:visible;}
+.curriculum-systems-root .ba-page .ba-table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:auto;
+ overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;border-radius:10px;}
+.curriculum-systems-root .ba-page .ba-table-scroll table{width:100%;margin:0;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
+.curriculum-systems-root .ba-page .ba-table-scroll thead th{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);}
+.curriculum-systems-root .ba-page .ba-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+.curriculum-systems-root .ba-page .ba-table-scroll td{background:transparent;}
+.curriculum-systems-root .ba-page .ba-table-scroll th,.curriculum-systems-root .ba-page .ba-table-scroll td{padding:9px 10px;}
+.curriculum-systems-root .ba-page .ba-analysis-grid{width:100%;max-width:none;min-width:0;margin:2px 0 0;gap:9px;}
+.ba-record-search-in-filter{display:grid;gap:6px;margin:0 0 10px;}
+.ba-record-search-in-filter span{font-size:11px;font-weight:750;color:var(--muted,#64748b);}
+.ba-record-search-in-filter input{min-height:40px;width:100%;border:1px solid var(--border,#d4dae3);
+ border-radius:9px;padding:0 11px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#182235);}
+.ba-modal-head button,.ba-sheet-head button{opacity:1;visibility:visible;flex:0 0 auto;color:var(--text,#182235);}
+@media(min-width:680px) and (max-width:1023px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1024px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:679px){.curriculum-systems-root .ba-page .ba-list{grid-template-columns:minmax(0,1fr);}}
+@media(max-width:639px){.curriculum-systems-root .ba-page {padding:2px 2px 14px;} .curriculum-systems-root .ba-page .ba-list{gap:7px;}}
+@media(prefers-reduced-motion:reduce){.curriculum-systems-root .ba-page .student-row,.curriculum-systems-root .ba-page .curriculum-row{transition:none;}}
+
 `;
   return CurriculumPathwaysWorkspace;
 })();
@@ -3549,14 +3511,7 @@ export default function CurriculumSystems() {
     <main className="curriculum-systems-root" data-mode={mode}>
       <style>{curriculumSystemsShellCss}</style>
       <section className="curriculum-systems-command" aria-label="Curriculum systems workspace">
-        <div className="curriculum-systems-command-copy">
-          <strong>Curriculum Systems</strong>
-          <small>
-            {mode === "curriculums"
-              ? "Manage curriculum definitions, programs, versions and linked usage."
-              : "Manage curriculum pathways and their subject or student relationships."}
-          </small>
-        </div>
+
 
         <div className="curriculum-systems-mode-switch" role="tablist" aria-label="Curriculum system areas">
           <button
@@ -3613,4 +3568,14 @@ const curriculumSystemsShellCss = `
 @media (max-width:430px) { .curriculum-systems-command-copy small { white-space: normal; line-height: 1.35; } .curriculum-systems-mode-switch button { grid-template-columns: 24px minmax(0,1fr); gap: 5px; } .curriculum-systems-mode-switch button > span:first-child { width: 24px; height: 24px; border-radius: 8px; } .curriculum-systems-mode-switch small { display: none; } }
 
 
+
+/* V36: retain a compact Curriculums / Pathways switch without a hero/title strip. */
+.curriculum-systems-root {gap:5px;}
+.curriculum-systems-command {padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;backdrop-filter:none;justify-content:flex-start;}
+.curriculum-systems-command-copy {display:none!important;}
+.curriculum-systems-mode-switch {width:max-content;max-width:100%;gap:4px;border-radius:9px;padding:2px;box-shadow:none;}
+.curriculum-systems-mode-switch button {min-height:31px;min-width:0;grid-template-columns:1fr;padding:4px 11px;}
+.curriculum-systems-mode-switch button > span:first-child,.curriculum-systems-mode-switch small {display:none!important;}
+.curriculum-systems-mode-switch strong {font-size:11px;}
+@media(max-width:760px){.curriculum-systems-command{display:block;padding:0;}.curriculum-systems-mode-switch{width:100%;}.curriculum-systems-mode-switch button{width:auto;}}
 `;

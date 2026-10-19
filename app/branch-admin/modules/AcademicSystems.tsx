@@ -11,6 +11,14 @@
  * - branch-scoped offline-first reads/writes;
  * - cards, tables, analytics, filters, sheets and forms.
  *
+ * V35 (Student Records parity):
+ * - Shared Role Portal Search / Add / Filter / More actions; no duplicate bars.
+ * - Compact Structures / Periods switch without a second page heading.
+ * - Desktop tables from 900px, mobile cards below; More overrides the default.
+ * - Same neutral, subtly textured cards and alternating table rows as Students.
+ * - Full-viewport, theme-aware filters, menus, actions and editing dialogs.
+ * - Existing CRUD, current academic configuration and offline/media logic retained.
+ *
  * It does not import the former Academicstructures.tsx or Academicperiods.tsx.
  * Both implementations are contained below as private workspaces and exposed
  * through one default AcademicSystems component.
@@ -23,6 +31,8 @@ import React, {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
@@ -62,6 +72,21 @@ import {
 } from "../../lib/media/mediaAssetUtils";
 
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
+
+/**
+ * Both entry routes lead to the same workspace: the direct legacy route and
+ * the Setup workspace accordion. The active editor alone owns these actions.
+ * Hook registration automatically cleans up when the editor unmounts.
+ */
+function useAcademicSystemsSharedActions(handlers: {
+  add: () => void;
+  search: (query: string) => void;
+  filter: () => void;
+  more: () => void;
+}) {
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", handlers);
+  useRegisterBranchWorkspaceToolbar("academicSystems", handlers);
+}
 
 type AcademicSystemsMode =
   | "structures"
@@ -483,7 +508,13 @@ function AcademicStructuresWorkspace() {
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
 
+  // The initial view follows Students: desktop table, mobile cards.
+  // View-mode changes made through More remain in control after mount.
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [levelFilter, setLevelFilter] = useState("all");
@@ -745,14 +776,6 @@ function AcademicStructuresWorkspace() {
     filteredRows.length,
     viewRows,
   ]);
-
-  const activeFilterCount = useMemo(
-    () =>
-      [statusFilter, levelFilter].filter(
-        (value) => value !== "all" && value !== "active",
-      ).length + (statusFilter !== "active" ? 1 : 0),
-    [levelFilter, statusFilter],
-  );
 
   const countsByLevel = useMemo(
     () => groupedCounts(viewRows, (item) => item.levelName),
@@ -1119,6 +1142,14 @@ function AcademicStructuresWorkspace() {
     }
   };
 
+  // The portal toolbar is the sole Search / Add / Filter / More control.
+  useAcademicSystemsSharedActions({
+    add: openCreate,
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+
   const clearFilters = () => {
     setStatusFilter("active");
     setLevelFilter("all");
@@ -1168,7 +1199,7 @@ function AcademicStructuresWorkspace() {
 
   return (
     <main
-      className="ba-page"
+      className="ba-page academic-structures-page"
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
@@ -1183,65 +1214,6 @@ function AcademicStructuresWorkspace() {
           >
             ✕
           </button>
-        </section>
-      )}
-
-      <section
-        className="ba-search-card"
-        aria-label="Academic structure search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search structures..."
-            aria-label="Search academic structures"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openCreate}
-          aria-label="Add academic structure"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {levelFilter !== "all" && (
-            <button type="button" onClick={() => setLevelFilter("all")}>
-              Level: {levelLabel(levelFilter)} ×
-            </button>
-          )}
-          {statusFilter !== "active" && (
-            <button type="button" onClick={() => setStatusFilter("active")}>
-              Status: {statusFilter === "all" ? "All" : "Inactive"} ×
-            </button>
-          )}
         </section>
       )}
 
@@ -1309,7 +1281,10 @@ function AcademicStructuresWorkspace() {
       )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-structures-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
+          search={search}
+          setSearch={setSearch}
           levelOptions={levelOptions}
           levelFilter={levelFilter}
           statusFilter={statusFilter}
@@ -1318,9 +1293,11 @@ function AcademicStructuresWorkspace() {
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-structures-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           viewMode={viewMode}
           setViewMode={(mode) => {
@@ -1333,9 +1310,11 @@ function AcademicStructuresWorkspace() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {selectedItem && (
+        <BranchViewportPortal themeSourceClass=".academic-structures-page" onEscape={() => setSelectedItem(null)}>
         <ActionSheet
           item={selectedItem}
           openEdit={openEdit}
@@ -1344,9 +1323,11 @@ function AcademicStructuresWorkspace() {
           setAsCurrent={setAsCurrent}
           onClose={() => setSelectedItem(null)}
         />
+        </BranchViewportPortal>
       )}
 
       {modalOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-structures-page" onEscape={() => { if (!saving) setModalOpen(false); }}>
         <StructureModal
           form={form}
           saving={saving}
@@ -1355,6 +1336,7 @@ function AcademicStructuresWorkspace() {
           setModalOpen={setModalOpen}
           save={save}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );
@@ -1421,20 +1403,9 @@ function StructureListItem({
   );
 }
 
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
 function FilterSheet({
+  search,
+  setSearch,
   levelOptions,
   levelFilter,
   statusFilter,
@@ -1450,6 +1421,8 @@ function FilterSheet({
   setStatusFilter: (value: StatusFilter) => void;
   clearFilters: () => void;
   onClose: () => void;
+  search: string;
+  setSearch: (query: string) => void;
 }) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
@@ -1462,6 +1435,17 @@ function FilterSheet({
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
           </button>
+        </div>
+
+        <div className="ba-record-search-in-filter">
+          <label htmlFor="academic-structure-filter-search">Search structures</label>
+          <input
+            id="academic-structure-filter-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search structures…"
+          />
         </div>
 
         <div className="ba-form compact">
@@ -2257,6 +2241,109 @@ const css = `
   }
 }
 
+
+/* V35 — Academic Systems uses the Students V9 record presentation.
+   900px desktop tables, mobile cards; shared toolbar owns top actions. */
+.ba-page.academic-structures-page,
+.ba-page.academic-periods-page {
+  width:100%;max-width:none;min-width:0;min-height:0;margin:0;
+  padding:5px;padding-bottom:max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
+}
+.ba-page.academic-structures-page .ba-list,
+.ba-page.academic-periods-page .ba-list {
+  width:100%;min-width:0;max-width:none;margin:2px 0 0;
+  gap:9px;align-items:stretch;
+}
+.ba-page.academic-structures-page .ba-list > .student-row,
+.ba-page.academic-periods-page .ba-list > .student-row {
+  width:100%;min-width:0;margin:0;padding:9px 10px;
+}
+.ba-page.academic-structures-page .student-row,
+.ba-page.academic-periods-page .student-row,
+.ba-page.academic-structures-page .ba-card,
+.ba-page.academic-periods-page .ba-card,
+.ba-page.academic-structures-page .ba-table-card,
+.ba-page.academic-periods-page .ba-table-card,
+.ba-page.academic-structures-page .ba-analysis,
+.ba-page.academic-periods-page .ba-analysis {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  box-shadow:none;border-radius:13px;transition:border-color .12s ease;
+}
+.ba-page.academic-structures-page .student-row:hover,
+.ba-page.academic-periods-page .student-row:hover,
+.ba-page.academic-structures-page .ba-card:hover,
+.ba-page.academic-periods-page .ba-card:hover { transform:none;box-shadow:none; }
+.ba-page.academic-structures-page .ba-avatar,
+.ba-page.academic-periods-page .ba-avatar {box-shadow:none;border-radius:12px;}
+.ba-page.academic-structures-page .ba-table-card,
+.ba-page.academic-periods-page .ba-table-card {
+  display:block;width:100%;min-width:0;max-width:none;
+  padding:4px;margin:2px 0 0;overflow:visible;
+}
+.ba-page.academic-structures-page .ba-table-scroll,
+.ba-page.academic-periods-page .ba-table-scroll {
+  box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:0;
+  overflow-x:auto;overflow-y:auto;overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;border-radius:10px;
+}
+.ba-page.academic-structures-page .ba-table-scroll table,
+.ba-page.academic-periods-page .ba-table-scroll table {
+  width:100%;margin:0;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+}
+.ba-page.academic-structures-page .ba-table-scroll thead th,
+.ba-page.academic-periods-page .ba-table-scroll thead th {
+  position:sticky;top:0;z-index:2;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+}
+.ba-page.academic-structures-page .ba-table-scroll tbody tr:nth-child(even),
+.ba-page.academic-periods-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);
+}
+.ba-page.academic-structures-page .ba-table-scroll td,
+.ba-page.academic-periods-page .ba-table-scroll td {background:transparent;}
+.ba-page.academic-structures-page .ba-table-scroll th,
+.ba-page.academic-structures-page .ba-table-scroll td,
+.ba-page.academic-periods-page .ba-table-scroll th,
+.ba-page.academic-periods-page .ba-table-scroll td {padding:9px 10px;}
+.ba-page.academic-structures-page .ba-analysis-grid,
+.ba-page.academic-periods-page .ba-analysis-grid {
+  width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;
+}
+.ba-page.academic-structures-page .ba-search-card,
+.ba-page.academic-periods-page .ba-search-card,
+.ba-page.academic-structures-page .ba-filter-chips,
+.ba-page.academic-periods-page .ba-filter-chips {display:none!important;}
+.ba-record-search-in-filter {display:grid;gap:6px;margin:0 0 12px;}
+.ba-record-search-in-filter label {font-size:12px;font-weight:700;color:var(--muted,#64748b)}
+.ba-record-search-in-filter input {
+  width:100%;min-height:42px;padding:0 12px;border:1px solid var(--border,#d4dae3);
+  border-radius:10px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#182235);
+}
+/* Dialogs use the shared BranchViewportPortal, with readable controls. */
+.academic-systems-root .ba-modal-head button,
+.academic-systems-root .ba-sheet-head button {opacity:1;visibility:visible;}
+@media(min-width:680px) and (max-width:1023px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(min-width:1024px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:repeat(4,minmax(0,1fr));}
+}
+@media(max-width:679px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:minmax(0,1fr);}
+}
+@media(max-width:639px){
+ .ba-page.academic-structures-page,.ba-page.academic-periods-page {padding:3px;padding-bottom:max(14px,env(safe-area-inset-bottom));}
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {gap:7px;}
+ .ba-page.academic-structures-page .ba-list > .student-row,.ba-page.academic-periods-page .ba-list > .student-row {padding:9px;}
+ .ba-page.academic-structures-page .ba-table-scroll th,.ba-page.academic-structures-page .ba-table-scroll td,
+ .ba-page.academic-periods-page .ba-table-scroll th,.ba-page.academic-periods-page .ba-table-scroll td {padding:8px 9px;}
+}
+@media(prefers-reduced-motion:reduce){
+ .ba-page.academic-structures-page .student-row,.ba-page.academic-periods-page .student-row {transition:none;}
+}
 `;
 
   return AcademicStructuresWorkspace;
@@ -2616,7 +2703,13 @@ function AcademicPeriodsWorkspace() {
   );
   const [branchSetting, setBranchSetting] = useState<any>(null);
 
+  // The initial view follows Students: desktop table, mobile cards.
+  // View-mode changes made through More remain in control after mount.
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [structureFilter, setStructureFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -2845,10 +2938,6 @@ function AcademicPeriodsWorkspace() {
     });
   }, [periodRows, search, structureFilter, statusFilter]);
 
-  const currentPeriod = useMemo(
-    () => periodRows.find((row) => row.current),
-    [periodRows],
-  );
   const upcomingCount = useMemo(
     () =>
       periodRows.filter((row) => getPeriodStatus(row) === "upcoming").length,
@@ -2883,12 +2972,6 @@ function AcademicPeriodsWorkspace() {
   const countsByType = useMemo(
     () => groupedCounts(periodRows, (row) => row.type || "Not set"),
     [periodRows],
-  );
-
-  const activeFilterCount = useMemo(
-    () =>
-      [structureFilter, statusFilter].filter((value) => value !== "all").length,
-    [structureFilter, statusFilter],
   );
 
   const nextOrderForStructure = (academicStructureId: string) => {
@@ -3156,6 +3239,14 @@ function AcademicPeriodsWorkspace() {
     await load();
   };
 
+  // The portal toolbar is the sole Search / Add / Filter / More control.
+  useAcademicSystemsSharedActions({
+    add: openCreate,
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+
   const clearFilters = () => {
     setStructureFilter("all");
     setStatusFilter("all");
@@ -3205,7 +3296,7 @@ function AcademicPeriodsWorkspace() {
 
   return (
     <main
-      className="ba-page"
+      className="ba-page academic-periods-page"
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
@@ -3223,93 +3314,13 @@ function AcademicPeriodsWorkspace() {
         </section>
       )}
 
-      <section
-        className="ba-search-card"
-        aria-label="Academic period search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search periods..."
-            aria-label="Search academic periods"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openCreate}
-          aria-label="Add academic period"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
       {!structures.length && (
-        <section className="ba-warning">
-          Create an academic structure first. Academic periods must belong to a
-          structure such as Primary, JHS, SHS, Montessori, Cambridge, or any
-          custom grouping.
+        <section className="ba-empty" role="status">
+          <div className="ba-empty-icon">◫</div>
+          <h3>Create an academic structure first</h3>
+          <p>Periods need an academic structure. Choose Structures above and add one.</p>
         </section>
       )}
-
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {structureFilter !== "all" && (
-            <button type="button" onClick={() => setStructureFilter("all")}>
-              Structure:{" "}
-              {(structureMap.get(idOf(structureFilter)) as any)?.name ||
-                structureFilter}{" "}
-              ×
-            </button>
-          )}
-          {statusFilter !== "all" && (
-            <button type="button" onClick={() => setStatusFilter("all")}>
-              Status: {statusLabel(statusFilter)} ×
-            </button>
-          )}
-        </section>
-      )}
-
-      {currentPeriod &&
-        viewMode === "cards" &&
-        !search &&
-        activeFilterCount === 0 && (
-          <section className="ba-current-card">
-            <div>
-              <span>Current period</span>
-              <strong>{currentPeriod.name}</strong>
-              <p>
-                {currentPeriod.structureName} ·{" "}
-                {friendlyDate(currentPeriod.startDate)} to{" "}
-                {friendlyDate(currentPeriod.endDate)}
-              </p>
-            </div>
-            <Chip tone="purple">Current</Chip>
-          </section>
-        )}
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
@@ -3371,7 +3382,10 @@ function AcademicPeriodsWorkspace() {
       )}
 
       {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-periods-page" onEscape={() => setFilterOpen(false)}>
         <FilterSheet
+          search={search}
+          setSearch={setSearch}
           structures={structures}
           structureFilter={structureFilter}
           statusFilter={statusFilter}
@@ -3380,9 +3394,11 @@ function AcademicPeriodsWorkspace() {
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-periods-page" onEscape={() => setMoreOpen(false)}>
         <MoreSheet
           viewMode={viewMode}
           setViewMode={(mode) => {
@@ -3395,9 +3411,11 @@ function AcademicPeriodsWorkspace() {
           }}
           onClose={() => setMoreOpen(false)}
         />
+        </BranchViewportPortal>
       )}
 
       {selectedItem && (
+        <BranchViewportPortal themeSourceClass=".academic-periods-page" onEscape={() => setSelectedItem(null)}>
         <ActionSheet
           period={selectedItem}
           openEdit={openEdit}
@@ -3406,9 +3424,11 @@ function AcademicPeriodsWorkspace() {
           remove={archivePeriod}
           onClose={() => setSelectedItem(null)}
         />
+        </BranchViewportPortal>
       )}
 
       {modalOpen && (
+        <BranchViewportPortal themeSourceClass=".academic-periods-page" onEscape={() => { if (!saving) setModalOpen(false); }}>
         <PeriodModal
           form={form}
           saving={saving}
@@ -3419,6 +3439,7 @@ function AcademicPeriodsWorkspace() {
           setModalOpen={setModalOpen}
           save={save}
         />
+        </BranchViewportPortal>
       )}
     </main>
   );
@@ -3485,20 +3506,9 @@ function PeriodListItem({
   );
 }
 
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
 function FilterSheet({
+  search,
+  setSearch,
   structures,
   structureFilter,
   statusFilter,
@@ -3514,6 +3524,8 @@ function FilterSheet({
   setStatusFilter: (value: StatusFilter) => void;
   clearFilters: () => void;
   onClose: () => void;
+  search: string;
+  setSearch: (query: string) => void;
 }) {
   return (
     <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
@@ -3526,6 +3538,17 @@ function FilterSheet({
           <button type="button" onClick={onClose} aria-label="Close filters">
             ✕
           </button>
+        </div>
+
+        <div className="ba-record-search-in-filter">
+          <label htmlFor="academic-period-filter-search">Search periods</label>
+          <input
+            id="academic-period-filter-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search periods…"
+          />
         </div>
 
         <div className="ba-form compact">
@@ -4353,6 +4376,109 @@ const css = `
   }
 }
 
+
+/* V35 — Academic Systems uses the Students V9 record presentation.
+   900px desktop tables, mobile cards; shared toolbar owns top actions. */
+.ba-page.academic-structures-page,
+.ba-page.academic-periods-page {
+  width:100%;max-width:none;min-width:0;min-height:0;margin:0;
+  padding:5px;padding-bottom:max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
+}
+.ba-page.academic-structures-page .ba-list,
+.ba-page.academic-periods-page .ba-list {
+  width:100%;min-width:0;max-width:none;margin:2px 0 0;
+  gap:9px;align-items:stretch;
+}
+.ba-page.academic-structures-page .ba-list > .student-row,
+.ba-page.academic-periods-page .ba-list > .student-row {
+  width:100%;min-width:0;margin:0;padding:9px 10px;
+}
+.ba-page.academic-structures-page .student-row,
+.ba-page.academic-periods-page .student-row,
+.ba-page.academic-structures-page .ba-card,
+.ba-page.academic-periods-page .ba-card,
+.ba-page.academic-structures-page .ba-table-card,
+.ba-page.academic-periods-page .ba-table-card,
+.ba-page.academic-structures-page .ba-analysis,
+.ba-page.academic-periods-page .ba-analysis {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  box-shadow:none;border-radius:13px;transition:border-color .12s ease;
+}
+.ba-page.academic-structures-page .student-row:hover,
+.ba-page.academic-periods-page .student-row:hover,
+.ba-page.academic-structures-page .ba-card:hover,
+.ba-page.academic-periods-page .ba-card:hover { transform:none;box-shadow:none; }
+.ba-page.academic-structures-page .ba-avatar,
+.ba-page.academic-periods-page .ba-avatar {box-shadow:none;border-radius:12px;}
+.ba-page.academic-structures-page .ba-table-card,
+.ba-page.academic-periods-page .ba-table-card {
+  display:block;width:100%;min-width:0;max-width:none;
+  padding:4px;margin:2px 0 0;overflow:visible;
+}
+.ba-page.academic-structures-page .ba-table-scroll,
+.ba-page.academic-periods-page .ba-table-scroll {
+  box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:0;
+  overflow-x:auto;overflow-y:auto;overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;border-radius:10px;
+}
+.ba-page.academic-structures-page .ba-table-scroll table,
+.ba-page.academic-periods-page .ba-table-scroll table {
+  width:100%;margin:0;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+}
+.ba-page.academic-structures-page .ba-table-scroll thead th,
+.ba-page.academic-periods-page .ba-table-scroll thead th {
+  position:sticky;top:0;z-index:2;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+}
+.ba-page.academic-structures-page .ba-table-scroll tbody tr:nth-child(even),
+.ba-page.academic-periods-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);
+}
+.ba-page.academic-structures-page .ba-table-scroll td,
+.ba-page.academic-periods-page .ba-table-scroll td {background:transparent;}
+.ba-page.academic-structures-page .ba-table-scroll th,
+.ba-page.academic-structures-page .ba-table-scroll td,
+.ba-page.academic-periods-page .ba-table-scroll th,
+.ba-page.academic-periods-page .ba-table-scroll td {padding:9px 10px;}
+.ba-page.academic-structures-page .ba-analysis-grid,
+.ba-page.academic-periods-page .ba-analysis-grid {
+  width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;
+}
+.ba-page.academic-structures-page .ba-search-card,
+.ba-page.academic-periods-page .ba-search-card,
+.ba-page.academic-structures-page .ba-filter-chips,
+.ba-page.academic-periods-page .ba-filter-chips {display:none!important;}
+.ba-record-search-in-filter {display:grid;gap:6px;margin:0 0 12px;}
+.ba-record-search-in-filter label {font-size:12px;font-weight:700;color:var(--muted,#64748b)}
+.ba-record-search-in-filter input {
+  width:100%;min-height:42px;padding:0 12px;border:1px solid var(--border,#d4dae3);
+  border-radius:10px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#182235);
+}
+/* Dialogs use the shared BranchViewportPortal, with readable controls. */
+.academic-systems-root .ba-modal-head button,
+.academic-systems-root .ba-sheet-head button {opacity:1;visibility:visible;}
+@media(min-width:680px) and (max-width:1023px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(min-width:1024px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:repeat(4,minmax(0,1fr));}
+}
+@media(max-width:679px){
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {grid-template-columns:minmax(0,1fr);}
+}
+@media(max-width:639px){
+ .ba-page.academic-structures-page,.ba-page.academic-periods-page {padding:3px;padding-bottom:max(14px,env(safe-area-inset-bottom));}
+ .ba-page.academic-structures-page .ba-list,.ba-page.academic-periods-page .ba-list {gap:7px;}
+ .ba-page.academic-structures-page .ba-list > .student-row,.ba-page.academic-periods-page .ba-list > .student-row {padding:9px;}
+ .ba-page.academic-structures-page .ba-table-scroll th,.ba-page.academic-structures-page .ba-table-scroll td,
+ .ba-page.academic-periods-page .ba-table-scroll th,.ba-page.academic-periods-page .ba-table-scroll td {padding:8px 9px;}
+}
+@media(prefers-reduced-motion:reduce){
+ .ba-page.academic-structures-page .student-row,.ba-page.academic-periods-page .student-row {transition:none;}
+}
 `;
 
   return AcademicPeriodsWorkspace;
@@ -4404,86 +4530,12 @@ export default function AcademicSystems() {
         {academicSystemsShellCss}
       </style>
 
-      <section
-        className="academic-systems-command"
-        aria-label="Academic systems workspace"
-      >
-        <div className="academic-systems-command-copy">
-          <strong>
-            Academic Systems
-          </strong>
-
-          <small>
-            {mode === "structures"
-              ? "Manage academic levels, years and their linked setup."
-              : "Manage terms, semesters, dates and the current period."}
-          </small>
-        </div>
-
-        <div
-          className="academic-systems-mode-switch"
-          role="tablist"
-          aria-label="Academic system areas"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={
-              mode === "structures"
-            }
-            className={
-              mode === "structures"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              changeMode("structures")
-            }
-          >
-            <span aria-hidden="true">
-              ◫
-            </span>
-
-            <span>
-              <strong>
-                Structures
-              </strong>
-              <small>
-                Levels and years
-              </small>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            role="tab"
-            aria-selected={
-              mode === "periods"
-            }
-            className={
-              mode === "periods"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              changeMode("periods")
-            }
-          >
-            <span aria-hidden="true">
-              ◷
-            </span>
-
-            <span>
-              <strong>
-                Periods
-              </strong>
-              <small>
-                Terms and semesters
-              </small>
-            </span>
-          </button>
-        </div>
-      </section>
+      <nav className="academic-systems-mode-switch" role="tablist" aria-label="Academic systems">
+        <button type="button" role="tab" aria-selected={mode === "structures"}
+          className={mode === "structures" ? "active" : ""} onClick={() => changeMode("structures")}>Structures</button>
+        <button type="button" role="tab" aria-selected={mode === "periods"}
+          className={mode === "periods" ? "active" : ""} onClick={() => changeMode("periods")}>Periods</button>
+      </nav>
 
       <section
         className="academic-systems-workspace"
@@ -4497,9 +4549,7 @@ export default function AcademicSystems() {
         {modeReady ? (
           <ActiveWorkspace />
         ) : (
-          <section className="academic-systems-boot">
-            Opening academic systems…
-          </section>
+          <section className="academic-systems-boot" aria-label="Loading academic systems" aria-busy="true" />
         )}
       </section>
     </main>
@@ -4508,314 +4558,28 @@ export default function AcademicSystems() {
 
 const academicSystemsShellCss = `
 .academic-systems-root {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  display: grid;
-  gap: 10px;
-  overflow-x: clip;
-  overflow-y: visible;
-  color:
-    var(
-      --eds-text,
-      var(--text, #111827)
-    );
+  display:grid;gap:5px;min-width:0;width:100%;max-width:none;
+  overflow-x:clip;color:var(--text,#111827);
 }
-
-.academic-systems-command {
-  position: relative;
-  z-index: 5;
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border:
-    1px solid
-    var(
-      --eds-border,
-      var(--border, rgba(15,23,42,.09))
-    );
-  border-radius:
-    var(--eds-radius-card, 16px);
-  background:
-    color-mix(
-      in srgb,
-      var(
-        --eds-header-bg,
-        var(--surface, #ffffff)
-      ) 96%,
-      transparent
-    );
-  box-shadow:
-    var(
-      --eds-shadow-soft,
-      0 8px 22px rgba(15,23,42,.06)
-    );
-  backdrop-filter:
-    blur(14px)
-    saturate(1.06);
-  -webkit-backdrop-filter:
-    blur(14px)
-    saturate(1.06);
-}
-
-.academic-systems-command-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.academic-systems-command-copy strong,
-.academic-systems-command-copy small {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.academic-systems-command-copy strong {
-  color:
-    var(
-      --eds-text-strong,
-      var(--text, #111827)
-    );
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.academic-systems-command-copy small {
-  margin-top: 3px;
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #667085)
-    );
-  font-size: 9px;
-  font-weight: 650;
-}
-
 .academic-systems-mode-switch {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns:
-    repeat(2, minmax(0, 1fr));
-  gap: 4px;
-  padding: 3px;
-  border:
-    1px solid
-    var(
-      --eds-divider,
-      var(--border, rgba(15,23,42,.08))
-    );
-  border-radius:
-    var(--eds-radius-control, 13px);
-  background:
-    var(
-      --eds-surface-sunken,
-      color-mix(
-        in srgb,
-        var(--surface, #ffffff) 82%,
-        var(--bg, #f4f7fb)
-      )
-    );
+  display:flex;align-items:center;gap:4px;max-width:100%;width:max-content;
+  margin:0 0 1px;padding:3px;
+  border:1px solid var(--border,rgba(15,23,42,.12));
+  border-radius:9px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
 }
-
 .academic-systems-mode-switch button {
-  min-width: 128px;
-  min-height: 40px;
-  display: grid;
-  grid-template-columns:
-    27px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 4px 7px;
-  border: 1px solid transparent;
-  border-radius:
-    calc(
-      var(--eds-radius-control, 13px)
-      - 3px
-    );
-  background: transparent;
-  color:
-    var(
-      --eds-text,
-      var(--text, #111827)
-    );
-  text-align: left;
-  cursor: pointer;
+  flex:0 0 auto;min-height:31px;padding:5px 12px;
+  border:1px solid transparent;border-radius:7px;background:transparent;
+  color:var(--text,#111827);font:inherit;font-size:11px;font-weight:800;
+  cursor:pointer;
 }
-
-.academic-systems-mode-switch button:hover {
-  background:
-    var(
-      --eds-primary-softer,
-      color-mix(
-        in srgb,
-        var(--primary-color, #2563eb) 7%,
-        transparent
-      )
-    );
-}
-
 .academic-systems-mode-switch button.active {
-  background:
-    var(
-      --eds-surface-raised,
-      var(--surface, #ffffff)
-    );
-  color:
-    var(
-      --eds-primary,
-      var(--primary-color, #2563eb)
-    );
-  border-color:
-    color-mix(
-      in srgb,
-      var(
-        --eds-primary,
-        var(--primary-color, #2563eb)
-      ) 25%,
-      var(--eds-border, transparent)
-    );
-  box-shadow:
-    var(
-      --eds-shadow-soft,
-      0 4px 12px rgba(15,23,42,.07)
-    );
+  border-color:color-mix(in srgb,var(--ba-primary,var(--primary-color,#2563eb)) 26%,var(--border,#d4dae3));
+  background:color-mix(in srgb,var(--ba-primary,var(--primary-color,#2563eb)) 10%,var(--card-bg,var(--surface,#fff)));
+  color:var(--ba-primary,var(--primary-color,#2563eb));
 }
-
-.academic-systems-mode-switch
-button > span:first-child {
-  width: 27px;
-  height: 27px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background:
-    var(
-      --eds-primary-soft,
-      color-mix(
-        in srgb,
-        var(--primary-color, #2563eb) 13%,
-        transparent
-      )
-    );
-  color:
-    var(
-      --eds-primary,
-      var(--primary-color, #2563eb)
-    );
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.academic-systems-mode-switch
-button > span:last-child {
-  min-width: 0;
-}
-
-.academic-systems-mode-switch strong,
-.academic-systems-mode-switch small {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.academic-systems-mode-switch strong {
-  color: inherit;
-  font-size: 10px;
-  font-weight: 850;
-}
-
-.academic-systems-mode-switch small {
-  margin-top: 2px;
-  color:
-    var(
-      --eds-text-muted,
-      var(--muted, #667085)
-    );
-  font-size: 8px;
-  font-weight: 650;
-}
-
-.academic-systems-workspace {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  height: auto;
-  max-height: none;
-  overflow-x: clip;
-  overflow-y: visible;
-}
-
-.academic-systems-workspace > * {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.academic-systems-boot {
-  min-height: 180px;
-  display: grid;
-  place-items: center;
-  border:
-    1px solid
-    var(--eds-border, rgba(15,23,42,.09));
-  border-radius:
-    var(--eds-radius-card, 16px);
-  background:
-    var(--eds-surface, #ffffff);
-  color:
-    var(--eds-text-muted, #667085);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-@media (max-width: 760px) {
-  .academic-systems-command {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 7px;
-    padding: 8px;
-  }
-
-  .academic-systems-mode-switch {
-    width: 100%;
-  }
-
-  .academic-systems-mode-switch button {
-    min-width: 0;
-  }
-}
-
-@media (max-width: 430px) {
-  .academic-systems-command-copy small {
-    white-space: normal;
-    line-height: 1.35;
-  }
-
-  .academic-systems-mode-switch button {
-    grid-template-columns:
-      24px minmax(0, 1fr);
-    gap: 5px;
-  }
-
-  .academic-systems-mode-switch
-  button > span:first-child {
-    width: 24px;
-    height: 24px;
-    border-radius: 8px;
-  }
-
-  .academic-systems-mode-switch small {
-    display: none;
-  }
-}
-
-/* Portal-aware overlay positioning is defined inside both private workspace
-   styles, after their base backdrop declarations. This shell intentionally
-   does not use broad [class*="modal"] selectors. */
-
+.academic-systems-mode-switch button:focus-visible {outline:2px solid var(--ba-primary,var(--primary-color,#2563eb));outline-offset:1px;}
+.academic-systems-workspace {width:100%;max-width:none;min-width:0;overflow-x:clip;}
+.academic-systems-boot {min-height:130px;display:grid;place-items:center;color:var(--muted,#64748b);font-size:12px;}
+@media print {.academic-systems-mode-switch{display:none!important;}}
 `;

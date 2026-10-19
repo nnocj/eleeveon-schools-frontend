@@ -237,6 +237,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
    */
   useEffect(() => {
     if (!activeMembership || !effective || !expectedIdentity) return;
+    // Never publish a new workspace appearance from values hydrated for
+    // a different school/branch (common during fresh first-entry setup).
+    if (!settingsContext.loadedFor ||
+        settingsContext.loadedFor.key !== expectedIdentity.key) return;
 
     const liveKey = `${expectedIdentity.key}::${effectiveSignature}`;
     if (liveApplicationRef.current === liveKey) return;
@@ -300,6 +304,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     expectedIdentity,
     effective,
     effectiveSignature,
+    settingsContext.loadedFor?.key,
   ]);
 
   /*

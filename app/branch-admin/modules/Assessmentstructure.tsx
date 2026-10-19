@@ -10,6 +10,8 @@
  * - tree navigation/validation comes from app/lib/assessments;
  * - subtree mutation commands are transaction-backed;
  * - drag-and-drop can be added later by calling the same movement commands.
+ * V36: shared Setup toolbar, 900px responsive records, viewport dialogs,
+ *      compact Students-style textures, tree mutations unchanged.
  */
 
 import {
@@ -18,6 +20,8 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 
 import {
   db,
@@ -243,6 +247,14 @@ export default function AssessmentSystems() {
     useState<StatusFilter>("active");
   const [viewMode, setViewMode] =
     useState<ViewMode>("editor");
+  const [structureListView, setStructureListView] = useState<"cards" | "table">("cards");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setStructureListView(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
+
 
   const [
     structureSheetOpen,
@@ -1054,6 +1066,21 @@ export default function AssessmentSystems() {
     }
   };
 
+  // Shared Setup toolbar owns Add/Search/Filter/More; the tree retains its
+  // independent edit, preview and validation controls.
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", {
+    add: openNewStructure,
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+  useRegisterBranchWorkspaceToolbar("assessmentSystems", {
+    add: openNewStructure,
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+
   if (
     restoring ||
     branchLoading ||
@@ -1088,49 +1115,7 @@ export default function AssessmentSystems() {
 
   return (
     <section className="ae-page">
-      <header className="ae-toolbar">
-        <div className="ae-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) =>
-              setSearch(
-                event.target.value,
-              )
-            }
-            placeholder="Search assessment systems or items…"
-          />
-        </div>
 
-        <button
-          type="button"
-          className="ae-primary-action"
-          onClick={openNewStructure}
-        >
-          + System
-        </button>
-
-        <select
-          value={statusFilter}
-          onChange={(event) =>
-            setStatusFilter(
-              event.target
-                .value as StatusFilter,
-            )
-          }
-          aria-label="Status filter"
-        >
-          <option value="active">
-            Active
-          </option>
-          <option value="inactive">
-            Inactive
-          </option>
-          <option value="all">
-            All
-          </option>
-        </select>
-      </header>
 
       <div className="ae-layout">
         <aside className="ae-structures">
@@ -1141,6 +1126,24 @@ export default function AssessmentSystems() {
             </span>
           </div>
 
+          {structureListView === "table" ? (
+            <div className="ae-table-wrap" role="region" aria-label="Assessment systems table">
+              <table>
+                <thead><tr><th>Systems ({filteredModels.length})</th><th>Items</th><th>Issues</th></tr></thead>
+                <tbody>{filteredModels.map(model => {
+                  const sid=idOf(model.structure.id);
+                  const errors=model.issues.filter(issue=>issue.severity === "error").length;
+                  return <tr key={sid} className={sid === idOf(selectedModel?.structure.id) ? "selected" : ""}>
+                    <td><button type="button" className="ae-table-choice" aria-pressed={sid===idOf(selectedModel?.structure.id)} onClick={()=>setSelectedStructureId(sid)}>{model.structure.name}</button></td>
+                    <td>{model.items.length}</td>
+                    <td>{errors ? `${errors} errors` : "Ready"}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+              {!filteredModels.length && <div className="ae-empty compact">No matching structures.</div>}
+            </div>
+          ) : (
+          <div className="ae-structure-list">
           {filteredModels.length ? (
             filteredModels.map(
               (model) => {
@@ -1200,6 +1203,8 @@ export default function AssessmentSystems() {
             <div className="ae-empty compact">
               No matching structures.
             </div>
+          )}
+          </div>
           )}
         </aside>
 
@@ -1423,6 +1428,39 @@ export default function AssessmentSystems() {
         </main>
       </div>
 
+      {filterOpen && (
+        <BranchViewportPortal themeSourceClass=".ae-page" onEscape={() => setFilterOpen(false)}>
+          <div className="ae-overlay ae-setup-modal" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setFilterOpen(false);}}>
+            <section className="ae-setup-sheet" role="dialog" aria-modal="true" aria-label="Assessment filters">
+              <header><h2>Filters</h2><button type="button" onClick={()=>setFilterOpen(false)} aria-label="Close filters">✕</button></header>
+              <div className="ae-setup-fields">
+                <label><span>Search systems or items</span><input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search assessments" /></label>
+                <label><span>Status</span><select value={statusFilter} onChange={e=>setStatusFilter(e.target.value as StatusFilter)}><option value="active">Active</option><option value="inactive">Inactive</option><option value="all">All</option></select></label>
+              </div>
+              <footer><button type="button" onClick={()=>{setSearch("");setStatusFilter("active");}}>Clear</button><button type="button" className="primary" onClick={()=>setFilterOpen(false)}>Apply</button></footer>
+            </section>
+          </div>
+        </BranchViewportPortal>
+      )}
+      {moreOpen && (
+        <BranchViewportPortal themeSourceClass=".ae-page" onEscape={() => setMoreOpen(false)}>
+          <div className="ae-overlay ae-setup-modal" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)setMoreOpen(false);}}>
+            <section className="ae-setup-sheet small" role="dialog" aria-modal="true" aria-label="More assessment actions">
+              <header><h2>More</h2><button type="button" onClick={()=>setMoreOpen(false)} aria-label="Close menu">✕</button></header>
+              <nav className="ae-setup-menu">
+                <button type="button" onClick={()=>{setStructureListView("cards");setMoreOpen(false);}}>Cards</button>
+                <button type="button" onClick={()=>{setStructureListView("table");setMoreOpen(false);}}>Table</button>
+                <button type="button" onClick={()=>{setViewMode("editor");setMoreOpen(false);}}>Tree editor</button>
+                <button type="button" onClick={()=>{setViewMode("preview");setMoreOpen(false);}}>Preview</button>
+                <button type="button" onClick={()=>{setViewMode("validation");setMoreOpen(false);}}>Validation</button>
+                <button type="button" onClick={()=>{setMoreOpen(false);void load();}}>Refresh</button>
+              </nav>
+            </section>
+          </div>
+        </BranchViewportPortal>
+      )}
+
+      {structureSheetOpen && <BranchViewportPortal themeSourceClass=".ae-page" onEscape={() => setStructureSheetOpen(false)}>
       <AssessmentStructureEditorSheet
         open={structureSheetOpen}
         draft={structureDraft}
@@ -1444,7 +1482,9 @@ export default function AssessmentSystems() {
         }
         onSave={saveStructure}
       />
+      </BranchViewportPortal>}
 
+      {itemSheetOpen && <BranchViewportPortal themeSourceClass=".ae-page" onEscape={() => setItemSheetOpen(false)}>
       <AssessmentItemEditorSheet
         open={itemSheetOpen}
         draft={itemDraft}
@@ -1465,6 +1505,7 @@ export default function AssessmentSystems() {
         }
         onSave={saveItem}
       />
+      </BranchViewportPortal>}
 
       {toast ? (
         <div
@@ -1867,23 +1908,6 @@ function EditorStyles() {
       .ae-toast.error {
         background: #991b1b;
       }
-
-      @media (min-width: 980px) {
-        .ae-overlay {
-          top: var(--eds-shell-top-offset, 0px);
-          right: 0;
-          bottom: 0;
-          left: var(--portal-content-left, 0px);
-          width: auto;
-          max-width: calc(100vw - var(--portal-content-left, 0px));
-          min-width: 0;
-          overflow-x: hidden;
-        }
-        .ae-sheet {
-          min-width: 0;
-          max-width: calc(100vw - var(--portal-content-left, 0px) - 20px);
-        }
-      }
       @media (max-width: 860px) {
         .ae-layout {
           grid-template-columns: 1fr;
@@ -1936,6 +1960,69 @@ function EditorStyles() {
           border-radius: 20px 20px 0 0;
         }
       }
-    `}</style>
+    
+      /* V36 tree workspace — compact branch setup appearance */
+      .ae-page { --ae-border:var(--border,rgba(15,23,42,.14));
+        --ae-muted:var(--muted,#64748b);--ae-soft:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 92%,var(--text,#182235) 8%);
+        min-height:0;width:100%;min-width:0;max-width:none;padding:4px 4px 18px;
+        background:var(--bg,var(--background,#f2f4f7));color:var(--text,#111827);overflow:visible; }
+      .ae-layout {gap:8px;grid-template-columns:minmax(220px,345px) minmax(0,1fr);}
+      .ae-structures,.ae-workspace,.ae-structure-card,.ae-node-main {
+        border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+        border-radius:12px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);box-shadow:none;}
+      .ae-structures {padding:5px;max-width:100%;}
+      .ae-structure-card {padding:9px;margin-bottom:5px;}
+      .ae-workspace {padding:9px;}
+      .ae-workspace-header {align-items:center;}
+      .ae-workspace-header h2 {font-size:13px;margin:0;letter-spacing:normal;}
+      .ae-workspace-header small,.ae-workspace-header p {display:none;}
+      .ae-actions button {min-height:32px;padding:5px 9px;border-radius:7px;font-size:11px;font-weight:750;}
+      .ae-tabs {margin:8px 0;gap:4px;}
+      .ae-tabs button {min-height:31px;padding:5px 9px;font-size:11px;border-radius:7px;}
+      .ae-node-main {min-height:48px;border-radius:9px;padding:6px;}
+      .ae-table-wrap {width:100%;overflow-x:auto;border-radius:8px;}
+      .ae-table-wrap table {width:100%;border-collapse:collapse;min-width:290px;color:var(--text,#111827);}
+      .ae-table-wrap th,.ae-table-wrap td {padding:8px 7px;text-align:left;font-size:10px;
+        border-bottom:1px solid var(--ae-border);}
+      .ae-table-wrap th {background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);font-weight:800;}
+      .ae-table-wrap tr:nth-child(even) td {background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+      .ae-table-wrap tr.selected td:first-child{box-shadow:inset 3px 0 0 var(--primary-color,#2563eb);}
+      .ae-table-choice{border:0;background:transparent;color:var(--text,#111827);font-weight:750;text-align:left;cursor:pointer;font-size:11px;}
+      .ae-setup-modal {position:fixed;inset:0;z-index:12000;display:grid;place-items:center;
+        padding:clamp(8px,2vw,18px);background:rgba(15,23,42,.52);backdrop-filter:blur(10px);}
+      .ae-setup-sheet {width:min(590px,100%);max-height:min(84dvh,760px);overflow:auto;
+        border-radius:15px;border:1px solid var(--ae-border);padding:12px;
+        background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);box-shadow:0 25px 80px rgba(15,23,42,.25);}
+      .ae-setup-sheet.small{max-width:420px;}
+      .ae-setup-sheet header {display:flex;align-items:center;justify-content:space-between;gap:8px;}
+      .ae-setup-sheet h2{font-size:15px;margin:0;}
+      .ae-setup-sheet header button{width:32px;height:32px;border:1px solid var(--ae-border);border-radius:8px;
+       background:var(--surface,#fff);color:var(--text,#111827);cursor:pointer;}
+      .ae-setup-fields{display:grid;gap:9px;margin:11px 0;}
+      .ae-setup-fields label{display:grid;gap:4px;color:var(--ae-muted);font-size:11px;font-weight:800;}
+      .ae-setup-fields input,.ae-setup-fields select{width:100%;min-height:40px;padding:6px 10px;
+        border:1px solid var(--ae-border);border-radius:9px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#111827);}
+      .ae-setup-sheet footer{display:flex;justify-content:flex-end;gap:7px;border-top:1px solid var(--ae-border);padding-top:10px;}
+      .ae-setup-sheet footer button,.ae-setup-menu button{min-height:34px;padding:6px 10px;border:1px solid var(--ae-border);border-radius:8px;
+        background:var(--surface,#fff);color:var(--text,#111827);font-size:11px;cursor:pointer;}
+      .ae-setup-sheet footer .primary{background:var(--primary-color,#2563eb);color:#fff;border-color:transparent;}
+      .ae-setup-menu{display:grid;gap:5px;margin-top:10px;}
+      .ae-setup-menu button{text-align:left;}
+      /* The existing assessment-editor sheets are real dialogs, not side drawers. */
+      .ae-overlay {display:grid;place-items:center;padding:clamp(8px,2vw,18px);
+        background:rgba(15,23,42,.54);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);}
+      .ae-overlay .ae-sheet {width:min(640px,100%);max-width:100%;height:auto;
+        max-height:min(88dvh,780px);overflow:hidden;border-radius:15px;
+        border:1px solid var(--border,rgba(15,23,42,.15));
+        box-shadow:0 28px 85px rgba(15,23,42,.28);}
+      .ae-overlay .ae-sheet-header,.ae-overlay .ae-sheet-footer {flex:0 0 auto;padding:12px;}
+      .ae-overlay .ae-sheet-body{min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+      .ae-page .ae-overlay {background:rgba(15,23,42,.52);backdrop-filter:blur(10px);}
+      .ae-page .ae-sheet{background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);}
+      .ae-page .ae-sheet-header button{background:var(--surface,#fff);color:var(--text,#111827);border:1px solid var(--ae-border);border-radius:8px;}
+      @media(max-width:860px){.ae-layout{grid-template-columns:1fr;}.ae-structures{position:static;display:block;overflow:auto;}}
+      @media(max-width:639px){.ae-page{padding:3px;}.ae-workspace-header{display:grid;}.ae-structures{padding:5px;}}
+      @media(prefers-reduced-motion:reduce){.ae-node-main,.ae-structure-card{transition:none;}}
+`}</style>
   );
 }

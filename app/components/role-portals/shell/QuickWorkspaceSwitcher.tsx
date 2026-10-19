@@ -1,18 +1,17 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-} from "react";
+/**
+ * app/components/role-portals/shell/QuickWorkspaceSwitcher.tsx
+ * Display names come from the shared roleDisplay.ts utility.
+ * Internal membership roles remain unchanged for authorization and routing.
+ */
 
-import type {
-  UserMembership,
-} from "../../../lib/auth/roleRedirect";
+import { useEffect, useState } from "react";
 
-import type {
-  WorkspaceDisplayIdentityMap,
-} from "../../../lib/workspaces/useWorkspaceDisplayNames";
+import type { UserMembership } from "../../../lib/auth/roleRedirect";
+import { displayRoleLabel } from "../../../lib/auth/roleDisplay";
 
+import type { WorkspaceDisplayIdentityMap } from "../../../lib/workspaces/useWorkspaceDisplayNames";
 import {
   workspaceDetailLabel,
   workspaceProfileImage,
@@ -21,31 +20,20 @@ import {
 
 export interface QuickWorkspaceSwitcherProps {
   memberships: UserMembership[];
-  selectedMembership?:
-    UserMembership | null;
-  identities:
-    WorkspaceDisplayIdentityMap;
-  switchingMembershipId?:
-    string | null;
+  selectedMembership?: UserMembership | null;
+  identities: WorkspaceDisplayIdentityMap;
+  switchingMembershipId?: string | null;
 
-  membershipKey(
-    membership: UserMembership,
-  ): string;
+  membershipKey(membership: UserMembership): string;
+  sameMembership(left: UserMembership, right?: UserMembership | null): boolean;
 
-  sameMembership(
-    left: UserMembership,
-    right?:
-      UserMembership | null,
-  ): boolean;
-
+  // Retained for compatibility with existing AccountWorkspaceDrawer callers.
+  // Role labels rendered here always use displayRoleLabel instead.
   roleLabel(role: string): string;
   roleIcon(role: string): string;
 
-  onSwitchMembership(
-    membership: UserMembership,
-  ): void;
+  onSwitchMembership(membership: UserMembership): void;
 }
-
 
 function WorkspaceThumbnail({
   image,
@@ -58,18 +46,13 @@ function WorkspaceThumbnail({
   fallback: string;
   active: boolean;
 }) {
-  const [
-    failed,
-    setFailed,
-  ] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     setFailed(false);
   }, [image]);
 
-  const showImage =
-    Boolean(image) &&
-    !failed;
+  const showImage = Boolean(image) && !failed;
 
   return (
     <span
@@ -86,15 +69,10 @@ function WorkspaceThumbnail({
         <img
           src={image || ""}
           alt=""
-          onError={() =>
-            setFailed(true)
-          }
+          onError={() => setFailed(true)}
         />
       ) : (
-        <span
-          className="workspace-thumbnail-fallback"
-          aria-hidden="true"
-        >
+        <span className="workspace-thumbnail-fallback" aria-hidden="true">
           {fallback}
         </span>
       )}
@@ -102,9 +80,7 @@ function WorkspaceThumbnail({
       <span
         className={[
           "workspace-thumbnail-status",
-          active
-            ? "current"
-            : "available",
+          active ? "current" : "available",
         ].join(" ")}
         aria-hidden="true"
       />
@@ -119,106 +95,48 @@ export default function QuickWorkspaceSwitcher({
   switchingMembershipId,
   membershipKey,
   sameMembership,
-  roleLabel,
   roleIcon,
   onSwitchMembership,
 }: QuickWorkspaceSwitcherProps) {
   return (
     <div className="workspace-list shell-workspace-switcher compact-workspace-switcher">
-      {memberships.map(
-        (membership) => {
-          const id =
-            membershipKey(
-              membership,
-            );
+      {memberships.map((membership) => {
+        const id = membershipKey(membership);
+        const active = sameMembership(membership, selectedMembership);
+        const switching = switchingMembershipId === id;
 
-          const active =
-            sameMembership(
-              membership,
-              selectedMembership,
-            );
+        const image = workspaceProfileImage(membership, identities);
+        const scope = workspaceScopeLabel(membership, identities);
+        const detail = workspaceDetailLabel(membership, identities);
+        const visibleRole = displayRoleLabel(membership.role);
 
-          const switching =
-            switchingMembershipId ===
-            id;
+        return (
+          <button
+            key={id}
+            type="button"
+            className={active ? "active" : ""}
+            onClick={() => onSwitchMembership(membership)}
+            disabled={Boolean(switchingMembershipId)}
+          >
+            <WorkspaceThumbnail
+              image={image}
+              label={visibleRole}
+              fallback={roleIcon(membership.role)}
+              active={active}
+            />
 
-          const image =
-            workspaceProfileImage(
-              membership,
-              identities,
-            );
+            <span className="workspace-switch-copy">
+              <strong>{visibleRole}</strong>
+              <small title={`${scope} · ${detail}`}>
+                {scope}
+                {detail && detail !== "Workspace access" ? ` · ${detail}` : ""}
+              </small>
+            </span>
 
-          const scope =
-            workspaceScopeLabel(
-              membership,
-              identities,
-            );
-
-          const detail =
-            workspaceDetailLabel(
-              membership,
-              identities,
-            );
-
-          return (
-            <button
-              key={id}
-              type="button"
-              className={
-                active
-                  ? "active"
-                  : ""
-              }
-              onClick={() =>
-                onSwitchMembership(
-                  membership,
-                )
-              }
-              disabled={Boolean(
-                switchingMembershipId,
-              )}
-            >
-              <WorkspaceThumbnail
-                image={image}
-                label={roleLabel(
-                  membership.role,
-                )}
-                fallback={roleIcon(
-                  membership.role,
-                )}
-                active={active}
-              />
-
-              <span className="workspace-switch-copy">
-                <strong>
-                  {roleLabel(
-                    membership.role,
-                  )}
-                </strong>
-
-                <small
-                  title={`${scope} · ${detail}`}
-                >
-                  {scope}
-                  {detail &&
-                  detail !==
-                    "Workspace access"
-                    ? ` · ${detail}`
-                    : ""}
-                </small>
-              </span>
-
-              <b>
-                {switching
-                  ? "..."
-                  : active
-                    ? "Current"
-                    : "Open"}
-              </b>
-            </button>
-          );
-        },
-      )}
+            <b>{switching ? "..." : active ? "Current" : "Open"}</b>
+          </button>
+        );
+      })}
     </div>
   );
 }

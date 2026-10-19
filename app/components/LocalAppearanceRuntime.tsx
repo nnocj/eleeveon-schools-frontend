@@ -187,7 +187,7 @@ export default function LocalAppearanceRuntime({
     sharedSettings?.appearanceMode || sharedSettings?.theme || sharedSettings?.mode || theme.mode,
   );
   const sharedPrimaryColor = String(
-    sharedSettings?.primaryColor || theme.primaryColor || "#2f6fed",
+    (theme.ready ? theme.primaryColor : sharedSettings?.primaryColor) || "#2f6fed",
   ).trim();
   const sharedFontSize = sharedSettings?.fontSize ?? theme.fontSize ?? 16;
 

@@ -487,7 +487,7 @@ export default function AccountWorkspaceDrawer({
          * =============================================== */}
 
         <header className="compact-drawer-head">
-          <div className="compact-drawer-identity">
+          <button type="button" className="compact-drawer-identity drawer-identity-profile-link" onClick={() => { onClose(); router.push("/profile"); }} aria-label="Open my profile">
             <DrawerProfileImage
               src={
                 memberImage
@@ -506,7 +506,7 @@ export default function AccountWorkspaceDrawer({
                 {memberRole}
               </small>
             </span>
-          </div>
+          </button>
 
           <button
             className="compact-drawer-close"
@@ -520,15 +520,6 @@ export default function AccountWorkspaceDrawer({
           </button>
         </header>
 
-        <button
-          type="button"
-          className="drawer-open-profile"
-          onClick={() => { onClose(); router.push("/profile"); }}
-        >
-          <span aria-hidden="true">👤</span>
-          <span><strong>My profile</strong><small>Personal details, login email and password</small></span>
-          <span aria-hidden="true">›</span>
-        </button>
 
         {/* ===============================================
          * WORKSPACES
@@ -745,6 +736,10 @@ export default function AccountWorkspaceDrawer({
 // ======================================================
 
 const css = `
+.drawer-identity-profile-link{border:0;padding:0;background:transparent;color:inherit;text-align:left;cursor:pointer;max-width:100%;border-radius:12px;}
+.drawer-identity-profile-link:hover .compact-drawer-member-copy strong{text-decoration:underline;text-underline-offset:3px;}
+.drawer-identity-profile-link:focus-visible{outline:3px solid var(--primary-color,#2563eb);outline-offset:3px;}
+
 .drawer-open-profile{display:grid;grid-template-columns:32px minmax(0,1fr) 14px;align-items:center;gap:10px;width:100%;padding:12px;border:1px solid var(--eds-border,var(--border,#d9dee8));border-radius:14px;background:var(--eds-surface,var(--surface,#fff));color:var(--eds-text,var(--text,#172033));text-align:left;cursor:pointer}.drawer-open-profile strong,.drawer-open-profile small{display:block}.drawer-open-profile small{font-size:11px;color:var(--eds-text-muted,var(--muted,#64748b));margin-top:2px}.drawer-open-profile:focus-visible{outline:3px solid var(--primary-color,#2563eb);outline-offset:2px}
 
 .drawer-compact-switch-trigger { width:100%; display:flex; align-items:center; gap:11px; padding:12px; border:1px solid var(--eds-border,var(--border,#d9dee8)); border-radius:16px; background:var(--eds-surface,var(--surface,#fff)); color:var(--eds-text,var(--text,#172033)); text-align:left; cursor:pointer; }

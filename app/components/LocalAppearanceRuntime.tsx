@@ -86,7 +86,21 @@ function applyWorkspaceBrandAccent(primaryColor: string) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   const color = primaryColor.trim() || "#2f6fed";
+  const compact = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)
+    ? color.slice(1)
+    : "";
+  const hex = compact.length === 3
+    ? compact.split("").map((part) => part + part).join("")
+    : compact;
+  const number = hex ? Number.parseInt(hex, 16) : null;
+  const brightness = number === null ? 0 :
+    (((number >> 16) & 255) * 299 + ((number >> 8) & 255) * 587 +
+      (number & 255) * 114) / 1000;
+  const brandText = brightness > 155 ? "#111827" : "#ffffff";
   const accentTokens: Record<string, string> = {
+    "--ba-primary": color,
+    "--ba-primary-text": brandText,
+    "--eds-primary-text": brandText,
     "--primary-color": color,
     "--dashboard-primary": color,
     "--branch-primary": color,
@@ -237,13 +251,33 @@ export default function LocalAppearanceRuntime({
     );
   }, [accountId, branchId, roleKey, schoolId, theme.appliedFor]);
 
-  // Use the already-applied, matching workspace brand when possible. Generic
-  // account defaults must not override a branch colour during a mode switch.
-  const sharedPrimaryColor = String(
+  // The Students module obtains the institutional primary colour directly
+  // from SettingsContext. Do the same here ONLY when settings have been
+  // hydrated for this exact school/branch. Previously theme.appliedFor won
+  // even when it still held the Eleeveon default blue.
+  const selectedSettingsMatch = Boolean(
+    settingsContext.ready &&
+    settingsContext.loadedFor &&
+    settingsContext.effectiveScope === "branch" &&
+    cleanRole(settingsContext.loadedFor.role) === roleKey &&
+    cleanId(settingsContext.loadedFor.accountId) === accountId &&
+    cleanId(settingsContext.loadedFor.schoolId) === schoolId &&
+    cleanId(settingsContext.loadedFor.branchId) === branchId,
+  );
+
+  const resolvedBranchColor = selectedSettingsMatch
+    ? String(sharedSettings?.primaryColor || settingsContext.branchSettings?.primaryColor || "").trim()
+    : "";
+
+  const sharedPrimaryColor =
+    resolvedBranchColor ||
     (theme.ready && appearanceMatchesWorkspace
-      ? theme.appliedFor?.primaryColor || theme.primaryColor
-      : sharedSettings?.primaryColor || theme.primaryColor) || "#2f6fed",
-  ).trim();
+      ? String(theme.primaryColor || theme.appliedFor?.primaryColor || "").trim()
+      : "") ||
+    (settingsContext.ready && settingsContext.effectiveScope !== "branch"
+      ? String(sharedSettings?.primaryColor || "").trim()
+      : "") ||
+    "#2f6fed";
 
   const apply = useCallback(
     (
@@ -352,7 +386,8 @@ export default function LocalAppearanceRuntime({
         const root = document.documentElement;
         for (const token of [
           "--primary-color", "--dashboard-primary", "--branch-primary",
-          "--accent-color", "--eds-primary", "--eds-brand-primary",
+          "--accent-color", "--ba-primary", "--ba-primary-text",
+          "--eds-primary", "--eds-brand-primary", "--eds-primary-text",
           "--eds-primary-soft", "--eds-primary-softer",
         ]) {
           if (root.style.getPropertyPriority(token) === "important") {

@@ -479,7 +479,6 @@ export default function AccountProfilePage() {
   });
   const [transferCandidate, setTransferCandidate] = useState<OwnerUser | null>(null);
   const [activeSheet, setActiveSheet] = useState<SheetKey>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [toast, setToast] = useState<{
     tone: ToastTone;
     message: string;
@@ -1381,49 +1380,17 @@ export default function AccountProfilePage() {
 
       {notice && <section className="ba-notice">{notice}</section>}
 
-      <section className="ba-search-card" aria-label="Account profile actions">
-        <label className="ba-search ba-profile-search">
-          <span>👑</span>
-          <input
-            value={`${safeText(ownerUser?.fullName, "Owner")} · ${safeText(
-              account?.name,
-              "Account",
-            )} · ${titleCase(summary.accountStatus)}`}
-            readOnly
-            aria-label="Owner and account profile"
-          />
-        </label>
-
+      <nav className="ba-profile-back-row" aria-label="Profile navigation">
         <button
           type="button"
-          className="ba-add-inline ba-edit-inline"
-          onClick={openMyProfileSheet}
-          aria-label="Edit my profile"
-          title="Edit my profile"
+          className="ba-profile-back"
+          onClick={() => router.back()}
+          aria-label="Go back to workspace"
         >
-          ✎
+          <span aria-hidden="true">←</span>
+          <span>Back to workspace</span>
         </button>
-
-        <button
-          type="button"
-          className="ba-filter-button"
-          onClick={() => setActiveSheet("defaults")}
-          aria-label="Open account defaults"
-          title="Account defaults"
-        >
-          <SliderIcon />
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-          title="More"
-        >
-          ⋯
-        </button>
-      </section>
+      </nav>
 
       <section className="ba-profile-panel" aria-label="Account profile overview">
         <div className="ba-profile-panel-head">
@@ -1537,44 +1504,6 @@ export default function AccountProfilePage() {
           Owner email and phone stay synchronized; password remains AppUser-only.
         </p>
       </section>
-
-      {moreOpen && (
-        <MoreSheet
-          onMyProfile={() => {
-            setMoreOpen(false);
-            openMyProfileSheet();
-          }}
-          onAccount={() => {
-            setMoreOpen(false);
-            openAccountSheet();
-          }}
-          onDefaults={() => {
-            setMoreOpen(false);
-            setActiveSheet("defaults");
-          }}
-          onSecurity={() => {
-            setMoreOpen(false);
-            setActiveSheet("security");
-          }}
-          onTransfer={() => {
-            setMoreOpen(false);
-            openTransferSheet();
-          }}
-          onSync={() => {
-            setMoreOpen(false);
-            setActiveSheet("sync");
-          }}
-          onProtected={() => {
-            setMoreOpen(false);
-            setActiveSheet("protected");
-          }}
-          onRefresh={async () => {
-            setMoreOpen(false);
-            await load();
-          }}
-          onClose={() => setMoreOpen(false)}
-        />
-      )}
 
       {activeSheet === "myProfile" && (
         <MyProfileSheet
@@ -1774,127 +1703,6 @@ function State({
         <p>{text}</p>
       </section>
     </main>
-  );
-}
-
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
-function MoreSheet({
-  onMyProfile,
-  onAccount,
-  onDefaults,
-  onSecurity,
-  onTransfer,
-  onSync,
-  onProtected,
-  onRefresh,
-  onClose,
-}: {
-  onMyProfile: () => void;
-  onAccount: () => void;
-  onDefaults: () => void;
-  onSecurity: () => void;
-  onTransfer: () => void;
-  onSync: () => void;
-  onProtected: () => void;
-  onRefresh: () => void | Promise<void>;
-  onClose: () => void;
-}) {
-  return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
-        <div className="ba-sheet-head">
-          <div>
-            <h2>More</h2>
-            <p>Manage your profile, workspace and account preferences.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close more options">
-            ✕
-          </button>
-        </div>
-        <div className="ba-menu-list">
-          <MenuButton
-            icon="👤"
-            title="My Profile"
-            note="Your name, phone and personal locale"
-            onClick={onMyProfile}
-          />
-          <MenuButton
-            icon="🏢"
-            title="Owner Account"
-            note="Account/workspace name, website and branding"
-            onClick={onAccount}
-          />
-          <MenuButton
-            icon="🔒"
-            title="Owner Login & Security"
-            note="Login email, password and access rules"
-            onClick={onSecurity}
-          />
-          <MenuButton
-            icon="↔"
-            title="Transfer Ownership"
-            note="Move the complete owner account to an existing user"
-            onClick={onTransfer}
-          />
-          <MenuButton
-            icon="⚙"
-            title="Defaults"
-            note="Country, currency, timezone and locale"
-            onClick={onDefaults}
-          />
-          <MenuButton
-            icon="☁"
-            title="Sync & Backup"
-            note="Offline mode, auto sync and backup frequency"
-            onClick={onSync}
-          />
-          <MenuButton
-            icon="🛡"
-            title="Protected"
-            note="Plan, subscription and platform flags"
-            onClick={onProtected}
-          />
-          <MenuButton
-            icon="↻"
-            title="Refresh"
-            note="Reload backend and local account data"
-            onClick={onRefresh}
-          />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function MenuButton({
-  icon,
-  title,
-  note,
-  onClick,
-}: {
-  icon: string;
-  title: string;
-  note: string;
-  onClick: () => void | Promise<void>;
-}) {
-  return (
-    <button type="button" onClick={onClick}>
-      <span>{icon}</span>
-      <b>{title}</b>
-      <small>{note}</small>
-    </button>
   );
 }
 
@@ -2932,6 +2740,13 @@ function CameraCaptureModal({
 }
 
 const css = `
+/* Compact navigation replaces the previous search/filter/more toolbar. */
+.ba-profile-back-row{max-width:1180px;margin:0 auto 10px;display:flex;align-items:center;}
+.ba-profile-back{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:7px 12px;border:1px solid var(--border,rgba(15,23,42,.12));border-radius:11px;background:var(--card-bg,var(--surface,#fff));color:var(--text,#172033);font:inherit;font-size:12px;font-weight:750;cursor:pointer;}
+.ba-profile-back:hover{border-color:var(--ba-primary,#2563eb);}
+.ba-profile-back:focus-visible{outline:3px solid var(--ba-primary,#2563eb);outline-offset:2px;}
+.ba-profile-back span:first-child{font-size:19px;line-height:1;}
+
 @keyframes spin { to { transform: rotate(360deg); } }
 .ba-page { --ease: cubic-bezier(.2,.8,.2,1); min-height: 100dvh; width: 100%; max-width: 100%; min-width: 0; padding: calc(8px * var(--local-density-scale, 1)); padding-bottom: max(40px, env(safe-area-inset-bottom)); background: radial-gradient(circle at top left, color-mix(in srgb, var(--ba-primary) 9%, transparent), transparent 30rem), var(--bg, #f7f8fb); color: var(--text, #111827); font-family: var(--font-family, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); font-size: var(--font-size, 14px); overflow-x: hidden; }
 .ba-page *, .ba-page *::before, .ba-page *::after { box-sizing: border-box; min-width: 0; }

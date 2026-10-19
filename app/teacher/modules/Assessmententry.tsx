@@ -55,6 +55,7 @@ import {
 } from "../../lib/sync/syncUtils";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import ModuleSkeleton from "../../components/offline/ModuleSkeleton";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
@@ -285,6 +286,11 @@ export default function AssessmentEntries() {
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
 
   const { loading, setLoading } = useBackgroundLoader();
+  // A confirmed local read is scoped to the active workspace. A later
+  // synchronization refresh must not hide already visible records.
+  const scopeKey = [accountId || "", schoolId || "", branchId || ""].join("|");
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
+  const [failedScopeKey, setFailedScopeKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [sessionStarted, setSessionStarted] = useState(false);
   const [toast, setToast] = useState<{
@@ -451,6 +457,8 @@ export default function AssessmentEntries() {
   const load = async () => {
     if (!authenticated || !accountId || !schoolId || !branchId) {
       clearData();
+      setLoadedScopeKey(null);
+      setFailedScopeKey(null);
       setLoading(false);
       return;
     }
@@ -558,10 +566,16 @@ export default function AssessmentEntries() {
           (r) => sameTenant(r as TenantRow) && !r.isDeleted,
         ),
       );
+      setLoadedScopeKey(scopeKey);
+      setFailedScopeKey(null);
     } catch (error) {
       console.error(error);
-      clearData();
-      showToast("error", "Failed to load assessment entries.");
+      // A failed background refresh cannot erase data already on screen.
+      if (loadedScopeKey !== scopeKey) {
+        clearData();
+        setFailedScopeKey(scopeKey);
+      }
+      showToast("error", "Could not refresh assessment records. Try again.");
     } finally {
       setLoading(false);
     }
@@ -1861,13 +1875,44 @@ export default function AssessmentEntries() {
     print: printAssessmentTable,
   });
 
-  if (accountLoading || contextLoading || settingsLoading || !teacherAccess.ready || loading) {
+  // Skeletons are used only until the first successful local read for this
+  // workspace. Subsequent background reads leave the actual records visible.
+  // On first entry the skeleton resembles the view currently being opened:
+  // class picker, subject picker, student score cards or score table.
+  const hasLoadedCurrentScope = loadedScopeKey === scopeKey;
+  const firstReadFailed = failedScopeKey === scopeKey && !hasLoadedCurrentScope;
+  const awaitingFirstRead = !hasLoadedCurrentScope && !firstReadFailed;
+  const waitingForWorkspace =
+    accountLoading || contextLoading || settingsLoading || !teacherAccess.ready;
+
+  if (waitingForWorkspace || (awaitingFirstRead && authenticated && teacherAccess.permitted && Boolean(accountId && schoolId && branchId))) {
+    const entryOpened = classSubjectId !== "all";
     return (
-      <State
-        primary={primary}
-        title="Opening Assessment Entries..."
-        text="Checking branch classes, class subjects, students, assessment structures, and saved scores."
-      />
+      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <ModuleSkeleton
+          kind={entryOpened ? "assessment" : "class"}
+          view={entryOpened && viewMode === "table" ? "table" : "cards"}
+          count={entryOpened ? 5 : 6}
+          title="Getting assessment records ready…"
+          message="Checking your saved classes, subjects and scores."
+        />
+      </main>
+    );
+  }
+
+  if (firstReadFailed && authenticated && teacherAccess.permitted && accountId && schoolId && branchId) {
+    return (
+      <main className="ae-page" style={{ "--ae-primary": primary } as React.CSSProperties}>
+        <style>{css}</style>
+        <section className="ae-state" role="alert">
+          <h2>Assessment records couldn't be opened</h2>
+          <p>Your saved scores were not changed. Try loading this workspace again.</p>
+          <button type="button" className="ae-state-button" onClick={() => void load()}>
+            Try again
+          </button>
+        </section>
+      </main>
     );
   }
 

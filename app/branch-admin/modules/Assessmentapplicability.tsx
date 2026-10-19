@@ -33,6 +33,10 @@
  *   filters class subjects to only those that belong to the selected class
  * - no database structure was changed; ClassSubject and AssessmentApplicability remain atomic
  *
+ * V36 Setup workspace: shared actions, mobile cards / desktop tables,
+ *     Students-style surfaces and viewport dialogs. Existing class-first,
+ *     gradingStructures and assessment links remain unchanged.
+ *
  * Golden close/action fix:
  * - card/sheet/modal close buttons now reuse the same theme-safe pattern as the More modal
  * - no input, modal layout, CRUD, sync or data behavior was changed
@@ -40,6 +44,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
+
 
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
@@ -367,6 +374,8 @@ export default function Assessmentapplicability() {
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  // Match Students: tablet/phone cards, laptop/desktop table; More may override.
+  useEffect(() => { if (typeof window !== "undefined") setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards"); }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [structureFilter, setStructureFilter] = useState("all");
@@ -1086,6 +1095,21 @@ export default function Assessmentapplicability() {
     await load();
   };
 
+  // Shared Branch Admin actions; these replace this module's former toolbar.
+  // The Setup route is the active RolePortalShell destination.
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", {
+    add: () => openCreate(),
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+  useRegisterBranchWorkspaceToolbar("assessmentApplicability", {
+    add: () => openCreate(),
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+  });
+
   if (loading || accountLoading || settingsLoading || contextLoading) {
     return (
       <State
@@ -1130,7 +1154,7 @@ export default function Assessmentapplicability() {
 
   return (
     <main
-      className="ba-page"
+      className="ba-page assessment-applicability-page"
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
@@ -1148,55 +1172,7 @@ export default function Assessmentapplicability() {
         </section>
       )}
 
-      <section
-        className="ba-search-card"
-        aria-label="Assessment applicability search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={
-              selectedClassId ? "Search applicability..." : "Search classes..."
-            }
-            aria-label={
-              selectedClassId
-                ? "Search assessment applicability"
-                : "Search classes"
-            }
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openCreate}
-          aria-label="Add assessment applicability"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
+      
 
       {!assessmentStructures.length && (
         <section className="ba-warning">
@@ -1256,21 +1232,7 @@ export default function Assessmentapplicability() {
           </section>
 
           {activeFilterCount > 0 && (
-            <section className="ba-filter-chips" aria-label="Active filters">
-              {structureFilter !== "all" && (
-                <button type="button" onClick={() => setStructureFilter("all")}>
-                  Assessment:{" "}
-                  {(assessmentStructureMap.get(idOf(structureFilter)) as any)
-                    ?.name || structureFilter}{" "}
-                  ×
-                </button>
-              )}
-              {statusFilter !== "all" && (
-                <button type="button" onClick={() => setStatusFilter("all")}>
-                  Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
-                </button>
-              )}
-            </section>
+            <></>
           )}
 
           {viewMode === "summary" && (
@@ -1359,7 +1321,9 @@ export default function Assessmentapplicability() {
       )}
 
       {filterOpen && (
-        <FilterSheet
+        <BranchViewportPortal themeSourceClass=".assessment-applicability-page"><FilterSheet
+          search={search}
+          setSearch={setSearch}
           assessmentStructures={assessmentStructures}
           structureFilter={structureFilter}
           statusFilter={statusFilter}
@@ -1367,11 +1331,11 @@ export default function Assessmentapplicability() {
           setStatusFilter={setStatusFilter}
           clearFilters={clearFilters}
           onClose={() => setFilterOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {moreOpen && (
-        <MoreSheet
+        <BranchViewportPortal themeSourceClass=".assessment-applicability-page"><MoreSheet
           viewMode={viewMode}
           setViewMode={(mode) => {
             setViewMode(mode);
@@ -1382,20 +1346,20 @@ export default function Assessmentapplicability() {
             await load();
           }}
           onClose={() => setMoreOpen(false)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {selectedItem && (
-        <ActionSheet
+        <BranchViewportPortal themeSourceClass=".assessment-applicability-page"><ActionSheet
           item={selectedItem}
           openEdit={openEdit}
           archive={archive}
           onClose={() => setSelectedItem(null)}
-        />
+        /></BranchViewportPortal>
       )}
 
       {modalOpen && (
-        <ApplicabilityModal
+        <BranchViewportPortal themeSourceClass=".assessment-applicability-page"><ApplicabilityModal
           form={form}
           saving={saving}
           classSubjectOptions={classSubjectOptions}
@@ -1410,7 +1374,7 @@ export default function Assessmentapplicability() {
           updateForm={updateForm}
           setModalOpen={setModalOpen}
           save={save}
-        />
+        /></BranchViewportPortal>
       )}
     </main>
   );
@@ -1516,20 +1480,9 @@ function ApplicabilityListRow({
   );
 }
 
-function SliderIcon() {
-  return (
-    <svg className="ba-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
 function FilterSheet({
+  search,
+  setSearch,
   assessmentStructures,
   structureFilter,
   statusFilter,
@@ -1538,6 +1491,8 @@ function FilterSheet({
   clearFilters,
   onClose,
 }: {
+  search: string;
+  setSearch: (value: string) => void;
   assessmentStructures: AssessmentStructure[];
   structureFilter: string;
   statusFilter: StatusFilter;
@@ -1560,6 +1515,9 @@ function FilterSheet({
         </div>
 
         <div className="ba-form compact">
+        <div className="ba-record-search-in-filter"><span>Search</span><input
+          type="search" value={search} onChange={(event) => SETsearch(event.target.value)}
+          placeholder="Search records" aria-label="Search records" /></div>
           <label>
             <span>Assessment Structure</span>
             <select
@@ -1868,7 +1826,7 @@ function ApplicabilityModal({
   );
 
   return (
-    <div className="ba-modal-backdrop">
+    <BranchViewportPortal themeSourceClass=".assessment-applicability-page"><div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
@@ -2056,7 +2014,7 @@ function ApplicabilityModal({
           </button>
         </div>
       </form>
-    </div>
+    </div></BranchViewportPortal>
   );
 }
 
@@ -2490,5 +2448,46 @@ const css = `
     max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
   }
 }
+
+
+
+/* V36 SETUP: Students visual standard; source CRUD, relationships and offline sync remain unchanged. */
+.assessment-applicability-page {
+  width:100%;min-width:0;max-width:none;min-height:0;margin:0;
+  padding:4px 4px max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
+}
+.assessment-applicability-page .ba-search-card,.assessment-applicability-page .ba-filter-chips,.assessment-applicability-page .ba-hero {display:none!important;}
+.assessment-applicability-page .ba-list{width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;align-items:stretch;}
+.assessment-applicability-page .ba-list > .student-row,.assessment-applicability-page .ba-list > .curriculum-row,
+.assessment-applicability-page .ba-list > .pathway-row,.assessment-applicability-page .ba-list > .organization-row{width:100%;min-width:0;margin:0;padding:9px 10px;}
+.assessment-applicability-page .student-row,.assessment-applicability-page .organization-row,.assessment-applicability-page .curriculum-row,
+.assessment-applicability-page .pathway-row,.assessment-applicability-page .ba-card,.assessment-applicability-page .ba-table-card,.assessment-applicability-page .ba-analysis{
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ border-radius:13px;box-shadow:none;transform:none;
+}
+.assessment-applicability-page .student-row:hover,.assessment-applicability-page .curriculum-row:hover,.assessment-applicability-page .pathway-row:hover,
+.assessment-applicability-page .organization-row:hover{transform:none;box-shadow:none;}
+.assessment-applicability-page .ba-avatar{box-shadow:none;border-radius:12px;}
+.assessment-applicability-page .ba-table-card{display:block;width:100%;max-width:none;min-width:0;margin:2px 0 0;padding:4px;overflow:visible;}
+.assessment-applicability-page .ba-table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:auto;
+ overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;border-radius:10px;}
+.assessment-applicability-page .ba-table-scroll table{width:100%;margin:0;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
+.assessment-applicability-page .ba-table-scroll thead th{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);}
+.assessment-applicability-page .ba-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+.assessment-applicability-page .ba-table-scroll td{background:transparent;}
+.assessment-applicability-page .ba-table-scroll th,.assessment-applicability-page .ba-table-scroll td{padding:9px 10px;}
+.assessment-applicability-page .ba-analysis-grid{width:100%;max-width:none;min-width:0;margin:2px 0 0;gap:9px;}
+.ba-record-search-in-filter{display:grid;gap:6px;margin:0 0 10px;}
+.ba-record-search-in-filter span{font-size:11px;font-weight:750;color:var(--muted,#64748b);}
+.ba-record-search-in-filter input{min-height:40px;width:100%;border:1px solid var(--border,#d4dae3);
+ border-radius:9px;padding:0 11px;background:var(--input-bg,var(--surface,#fff));color:var(--text,#182235);}
+.ba-modal-head button,.ba-sheet-head button{opacity:1;visibility:visible;flex:0 0 auto;color:var(--text,#182235);}
+@media(min-width:680px) and (max-width:1023px){.assessment-applicability-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1024px){.assessment-applicability-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:679px){.assessment-applicability-page .ba-list{grid-template-columns:minmax(0,1fr);}}
+@media(max-width:639px){.assessment-applicability-page {padding:2px 2px 14px;} .assessment-applicability-page .ba-list{gap:7px;}}
+@media(prefers-reduced-motion:reduce){.assessment-applicability-page .student-row,.assessment-applicability-page .curriculum-row{transition:none;}}
 
 `;

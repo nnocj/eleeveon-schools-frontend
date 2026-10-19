@@ -334,18 +334,18 @@ function RolePortalShellContent({
   } = settingsContext;
 
   const resolvedPrimaryColor =
-    settings?.primaryColor ||
     themeContext.primaryColor ||
+    settings?.primaryColor ||
     "#2f6fed";
 
   const resolvedFontFamily =
-    settings?.fontFamily ||
     themeContext.fontFamily ||
+    settings?.fontFamily ||
     "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
   const resolvedFontSize =
-    Number(settings?.fontSize) ||
     themeContext.fontSize ||
+    Number(settings?.fontSize) ||
     16;
 
   useEffect(() => {
@@ -1010,7 +1010,8 @@ function RolePortalShellContent({
       !isOnline ||
       Boolean(switchingMembershipId) ||
       !priorityWorkspaceKey ||
-      activeModuleTables.length === 0
+      activeModuleTables.length === 0 ||
+      canonicalPriorityRole(selectedMembership?.role) === "teacher"
     ) {
       setPriorityPreparing(null);
       return;
@@ -1084,13 +1085,67 @@ function RolePortalShellContent({
     priorityRetry,
   ]);
 
+  // Teacher's server authorization permits a role-specific collection of
+  // tables. A generic module list can include forbidden tables, so never send
+  // it to the priority endpoint for Teacher. Download the backend-selected,
+  // membership-scoped set instead; this remains fully server-authorized.
+  const teacherWorkspace = canonicalPriorityRole(selectedMembership?.role) === "teacher";
+  const [teacherDataState, setTeacherDataState] = useState<{
+    key: string;
+    ready: boolean;
+    error: string | null;
+    preparing: boolean;
+  }>({ key: "", ready: false, error: null, preparing: false });
+
+  useEffect(() => {
+    if (!teacherWorkspace || !priorityWorkspaceKey || !selectedMembership ||
+        !authenticated || !sessionVerified || !canAccess ||
+        !appearanceMatchesRole || !databaseContext.ready || switchingMembershipId) return;
+    let cancelled = false;
+    const key = priorityWorkspaceKey;
+    const membership = selectedMembership;
+    setTeacherDataState({ key, ready: false, error: null, preparing: true });
+    void (async () => {
+      try {
+        const cached = await isWorkspaceLocallyReady(membership);
+        if (cancelled) return;
+        if (cached) {
+          setTeacherDataState({ key, ready: true, error: null, preparing: false });
+          return;
+        }
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          throw new Error("Connect to the internet to download your assigned teaching records.");
+        }
+        await bootstrapSelectedWorkspace(membership, {
+          allowCached: true,
+          onProgress: (progress) => {
+            if (cancelled) return;
+            setPriorityProgress({ done: progress.current ?? 0, total: progress.total ?? 0 });
+          },
+        });
+        if (cancelled) return;
+        const complete = await isWorkspaceLocallyReady(membership);
+        if (!complete) throw new Error("Teacher workspace download is not complete. Retry to continue.");
+        setTeacherDataState({ key, ready: true, error: null, preparing: false });
+      } catch (error) {
+        if (cancelled) return;
+        setTeacherDataState({ key, ready: false,
+          error: error instanceof Error ? error.message : String(error), preparing: false });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [teacherWorkspace, priorityWorkspaceKey, authenticated, sessionVerified,
+      canAccess, appearanceMatchesRole, databaseContext.ready,
+      switchingMembershipId, priorityRetry]);
+
   const retryCurrentModule = useCallback(() => {
     if (!navigator.onLine || !selectedMembership || !activeModuleTables.length) return;
+    if (teacherWorkspace) setTeacherDataState({ key: priorityWorkspaceKey, ready: false, error: null, preparing: true });
     // Retry the same module without refreshing the document or other modules.
     priorityAttemptedAt.current.clear();
     setPriorityError(null);
     setPriorityRetry(value => value + 1);
-  }, [selectedMembership, activeModuleTables]);
+  }, [selectedMembership, activeModuleTables, teacherWorkspace, priorityWorkspaceKey]);
 
   const [hubUnreadCount, setHubUnreadCount] = useState(0);
   const [hubHasAttention, setHubHasAttention] = useState(false);
@@ -1947,6 +2002,18 @@ function RolePortalShellContent({
     [sidebarWidth],
   );
 
+  const teacherModuleComplete = teacherWorkspace &&
+    teacherDataState.key === priorityWorkspaceKey && teacherDataState.ready;
+  const moduleFullyReady = teacherWorkspace
+    ? teacherModuleComplete
+    : moduleReadiness.status === "complete";
+  const moduleDownloadError = teacherWorkspace
+    ? (teacherDataState.key === priorityWorkspaceKey ? teacherDataState.error : null)
+    : priorityError;
+  const moduleIsPreparing = teacherWorkspace
+    ? (teacherDataState.key !== priorityWorkspaceKey || teacherDataState.preparing)
+    : priorityPreparing !== null;
+
   // Never release a fresh/incognito workspace before its complete,
   // membership-scoped bootstrap has finished. On failure keep Retry visible;
   // do not open blank modules or silently use the wrong branding.
@@ -2290,22 +2357,22 @@ function RolePortalShellContent({
             </div>
           )}
           </div>
-          {activeModuleTables.length > 0 && moduleReadiness.status !== "complete" ? (
+          {activeModuleTables.length > 0 && !moduleFullyReady ? (
             <section className="role-module-first-download" role="status" aria-live="polite">
               <div className="role-module-first-download-card">
-                {!priorityError && moduleReadiness.online ? (
+                {!moduleDownloadError && moduleReadiness.online ? (
                   <span className="role-module-first-spinner" aria-hidden="true" />
                 ) : null}
-                <strong>{priorityError ? "Unable to prepare this module" :
+                <strong>{moduleDownloadError ? "Unable to prepare this module" :
                   !moduleReadiness.online ? "Module not available offline yet" :
                   `Preparing ${activeModuleLabel}…`}</strong>
-                <p>{priorityError || (!moduleReadiness.online
+                <p>{moduleDownloadError || (!moduleReadiness.online
                   ? "This module has not been downloaded on this device. Reconnect and retry."
                   : "Downloading the records required by this module. Existing school records are not being treated as empty.")}</p>
                 {priorityProgress?.total ? (
                   <small>{priorityProgress.done.toLocaleString()} / {priorityProgress.total.toLocaleString()} records</small>
                 ) : null}
-                {(priorityError || !moduleReadiness.online || moduleReadiness.status === "failed") && (
+                {(moduleDownloadError || !moduleReadiness.online || (!teacherWorkspace && moduleReadiness.status === "failed")) && (
                   <button type="button" onClick={retryCurrentModule}
                     disabled={!moduleReadiness.online}>Retry download</button>
                 )}

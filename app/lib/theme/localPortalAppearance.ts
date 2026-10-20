@@ -42,6 +42,8 @@ export type LocalPortalSettings = {
 export type LocalAppearanceId = string | number | null | undefined;
 
 export type LocalAppearanceContext = {
+  /** Permanent authenticated AppUser.id, NEVER the shared account id. */
+  userId?: LocalAppearanceId;
   accountId?: LocalAppearanceId;
   schoolId?: LocalAppearanceId;
   branchId?: LocalAppearanceId;
@@ -334,14 +336,25 @@ export function getLocalSettingsStorageKey(
   input: LocalAppearanceContext,
 ) {
   const account = normalizeStorageIdentity(input.accountId, "guest");
+  const user = normalizeStorageIdentity(input.userId, "unresolved-user");
   const school = normalizeStorageIdentity(input.schoolId, "no-school");
   const branch = normalizeStorageIdentity(input.branchId, "no-branch");
-  const role = normalizeStorageIdentity(input.roleKey, "portal");
+  // UI labels such as "branch-admin" and membership role "branch_admin"
+  // must address the same saved preference record.
+  const role = normalizeStorageIdentity(input.roleKey, "portal")
+    .toLowerCase().replace(/[\s-]+/g, "_");
 
+  // V2 deliberately does NOT reuse the earlier account-wide local settings key.
+  // A shared browser might contain another user's former light/dark preference;
+  // adopting that value for the next person would violate user separation.
+  // We leave old keys untouched and start every user with Portal Default until
+  // that user explicitly makes a choice in their own private local key.
   return [
     "eleeveon",
     "local-settings",
+    "v2",
     account,
+    user,
     school,
     branch,
     role,

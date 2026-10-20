@@ -11,6 +11,7 @@ import React, {
 } from "react";
 
 import { useActiveMembership } from "../context/active-membership-context";
+import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { useTheme } from "../context/theme-context";
 
@@ -204,7 +205,14 @@ export default function LocalAppearanceRuntime({
   children: React.ReactNode;
 }) {
   const { activeMembership, activeRole } = useActiveMembership();
+  const accountContext = useAccount();
   const settingsContext = useSettings();
+
+  // The app user is distinct from the account that owns the school. A browser
+  // can be used by multiple Teachers/Branch Admins under the same account.
+  const userId = cleanId(
+    accountContext.user?.id ?? (activeMembership as any)?.userId,
+  );
   const theme = useTheme();
 
   const accountId = cleanId(
@@ -221,8 +229,8 @@ export default function LocalAppearanceRuntime({
   );
 
   const storageKey = useMemo(
-    () => getLocalSettingsStorageKey({ accountId, schoolId, branchId, roleKey }),
-    [accountId, branchId, roleKey, schoolId],
+    () => getLocalSettingsStorageKey({ userId, accountId, schoolId, branchId, roleKey }),
+    [userId, accountId, branchId, roleKey, schoolId],
   );
 
   const sharedSettings =
@@ -364,9 +372,9 @@ export default function LocalAppearanceRuntime({
   );
 
   const refresh = useCallback(() => {
-    if (!theme.ready || !appearanceMatchesWorkspace) return;
+    if (!userId || !theme.ready || !appearanceMatchesWorkspace) return;
     apply();
-  }, [appearanceMatchesWorkspace, apply, theme.ready]);
+  }, [userId, appearanceMatchesWorkspace, apply, theme.ready]);
 
   useEffect(() => {
     if (activeStorageKeyRef.current === storageKey) return;
@@ -378,7 +386,7 @@ export default function LocalAppearanceRuntime({
   }, [sharedDefaultMode, storageKey]);
 
   useEffect(() => {
-    if (!theme.ready || !appearanceMatchesWorkspace) {
+    if (!userId || !theme.ready || !appearanceMatchesWorkspace) {
       setReady(false);
       // A previous workspace may have written !important brand values.
       // Release them while the next workspace is being resolved.
@@ -398,7 +406,7 @@ export default function LocalAppearanceRuntime({
       return;
     }
     apply();
-  }, [appearanceMatchesWorkspace, apply, settingsContext.loadedFor?.key, theme.appliedFor?.key, theme.ready]);
+  }, [userId, appearanceMatchesWorkspace, apply, settingsContext.loadedFor?.key, theme.appliedFor?.key, theme.ready]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -406,6 +414,7 @@ export default function LocalAppearanceRuntime({
     const handleLocalChange = (
       event: Event,
     ) => {
+      if (!userId) return;
       const custom =
         event as CustomEvent<
           LocalSettingsChangeDetail
@@ -436,6 +445,7 @@ export default function LocalAppearanceRuntime({
     const handleLocalRefresh = (
       event: Event,
     ) => {
+      if (!userId) return;
       const custom =
         event as CustomEvent<
           LocalSettingsChangeDetail
@@ -465,6 +475,7 @@ export default function LocalAppearanceRuntime({
         event.storageArea ===
           window.localStorage &&
         event.key === storageKey &&
+        Boolean(userId) &&
         theme.ready &&
         appearanceMatchesWorkspace
       ) {
@@ -475,6 +486,7 @@ export default function LocalAppearanceRuntime({
     const handleSharedAppearance =
       () => {
         if (
+          userId &&
           theme.ready &&
           appearanceMatchesWorkspace
         ) {
@@ -527,6 +539,7 @@ export default function LocalAppearanceRuntime({
       );
     };
   }, [
+    userId,
     appearanceMatchesWorkspace,
     apply,
     storageKey,

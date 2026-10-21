@@ -323,22 +323,49 @@ export default function ClassicFormalTemplate({
     compact,
   });
 
+  // Readability upgrade: preserve the existing A4 design while using genuinely
+  // legible type in the subject/results table and student details.
+  // Compact templates retain slightly tighter spacing, not miniature text.
+  // Print uses these same sizes; the zoomable A4 preview is unchanged.
+  const readableTableHead: React.CSSProperties = {
+    fontSize: compact ? 10.6 : 11.3,
+    lineHeight: 1.25,
+    padding: compact ? "5px 3px" : "6px 4px",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    verticalAlign: "middle",
+  };
+
+  const readableTableCell: React.CSSProperties = {
+    fontSize: compact ? 11.8 : 12.6,
+    lineHeight: 1.3,
+    padding: compact ? "5px 4px" : "6px 5px",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    verticalAlign: "middle",
+  };
+
   const label: React.CSSProperties = {
     ...tableStyles.label,
+    fontSize: compact ? 10 : 10.7,
+    lineHeight: 1.25,
     color: "#404040",
     opacity: 1,
   };
 
   const value: React.CSSProperties = {
     ...tableStyles.value,
+    fontSize: compact ? 11.8 : 12.7,
+    lineHeight: 1.25,
+    fontWeight: 800,
     color: "#111",
   };
 
   const infoBox: React.CSSProperties = {
     border: "1px solid #bdbdbd",
     borderRadius: 7,
-    padding: compact ? 5 : 6,
-    minHeight: compact ? 36 : 40,
+    padding: compact ? 6 : 7,
+    minHeight: compact ? 42 : 46,
     background: "rgba(255,255,255,0.96)",
     boxSizing: "border-box",
   };
@@ -346,7 +373,8 @@ export default function ClassicFormalTemplate({
   const signatureNameStyle: React.CSSProperties = {
     minHeight: 16,
     marginBottom: 3,
-    fontSize: compact ? 9.2 : 10.2,
+    fontSize: compact ? 11 : 11.8,
+    lineHeight: 1.25,
     fontWeight: 850,
     color: "#111",
   };
@@ -545,8 +573,8 @@ export default function ClassicFormalTemplate({
                 <div
                   style={{
                     ...value,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+                    overflowWrap: "break-word",
+                    whiteSpace: "normal",
                   }}
                 >
                   {box.value}
@@ -575,7 +603,7 @@ export default function ClassicFormalTemplate({
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
-                <span style={{ fontSize: 9, fontWeight: 900, color: "#666" }}>
+                <span style={{ fontSize: 10.5, fontWeight: 900, color: "#666" }}>
                   PHOTO
                 </span>
               )}
@@ -584,15 +612,16 @@ export default function ClassicFormalTemplate({
         </div>
 
         <div style={{ marginTop: 9 }}>
-          <table style={tableStyles.table}>
+          <table style={{ ...tableStyles.table, width: "100%" }}>
             <thead>
               <tr>
                 <th
                   data-report-color-block="true"
                   style={{
                     ...tableStyles.th,
+                    ...readableTableHead,
                     textAlign: "left",
-                    minWidth: 95,
+                    minWidth: compact ? 122 : 132,
                     borderColor: "#111",
                   }}
                 >
@@ -603,10 +632,10 @@ export default function ClassicFormalTemplate({
                   <th
                     data-report-color-block="true"
                     key={column.assessmentStructureItemId}
-                    style={{ ...tableStyles.th, borderColor: "#111" }}
+                    style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
                   >
                     {assessmentColumnLabel(column, resolvedSettings)}
-                    <div style={{ fontSize: 8, marginTop: 2, opacity: 0.95 }}>
+                    <div style={{ fontSize: compact ? 9.5 : 10, marginTop: 2, opacity: 0.95 }}>
                       W:{formatNumber(column.weight, 0)}
                     </div>
                   </th>
@@ -614,13 +643,13 @@ export default function ClassicFormalTemplate({
 
                 <th
                   data-report-color-block="true"
-                  style={{ ...tableStyles.th, borderColor: "#111" }}
+                  style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
                 >
                   Weighted
                 </th>
                 <th
                   data-report-color-block="true"
-                  style={{ ...tableStyles.th, borderColor: "#111" }}
+                  style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
                 >
                   %
                 </th>
@@ -628,7 +657,7 @@ export default function ClassicFormalTemplate({
                 {resolvedSettings.showGrade && (
                   <th
                     data-report-color-block="true"
-                    style={{ ...tableStyles.th, borderColor: "#111" }}
+                    style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
                   >
                     Grade
                   </th>
@@ -637,7 +666,7 @@ export default function ClassicFormalTemplate({
                 {resolvedSettings.showSubjectPosition && (
                   <th
                     data-report-color-block="true"
-                    style={{ ...tableStyles.th, borderColor: "#111" }}
+                    style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
                   >
                     {resolvedSettings.subjectPositionLabel || "Pos."}
                   </th>
@@ -648,7 +677,8 @@ export default function ClassicFormalTemplate({
                     data-report-color-block="true"
                     style={{
                       ...tableStyles.th,
-                      minWidth: 85,
+                      ...readableTableHead,
+                      minWidth: compact ? 85 : 94,
                       borderColor: "#111",
                     }}
                   >
@@ -664,6 +694,12 @@ export default function ClassicFormalTemplate({
                   <td
                     style={{
                       ...tableStyles.td,
+                      ...readableTableCell,
+                      fontSize: compact ? 13.2 : 14.3,
+                      lineHeight: 1.28,
+                      minWidth: compact ? 122 : 132,
+                      whiteSpace: "normal",
+                      overflowWrap: "break-word",
                       fontWeight: 850,
                       borderColor: "#9a9a9a",
                     }}
@@ -674,9 +710,10 @@ export default function ClassicFormalTemplate({
                         <div
                           style={{
                             marginTop: 2,
-                            fontSize: 8,
-                            opacity: 0.78,
-                            fontWeight: 600,
+                            fontSize: compact ? 9.8 : 10.5,
+                            lineHeight: 1.25,
+                            color: "#424242",
+                            fontWeight: 650,
                           }}
                         >
                           {subject.teacherName}
@@ -696,6 +733,7 @@ export default function ClassicFormalTemplate({
                         key={column.assessmentStructureItemId}
                         style={{
                           ...tableStyles.td,
+                          ...readableTableCell,
                           textAlign: "center",
                           borderColor: "#9a9a9a",
                         }}
@@ -712,6 +750,7 @@ export default function ClassicFormalTemplate({
                   <td
                     style={{
                       ...tableStyles.td,
+                      ...readableTableCell,
                       textAlign: "center",
                       fontWeight: 850,
                       borderColor: "#9a9a9a",
@@ -723,6 +762,7 @@ export default function ClassicFormalTemplate({
                   <td
                     style={{
                       ...tableStyles.td,
+                      ...readableTableCell,
                       textAlign: "center",
                       fontWeight: 850,
                       borderColor: "#9a9a9a",
@@ -735,6 +775,7 @@ export default function ClassicFormalTemplate({
                     <td
                       style={{
                         ...tableStyles.td,
+                        ...readableTableCell,
                         textAlign: "center",
                         fontWeight: 950,
                         borderColor: "#9a9a9a",
@@ -748,6 +789,7 @@ export default function ClassicFormalTemplate({
                     <td
                       style={{
                         ...tableStyles.td,
+                        ...readableTableCell,
                         textAlign: "center",
                         borderColor: "#9a9a9a",
                       }}
@@ -757,7 +799,7 @@ export default function ClassicFormalTemplate({
                   )}
 
                   {resolvedSettings.showSubjectRemarks && (
-                    <td style={{ ...tableStyles.td, borderColor: "#9a9a9a" }}>
+                    <td style={{ ...tableStyles.td, ...readableTableCell, borderColor: "#9a9a9a" }}>
                       {subject.remark}
                     </td>
                   )}
@@ -769,6 +811,7 @@ export default function ClassicFormalTemplate({
                   <td
                     style={{
                       ...tableStyles.td,
+                      ...readableTableCell,
                       textAlign: "center",
                       padding: 16,
                     }}
@@ -806,7 +849,7 @@ export default function ClassicFormalTemplate({
                 <div
                   style={{
                     ...value,
-                    fontSize: compact ? 14 : 15.5,
+                    fontSize: compact ? 16 : 17,
                     fontWeight: 950,
                   }}
                 >
@@ -836,7 +879,7 @@ export default function ClassicFormalTemplate({
             <div style={label}>
               {resolvedSettings.classTeacherLabel}'s Remark
             </div>
-            <div style={{ marginTop: 5, fontSize: 10.5, lineHeight: 1.3 }}>
+            <div style={{ marginTop: 5, fontSize: compact ? 11.7 : 12.5, lineHeight: 1.35, overflowWrap: "break-word" }}>
               {report.classTeacherRemark || ""}
             </div>
           </div>
@@ -852,7 +895,7 @@ export default function ClassicFormalTemplate({
             <div style={label}>
               {resolvedSettings.headTeacherLabel}'s Remark
             </div>
-            <div style={{ marginTop: 5, fontSize: 10.5, lineHeight: 1.3 }}>
+            <div style={{ marginTop: 5, fontSize: compact ? 11.7 : 12.5, lineHeight: 1.35, overflowWrap: "break-word" }}>
               {report.headTeacherRemark || ""}
             </div>
           </div>
@@ -896,7 +939,7 @@ export default function ClassicFormalTemplate({
               >
                 <div>
                   <div style={label}>Current Academic Period</div>
-                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                  <div style={{ ...value, fontSize: compact ? 11.8 : 12.6 }}>
                     {currentAcademicPeriod?.name ||
                       header.academicPeriod?.name ||
                       "Current Period"}
@@ -905,7 +948,7 @@ export default function ClassicFormalTemplate({
 
                 <div style={{ textAlign: "right" }}>
                   <div style={label}>Ends</div>
-                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                  <div style={{ ...value, fontSize: compact ? 12 : 12.8 }}>
                     {currentAcademicPeriod?.formattedEndDate ||
                       currentPeriodEndLine.replace(/^.*?:\s*/i, "")}
                   </div>
@@ -929,14 +972,14 @@ export default function ClassicFormalTemplate({
               >
                 <div>
                   <div style={label}>Next Academic Period</div>
-                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                  <div style={{ ...value, fontSize: compact ? 11.8 : 12.6 }}>
                     {nextAcademicPeriod?.name || "Next Period"}
                   </div>
                 </div>
 
                 <div style={{ textAlign: "right" }}>
                   <div style={label}>Begins</div>
-                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                  <div style={{ ...value, fontSize: compact ? 12 : 12.8 }}>
                     {nextAcademicPeriod?.formattedStartDate ||
                       nextPeriodLine.replace(/^.*?:\s*/i, "")}
                   </div>
@@ -963,14 +1006,14 @@ export default function ClassicFormalTemplate({
                     {(resolvedSettings as any).generatedDateLabel ||
                       "Generated"}
                   </div>
-                  <div style={{ ...value, fontSize: compact ? 10.2 : 11.2 }}>
+                  <div style={{ ...value, fontSize: compact ? 11.8 : 12.6 }}>
                     Report Card
                   </div>
                 </div>
 
                 <div style={{ textAlign: "right" }}>
                   <div style={label}>Date</div>
-                  <div style={{ ...value, fontSize: compact ? 10.8 : 12 }}>
+                  <div style={{ ...value, fontSize: compact ? 12 : 12.8 }}>
                     {generatedDateValue}
                   </div>
                 </div>
@@ -998,7 +1041,7 @@ export default function ClassicFormalTemplate({
               style={{
                 borderTop: "1px solid #111",
                 paddingTop: 5,
-                fontSize: 10,
+                fontSize: compact ? 10.7 : 11.4,
                 fontWeight: 850,
               }}
             >
@@ -1025,7 +1068,7 @@ export default function ClassicFormalTemplate({
               style={{
                 borderTop: "1px solid #111",
                 paddingTop: 5,
-                fontSize: 10,
+                fontSize: compact ? 10.7 : 11.4,
                 fontWeight: 850,
               }}
             >
@@ -1042,7 +1085,7 @@ export default function ClassicFormalTemplate({
                 style={{
                   borderTop: "1px solid #111",
                   paddingTop: 5,
-                  fontSize: 10,
+                  fontSize: compact ? 10.7 : 11.4,
                   fontWeight: 850,
                 }}
               >
@@ -1060,8 +1103,9 @@ export default function ClassicFormalTemplate({
             display: "flex",
             justifyContent: "space-between",
             gap: 10,
-            fontSize: 8,
-            color: "#555",
+            fontSize: compact ? 9.2 : 9.8,
+            lineHeight: 1.25,
+            color: "#444",
           }}
         >
           <span>
@@ -1243,7 +1287,7 @@ const css = `
 }
 
 .src-mobile-toolbar strong {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 950;
   color: var(--text, #0f172a);
 }
@@ -1251,7 +1295,7 @@ const css = `
 .src-mobile-toolbar span {
   margin-top: 2px;
   color: var(--muted, #64748b);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -1516,11 +1560,11 @@ const css = `
   }
 
   .src-mobile-toolbar strong {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .src-mobile-toolbar span {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .src-zoom-controls {

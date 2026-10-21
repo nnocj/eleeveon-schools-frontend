@@ -1516,7 +1516,7 @@ function FilterSheet({
 
         <div className="ba-form compact">
         <div className="ba-record-search-in-filter"><span>Search</span><input
-          type="search" value={search} onChange={(event) => SETsearch(event.target.value)}
+          type="search" value={search} onChange={(event) => setSearch(event.target.value)}
           placeholder="Search records" aria-label="Search records" /></div>
           <label>
             <span>Assessment Structure</span>

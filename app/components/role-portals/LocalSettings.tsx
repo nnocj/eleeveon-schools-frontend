@@ -49,6 +49,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { useAccount } from "../../context/account-context";
+import { useActiveMembership } from "../../context/active-membership-context";
 
 // ======================================================
 // DEVICE-LOCAL APPEARANCE CONTRACT
@@ -99,6 +101,8 @@ type Props = {
   portalName?: string;
   roleKey?: string;
   accountId?: LocalAppearanceId;
+  /** Optional caller override; normal portals use the authenticated user. */
+  userId?: LocalAppearanceId;
   schoolId?: LocalAppearanceId;
   branchId?: LocalAppearanceId;
 
@@ -151,6 +155,7 @@ export default function LocalSettings({
   portalName = "Portal",
   roleKey = "portal",
   accountId,
+  userId: suppliedUserId,
   schoolId,
   branchId,
   triggerLabel = "Local Settings",
@@ -161,9 +166,17 @@ export default function LocalSettings({
   sharedDefaultMode = "light",
   onChange,
 }: Props) {
+  const { user } = useAccount();
+  const { activeMembership } = useActiveMembership();
+  const userId = String(
+    suppliedUserId ?? user?.id ?? (activeMembership as any)?.userId ?? "",
+  ).trim();
+
+  // The saved preference belongs to this AppUser, not all members of a school.
+  // The same helper is used by LocalAppearanceRuntime and AccountWorkspaceDrawer.
   const storageKey = useMemo(
-    () => getLocalSettingsStorageKey({ accountId, schoolId, branchId, roleKey }),
-    [accountId, schoolId, branchId, roleKey]
+    () => getLocalSettingsStorageKey({ userId, accountId, schoolId, branchId, roleKey }),
+    [userId, accountId, schoolId, branchId, roleKey]
   );
 
   const [open, setOpen] = useState(inline);
@@ -181,6 +194,10 @@ export default function LocalSettings({
   const applyAndAnnounce = (
     next: LocalPortalSettings,
   ) => {
+    if (!userId) {
+      // Avoid writing a preference into an unresolved/guest identity.
+      return normalizeLocalPortalSettings(next);
+    }
     const normalized =
       saveApplyAndAnnounceLocalPortalSettings(
         storageKey,
@@ -229,6 +246,7 @@ export default function LocalSettings({
     patch:
       Partial<LocalPortalSettings>,
   ) => {
+    if (!userId) return;
     const next =
       normalizeLocalPortalSettings({
         ...settings,
@@ -246,6 +264,7 @@ export default function LocalSettings({
   };
 
   const resetSettings = () => {
+    if (!userId) return;
     clearLocalPortalSettings(
       storageKey,
     );

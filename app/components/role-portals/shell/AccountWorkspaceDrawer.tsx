@@ -10,6 +10,7 @@ import {
 import { useLocalAppearanceRuntime } from "../../LocalAppearanceRuntime";
 import { saveApplyAndAnnounceLocalPortalSettings } from "../../../lib/theme/localPortalAppearance";
 import { useAccount } from "../../../context/account-context";
+import { useSettings } from "../../../context/settings-context";
 import { db } from "../../../lib/db/db";
 
 import type {
@@ -295,6 +296,7 @@ export default function AccountWorkspaceDrawer({
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
   const appearance = useLocalAppearanceRuntime();
   const accountContext = useAccount();
+  const settingsContext = useSettings();
   const [appearanceSaving, setAppearanceSaving] = useState(false);
   const [appearanceError, setAppearanceError] = useState("");
 
@@ -308,16 +310,35 @@ export default function AccountWorkspaceDrawer({
   const selectAppearance = async (mode: "light" | "dark" | "system") => {
     if (appearanceSaving) return;
     setAppearanceError("");
-    // The existing LocalAppearanceRuntime owns the *exact* established palette.
-    // Do not replace or rewrite branch, school or platform branding.
+
+    // Only mutate the private key after the signed-in AppUser is identified.
+    const userId = String(accountContext.user?.id ?? "").trim();
+    if (!userId) {
+      setAppearanceError("Your profile is still loading. Please try again.");
+      return;
+    }
+
+    const workspaceSettings = settingsContext.effectiveSettings as Record<string, any> | null;
+    const sharedDefaultMode = String(
+      workspaceSettings?.appearanceMode || workspaceSettings?.theme || workspaceSettings?.mode || "light",
+    );
+    const sharedPrimaryColor = String(
+      workspaceSettings?.primaryColor ||
+      (typeof document !== "undefined"
+        ? getComputedStyle(document.documentElement).getPropertyValue("--primary-color").trim()
+        : "") || "#2f6fed",
+    );
+
+    // Colour remains the school's; only this user's mode is saved.
     saveApplyAndAnnounceLocalPortalSettings(
       appearance.storageKey,
       { ...appearance.settings, appearanceMode: mode },
-      { sharedDefaultMode: "light" },
+      {
+        sharedDefaultMode,
+        sharedPrimaryColor,
+        sharedFontSize: workspaceSettings?.fontSize,
+      },
     );
-
-    const userId = String(accountContext.user?.id ?? "").trim();
-    if (!userId) return;
     setAppearanceSaving(true);
     try {
       const existing = await db.appUsers.get(userId);

@@ -72,16 +72,16 @@ type Props = StudentReportTemplateBaseProps & {
   dataset?: StudentReportCardDataset;
 };
 
-type InfoChip = {
-  key: string;
-  label: string;
-  value: React.ReactNode;
-  show: boolean;
-};
-
 // ======================================================
 // COMPONENT
 // ======================================================
+
+// Presentation-only normalization; database names are never modified.
+function reportNameTitleCase(input: unknown): string {
+  return String(input ?? "")
+    .toLocaleLowerCase("en-GH")
+    .replace(/(^|[\s\-'])\p{L}/gu, (part) => part.toLocaleUpperCase("en-GH"));
+}
 
 export default function SideProfileTemplate({
   dataset,
@@ -316,6 +316,10 @@ export default function SideProfileTemplate({
       color: "#fff",
       padding: compact ? "4.5px 4px" : "5.5px 5px",
       fontWeight: 950,
+      fontSize: compact ? 10.5 : 11.2,
+      lineHeight: 1.22,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
     },
     td: {
       ...baseTableStyles.td,
@@ -323,13 +327,17 @@ export default function SideProfileTemplate({
       borderBottom: "1px solid #e5e7eb",
       padding: compact ? "3.8px 4px" : "4.8px 5px",
       color: "#111827",
+      fontSize: compact ? 11.5 : 12.4,
+      lineHeight: 1.26,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
     },
     label: baseTableStyles.label,
     value: baseTableStyles.value,
   };
 
   const smallLabel: React.CSSProperties = {
-    fontSize: compact ? 6.6 : 7.2,
+    fontSize: compact ? 9.5 : 10.2,
     fontWeight: 950,
     letterSpacing: 0.25,
     textTransform: "uppercase",
@@ -338,7 +346,7 @@ export default function SideProfileTemplate({
   };
 
   const strongValue: React.CSSProperties = {
-    fontSize: compact ? 9.2 : 10.2,
+    fontSize: compact ? 11.4 : 12.4,
     fontWeight: 950,
     color: "#0f172a",
     lineHeight: 1.15,
@@ -346,7 +354,7 @@ export default function SideProfileTemplate({
   };
 
   const sidebarLabel: React.CSSProperties = {
-    fontSize: compact ? 6.6 : 7.2,
+    fontSize: compact ? 9 : 9.6,
     fontWeight: 950,
     letterSpacing: 0.25,
     textTransform: "uppercase",
@@ -356,7 +364,7 @@ export default function SideProfileTemplate({
 
   const sidebarValue: React.CSSProperties = {
     marginTop: 1,
-    fontSize: compact ? 8.6 : 9.4,
+    fontSize: compact ? 10 : 11,
     fontWeight: 900,
     color: "#fff",
     lineHeight: 1.18,
@@ -366,59 +374,6 @@ export default function SideProfileTemplate({
   const generatedDateValue = (resolvedSettings as any).showGeneratedDate
     ? friendlyReportDate((dataset as any)?.generatedAt)
     : "";
-
-  const sidebarItems: InfoChip[] = [
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
-      show: true,
-    },
-    {
-      key: "gender",
-      label: "Gender",
-      value: report.gender || student?.gender || "-",
-      show: true,
-    },
-    {
-      key: "class",
-      label: "Class",
-      value: report.className || "-",
-      show: true,
-    },
-    {
-      key: "period",
-      label: "Period",
-      value: header.academicPeriod?.name || "-",
-      show: true,
-    },
-    {
-      key: "numberOnRoll",
-      label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value:
-        studentInfo.numberOnRoll ||
-        (report as any).numberOnRoll ||
-        (report as any).classSize ||
-        (dataset as any)?.numberOnRoll ||
-        (dataset as any)?.classSize ||
-        "-",
-      show: resolvedSettings.showNumberOnRoll,
-    },
-    {
-      key: "attendance",
-      label: "Attendance",
-      value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`,
-      show: resolvedSettings.showAttendance,
-    },
-    {
-      key: "attendancePercent",
-      label: "Attendance %",
-      value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show:
-        resolvedSettings.showAttendance &&
-        resolvedSettings.showAttendancePercent,
-    },
-  ].filter((item) => item.show);
 
   const summaryCards = [
     {
@@ -459,8 +414,8 @@ export default function SideProfileTemplate({
 
   const subjectTableColumnCount =
     1 +
-    assessmentColumns.length +
-    2 +
+    (resolvedSettings.showAssessmentBreakdown ? assessmentColumns.length : 0) +
+    1 +
     (resolvedSettings.showGrade ? 1 : 0) +
     (resolvedSettings.showSubjectPosition ? 1 : 0) +
     (resolvedSettings.showSubjectRemarks ? 1 : 0);
@@ -589,19 +544,6 @@ export default function SideProfileTemplate({
                 </span>
               )}
             </div>
-
-            <div
-              style={{
-                marginTop: 9,
-                fontSize: compact ? 8 : 8.8,
-                lineHeight: 1.18,
-                fontWeight: 900,
-                textTransform: "uppercase",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {branding.schoolName}
-            </div>
           </div>
 
           <div
@@ -610,6 +552,7 @@ export default function SideProfileTemplate({
               textAlign: "center",
             }}
           >
+            {resolvedSettings.showStudentPhoto && (
             <div
               style={{
                 width: compact ? 82 : 92,
@@ -643,19 +586,8 @@ export default function SideProfileTemplate({
                 </span>
               )}
             </div>
+            )}
 
-            <div
-              style={{
-                marginTop: 9,
-                fontSize: compact ? 13 : 14.5,
-                lineHeight: 1.05,
-                fontWeight: 950,
-                textTransform: "uppercase",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {report.studentName}
-            </div>
             <div
               style={{
                 marginTop: 4,
@@ -669,29 +601,6 @@ export default function SideProfileTemplate({
             </div>
           </div>
 
-          <div
-            style={{
-              padding: compact ? "0 10px 8px" : "0 12px 10px",
-              display: "grid",
-              gap: 6,
-            }}
-          >
-            {sidebarItems.map((item) => (
-              <div
-                key={item.key}
-                style={{
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,.14)",
-                  background: "rgba(255,255,255,.09)",
-                  padding: compact ? "5px 7px" : "6px 8px",
-                  textAlign: "left",
-                }}
-              >
-                <div style={sidebarLabel}>{item.label}</div>
-                <div style={sidebarValue}>{item.value}</div>
-              </div>
-            ))}
-          </div>
 
           <div style={{ marginTop: "auto", padding: compact ? 10 : 12 }}>
             {generatedDateValue && (
@@ -749,6 +658,40 @@ export default function SideProfileTemplate({
             fontFamily={fontFamily}
           />
 
+          <section style={{ marginTop: 8, border: "1px solid #d9dee8", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, .8fr) minmax(0, 1.2fr)", borderBottom: "1px solid #d9dee8" }}>
+              {[
+                { key: "name", label: "Student Name", value: reportNameTitleCase(report.studentName) },
+                { key: "gender", label: "Gender", value: report.gender || student?.gender || "-" },
+                { key: "admission", label: "Admission No.", value: report.admissionNumber || "-" },
+              ].map((item, index) => (
+                <div key={item.key} style={{ padding: "7px 6px", minWidth: 0, borderLeft: index ? "1px solid #d9dee8" : undefined }}>
+                  <div style={smallLabel}>{item.label}</div>
+                  <div style={{ ...strongValue, fontSize: item.key === "name" ? (compact ? 12.2 : 13.5) : undefined, marginTop: 2 }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) repeat(3, minmax(0, 1fr))" }}>
+              {[
+                { key: "structure", label: "Academic Structure", value: firstText((header as any)?.academicStructure?.name, (header as any)?.academicStructureName, "-") },
+                { key: "period", label: "Academic Period", value: header.academicPeriod?.name || "-" },
+                { key: "class", label: "Class", value: report.className || "-" },
+                { key: "attendance", label: "Attendance", value: `${report.attendance?.presentDays ?? 0}/${report.attendance?.totalDays ?? 0}` },
+              ].filter((item) => item.key !== "attendance" || resolvedSettings.showAttendance).map((item, index) => (
+                <div key={item.key} style={{ padding: "7px 6px", minWidth: 0, borderLeft: index ? "1px solid #d9dee8" : undefined }}>
+                  <div style={smallLabel}>{item.label}</div>
+                  <div style={{ ...strongValue, marginTop: 2 }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+            {resolvedSettings.showNumberOnRoll && (
+              <div style={{ padding: "6px 8px", borderTop: "1px solid #d9dee8" }}>
+                <span style={smallLabel}>{resolvedSettings.numberOnRollLabel || "Number On Roll"}: </span>
+                <span style={strongValue}>{studentInfo.numberOnRoll || (report as any).numberOnRoll || (report as any).classSize || (dataset as any)?.numberOnRoll || (dataset as any)?.classSize || "-"}</span>
+              </div>
+            )}
+          </section>
+
           <div style={{ marginTop: 8 }}>
             <table style={tableStyles.table}>
               <thead>
@@ -777,9 +720,6 @@ export default function SideProfileTemplate({
                       </div>
                     </th>
                   ))}
-                  <th data-report-color-block="true" style={tableStyles.th}>
-                    Weighted
-                  </th>
                   <th data-report-color-block="true" style={tableStyles.th}>
                     %
                   </th>
@@ -811,6 +751,9 @@ export default function SideProfileTemplate({
                       style={{
                         ...tableStyles.td,
                         fontWeight: 950,
+                        fontSize: compact ? 12.8 : 13.7,
+                        lineHeight: 1.25,
+                        overflowWrap: "break-word",
                         background: rowIndex % 2 === 0 ? "#f8fafc" : "#ffffff",
                       }}
                     >
@@ -820,12 +763,12 @@ export default function SideProfileTemplate({
                           <div
                             style={{
                               marginTop: 2,
-                              fontSize: 7.4,
+                              fontSize: 10.0,
                               opacity: 0.72,
                               fontWeight: 700,
                             }}
                           >
-                            {subject.teacherName}
+                            {reportNameTitleCase(subject.teacherName)}
                           </div>
                         )}
                     </td>
@@ -851,15 +794,7 @@ export default function SideProfileTemplate({
                       );
                     })}
 
-                    <td
-                      style={{
-                        ...tableStyles.td,
-                        textAlign: "center",
-                        fontWeight: 950,
-                      }}
-                    >
-                      {formatNumber(subject.weightedTotal, 1)}
-                    </td>
+                    
                     <td
                       style={{
                         ...tableStyles.td,
@@ -1101,22 +1036,22 @@ export default function SideProfileTemplate({
             {[
               {
                 label: resolvedSettings.classTeacherLabel,
-                name: signatures.classTeacherName || "",
+                name: reportNameTitleCase(signatures.classTeacherName || ""),
                 image: "",
                 show: true,
               },
               {
                 label: resolvedSettings.headTeacherLabel,
-                name: firstText(
+                name: reportNameTitleCase(firstText(
                   signatures.headTeacherName,
                   signatures.principalName,
-                ),
+                )),
                 image: reportSignatureImage,
                 show: true,
               },
               {
                 label: resolvedSettings.parentLabel,
-                name: firstText(signatures.parentName, signatures.guardianName),
+                name: reportNameTitleCase(firstText(signatures.parentName, signatures.guardianName)),
                 image: "",
                 show: resolvedSettings.showParentSignature,
               },
@@ -1189,7 +1124,7 @@ export default function SideProfileTemplate({
 
       <div className="src-mobile-toolbar report-no-print">
         <div>
-          <strong>{report.studentName}</strong>
+          <strong>{reportNameTitleCase(report.studentName)}</strong>
           <span>
             {report.className} ·{" "}
             {header.academicPeriod?.name || "Academic Period"}

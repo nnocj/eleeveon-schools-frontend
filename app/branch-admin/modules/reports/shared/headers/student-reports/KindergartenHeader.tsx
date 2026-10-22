@@ -15,12 +15,12 @@
 
 import React from "react";
 
-import type { ReportTemplateHeaderProps } from "../ReportTemplateTypes";
+import type { ReportTemplateHeaderProps } from "../../ReportTemplateTypes";
 
 import {
   resolveBranding,
   resolvePrimaryColor,
-} from "../ReportTemplateUtils";
+} from "../../ReportTemplateUtils";
 
 export default function KindergartenHeader({
   header,

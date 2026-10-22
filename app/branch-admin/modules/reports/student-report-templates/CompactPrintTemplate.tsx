@@ -53,11 +53,26 @@ import {
   reportTemplateEmptyMessage,
 } from "../shared/ReportTemplateUtils";
 
+import CompactPrintHeader from "../shared/headers/student-reports/CompactPrintHeader";
+
 import {
   assessmentCellText,
   assessmentColumnLabel,
   collectAssessmentColumns,
 } from "./student-report-template-utils";
+
+type CompactInfo = { key: string; label: string; value: React.ReactNode; span?: number; show: boolean };
+
+/** Display-only name normalization; no changes to stored records. */
+function displayNameInTitleCase(name: unknown): string {
+  return String(name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("en")
+    .replace(/(^|[\s\-\u2019'])(\p{L})/gu, (_match, separator: string, letter: string) =>
+      separator + letter.toLocaleUpperCase("en"),
+    );
+}
 
 type Props = StudentReportTemplateBaseProps & {
   dataset?: StudentReportCardDataset;
@@ -245,8 +260,8 @@ export default function CompactPrintTemplate({
   const studentPhoto = studentInfo.studentPhoto || "";
 
   const label: React.CSSProperties = {
-    fontSize: 7.6,
-    lineHeight: 1.1,
+    fontSize: 9.7,
+    lineHeight: 1.2,
     textTransform: "uppercase",
     letterSpacing: 0.35,
     fontWeight: 900,
@@ -255,16 +270,16 @@ export default function CompactPrintTemplate({
 
   const value: React.CSSProperties = {
     marginTop: 1,
-    fontSize: 9.1,
-    lineHeight: 1.12,
+    fontSize: 12,
+    lineHeight: 1.24,
     fontWeight: 900,
     color: "#111827",
   };
 
   const infoCell: React.CSSProperties = {
     border: "1px solid #c8ccd3",
-    padding: "3.5px 5px",
-    minHeight: 26,
+    padding: "5px 6px",
+    minHeight: 39,
     background: "rgba(255,255,255,.97)",
     boxSizing: "border-box",
   };
@@ -272,13 +287,16 @@ export default function CompactPrintTemplate({
   const tableBase: React.CSSProperties = {
     width: "100%",
     borderCollapse: "collapse",
-    fontSize: 8.35,
-    lineHeight: 1.13,
+    fontSize: 11.3,
+    lineHeight: 1.25,
   };
 
   const th: React.CSSProperties = {
     border: "1px solid #111827",
-    padding: "3px 3px",
+    padding: "5px 4px",
+    fontSize: 10.5,
+    lineHeight: 1.25,
+    whiteSpace: "normal",
     background: primary,
     color: contrast,
     textAlign: "center",
@@ -288,64 +306,38 @@ export default function CompactPrintTemplate({
 
   const td: React.CSSProperties = {
     border: "1px solid #7d8590",
-    padding: "2.8px 3px",
+    padding: "5px 4px",
+    fontSize: 11.6,
+    overflowWrap: "break-word",
+    whiteSpace: "normal",
     verticalAlign: "middle",
-    lineHeight: 1.12,
+    lineHeight: 1.25,
   };
 
-  const visibleStudentInfoBoxes = [
-    {
-      key: "studentName",
-      label: "Student",
-      value: report.studentName,
-      span: 2,
-      show: true,
-    },
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
-      show: true,
-    },
-    {
-      key: "gender",
-      label: "Gender",
-      value: report.gender || student?.gender || "-",
-      show: true,
-    },
-    { key: "class", label: "Class", value: report.className, show: true },
-    {
-      key: "period",
-      label: "Academic Period",
-      value: header.academicPeriod?.name || "-",
-      show: true,
-    },
-    {
-      key: "numberOnRoll",
-      label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value:
-        studentInfo.numberOnRoll ||
-        (report as any).numberOnRoll ||
-        (report as any).classSize ||
-        (dataset as any)?.numberOnRoll ||
-        "-",
-      show: resolvedSettings.showNumberOnRoll,
-    },
-    {
-      key: "attendance",
-      label: "Attendance",
-      value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`,
-      show: resolvedSettings.showAttendance,
-    },
-    {
-      key: "attendancePercent",
-      label: "Attendance %",
-      value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show:
-        resolvedSettings.showAttendance &&
-        resolvedSettings.showAttendancePercent,
-    },
+  // Academic Structure is the single academic year/structure label.
+  const academicStructureName = firstText(
+    (header as any)?.academicStructure?.name,
+    (header as any)?.academicStructureName,
+    (header as any)?.academicYear?.name,
+    (header as any)?.academicYearName,
+    (report as any)?.academicStructureName,
+    typeof (header as any)?.academicYear === "string"
+      ? (header as any).academicYear
+      : "",
+  );
+
+  const visibleStudentInfoBoxes: CompactInfo[] = [
+    { key: "studentName", label: "Student Name", value: displayNameInTitleCase(report.studentName), span: 2, show: true },
+    { key: "gender", label: "Gender", value: report.gender || student?.gender || "-", show: true },
+    { key: "admissionNumber", label: "Admission No.", value: report.admissionNumber || "-", show: true },
+    { key: "academicStructure", label: "Academic Structure", value: academicStructureName || "-", show: true },
+    { key: "academicPeriod", label: "Academic Period", value: header.academicPeriod?.name || "-", show: true },
+    { key: "class", label: "Class", value: report.className || "-", show: true },
+    { key: "attendance", label: "Attendance", value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`, show: resolvedSettings.showAttendance },
   ].filter((item) => item.show);
+  const extraStudentInfoBoxes: CompactInfo[] = resolvedSettings.showNumberOnRoll
+    ? [{ key: "numberOnRoll", label: resolvedSettings.numberOnRollLabel || "Number On Roll", value: studentInfo.numberOnRoll || (report as any).numberOnRoll || (report as any).classSize || (dataset as any)?.numberOnRoll || "-", show: true }]
+    : [];
 
   const summaryCards = [
     {
@@ -389,8 +381,8 @@ export default function CompactPrintTemplate({
 
   const subjectTableColumnCount =
     1 +
-    assessmentColumns.length +
-    2 +
+    (resolvedSettings.showAssessmentBreakdown ? assessmentColumns.length : 0) +
+    1 +
     (resolvedSettings.showGrade ? 1 : 0) +
     (resolvedSettings.showSubjectPosition ? 1 : 0) +
     (resolvedSettings.showSubjectRemarks ? 1 : 0);
@@ -454,174 +446,31 @@ export default function CompactPrintTemplate({
       )}
 
       <div style={{ position: "relative", zIndex: 1 }}>
-        <header
-          style={{
-            display: "grid",
-            gridTemplateColumns: branding.logo ? "52px 1fr 150px" : "1fr 150px",
-            gap: 8,
-            alignItems: "center",
-            border: "1.5px solid #111827",
-            borderTop: `5px solid ${primary}`,
-            padding: "6px 7px",
-            background: "rgba(255,255,255,.98)",
-          }}
-        >
-          {branding.logo && (
-            <div
-              style={{
-                width: 50,
-                height: 50,
-                border: "1px solid #c8ccd3",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                background: "#fff",
-              }}
-            >
-              <img
-                src={branding.logo}
-                alt="School logo"
-                style={{ width: "100%", height: "100%", objectFit: "contain" }}
-              />
-            </div>
-          )}
+        <CompactPrintHeader
+         header={header}
+         dataset={dataset}
+         settings={resolvedSettings}
+         title="Compact Academic Report"
+         primaryColor={primary}
+         fontFamily={fontFamily}
+         compact
+         studentPhoto={studentPhoto}
+         showStudentPhoto={Boolean(resolvedSettings.showStudentPhoto)}
+       />
 
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontSize: 17.2,
-                lineHeight: 1,
-                fontWeight: 1000,
-                textTransform: "uppercase",
-                color: "#111827",
-              }}
-            >
-              {branding.schoolName}
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 4, marginTop: 6 }}>
+          {visibleStudentInfoBoxes.map((box) => (
+            <div key={box.key} style={{ ...infoCell, gridColumn: box.span ? `span ${box.span}` : undefined }}>
+              <div style={label}>{box.label}</div>
+              <div style={{ ...value, whiteSpace: "normal", overflowWrap: "break-word" }}>{box.value}</div>
             </div>
-            {branding.motto && (
-              <div
-                style={{
-                  marginTop: 2,
-                  fontSize: 8.6,
-                  fontWeight: 800,
-                  color: "#374151",
-                }}
-              >
-                {branding.motto}
-              </div>
-            )}
-            <div
-              style={{
-                marginTop: 3,
-                fontSize: 7.8,
-                fontWeight: 750,
-                color: "#4b5563",
-                lineHeight: 1.25,
-              }}
-            >
-              {[
-                branding.branchName,
-                branding.address,
-                branding.phone,
-                branding.email,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
+          ))}
+          {extraStudentInfoBoxes.map((box) => (
+            <div key={box.key} style={infoCell}>
+              <div style={label}>{box.label}</div>
+              <div style={{ ...value, whiteSpace: "normal", overflowWrap: "break-word" }}>{box.value}</div>
             </div>
-          </div>
-
-          <div
-            data-report-color-block="true"
-            style={{
-              background: primary,
-              color: contrast,
-              padding: "6px 7px",
-              textAlign: "center",
-              fontWeight: 1000,
-              textTransform: "uppercase",
-              letterSpacing: 0.45,
-              fontSize: 9,
-              lineHeight: 1.15,
-              border: "1px solid #111827",
-            }}
-          >
-            Compact Academic Report
-            <div style={{ marginTop: 2, fontSize: 7.4, opacity: 0.95 }}>
-              {header.academicStructure?.name || "Academic Year"}
-            </div>
-          </div>
-        </header>
-
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: resolvedSettings.showStudentPhoto
-              ? "1fr 58px"
-              : "1fr",
-            gap: 5,
-            marginTop: 5,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
-              gap: 3.5,
-            }}
-          >
-            {visibleStudentInfoBoxes.map((box) => (
-              <div
-                key={box.key}
-                style={{
-                  ...infoCell,
-                  gridColumn: (box as any).span
-                    ? `span ${(box as any).span}`
-                    : undefined,
-                }}
-              >
-                <div style={label}>{box.label}</div>
-                <div
-                  style={{
-                    ...value,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {box.value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {resolvedSettings.showStudentPhoto && (
-            <div
-              style={{
-                border: "1px solid #c8ccd3",
-                background: "#f8fafc",
-                minHeight: 58,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-              }}
-            >
-              {studentPhoto ? (
-                <img
-                  src={studentPhoto}
-                  alt="Student"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span
-                  style={{ fontSize: 7.4, fontWeight: 950, color: "#6b7280" }}
-                >
-                  PHOTO
-                </span>
-              )}
-            </div>
-          )}
+          ))}
         </section>
 
         {summaryCards.length > 0 && (
@@ -676,15 +525,12 @@ export default function CompactPrintTemplate({
                     style={th}
                   >
                     {assessmentColumnLabel(column, resolvedSettings)}
-                    <div style={{ fontSize: 6.7, marginTop: 1, opacity: 0.95 }}>
+                    <div style={{ fontSize: 9, marginTop: 1, opacity: 0.95 }}>
                       W:{formatNumber(column.weight, 0)}
                     </div>
                   </th>
                 ))}
 
-                <th data-report-color-block="true" style={th}>
-                  Weighted
-                </th>
                 <th data-report-color-block="true" style={th}>
                   %
                 </th>
@@ -715,19 +561,19 @@ export default function CompactPrintTemplate({
             <tbody>
               {report.subjectResults.map((subject) => (
                 <tr key={subject.classSubjectId}>
-                  <td style={{ ...td, fontWeight: 900, color: "#111827" }}>
+                  <td style={{ ...td, fontWeight: 900, color: "#111827", fontSize: 12.9, minWidth: 118, whiteSpace: "normal", overflowWrap: "break-word" }}>
                     {subject.subjectName}
                     {resolvedSettings.showTeacherNames &&
                       subject.teacherName && (
                         <div
                           style={{
                             marginTop: 1,
-                            fontSize: 6.8,
+                            fontSize: 10,
                             color: "#4b5563",
                             fontWeight: 700,
                           }}
                         >
-                          {subject.teacherName}
+                          {displayNameInTitleCase(subject.teacherName)}
                         </div>
                       )}
                   </td>
@@ -753,9 +599,6 @@ export default function CompactPrintTemplate({
                     );
                   })}
 
-                  <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
-                    {formatNumber(subject.weightedTotal, 1)}
-                  </td>
                   <td style={{ ...td, textAlign: "center", fontWeight: 900 }}>
                     {formatPercent(subject.percentage, 1, "-")}
                   </td>
@@ -816,8 +659,8 @@ export default function CompactPrintTemplate({
             <div
               style={{
                 marginTop: 3,
-                fontSize: 8.4,
-                lineHeight: 1.18,
+                fontSize: 11,
+                lineHeight: 1.28,
                 color: "#111827",
               }}
             >
@@ -839,8 +682,8 @@ export default function CompactPrintTemplate({
             <div
               style={{
                 marginTop: 3,
-                fontSize: 8.4,
-                lineHeight: 1.18,
+                fontSize: 11,
+                lineHeight: 1.28,
                 color: "#111827",
               }}
             >
@@ -968,7 +811,7 @@ export default function CompactPrintTemplate({
           }}
         >
           <CompactSignature
-            name={signatures.classTeacherName || ""}
+            name={displayNameInTitleCase(signatures.classTeacherName)}
             label={resolvedSettings.classTeacherLabel}
           />
 
@@ -981,10 +824,10 @@ export default function CompactPrintTemplate({
               />
             )}
             <CompactSignature
-              name={firstText(
+              name={displayNameInTitleCase(firstText(
                 signatures.headTeacherName,
                 signatures.principalName,
-              )}
+              ))}
               label={resolvedSettings.headTeacherLabel}
               inline
             />
@@ -992,7 +835,7 @@ export default function CompactPrintTemplate({
 
           {resolvedSettings.showParentSignature && (
             <CompactSignature
-              name={firstText(signatures.parentName, signatures.guardianName)}
+              name={displayNameInTitleCase(firstText(signatures.parentName, signatures.guardianName))}
               label={resolvedSettings.parentLabel}
             />
           )}
@@ -1006,7 +849,7 @@ export default function CompactPrintTemplate({
             display: "flex",
             justifyContent: "space-between",
             gap: 10,
-            fontSize: 6.9,
+            fontSize: 9.2,
             color: "#4b5563",
             fontWeight: 700,
           }}
@@ -1028,7 +871,7 @@ export default function CompactPrintTemplate({
 
       <div className="src-mobile-toolbar report-no-print">
         <div>
-          <strong>{report.studentName}</strong>
+          <strong>{displayNameInTitleCase(report.studentName)}</strong>
           <span>
             {report.className} ·{" "}
             {header.academicPeriod?.name || "Academic Period"}
@@ -1137,7 +980,7 @@ function CompactSignature({
           style={{
             minHeight: 13,
             marginBottom: 2,
-            fontSize: 8.2,
+            fontSize: 10.5,
             fontWeight: 900,
             color: "#111827",
           }}
@@ -1148,7 +991,7 @@ function CompactSignature({
           style={{
             borderTop: "1px solid #111827",
             paddingTop: 3,
-            fontSize: 8.1,
+            fontSize: 10.2,
             fontWeight: 900,
             color: "#111827",
           }}

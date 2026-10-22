@@ -21,6 +21,9 @@ import Students from "./modules/Students";
 import Teachers from "./modules/Teachers";
 import Parents from "./modules/Parents";
 import Classes from "./modules/Classes";
+import Fees from "./modules/Fees";
+import Expenses from "./modules/Expenses";
+import Payroll from "./modules/Payroll";
 import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
 import Broadsheets from "./modules/reports/Broadsheets";
@@ -318,6 +321,56 @@ function BranchReportsWorkspace(props: RouteProps) {
 }
 
 // ======================================================
+// FINANCE — FEES / EXPENSES / PAYROLL
+// Existing branch-scoped modules are rendered without modifying their internals.
+// ======================================================
+
+type FinanceView = "fees" | "expenses" | "payroll";
+
+function BranchFinanceWorkspace(props: RouteProps) {
+  const [view, setView] = React.useState<FinanceView>("fees");
+
+  const CurrentView: React.ComponentType<RouteProps> =
+    view === "expenses"
+      ? Expenses
+      : view === "payroll"
+        ? Payroll
+        : Fees;
+
+  return (
+    <div className="ba-workspace-wrapper ba-finance-workspace">
+      <style>{branchWorkspaceCss}</style>
+      <div className="ba-contextual-actions ba-finance-subtabs" aria-label="Finance views">
+        <div className="ba-finance-subtab-list" role="group" aria-label="Select finance view">
+          {([
+            ["fees", "Fees"],
+            ["expenses", "Expenses"],
+            ["payroll", "Payroll"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={view === key ? "is-active" : ""}
+              aria-pressed={view === key}
+              onClick={() => {
+                setView(key);
+                const pane = document.querySelector<HTMLElement>(
+                  ".role-shell.workspace-locked-scroll .app-content",
+                );
+                if (pane) pane.scrollTop = 0;
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <CurrentView {...props} />
+    </div>
+  );
+}
+
+// ======================================================
 // SETUP — FIRST-PASS UNIFIED WORKSPACE
 // Existing editors remain functional until their fields are
 // progressively merged into independent-save form sections.
@@ -544,6 +597,24 @@ const branchWorkspaceCss = `
  .ba-reports-workspace .student-reports-page .ba-print-card { overflow:visible!important; }
 }
 
+ /* FINANCE: compact, branch-workspace-aligned contextual tabs. */
+ .ba-finance-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
+ .ba-finance-workspace .ba-finance-subtabs {
+   display:flex; align-items:center; width:100%; min-width:0; margin:0;
+   padding:4px 0 5px; position:sticky; top:0; z-index:22;
+   background:var(--eds-shell-bg,var(--bg,var(--surface,#fff)));
+   border-bottom:1px solid var(--border,rgba(15,23,42,.10));
+   backdrop-filter:blur(12px);
+ }
+ .ba-finance-subtab-list {
+   display:flex; align-items:center; gap:4px; min-width:0; width:100%;
+   overflow-x:auto; white-space:nowrap; scrollbar-width:thin;
+ }
+ .ba-finance-workspace .ba-finance-subtab-list button {
+   flex:0 0 auto; min-height:31px; border-radius:7px; padding:4px 11px; font-size:11px;
+ }
+ @media print { .ba-finance-workspace .ba-finance-subtabs { display:none!important; } }
+
 .ba-setup-page { display:grid; gap:8px; padding-top:1px; }
 .ba-setup-intro { padding:2px 2px 8px; }
 .ba-setup-intro h2 { margin:0; font-size:21px; color:var(--text,#111827); }
@@ -577,7 +648,7 @@ export const NAV_SECTIONS: RoleNavSection[] = [
       { key: "assessmentEntries", label: "Enter Scores", icon: "📝" },
       { key: "reportsWorkspace", label: "Reports", icon: "📄" },
       { key: "students", label: "Students", icon: "👥" },
-      { key: "classes", label: "Classes", icon: "🏫" },
+      { key: "financeWorkspace", label: "Finance", icon: "💰" },
       { key: "teachers", label: "Teachers", icon: "👩‍🏫" },
       { key: "setupWorkspace", label: "Setup", icon: "⚙️" },
     ],
@@ -587,18 +658,23 @@ export const NAV_SECTIONS: RoleNavSection[] = [
 // ======================================================
 
 // Main routes + legacy contextual routes used by existing modules.
-// Finance, transport, teacher attendance and communication modules remain
-// outside this compact Branch Admin workspace. Student Attendance lives in Reports.
+// Finance now has its own contextual workspace; transport, teacher attendance
+// and communication modules remain outside this compact Branch Admin layout.
+// Student Attendance lives in Reports.
 const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   assessmentEntries: AssessmentEntries,
   reportsWorkspace: BranchReportsWorkspace,
   students: Students,
-  classes: Classes,
+  classes: Classes, // Legacy/contextual route; class setup stays under Setup.
+  financeWorkspace: BranchFinanceWorkspace,
   teachers: Teachers,
   setupWorkspace: BranchSetupWorkspace,
 
   // Kept for any existing contextual calls to navigate("...").
   parents: Parents,
+  fees: Fees,
+  expenses: Expenses,
+  payroll: Payroll,
   studentReports: StudentReports,
   broadsheets: Broadsheets,
   reportRemarks: ReportRemarks,

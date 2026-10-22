@@ -73,6 +73,7 @@ type Props = StudentReportTemplateBaseProps & {
 };
 
 type InfoChip = {
+  span?: number;
   key: string;
   label: string;
   value: React.ReactNode;
@@ -82,6 +83,18 @@ type InfoChip = {
 // ======================================================
 // COMPONENT
 // ======================================================
+
+/** Display-only name normalization; no changes to stored records. */
+function displayNameInTitleCase(name: unknown): string {
+  return String(name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("en")
+    .replace(/(^|[\s\-\u2019'])(\p{L})/gu, (_match, separator: string, letter: string) =>
+      separator + letter.toLocaleUpperCase("en"),
+    );
+}
+
 
 export default function CambridgeTemplate({
   dataset,
@@ -305,7 +318,7 @@ export default function CambridgeTemplate({
       overflow: "hidden",
       borderRadius: 6,
       border: "1px solid #9fb3d1",
-      fontSize: compact ? 8.5 : 9.2,
+      fontSize: compact ? 11 : 12.2,
     },
     th: {
       ...baseTableStyles.th,
@@ -313,14 +326,22 @@ export default function CambridgeTemplate({
       borderBottom: "1px solid #111827",
       background: "#0f2f5f",
       color: "#fff",
-      padding: compact ? "5px 5px" : "6px 6px",
+      padding: compact ? "5px 4px" : "6px 4px",
+      fontSize: compact ? 10.1 : 10.9,
+      lineHeight: 1.25,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
       fontWeight: 950,
     },
     td: {
       ...baseTableStyles.td,
       border: "0",
       borderBottom: "1px solid #e5e7eb",
-      padding: compact ? "4px 5px" : "5px 6px",
+      padding: compact ? "4px 4px" : "5px 5px",
+      fontSize: compact ? 11.2 : 12.3,
+      lineHeight: 1.25,
+      overflowWrap: "break-word",
+      whiteSpace: "normal",
       color: "#111827",
     },
     label: baseTableStyles.label,
@@ -328,7 +349,7 @@ export default function CambridgeTemplate({
   };
 
   const smallLabel: React.CSSProperties = {
-    fontSize: compact ? 6.9 : 7.6,
+    fontSize: compact ? 9.3 : 10,
     fontWeight: 950,
     letterSpacing: 0.25,
     textTransform: "uppercase",
@@ -337,65 +358,47 @@ export default function CambridgeTemplate({
   };
 
   const strongValue: React.CSSProperties = {
-    fontSize: compact ? 9.6 : 10.6,
+    fontSize: compact ? 11.8 : 12.7,
     fontWeight: 950,
     color: "#0f172a",
     lineHeight: 1.15,
     overflowWrap: "anywhere",
   };
 
+  // Academic Structure is the single academic year/structure label.
+  const academicStructureName = firstText(
+    (header as any)?.academicStructure?.name,
+    (header as any)?.academicStructureName,
+    (header as any)?.academicYear?.name,
+    (header as any)?.academicYearName,
+    (report as any)?.academicStructureName,
+    typeof (header as any)?.academicYear === "string"
+      ? (header as any).academicYear
+      : "",
+  );
+
+  // Exact shared two-row information order. The optional number-on-roll
+  // occupies an additional row, never displacing the first two rows.
   const studentInfoChips: InfoChip[] = [
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
-      show: true,
-    },
-    {
-      key: "gender",
-      label: "Gender",
-      value: report.gender || student?.gender || "-",
-      show: true,
-    },
-    {
-      key: "class",
-      label: "Class",
-      value: report.className || "-",
-      show: true,
-    },
-    {
-      key: "academicPeriod",
-      label: "Period",
-      value: header.academicPeriod?.name || "-",
-      show: true,
-    },
-    {
-      key: "numberOnRoll",
-      label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value:
-        studentInfo.numberOnRoll ||
-        (report as any).numberOnRoll ||
-        (report as any).classSize ||
-        (dataset as any)?.numberOnRoll ||
-        (dataset as any)?.classSize ||
-        "-",
-      show: resolvedSettings.showNumberOnRoll,
-    },
-    {
-      key: "attendance",
-      label: "Attendance",
-      value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`,
-      show: resolvedSettings.showAttendance,
-    },
-    {
-      key: "attendancePercent",
-      label: "Attendance %",
-      value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show:
-        resolvedSettings.showAttendance &&
-        resolvedSettings.showAttendancePercent,
-    },
+    { key: "studentName", label: "Student Name", value: displayNameInTitleCase(report.studentName), span: 2, show: true },
+    { key: "gender", label: "Gender", value: report.gender || student?.gender || "-", show: true },
+    { key: "admissionNumber", label: "Admission No.", value: report.admissionNumber || "-", show: true },
+    { key: "academicStructure", label: "Academic Structure", value: academicStructureName || "-", show: true },
+    { key: "academicPeriod", label: "Academic Period", value: header.academicPeriod?.name || "-", show: true },
+    { key: "class", label: "Class", value: report.className || "-", show: true },
+    { key: "attendance", label: "Attendance", value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`, show: resolvedSettings.showAttendance },
   ].filter((item) => item.show);
+
+  const extraStudentInfoChips: InfoChip[] = resolvedSettings.showNumberOnRoll
+    ? [{
+        key: "numberOnRoll",
+        label: resolvedSettings.numberOnRollLabel || "Number On Roll",
+        value: studentInfo.numberOnRoll || (report as any).numberOnRoll ||
+          (report as any).classSize || (dataset as any)?.numberOnRoll ||
+          (dataset as any)?.classSize || "-",
+        show: true,
+      }]
+    : [];
 
   const summaryCards = [
     {
@@ -439,8 +442,8 @@ export default function CambridgeTemplate({
 
   const subjectTableColumnCount =
     1 +
-    assessmentColumns.length +
-    2 +
+    (resolvedSettings.showAssessmentBreakdown ? assessmentColumns.length : 0) +
+    1 +
     (resolvedSettings.showGrade ? 1 : 0) +
     (resolvedSettings.showSubjectPosition ? 1 : 0) +
     (resolvedSettings.showSubjectRemarks ? 1 : 0);
@@ -533,101 +536,19 @@ export default function CambridgeTemplate({
             marginTop: 8,
             display: "grid",
             gridTemplateColumns: resolvedSettings.showStudentPhoto
-              ? "1fr 86px"
+              ? "94px minmax(0, 1fr)"
               : "1fr",
             gap: 8,
             alignItems: "stretch",
           }}
         >
-          <div
-            style={{
-              borderRadius: 8,
-              border: "1px solid #b8c7dc",
-              background: "linear-gradient(180deg, #ffffff, #f3f8ff)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) auto",
-                alignItems: "center",
-                gap: 10,
-                padding: compact ? "7px 9px" : "8px 11px",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={smallLabel}>Learner Profile</div>
-                <div
-                  style={{
-                    marginTop: 1,
-                    fontSize: compact ? 15.5 : 17.5,
-                    lineHeight: 1.05,
-                    fontWeight: 950,
-                    color: "#0f172a",
-                    textTransform: "uppercase",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {report.studentName}
-                </div>
-              </div>
-
-              <div
-                data-report-color-block="true"
-                style={{
-                  borderRadius: 4,
-                  padding: compact ? "5px 9px" : "6px 11px",
-                  background: primary,
-                  color: "#fff",
-                  fontSize: compact ? 8 : 8.8,
-                  fontWeight: 950,
-                  textTransform: "uppercase",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {report.className || "Class"}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-                gap: 0,
-              }}
-            >
-              {studentInfoChips.map((chip, index) => (
-                <div
-                  key={chip.key}
-                  style={{
-                    padding: compact ? "6px 8px" : "7px 9px",
-                    borderRight:
-                      (index + 1) % 4 === 0 ? "0" : "1px solid #e5e7eb",
-                    borderBottom:
-                      index < studentInfoChips.length - 4
-                        ? "1px solid #e5e7eb"
-                        : "0",
-                    minWidth: 0,
-                  }}
-                >
-                  <div style={smallLabel}>{chip.label}</div>
-                  <div style={{ ...strongValue, marginTop: 1 }}>
-                    {chip.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {resolvedSettings.showStudentPhoto && (
             <div
               style={{
-                border: "1px solid #d9dee8",
-                borderRadius: 18,
-                overflow: "hidden",
+                border: "1.4px solid #9fb3d1",
+                borderRadius: 13,
                 background: "#f8fafc",
+                overflow: "hidden",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -635,20 +556,47 @@ export default function CambridgeTemplate({
               }}
             >
               {studentPhoto ? (
-                <img
-                  src={studentPhoto}
-                  alt="Student"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
+                <img src={studentPhoto} alt="Student" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : (
-                <span
-                  style={{ fontSize: 9, fontWeight: 950, color: "#64748b" }}
-                >
-                  PHOTO
-                </span>
+                <span style={{ fontSize: 11, fontWeight: 900, color: "#64748b" }}>PHOTO</span>
               )}
             </div>
           )}
+          <div
+            style={{
+                borderRadius: 8,
+                border: "1px solid #b8c7dc",
+                background: "linear-gradient(180deg, #ffffff, #f3f8ff)",
+                overflow: "hidden",
+              }}
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+              {studentInfoChips.map((chip, index) => (
+                <div
+                  key={chip.key}
+                  style={{
+                    minWidth: 0,
+                    gridColumn: chip.span ? `span ${chip.span}` : undefined,
+                    padding: compact ? "7px 8px" : "8px 9px",
+                    borderRight: (index !== 2 && index !== 6)
+                      ? `1px solid #dbe5f3` : undefined,
+                    borderBottom: index < 3 ? `1px solid #dbe5f3` : undefined,
+                  }}
+                >
+                  <div style={smallLabel}>{chip.label}</div>
+                  <div style={{ ...strongValue, marginTop: 3, whiteSpace: "normal", overflowWrap: "break-word" }}>
+                    {chip.value}
+                  </div>
+                </div>
+              ))}
+              {extraStudentInfoChips.map((chip) => (
+                <div key={chip.key} style={{ gridColumn: "1 / -1", padding: compact ? "7px 8px" : "8px 9px", borderTop: `1px solid #dbe5f3` }}>
+                  <div style={smallLabel}>{chip.label}</div>
+                  <div style={{ ...strongValue, marginTop: 3 }}>{chip.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
 
         <div style={{ marginTop: 8 }}>
@@ -672,7 +620,7 @@ export default function CambridgeTemplate({
                       resolvedSettings.showAssessmentMaximumScores) && (
                       <div
                         style={{
-                          fontSize: 7.5,
+                          fontSize: compact ? 9.2 : 9.7,
                           marginTop: 2,
                           opacity: 0.88,
                         }}
@@ -698,9 +646,6 @@ export default function CambridgeTemplate({
                     )}
                   </th>
                 ))}
-                <th data-report-color-block="true" style={tableStyles.th}>
-                  Score
-                </th>
                 <th data-report-color-block="true" style={tableStyles.th}>
                   %
                 </th>
@@ -732,6 +677,11 @@ export default function CambridgeTemplate({
                     style={{
                       ...tableStyles.td,
                       fontWeight: 950,
+                      fontSize: compact ? 12.5 : 13.9,
+                      lineHeight: 1.25,
+                      minWidth: compact ? 118 : 128,
+                      whiteSpace: "normal",
+                      overflowWrap: "break-word",
                       background: rowIndex % 2 === 0 ? "#f8fafc" : "#ffffff",
                     }}
                   >
@@ -741,12 +691,12 @@ export default function CambridgeTemplate({
                         <div
                           style={{
                             marginTop: 2,
-                            fontSize: 7.8,
-                            opacity: 0.72,
+                            fontSize: compact ? 10 : 10.8,
+                            opacity: 0.85,
                             fontWeight: 700,
                           }}
                         >
-                          {subject.teacherName}
+                          {displayNameInTitleCase(subject.teacherName)}
                         </div>
                       )}
                   </td>
@@ -772,16 +722,7 @@ export default function CambridgeTemplate({
                     );
                   })}
 
-                  <td
-                    style={{
-                      ...tableStyles.td,
-                      textAlign: "center",
-                      fontWeight: 950,
-                    }}
-                  >
-                    {formatNumber(subject.weightedTotal, 1)}
-                  </td>
-                  <td
+<td
                     style={{
                       ...tableStyles.td,
                       textAlign: "center",
@@ -962,7 +903,7 @@ export default function CambridgeTemplate({
                 <div
                   style={{
                     marginTop: 2,
-                    fontSize: compact ? 8.8 : 9.7,
+                    fontSize: compact ? 10 : 10.8,
                     fontWeight: 900,
                     color: primary,
                   }}
@@ -1000,7 +941,7 @@ export default function CambridgeTemplate({
                 <div
                   style={{
                     marginTop: 2,
-                    fontSize: compact ? 8.8 : 9.7,
+                    fontSize: compact ? 10 : 10.8,
                     fontWeight: 900,
                     color: primary,
                   }}
@@ -1041,7 +982,7 @@ export default function CambridgeTemplate({
                 <div
                   style={{
                     marginTop: 2,
-                    fontSize: compact ? 8.8 : 9.7,
+                    fontSize: compact ? 10 : 10.8,
                     fontWeight: 900,
                     color: primary,
                   }}
@@ -1067,22 +1008,22 @@ export default function CambridgeTemplate({
           {[
             {
               label: resolvedSettings.classTeacherLabel,
-              name: signatures.classTeacherName || "",
+              name: displayNameInTitleCase(signatures.classTeacherName),
               image: "",
               show: true,
             },
             {
               label: resolvedSettings.headTeacherLabel,
-              name: firstText(
+              name: displayNameInTitleCase(firstText(
                 signatures.headTeacherName,
                 signatures.principalName,
-              ),
+              )),
               image: reportSignatureImage,
               show: true,
             },
             {
               label: resolvedSettings.parentLabel,
-              name: firstText(signatures.parentName, signatures.guardianName),
+              name: displayNameInTitleCase(firstText(signatures.parentName, signatures.guardianName)),
               image: "",
               show: resolvedSettings.showParentSignature,
             },
@@ -1105,7 +1046,7 @@ export default function CambridgeTemplate({
                   style={{
                     minHeight: 16,
                     marginBottom: 3,
-                    fontSize: compact ? 9 : 10,
+                    fontSize: compact ? 10.6 : 11.6,
                     fontWeight: 950,
                     color: "#111827",
                   }}
@@ -1134,7 +1075,7 @@ export default function CambridgeTemplate({
             display: "flex",
             justifyContent: "space-between",
             gap: 10,
-            fontSize: 7.8,
+            fontSize: 9.3,
             color: "#475569",
             fontWeight: 700,
           }}
@@ -1157,7 +1098,7 @@ export default function CambridgeTemplate({
 
       <div className="src-mobile-toolbar report-no-print">
         <div>
-          <strong>{report.studentName}</strong>
+          <strong>{displayNameInTitleCase(report.studentName)}</strong>
           <span>
             {report.className} ·{" "}
             {header.academicPeriod?.name || "Academic Period"}

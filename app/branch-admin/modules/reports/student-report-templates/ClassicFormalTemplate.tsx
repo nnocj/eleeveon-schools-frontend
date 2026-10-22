@@ -379,7 +379,26 @@ export default function ClassicFormalTemplate({
     color: "#111",
   };
 
+  // Academic Structure is the report's single academic year/structure label.
+  // Render it only here, before the student's other information.
+  const academicStructureName = firstText(
+    (header as any)?.academicStructure?.name,
+    (header as any)?.academicStructureName,
+    (header as any)?.academicYear?.name,
+    (header as any)?.academicYearName,
+    (report as any)?.academicStructureName,
+    typeof (header as any)?.academicYear === "string"
+      ? (header as any).academicYear
+      : "",
+  );
+
   const visibleStudentInfoBoxes = [
+    {
+      key: "academicStructure",
+      label: "Academic Structure",
+      value: academicStructureName || "-",
+      show: true,
+    },
     {
       key: "studentName",
       label: "Student Name",
@@ -542,73 +561,38 @@ export default function ClassicFormalTemplate({
           compact={compact}
           primaryColor={primary}
           fontFamily={fontFamily}
+          studentPhoto={studentPhoto}
+          showStudentPhoto={Boolean(resolvedSettings.showStudentPhoto)}
         />
 
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: resolvedSettings.showStudentPhoto
-              ? "1fr 78px"
-              : "1fr",
-            gap: 8,
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: 5,
             marginTop: 8,
           }}
         >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-              gap: 5,
-            }}
-          >
-            {visibleStudentInfoBoxes.map((box) => (
-              <div
-                key={box.key}
-                style={{
-                  ...infoBox,
-                  gridColumn: box.span ? `span ${box.span}` : undefined,
-                }}
-              >
-                <div style={label}>{box.label}</div>
-                <div
-                  style={{
-                    ...value,
-                    overflowWrap: "break-word",
-                    whiteSpace: "normal",
-                  }}
-                >
-                  {box.value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {resolvedSettings.showStudentPhoto && (
+          {visibleStudentInfoBoxes.map((box) => (
             <div
+              key={box.key}
               style={{
-                border: "1px solid #bdbdbd",
-                borderRadius: 8,
-                overflow: "hidden",
-                background: "#fafafa",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: 78,
+                ...infoBox,
+                gridColumn: box.span ? `span ${box.span}` : undefined,
               }}
             >
-              {studentPhoto ? (
-                <img
-                  src={studentPhoto}
-                  alt="Student"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span style={{ fontSize: 10.5, fontWeight: 900, color: "#666" }}>
-                  PHOTO
-                </span>
-              )}
+              <div style={label}>{box.label}</div>
+              <div
+                style={{
+                  ...value,
+                  overflowWrap: "break-word",
+                  whiteSpace: "normal",
+                }}
+              >
+                {box.value}
+              </div>
             </div>
-          )}
+          ))}
         </div>
 
         <div style={{ marginTop: 9 }}>

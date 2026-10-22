@@ -72,16 +72,16 @@ type Props = StudentReportTemplateBaseProps & {
   dataset?: StudentReportCardDataset;
 };
 
-type InfoChip = {
-  key: string;
-  label: string;
-  value: React.ReactNode;
-  show: boolean;
-};
-
 // ======================================================
 // COMPONENT
 // ======================================================
+
+// Presentation-only normalization; database names are never modified.
+function reportNameTitleCase(input: unknown): string {
+  return String(input ?? "")
+    .toLocaleLowerCase("en-GH")
+    .replace(/(^|[\s\-'])\p{L}/gu, (part) => part.toLocaleUpperCase("en-GH"));
+}
 
 export default function MontessoriTemplate({
   dataset,
@@ -305,7 +305,7 @@ export default function MontessoriTemplate({
       overflow: "hidden",
       borderRadius: 6,
       border: "1px solid #d9cbb3",
-      fontSize: compact ? 8.5 : 9.2,
+      fontSize: compact ? 11.3 : 12,
     },
     th: {
       ...baseTableStyles.th,
@@ -315,6 +315,10 @@ export default function MontessoriTemplate({
       color: "#fff",
       padding: compact ? "5px 5px" : "6px 6px",
       fontWeight: 950,
+      fontSize: compact ? 10.5 : 11.2,
+      lineHeight: 1.22,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
     },
     td: {
       ...baseTableStyles.td,
@@ -322,13 +326,17 @@ export default function MontessoriTemplate({
       borderBottom: "1px solid #e5e7eb",
       padding: compact ? "4px 5px" : "5px 6px",
       color: "#111827",
+      fontSize: compact ? 11.5 : 12.4,
+      lineHeight: 1.26,
+      whiteSpace: "normal",
+      overflowWrap: "break-word",
     },
     label: baseTableStyles.label,
     value: baseTableStyles.value,
   };
 
   const smallLabel: React.CSSProperties = {
-    fontSize: compact ? 6.9 : 7.6,
+    fontSize: compact ? 9.5 : 10.2,
     fontWeight: 950,
     letterSpacing: 0.2,
     textTransform: "uppercase",
@@ -337,65 +345,12 @@ export default function MontessoriTemplate({
   };
 
   const strongValue: React.CSSProperties = {
-    fontSize: compact ? 9.6 : 10.6,
+    fontSize: compact ? 11.4 : 12.4,
     fontWeight: 950,
     color: "#243126",
     lineHeight: 1.15,
     overflowWrap: "anywhere",
   };
-
-  const studentInfoChips: InfoChip[] = [
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
-      show: true,
-    },
-    {
-      key: "gender",
-      label: "Gender",
-      value: report.gender || student?.gender || "-",
-      show: true,
-    },
-    {
-      key: "class",
-      label: "Class",
-      value: report.className || "-",
-      show: true,
-    },
-    {
-      key: "academicPeriod",
-      label: "Period",
-      value: header.academicPeriod?.name || "-",
-      show: true,
-    },
-    {
-      key: "numberOnRoll",
-      label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value:
-        studentInfo.numberOnRoll ||
-        (report as any).numberOnRoll ||
-        (report as any).classSize ||
-        (dataset as any)?.numberOnRoll ||
-        (dataset as any)?.classSize ||
-        "-",
-      show: resolvedSettings.showNumberOnRoll,
-    },
-    {
-      key: "attendance",
-      label: "Attendance",
-      value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`,
-      show: resolvedSettings.showAttendance,
-    },
-    {
-      key: "attendancePercent",
-      label: "Attendance %",
-      value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show:
-        resolvedSettings.showAttendance &&
-        resolvedSettings.showAttendancePercent,
-    },
-  ].filter((item) => item.show);
 
   const summaryCards = [
     {
@@ -439,8 +394,8 @@ export default function MontessoriTemplate({
 
   const subjectTableColumnCount =
     1 +
-    assessmentColumns.length +
-    2 +
+    (resolvedSettings.showAssessmentBreakdown ? assessmentColumns.length : 0) +
+    1 +
     (resolvedSettings.showGrade ? 1 : 0) +
     (resolvedSettings.showSubjectPosition ? 1 : 0) +
     (resolvedSettings.showSubjectRemarks ? 1 : 0);
@@ -528,124 +483,77 @@ export default function MontessoriTemplate({
           fontFamily={fontFamily}
         />
 
+        {/* Student details: same two-row reading order across every report style. */}
         <section
           style={{
             marginTop: 8,
             display: "grid",
             gridTemplateColumns: resolvedSettings.showStudentPhoto
-              ? "1fr 86px"
+              ? "minmax(0, 1fr) 86px"
               : "1fr",
             gap: 8,
             alignItems: "stretch",
           }}
         >
-          <div
-            style={{
-              borderRadius: 8,
-              border: "1px solid #d9cbb3",
-              background: "linear-gradient(180deg, #ffffff, #fbfaf4)",
-              overflow: "hidden",
-            }}
-          >
+          <div style={{ border: "1px solid #d9cbb3", borderRadius: 14, background: "linear-gradient(180deg, #fffdf7, #ffffff)", overflow: "hidden" }}>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) auto",
-                alignItems: "center",
-                gap: 10,
-                padding: compact ? "7px 9px" : "8px 11px",
-                borderBottom: "1px solid #e5e7eb",
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={smallLabel}>Learner Profile</div>
-                <div
-                  style={{
-                    marginTop: 1,
-                    fontSize: compact ? 15.5 : 17.5,
-                    lineHeight: 1.05,
-                    fontWeight: 950,
-                    color: "#243126",
-                    textTransform: "uppercase",
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  {report.studentName}
-                </div>
-              </div>
-
-              <div
-                data-report-color-block="true"
-                style={{
-                  borderRadius: 999,
-                  padding: compact ? "5px 9px" : "6px 11px",
-                  background: primary,
-                  color: "#fff",
-                  fontSize: compact ? 8 : 8.8,
-                  fontWeight: 950,
-                  textTransform: "uppercase",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {report.className || "Class"}
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                gridTemplateColumns: "minmax(0, 2fr) minmax(0, .8fr) minmax(0, 1.2fr)",
                 gap: 0,
+                borderBottom: "1px solid #d9cbb3",
               }}
             >
-              {studentInfoChips.map((chip, index) => (
-                <div
-                  key={chip.key}
-                  style={{
-                    padding: compact ? "6px 8px" : "7px 9px",
-                    borderRight:
-                      (index + 1) % 4 === 0 ? "0" : "1px solid #e5e7eb",
-                    borderBottom:
-                      index < studentInfoChips.length - 4
-                        ? "1px solid #e5e7eb"
-                        : "0",
-                    minWidth: 0,
-                  }}
-                >
-                  <div style={smallLabel}>{chip.label}</div>
-                  <div style={{ ...strongValue, marginTop: 1 }}>
-                    {chip.value}
-                  </div>
+              <div style={{ padding: compact ? "6px 7px" : "7px 9px", minWidth: 0 }}>
+                <div style={smallLabel}>Student Name</div>
+                <div style={{ ...strongValue, marginTop: 2, fontSize: compact ? 12.6 : 14.2, overflowWrap: "anywhere" }}>
+                  {reportNameTitleCase(report.studentName)}
                 </div>
-              ))}
+              </div>
+              <div style={{ padding: compact ? "6px 7px" : "7px 9px", minWidth: 0, borderLeft: "1px solid #d9cbb3" }}>
+                <div style={smallLabel}>Gender</div>
+                <div style={{ ...strongValue, marginTop: 2 }}>{report.gender || student?.gender || "-"}</div>
+              </div>
+              <div style={{ padding: compact ? "6px 7px" : "7px 9px", minWidth: 0, borderLeft: "1px solid #d9cbb3" }}>
+                <div style={smallLabel}>Admission No.</div>
+                <div style={{ ...strongValue, marginTop: 2 }}>{report.admissionNumber || "-"}</div>
+              </div>
             </div>
-          </div>
-
-          {resolvedSettings.showStudentPhoto && (
             <div
               style={{
-                border: "1px solid #d9cbb3",
-                borderRadius: 8,
-                overflow: "hidden",
-                background: "#faf9f4",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: 92,
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)",
               }}
             >
-              {studentPhoto ? (
-                <img
-                  src={studentPhoto}
-                  alt="Student"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span
-                  style={{ fontSize: 9, fontWeight: 950, color: "#6f6a5f" }}
-                >
-                  PHOTO
+              {[
+                { key: "structure", label: "Academic Structure", value: firstText((header as any)?.academicStructure?.name, (header as any)?.academicStructureName, "-") },
+                { key: "period", label: "Academic Period", value: firstText(header.academicPeriod?.name, (header as any)?.academicPeriodName, "-") },
+                { key: "class", label: "Class", value: report.className || "-" },
+                { key: "attendance", label: "Attendance", value: `${report.attendance?.presentDays ?? 0}/${report.attendance?.totalDays ?? 0}` },
+              ]
+                .filter((item) => item.key !== "attendance" || resolvedSettings.showAttendance)
+                .map((item, index) => (
+                  <div key={item.key} style={{ padding: compact ? "6px 7px" : "7px 9px", minWidth: 0, borderLeft: index === 0 ? undefined : "1px solid #d9cbb3" }}>
+                    <div style={smallLabel}>{item.label}</div>
+                    <div style={{ ...strongValue, marginTop: 2, overflowWrap: "anywhere" }}>{item.value}</div>
+                  </div>
+                ))}
+            </div>
+            {resolvedSettings.showNumberOnRoll && (
+              <div style={{ padding: compact ? "5px 7px" : "6px 9px", borderTop: "1px solid #d9cbb3" }}>
+                <span style={smallLabel}>{resolvedSettings.numberOnRollLabel || "Number On Roll"}: </span>
+                <span style={strongValue}>
+                  {studentInfo.numberOnRoll || (report as any).numberOnRoll || (report as any).classSize || (dataset as any)?.numberOnRoll || (dataset as any)?.classSize || "-"}
                 </span>
+              </div>
+            )}
+          </div>
+          {resolvedSettings.showStudentPhoto && (
+            <div style={{ border: "1px solid #d9cbb3", borderRadius: 14, background: "#fff", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 96 }}>
+              {studentPhoto ? (
+                <img src={studentPhoto} alt="Student" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <span style={{ fontSize: 10, fontWeight: 900, color: "#64748b" }}>PHOTO</span>
               )}
             </div>
           )}
@@ -699,9 +607,6 @@ export default function MontessoriTemplate({
                   </th>
                 ))}
                 <th data-report-color-block="true" style={tableStyles.th}>
-                  Total
-                </th>
-                <th data-report-color-block="true" style={tableStyles.th}>
                   %
                 </th>
                 {resolvedSettings.showGrade && (
@@ -732,6 +637,9 @@ export default function MontessoriTemplate({
                     style={{
                       ...tableStyles.td,
                       fontWeight: 950,
+                        fontSize: compact ? 12.8 : 13.7,
+                        lineHeight: 1.25,
+                        overflowWrap: "break-word",
                       background: rowIndex % 2 === 0 ? "#f8fafc" : "#ffffff",
                     }}
                   >
@@ -741,12 +649,12 @@ export default function MontessoriTemplate({
                         <div
                           style={{
                             marginTop: 2,
-                            fontSize: 7.8,
+                            fontSize: 10.2,
                             opacity: 0.72,
                             fontWeight: 700,
                           }}
                         >
-                          {subject.teacherName}
+                          {reportNameTitleCase(subject.teacherName)}
                         </div>
                       )}
                   </td>
@@ -772,15 +680,7 @@ export default function MontessoriTemplate({
                     );
                   })}
 
-                  <td
-                    style={{
-                      ...tableStyles.td,
-                      textAlign: "center",
-                      fontWeight: 950,
-                    }}
-                  >
-                    {formatNumber(subject.weightedTotal, 1)}
-                  </td>
+                  
                   <td
                     style={{
                       ...tableStyles.td,
@@ -1067,22 +967,22 @@ export default function MontessoriTemplate({
           {[
             {
               label: resolvedSettings.classTeacherLabel,
-              name: signatures.classTeacherName || "",
+              name: reportNameTitleCase(signatures.classTeacherName || ""),
               image: "",
               show: true,
             },
             {
               label: resolvedSettings.headTeacherLabel,
-              name: firstText(
+              name: reportNameTitleCase(firstText(
                 signatures.headTeacherName,
                 signatures.principalName,
-              ),
+              )),
               image: reportSignatureImage,
               show: true,
             },
             {
               label: resolvedSettings.parentLabel,
-              name: firstText(signatures.parentName, signatures.guardianName),
+              name: reportNameTitleCase(firstText(signatures.parentName, signatures.guardianName)),
               image: "",
               show: resolvedSettings.showParentSignature,
             },
@@ -1105,7 +1005,7 @@ export default function MontessoriTemplate({
                   style={{
                     minHeight: 16,
                     marginBottom: 3,
-                    fontSize: compact ? 9 : 10,
+                    fontSize: compact ? 10.5 : 11.5,
                     fontWeight: 950,
                     color: "#111827",
                   }}
@@ -1156,7 +1056,7 @@ export default function MontessoriTemplate({
 
       <div className="src-mobile-toolbar report-no-print">
         <div>
-          <strong>{report.studentName}</strong>
+          <strong>{reportNameTitleCase(report.studentName)}</strong>
           <span>
             {report.className} ·{" "}
             {header.academicPeriod?.name || "Academic Period"}

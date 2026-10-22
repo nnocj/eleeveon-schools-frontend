@@ -15,13 +15,12 @@
 
 import React from "react";
 
-import type { ReportTemplateHeaderProps } from "../../ReportTemplateTypes";
+import type { ReportTemplateHeaderProps } from "../ReportTemplateTypes";
 
 import {
   resolveBranding,
   resolvePrimaryColor,
-  firstText,
-} from "../../ReportTemplateUtils";
+} from "../ReportTemplateUtils";
 
 export default function IBHeader({
   header,
@@ -33,44 +32,17 @@ export default function IBHeader({
 }: ReportTemplateHeaderProps) {
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
-  const primary =
-    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
-
-  const academicStructureName = firstText(
-    (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName,
-  );
-
-  const academicPeriodName = firstText(
-    (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName,
-  );
-
-  const className = firstText(
-    (resolvedHeader as any)?.classData?.name,
-    (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className,
-  );
+  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
 
   const contactLine = [
     branding.address,
     branding.phone ? `Tel: ${branding.phone}` : "",
     branding.email,
     branding.website,
-  ]
-    .filter(Boolean)
-    .join("  •  ");
+  ].filter(Boolean).join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress]
-    .filter(Boolean)
-    .join(" · ");
+  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
   const logoSize = compact ? 42 : 48;
-
-  const metaItems = [
-    { label: "Programme", value: academicStructureName || "-" },
-    { label: "Learning Period", value: academicPeriodName || "-" },
-    { label: "Class / Year Group", value: className || "-" },
-  ];
 
   return (
     <header
@@ -85,10 +57,7 @@ export default function IBHeader({
         boxShadow: "0 8px 22px rgba(15,23,42,.055)",
       }}
     >
-      <div
-        data-report-color-block="true"
-        style={{ height: 6, background: "#0f766e" }}
-      />
+      <div data-report-color-block="true" style={{ height: 6, background: "#0f766e" }} />
 
       <div
         style={{
@@ -120,16 +89,14 @@ export default function IBHeader({
             <div
               style={{
                 marginTop: 3,
-                fontSize: compact ? 7.2 : 8,
+                fontSize: compact ? 9.2 : 9.8,
                 lineHeight: 1.25,
                 fontWeight: 720,
                 color: "#475569",
                 overflowWrap: "anywhere",
               }}
             >
-              {[branding.motto, contactLine, branchLine]
-                .filter(Boolean)
-                .join("  •  ")}
+              {[branding.motto, contactLine, branchLine].filter(Boolean).join("  •  ")}
             </div>
           )}
         </div>
@@ -152,14 +119,7 @@ export default function IBHeader({
           }}
         >
           {title}
-          <div
-            style={{
-              marginTop: 2,
-              fontSize: compact ? 6.5 : 7.1,
-              color: "#64748b",
-              fontWeight: 850,
-            }}
-          >
+          <div style={{ marginTop: 2, fontSize: compact ? 9.2 : 9.8, color: "#64748b", fontWeight: 850 }}>
             IB-style progress record
           </div>
         </div>
@@ -179,77 +139,15 @@ export default function IBHeader({
           }}
         >
           {branding.logo ? (
-            <img
-              src={branding.logo}
-              alt="School logo"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                padding: 4,
-                boxSizing: "border-box",
-              }}
-            />
+            <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }} />
           ) : (
-            <span
-              style={{
-                fontSize: compact ? 6.6 : 7.2,
-                fontWeight: 950,
-                color: "#64748b",
-                textAlign: "center",
-                lineHeight: 1.05,
-                textTransform: "uppercase",
-              }}
-            >
-              School
-              <br />
-              Logo
+            <span style={{ fontSize: compact ? 6.6 : 7.2, fontWeight: 950, color: "#64748b", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
+              School<br />Logo
             </span>
           )}
         </div>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          background: "#ffffff",
-        }}
-      >
-        {metaItems.map((item, index) => (
-          <div
-            key={item.label}
-            style={{
-              minWidth: 0,
-              padding: compact ? "5px 8px" : "6px 9px",
-              borderLeft: index === 0 ? "0" : "1px solid #dbe5f3",
-            }}
-          >
-            <div
-              style={{
-                fontSize: compact ? 6.4 : 7,
-                fontWeight: 950,
-                textTransform: "uppercase",
-                letterSpacing: 0.25,
-                color: "#64748b",
-              }}
-            >
-              {item.label}
-            </div>
-            <div
-              style={{
-                marginTop: 1,
-                fontSize: compact ? 7.8 : 8.6,
-                fontWeight: 900,
-                color: "#0f172a",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {item.value}
-            </div>
-          </div>
-        ))}
-      </div>
     </header>
   );
 }

@@ -24,7 +24,6 @@ import type { ReportTemplateHeaderProps } from "../../ReportTemplateTypes";
 import {
   resolveBranding,
   resolvePrimaryColor,
-  firstText,
 } from "../../ReportTemplateUtils";
 
 // ======================================================
@@ -42,24 +41,7 @@ export default function BorderedTraditionalHeader({
   const resolvedHeader = header || dataset?.header;
   const branding = resolveBranding(resolvedHeader);
 
-  const primary =
-    primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
-
-  const academicStructureName = firstText(
-    (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName,
-  );
-
-  const academicPeriodName = firstText(
-    (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName,
-  );
-
-  const className = firstText(
-    (resolvedHeader as any)?.classData?.name,
-    (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className,
-  );
+  const primary = primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
 
   const contactLine = [
     branding.address,
@@ -70,16 +52,8 @@ export default function BorderedTraditionalHeader({
     .filter(Boolean)
     .join("  •  ");
 
-  const branchLine = [branding.branchName, branding.branchAddress]
-    .filter(Boolean)
-    .join(" · ");
-  const logoSize = compact ? 52 : 62;
-
-  const metaItems = [
-    { label: "Academic Structure", value: academicStructureName || "-" },
-    { label: "Academic Period", value: academicPeriodName || "-" },
-    { label: "Class", value: className || "-" },
-  ];
+  const branchLine = [branding.branchName, branding.branchAddress].filter(Boolean).join(" · ");
+  const logoSize = compact ? 68 : 80;
 
   const rule: React.CSSProperties = {
     height: 0,
@@ -91,10 +65,7 @@ export default function BorderedTraditionalHeader({
     <header
       className="bordered-traditional-report-header"
       style={{
-        fontFamily:
-          fontFamily ||
-          branding.fontFamily ||
-          "Georgia, 'Times New Roman', serif",
+        fontFamily: fontFamily || branding.fontFamily || "Georgia, 'Times New Roman', serif",
         color: "#111827",
         background: "#fffdf7",
         border: "2px double #111827",
@@ -155,9 +126,7 @@ export default function BorderedTraditionalHeader({
                   textTransform: "uppercase",
                 }}
               >
-                School
-                <br />
-                Crest
+                School<br />Crest
               </span>
             )}
           </div>
@@ -189,7 +158,7 @@ export default function BorderedTraditionalHeader({
             <div
               style={{
                 marginTop: 3,
-                fontSize: compact ? 8.4 : 9.4,
+                fontSize: compact ? 9.7 : 10.5,
                 fontWeight: 760,
                 fontStyle: "italic",
                 color: "#334155",
@@ -204,7 +173,7 @@ export default function BorderedTraditionalHeader({
             <div
               style={{
                 marginTop: 4,
-                fontSize: compact ? 7.2 : 8,
+                fontSize: compact ? 9.3 : 10,
                 fontWeight: 700,
                 color: "#475569",
                 lineHeight: 1.22,
@@ -219,7 +188,7 @@ export default function BorderedTraditionalHeader({
             <div
               style={{
                 marginTop: 2,
-                fontSize: compact ? 7.2 : 8,
+                fontSize: compact ? 9.3 : 10,
                 fontWeight: 900,
                 color: primary,
                 lineHeight: 1.22,
@@ -252,50 +221,6 @@ export default function BorderedTraditionalHeader({
           {title}
         </div>
 
-        <div
-          style={{
-            marginTop: compact ? 8 : 10,
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            border: "1px solid #111827",
-            background: "#fffaf0",
-          }}
-        >
-          {metaItems.map((item, index) => (
-            <div
-              key={item.label}
-              style={{
-                minWidth: 0,
-                padding: compact ? "4px 7px" : "5px 8px",
-                borderLeft: index === 0 ? 0 : "1px solid #111827",
-                textAlign: "center",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: compact ? 6.8 : 7.4,
-                  fontWeight: 950,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.25,
-                  color: "#64748b",
-                }}
-              >
-                {item.label}
-              </div>
-              <div
-                style={{
-                  marginTop: 1,
-                  fontSize: compact ? 8.2 : 9,
-                  fontWeight: 950,
-                  color: "#111827",
-                  overflowWrap: "anywhere",
-                }}
-              >
-                {item.value}
-              </div>
-            </div>
-          ))}
-        </div>
       </div>
     </header>
   );

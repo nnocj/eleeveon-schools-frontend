@@ -18,13 +18,13 @@
 
 import React from "react";
 
-import type { ReportTemplateHeaderProps } from "../ReportTemplateTypes";
+import type { ReportTemplateHeaderProps } from "../../ReportTemplateTypes";
 
 import {
   resolveBranding,
   resolvePrimaryColor,
   getContrastTextColor,
-} from "../ReportTemplateUtils";
+} from "../../ReportTemplateUtils";
 
 // ======================================================
 // COMPONENT

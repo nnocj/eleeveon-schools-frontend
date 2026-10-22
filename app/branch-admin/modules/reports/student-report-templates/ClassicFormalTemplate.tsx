@@ -75,6 +75,24 @@ type Props = StudentReportTemplateBaseProps & {
   dataset?: StudentReportCardDataset;
 };
 
+/**
+ * Report-only presentation formatting. The saved student and teacher records
+ * remain unchanged; names are displayed consistently even when schools enter
+ * UPPERCASE, lowercase, or mixed-case names.
+ *
+ * Hyphenated and apostrophe-separated names are title-cased independently:
+ * e.g. AMA-MARIA O'BRIEN => Ama-Maria O'Brien.
+ */
+function displayNameInTitleCase(name: unknown): string {
+  return String(name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("en")
+    .replace(/(^|[\s\-\u2019'])(\p{L})/gu, (_match, separator: string, letter: string) =>
+      separator + letter.toLocaleUpperCase("en"),
+    );
+}
+
 // ======================================================
 // COMPONENT
 // ======================================================
@@ -392,24 +410,17 @@ export default function ClassicFormalTemplate({
       : "",
   );
 
+  // The first two rows are deliberately stable, in the school's requested order:
+  // row 1: Student Name (wide), Gender, Admission No.
+  // row 2: Academic Structure, Academic Period, Class, Attendance.
+  // The separately configurable Number on Roll remains available as an
+  // optional additional card, without pushing the ordered rows out of place.
   const visibleStudentInfoBoxes = [
-    {
-      key: "academicStructure",
-      label: "Academic Structure",
-      value: academicStructureName || "-",
-      show: true,
-    },
     {
       key: "studentName",
       label: "Student Name",
-      value: report.studentName,
+      value: displayNameInTitleCase(report.studentName),
       span: 2,
-      show: true,
-    },
-    {
-      key: "admissionNumber",
-      label: "Admission No.",
-      value: report.admissionNumber || "-",
       show: true,
     },
     {
@@ -419,9 +430,15 @@ export default function ClassicFormalTemplate({
       show: true,
     },
     {
-      key: "class",
-      label: "Class",
-      value: report.className,
+      key: "admissionNumber",
+      label: "Admission No.",
+      value: report.admissionNumber || "-",
+      show: true,
+    },
+    {
+      key: "academicStructure",
+      label: "Academic Structure",
+      value: academicStructureName || "-",
       show: true,
     },
     {
@@ -431,16 +448,10 @@ export default function ClassicFormalTemplate({
       show: true,
     },
     {
-      key: "numberOnRoll",
-      label: resolvedSettings.numberOnRollLabel || "Number On Roll",
-      value:
-        studentInfo.numberOnRoll ||
-        (report as any).numberOnRoll ||
-        (report as any).classSize ||
-        (dataset as any)?.numberOnRoll ||
-        (dataset as any)?.classSize ||
-        "-",
-      show: resolvedSettings.showNumberOnRoll,
+      key: "class",
+      label: "Class",
+      value: report.className,
+      show: true,
     },
     {
       key: "attendance",
@@ -448,15 +459,23 @@ export default function ClassicFormalTemplate({
       value: `${report.attendance?.presentDays || 0}/${report.attendance?.totalDays || 0}`,
       show: resolvedSettings.showAttendance,
     },
-    {
-      key: "attendancePercent",
-      label: "Attendance %",
-      value: formatPercent(report.attendance?.attendancePercent, 1, "-"),
-      show:
-        resolvedSettings.showAttendance &&
-        resolvedSettings.showAttendancePercent,
-    },
   ].filter((item) => item.show);
+
+  const extraStudentInfoBoxes = resolvedSettings.showNumberOnRoll
+    ? [
+        {
+          key: "numberOnRoll",
+          label: resolvedSettings.numberOnRollLabel || "Number On Roll",
+          value:
+            studentInfo.numberOnRoll ||
+            (report as any).numberOnRoll ||
+            (report as any).classSize ||
+            (dataset as any)?.numberOnRoll ||
+            (dataset as any)?.classSize ||
+            "-",
+        },
+      ]
+    : [];
 
   const summaryCards = [
     {
@@ -500,8 +519,8 @@ export default function ClassicFormalTemplate({
 
   const subjectTableColumnCount =
     1 +
-    assessmentColumns.length +
-    2 +
+    (resolvedSettings.showAssessmentBreakdown ? assessmentColumns.length : 0) +
+    1 + // Percentage remains; the redundant Weighted column is hidden.
     (resolvedSettings.showGrade ? 1 : 0) +
     (resolvedSettings.showSubjectPosition ? 1 : 0) +
     (resolvedSettings.showSubjectRemarks ? 1 : 0);
@@ -593,6 +612,14 @@ export default function ClassicFormalTemplate({
               </div>
             </div>
           ))}
+          {extraStudentInfoBoxes.map((box) => (
+            <div key={box.key} style={infoBox}>
+              <div style={label}>{box.label}</div>
+              <div style={{ ...value, overflowWrap: "break-word", whiteSpace: "normal" }}>
+                {box.value}
+              </div>
+            </div>
+          ))}
         </div>
 
         <div style={{ marginTop: 9 }}>
@@ -625,12 +652,6 @@ export default function ClassicFormalTemplate({
                   </th>
                 ))}
 
-                <th
-                  data-report-color-block="true"
-                  style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
-                >
-                  Weighted
-                </th>
                 <th
                   data-report-color-block="true"
                   style={{ ...tableStyles.th, ...readableTableHead, borderColor: "#111" }}
@@ -700,7 +721,7 @@ export default function ClassicFormalTemplate({
                             fontWeight: 650,
                           }}
                         >
-                          {subject.teacherName}
+                          {displayNameInTitleCase(subject.teacherName)}
                         </div>
                       )}
                   </td>
@@ -731,17 +752,6 @@ export default function ClassicFormalTemplate({
                     );
                   })}
 
-                  <td
-                    style={{
-                      ...tableStyles.td,
-                      ...readableTableCell,
-                      textAlign: "center",
-                      fontWeight: 850,
-                      borderColor: "#9a9a9a",
-                    }}
-                  >
-                    {formatNumber(subject.weightedTotal, 1)}
-                  </td>
 
                   <td
                     style={{
@@ -1019,7 +1029,7 @@ export default function ClassicFormalTemplate({
         >
           <div style={{ textAlign: "center" }}>
             <div style={signatureNameStyle}>
-              {signatures.classTeacherName || ""}
+              {displayNameInTitleCase(signatures.classTeacherName)}
             </div>
             <div
               style={{
@@ -1046,7 +1056,7 @@ export default function ClassicFormalTemplate({
               />
             )}
             <div style={signatureNameStyle}>
-              {firstText(signatures.headTeacherName, signatures.principalName)}
+              {displayNameInTitleCase(firstText(signatures.headTeacherName, signatures.principalName))}
             </div>
             <div
               style={{
@@ -1109,7 +1119,7 @@ export default function ClassicFormalTemplate({
 
       <div className="src-mobile-toolbar report-no-print">
         <div>
-          <strong>{report.studentName}</strong>
+          <strong>{displayNameInTitleCase(report.studentName)}</strong>
           <span>
             {report.className} ·{" "}
             {header.academicPeriod?.name || "Academic Period"}

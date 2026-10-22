@@ -301,7 +301,6 @@ export default function CompactPrintTemplate({
     color: contrast,
     textAlign: "center",
     fontWeight: 950,
-    lineHeight: 1.08,
   };
 
   const td: React.CSSProperties = {

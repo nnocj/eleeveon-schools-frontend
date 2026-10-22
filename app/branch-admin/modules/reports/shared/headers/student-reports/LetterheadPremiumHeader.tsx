@@ -25,7 +25,6 @@ import {
   resolveBranding,
   resolvePrimaryColor,
   getContrastTextColor,
-  firstText,
 } from "../../ReportTemplateUtils";
 
 // ======================================================
@@ -47,22 +46,6 @@ export default function LetterHeadPremiumHeader({
     primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
   const contrast = getContrastTextColor(primary);
 
-  const academicStructureName = firstText(
-    (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName,
-  );
-
-  const academicPeriodName = firstText(
-    (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName,
-  );
-
-  const className = firstText(
-    (resolvedHeader as any)?.classData?.name,
-    (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className,
-  );
-
   const contactLine = [
     branding.address,
     branding.phone ? `Tel: ${branding.phone}` : "",
@@ -76,13 +59,6 @@ export default function LetterHeadPremiumHeader({
     .filter(Boolean)
     .join(" · ");
   const logoSize = compact ? 46 : 52;
-
-  const metaItems = [
-    { label: "Structure", value: academicStructureName || "-" },
-    { label: "Period", value: academicPeriodName || "-" },
-    { label: "Class", value: className || "-" },
-    { label: "Branch", value: branding.branchName || "-" },
-  ];
 
   return (
     <header
@@ -305,54 +281,6 @@ export default function LetterHeadPremiumHeader({
         <span style={{ flex: 1, height: 1, background: "#e7ddbf" }} />
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-          gap: 0,
-          padding: compact ? "5px 9px 7px" : "6px 11px 8px",
-        }}
-      >
-        {metaItems.map((item, index) => (
-          <div
-            key={item.label}
-            style={{
-              minWidth: 0,
-              padding: compact ? "3px 7px" : "4px 8px",
-              borderLeft:
-                index === 0 ? `3px solid ${primary}` : "1px solid #eadfbe",
-              background: index === 0 ? "#fffaf0" : "transparent",
-            }}
-          >
-            <div
-              style={{
-                fontSize: compact ? 6.3 : 6.9,
-                fontWeight: 950,
-                textTransform: "uppercase",
-                letterSpacing: 0.25,
-                color: "#776b50",
-                lineHeight: 1.1,
-              }}
-            >
-              {item.label}
-            </div>
-            <div
-              style={{
-                marginTop: 1,
-                fontSize: compact ? 7.6 : 8.4,
-                fontWeight: 950,
-                color: "#111827",
-                lineHeight: 1.1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {item.value}
-            </div>
-          </div>
-        ))}
-      </div>
     </header>
   );
 }

@@ -25,7 +25,6 @@ import {
   resolveBranding,
   resolvePrimaryColor,
   getContrastTextColor,
-  firstText,
 } from "../../ReportTemplateUtils";
 
 // ======================================================
@@ -47,22 +46,6 @@ export default function ModernCleanHeader({
     primaryColor || resolvePrimaryColor(resolvedHeader, branding.primaryColor);
   const contrast = getContrastTextColor(primary);
 
-  const academicStructureName = firstText(
-    (resolvedHeader as any)?.academicStructure?.name,
-    (resolvedHeader as any)?.academicStructureName,
-  );
-
-  const academicPeriodName = firstText(
-    (resolvedHeader as any)?.academicPeriod?.name,
-    (resolvedHeader as any)?.academicPeriodName,
-  );
-
-  const className = firstText(
-    (resolvedHeader as any)?.classData?.name,
-    (resolvedHeader as any)?.className,
-    (dataset as any)?.report?.className,
-  );
-
   const contactLine = [
     branding.address,
     branding.phone ? `Tel: ${branding.phone}` : "",
@@ -76,12 +59,6 @@ export default function ModernCleanHeader({
     .filter(Boolean)
     .join(" · ");
   const logoSize = compact ? 54 : 64;
-
-  const metaItems = [
-    { label: "Structure", value: academicStructureName || "-" },
-    { label: "Period", value: academicPeriodName || "-" },
-    { label: "Class", value: className || "-" },
-  ];
 
   return (
     <header
@@ -159,7 +136,7 @@ export default function ModernCleanHeader({
             ) : (
               <span
                 style={{
-                  fontSize: compact ? 7 : 7.8,
+                  fontSize: compact ? 9.2 : 9.7,
                   fontWeight: 950,
                   color: primary,
                   textAlign: "center",
@@ -275,7 +252,7 @@ export default function ModernCleanHeader({
           >
             <div
               style={{
-                fontSize: compact ? 7 : 7.8,
+                fontSize: compact ? 9.2 : 9.7,
                 fontWeight: 950,
                 letterSpacing: 0.35,
                 textTransform: "uppercase",
@@ -297,67 +274,9 @@ export default function ModernCleanHeader({
             </div>
           </div>
 
-          <div
-            style={{
-              borderRadius: 14,
-              border: "1px solid #e5e7eb",
-              background: "#f8fafc",
-              padding: compact ? "6px 8px" : "7px 9px",
-              textAlign: "center",
-              fontSize: compact ? 8 : 8.8,
-              fontWeight: 950,
-              color: primary,
-              overflowWrap: "anywhere",
-            }}
-          >
-            {academicPeriodName || "Academic Period"}
-          </div>
         </aside>
       </div>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-          gap: 0,
-          borderTop: "1px solid #e5e7eb",
-          background: "#f8fafc",
-        }}
-      >
-        {metaItems.map((item, index) => (
-          <div
-            key={item.label}
-            style={{
-              padding: compact ? "6px 10px" : "7px 12px",
-              borderLeft: index === 0 ? "0" : "1px solid #e5e7eb",
-              minWidth: 0,
-            }}
-          >
-            <div
-              style={{
-                fontSize: compact ? 6.8 : 7.3,
-                fontWeight: 950,
-                letterSpacing: 0.32,
-                textTransform: "uppercase",
-                color: "#64748b",
-              }}
-            >
-              {item.label}
-            </div>
-            <div
-              style={{
-                marginTop: 1,
-                fontSize: compact ? 8.3 : 9.1,
-                fontWeight: 950,
-                color: "#111827",
-                overflowWrap: "anywhere",
-              }}
-            >
-              {item.value}
-            </div>
-          </div>
-        ))}
-      </div>
     </header>
   );
 }

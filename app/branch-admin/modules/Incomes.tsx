@@ -39,7 +39,7 @@
  * - Prevents stale branch finance data after role/workspace switching.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
@@ -344,7 +344,24 @@ export default function IncomesPage() {
 
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
+  // Match Students: dense table on laptops, compact cards on phones.
+  // The initial cards value is SSR-safe. Once a user chooses a mode under More,
+  // responsive changes must not unexpectedly overwrite that choice.
   const [view, setView] = useState<ViewMode>("cards");
+  const viewChosenByUser = useRef(false);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 980px)");
+    const apply = () => {
+      if (!viewChosenByUser.current) setView(media.matches ? "table" : "cards");
+    };
+    apply();
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", apply);
+      return () => media.removeEventListener("change", apply);
+    }
+    media.addListener(apply);
+    return () => media.removeListener(apply);
+  }, []);
   const [query, setQuery] = useState("");
   const [methodFilter, setMethodFilter] = useState<MethodFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -859,6 +876,7 @@ export default function IncomesPage() {
         <MoreSheet
           view={view}
           setView={(mode) => {
+            viewChosenByUser.current = true;
             setView(mode);
             setMoreOpen(false);
           }}

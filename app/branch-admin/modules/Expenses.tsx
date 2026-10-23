@@ -1546,4 +1546,31 @@ const css = `
 @media(min-width:680px){.ex-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(min-width:1040px){.ex-list{grid-template-columns:repeat(4,minmax(0,1fr));max-width:none;}.ex-table-card,.ex-analysis-grid,.ex-filter-chips{max-width:none;}}
 @media(max-width:520px){.ex-page{padding:4px!important;padding-bottom:12px!important;}.ex-list{grid-template-columns:1fr;}.expense-row{border-radius:11px;}}
+/* Students V2 matching table/row texture, status-neutral cards, full-width layout. */
+.ex-page{width:100%;max-width:none;min-height:0;overflow-x:clip;background:var(--bg,var(--background,#f2f4f7));padding:5px!important;}
+.ex-list{width:100%;max-width:none;gap:9px;margin-top:2px;}
+.expense-row,.ex-table-card,.ex-analysis,.ex-empty{
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ border-radius:13px;box-shadow:none;transition:border-color .12s ease;
+}
+.expense-row{padding:9px 10px;}.expense-row:hover{transform:none;box-shadow:none;}
+.expense-avatar{box-shadow:none;border-radius:12px;}
+.ex-table-card{padding:4px;margin-top:2px;width:100%;max-width:none;overflow:visible;}
+.ex-table-scroll{box-sizing:border-box;width:100%;max-width:100%;overflow-x:auto;overflow-y:auto;
+ -webkit-overflow-scrolling:touch;border-radius:10px;overscroll-behavior-x:contain;}
+.ex-table-scroll table{width:100%;min-width:850px;margin:0;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
+.ex-table-scroll thead th{position:sticky;top:0;z-index:2;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+ color:var(--text,#182235);font-weight:800;letter-spacing:.01em;text-transform:none;}
+.ex-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+.ex-table-scroll th,.ex-table-scroll td{background-color:transparent;padding:9px 10px;font-size:12px;}
+.ex-table-scroll td strong{font-size:12px;}
+.ex-table-actions{gap:4px;}
+.ex-table-actions button{min-height:30px;padding:0 9px;border-radius:8px;font-size:10px;}
+@media(min-width:680px) and (max-width:1023px){.ex-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1024px){.ex-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:639px){.ex-page{padding:3px!important;}.ex-list{grid-template-columns:minmax(0,1fr);gap:7px;}}
+
 `;

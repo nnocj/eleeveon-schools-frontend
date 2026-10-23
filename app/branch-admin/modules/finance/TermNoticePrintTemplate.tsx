@@ -74,7 +74,7 @@ export default function TermNoticePrintTemplate({
         .ef-term-notice-a4 .ef-doc-footer {margin-top:24px;padding-top:8px;border-top:1px solid #94a3b8;display:flex;justify-content:space-between;font-size:10px;color:#475569;}
         @media print {
           @page {size:A4 portrait;margin:11mm;}
-          .ef-term-notice-a4{width:100%;padding:0!important;page-break-after:always;break-after:page;box-shadow:none!important;border:0!important;}
+          .ef-term-notice-a4{width:100%;padding:0!important;break-after:page;box-shadow:none!important;border:0!important;}
           .ef-term-notice-a4 .ef-doc-note {break-inside:avoid-page;}
           .ef-term-notice-a4 thead{display:table-header-group;}
           .ef-term-notice-a4 tr{break-inside:avoid-page;}

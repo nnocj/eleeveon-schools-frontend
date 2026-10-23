@@ -332,8 +332,8 @@ function BranchFinanceWorkspace(_props: RouteProps) {
   return (
     <div className="ba-workspace-wrapper ba-finance-workspace">
       <style>{branchWorkspaceCss}</style>
-      <nav className="ba-finance-subtabs" aria-label="Finance workspaces">
-        <div className="ba-finance-subtab-list" role="tablist" aria-label="Finance sections">
+      <div className="ba-contextual-actions ba-report-subtabs ba-finance-subtabs report-no-print" aria-label="Finance workspaces">
+        <div className="ba-report-subtab-list ba-finance-subtab-list" role="group" aria-label="Finance sections">
           {([
             ["notices", "Term Notices"],
             ["tracking", "Student Tracking"],
@@ -342,9 +342,8 @@ function BranchFinanceWorkspace(_props: RouteProps) {
           ] as const).map(([key, label]) => (
             <button
               type="button"
-              role="tab"
               key={key}
-              aria-selected={view === key}
+              aria-pressed={view === key}
               className={view === key ? "is-active" : ""}
               onClick={() => {
                 setView(key);
@@ -356,7 +355,7 @@ function BranchFinanceWorkspace(_props: RouteProps) {
             >{label}</button>
           ))}
         </div>
-      </nav>
+      </div>
       {/* Mount one workspace at a time so the shared toolbar belongs to the active tab. */}
       {view === "expenses" ? (
         <Expenses />
@@ -596,40 +595,40 @@ const branchWorkspaceCss = `
  .ba-reports-workspace .student-reports-page .ba-print-card { overflow:visible!important; }
 }
 
- /* FINANCE: compact, branch-workspace-aligned contextual tabs. */
- .ba-finance-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
- .ba-finance-workspace .ba-finance-subtabs {
-   display:flex; align-items:center; width:100%; min-width:0; margin:0;
-   padding:4px 0 5px; position:sticky; top:0; z-index:22;
-   background:var(--eds-shell-bg,var(--bg,var(--surface,#fff)));
-   border-bottom:1px solid var(--border,rgba(15,23,42,.10));
-   backdrop-filter:blur(12px);
- }
- .ba-finance-subtab-list {
-   display:flex; align-items:center; gap:4px; min-width:0; width:100%;
-   overflow-x:auto; white-space:nowrap; scrollbar-width:thin;
- }
- .ba-finance-workspace .ba-finance-subtab-list button {
-   flex:0 0 auto; min-height:32px; border-radius:8px; padding:5px 12px; font-size:11px;
-   font-weight:750; letter-spacing:.01em; cursor:pointer;
-   border:1px solid color-mix(in srgb,var(--border,rgba(15,23,42,.12)) 80%,var(--text,#182235) 20%);
-   background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 94%,var(--text,#182235) 6%);
-   color:var(--text,#182235);box-shadow:none;
- }
- .ba-finance-workspace .ba-finance-subtab-list button:hover {
-   background:color-mix(in srgb,var(--primary-color,#2563eb) 7%,var(--card-bg,var(--surface,#fff)));
- }
- .ba-finance-workspace .ba-finance-subtab-list button.is-active,
- .ba-finance-workspace .ba-finance-subtab-list button[aria-selected="true"] {
-   border-color:color-mix(in srgb,var(--primary-color,#2563eb) 65%,var(--border,#d4dae3));
-   background:color-mix(in srgb,var(--primary-color,#2563eb) 14%,var(--card-bg,var(--surface,#fff)));
-   color:var(--text,#182235);font-weight:900;
-   box-shadow:inset 0 -2px 0 var(--primary-color,#2563eb);
- }
- .ba-finance-workspace .ba-finance-subtab-list button:focus-visible {
-   outline:2px solid var(--primary-color,#2563eb);outline-offset:2px;
- }
- @media print { .ba-finance-workspace .ba-finance-subtabs { display:none!important; } }
+/* FINANCE subtabs use exactly the same dimensions, surfaces and active
+   state as the Reports contextual subtabs; no separate finance treatment. */
+.ba-finance-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
+.ba-finance-workspace .ba-report-subtabs {
+  display:flex; align-items:center; gap:6px; flex-wrap:nowrap;
+  min-width:0; width:100%; margin:0; padding:4px 0 5px;
+  position:sticky; top:0; z-index:22;
+  background:var(--eds-shell-bg,var(--bg,var(--surface,#fff)));
+  border-bottom:1px solid var(--border,rgba(15,23,42,.10));
+  backdrop-filter:blur(12px);
+}
+.ba-finance-workspace .ba-report-subtab-list {
+  display:flex; flex:1 1 auto; min-width:0; gap:4px;
+  overflow-x:auto; scrollbar-width:thin; overscroll-behavior-x:contain;
+  white-space:nowrap;
+}
+.ba-finance-workspace .ba-report-subtab-list button {
+  flex:0 0 auto; min-height:31px; border-radius:7px;
+  padding:4px 9px; font-size:11px;
+}
+@media(max-width:640px) {
+  .ba-finance-workspace .ba-report-subtabs {
+    display:flex; flex-direction:column; align-items:stretch; gap:5px;
+    width:100%; min-width:0; padding-bottom:5px;
+  }
+  .ba-finance-workspace .ba-report-subtab-list {
+    display:flex; width:100%; min-width:0; flex:0 0 auto;
+    overflow-x:auto; padding-bottom:1px;
+  }
+  .ba-finance-workspace .ba-report-subtab-list button {
+    font-size:11px; padding:4px 9px;
+  }
+}
+@media print { .ba-finance-workspace .ba-report-subtabs { display:none!important; } }
 
 .ba-setup-page { display:grid; gap:8px; padding-top:1px; }
 .ba-setup-intro { padding:2px 2px 8px; }

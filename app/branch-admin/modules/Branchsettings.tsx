@@ -149,6 +149,7 @@ import CumulativeReportBook from "./reports/components/CumulativeReportBook";
 import CumulativeTranscriptCard from "./reports/components/CumulativeTranscriptCard";
 import BroadsheetCard from "./reports/components/BroadsheetCard";
 import CredentialDesignSettings from "./identity/CredentialDesignSettings";
+import IdentityIssuanceSettings from "./identity/IdentityIssuanceSettings";
 import WebsiteSettingsSheet from "../../lib/websites/builder/settings/WebsiteSettingsSheet";
 
 import { useDataRevision } from "../../hooks/useDataRevision";
@@ -245,6 +246,7 @@ type SettingsSection =
   | "reportMedia"
   | "reportTemplates"
   | "identityCredentials"
+  | "identityIssuance"
   | "website"
   | "gallery";
 
@@ -5009,6 +5011,14 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         tone: "blue",
       },
       {
+        key: "identityIssuance" as SettingsSection,
+        icon: "🪪",
+        title: "ID Issuance",
+        subtitle: "Automatic or manual student and teacher IDs",
+        detail: "QR verification, validity and public information",
+        tone: "blue",
+      },
+      {
         key: "identityCredentials" as SettingsSection,
         icon: "▣",
         title: "Identity Credential Design",
@@ -5034,7 +5044,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
 
     const allowed = view === "reports"
       ? ["reportMedia", "reportTemplates"]
-      : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials"];
+      : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials", "identityIssuance"];
     const chosen = sections.filter((section) => allowed.includes(section.key));
     if (!searchTerm) return chosen;
 
@@ -5485,6 +5495,14 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         />
       )}
 
+      {sectionOpen === "identityIssuance" && (
+        <IdentityIssuanceSettings
+          schoolId={String(selectedSchoolId || "")}
+          branchId={String(selectedBranchId || "")}
+          onClose={() => setSectionOpen(null)}
+        />
+      )}
+
       {sectionOpen === "identityCredentials" && (
         <CredentialDesignSettings
           accountId={selectedAccountId}
@@ -5884,6 +5902,12 @@ function MoreSheet({
       note: "Template, domain, SEO and publishing",
     },
     {
+      key: "identityIssuance",
+      icon: "🪪",
+      label: "ID Issuance",
+      note: "Automatic/manual student and teacher IDs",
+    },
+    {
       key: "identityCredentials",
       icon: "▣",
       label: "Identity Credential Design",
@@ -5911,7 +5935,7 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials"]).includes(s.key)).map((section) => (
+          {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials", "identityIssuance"]).includes(s.key)).map((section) => (
             <button
               key={section.key}
               type="button"

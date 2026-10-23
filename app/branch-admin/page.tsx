@@ -23,6 +23,7 @@ import Parents from "./modules/Parents";
 import Classes from "./modules/Classes";
 import TermFeesRequirements from "./modules/finance/TermFeesRequirements";
 import Expenses from "./modules/Expenses";
+import Incomes from "./modules/Incomes";
 import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
 import Broadsheets from "./modules/reports/Broadsheets";
@@ -324,7 +325,7 @@ function BranchReportsWorkspace(props: RouteProps) {
 // Existing branch-scoped modules are rendered without modifying their internals.
 // ======================================================
 
-type FinanceView = "notices" | "tracking" | "expenses";
+type FinanceView = "notices" | "tracking" | "incomes" | "expenses";
 
 function BranchFinanceWorkspace(_props: RouteProps) {
   const [view, setView] = React.useState<FinanceView>("notices");
@@ -336,6 +337,7 @@ function BranchFinanceWorkspace(_props: RouteProps) {
           {([
             ["notices", "Term Notices"],
             ["tracking", "Student Tracking"],
+            ["incomes", "Incomes"],
             ["expenses", "Expenses"],
           ] as const).map(([key, label]) => (
             <button
@@ -358,6 +360,8 @@ function BranchFinanceWorkspace(_props: RouteProps) {
       {/* Mount one workspace at a time so the shared toolbar belongs to the active tab. */}
       {view === "expenses" ? (
         <Expenses />
+      ) : view === "incomes" ? (
+        <Incomes />
       ) : (
         <TermFeesRequirements key={view} mode={view} />
       )}
@@ -606,7 +610,24 @@ const branchWorkspaceCss = `
    overflow-x:auto; white-space:nowrap; scrollbar-width:thin;
  }
  .ba-finance-workspace .ba-finance-subtab-list button {
-   flex:0 0 auto; min-height:31px; border-radius:7px; padding:4px 11px; font-size:11px;
+   flex:0 0 auto; min-height:32px; border-radius:8px; padding:5px 12px; font-size:11px;
+   font-weight:750; letter-spacing:.01em; cursor:pointer;
+   border:1px solid color-mix(in srgb,var(--border,rgba(15,23,42,.12)) 80%,var(--text,#182235) 20%);
+   background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 94%,var(--text,#182235) 6%);
+   color:var(--text,#182235);box-shadow:none;
+ }
+ .ba-finance-workspace .ba-finance-subtab-list button:hover {
+   background:color-mix(in srgb,var(--primary-color,#2563eb) 7%,var(--card-bg,var(--surface,#fff)));
+ }
+ .ba-finance-workspace .ba-finance-subtab-list button.is-active,
+ .ba-finance-workspace .ba-finance-subtab-list button[aria-selected="true"] {
+   border-color:color-mix(in srgb,var(--primary-color,#2563eb) 65%,var(--border,#d4dae3));
+   background:color-mix(in srgb,var(--primary-color,#2563eb) 14%,var(--card-bg,var(--surface,#fff)));
+   color:var(--text,#182235);font-weight:900;
+   box-shadow:inset 0 -2px 0 var(--primary-color,#2563eb);
+ }
+ .ba-finance-workspace .ba-finance-subtab-list button:focus-visible {
+   outline:2px solid var(--primary-color,#2563eb);outline-offset:2px;
  }
  @media print { .ba-finance-workspace .ba-finance-subtabs { display:none!important; } }
 
@@ -668,6 +689,7 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   // Kept for any existing contextual calls to navigate("...").
   parents: Parents,
   expenses: Expenses,
+  incomes: Incomes,
   fees: BranchFinanceWorkspace,
   studentReports: StudentReports,
   broadsheets: Broadsheets,

@@ -66,6 +66,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import IdentityCardActions from "./identity/IdentityCardActions";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { createPortal } from "react-dom";
@@ -4057,6 +4058,12 @@ function ActionSheet({
         </div>
 
         <div className="ba-menu-list">
+          <IdentityCardActions
+            subjectType="student" subjectId={item.id}
+            schoolId={String(row.schoolId)} branchId={String(row.branchId)}
+            name={String(row.fullName || "Student")}
+            detail={item.className} photoUrl={item.photoUrl}
+          />
           <button type="button" onClick={() => openEdit(item.row)}>
             <span>✎</span>
             <b>Edit student</b>

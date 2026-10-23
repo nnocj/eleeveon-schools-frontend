@@ -1945,7 +1945,7 @@ export interface AssessmentApplicability extends BaseSync {
   schoolId: string;
   branchId: string;
 
-  classSubjectId: string; // 🔥 ONLY source of truth
+  classSubjectId: string; // ðŸ”¥ ONLY source of truth
 
   assessmentStructureId: string;
   gradingStructureId?: string;
@@ -3065,7 +3065,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showTranscriptFinalRecommendation?: boolean;
 
   // =========================
-  // BROADSHEET — SHARED DISPLAY CONTROLS
+  // BROADSHEET â€” SHARED DISPLAY CONTROLS
   // =========================
   showBroadsheetLogo?: boolean;
   showBroadsheetWatermark?: boolean;
@@ -3077,7 +3077,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showBroadsheetStudentPhoto?: boolean;
 
   // =========================
-  // BROADSHEET — SUBJECT VIEW CONTROLS
+  // BROADSHEET â€” SUBJECT VIEW CONTROLS
   // =========================
   showBroadsheetAssessmentBreakdown?: boolean;
   showBroadsheetWeightedTotal?: boolean;
@@ -3091,7 +3091,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showBroadsheetClassAverage?: boolean;
 
   // =========================
-  // BROADSHEET — CLASS VIEW CONTROLS
+  // BROADSHEET â€” CLASS VIEW CONTROLS
   // =========================
   showBroadsheetSubjectScores?: boolean;
   showBroadsheetSubjectGrades?: boolean;
@@ -3103,7 +3103,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showBroadsheetClassLowestAverage?: boolean;
 
   // =========================
-  // BROADSHEET — ANNUAL VIEW CONTROLS
+  // BROADSHEET â€” ANNUAL VIEW CONTROLS
   // =========================
   showBroadsheetPeriodScores?: boolean;
   showBroadsheetAnnualAverage?: boolean;
@@ -3115,7 +3115,7 @@ export interface ReportCardTemplateSetting extends BaseSync {
   showBroadsheetLatestPeriod?: boolean;
 
   // =========================
-  // BROADSHEET — LABEL CUSTOMIZATION
+  // BROADSHEET â€” LABEL CUSTOMIZATION
   // =========================
   broadsheetTitleLabel?: string;
   broadsheetGeneratedDateLabel?: string;
@@ -3263,13 +3263,32 @@ export interface StudentPromotion extends BaseSync {
 // FINANCE
 // ======================================================
 
+/**
+ * Existing feeStructures.items is a JSON array synchronized by the finance engine.
+ * These optional print/requirements fields extend older {name,amount} rows
+ * without adding Dexie object stores or changing the database version.
+ * Physical requirements MUST have amount=0. Monetary charges remain fees.
+ */
+export interface FeeStructureItem {
+  name: string;
+  amount: number;
+  kind?: "fee" | "requirement" | "notice_meta";
+  itemKey?: string;
+  description?: string;
+  quantity?: number;
+  unit?: string;
+  instructions?: string;
+  required?: boolean;
+  dueDate?: string;
+}
+
 export interface FeeStructure extends BaseSync {
   schoolId: string;
   branchId: string;
   classId?: string;
   academicStructureId: string;
   academicPeriodId: string;
-  items: { name: string; amount: number }[];
+  items: FeeStructureItem[];
 }
 
 export interface Payment extends BaseSync {
@@ -4635,7 +4654,7 @@ export interface ScheduleConflict extends BaseSync {
 
 
 // ======================================================
-// ADVANCED SCHEDULING ENGINE — PLATFORM V2
+// ADVANCED SCHEDULING ENGINE â€” PLATFORM V2
 // ======================================================
 
 export interface ScheduleDomainRecord extends BaseSync {

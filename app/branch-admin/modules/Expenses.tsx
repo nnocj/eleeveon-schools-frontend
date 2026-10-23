@@ -42,6 +42,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
+import { FINANCE_CURRENCIES, formatFinanceMoney, getFinanceCurrency } from "./finance/financeCurrency";
+
 
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
@@ -253,16 +257,7 @@ function dateLabel(value?: number | string | null) {
 }
 
 function money(value: any, currency = "GHS") {
-  const amount = n(value);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency || "GHS",
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${currency || "GHS"} ${amount.toLocaleString()}`;
-  }
+  return formatFinanceMoney(value, currency);
 }
 
 function methodTone(method?: string): Tone {
@@ -377,6 +372,7 @@ export default function ExpensesPage() {
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [method, setMethod] = useState<MethodFilter>("all");
   const [organizationFilter, setOrganizationFilter] = useState("all");
+  const [currencyFilter, setCurrencyFilter] = useState("GHS");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -476,6 +472,12 @@ export default function ExpensesPage() {
     };
   }, [currencySettings, expenses]);
 
+  // Select the branch's preferred currency for meaningful, non-converted totals.
+  // All currencies remain available from the shared Filter sheet.
+  useEffect(() => {
+    setCurrencyFilter(current => current === "GHS" ? currency.code : current);
+  }, [currency.code]);
+
   const organizationMap = useMemo(
     () =>
       new Map<string, string>(organizations.map((item) => [idOf(item), rowName(item)])),
@@ -494,6 +496,8 @@ export default function ExpensesPage() {
       .filter(
         (row) => method === "all" || String(row.paymentMethod || "") === method,
       )
+      .filter((row) => currencyFilter === "all" ||
+        String(row.currencyCode || currency.code).toUpperCase() === currencyFilter)
       .filter(
         (row) =>
           organizationFilter === "all" ||
@@ -522,28 +526,31 @@ export default function ExpensesPage() {
           n(b.date || b.updatedAt || b.createdAt) -
           n(a.date || a.updatedAt || a.createdAt),
       );
-  }, [category, expenses, method, organizationFilter, organizationMap, query]);
+  }, [category, currency.code, currencyFilter, expenses, method, organizationFilter, organizationMap, query]);
+
+  const mixedCurrency = useMemo(() => new Set(filteredExpenses.map(row => String(row.currencyCode || currency.code))).size > 1, [filteredExpenses, currency.code]);
 
   const summary = useMemo(() => {
-    const total = filteredExpenses.reduce((sum, row) => sum + n(row.amount), 0);
-    const allTotal = expenses.reduce((sum, row) => sum + n(row.amount), 0);
+    const total = filteredExpenses.filter(row => !mixedCurrency || String(row.currencyCode || currency.code) === currency.code).reduce((sum, row) => sum + n(row.amount), 0);
+    const allTotal = expenses.filter(row => String(row.currencyCode || currency.code) === (currencyFilter === "all" ? currency.code : currencyFilter)).reduce((sum, row) => sum + n(row.amount), 0);
     const cash = filteredExpenses
-      .filter((row) => String(row.paymentMethod) === "cash")
+      .filter((row) => (!mixedCurrency || String(row.currencyCode || currency.code) === currency.code) && String(row.paymentMethod) === "cash")
       .reduce((sum, row) => sum + n(row.amount), 0);
     const momo = filteredExpenses
-      .filter((row) => String(row.paymentMethod) === "momo")
+      .filter((row) => (!mixedCurrency || String(row.currencyCode || currency.code) === currency.code) && String(row.paymentMethod) === "momo")
       .reduce((sum, row) => sum + n(row.amount), 0);
     const bank = filteredExpenses
-      .filter((row) => String(row.paymentMethod) === "bank")
+      .filter((row) => (!mixedCurrency || String(row.currencyCode || currency.code) === currency.code) && String(row.paymentMethod) === "bank")
       .reduce((sum, row) => sum + n(row.amount), 0);
     const card = filteredExpenses
-      .filter((row) => String(row.paymentMethod) === "card")
+      .filter((row) => (!mixedCurrency || String(row.currencyCode || currency.code) === currency.code) && String(row.paymentMethod) === "card")
       .reduce((sum, row) => sum + n(row.amount), 0);
 
     return {
       shown: filteredExpenses.length,
       all: expenses.length,
       total,
+      mixedCurrency,
       allTotal,
       cash,
       momo,
@@ -556,21 +563,22 @@ export default function ExpensesPage() {
         ).length,
         amount: filteredExpenses
           .filter(
-            (row) => String(row.expenseSourceType || "other") === item.value,
+            (row) => (!mixedCurrency || String(row.currencyCode || currency.code) === currency.code) && String(row.expenseSourceType || "other") === item.value,
           )
           .reduce((sum, row) => sum + n(row.amount), 0),
       })),
     };
-  }, [expenses, filteredExpenses]);
+  }, [currency.code, currencyFilter, expenses, filteredExpenses, mixedCurrency]);
 
   const activeFilterCount = useMemo(
     () =>
       [
         category !== "all",
+        currencyFilter !== currency.code,
         method !== "all",
         organizationFilter !== "all",
       ].filter(Boolean).length,
-    [category, method, organizationFilter],
+    [category, currency.code, currencyFilter, method, organizationFilter],
   );
 
   function openDrawer(existing?: AnyRow) {
@@ -596,12 +604,12 @@ export default function ExpensesPage() {
             receiptNumber: text(existing.receiptNumber),
             referenceNumber: text(existing.referenceNumber),
             currencyCode: text(existing.currencyCode, preferred.code),
-            currencySymbol: text(existing.currencySymbol, preferred.symbol),
+            currencySymbol: getFinanceCurrency(text(existing.currencyCode, preferred.code)).symbol,
           }
         : {
             ...emptyExpenseForm,
             currencyCode: preferred.code,
-            currencySymbol: preferred.symbol,
+            currencySymbol: getFinanceCurrency(preferred.code).symbol,
           },
     );
     setDrawerOpen(true);
@@ -632,7 +640,7 @@ export default function ExpensesPage() {
         receiptNumber: form.receiptNumber.trim(),
         referenceNumber: form.referenceNumber.trim(),
         currencyCode: form.currencyCode || currency.code,
-        currencySymbol: form.currencySymbol || currency.symbol,
+        currencySymbol: getFinanceCurrency(form.currencyCode || currency.code).symbol,
         active: true,
         isDeleted: false,
       };
@@ -664,6 +672,38 @@ export default function ExpensesPage() {
       showToast("error", error?.message || "Failed to delete expense.");
     }
   }
+
+  const printExpenses = () => {
+    printBranchTable({
+      title: "Branch Expense Records",
+      subtitle: `${filteredExpenses.length} expense records · Selected branch`,
+      columns: [
+        { key: "date", label: "Date" },
+        { key: "expense", label: "Expense" },
+        { key: "category", label: "Category" },
+        { key: "method", label: "Method" },
+        { key: "paidTo", label: "Paid To" },
+        { key: "amount", label: "Amount" },
+      ],
+      rows: filteredExpenses.map(row => ({
+        date: dateLabel(row.date),
+        expense: row.title || "Expense",
+        category: categoryInfo(row.expenseSourceType).label,
+        method: row.paymentMethod || "—",
+        paidTo: row.paidTo || "—",
+        amount: money(row.amount, row.currencyCode || currency.code),
+      })),
+    });
+  };
+
+  // Finance uses the same portal-owned action strip as Students.
+  useRegisterBranchWorkspaceToolbar("financeWorkspace", {
+    add: () => openDrawer(),
+    search: setQuery,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: printExpenses,
+  });
 
   if (loading || accountLoading || settingsLoading) {
     return (
@@ -715,55 +755,6 @@ export default function ExpensesPage() {
         </section>
       )}
 
-      <section
-        className="ex-search-card"
-        aria-label="Expenses search and actions"
-      >
-        <span
-          className={`status-dot-mini ${summary.shown ? "red" : "gray"}`}
-          title={`${summary.shown} expense(s)`}
-        />
-
-        <label className="ex-search">
-          <span>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search expenses..."
-            aria-label="Search expenses"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ex-add-inline"
-          onClick={() => openDrawer()}
-          aria-label="Add expense"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ex-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ex-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
       {(category !== "all" ||
         method !== "all" ||
         organizationFilter !== "all" ||
@@ -778,6 +769,9 @@ export default function ExpensesPage() {
             <button type="button" onClick={() => setMethod("all")}>
               Method: {method} ×
             </button>
+          )}
+          {currencyFilter !== currency.code && (
+            <button type="button" onClick={() => setCurrencyFilter(currency.code)}>Currency: {currencyFilter} ×</button>
           )}
           {organizationFilter !== "all" && (
             <button type="button" onClick={() => setOrganizationFilter("all")}>
@@ -796,7 +790,17 @@ export default function ExpensesPage() {
       )}
 
       {view === "analytics" && (
-        <AnalyticsView summary={summary} currency={currency.code} />
+        mixedCurrency ? (
+          <section className="ex-analysis-grid" aria-label="Expenses by currency">
+            {[...new Set(filteredExpenses.map(row => String(row.currencyCode || currency.code)))].map(code => (
+              <article key={code} className="ex-analysis">
+                <span>{code} expenses</span>
+                <strong>{money(filteredExpenses.filter(row => (row.currencyCode || currency.code) === code).reduce((a, r) => a + n(r.amount), 0), code)}</strong>
+                <p>Separate currency totals; no automatic conversion.</p>
+              </article>
+            ))}
+          </section>
+        ) : <AnalyticsView summary={summary} currency={currencyFilter === "all" ? currency.code : currencyFilter} />
       )}
 
       {view === "table" && (
@@ -842,6 +846,8 @@ export default function ExpensesPage() {
           setMethod={setMethod}
           organizationFilter={organizationFilter}
           setOrganizationFilter={setOrganizationFilter}
+          currencyFilter={currencyFilter}
+          setCurrencyFilter={setCurrencyFilter}
           organizations={organizations}
           onClose={() => setFilterOpen(false)}
         />
@@ -855,7 +861,7 @@ export default function ExpensesPage() {
             setMoreOpen(false);
           }}
           summary={summary}
-          currency={currency.code}
+          currency={currencyFilter === "all" ? currency.code : currencyFilter}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
@@ -1046,6 +1052,8 @@ function FilterSheet({
   setMethod,
   organizationFilter,
   setOrganizationFilter,
+  currencyFilter,
+  setCurrencyFilter,
   organizations,
   onClose,
 }: {
@@ -1055,6 +1063,8 @@ function FilterSheet({
   setMethod: (value: MethodFilter) => void;
   organizationFilter: string;
   setOrganizationFilter: (value: string) => void;
+  currencyFilter: string;
+  setCurrencyFilter: (value: string) => void;
   organizations: AnyRow[];
   onClose: () => void;
 }) {
@@ -1071,6 +1081,13 @@ function FilterSheet({
           </button>
         </div>
         <div className="ex-form compact">
+          <label>
+            <span>Currency</span>
+            <select value={currencyFilter} onChange={event => setCurrencyFilter(event.target.value)}>
+              <option value="all">All currencies (keep totals separate)</option>
+              {FINANCE_CURRENCIES.map(item => <option key={item.code} value={item.code}>{item.name} ({item.code})</option>)}
+            </select>
+          </label>
           <label>
             <span>Category</span>
             <select
@@ -1124,6 +1141,7 @@ function FilterSheet({
               setCategory("all");
               setMethod("all");
               setOrganizationFilter("all");
+              setCurrencyFilter("all");
             }}
           >
             Reset
@@ -1192,7 +1210,7 @@ function MoreSheet({
           >
             <span>◔</span>
             <b>Analytics</b>
-            <small>{money(summary.total, currency)} total shown</small>
+            <small>{summary.mixedCurrency ? "Multiple currencies — view separate totals" : `${money(summary.total, currency)} total shown`}</small>
           </button>
           <button type="button" onClick={onAdd}>
             <span>📉</span>
@@ -1370,15 +1388,19 @@ function ExpenseDrawer({
             </label>
             <label>
               <span>Currency</span>
-              <input
+              <select
                 value={form.currencyCode}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    currencyCode: event.target.value.toUpperCase(),
-                  })
-                }
-              />
+                onChange={(event) => {
+                  const choice = getFinanceCurrency(event.target.value);
+                  setForm({ ...form, currencyCode: choice.code, currencySymbol: choice.symbol });
+                }}
+              >
+                {FINANCE_CURRENCIES.map(item => (
+                  <option key={item.code} value={item.code}>
+                    {item.name} ({item.code})
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="wide">
               <span>Description</span>
@@ -1507,4 +1529,21 @@ function AnalyticsView({
 
 const css = `
 @keyframes spin{to{transform:rotate(360deg)}}.ex-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--ex-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.ex-page *,.ex-page *::before,.ex-page *::after{box-sizing:border-box;min-width:0}.ex-page button,.ex-page input,.ex-page select,.ex-page textarea{font:inherit;max-width:100%}.ex-page button{-webkit-tap-highlight-color:transparent}.ex-page input,.ex-page select,.ex-page textarea{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.ex-page textarea{min-height:110px;padding:12px;resize:vertical;line-height:1.5}.ex-page input:focus,.ex-page select:focus,.ex-page textarea:focus{border-color:color-mix(in srgb,var(--ex-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--ex-primary) 12%,transparent)}.ex-state,.ex-search-card,.expense-row,.ex-table-card,.ex-analysis,.ex-empty,.ex-sheet,.ex-form-card{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.ex-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.ex-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--ex-primary) 18%,transparent);border-top-color:var(--ex-primary);animation:spin .8s linear infinite}.ex-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.ex-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ex-toast{position:sticky;top:8px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:12px 14px;border-radius:18px;font-size:13px;font-weight:850;box-shadow:0 18px 40px rgba(15,23,42,.12)}.ex-toast.success{background:rgba(34,197,94,.14);color:#166534}.ex-toast.error,.ex-inline-error{background:rgba(239,68,68,.12);color:#991b1b}.ex-toast.info{background:rgba(59,130,246,.13);color:#1d4ed8}.ex-toast button{border:0;background:transparent;color:currentColor;font-weight:1000;cursor:pointer}.ex-inline-error{padding:10px 12px;border-radius:18px;font-size:12px;font-weight:850;margin-bottom:10px}.ex-search-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.ex-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.ex-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.ex-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.ex-icon-button,.ex-filter-button,.ex-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.ex-add-inline{border-color:var(--ex-primary);background:var(--ex-primary);color:#fff;font-size:25px;box-shadow:0 12px 28px color-mix(in srgb,var(--ex-primary) 22%,transparent)}.ex-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.ex-filter-button{position:relative;background:color-mix(in srgb,var(--ex-primary) 8%,var(--card-bg,#fff));color:var(--ex-primary)}.ex-filter-button.active{background:var(--ex-primary);color:#fff;border-color:var(--ex-primary)}.ex-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-flex}.status-dot-mini.red{background:#ef4444}.status-dot-mini.gray{background:var(--muted,#64748b)}.ex-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.ex-filter-chips::-webkit-scrollbar{display:none}.ex-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--ex-primary) 11%,transparent);color:var(--ex-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.ex-list{display:grid;gap:8px;margin-top:10px}.expense-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left}.expense-avatar{width:48px;height:48px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--ex-primary) 12%,var(--surface,#fff));font-size:22px}.expense-main,.expense-main strong,.expense-main small,.expense-main em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.expense-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000}.expense-main small{margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:850}.expense-main em{margin-top:3px;color:color-mix(in srgb,var(--muted,#64748b) 86%,var(--text,#111827));font-size:11px;font-weight:750;font-style:normal}.expense-side{display:flex;align-items:center;gap:5px}.expense-side button{min-height:31px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-size:11px;font-weight:950;padding:0 9px;cursor:pointer}.expense-side button.danger,.ex-table-actions button.danger{color:#991b1b;background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));border-color:color-mix(in srgb,#dc2626 24%,var(--border,rgba(0,0,0,.10)))}.ex-chip{max-width:100%;display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:capitalize}.ex-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.ex-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.ex-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.ex-chip.gray{background:color-mix(in srgb,var(--muted,#64748b) 14%,transparent);color:var(--muted,#64748b)}.ex-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.ex-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.ex-sheet-backdrop,.ex-drawer-layer{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.50);backdrop-filter:blur(12px)}.ex-sheet{width:min(760px,100%);max-height:min(88dvh,760px);overflow-y:auto;padding:14px;border-radius:28px 28px 22px 22px;box-shadow:0 30px 90px rgba(15,23,42,.32);animation:sheetIn .18s var(--ease)}.ex-sheet.small{width:min(520px,100%)}@keyframes sheetIn{from{transform:translateY(16px);opacity:.7}to{transform:translateY(0);opacity:1}}.ex-sheet-head,.ex-drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px}.ex-sheet-head h2,.ex-drawer-head h2{margin:0;color:var(--text,#111827);font-size:21px;font-weight:1000;letter-spacing:-.05em}.ex-sheet-head p,.ex-drawer-head p{margin:0;color:var(--ex-primary);font-size:10px;font-weight:1000;letter-spacing:.08em;text-transform:uppercase}.ex-sheet-head p+*,.ex-drawer-head p+*{margin-top:2px}.ex-sheet-head span,.ex-drawer-head span{display:block;margin-top:5px;color:var(--muted,#64748b);font-size:12px;font-weight:800}.ex-sheet-head button,.ex-drawer-head button{width:38px;height:38px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-weight:1000;cursor:pointer;flex:0 0 auto}.ex-form{display:grid;gap:10px}.ex-form label{display:grid;gap:6px}.ex-form span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.ex-menu-list{display:grid;gap:8px}.ex-menu-list button{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:10px;align-items:center;min-height:58px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;padding:9px;background:var(--surface,#fff);color:var(--text,#111827);text-align:left;cursor:pointer}.ex-menu-list button span{grid-row:span 2;width:42px;height:42px;display:grid;place-items:center;border-radius:16px;background:color-mix(in srgb,var(--ex-primary) 10%,transparent);color:var(--ex-primary);font-weight:1000}.ex-menu-list button b,.ex-menu-list button small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ex-menu-list button b{font-size:13px;font-weight:1000}.ex-menu-list button small{margin-top:2px;color:var(--muted,#64748b);font-size:11px;font-weight:750}.ex-menu-list button.active{border-color:color-mix(in srgb,var(--ex-primary) 34%,var(--border,rgba(0,0,0,.10)));background:color-mix(in srgb,var(--ex-primary) 8%,var(--surface,#fff))}.ex-sheet-actions,.ex-drawer-actions{position:sticky;bottom:-14px;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px;padding:12px 0 2px;background:linear-gradient(to top,var(--card-bg,var(--surface,#fff)) 70%,transparent)}.ex-sheet-actions button,.ex-drawer-actions button{min-height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;padding:0 16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--surface,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.ex-sheet-actions button.primary,.ex-drawer-actions button.primary{border-color:var(--ex-primary);background:var(--ex-primary);color:#fff;box-shadow:0 14px 32px color-mix(in srgb,var(--ex-primary) 25%,transparent)}.ex-table-card,.ex-analysis,.ex-empty,.ex-form-card{padding:13px;border-radius:24px}.ex-table-card{margin-top:10px}.ex-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.08))}.ex-table-scroll table{width:100%;min-width:1020px;border-collapse:collapse;background:var(--card-bg,var(--surface,var(--bg,transparent)))}.ex-table-scroll th,.ex-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px}.ex-table-scroll th{background:var(--table-header-bg,color-mix(in srgb,var(--ex-primary) 6%,var(--card-bg,var(--surface,var(--bg,transparent)))));color:var(--table-header-text,var(--muted,var(--text)));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em}.ex-table-scroll td strong,.ex-table-scroll td span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ex-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.ex-table-actions{display:flex;gap:7px;overflow-x:auto}.ex-table-actions button{flex:0 0 auto;min-height:34px;border:1px solid var(--ex-primary);border-radius:999px;padding:0 12px;background:var(--ex-primary);color:#fff;font-size:11px;font-weight:950;cursor:pointer}.ex-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.ex-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.ex-analysis span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.ex-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.ex-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.ex-analysis-list{display:grid;gap:10px;margin-top:12px}.ex-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.ex-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.ex-analysis-list b,.ex-analysis-list small{font-size:12px}.ex-analysis-list small{color:var(--muted,#64748b);font-weight:850}.ex-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.ex-progress i{display:block;height:100%;border-radius:inherit;background:var(--ex-primary)}.ex-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed;margin-top:10px}.ex-empty div{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--ex-primary) 12%,var(--surface,#fff));font-size:28px}.ex-empty h3{margin:0;font-size:18px;font-weight:1000}.ex-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.ex-drawer-layer{place-items:stretch end;padding:0}.ex-drawer-overlay{position:absolute;inset:0;border:0;background:transparent;cursor:pointer}.ex-drawer{position:relative;z-index:1;width:min(720px,100%);height:100dvh;overflow-y:auto;padding:14px;background:var(--card-bg,var(--surface,#fff));box-shadow:-24px 0 80px rgba(15,23,42,.28)}.ex-form-card{display:grid;gap:10px}.ex-form-grid{display:grid;grid-template-columns:1fr;gap:10px}.ex-form-grid label{display:grid;gap:6px}.ex-form-grid label.wide{grid-column:1/-1}.ex-form-grid span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}@media (min-width:680px){.ex-page{padding:calc(12px * var(--local-density-scale,1));padding-bottom:44px}.ex-search-card{grid-template-columns:auto minmax(0,1fr) 48px 48px 48px}.ex-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.expense-row{border-radius:24px;padding:12px}.expense-row{grid-template-columns:auto minmax(0,1fr)}.expense-side{grid-column:1/-1;justify-content:flex-end}.ex-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.ex-analysis.wide{grid-column:span 2}.ex-sheet-backdrop{place-items:center;padding:18px}.ex-sheet{border-radius:28px;padding:18px}.ex-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (min-width:1040px){.ex-page{padding:calc(16px * var(--local-density-scale,1));padding-bottom:48px}.ex-search-card,.ex-list,.ex-analysis-grid,.ex-table-card,.ex-filter-chips{max-width:1180px;margin-left:auto;margin-right:auto}.ex-list{grid-template-columns:repeat(3,minmax(0,1fr))}.ex-analysis-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.ex-analysis.wide{grid-column:span 2}.expense-row{grid-template-columns:auto minmax(0,1fr) auto}.expense-side{grid-column:auto;justify-content:flex-end}}@media (max-width:520px){.ex-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.ex-icon-button,.ex-filter-button,.ex-add-inline{width:40px;height:40px}.expense-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.expense-side{grid-column:1/-1;justify-content:flex-end;overflow-x:auto}.ex-sheet,.ex-drawer{padding:12px}.ex-sheet-actions,.ex-drawer-actions{display:grid;grid-template-columns:minmax(0,1fr)}.ex-sheet-actions button,.ex-drawer-actions button{width:100%}}
+
+/* Students V2 visual language: compact cards, themed texture, flat table surfaces. */
+.ex-page{--ex-primary:var(--ba-primary,var(--primary-color,#2563eb));min-height:100px;padding:7px!important;padding-bottom:20px!important;background:radial-gradient(circle at top left,color-mix(in srgb,var(--ex-primary) 6%,transparent),transparent 22rem),var(--bg,transparent);font-size:var(--font-size,13px);}
+.ex-list{margin-top:4px;gap:8px;max-width:none;}
+.expense-row,.ex-table-card,.ex-analysis,.ex-empty{border-radius:12px;box-shadow:none;padding:10px;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 96%,var(--ex-primary) 4%);}
+.expense-avatar{width:40px;height:40px;border-radius:10px;font-size:18px;}
+.expense-main strong{font-size:13px;font-weight:800;}
+.expense-main small{font-size:11px;}
+.ex-table-card{padding:5px;margin-top:4px;}
+.ex-table-scroll{border-radius:9px;}
+.ex-sheet,.ex-form-card{border-radius:14px;box-shadow:none;}
+.ex-drawer{background:var(--card-bg,var(--surface,#fff));}
+.ex-page input,.ex-page select,.ex-page textarea{border-radius:9px;font-weight:650;}
+.ex-page button:focus-visible{outline:2px solid var(--ex-primary);outline-offset:2px;}
+@media(min-width:680px){.ex-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1040px){.ex-list{grid-template-columns:repeat(4,minmax(0,1fr));max-width:none;}.ex-table-card,.ex-analysis-grid,.ex-filter-chips{max-width:none;}}
+@media(max-width:520px){.ex-page{padding:4px!important;padding-bottom:12px!important;}.ex-list{grid-template-columns:1fr;}.expense-row{border-radius:11px;}}
 `;

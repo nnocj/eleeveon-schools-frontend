@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import TermNoticePrintTemplate from "./TermNoticePrintTemplate";
 import StudentTrackingPrintTemplate, { type TrackingPrintRow } from "./StudentTrackingPrintTemplate";
+import BranchReportPreview, { BranchReportZoomControls, BranchReportZoomProvider } from "../../../components/role-portals/shell/BranchReportPreview";
 import { FINANCE_CURRENCIES, formatFinanceMoney } from "./financeCurrency";
 import { useSettings } from "../../../context/settings-context";
 import { useActiveBranch } from "../../../context/active-branch-context";
@@ -118,6 +119,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [payPickerStudentId, setPayPickerStudentId] = useState("");
   const [view, setView] = useState<"cards" | "table">("cards");
+  // Like Assessment Entries, Term Notices starts with a class browser.
+  const [openedNoticeClass, setOpenedNoticeClass] = useState(false);
+  const [trackingPreviewRows, setTrackingPreviewRows] = useState<TrackingPrintRow[] | null>(null);
   // The preview is separate from the document-only print root. Users can
   // inspect a general class notice or every student's personalised notice.
   const [previewMode, setPreviewMode] = useState<"class" | "batch" | "student" | "classes" | "all_students" | null>(null);
@@ -323,6 +327,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       }
       setAppliedClassIds(completed);
       setClassId(completed[0] || classId);
+      setOpenedNoticeClass(true);
       setEditorOpen(false);
       await load();
       setMessage(`Notice saved for ${completed.length} ${completed.length === 1 ? "class" : "classes"}: ${completed.map(classLabel).join(", ")}. You can preview, print, or issue student records.`);
@@ -493,7 +498,11 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       itemsRequired: row.items?.total,
       status: row.paidStatus === "paid" ? "Paid" : row.paidStatus === "part" ? "Part paid" : "Unpaid",
     }));
-    flushSync(() => { setPrintJobs([]); setTrackingPrintRows(rows); });
+    setTrackingPreviewRows(rows);
+  };
+  const printTrackingNow = () => {
+    if (!trackingPreviewRows?.length) return;
+    flushSync(() => { setPrintJobs([]); setTrackingPrintRows(trackingPreviewRows); });
     window.print();
   };
   const printOneFromPicker = () => {
@@ -510,7 +519,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     search: setQuery,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
-    print: () => section === "tracking" ? printTrackingList() : openPreview("class"),
+    print: () => section === "tracking" ? printTrackingList() :
+      openedNoticeClass ? openPreview("class") : setMessage("Select a class card to preview its term notice."),
   });
 
   const schoolName = id(activeSchool?.name) || "School";
@@ -530,15 +540,40 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     <div className="ef-no-print">
       {message && <div role="status" className="ef-message" onClick={() => setMessage("")}>{message} <span>×</span></div>}
       {section === "notices" && <>
-        <div className="ef-heading"><div><strong>Term Fees & Requirements</strong><span>{notice ? `${fees.length} fees · ${requirements.length} items` : "Prepare the next-term notice"}{appliedClassIds.length > 1 ? ` · Batch: ${appliedClassIds.map(classLabel).join(", ")}` : ""}</span></div></div>
+        {!openedNoticeClass ? <>
+          <div className="ef-class-browser-caption">Choose a class <span>{selectedPeriod?.name || "Select an academic period in Filter"}</span></div>
+          <div className="ef-class-browser" aria-label="Term notice classes">
+            {classes.filter(row => !query.trim() || `${row.name} ${row.code || ""}`.toLowerCase().includes(query.toLowerCase())).map(row => {
+              const classNotice = getNoticeForClass(row.id);
+              const feeItems = (classNotice?.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item));
+              const requirements = (classNotice?.items || []).filter(isRequirement);
+              const studentCount = studentsForClass(row.id).length;
+              return <button key={row.id} type="button" className="ef-class-card" onClick={() => { setClassId(row.id); setOpenedNoticeClass(true); }}>
+                <span className="ef-class-card-mark">{row.name.slice(0,1).toUpperCase()}</span>
+                <span className="ef-class-card-main"><strong>{row.name}</strong><small>{studentCount} student{studentCount === 1 ? "" : "s"} · {selectedPeriod?.name || "No period"}</small></span>
+                <span className={`ef-class-card-status ${classNotice ? "configured" : "draft"}`}>
+                  <i />{classNotice ? `${feeItems.length} fees · ${requirements.length} items` : "Not prepared"}
+                </span>
+                <span aria-hidden="true" className="ef-class-card-arrow">›</span>
+              </button>;
+            })}
+          </div>
+          {!classes.length && <div className="ef-empty">Create classes in Setup before preparing term notices.</div>}
+          <p className="ef-help">Use + to prepare notices for multiple classes or all classes in an organization.</p>
+        </> : <>
+        <div className="ef-class-detail-top">
+          <button type="button" className="ef-back-classes" onClick={() => setOpenedNoticeClass(false)}>← Classes</button>
+          <span className="ef-class-context">{classTitle} · {periodTitle}</span>
+        </div>
         <div className="ef-grid">
           <article className="ef-panel"><header>Fees Payable <span>{fees.length} entries</span></header>{fees.length ? fees.map((item, n) => <div className="ef-line" key={n}><span>{item.name}</span><b>{formatAmount(item.amount)}</b></div>) : <div className="ef-muted">No fees configured for this class and period.</div>}<div className="ef-line total"><span>Total</span><b>{formatAmount(feesTotal)}</b></div></article>
           <article className="ef-panel"><header>Items to Bring or Purchase <span>{requirements.length} entries</span></header>{requirements.length ? requirements.map((item, n) => <div className="ef-line" key={n}><span>{item.name}{item.instructions ? <small>{item.instructions}</small> : null}</span><b>{item.quantity || 1} {item.unit || "pcs"}</b></div>) : <div className="ef-muted">No physical requirements configured.</div>}</article>
         </div>
         <p className="ef-help">Print notices without invoicing, or issue student records to begin tracking payments and materials. Required items have no monetary charge unless separately listed as a fee.</p>
+        </>}
       </>}
       {section === "tracking" && <>
-        <div className="ef-heading"><div><strong>Student Tracking</strong><span>{displayed.length} students in {classTitle} · Print the filtered list with the shared Print action</span></div></div>
+        <div className="ef-heading"><div><strong>Student Tracking</strong><span>{classTitle} · {periodTitle} · {displayed.length} students</span></div></div>
         {view === "table" ? (
           <section className="ef-table-card" aria-label="Student fee records">
             <div className="ef-table-wrap">
@@ -703,10 +738,39 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       </section>
     </div>, document.body
   )}
+  {canPortal && trackingPreviewRows && createPortal(
+    <div className="ef-preview-backdrop ef-register-preview-backdrop" role="presentation" onMouseDown={event => {
+      if (event.target === event.currentTarget) setTrackingPreviewRows(null);
+    }}>
+      <section className="ef-preview-dialog ef-register-preview-dialog" role="dialog" aria-modal="true" aria-label="Student Tracking A4 preview">
+        <BranchReportZoomProvider>
+          <header className="ef-preview-toolbar report-no-print">
+            <div><strong>Student Tracking Report</strong><small>{classTitle} · {periodTitle} · {trackingPreviewRows.length} students</small></div>
+            <div className="ef-preview-controls">
+              <BranchReportZoomControls />
+              <button type="button" className="ef-preview-print" onClick={printTrackingNow}>Print Report</button>
+              <button type="button" className="ef-preview-close" aria-label="Close preview" onClick={() => setTrackingPreviewRows(null)}>×</button>
+            </div>
+          </header>
+          <div className="ef-register-preview-document">
+            <BranchReportPreview printZoneId="finance-student-tracking-preview" naturalWidth={794}>
+              <StudentTrackingPrintTemplate
+                schoolName={schoolName} branchName={branchName}
+                schoolLogo={id((activeBranch as any)?.logo || (activeSchool as any)?.logo)}
+                academicStructure={academicTitle} academicPeriod={periodTitle}
+                className={classTitle} rows={trackingPreviewRows} issuedOn={today()}
+              />
+            </BranchReportPreview>
+          </div>
+        </BranchReportZoomProvider>
+      </section>
+    </div>, document.body
+  )}
   {canPortal && createPortal(
     <div id="eleeveon-finance-print-root" className="ef-print" aria-hidden="true">
       {trackingPrintRows && <StudentTrackingPrintTemplate
         schoolName={schoolName} branchName={branchName}
+        schoolLogo={id((activeBranch as any)?.logo || (activeSchool as any)?.logo)}
         academicStructure={academicTitle} academicPeriod={periodTitle}
         className={classTitle} currencyCode={noticeCurrency}
         rows={trackingPrintRows} issuedOn={today()}
@@ -842,4 +906,46 @@ const styles = `
  #eleeveon-finance-print-root .ef-term-notice-a4:last-child{break-after:auto;page-break-after:auto;}
  #eleeveon-finance-print-root .ef-doc-section{break-inside:avoid-page;}
 }
+
+/* Assessment Entries-style first step: class cards, then the selected term notice. */
+.ef-class-browser-caption{display:flex;justify-content:space-between;gap:12px;align-items:center;
+ padding:6px 3px 7px;font-size:12px;font-weight:850;color:var(--text,#182235);}
+.ef-class-browser-caption span{font-size:11px;font-weight:650;color:var(--muted,#64748b);}
+.ef-class-browser{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;}
+.ef-page .ef-class-card{display:flex;align-items:center;gap:10px;min-width:0;min-height:80px;
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+ border-radius:13px;padding:11px;text-align:left;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+ color:var(--text,#182235);box-shadow:none;}
+.ef-page .ef-class-card:hover,.ef-page .ef-class-card:focus-visible{border-color:var(--ef-primary,#2563eb);
+ background:color-mix(in srgb,var(--ef-primary,#2563eb) 7%,var(--card-bg,var(--surface,#fff)));}
+.ef-class-card-mark{width:36px;height:36px;flex:0 0 36px;display:grid;place-items:center;
+ border-radius:10px;background:color-mix(in srgb,var(--ef-primary,#2563eb) 10%,var(--card-bg,var(--surface,#fff)));
+ color:var(--ef-primary,#2563eb);font-weight:950;font-size:16px;}
+.ef-class-card-main{min-width:0;flex:1;display:grid;gap:5px;}
+.ef-class-card-main strong{font-size:13px;line-height:1.15;overflow-wrap:anywhere;}
+.ef-class-card-main small{font-size:10px;font-weight:650;color:var(--muted,#64748b);}
+.ef-class-card-status{display:flex;align-items:center;gap:5px;flex:0 0 auto;
+ font-size:10px;font-weight:750;color:var(--muted,#64748b);}
+.ef-class-card-status i{width:7px;height:7px;border-radius:50%;background:#94a3b8;}
+.ef-class-card-status.configured i{background:#16a34a;}
+.ef-class-card-arrow{color:var(--muted,#64748b);font-size:19px;}
+.ef-class-detail-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0 8px;}
+.ef-page .ef-back-classes{font-size:11px;border-radius:7px;min-height:31px;}
+.ef-class-context{font-size:11px;font-weight:800;color:var(--muted,#64748b);}
+.ef-register-preview-document{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;
+ background:#d9dfe8;padding:12px;overscroll-behavior:contain;}
+.ef-register-preview-document .ba-fit-viewport{max-height:none!important;overflow-y:visible!important;}
+.ef-register-preview-document .ba-fit-stage{margin:0 auto;}
+.ef-register-preview-dialog .ef-preview-toolbar{flex:0 0 auto;}
+.ef-register-preview-dialog .ba-global-report-zoom{display:flex;gap:3px;margin-left:0;}
+.ef-register-preview-dialog .ba-global-report-zoom button,.ef-register-preview-dialog .ba-global-report-zoom select{
+ min-height:31px;min-width:31px;font-size:12px;border:1px solid var(--border,#d4dae3);
+ background:var(--surface,#fff);color:var(--text,#182235);border-radius:7px;padding:4px;}
+@media(min-width:700px) and (max-width:1150px){.ef-class-browser{grid-template-columns:repeat(3,minmax(0,1fr));}}
+@media(max-width:699px){.ef-class-browser{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
+ .ef-page .ef-class-card{display:grid;grid-template-columns:36px minmax(0,1fr) auto;
+  gap:7px;padding:9px;min-height:92px;align-content:center;}
+ .ef-class-card-status{grid-column:2/-1;}.ef-class-card-arrow{grid-column:3;grid-row:1;}
+ .ef-register-preview-document{padding:5px;}}
 `;

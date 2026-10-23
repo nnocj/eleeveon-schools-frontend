@@ -2,7 +2,7 @@
 
 /**
  * app/branch-admin/page.tsx
- * BRANCH ADMIN — ENTER SCORES + ATTENDANCE WORKSPACE
+ * BRANCH ADMIN â€” ENTER SCORES + ATTENDANCE WORKSPACE
  * Six direct destinations, Enter Scores as home; Student Attendance in Reports.
  * Other module source files and DB tables are left untouched.
  * Existing branch-scoped sync and workspace settings remain in place.
@@ -22,6 +22,7 @@ import Teachers from "./modules/Teachers";
 import Parents from "./modules/Parents";
 import Classes from "./modules/Classes";
 import Fees from "./modules/Fees";
+import TermFeesRequirements from "./modules/finance/TermFeesRequirements";
 import Expenses from "./modules/Expenses";
 import Payroll from "./modules/Payroll";
 import AssessmentEntries from "./modules/AssessmentEntries";
@@ -263,7 +264,7 @@ function BranchAdminLocalSettingsPage() {
 
 }
 
-// REPORTS — ONE WORKSPACE, CONTEXTUAL ACTIONS
+// REPORTS â€” ONE WORKSPACE, CONTEXTUAL ACTIONS
 // ======================================================
 
 type ReportsView = "reports" | "broadsheets" | "remarks" | "attendance";
@@ -321,7 +322,7 @@ function BranchReportsWorkspace(props: RouteProps) {
 }
 
 // ======================================================
-// FINANCE — FEES / EXPENSES / PAYROLL
+// FINANCE â€” FEES / EXPENSES / PAYROLL
 // Existing branch-scoped modules are rendered without modifying their internals.
 // ======================================================
 
@@ -329,6 +330,7 @@ type FinanceView = "fees" | "expenses" | "payroll";
 
 function BranchFinanceWorkspace(props: RouteProps) {
   const [view, setView] = React.useState<FinanceView>("fees");
+  const [feesView, setFeesView] = React.useState<"term" | "records">("term");
 
   const CurrentView: React.ComponentType<RouteProps> =
     view === "expenses"
@@ -365,13 +367,24 @@ function BranchFinanceWorkspace(props: RouteProps) {
           ))}
         </div>
       </div>
-      <CurrentView {...props} />
+      {view === "fees" ? (
+        <div className="ba-finance-fees-pane">
+          <div className="ba-finance-fees-subtabs" role="group" aria-label="Fee tools">
+            {([ ["term", "Term Notices & Tracking"], ["records", "Fee Records"] ] as const).map(([key, label]) => (
+              <button key={key} type="button" className={feesView === key ? "is-active" : ""} aria-pressed={feesView === key} onClick={() => setFeesView(key)}>{label}</button>
+            ))}
+          </div>
+          {feesView === "term" ? <TermFeesRequirements /> : <Fees {...props} />}
+        </div>
+      ) : (
+        <CurrentView {...props} />
+      )}
     </div>
   );
 }
 
 // ======================================================
-// SETUP — FIRST-PASS UNIFIED WORKSPACE
+// SETUP â€” FIRST-PASS UNIFIED WORKSPACE
 // Existing editors remain functional until their fields are
 // progressively merged into independent-save form sections.
 // ======================================================
@@ -492,7 +505,7 @@ function BranchSetupWorkspace(props: RouteProps) {
                 <strong>{section.title}</strong>
                 <small>{section.description}</small>
               </span>
-              <span className="ba-setup-chevron" aria-hidden="true">{isOpen ? "⌃" : "⌄"}</span>
+              <span className="ba-setup-chevron" aria-hidden="true">{isOpen ? "âŒƒ" : "âŒ„"}</span>
             </button>
             {isOpen && (
               <div className="ba-setup-expanded" id={sectionId}>
@@ -564,7 +577,7 @@ const branchWorkspaceCss = `
 .ba-reports-workspace .student-reports-page .ba-print-zone { width:100%; padding:0!important; }
 .ba-reports-workspace .ba-print-head,
 .ba-reports-workspace .ba-report-toolbar { display:none!important; }
-/* V15 — mobile has dedicated full-width tab row, then a right-aligned zoom row. */
+/* V15 â€” mobile has dedicated full-width tab row, then a right-aligned zoom row. */
 @media(max-width:640px) {
  .ba-reports-workspace .ba-report-subtabs {
    display:flex; flex-direction:column; align-items:stretch;
@@ -599,6 +612,11 @@ const branchWorkspaceCss = `
 
  /* FINANCE: compact, branch-workspace-aligned contextual tabs. */
  .ba-finance-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
+ .ba-finance-fees-pane {min-width:0;width:100%;}
+ .ba-finance-fees-subtabs {display:flex;gap:6px;overflow-x:auto;min-width:0;margin:4px 0 9px;padding:0 0 5px;border-bottom:1px solid var(--border,rgba(15,23,42,.1));}
+ .ba-finance-fees-subtabs button {flex:0 0 auto;min-height:30px;border:1px solid var(--border,rgba(15,23,42,.1));border-radius:8px;background:var(--surface,#fff);color:var(--text,#111827);font-size:11px;font-weight:750;padding:5px 10px;cursor:pointer;}
+ .ba-finance-fees-subtabs button.is-active {background:color-mix(in srgb,var(--primary-color,#2563eb) 12%,var(--surface,#fff));border-color:var(--primary-color,#2563eb);}
+ @media print {.ba-finance-fees-subtabs{display:none!important;}}
  .ba-finance-workspace .ba-finance-subtabs {
    display:flex; align-items:center; width:100%; min-width:0; margin:0;
    padding:4px 0 5px; position:sticky; top:0; z-index:22;
@@ -645,12 +663,12 @@ export const NAV_SECTIONS: RoleNavSection[] = [
     title: "Workspaces",
     defaultOpen: true,
     items: [
-      { key: "assessmentEntries", label: "Enter Scores", icon: "📝" },
-      { key: "reportsWorkspace", label: "Reports", icon: "📄" },
-      { key: "students", label: "Students", icon: "👥" },
-      { key: "financeWorkspace", label: "Finance", icon: "💰" },
-      { key: "teachers", label: "Teachers", icon: "👩‍🏫" },
-      { key: "setupWorkspace", label: "Setup", icon: "⚙️" },
+      { key: "assessmentEntries", label: "Enter Scores", icon: "ðŸ“" },
+      { key: "reportsWorkspace", label: "Reports", icon: "ðŸ“„" },
+      { key: "students", label: "Students", icon: "ðŸ‘¥" },
+      { key: "teachers", label: "Teachers", icon: "ðŸ‘©â€ðŸ«" },
+      { key: "financeWorkspace", label: "Finance", icon: "ðŸ’°" },
+      { key: "setupWorkspace", label: "Setup", icon: "âš™ï¸" },
     ],
   },
 ];

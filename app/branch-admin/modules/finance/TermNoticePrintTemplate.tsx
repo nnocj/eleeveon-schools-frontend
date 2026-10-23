@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * Eleeveon Schools â€” printable A4 next-term fee and materials notice.
+ * Eleeveon Schools — printable A4 next-term fee and materials notice.
  * A presentation component, like a student report template: it never reads
  * Dexie and never creates invoices or payment records.
  * Keep the amount payable independent from the physical supplies checklist.
  */
 import React from "react";
 import type { FeeStructureItem } from "../../../lib/db/db";
+import { formatFinanceMoney, getFinanceCurrency } from "./financeCurrency";
 
 export type TermNoticePrintTemplateProps = {
   schoolName: string;
@@ -25,23 +26,20 @@ export type TermNoticePrintTemplateProps = {
   fees: FeeStructureItem[];
   requirements: FeeStructureItem[];
   studentBalance?: number;
+  currencyCode?: string;
   dueDate?: string;
   notice?: string;
   issuedOn: string;
 };
 
-const cash = (amount: number) =>
-  `GHâ‚µ${Number(amount || 0).toLocaleString("en-GH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-
 export default function TermNoticePrintTemplate({
   schoolName, branchName, schoolLogo, schoolMotto, schoolAddress,
   schoolPhone, primaryColor = "#1e4f83", academicStructure,
   academicPeriod, className, studentName, admissionNumber,
-  fees, requirements, studentBalance, dueDate, notice, issuedOn,
+  fees, requirements, studentBalance, dueDate, notice, issuedOn, currencyCode = "GHS",
 }: TermNoticePrintTemplateProps) {
+  const cash = (amount: number) => formatFinanceMoney(amount, currencyCode);
+  const currencyLabel = getFinanceCurrency(currencyCode);
   const total = fees.reduce((value, item) => value + Math.max(0, Number(item.amount) || 0), 0);
 
   return (
@@ -64,7 +62,7 @@ export default function TermNoticePrintTemplate({
         .ef-term-notice-a4 .ef-document-info>div:last-child {border-right:0;}
         .ef-term-notice-a4 .ef-document-info small {display:block;text-transform:uppercase;font-size:9px;letter-spacing:.3px;color:#64748b;font-weight:850;}
         .ef-term-notice-a4 .ef-document-info b {display:block;font-size:12px;overflow-wrap:anywhere;}
-        .ef-term-notice-a4 .ef-doc-section {margin-top:16px;break-inside:avoid-page;}
+        .ef-term-notice-a4 .ef-doc-section {margin-top:16px;break-inside:auto;}
         .ef-term-notice-a4 .ef-doc-section h3 {font-size:13.5px;text-transform:uppercase;margin:0 0 6px;color:#182d47;}
         .ef-term-notice-a4 .ef-doc-table {border-collapse:collapse;width:100%;table-layout:fixed;}
         .ef-term-notice-a4 .ef-doc-table th {background:#e9eff5;color:#1b3148;text-align:left;font-weight:800;font-size:11px;}
@@ -77,7 +75,9 @@ export default function TermNoticePrintTemplate({
         @media print {
           @page {size:A4 portrait;margin:11mm;}
           .ef-term-notice-a4{width:100%;padding:0!important;page-break-after:always;break-after:page;box-shadow:none!important;border:0!important;}
-          .ef-term-notice-a4 .ef-doc-section,.ef-term-notice-a4 .ef-doc-note {break-inside:avoid-page;}
+          .ef-term-notice-a4 .ef-doc-note {break-inside:avoid-page;}
+          .ef-term-notice-a4 thead{display:table-header-group;}
+          .ef-term-notice-a4 tr{break-inside:avoid-page;}
         }
       `}</style>
       <header className="ef-document-head">
@@ -86,23 +86,23 @@ export default function TermNoticePrintTemplate({
           <h1 className="ef-document-school">{schoolName}</h1>
           {schoolMotto && <p className="ef-document-motto">{schoolMotto}</p>}
           {branchName && <p className="ef-document-contact" style={{fontWeight:800}}>{branchName}</p>}
-          {(schoolAddress || schoolPhone) && <p className="ef-document-contact">{[schoolAddress,schoolPhone ? `Tel: ${schoolPhone}` : ""].filter(Boolean).join("  â€¢  ")}</p>}
+          {(schoolAddress || schoolPhone) && <p className="ef-document-contact">{[schoolAddress,schoolPhone ? `Tel: ${schoolPhone}` : ""].filter(Boolean).join("  •  ")}</p>}
         </div>
         <div aria-hidden="true" />
       </header>
       <div className="ef-document-title">
         <h2>Next Term Fees &amp; Requirements</h2>
-        <p>{academicStructure} Â· {academicPeriod}</p>
+        <p>{academicStructure} · {academicPeriod}</p>
       </div>
       <div className="ef-document-info">
         <div><small>Class</small><b>{className}</b></div>
         <div><small>Student</small><b>{studentName || "All Students"}</b></div>
-        <div><small>Admission No.</small><b>{admissionNumber || "â€”"}</b></div>
+        <div><small>Admission No.</small><b>{admissionNumber || "—"}</b></div>
       </div>
       <section className="ef-doc-section">
         <h3>A. Fees Payable</h3>
         <table className="ef-doc-table">
-          <thead><tr><th>Fee Description</th><th className="ef-doc-number">Amount (GHâ‚µ)</th></tr></thead>
+          <thead><tr><th>Fee Description</th><th className="ef-doc-number">Amount ({currencyLabel.code})</th></tr></thead>
           <tbody>
             {fees.length ? fees.map((item,index)=><tr key={`${item.itemKey || item.name}-${index}`}><td>{item.name}</td><td className="ef-doc-number">{cash(item.amount)}</td></tr>) : <tr><td colSpan={2}>No fees specified for this period.</td></tr>}
             <tr className="ef-doc-total"><td>Total Fees</td><td className="ef-doc-number">{cash(total)}</td></tr>
@@ -115,13 +115,13 @@ export default function TermNoticePrintTemplate({
         <table className="ef-doc-table">
           <thead><tr><th style={{width:"42%"}}>Item</th><th style={{width:92}}>Quantity</th><th>Instructions / Specification</th></tr></thead>
           <tbody>
-            {requirements.length ? requirements.map((item,index)=><tr key={`${item.itemKey || item.name}-${index}`}><td>{item.name}{item.required === false ? " (Optional)" : ""}</td><td>{Math.max(1, Number(item.quantity) || 1)} {item.unit || "pcs"}</td><td>{item.instructions || "â€”"}</td></tr>) : <tr><td colSpan={3}>No physical supplies specified for this period.</td></tr>}
+            {requirements.length ? requirements.map((item,index)=><tr key={`${item.itemKey || item.name}-${index}`}><td>{item.name}{item.required === false ? " (Optional)" : ""}</td><td>{Math.max(1, Number(item.quantity) || 1)} {item.unit || "pcs"}</td><td>{item.instructions || "—"}</td></tr>) : <tr><td colSpan={3}>No physical supplies specified for this period.</td></tr>}
           </tbody>
         </table>
         <p style={{fontSize:10.5,color:"#526276",marginTop:5}}>Items listed here are physical supplies, not additional fees unless shown separately in Section A.</p>
       </section>
       {(dueDate || notice) && <div className="ef-doc-note"><strong>School Instructions</strong>{dueDate && <div>Payment / submission due date: {dueDate}</div>}{notice && <div>{notice}</div>}</div>}
-      <footer className="ef-doc-footer"><span>Issued by School Administration Â· {issuedOn}</span><span>Keep this notice for your records</span></footer>
+      <footer className="ef-doc-footer"><span>Issued by School Administration · {issuedOn}</span><span>Keep this notice for your records</span></footer>
     </article>
   );
 }

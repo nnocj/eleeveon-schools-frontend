@@ -41,6 +41,9 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
+import { FINANCE_CURRENCIES, formatFinanceMoney, getFinanceCurrency } from "./finance/financeCurrency";
 
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
@@ -201,16 +204,7 @@ function dateLabel(value?: number | string | null) {
 }
 
 function money(value: any, currency = "GHS") {
-  const amount = n(value);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: currency || "GHS",
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${currency || "GHS"} ${amount.toLocaleString()}`;
-  }
+  return formatFinanceMoney(value, currency);
 }
 
 function sourceLabel(value?: string) {
@@ -355,6 +349,7 @@ export default function IncomesPage() {
   const [methodFilter, setMethodFilter] = useState<MethodFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [organizationFilter, setOrganizationFilter] = useState("all");
+  const [currencyFilter, setCurrencyFilter] = useState<string>("GHS");
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -454,6 +449,10 @@ export default function IncomesPage() {
     };
   }, [currencySettings, incomes]);
 
+  useEffect(() => {
+    setCurrencyFilter(current => current === "GHS" ? currency.code : current);
+  }, [currency.code]);
+
   const organizationMap = useMemo(
     () =>
       new Map<string, string>(
@@ -480,6 +479,8 @@ export default function IncomesPage() {
           organizationFilter === "all" ||
           String(row.organizationId || "") === organizationFilter,
       )
+      .filter(row => currencyFilter === "all" ||
+        String(row.currencyCode || currency.code).toUpperCase() === currencyFilter)
       .filter((row) => {
         if (!q) return true;
         return [
@@ -496,13 +497,15 @@ export default function IncomesPage() {
           .toLowerCase()
           .includes(q);
       })
-      .sort(
-        (a, b) =>
-          n(b.date || b.updatedAt || b.createdAt) -
-          n(a.date || a.updatedAt || a.createdAt),
-      );
+      .sort((a, b) => {
+        const when = (row: AnyRow) => typeof row.date === "string" ?
+          new Date(row.date).getTime() || 0 : n(row.updatedAt || row.createdAt);
+        return when(b) - when(a);
+      });
   }, [
     incomes,
+    currency.code,
+    currencyFilter,
     methodFilter,
     organizationFilter,
     organizationMap,
@@ -510,44 +513,53 @@ export default function IncomesPage() {
     sourceFilter,
   ]);
 
+  const mixedCurrency = useMemo(() =>
+    new Set(incomeRows.map(row => String(row.currencyCode || currency.code))).size > 1,
+    [incomeRows, currency.code],
+  );
+
   const summary = useMemo(() => {
-    const total = incomeRows.reduce((sum, row) => sum + n(row.amount), 0);
-    const cash = incomeRows
+    // Never sum numeric values across different currencies.
+    const singleCurrencyRows = mixedCurrency ?
+      incomeRows.filter(row => String(row.currencyCode || currency.code) === currency.code) : incomeRows;
+    const total = singleCurrencyRows.reduce((sum, row) => sum + n(row.amount), 0);
+    const cash = singleCurrencyRows
       .filter((row) => String(row.paymentMethod) === "cash")
       .reduce((sum, row) => sum + n(row.amount), 0);
-    const momo = incomeRows
+    const momo = singleCurrencyRows
       .filter((row) => String(row.paymentMethod) === "momo")
       .reduce((sum, row) => sum + n(row.amount), 0);
-    const bank = incomeRows
+    const bank = singleCurrencyRows
       .filter((row) => String(row.paymentMethod) === "bank")
       .reduce((sum, row) => sum + n(row.amount), 0);
-    const card = incomeRows
+    const card = singleCurrencyRows
       .filter((row) => String(row.paymentMethod) === "card")
       .reduce((sum, row) => sum + n(row.amount), 0);
     return {
       shown: incomeRows.length,
+      mixedCurrency,
       all: incomes.length,
       total,
       cash,
       momo,
       bank,
       card,
-      today: incomeRows
+      today: singleCurrencyRows
         .filter((row) => String(row.date || "").slice(0, 10) === today())
         .reduce((sum, row) => sum + n(row.amount), 0),
     };
-  }, [incomeRows, incomes.length]);
+  }, [incomeRows, incomes.length, mixedCurrency, currency.code]);
 
   const sourceRows = useMemo(() => {
     const map = new Map<string, number>();
-    incomeRows.forEach((row) => {
+    incomeRows.filter(row => !mixedCurrency || String(row.currencyCode || currency.code) === currency.code).forEach((row) => {
       const key = sourceLabel(row.source);
       map.set(key, (map.get(key) || 0) + n(row.amount));
     });
     return Array.from(map.entries())
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value);
-  }, [incomeRows]);
+  }, [incomeRows, mixedCurrency, currency.code]);
 
   const activeFilterCount = useMemo(
     () =>
@@ -555,8 +567,9 @@ export default function IncomesPage() {
         methodFilter !== "all",
         sourceFilter !== "all",
         organizationFilter !== "all",
+        currencyFilter !== currency.code,
       ].filter(Boolean).length,
-    [methodFilter, organizationFilter, sourceFilter],
+    [methodFilter, organizationFilter, sourceFilter, currencyFilter, currency.code],
   );
 
   function openDrawer(existing?: AnyRow) {
@@ -579,7 +592,7 @@ export default function IncomesPage() {
             referenceNumber: text(existing.referenceNumber),
             receiptNumber: text(existing.receiptNumber),
             currencyCode: text(existing.currencyCode, currency.code),
-            currencySymbol: text(existing.currencySymbol, currency.symbol),
+            currencySymbol: getFinanceCurrency(text(existing.currencyCode, currency.code)).symbol,
           }
         : {
             ...emptyIncomeForm,
@@ -616,7 +629,7 @@ export default function IncomesPage() {
         referenceNumber: form.referenceNumber.trim(),
         receiptNumber: form.receiptNumber.trim() || generateReceipt(),
         currencyCode: form.currencyCode || currency.code,
-        currencySymbol: form.currencySymbol || currency.symbol,
+        currencySymbol: getFinanceCurrency(form.currencyCode || currency.code).symbol,
         active: true,
         isDeleted: false,
       };
@@ -648,6 +661,38 @@ export default function IncomesPage() {
       showToast("error", error?.message || "Failed to delete income.");
     }
   }
+
+  const printIncomes = () => {
+    printBranchTable({
+      title: "Branch Income Records",
+      subtitle: `${incomeRows.length} income record(s) · Selected branch`,
+      columns: [
+        { key: "date", label: "Date" },
+        { key: "income", label: "Income" },
+        { key: "source", label: "Source" },
+        { key: "method", label: "Method" },
+        { key: "receivedBy", label: "Received By" },
+        { key: "amount", label: "Amount" },
+      ],
+      rows: incomeRows.map(row => ({
+        date: dateLabel(row.date),
+        income: row.title || "Income",
+        source: sourceLabel(row.source),
+        method: methodLabel(row.paymentMethod),
+        receivedBy: row.receivedBy || "—",
+        amount: money(row.amount, row.currencyCode || currency.code),
+      })),
+    });
+  };
+
+  // Branch Admin's shared top actions: no duplicated local action strip.
+  useRegisterBranchWorkspaceToolbar("financeWorkspace", {
+    add: () => openDrawer(),
+    search: setQuery,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: printIncomes,
+  });
 
   if (loading || accountLoading || settingsLoading) {
     return (
@@ -699,58 +744,10 @@ export default function IncomesPage() {
         </section>
       )}
 
-      <section
-        className="bi-search-card"
-        aria-label="Income search and actions"
-      >
-        <span
-          className={`status-dot-mini ${summary.shown ? "green" : "gray"}`}
-          title={`${summary.shown} income record(s)`}
-        />
-
-        <label className="bi-search">
-          <span>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search incomes..."
-            aria-label="Search incomes"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="bi-add-inline"
-          onClick={() => openDrawer()}
-          aria-label="Add income"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`bi-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="bi-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
-
       {(methodFilter !== "all" ||
         sourceFilter !== "all" ||
         organizationFilter !== "all" ||
+        currencyFilter !== currency.code ||
         query.trim()) && (
         <section className="bi-filter-chips" aria-label="Active filters">
           {methodFilter !== "all" && (
@@ -761,6 +758,11 @@ export default function IncomesPage() {
           {sourceFilter !== "all" && (
             <button type="button" onClick={() => setSourceFilter("all")}>
               Source: {sourceLabel(sourceFilter)} ×
+            </button>
+          )}
+          {currencyFilter !== currency.code && (
+            <button type="button" onClick={() => setCurrencyFilter(currency.code)}>
+              Currency: {currencyFilter} ×
             </button>
           )}
           {organizationFilter !== "all" && (
@@ -780,11 +782,24 @@ export default function IncomesPage() {
       )}
 
       {view === "analytics" && (
-        <AnalyticsView
-          summary={summary}
-          sourceRows={sourceRows}
-          currency={currency.code}
-        />
+        mixedCurrency ? (
+          <section className="bi-analysis-grid" aria-label="Income totals by currency">
+            {[...new Set(incomeRows.map(row => String(row.currencyCode || currency.code)))].map(code => (
+              <article className="bi-analysis" key={code}>
+                <span>{code} income</span>
+                <strong>{money(incomeRows.filter(row => (row.currencyCode || currency.code) === code)
+                  .reduce((sum, row) => sum + n(row.amount), 0), code)}</strong>
+                <p>Totals are separate; no currency conversion.</p>
+              </article>
+            ))}
+          </section>
+        ) : (
+          <AnalyticsView
+            summary={summary}
+            sourceRows={sourceRows}
+            currency={incomeRows[0]?.currencyCode || currency.code}
+          />
+        )
       )}
 
       {view === "table" && (
@@ -832,6 +847,9 @@ export default function IncomesPage() {
           setSourceFilter={setSourceFilter}
           organizationFilter={organizationFilter}
           setOrganizationFilter={setOrganizationFilter}
+          currencyFilter={currencyFilter}
+          setCurrencyFilter={setCurrencyFilter}
+          defaultCurrency={currency.code}
           organizations={organizations}
           onClose={() => setFilterOpen(false)}
         />
@@ -846,6 +864,7 @@ export default function IncomesPage() {
           }}
           summary={summary}
           currency={currency.code}
+          mixedCurrency={mixedCurrency}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
@@ -1055,6 +1074,9 @@ function FilterSheet({
   setSourceFilter,
   organizationFilter,
   setOrganizationFilter,
+  currencyFilter,
+  setCurrencyFilter,
+  defaultCurrency,
   organizations,
   onClose,
 }: {
@@ -1064,6 +1086,9 @@ function FilterSheet({
   setSourceFilter: (value: SourceFilter) => void;
   organizationFilter: string;
   setOrganizationFilter: (value: string) => void;
+  currencyFilter: string;
+  setCurrencyFilter: (value: string) => void;
+  defaultCurrency: string;
   organizations: AnyRow[];
   onClose: () => void;
 }) {
@@ -1117,6 +1142,15 @@ function FilterSheet({
             </select>
           </label>
           <label>
+            <span>Currency</span>
+            <select value={currencyFilter} onChange={event => setCurrencyFilter(event.target.value)}>
+              <option value="all">All currencies (separate totals)</option>
+              {FINANCE_CURRENCIES.map(item => <option key={item.code} value={item.code}>
+                {item.symbol} · {item.name} ({item.code})
+              </option>)}
+            </select>
+          </label>
+          <label>
             <span>Organization</span>
             <select
               value={organizationFilter}
@@ -1138,6 +1172,7 @@ function FilterSheet({
               setSourceFilter("all");
               setMethodFilter("all");
               setOrganizationFilter("all");
+              setCurrencyFilter(defaultCurrency);
             }}
           >
             Reset
@@ -1156,6 +1191,7 @@ function MoreSheet({
   setView,
   summary,
   currency,
+  mixedCurrency,
   onRefresh,
   onAdd,
   onClose,
@@ -1164,6 +1200,7 @@ function MoreSheet({
   setView: (value: ViewMode) => void;
   summary: AnyRow;
   currency: string;
+  mixedCurrency: boolean;
   onRefresh: () => void | Promise<void>;
   onAdd: () => void;
   onClose: () => void;
@@ -1206,7 +1243,7 @@ function MoreSheet({
           >
             <span>◔</span>
             <b>Analytics</b>
-            <small>{money(summary.total, currency)} shown</small>
+            <small>{mixedCurrency ? "Separate currency totals" : `${money(summary.total, currency)} shown`}</small>
           </button>
           <button type="button" onClick={onAdd}>
             <span>💰</span>
@@ -1375,18 +1412,19 @@ function IncomeDrawer({
                 }
               />
             </label>
-            <label>
-              <span>Currency</span>
-              <input
-                value={form.currencyCode}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    currencyCode: event.target.value.toUpperCase(),
-                  })
-                }
-              />
-            </label>
+              <label>
+                <span>Currency</span>
+                <select value={form.currencyCode} onChange={event => {
+                  const selected = getFinanceCurrency(event.target.value);
+                  setForm({ ...form, currencyCode: selected.code, currencySymbol: selected.symbol });
+                }}>
+                  {FINANCE_CURRENCIES.map(item => (
+                    <option key={item.code} value={item.code}>{item.symbol} · {item.name} ({item.code})</option>
+                  ))}
+                  {!FINANCE_CURRENCIES.some(item => item.code === form.currencyCode) &&
+                    <option value={form.currencyCode}>{form.currencyCode}</option>}
+                </select>
+              </label>
             <label className="wide">
               <span>Description</span>
               <textarea
@@ -1582,4 +1620,35 @@ function AnalyticsView({
 
 const css = `
 @keyframes spin{to{transform:rotate(360deg)}}.bi-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--bi-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.bi-page *,.bi-page *::before,.bi-page *::after{box-sizing:border-box;min-width:0}.bi-page button,.bi-page input,.bi-page select,.bi-page textarea{font:inherit;max-width:100%}.bi-page button{-webkit-tap-highlight-color:transparent}.bi-page input,.bi-page select,.bi-page textarea{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.bi-page textarea{min-height:110px;padding:12px;resize:vertical;line-height:1.5}.bi-page input:focus,.bi-page select:focus,.bi-page textarea:focus{border-color:color-mix(in srgb,var(--bi-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--bi-primary) 12%,transparent)}.bi-state,.bi-search-card,.income-row,.bi-table-card,.bi-analysis,.bi-empty,.bi-sheet,.bi-form-card{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.bi-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.bi-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--bi-primary) 18%,transparent);border-top-color:var(--bi-primary);animation:spin .8s linear infinite}.bi-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.bi-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.bi-toast{position:sticky;top:8px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:12px 14px;border-radius:18px;font-size:13px;font-weight:850;box-shadow:0 18px 40px rgba(15,23,42,.12)}.bi-toast.success{background:rgba(34,197,94,.14);color:#166534}.bi-toast.error,.bi-inline-error{background:rgba(239,68,68,.12);color:#991b1b}.bi-toast.info{background:rgba(59,130,246,.13);color:#1d4ed8}.bi-toast button{border:0;background:transparent;color:currentColor;font-weight:1000;cursor:pointer}.bi-inline-error{padding:10px 12px;border-radius:18px;font-size:12px;font-weight:850;margin-bottom:10px}.bi-search-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.bi-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.bi-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.bi-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.bi-icon-button,.bi-filter-button,.bi-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.bi-add-inline{border-color:var(--bi-primary);background:var(--bi-primary);color:#fff;font-size:25px;box-shadow:0 12px 28px color-mix(in srgb,var(--bi-primary) 22%,transparent)}.bi-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.bi-filter-button{position:relative;background:color-mix(in srgb,var(--bi-primary) 8%,var(--card-bg,#fff));color:var(--bi-primary)}.bi-filter-button.active{background:var(--bi-primary);color:#fff;border-color:var(--bi-primary)}.bi-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-flex}.status-dot-mini.green{background:#22c55e}.status-dot-mini.gray{background:var(--muted,#64748b)}.bi-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.bi-filter-chips::-webkit-scrollbar{display:none}.bi-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--bi-primary) 11%,transparent);color:var(--bi-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.bi-list{display:grid;gap:7px;margin-top:10px}.income-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left}.income-avatar{width:48px;height:48px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--bi-primary) 12%,var(--surface,#fff));font-size:22px}.income-main,.income-main strong,.income-main small,.income-main em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.income-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000}.income-main small{margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:850}.income-main em{margin-top:3px;color:color-mix(in srgb,var(--muted,#64748b) 86%,var(--text,#111827));font-size:11px;font-weight:750;font-style:normal}.income-side{display:flex;align-items:center;gap:5px}.income-side button{min-height:31px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-size:11px;font-weight:950;padding:0 9px;cursor:pointer}.income-side button.danger,.bi-table-actions button.danger,.bi-sheet-actions button.danger{color:#991b1b;background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));border-color:color-mix(in srgb,#dc2626 24%,var(--border,rgba(0,0,0,.10)))}.bi-chip{max-width:100%;display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:capitalize}.bi-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.bi-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.bi-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.bi-chip.gray{background:color-mix(in srgb,var(--muted,#64748b) 14%,transparent);color:var(--muted,#64748b)}.bi-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.bi-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.bi-sheet-backdrop,.bi-drawer-layer{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.50);backdrop-filter:blur(12px)}.bi-sheet{width:min(760px,100%);max-height:min(88dvh,760px);overflow-y:auto;padding:14px;border-radius:28px 28px 22px 22px;box-shadow:0 30px 90px rgba(15,23,42,.32);animation:sheetIn .18s var(--ease);background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10))}.bi-sheet.small{width:min(520px,100%)}@keyframes sheetIn{from{transform:translateY(16px);opacity:.7}to{transform:translateY(0);opacity:1}}.bi-sheet-head,.bi-drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px}.bi-sheet-head h2,.bi-drawer-head h2{margin:0;color:var(--text,#111827);font-size:21px;font-weight:1000;letter-spacing:-.05em}.bi-sheet-head p,.bi-drawer-head span{margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5;font-weight:750}.bi-drawer-head p{margin:0;color:var(--bi-primary);font-size:10px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}.bi-sheet-head button,.bi-drawer-head button{width:38px;height:38px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-weight:1000;cursor:pointer;flex:0 0 auto}.bi-form{display:grid;gap:10px}.bi-form label{display:grid;gap:6px}.bi-form span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-menu-list{display:grid;gap:8px}.bi-menu-list button{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:10px;align-items:center;min-height:58px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;padding:9px;background:var(--surface,#fff);color:var(--text,#111827);text-align:left;cursor:pointer}.bi-menu-list button span{grid-row:span 2;width:42px;height:42px;display:grid;place-items:center;border-radius:16px;background:color-mix(in srgb,var(--bi-primary) 10%,transparent);color:var(--bi-primary);font-weight:1000}.bi-menu-list button b,.bi-menu-list button small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bi-menu-list button b{font-size:13px;font-weight:1000}.bi-menu-list button small{margin-top:2px;color:var(--muted,#64748b);font-size:11px;font-weight:750}.bi-menu-list button.active{border-color:color-mix(in srgb,var(--bi-primary) 34%,var(--border,rgba(0,0,0,.10)));background:color-mix(in srgb,var(--bi-primary) 8%,var(--surface,#fff))}.bi-sheet-actions,.bi-drawer-actions{position:sticky;bottom:-14px;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px;padding:12px 0 2px;background:linear-gradient(to top,var(--card-bg,var(--surface,#fff)) 70%,transparent)}.bi-sheet-actions button,.bi-drawer-actions button{min-height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;padding:0 16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--surface,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.bi-sheet-actions button.primary,.bi-drawer-actions button.primary{border-color:var(--bi-primary);background:var(--bi-primary);color:#fff;box-shadow:0 14px 32px color-mix(in srgb,var(--bi-primary) 25%,transparent)}.bi-drawer-layer{place-items:stretch end;padding:0}.bi-drawer-overlay{position:absolute;inset:0;border:0;background:transparent}.bi-drawer{position:relative;z-index:1;width:min(560px,100%);height:100dvh;overflow-y:auto;padding:14px;background:var(--card-bg,var(--surface,#fff));box-shadow:-30px 0 90px rgba(15,23,42,.32)}.bi-form-card{padding:12px;border-radius:22px}.bi-form-grid{display:grid;grid-template-columns:1fr;gap:10px}.bi-form-grid label{display:grid;gap:6px}.bi-form-grid label.wide{grid-column:1/-1}.bi-form-grid span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-table-card,.bi-analysis,.bi-empty{padding:13px;border-radius:24px}.bi-table-card{margin-top:10px}.bi-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.08))}.bi-table-scroll table{width:100%;min-width:900px;border-collapse:collapse;background:var(--card-bg,var(--surface,var(--bg,transparent)))}.bi-table-scroll th,.bi-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px}.bi-table-scroll th{background:var(--table-header-bg,color-mix(in srgb,var(--bi-primary) 6%,var(--card-bg,var(--surface,var(--bg,transparent)))));color:var(--table-header-text,var(--muted,var(--text)));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em}.bi-table-scroll td strong,.bi-table-scroll td span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bi-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.bi-table-actions{display:flex;gap:7px;overflow-x:auto}.bi-table-actions button{flex:0 0 auto;min-height:34px;border:1px solid var(--bi-primary);border-radius:999px;padding:0 12px;background:var(--bi-primary);color:#fff;font-size:11px;font-weight:950;cursor:pointer}.bi-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.bi-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.bi-analysis span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.bi-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.bi-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.bi-analysis-list{display:grid;gap:10px;margin-top:12px}.bi-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.bi-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.bi-analysis-list b,.bi-analysis-list small{font-size:12px}.bi-analysis-list small{color:var(--muted,#64748b);font-weight:850}.bi-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.bi-progress i{display:block;height:100%;border-radius:inherit;background:var(--bi-primary)}.bi-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed}.bi-empty div{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--bi-primary) 12%,var(--surface,#fff));font-size:28px}.bi-empty h3{margin:0;font-size:18px;font-weight:1000}.bi-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.bi-detail-grid{display:grid;grid-template-columns:1fr;gap:8px}.bi-detail-grid article,.bi-info-list article{padding:12px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.bi-detail-grid span,.bi-info-list span{display:block;color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-detail-grid b,.bi-info-list b{display:block;margin-top:5px;font-size:13px;font-weight:1000;overflow-wrap:anywhere}.bi-info-list{display:grid;gap:8px;margin-top:10px}@media (min-width:680px){.bi-page{padding:calc(12px * var(--local-density-scale,1));padding-bottom:44px}.bi-search-card{grid-template-columns:auto minmax(0,1fr) 48px 48px 48px}.bi-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.income-row{border-radius:24px;padding:12px}.income-row{grid-template-columns:auto minmax(0,1fr)}.income-side{grid-column:1/-1;justify-content:flex-end}.bi-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-analysis.wide{grid-column:span 2}.bi-sheet-backdrop{place-items:center;padding:18px}.bi-sheet{border-radius:28px;padding:18px}.bi-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (min-width:1040px){.bi-page{padding:calc(16px * var(--local-density-scale,1));padding-bottom:48px}.bi-search-card,.bi-list,.bi-analysis-grid,.bi-table-card,.bi-filter-chips{max-width:1180px;margin-left:auto;margin-right:auto}.bi-list{grid-template-columns:repeat(3,minmax(0,1fr))}.bi-analysis-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.bi-analysis.wide{grid-column:span 2}.income-row{grid-template-columns:auto minmax(0,1fr) auto}.income-side{grid-column:auto;justify-content:flex-start}}@media (max-width:520px){.bi-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.bi-icon-button,.bi-filter-button,.bi-add-inline{width:40px;height:40px}.income-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.income-side{grid-column:1/-1;justify-content:flex-end;overflow-x:auto}.bi-drawer{width:100%}.bi-sheet{border-radius:24px 24px 18px 18px;padding:12px}.bi-sheet-actions,.bi-drawer-actions{display:grid;grid-template-columns:minmax(0,1fr)}.bi-sheet-actions button,.bi-drawer-actions button{width:100%}}
+
+/* Finance V5: match Students/Expenses compact mixed-surface UI. */
+.bi-page{min-height:0;padding:3px!important;background:transparent!important;}
+.bi-list{width:100%;max-width:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.income-row{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px;
+ padding:9px 10px;border-radius:12px;border:1px solid var(--border,rgba(15,23,42,.13));
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 92%,var(--text,#182235) 8%);
+ box-shadow:none;transform:none;transition:background .15s ease;}
+.income-row:hover{transform:none;box-shadow:none;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 87%,var(--text,#182235) 13%);}
+.income-avatar{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;box-shadow:none;}
+.income-main{min-width:0;overflow-wrap:anywhere;}.income-main strong{font-size:12px;line-height:1.25;}
+.income-main small,.income-main em{font-size:11px;}
+.income-side{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
+.income-side button{min-height:29px;padding:4px 9px;border-radius:8px;font-size:10px;}
+.bi-table-card{padding:4px;margin-top:2px;width:100%;max-width:none;overflow:visible;border-radius:12px;}
+.bi-table-scroll{box-sizing:border-box;width:100%;max-width:100%;overflow-x:auto;overflow-y:auto;
+ -webkit-overflow-scrolling:touch;border-radius:10px;overscroll-behavior-x:contain;}
+.bi-table-scroll table{width:100%;min-width:850px;margin:0;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
+.bi-table-scroll thead th{position:sticky;top:0;z-index:2;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+ color:var(--text,#182235);font-weight:800;letter-spacing:.01em;text-transform:none;}
+.bi-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
+.bi-table-scroll th,.bi-table-scroll td{background-color:transparent;padding:9px 10px;font-size:12px;}
+.bi-table-scroll td strong{font-size:12px;}.bi-table-actions{gap:4px;}
+.bi-table-actions button{min-height:30px;padding:0 9px;border-radius:8px;font-size:10px;}
+.bi-analysis{border-radius:12px;box-shadow:none;}
+.bi-empty{padding:24px 12px;border-radius:12px;box-shadow:none;}
+@media(min-width:680px) and (max-width:1023px){.bi-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(min-width:1024px){.bi-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
+@media(max-width:639px){.bi-list{grid-template-columns:minmax(0,1fr);gap:7px;}}
 `;

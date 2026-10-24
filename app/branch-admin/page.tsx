@@ -336,7 +336,7 @@ function BranchFinanceWorkspace(_props: RouteProps) {
         <div className="ba-report-subtab-list ba-finance-subtab-list" role="group" aria-label="Finance sections">
           {([
             ["notices", "Term Notices"],
-            ["tracking", "Student Tracking"],
+            ["tracking", "Fee Tracking"],
             ["incomes", "Incomes"],
             ["expenses", "Expenses"],
           ] as const).map(([key, label]) => (

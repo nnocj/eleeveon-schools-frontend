@@ -2,8 +2,8 @@
 
 /**
  * Eleeveon Schools — A4 term fees and requirements notice.
- * Current selected academic term is ALWAYS the left-hand panel;
- * the succeeding configured period (if one exists) is ALWAYS the right-hand panel.
+ * This term appears first as a compact, secondary summary.
+ * Next term follows as the primary, larger and more visible section.
  * All amounts come from existing period-specific feeStructures, not projections.
  * This component is presentation-only: printing never issues invoices or payments.
  */
@@ -138,6 +138,100 @@ export default function TermNoticePrintTemplate({
       .ef-term-notice-a4 .ef-notice-disclaimer{font-size:10px;margin:13px 0 0;color:#536477;}
       .ef-term-notice-a4 .ef-doc-footer{margin-top:22px;padding-top:8px;border-top:1px solid #94a3b8;
         display:flex;justify-content:space-between;font-size:10px;color:#475569;gap:12px;}
+      /* Layout hierarchy: compact current term, then full-width prominent next term. */
+      .ef-term-notice-a4 .ef-notice-term-grid{
+        display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current{
+        background:#fafbfd;border:1px solid #d9e0e8;border-radius:5px;
+        color:#475569;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current>header{
+        background:#f3f6f9;border-bottom:1px solid #d9e0e8;
+        padding:6px 10px;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current>header small{
+        font-size:8.5px;letter-spacing:.4px;color:#64748b;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current>header strong{
+        font-size:11px;margin:0;color:#475569;font-weight:750;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-term-body{
+        display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;
+        padding:8px 10px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-section-heading{
+        font-size:9px;font-weight:750;color:#64748b;margin-bottom:4px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table th,
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table td{
+        font-size:8.5px;padding:3px 5px;border-color:#d5dde5;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table th{
+        font-size:8px;background:#f4f6f8;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-total{
+        font-size:9px;padding:5px;background:#f0f3f7;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies li{
+        padding:4px 0;font-size:8.5px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies li b,
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies small{
+        font-size:8px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-balance,
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-instructions{
+        font-size:9px;grid-column:1 / -1;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-muted{font-size:9px;}
+      /* The upcoming term is the main notice: larger, bolder and full-width. */
+      .ef-term-notice-a4 .ef-notice-term-panel.next{
+        background:#fff;border:2px solid var(--notice-accent,#1e4f83);
+        border-radius:7px;box-shadow:0 2px 8px rgba(19,45,76,.06);
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next>header{
+        background:#e8f0f9;border-bottom:2px solid var(--notice-accent,#1e4f83);
+        border-left:5px solid var(--notice-accent,#1e4f83);padding:12px 14px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next>header small{
+        font-size:10px;color:#285277;letter-spacing:.85px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next>header strong{
+        font-size:19px;line-height:1.15;font-weight:950;margin-top:5px;color:#142b44;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-term-body{
+        display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:14px 18px;padding:15px 14px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-section-heading{
+        font-size:12px;color:#18324d;margin-bottom:8px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-table th,
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-table td{
+        font-size:11px;padding:7px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-total{
+        font-size:12px;padding:9px;background:#eaf2fa;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-total strong{
+        font-size:14px;color:#132f49;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-supplies li{
+        font-size:11px;padding:8px 0;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-supplies li b{font-size:10.5px;}
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-instructions{
+        grid-column:1 / -1;font-size:11px;border-top:2px solid #d4e3f0;
+        background:#f5f9fe;padding:9px 10px;
+      }
+      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-muted{font-size:11px;}
+      @media (max-width:560px){
+        .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-term-body,
+        .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-term-body{
+          grid-template-columns:minmax(0,1fr);
+        }
+      }
       @media print{
         @page{size:A4 portrait;margin:11mm;}
         .ef-term-notice-a4{width:100%!important;min-width:0!important;min-height:0!important;
@@ -161,7 +255,7 @@ export default function TermNoticePrintTemplate({
       <div aria-hidden="true" />
     </header>
     <div className="ef-document-title"><h2>Term Fees &amp; Requirements Notice</h2>
-      <p>{academicStructure} · Current term (left) / Next term (right)</p></div>
+      <p>{academicStructure} · This term summary, followed by next term details</p></div>
     <div className="ef-document-info">
       <div><small>Class</small><b>{className}</b></div>
       <div><small>Student</small><b>{studentName || "All Students"}</b></div>
@@ -169,7 +263,7 @@ export default function TermNoticePrintTemplate({
     </div>
     <div className="ef-notice-term-grid">
       <section className="ef-notice-term-panel current" aria-label={`Current term: ${academicPeriod}`}>
-        <header><small>Current Term</small><strong>{academicPeriod}</strong></header>
+        <header><small>This Term · Current Period</small><strong>{academicPeriod}</strong></header>
         <div className="ef-notice-term-body">
           <section><h3 className="ef-notice-section-heading">Fees for this term</h3>
             <SumRows items={fees} currency={currencyCode}/></section>
@@ -184,7 +278,7 @@ export default function TermNoticePrintTemplate({
         </div>
       </section>
       <section className="ef-notice-term-panel next" aria-label={`Next term: ${nextAcademicPeriod || "not configured"}`}>
-        <header><small>Next Term</small><strong>{nextAcademicPeriod || "Not configured"}</strong>
+        <header><small>Next Term · Upcoming</small><strong>{nextAcademicPeriod || "Not configured"}</strong>
           {nextAcademicStructure && nextAcademicStructure !== academicStructure && <small>{nextAcademicStructure}</small>}</header>
         <div className="ef-notice-term-body">
           {!nextAcademicPeriod ? <p className="ef-notice-muted">The next academic term has not yet been set up in the school calendar.</p> :

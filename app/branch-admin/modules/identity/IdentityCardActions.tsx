@@ -70,7 +70,7 @@ export default function IdentityCardActions({subjectId,subjectType,schoolId,bran
           <div className="eleeveon-id-top" style={{background:accent}}>{schoolName.toUpperCase()}<br/><small>{subjectType.toUpperCase()} ID</small></div>
           <div className="eleeveon-id-core">
             {photoUrl?<img className="photo" src={photoUrl} alt="Cardholder"/>:<div style={{width:66,height:82,display:"grid",placeItems:"center",background:"#e2e8f0"}}>◉</div>}
-            <div style={{flex:1,minWidth:0}}><b style={{display:"block",fontSize:13}}>{name}</b><small>{detail||subjectType}</small><br/><small>Valid to: {card.expiresAt?new Date(card.expiresAt).toLocaleDateString():"Not set"}</small></div>
+            <div style={{flex:1,minWidth:0}}><b style={{display:"block",fontSize:13}}>{name}</b><small>{detail||subjectType}</small><br/><small>Valid to: {card?.expiresAt?new Date(card.expiresAt).toLocaleDateString():"Not set"}</small></div>
             {qr&&<img className="qr" src={qr} alt="Public verification QR code"/>}
           </div>
           <div style={{background:"#e5edf5",padding:7,textAlign:"center",fontSize:10}}>Scan QR to verify online · Powered by Eleeveon Schools</div>
@@ -78,7 +78,7 @@ export default function IdentityCardActions({subjectId,subjectType,schoolId,bran
         <p style={{fontSize:11,opacity:.8}}>Verification requires internet access. The card design is a basic layout; branch designs can be routed through the existing credential template registry.</p>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"}}>
           <button type="button" onClick={printCard}>Print ID</button>
-          <button type="button" onClick={()=>navigator.clipboard?.writeText(card.verificationUrl||"")}>Copy verification link</button>
+          <button type="button" onClick={()=>navigator.clipboard?.writeText(card?.verificationUrl||"")}>Copy verification link</button>
           <button type="button" onClick={()=>setOpen(false)}>Done</button>
         </div>
       </section>

@@ -125,7 +125,6 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   // The preview is separate from the document-only print root. Users can
   // inspect a general class notice or every student's personalised notice.
   const [previewMode, setPreviewMode] = useState<"class" | "batch" | "student" | "classes" | "all_students" | null>(null);
-  const [previewIndex, setPreviewIndex] = useState(0);
   const [previewStudentId, setPreviewStudentId] = useState("");
   const resolvedMediaById = useEntityMediaUrls({
     accountId,
@@ -144,6 +143,22 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   };
 
   useEffect(() => { setCanPortal(true); }, []);
+  // Keep body and shell content behind the modal; restore previous scroll values on exit.
+  const anyFinanceDialogOpen = Boolean(trackingStudentId || payPickerOpen || editorOpen || receivedEditor ||
+    paymentStudent || filterOpen || summaryOpen || moreOpen || individualPrintPickerOpen ||
+    previewMode || trackingPreviewRows);
+  useEffect(() => {
+    if (!anyFinanceDialogOpen || typeof document === "undefined") return;
+    const previousBody = document.body.style.overflow;
+    const previousHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBody;
+      document.documentElement.style.overflow = previousHtml;
+    };
+  }, [anyFinanceDialogOpen]);
+
   useEffect(() => {
     if (typeof window !== "undefined") setView(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
   }, []);
@@ -214,6 +229,26 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const classLabel = (targetClassId: string) => classes.find(row => row.id === targetClassId)?.name || "Class";
   const selectedStructure = structures.find(r => r.id === structureId);
   const selectedPeriod = periods.find(r => r.id === periodId);
+  // Only show a next-term figure if that period and its fee structure truly exist.
+  const currentPeriodIndex = visiblePeriods.findIndex(r => r.id === periodId);
+  const withinStructureNext = currentPeriodIndex >= 0 ? visiblePeriods[currentPeriodIndex + 1] : undefined;
+  // Term 3 may be followed by Term 1 in the NEXT academic year. Only use an
+  // actual future period with a valid start date; never make up a new period.
+  const selectedPeriodForNext = periods.find(row => row.id === periodId);
+  const currentPeriodEnd = selectedPeriodForNext?.endDate ? Date.parse(selectedPeriodForNext.endDate) : NaN;
+  const nextAcademicYearPeriod = Number.isFinite(currentPeriodEnd) ? periods
+    .filter(row => row.id !== periodId && Number.isFinite(Date.parse(row.startDate)) && Date.parse(row.startDate) >= currentPeriodEnd)
+    .sort((a, b) => Date.parse(a.startDate) - Date.parse(b.startDate))[0] : undefined;
+  const nextPeriod = withinStructureNext || nextAcademicYearPeriod;
+  const nextStructureName = structures.find(row => row.id === nextPeriod?.academicStructureId)?.name;
+  const getNoticeForPeriod = (targetClassId: string, targetPeriodId: string, targetStructureId: string): FeeStructure | undefined => noticeRows
+    .filter(row => id(row.academicStructureId) === targetStructureId && id(row.academicPeriodId) === targetPeriodId && id(row.classId) === targetClassId)
+    .sort((a, b) => {
+      const markedA = (a.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+      const markedB = (b.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+      return Number(markedB) - Number(markedA) || (b.updatedAt || 0) - (a.updatedAt || 0);
+    })[0];
+
   const selectedClass = classes.find(r => r.id === classId);
   // Reuse the canonical fee structure for this class/term. Creating a second
   // feeStructure could double-count charges in the existing Fees module.
@@ -439,7 +474,6 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     if ((kind === "batch" || kind === "all_students") && !ids.some(cid => studentsForClass(cid).length)) {
       setMessage("No students belong to those classes yet."); return;
     }
-    setPreviewIndex(0);
     setPreviewStudentId(studentId);
     setPreviewMode(kind);
   };
@@ -451,6 +485,12 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     const meta = (documentNotice.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
     const documentCurrency = id(meta?.description) || preferredCurrency;
     const student = job.studentId ? students.find(row => row.id === job.studentId) : undefined;
+    const nextNotice = nextPeriod ? getNoticeForPeriod(job.classId, nextPeriod.id, id(nextPeriod.academicStructureId)) : undefined;
+    const nextItems = nextNotice?.items || [];
+    const nextFees = nextItems.filter(item => !isRequirement(item) && !isNoticeMeta(item));
+    const nextRequirements = nextItems.filter(isRequirement);
+    const nextMeta = nextItems.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+    const nextCurrency = id(nextMeta?.description) || preferredCurrency;
     const studentInvoice = student && invoices.find(inv => inv.studentId === student.id && id(inv.classId) === job.classId && id(inv.academicStructureId) === structureId && id(inv.academicPeriodId) === periodId && inv.status !== "void" && inv.status !== "cancelled");
     const paid = studentInvoice ? payments.filter(pay => pay.invoiceId === studentInvoice.id && pay.status === "paid").reduce((a, pay) => a + money(pay.amount), 0) : 0;
     return <TermNoticePrintTemplate
@@ -464,6 +504,14 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       primaryColor={id(settings?.primaryColor) || "#1e4f83"}
       academicStructure={selectedStructure?.name || "Academic Structure"}
       academicPeriod={selectedPeriod?.name || "Academic Period"}
+      nextAcademicPeriod={nextPeriod?.name}
+      nextAcademicStructure={nextStructureName}
+      nextPeriodConfigured={Boolean(nextNotice)}
+      nextFees={nextFees}
+      nextRequirements={nextRequirements}
+      nextCurrencyCode={nextCurrency}
+      nextDueDate={nextMeta?.dueDate}
+      nextNotice={nextMeta?.instructions}
       className={classLabel(job.classId)}
       studentName={student ? titleCase(student.fullName) : undefined}
       admissionNumber={student?.admissionNumber}
@@ -573,7 +621,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         </>}
       </>}
       {section === "tracking" && <>
-        <div className="ef-heading"><div><strong>Student Tracking</strong><span>{classTitle} · {periodTitle} · {displayed.length} students</span></div></div>
+        <div className="ef-heading"><div><strong>Fee Tracking</strong><span>{classTitle} · {periodTitle} · {displayed.length} students</span></div></div>
         {view === "table" ? (
           <section className="ef-table-card" aria-label="Student fee records">
             <div className="ef-table-wrap">
@@ -624,9 +672,13 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           ))}</div>
         )}
         {!displayed.length && <div className="ef-empty">No students match the selected class and filters.</div>}
-        {trackingStudentId && <div className="ef-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setTrackingStudentId(""); }}><section className="ef-sheet" role="dialog" aria-modal="true" aria-label="Item submissions"><header><strong>Materials Received</strong><button onClick={() => setTrackingStudentId("")}>×</button></header><p>{titleCase(students.find(s => s.id === trackingStudentId)?.fullName)}</p>{(receivedByStudent.get(trackingStudentId)?.entries || []).map(({ item, state }) => <div className="ef-line" key={item.id}><span>{item.name}<small>{state.received} / {item.quantity} {state.unit} received</small></span>{button("+ Receive", () => { setReceivedEditor(item); setReceiveQty(String(Math.max(1, Number(item.quantity || 0) - state.received))); }, state.received >= Number(item.quantity || 0))}</div>)}{!receivedByStudent.get(trackingStudentId)?.entries.length && <div className="ef-muted">Issue student records to enable item tracking.</div>}</section></div>}
+
       </>}
     </div>
+  </section>
+  {canPortal && createPortal(
+    <div className="ef-page ef-modal-host" style={{ "--ef-primary": id(settings?.primaryColor) || "#2563eb" } as React.CSSProperties}>
+        {trackingStudentId && <div className="ef-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setTrackingStudentId(""); }}><section className="ef-sheet" role="dialog" aria-modal="true" aria-label="Item submissions"><header><strong>Materials Received</strong><button onClick={() => setTrackingStudentId("")}>×</button></header><p>{titleCase(students.find(s => s.id === trackingStudentId)?.fullName)}</p>{(receivedByStudent.get(trackingStudentId)?.entries || []).map(({ item, state }) => <div className="ef-line" key={item.id}><span>{item.name}<small>{state.received} / {item.quantity} {state.unit} received</small></span>{button("+ Receive", () => { setReceivedEditor(item); setReceiveQty(String(Math.max(1, Number(item.quantity || 0) - state.received))); }, state.received >= Number(item.quantity || 0))}</div>)}{!receivedByStudent.get(trackingStudentId)?.entries.length && <div className="ef-muted">Issue student records to enable item tracking.</div>}</section></div>}
     {payPickerOpen && <div className="ef-overlay"><section className="ef-sheet" role="dialog" aria-modal="true" aria-label="Record a student payment"><header><strong>Select Student</strong><button type="button" onClick={() => setPayPickerOpen(false)}>×</button></header>
       {field("Student", <select value={payPickerStudentId} onChange={e => setPayPickerStudentId(e.target.value)}><option value="">Choose student</option>{studentRows.filter(r => r.invoice && r.balance > 0).map(r => <option key={r.student.id} value={r.student.id}>{titleCase(r.student.fullName)}</option>)}</select>)}
       <div className="ef-actions">{button("Record Payment", () => {const row = studentRows.find(r => r.student.id === payPickerStudentId); if (!row) return; setPaymentStudent(row.student);setPayAmount(String(row.balance));setPayPickerStudentId("");setPayPickerOpen(false);})}{button("Cancel", () => setPayPickerOpen(false))}</div>
@@ -690,7 +742,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
             {appliedClassIds.length > 1 && button("Print Student Batch — All Selected Classes", () => { setMoreOpen(false); printNotice(appliedClassIds.flatMap(cid => studentsForClass(cid).map(student => ({ classId: cid, studentId: student.id })))); })}
           </> : <>
             {button("Issue Student Records", () => { setMoreOpen(false); void issueInvoices(); }, !notice)}
-            {button(`Print Student Tracking List (${displayed.length})`, () => { setMoreOpen(false); printTrackingList(); }, !displayed.length)}
+            {button(`Print Fee Tracking List (${displayed.length})`, () => { setMoreOpen(false); printTrackingList(); }, !displayed.length)}
             {button(`Preview All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); openPreview("batch"); }, !notice || !targetStudents.length)}
             {button(`Print All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); printNotice(targetStudents.map(student => ({ classId, studentId: student.id }))); }, !notice || !targetStudents.length)}
             {button("Print Individual Notice…", () => { setMoreOpen(false); setIndividualPrintStudentId(""); setIndividualPrintPickerOpen(true); }, !notice || !targetStudents.length)}
@@ -710,31 +762,40 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         <div className="ef-actions">{button("Preview and Print", printOneFromPicker, !individualPrintStudentId)}{button("Cancel", () => setIndividualPrintPickerOpen(false))}</div>
       </section>
     </div>}
-  </section>
+
+    </div>, document.body
+  )}
   {canPortal && previewMode && createPortal(
-    <div className="ef-preview-backdrop" role="presentation" onMouseDown={event => {
-      if (event.target === event.currentTarget) setPreviewMode(null);
-    }}>
-      <section className="ef-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview fee notices">
-        <header className="ef-preview-toolbar">
-          <div>
-            <strong>{previewJobs.length > 1 ? "Notice Batch Preview" : "Notice Preview"}</strong>
-            <small>{previewJobs.length > 1 ? `${previewIndex + 1} of ${previewJobs.length} · ` : ""}{classLabel(previewJobs[previewIndex]?.classId || classId)}{previewJobs[previewIndex]?.studentId ? ` · ${titleCase(students.find(student => student.id === previewJobs[previewIndex]?.studentId)?.fullName)}` : ""}</small>
+    <div className="ef-preview-backdrop ef-notice-preview-backdrop" role="presentation"
+      onMouseDown={event => { if (event.target === event.currentTarget) setPreviewMode(null); }}>
+      <section className="ef-preview-dialog ef-register-preview-dialog ef-notice-preview-dialog"
+        role="dialog" aria-modal="true" aria-label="Vertically scrolling term notice batch preview">
+        <BranchReportZoomProvider>
+          <header className="ef-preview-toolbar report-no-print">
+            <div>
+              <strong>{previewJobs.length > 1 ? "Term Notice Batch" : "Term Notice Preview"}</strong>
+              <small>{previewJobs.length} notice{previewJobs.length === 1 ? "" : "s"} · {academicTitle} · {periodTitle} · Scroll down to see each notice</small>
+            </div>
+            <div className="ef-preview-controls">
+              <BranchReportZoomControls />
+              <button type="button" className="ef-preview-print" onClick={() => printNotice(previewJobs)}>
+                {previewJobs.length > 1 ? `Print All (${previewJobs.length})` : "Print Notice"}
+              </button>
+              <button type="button" className="ef-preview-close" aria-label="Close preview" onClick={() => setPreviewMode(null)}>×</button>
+            </div>
+          </header>
+          <div className="ef-register-preview-document ef-notice-preview-document">
+            <BranchReportPreview printZoneId="finance-term-notice-preview" naturalWidth={794}>
+              <div className="ef-notice-batch-pages">
+                {previewJobs.map((job, index) => (
+                  <div className="ef-notice-preview-paper" key={`preview-${job.classId}-${job.studentId || "class"}-${index}`}>
+                    {renderDocument(job, `preview-${job.classId}-${job.studentId || "class"}-${index}`)}
+                  </div>
+                ))}
+              </div>
+            </BranchReportPreview>
           </div>
-          <div className="ef-preview-controls">
-            {previewJobs.length > 1 && <>
-              <button type="button" disabled={previewIndex === 0} onClick={() => setPreviewIndex(index => Math.max(0, index - 1))}>← Previous</button>
-              <button type="button" disabled={previewIndex >= previewJobs.length - 1} onClick={() => setPreviewIndex(index => Math.min(previewJobs.length - 1, index + 1))}>Next →</button>
-            </>}
-            <button type="button" className="ef-preview-print" onClick={() => printNotice(previewJobs)}>
-              {previewJobs.length > 1 ? `Print All (${previewJobs.length})` : "Print Notice"}
-            </button>
-            <button type="button" className="ef-preview-close" aria-label="Close preview" onClick={() => setPreviewMode(null)}>×</button>
-          </div>
-        </header>
-        <div className="ef-preview-scroller"><div className="ef-preview-page">
-          {renderDocument(previewJobs[Math.min(previewIndex, previewJobs.length - 1)] || { classId }, `preview-${previewIndex}`)}
-        </div></div>
+        </BranchReportZoomProvider>
       </section>
     </div>, document.body
   )}
@@ -742,10 +803,10 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     <div className="ef-preview-backdrop ef-register-preview-backdrop" role="presentation" onMouseDown={event => {
       if (event.target === event.currentTarget) setTrackingPreviewRows(null);
     }}>
-      <section className="ef-preview-dialog ef-register-preview-dialog" role="dialog" aria-modal="true" aria-label="Student Tracking A4 preview">
+      <section className="ef-preview-dialog ef-register-preview-dialog" role="dialog" aria-modal="true" aria-label="Fee Tracking A4 preview">
         <BranchReportZoomProvider>
           <header className="ef-preview-toolbar report-no-print">
-            <div><strong>Student Tracking Report</strong><small>{classTitle} · {periodTitle} · {trackingPreviewRows.length} students</small></div>
+            <div><strong>Fee Tracking Report</strong><small>{classTitle} · {periodTitle} · {trackingPreviewRows.length} students</small></div>
             <div className="ef-preview-controls">
               <BranchReportZoomControls />
               <button type="button" className="ef-preview-print" onClick={printTrackingNow}>Print Report</button>
@@ -784,6 +845,17 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
 }
 
 const styles = `
+.ef-page.ef-modal-host{position:fixed!important;inset:0!important;z-index:30000!important;min-height:0!important;height:0!important;width:0!important;min-width:0!important;padding:0!important;background:transparent!important;overflow:visible!important;pointer-events:none!important;}
+.ef-modal-host .ef-overlay{position:fixed!important;inset:0!important;width:100vw;height:100dvh;max-height:none;z-index:30000!important;pointer-events:auto;overscroll-behavior:contain;padding:max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom));}
+.ef-modal-host .ef-sheet{max-height:calc(100dvh - 20px);min-height:0;overflow-y:auto;overscroll-behavior:contain;}
+@media(max-width:700px){.ef-modal-host .ef-overlay{padding:0!important;}.ef-modal-host .ef-sheet{border-radius:0!important;max-height:100dvh!important;height:100dvh!important;width:100vw!important;max-width:100vw!important;padding:calc(12px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));align-self:stretch;}}
+.ef-notice-preview-dialog{height:calc(100dvh - 24px)!important;max-height:calc(100dvh - 24px)!important;width:min(100%,1050px);}
+.ef-notice-preview-document{overflow-y:auto!important;overflow-x:hidden!important;min-height:0;flex:1 1 auto;padding:14px;overscroll-behavior:contain;}
+.ef-notice-batch-pages{width:794px;display:flex;flex-direction:column;gap:18px;}
+.ef-notice-preview-paper{width:794px;min-width:794px;max-width:794px;min-height:1123px;overflow:visible;background:white;box-shadow:0 6px 22px rgba(0,0,0,.2);color:#142238;padding:11mm;box-sizing:border-box;}
+.ef-notice-preview-paper .ef-term-notice-a4{width:100%;min-width:0;max-width:none;}
+@media(max-width:699px){.ef-notice-preview-backdrop{padding:0!important;}.ef-notice-preview-document{padding:5px!important;}.ef-notice-preview-dialog{height:100dvh!important;max-height:100dvh!important;width:100vw!important;border-radius:0!important;}}
+
 .ef-page{color:var(--text,#142134);width:100%;min-width:0;}
 .ef-page *{box-sizing:border-box;}
 .ef-no-print{display:grid;gap:9px;min-width:0;}

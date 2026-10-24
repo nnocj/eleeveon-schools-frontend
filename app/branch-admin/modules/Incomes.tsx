@@ -40,6 +40,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
@@ -856,6 +857,8 @@ export default function IncomesPage() {
         </section>
       )}
 
+      {(filterOpen || moreOpen || drawerOpen || selectedIncome) && (
+        <FinanceOverlayPortal primary={primary}>
       {filterOpen && (
         <FilterSheet
           methodFilter={methodFilter}
@@ -920,9 +923,34 @@ export default function IncomesPage() {
           close={() => setSelectedIncome(null)}
         />
       )}
+        </FinanceOverlayPortal>
+      )}
     </main>
   );
 }
+
+
+/** BODY-level modal host: escapes the role-shell's transformed/sticky header layers. */
+function FinanceOverlayPortal({primary,children}:{primary:string;children:React.ReactNode}) {
+  useEffect(() => {
+    const previousBody = document.body.style.overflow;
+    const previousHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousBody; document.documentElement.style.overflow = previousHtml; };
+  }, []);
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="bi-page bi-modal-host"
+      style={{"--bi-primary": primary,
+        position: "fixed", inset: 0, width: 0, height: 0, minHeight: 0,
+        background: "transparent", padding: 0, pointerEvents: "none",
+        overflow: "visible", zIndex: 50000} as React.CSSProperties}>
+      {children}
+    </div>, document.body
+  );
+}
+
 
 function State({
   primary,
@@ -1669,4 +1697,17 @@ const css = `
 @media(min-width:680px) and (max-width:1023px){.bi-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(min-width:1024px){.bi-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
 @media(max-width:639px){.bi-list{grid-template-columns:minmax(0,1fr);gap:7px;}}
+
+/* Finance modal fixes: portal out of sticky/transformed portal shell, use full viewport. */
+.bi-modal-host .bi-sheet-backdrop,.bi-modal-host .bi-drawer-layer{position:fixed!important;inset:0!important;
+ width:100vw!important;height:100dvh!important;max-height:none!important;pointer-events:auto!important;
+ z-index:50001!important;overscroll-behavior:contain;}
+.bi-modal-host .bi-sheet{max-height:calc(100dvh - 36px);overscroll-behavior:contain;}
+.bi-modal-host .bi-drawer{height:100dvh;max-height:100dvh;overscroll-behavior:contain;}
+@media(max-width:679px){
+ .bi-modal-host .bi-sheet-backdrop{padding:0!important;place-items:stretch!important;}
+ .bi-modal-host .bi-sheet{max-height:100dvh!important;height:100dvh!important;width:100vw!important;
+   max-width:100vw!important;border-radius:0!important;padding:calc(14px + env(safe-area-inset-top)) 12px calc(14px + env(safe-area-inset-bottom));}
+ .bi-modal-host .bi-drawer{width:100vw!important;padding-top:calc(14px + env(safe-area-inset-top));}
+}
 `;

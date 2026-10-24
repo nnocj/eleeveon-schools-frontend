@@ -90,7 +90,7 @@ export default function StudentTrackingPrintTemplate({
     <header className="finance-document-header">
       <div className="finance-document-logo">{schoolLogo ? <img src={schoolLogo} alt="School logo" /> : "ES"}</div>
       <div><h1>{schoolName}</h1>{branchName && <div className="finance-document-branch">{branchName}</div>}
-        <div className="finance-document-title">Student Fees &amp; Materials Register</div>
+        <div className="finance-document-title">Fee Tracking — Fees &amp; Materials Register</div>
       </div>
     </header>
     <div className="finance-document-meta">

@@ -2984,6 +2984,7 @@ export default function StudentsPage() {
       {viewMode === "table" && (
         <TableView
           rows={filteredRows}
+          onOpen={(item) => setSelectedItem(item)}
           openEdit={openEdit}
           remove={remove}
           setStatus={setStatus}
@@ -3557,6 +3558,8 @@ export default function StudentsPage() {
       {selectedItem && (
         <ActionSheet
           item={selectedItem}
+          schoolId={schoolId}
+          branchId={branchId}
           openEdit={openEdit}
           remove={remove}
           setStatus={setStatus}
@@ -4000,6 +4003,8 @@ function MoreSheet({
 
 function ActionSheet({
   item,
+  schoolId,
+  branchId,
   openEdit,
   remove,
   setStatus,
@@ -4008,6 +4013,8 @@ function ActionSheet({
   onClose,
 }: {
   item: StudentView;
+  schoolId: string;
+  branchId: string;
   openEdit: (row: Student) => void;
   remove: (item: StudentView) => void;
   setStatus: (item: StudentView, status: StudentStatus) => void;
@@ -4060,7 +4067,7 @@ function ActionSheet({
         <div className="ba-menu-list">
           <IdentityCardActions
             subjectType="student" subjectId={item.id}
-            schoolId={String(row.schoolId)} branchId={String(row.branchId)}
+            schoolId={schoolId} branchId={branchId}
             name={String(row.fullName || "Student")}
             detail={item.className} photoUrl={item.photoUrl}
           />
@@ -4193,12 +4200,14 @@ function StudentPromotionSheet({ scope, students, classes, structures, periods, 
 
 function TableView({
   rows,
+  onOpen,
   openEdit,
   remove,
   setStatus,
   onPromote,
 }: {
   rows: StudentView[];
+  onOpen: (item: StudentView) => void;
   openEdit: (row: Student) => void;
   remove: (item: StudentView) => void;
   setStatus: (item: StudentView, status: StudentStatus) => void;
@@ -4252,6 +4261,14 @@ function TableView({
                   <td>{timeText(row.updatedAt || row.createdAt)}</td>
                   <td>
                     <div className="ba-table-actions">
+                      <button
+                        type="button"
+                        onClick={() => onOpen(item)}
+                        aria-label={`View or generate ID card for ${row.fullName || "student"}`}
+                        title="View or generate ID card"
+                      >
+                        ID Card
+                      </button>
                       <button type="button" onClick={() => openEdit(item.row)}>
                         Edit
                       </button>

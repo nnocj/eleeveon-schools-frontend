@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   db,
   type Branch,
   type IdentityCredentialDesignSetting,
   type School,
-} from "../../../lib/db";
+} from "../../../lib/db/db";
 import IdentityCredentialPreview from "./IdentityCredentialPreview";
+import { useIdentityCardPresentation, IDENTITY_DESIGN_CHANGED_EVENT } from "./identityCardPresentation";
 import { SyncStatus } from "../../../lib/constants/syncStatus";
 
 type Props = {
@@ -128,17 +129,10 @@ export default function CredentialDesignSettings({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const branding = useMemo(
-    () => ({
-      schoolName: school?.name || "Eleeveon International Academy",
-      branchName: branch?.name || "Main Campus",
-      motto: school?.motto || "Excellence, Character and Service",
-      address: branch?.address || school?.address || "",
-      schoolLogoUrl: school?.logo || "",
-      branchLogoUrl: branch?.logo || "",
-    }),
-    [school, branch],
-  );
+  const { branding } = useIdentityCardPresentation({
+    accountId, schoolId: String(schoolId || ""), branchId: String(branchId || ""),
+    school: school as any, branch: branch as any,
+  });
 
   const load = async () => {
     if (!accountId || !schoolId) {
@@ -248,6 +242,7 @@ export default function CredentialDesignSettings({
       };
 
       await db.identityCredentialDesignSettings.put(payload);
+      window.dispatchEvent(new Event(IDENTITY_DESIGN_CHANGED_EVENT));
       setForm(payload);
       setMessage("Credential design saved.");
       await load();
@@ -501,6 +496,17 @@ export default function CredentialDesignSettings({
               />
             </label>
             <label>
+              Signature label
+              <input value={form.signatureLabel || ""}
+                onChange={(event) => update("signatureLabel", event.target.value)} />
+            </label>
+            <label>
+              Watermark opacity
+              <input type="number" min={0} max={1} step={0.01}
+                value={Number(form.watermarkOpacity ?? 0.06)}
+                onChange={(event) => update("watermarkOpacity", Math.max(0,Math.min(1,Number(event.target.value))))}/>
+            </label>
+            <label>
               Watermark text
               <input
                 value={form.watermarkText || ""}
@@ -516,6 +522,9 @@ export default function CredentialDesignSettings({
               ["School name", "showSchoolName"],
               ["Branch name", "showBranchName"],
               ["Photo", "showPhoto"],
+              ["Motto", "showMotto"],
+              ["Address", "showAddress"],
+              ["Authorized signature", "showSignature"],
               ["QR code", "showQrCode"],
               ["Credential reference", "showCredentialReference"],
               ["Issue date", "showIssueDate"],

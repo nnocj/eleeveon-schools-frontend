@@ -3,7 +3,7 @@
 /**
  * Shared branch expense / income workspace.
  * Replaces no database fields and makes no schema changes.
- * Academic terms filter existing transactions by configured inclusive dates.
+ * Academic terms filter existing transactions by configured inclusive dates. Yeah
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";

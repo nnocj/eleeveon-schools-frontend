@@ -58,7 +58,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const supportApi = {
-  list: () => request<{ conversations: SupportConversation[] }>("/support/conversations"),
+  list: () => request<{ conversations: SupportConversation[]; meta?: {
+    inboxScope: "platform" | "account";
+    platformConfigured: boolean;
+    platformAccountMatches: boolean;
+    conversationCount: number;
+  } }>("/support/conversations"),
   open: (id: string) => request<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${encodeURIComponent(id)}`),
   create: (data: { subject: string; body: string; type: string; schoolId?: string; branchId?: string; membershipId?: string; name?: string }) =>
     request<{ conversation: SupportConversation }>("/support/conversations", { method: "POST", body: JSON.stringify(data) }),

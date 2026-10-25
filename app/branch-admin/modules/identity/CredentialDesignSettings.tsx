@@ -186,10 +186,24 @@ export default function CredentialDesignSettings({
     if (selected) setForm(selected);
   };
 
-  const createNew = () => {
-    setForm(
-      defaultDesign(accountId, schoolId, branchId, primaryColor),
+  const createNew = (subjectType: "student" | "teacher") => {
+    const teacher = subjectType === "teacher";
+    const audienceHasDefault = designs.some(
+      (row) => row.subjectType === subjectType && row.isDefault && !row.isDeleted,
     );
+    setForm({
+      ...defaultDesign(accountId, schoolId, branchId, primaryColor),
+      name: teacher ? "Teacher ID" : "Student ID",
+      subjectType,
+      credentialType: teacher ? "staff_id" : "student_id",
+      isDefault: !audienceHasDefault,
+      visibleFields: {
+        ...DEFAULT_VISIBLE_FIELDS,
+        admissionNumber: !teacher,
+        staffNumber: teacher,
+        className: !teacher,
+      },
+    });
     setMessage("");
   };
 
@@ -205,8 +219,12 @@ export default function CredentialDesignSettings({
       const currentDeviceId = deviceId();
 
       if (form.isDefault) {
+        // Student and teacher designs can each have their own default.
+        // Saving a teacher ID must not unset the student's default layout.
         const otherDefaults = designs.filter(
-          (item) => item.id !== form.id && item.isDefault,
+          (item) => item.id !== form.id && item.isDefault &&
+            String(item.subjectType || "all") === String(form.subjectType || "all") &&
+            String(item.credentialType || "all") === String(form.credentialType || "all"),
         );
         for (const row of otherDefaults) {
           await db.identityCredentialDesignSettings.put({
@@ -244,12 +262,12 @@ export default function CredentialDesignSettings({
       await db.identityCredentialDesignSettings.put(payload);
       window.dispatchEvent(new Event(IDENTITY_DESIGN_CHANGED_EVENT));
       setForm(payload);
-      setMessage("Credential design saved.");
+      setMessage("ID card design saved.");
       await load();
       onSaved?.();
     } catch (error) {
       console.error(error);
-      setMessage("Credential design could not be saved.");
+      setMessage("ID card design could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -277,10 +295,10 @@ export default function CredentialDesignSettings({
       <section className="credential-settings-sheet">
         <header className="credential-settings-head">
           <div>
-            <h2>Identity Credential Design</h2>
+            <h2>ID Card Designs</h2>
             <p>
-              Design student, staff, parent and visitor credentials without
-              changing their QR values or references.
+              Choose a design for students, teachers or other people. Saved
+              options are used when their ID cards are viewed or printed.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close">
@@ -304,8 +322,11 @@ export default function CredentialDesignSettings({
               </option>
             ))}
           </select>
-          <button type="button" onClick={createNew}>
-            + New design
+          <button type="button" onClick={() => createNew("student")}>
+            + Student ID
+          </button>
+          <button type="button" onClick={() => createNew("teacher")}>
+            + Teacher ID
           </button>
         </div>
 
@@ -591,7 +612,7 @@ export default function CredentialDesignSettings({
             disabled={saving}
             onClick={save}
           >
-            {saving ? "Saving..." : "Save credential design"}
+            {saving ? "Saving..." : "Save ID design"}
           </button>
         </div>
       </section>

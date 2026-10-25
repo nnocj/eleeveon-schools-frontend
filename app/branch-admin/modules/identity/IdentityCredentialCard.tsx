@@ -73,6 +73,10 @@ export default function IdentityCredentialCard({
   className,
 }: IdentityCredentialCardProps) {
   const landscape = design.orientation !== "portrait";
+  const template = String(design.templateKey || "modern_clean");
+  const premium = template === "premium_gradient";
+  const classic = template === "classic_school";
+  const compact = template === "compact_qr_pass";
   const width = landscape ? 380 : 240;
   const height = landscape ? 240 : 380;
   const visible = design.visibleFields || {};
@@ -83,12 +87,19 @@ export default function IdentityCredentialCard({
   const text = design.textColor || "#111827";
   const muted = design.mutedTextColor || "#64748b";
   const border = design.borderColor || primary;
-  const qrPosition = design.qrPosition || "front_right";
+  const qrPosition = design.qrPosition || "bottom_right";
   const qrSize = design.qrSize || "medium";
-  const logo =
-    (design.showBranchLogo !== false && branding.branchLogoUrl) ||
-    (design.showSchoolLogo !== false && branding.schoolLogoUrl) ||
-    "";
+  const logos = [
+    design.showSchoolLogo !== false && branding.schoolLogoUrl ? { key: "school", url: branding.schoolLogoUrl } : null,
+    design.showBranchLogo !== false && branding.branchLogoUrl && branding.branchLogoUrl !== branding.schoolLogoUrl
+      ? { key: "branch", url: branding.branchLogoUrl } : null,
+  ].filter(Boolean) as {key: string; url: string}[];
+  // Branch-only logos should still render even if the two stored URLs match.
+  if (!logos.length && design.showBranchLogo !== false && branding.branchLogoUrl) {
+    logos.push({ key: "branch", url: branding.branchLogoUrl });
+  }
+  const showQr = design.showQrCode !== false && Boolean(qrValue(credential));
+  const qrOnBack = qrPosition.startsWith("back_");
 
   const fieldRows = [
     visible.admissionNumber !== false && subject.admissionNumber
@@ -109,8 +120,14 @@ export default function IdentityCredentialCard({
     visible.gender && subject.gender
       ? [labels.gender || "Gender", subject.gender]
       : null,
+    visible.dateOfBirth && subject.dateOfBirth
+      ? [labels.dateOfBirth || "Date of birth", readableDate(subject.dateOfBirth) || subject.dateOfBirth]
+      : null,
     visible.phone && subject.phone
       ? [labels.phone || "Phone", subject.phone]
+      : null,
+    visible.emergencyPhone && subject.emergencyPhone
+      ? [labels.emergencyPhone || "Emergency", subject.emergencyPhone]
       : null,
   ].filter(Boolean) as string[][];
 
@@ -124,11 +141,11 @@ export default function IdentityCredentialCard({
     border:
       design.borderStyle === "none"
         ? "none"
-        : `${design.borderStyle === "double" ? 3 : 1}px solid ${border}`,
+        : `${design.borderStyle === "double" ? 3 : 1}px ${design.borderStyle === "dashed" ? "dashed" : "solid"} ${border}`,
     borderRadius: Math.max(0, Number(design.borderRadiusPx ?? 16)),
-    background,
+    background: premium ? `linear-gradient(145deg,${background},#f4f7fc)` : background,
     color: text,
-    fontFamily: "inherit",
+    fontFamily: classic ? "Georgia,serif" : "inherit",
     boxSizing: "border-box",
     boxShadow:
       design.borderStyle === "accent"
@@ -157,26 +174,26 @@ export default function IdentityCredentialCard({
             textAlign: "center",
           }}
         >
-          {logo ? (
-            <img
-              src={logo}
-              alt=""
-              style={{ width: 42, height: 42, objectFit: "contain" }}
-            />
-          ) : null}
-          <strong style={{ fontSize: 15 }}>{branding.schoolName}</strong>
+          {logos.length > 0 && <div style={{display:"flex",gap:6}}>{logos.map(item => (
+          <img key={item.key} src={item.url} alt="" style={{width:42,height:42,objectFit:"contain"}} />
+        ))}</div>}
+          {design.showSchoolName !== false && <strong style={{ fontSize: 15 }}>{branding.schoolName}</strong>}
+          {design.showBranchName !== false && branding.branchName && <span style={{fontSize:10}}>{branding.branchName}</span>}
+          {design.showMotto !== false && branding.motto && <span style={{fontSize:10,color:muted}}>{branding.motto}</span>}
           {branding.address && design.showAddress !== false ? (
             <span style={{ fontSize: 10, color: muted }}>{branding.address}</span>
           ) : null}
-          {design.showQrCode !== false ? (
-            <IdentityQrCode value={qrValue(credential)} size={qrSize} />
-          ) : null}
+          {showQr && qrOnBack && <IdentityQrCode value={qrValue(credential)} size={qrSize} />}
           {design.showCredentialReference !== false &&
           credential?.credentialReference ? (
             <code style={{ fontSize: 9, wordBreak: "break-all" }}>
               {credential.credentialReference}
             </code>
           ) : null}
+          {design.showSignature && <div style={{fontSize:9,marginTop:"auto"}}>
+            {branding.signatureUrl && <img src={branding.signatureUrl} alt="Authorized signature" style={{height:32,maxWidth:100,objectFit:"contain"}} />}
+            <span style={{display:"block",borderTop:`1px solid ${muted}`,paddingTop:3}}>{design.signatureLabel || "Authorized Signature"}</span>
+          </div>}
           <p style={{ margin: "auto 0 0", fontSize: 9, color: muted }}>
             {design.footerText ||
               "This credential remains the property of the issuing school."}
@@ -186,54 +203,32 @@ export default function IdentityCredentialCard({
     );
   }
 
+  const qrSideBack = qrOnBack;
+  const qrLocation = qrPosition.replace(/^front_/,"bottom_").replace(/^back_/,"bottom_");
   const qrAbsolute: React.CSSProperties =
-    qrPosition === "front_left"
-      ? { bottom: 14, left: 14 }
-      : qrPosition === "front_center"
-        ? {
-            bottom: 14,
-            left: "50%",
-            transform: "translateX(-50%)",
-          }
-        : qrPosition === "back_left"
-          ? { top: 56, left: 14 }
-          : qrPosition === "back_center"
-            ? {
-                top: 56,
-                left: "50%",
-                transform: "translateX(-50%)",
-              }
-            : qrPosition === "back_right"
-              ? { top: 56, right: 14 }
-              : { bottom: 14, right: 14 };
+    qrLocation === "top_left" ? { top: 55, left: 12 } :
+    qrLocation === "top_right" ? { top: 55, right: 12 } :
+    qrLocation === "bottom_left" ? { bottom: 18, left: 12 } :
+    qrLocation === "center" || qrLocation === "front_center"
+      ? { bottom: 12, left: "50%", transform: "translateX(-50%)" }
+      : { bottom: 18, right: 12 };
 
   return (
     <article className={className} style={cardStyle}>
       <header
         style={{
-          minHeight: 44,
+          minHeight: compact ? 34 : classic ? 56 : 44,
           padding: "8px 12px",
           display: "flex",
           alignItems: "center",
           gap: 8,
           color: "#fff",
-          background: `linear-gradient(120deg, ${primary}, ${secondary})`,
+          background: premium ? `linear-gradient(120deg, ${primary}, ${secondary}, ${design.accentColor || primary})` : classic ? primary : `linear-gradient(120deg, ${primary}, ${secondary})`,
         }}
       >
-        {logo ? (
-          <img
-            src={logo}
-            alt=""
-            style={{
-              width: 30,
-              height: 30,
-              borderRadius: 6,
-              objectFit: "contain",
-              background: "#fff",
-              padding: 2,
-            }}
-          />
-        ) : null}
+        {logos.map(item => <img key={item.key} src={item.url} alt=""
+          style={{ width: 30, height: 30, borderRadius: 6,
+            objectFit: "contain", background: "#fff", padding: 2 }} />)}
         <div style={{ minWidth: 0 }}>
           {design.showSchoolName !== false ? (
             <strong
@@ -248,6 +243,7 @@ export default function IdentityCredentialCard({
               {branding.schoolName}
             </strong>
           ) : null}
+          {design.showMotto !== false && branding.motto && <span style={{ display: "block", fontSize: 8, opacity: 0.9 }}>{branding.motto}</span>}
           {design.showBranchName !== false && branding.branchName ? (
             <span style={{ display: "block", fontSize: 8, opacity: 0.9 }}>
               {branding.branchName}
@@ -287,7 +283,7 @@ export default function IdentityCredentialCard({
           subject.photoUrl ? (
             <img
               src={subject.photoUrl}
-              alt={subject.fullName}
+              alt="Cardholder photo"
               style={{
                 width: landscape ? 76 : 88,
                 height: landscape ? 86 : 102,
@@ -361,6 +357,10 @@ export default function IdentityCredentialCard({
             </div>
           ))}
 
+          {design.showCredentialReference !== false && credential?.credentialReference &&
+            (design.sides === "front_only" || !design.sides) && (
+            <div style={{fontSize:8,color:muted,overflowWrap:"anywhere"}}>{credential.credentialReference}</div>
+          )}
           {design.showIssueDate && credential?.generatedAt ? (
             <small style={{ display: "block", color: muted, fontSize: 8 }}>
               Issued: {readableDate(credential.generatedAt)}
@@ -374,24 +374,30 @@ export default function IdentityCredentialCard({
         </div>
       </div>
 
-      {design.showQrCode !== false ? (
+      {showQr && !qrSideBack ? (
         <div style={{ position: "absolute", ...qrAbsolute }}>
           <IdentityQrCode value={qrValue(credential)} size={qrSize} />
         </div>
       ) : null}
 
+      {design.showSignature && (design.sides === "front_only" || !design.sides) && <div
+        style={{position:"absolute",bottom:36,left:12,fontSize:8}}>
+        {branding.signatureUrl && <img src={branding.signatureUrl} alt="Authorized signature" style={{display:"block",height:25,maxWidth:88,objectFit:"contain"}} />}
+        <span style={{borderTop:`1px solid ${muted}`}}>{design.signatureLabel || "Authorized Signature"}</span>
+      </div>}
+      {design.showAddress && branding.address && <div style={{position:"absolute",bottom:24,left:12,right:12,fontSize:8,color:muted}}>{branding.address}</div>}
       <footer
         style={{
           position: "absolute",
           left: 12,
           right: 12,
           bottom: 8,
-          maxWidth: design.showQrCode !== false ? "56%" : "100%",
+          maxWidth: showQr && !qrSideBack ? "56%" : "100%",
           fontSize: 7.5,
           color: muted,
         }}
       >
-        {design.footerText || branding.motto || "Official school credential"}
+        {design.footerText || (design.showMotto !== false ? branding.motto : "") || "Official school credential"}
       </footer>
     </article>
   );

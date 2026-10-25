@@ -73,6 +73,7 @@ import type {
 } from "../../components/identity/types";
 
 import IdentityCredentialPreview from "./identity/IdentityCredentialPreview";
+import { useIdentityCardPresentation, chooseIdentityCardDesign } from "./identity/identityCardPresentation";
 import IdentityCredentialPrintSheet, {
   type PrintableCredential,
 } from "./identity/IdentityCredentialPrintSheet";
@@ -1119,30 +1120,11 @@ export default function IdentityCredentials() {
     );
   }, [events, selectedCredential]);
 
-  const branding = useMemo(
-    () => ({
-      schoolName:
-        (activeSchool as { name?: string } | null)?.name ||
-        "Eleeveon School",
-      branchName:
-        (activeBranch as { name?: string } | null)?.name ||
-        "Main Campus",
-      motto:
-        (activeSchool as { motto?: string } | null)?.motto ||
-        "",
-      address:
-        (activeBranch as { address?: string } | null)?.address ||
-        (activeSchool as { address?: string } | null)?.address ||
-        "",
-      schoolLogoUrl:
-        (activeSchool as { logo?: string } | null)?.logo ||
-        "",
-      branchLogoUrl:
-        (activeBranch as { logo?: string } | null)?.logo ||
-        "",
-    }),
-    [activeSchool, activeBranch],
-  );
+  const { branding, designs: liveCredentialDesigns, academicYear: identityAcademicYear } = useIdentityCardPresentation({
+    accountId, schoolId, branchId,
+    school: activeSchool as Record<string, any> | null,
+    branch: activeBranch as Record<string, any> | null,
+  });
 
   const defaultCredentialDesign = useMemo(
     () =>
@@ -1188,29 +1170,19 @@ export default function IdentityCredentials() {
   );
 
   const designForCredential = (
-    credential?: IdentityCredential | null,
+    credential?: Partial<IdentityCredential> | null,
   ): Partial<IdentityCredentialDesignSetting> => {
-    if (!credential) {
-      return credentialDesigns[0] || defaultCredentialDesign;
-    }
-
-    return (
-      credentialDesigns.find(
-        (design) =>
-          (!design.subjectType ||
-            design.subjectType === credential.subjectType) &&
-          (!design.credentialType ||
-            design.credentialType === credential.credentialType),
-      ) ||
-      credentialDesigns.find(
-        (design) =>
-          !design.subjectType ||
-          design.subjectType === credential.subjectType,
-      ) ||
-      credentialDesigns.find((design) => design.isDefault) ||
-      credentialDesigns[0] ||
-      defaultCredentialDesign
-    );
+    const available = liveCredentialDesigns.length ? liveCredentialDesigns : credentialDesigns;
+    const subjectType = String(credential?.subjectType || "student");
+    const credentialType = String(credential?.credentialType || "qr_code");
+    return available.length
+      ? chooseIdentityCardDesign(available, subjectType, credentialType)
+      : { ...defaultCredentialDesign, visibleFields: {
+          ...defaultCredentialDesign.visibleFields,
+          admissionNumber: subjectType === "student",
+          staffNumber: subjectType === "teacher" || subjectType === "staff",
+          className: subjectType === "student",
+        }};
   };
 
   const printableCredentials = useMemo<PrintableCredential[]>(() => {
@@ -1270,11 +1242,15 @@ export default function IdentityCredentials() {
               (credential.subjectType === "student"
                 ? subject.reference
                 : null),
-            staffNumber:
-              teacher && credential.subjectType === "staff"
-                ? subject.reference
-                : null,
+            staffNumber: teacher
+              ? String((teacher as any).staffNumber || (teacher as any).employeeNumber || (teacher as any).employeeId || subject.reference || "")
+              : null,
             className,
+            academicYear: identityAcademicYear,
+            gender: (student as any)?.gender || (teacher as any)?.gender || (parent as any)?.gender || null,
+            dateOfBirth: (student as any)?.dateOfBirth || (teacher as any)?.dateOfBirth || (parent as any)?.dateOfBirth || null,
+            emergencyPhone: (student as any)?.emergencyPhone || (student as any)?.parentPhone ||
+              (student as any)?.relativePhone || (teacher as any)?.relativePhone || null,
             organizationName:
               organizationById.get(
                 idOf(
@@ -1306,6 +1282,7 @@ export default function IdentityCredentials() {
     currentEnrollmentByStudentId,
     classById,
     organizationById,
+    identityAcademicYear,
   ]);
 
   const counts = useMemo(() => {
@@ -2437,6 +2414,7 @@ export default function IdentityCredentials() {
           )}
           branding={branding}
           credentials={printableCredentials}
+          designForCredential={designForCredential}
           title={
             printSelection === "selected"
               ? "Print Credential"

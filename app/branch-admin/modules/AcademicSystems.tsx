@@ -1090,14 +1090,27 @@ function AcademicStructuresWorkspace() {
         return;
       }
 
+      // Keep the configured academic structure and period consistent.
+      // An existing current period is valid only if it belongs to this structure.
+      const configuredPeriodId = idOf(branchSetting.currentAcademicPeriodId);
+      const configuredPeriod = periods.find((period: any) =>
+        sameId(period.id, configuredPeriodId) && !period.isDeleted,
+      );
+      const periodStillBelongsToStructure = Boolean(
+        configuredPeriod && sameId(configuredPeriod.academicStructureId, item.id),
+      );
+
       await updateLocal("schoolBranchSettings", String(branchSetting.id), {
         currentAcademicStructureId: item.id,
+        ...(periodStillBelongsToStructure ? {} : { currentAcademicPeriodId: undefined }),
       } as any);
 
       setSelectedItem(null);
       showToast(
         "success",
-        `"${(item.row as any).name}" is now the current academic structure.`,
+        periodStillBelongsToStructure
+          ? `"${(item.row as any).name}" is now the current academic structure.`
+          : `"${(item.row as any).name}" is current. Select its current academic period under Periods.`,
       );
       await load();
     } catch (error) {

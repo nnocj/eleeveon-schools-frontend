@@ -37,6 +37,9 @@ export default function IdentityCredentialPrintSheet({
         .identity-print-actions{display:flex;gap:8px}.identity-print-actions button{min-height:36px;border-radius:10px;padding:0 14px;border:1px solid var(--border,rgba(148,163,184,.35));background:transparent;color:inherit;cursor:pointer}
         .identity-print-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;padding:24px;overflow-x:auto}
         .identity-print-item{break-inside:avoid;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:center;width:100%;min-height:240px}
+        .eleeveon-identity-card,.eleeveon-identity-card *{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
+        .eleeveon-identity-card{box-shadow:none!important;break-inside:avoid!important;page-break-inside:avoid!important}
+        .eleeveon-identity-card svg{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
         @media print{
           @page{margin:7mm}
           body *{visibility:hidden!important}

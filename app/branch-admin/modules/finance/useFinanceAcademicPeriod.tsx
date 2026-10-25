@@ -61,6 +61,7 @@ export function useFinanceAcademicPeriod({
 }: HookArgs): FinanceAcademicScope {
   const [structures, setStructures] = useState<Row[]>([]);
   const [periods, setPeriods] = useState<Row[]>([]);
+  const [branchSetting, setBranchSetting] = useState<Row | null>(null);
   // null means use the current period. Explicit 'all' means show all dates.
   const [choice, setChoice] = useState<string | null>(null);
   const account = str(accountId);
@@ -71,6 +72,7 @@ export function useFinanceAcademicPeriod({
     setChoice(null);
     setStructures([]);
     setPeriods([]);
+    setBranchSetting(null);
   }, [account, school, branch]);
 
   useEffect(() => {
@@ -79,10 +81,15 @@ export function useFinanceAcademicPeriod({
     void Promise.all([
       listActiveLocal<Row>("academicStructures" as any),
       listActiveLocal<Row>("academicPeriods" as any),
-    ]).then(([a, b]) => {
+      listActiveLocal<Row>("schoolBranchSettings" as any),
+    ]).then(([a, b, c]) => {
       if (!live) return;
       setStructures((a || []).filter(row => inBranch(row, account, school, branch)));
       setPeriods((b || []).filter(row => inBranch(row, account, school, branch)));
+      const branchSettings = (c || [])
+        .filter(row => inBranch(row, account, school, branch))
+        .sort((x, y) => Number(y.updatedAt || 0) - Number(x.updatedAt || 0));
+      setBranchSetting(branchSettings[0] || null);
     }).catch(error => console.error("Academic finance context could not load:", error));
     return () => { live = false; };
   }, [account, school, branch, revision]);
@@ -102,10 +109,25 @@ export function useFinanceAcademicPeriod({
     }).sort((a, b) => b.startDate.localeCompare(a.startDate));
   }, [periods, structures]);
 
-  const configuredPeriodId = str(settings?.currentAcademicPeriodId);
+  // The authoritative value is the current branch setting from Academic Systems.
+  // A saved empty period deliberately overrides a stale context ID.
+  const configuredPeriodId = branchSetting
+    ? str(branchSetting.currentAcademicPeriodId)
+    : str(settings?.currentAcademicPeriodId);
+  const configuredStructureId = branchSetting
+    ? str(branchSetting.currentAcademicStructureId)
+    : str(settings?.currentAcademicStructureId);
+  const periodMatchesStructure = (row: AcademicOption) =>
+    !configuredStructureId || periods.some(period =>
+      str(period.id) === row.key &&
+      str(period.academicStructureId) === configuredStructureId,
+    );
   const today = new Date().toISOString().slice(0, 10);
-  const current = options.find(row => row.key === configuredPeriodId) ||
-    options.find(row => row.startDate <= today && today <= row.endDate) || null;
+  const current = options.find(row =>
+    row.key === configuredPeriodId && periodMatchesStructure(row),
+  ) || options.find(row =>
+    periodMatchesStructure(row) && row.startDate <= today && today <= row.endDate,
+  ) || null;
 
   const selectedKey = choice === "all" ? "all" :
     choice && options.some(row => row.key === choice) ? choice :
@@ -116,7 +138,9 @@ export function useFinanceAcademicPeriod({
   const status = selectedKey === "all"
     ? (unboundedCurrent && !options.some(row => row.key === configuredPeriodId)
       ? "Period dates not configured · All records"
-      : "All recorded dates")
+      : configuredStructureId && !current
+        ? "Current term not configured · All records"
+        : "All recorded dates")
     : (selectedKey === current?.key ? "Current term" : "Selected term");
   const filterSignature = selected
     ? `${selected.key}:${selected.startDate}:${selected.endDate}` : "all";

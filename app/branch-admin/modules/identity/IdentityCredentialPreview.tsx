@@ -37,7 +37,7 @@ export default function IdentityCredentialPreview({
     expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
     metadata: { qrValue: "eleeveon://credential/ELV-STD-2026-014" },
   };
-  const dual = design.sides === "front_back" || design.sides === "front_and_back";
+  const dual = design.sides === "front_and_back";
   return (
     <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start",
       justifyContent: "center", padding: 16, borderRadius: 16,

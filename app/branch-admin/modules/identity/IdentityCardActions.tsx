@@ -93,7 +93,7 @@ export default function IdentityCardActions({
     metadata: { qrValue: card?.verificationUrl || "" },
   } as Partial<IdentityCredential>;
   const hasCard = card?.status === "active" && Boolean(card.verificationUrl);
-  const doubleSided = design.sides === "front_back" || design.sides === "front_and_back";
+  const doubleSided = design.sides === "front_and_back";
 
   async function issue(replace = false) {
     setBusy(true); setError("");

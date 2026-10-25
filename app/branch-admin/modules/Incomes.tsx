@@ -1,1713 +1,480 @@
 "use client";
 
 /**
- * app/branch-admin/modules/Incomes.tsx
- * ---------------------------------------------------------
- * ELEEVEON BRANCH INCOMES V1
- * ---------------------------------------------------------
- * Golden Standard Finance Module.
- * Branch-scoped, offline-first, mobile-first, syncUtils powered.
- *
- * Purpose:
- * - Record non-fee income received by a branch.
- * - Track income source, payment method, receipt/reference and receiver.
- * - Keep income separate from student fee invoices/payments.
- * - Prepare clean income records for future finance reporting.
- *
- * Golden UI behavior:
- * - no hero card
- * - compact search + inline add + slider filter + More sheet
- * - one main section at a time
- * - cards, table and analytics views
- * - filters in bottom sheet
- * - dark-mode safe table headers and surfaces
- *
- * Tables used:
- * - incomes
- * - organizations
- * - schoolCurrencySettings
- *
- * Sync behavior:
- * - createLocal(...) creates income records
- * - updateLocal(...) edits income records
- * - softDeleteLocal(...) archives income rows
- * - listActiveLocal(...) reads active branch-scoped rows
- *
- * Workspace source fix:
- * - Resolves the active school/branch from eleeveon_open_workspace first.
- * - Falls back to active membership, ActiveBranchContext, settings, then storage.
- * - Prevents stale branch finance data after role/workspace switching.
+ * Shared branch expense / income workspace.
+ * Replaces no database fields and makes no schema changes.
+ * Academic terms filter existing transactions by configured inclusive dates.
  */
-
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
-import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
-import { FINANCE_CURRENCIES, formatFinanceMoney, getFinanceCurrency } from "./finance/financeCurrency";
-
 import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 import { useActiveMembership } from "../../context/active-membership-context";
-import {
-  createLocal,
-  listActiveLocal,
-  softDeleteLocal,
-  updateLocal,
-} from "../../lib/sync/syncUtils";
-
 import { useDataRevision } from "../../hooks/useDataRevision";
-import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
+import { createLocal, listActiveLocal, softDeleteLocal, updateLocal } from "../../lib/sync/syncUtils";
+import { FINANCE_CURRENCIES, getFinanceCurrency, formatFinanceMoney } from "./finance/financeCurrency";
+import { AcademicFinancePeriodBar, useFinanceAcademicPeriod } from "./finance/useFinanceAcademicPeriod";
+
 type AnyRow = Record<string, any>;
-type ViewMode = "cards" | "table" | "analytics";
-type ToastTone = "success" | "error" | "info";
-type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
-type MethodFilter = "all" | "cash" | "momo" | "bank" | "card";
-type SourceFilter =
-  | "all"
-  | "fees_related"
-  | "donation"
-  | "admission"
-  | "service"
-  | "canteen"
-  | "transport"
-  | "uniform"
-  | "other";
-
-type IncomeForm = {
-  id: string;
-  title: string;
-  description: string;
-  amount: string;
-  paymentMethod: "cash" | "momo" | "bank" | "card";
-  date: string;
-  source: SourceFilter;
-  organizationId: string;
-  receivedBy: string;
-  referenceNumber: string;
-  receiptNumber: string;
-  currencyCode: string;
-  currencySymbol: string;
+type Kind = "expenses" | "incomes";
+type View = "cards" | "table" | "analytics";
+type PaymentMethod = "cash" | "momo" | "bank" | "card";
+type FormState = {
+  id: string; title: string; description: string; amount: string; date: string;
+  paymentMethod: PaymentMethod; source: string; organizationId: string;
+  paidTo: string; approvedBy: string; receivedBy: string;
+  referenceNumber: string; receiptNumber: string; currencyCode: string;
 };
-
-const emptyIncomeForm: IncomeForm = {
-  id: "",
-  title: "",
-  description: "",
-  amount: "",
-  paymentMethod: "cash",
-  date: new Date().toISOString().slice(0, 10),
-  source: "other",
-  organizationId: "",
-  receivedBy: "",
-  referenceNumber: "",
-  receiptNumber: "",
-  currencyCode: "GHS",
-  currencySymbol: "₵",
+const EXPENSE_CATEGORIES = [
+  ["utilities", "Utilities", "💡"], ["salary", "Salary", "🧾"],
+  ["transport", "Transport", "🚌"], ["feeding", "Feeding", "🍲"],
+  ["maintenance", "Maintenance", "🛠️"], ["procurement", "Procurement", "📦"],
+  ["events", "Events", "🎪"], ["academic", "Academic", "📚"],
+  ["administration", "Administration", "🗂️"], ["technology", "Technology", "💻"],
+  ["marketing", "Marketing", "📣"], ["security", "Security", "🛡️"],
+  ["other", "Other", "📌"],
+] as const;
+const INCOME_SOURCES = [
+  ["fees_related", "Fees Related", "💵"], ["donation", "Donation", "🎁"],
+  ["admission", "Admission", "📄"], ["service", "Service", "🧾"],
+  ["canteen", "Canteen", "🍲"], ["transport", "Transport", "🚌"],
+  ["uniform", "Uniform", "👕"], ["other", "Other", "💰"],
+] as const;
+const str = (value: unknown) => String(value ?? "").trim();
+const number = (value: unknown) => {
+  const n = Number(value ?? 0); return Number.isFinite(n) ? n : 0;
 };
-
-const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
-
-type OpenWorkspaceSession = {
-  membership?: Record<string, any> | null;
-  membershipId?: string | null;
-  role?: string | null;
-  schoolId?: string | null;
-  branchId?: string | null;
-  openedAt?: number;
+const validMoney = (value: unknown) => Math.max(0, Math.round(number(value) * 100) / 100);
+const isoToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 };
-
-function safeStorageRead(key: string) {
-  if (typeof window === "undefined") return null;
-
-  try {
-    return (
-      window.localStorage.getItem(key) || window.sessionStorage.getItem(key)
-    );
-  } catch {
-    return null;
-  }
-}
-
-function safeJsonRead<T>(key: string): T | null {
-  const raw = safeStorageRead(key);
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function readOpenWorkspaceSession() {
-  return safeJsonRead<OpenWorkspaceSession>(OPEN_WORKSPACE_KEY);
-}
-
-function n(value: any) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function text(value: any, fallback = "") {
-  return String(value || "").trim() || fallback;
-}
-
-function idOf(row?: AnyRow | null): string {
-  return cleanId(row?.id ?? row?.payload?.id);
-}
-
-function cleanId(value: any): string {
-  if (value === undefined || value === null) return "";
-  return String(value).trim();
-}
-
-function sameScope(
-  row: AnyRow,
-  accountId?: string | null,
-  schoolId?: string,
-  branchId?: string,
-) {
-  if (!row || row.isDeleted === true) return false;
-  if (accountId && row.accountId && row.accountId !== accountId) return false;
-  if (schoolId && String(row.schoolId ?? "") !== String(schoolId ?? ""))
-    return false;
-  if (branchId && String(row.branchId ?? "") !== String(branchId ?? ""))
-    return false;
-  return true;
-}
-
-function rowName(row?: AnyRow | null) {
-  return text(
-    row?.fullName || row?.name || row?.title || row?.label || row?.email,
-    "Unnamed",
-  );
-}
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function dateLabel(value?: number | string | null) {
+const money = (value: unknown, code: string) => formatFinanceMoney(number(value), code);
+const randomReceipt = () => `INC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+function dateLabel(value: unknown): string {
   if (!value) return "Not set";
-  const time = typeof value === "number" ? value : new Date(value).getTime();
-  if (!Number.isFinite(time)) return "Not set";
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    }).format(new Date(time));
-  } catch {
-    return "Not set";
+  const d = new Date(value as string);
+  return Number.isNaN(d.getTime()) ? "Not set" : new Intl.DateTimeFormat("en-GH", {
+    day: "2-digit", month: "short", year: "numeric",
+  }).format(d);
+}
+function safeStorage(key: string): string {
+  if (typeof window === "undefined") return "";
+  try { return window.localStorage.getItem(key) || window.sessionStorage.getItem(key) || ""; }
+  catch { return ""; }
+}
+function openWorkspace(): AnyRow | null {
+  try { return JSON.parse(safeStorage("eleeveon_open_workspace")) as AnyRow; }
+  catch { return null; }
+}
+function idOf(value: unknown): string {
+  if (value && typeof value === "object") {
+    const o = value as AnyRow;
+    return str(o.id ?? o.localId ?? o.cloudId ?? o.payload?.id);
   }
+  return str(value);
 }
-
-function money(value: any, currency = "GHS") {
-  return formatFinanceMoney(value, currency);
+function inBranch(row: AnyRow, account: string, school: string, branch: string) {
+  return row && row.isDeleted !== true && row.active !== false &&
+    (!row.accountId || idOf(row.accountId) === account) &&
+    idOf(row.schoolId) === school && idOf(row.branchId) === branch;
 }
-
-function sourceLabel(value?: string) {
-  const map: Record<string, string> = {
-    all: "All sources",
-    fees_related: "Fees Related",
-    donation: "Donation",
-    admission: "Admission",
-    service: "Service",
-    canteen: "Canteen",
-    transport: "Transport",
-    uniform: "Uniform",
-    other: "Other",
-  };
-  return map[String(value || "other")] || text(value, "Other");
+function pickName(row?: AnyRow | null) {
+  return str(row?.fullName || row?.name || row?.title || row?.label) || "Unnamed";
 }
-
-function methodLabel(value?: string) {
-  const map: Record<string, string> = {
-    cash: "Cash",
-    momo: "Momo",
-    bank: "Bank",
-    card: "Card",
-    all: "All methods",
-  };
-  return map[String(value || "cash")] || text(value, "Cash");
+function defaultForm(kind: Kind, currency: string): FormState {
+  return { id:"", title:"", description:"", amount:"", date:isoToday(),
+    paymentMethod:"cash", source:"other", organizationId:"", paidTo:"", approvedBy:"",
+    receivedBy:"", referenceNumber:"", receiptNumber:kind === "incomes" ? randomReceipt():"",
+    currencyCode:currency };
 }
-
-function methodTone(method?: string): Tone {
-  const value = String(method || "").toLowerCase();
-  if (value === "cash") return "green";
-  if (value === "momo") return "orange";
-  if (value === "bank") return "blue";
-  if (value === "card") return "purple";
-  return "gray";
-}
-
-function generateReceipt() {
-  return `INC-${Date.now().toString(36).toUpperCase().slice(-6)}`;
-}
-
-function Chip({
-  children,
-  tone = "gray",
-}: {
-  children: React.ReactNode;
-  tone?: Tone;
-}) {
-  return <span className={`bi-chip ${tone}`}>{children}</span>;
-}
-
-function SliderIcon() {
-  return (
-    <svg className="bi-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
-}
-
-function Empty({ title, text: body }: { title: string; text: string }) {
-  return (
-    <section className="bi-empty">
-      <div>💰</div>
-      <h3>{title}</h3>
-      <p>{body}</p>
-    </section>
-  );
-}
-
-export default function IncomesPage() {
-  const dataRevision = useDataRevision();
-
+function FinanceLedgerModule({kind}: {kind: Kind}) {
+  const income = kind === "incomes";
+  const noun = income ? "Income" : "Expense";
+  const plural = income ? "Incomes" : "Expenses";
   const router = useRouter();
-  const { accountId, authenticated, loading: accountLoading } = useAccount();
-  const { settings, loading: settingsLoading } = useSettings();
-  const { activeMembership } = useActiveMembership() as any;
-  const { activeSchoolId, activeBranchId, activeSchool, activeBranch } =
-    useActiveBranch();
-  const primary = settings?.primaryColor || "var(--primary-color,#2563eb)";
-
-  const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
-
-  const schoolId = useMemo(
-    () =>
-      cleanId(openWorkspace?.schoolId) ||
-      cleanId(openWorkspace?.membership?.schoolId) ||
-      cleanId(openWorkspace?.membership?.school?.id) ||
-      cleanId(activeMembership?.schoolId) ||
-      cleanId(activeMembership?.school?.id) ||
-      cleanId(activeSchoolId) ||
-      cleanId(activeSchool?.id) ||
-      cleanId(settings?.schoolId) ||
-      cleanId(safeStorageRead("activeSchoolId")),
-    [
-      activeMembership?.school?.id,
-      activeMembership?.schoolId,
-      activeSchool?.id,
-      activeSchoolId,
-      openWorkspace?.membership?.school?.id,
-      openWorkspace?.membership?.schoolId,
-      openWorkspace?.schoolId,
-      settings?.schoolId,
-    ],
-  );
-
-  const branchId = useMemo(
-    () =>
-      cleanId(openWorkspace?.branchId) ||
-      cleanId(openWorkspace?.membership?.branchId) ||
-      cleanId(openWorkspace?.membership?.schoolBranchId) ||
-      cleanId(openWorkspace?.membership?.branch?.id) ||
-      cleanId(activeMembership?.branchId) ||
-      cleanId(activeMembership?.schoolBranchId) ||
-      cleanId(activeMembership?.branch?.id) ||
-      cleanId(activeBranchId) ||
-      cleanId(activeBranch?.id) ||
-      cleanId(settings?.branchId) ||
-      cleanId(safeStorageRead("activeBranchId")),
-    [
-      activeBranch?.id,
-      activeBranchId,
-      activeMembership?.branch?.id,
-      activeMembership?.branchId,
-      activeMembership?.schoolBranchId,
-      openWorkspace?.branchId,
-      openWorkspace?.membership?.branch?.id,
-      openWorkspace?.membership?.branchId,
-      openWorkspace?.membership?.schoolBranchId,
-      settings?.branchId,
-    ],
-  );
-
-  const { loading, setLoading } = useBackgroundLoader();
-  const [saving, setSaving] = useState(false);
-  // Match Students: dense table on laptops, compact cards on phones.
-  // The initial cards value is SSR-safe. Once a user chooses a mode under More,
-  // responsive changes must not unexpectedly overwrite that choice.
-  const [view, setView] = useState<ViewMode>("cards");
-  const viewChosenByUser = useRef(false);
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 980px)");
-    const apply = () => {
-      if (!viewChosenByUser.current) setView(media.matches ? "table" : "cards");
-    };
-    apply();
-    if (typeof media.addEventListener === "function") {
-      media.addEventListener("change", apply);
-      return () => media.removeEventListener("change", apply);
-    }
-    media.addListener(apply);
-    return () => media.removeListener(apply);
-  }, []);
-  const [query, setQuery] = useState("");
-  const [methodFilter, setMethodFilter] = useState<MethodFilter>("all");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
-  const [organizationFilter, setOrganizationFilter] = useState("all");
-  const [currencyFilter, setCurrencyFilter] = useState<string>("GHS");
-
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [selectedIncome, setSelectedIncome] = useState<AnyRow | null>(null);
-  const [message, setMessage] = useState("");
-  const [toast, setToast] = useState<{
-    tone: ToastTone;
-    message: string;
-  } | null>(null);
-
+  const revision = useDataRevision();
+  const {accountId, authenticated, loading: accountLoading} = useAccount();
+  const {settings, loading: settingsLoading} = useSettings();
+  const {activeMembership} = useActiveMembership() as any;
+  const {activeSchoolId, activeBranchId, activeSchool, activeBranch} = useActiveBranch();
+  const session = useMemo(() => openWorkspace(), []);
+  const account = str(accountId);
+  const school = idOf(session?.schoolId) || idOf(session?.membership?.schoolId) ||
+    idOf(session?.membership?.school?.id) || idOf(activeMembership?.schoolId) ||
+    idOf(activeMembership?.school?.id) || idOf(activeSchoolId) ||
+    idOf(activeSchool?.id) || idOf(settings?.schoolId) || safeStorage("activeSchoolId");
+  const branch = idOf(session?.branchId) || idOf(session?.membership?.branchId) ||
+    idOf(session?.membership?.schoolBranchId) || idOf(session?.membership?.branch?.id) ||
+    idOf(activeMembership?.branchId) || idOf(activeMembership?.schoolBranchId) ||
+    idOf(activeMembership?.branch?.id) || idOf(activeBranchId) ||
+    idOf(activeBranch?.id) || idOf(settings?.branchId) || safeStorage("activeBranchId");
+  const primary = str(settings?.primaryColor) || "#2563eb";
+  const academicScope = useFinanceAcademicPeriod({ accountId: account, schoolId:school, branchId:branch, settings, revision });
+  const [records, setRecords] = useState<AnyRow[]>([]);
   const [organizations, setOrganizations] = useState<AnyRow[]>([]);
   const [currencySettings, setCurrencySettings] = useState<AnyRow[]>([]);
-  const [incomes, setIncomes] = useState<AnyRow[]>([]);
-  const [form, setForm] = useState<IncomeForm>(emptyIncomeForm);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{message:string;error?:boolean} | null>(null);
+  const [view, setView] = useState<View>("cards");
+  const viewChosen = useRef(false);
+  const [query, setQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [methodFilter, setMethodFilter] = useState("all");
+  const [organizationFilter, setOrganizationFilter] = useState("all");
+  const [currencyFilter, setCurrencyFilter] = useState("GHS");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<AnyRow|null>(null);
+  const [form, setForm] = useState<FormState>(() => defaultForm(kind,"GHS"));
+  const sources: ReadonlyArray<readonly [string, string, string]> = income ? INCOME_SOURCES : EXPENSE_CATEGORIES;
+  const sourceLabel = (source: unknown) => sources.find(item => item[0] === source)?.[1] || "Other";
+  const sourceIcon = (source: unknown) => sources.find(item => item[0] === source)?.[2] || "📌";
 
   useEffect(() => {
     if (accountLoading) return;
-    if (!authenticated || !accountId) router.replace("/login");
-  }, [accountLoading, authenticated, accountId, router]);
+    if (!authenticated || !account) router.replace("/login");
+  }, [accountLoading, authenticated, account, router]);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 980px)");
+    const choose = () => { if (!viewChosen.current) setView(media.matches ? "table" : "cards"); };
+    choose();
+    media.addEventListener?.("change",choose);
+    return () => media.removeEventListener?.("change",choose);
+  }, []);
 
-  function showToast(tone: ToastTone, message: string) {
-    setToast({ tone, message });
-    window.setTimeout(
-      () =>
-        setToast((current) => (current?.message === message ? null : current)),
-      4200,
-    );
-  }
-
-  async function load() {
-    if (!authenticated || !accountId || !schoolId || !branchId) {
-      setLoading(false);
-      return;
-    }
-
+  const load = useCallback(async () => {
+    if (!authenticated || !account || !school || !branch) { setLoading(false); return; }
     setLoading(true);
     try {
-      const [incomeRows, organizationRows, currencyRows] = await Promise.all([
-        listActiveLocal<AnyRow>("incomes" as any),
+      const [rows, orgs, currencies] = await Promise.all([
+        listActiveLocal<AnyRow>(kind as any),
         listActiveLocal<AnyRow>("organizations" as any),
         listActiveLocal<AnyRow>("schoolCurrencySettings" as any),
       ]);
-
-      setIncomes(
-        incomeRows.filter((row) =>
-          sameScope(row, accountId, schoolId, branchId),
-        ),
-      );
-      setOrganizations(
-        organizationRows
-          .filter((row) => sameScope(row, accountId, schoolId, branchId))
-          .sort((a, b) => rowName(a).localeCompare(rowName(b))),
-      );
-      setCurrencySettings(
-        currencyRows.filter((row) =>
-          sameScope(row, accountId, schoolId, branchId),
-        ),
-      );
-    } catch (error) {
-      console.error("Failed to load branch incomes:", error);
-      showToast("error", "Failed to load incomes.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (accountLoading || settingsLoading) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    authenticated,
-    accountId,
-    schoolId,
-    branchId,
-    accountLoading,
-    settingsLoading,
-    activeMembership?.role,
-    activeMembership?.schoolId,
-    activeMembership?.branchId,
-    activeMembership?.schoolBranchId,
-    openWorkspace?.openedAt,
-    openWorkspace?.membershipId,
-    dataRevision,
-  ]);
-
-  const currency = useMemo(() => {
-    const preferred =
-      currencySettings.find(
-        (row) => row.defaultForIncomeExpense || row.active !== false,
-      ) || currencySettings[0];
-    return {
-      code: text(preferred?.currencyCode || incomes[0]?.currencyCode, "GHS"),
-      symbol: text(preferred?.currencySymbol, "₵"),
-      name: text(preferred?.currencyName, "Ghana Cedi"),
-    };
-  }, [currencySettings, incomes]);
-
-  useEffect(() => {
-    setCurrencyFilter(current => current === "GHS" ? currency.code : current);
-  }, [currency.code]);
-
-  const organizationMap = useMemo(
-    () =>
-      new Map<string, string>(
-        organizations.map((item) => [idOf(item), rowName(item)]),
-      ),
-    [organizations],
-  );
-
-  const incomeRows = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    return incomes
-      .filter(
-        (row) =>
-          methodFilter === "all" ||
-          String(row.paymentMethod || "") === methodFilter,
-      )
-      .filter(
-        (row) =>
-          sourceFilter === "all" ||
-          String(row.source || "other") === sourceFilter,
-      )
-      .filter(
-        (row) =>
-          organizationFilter === "all" ||
-          String(row.organizationId || "") === organizationFilter,
-      )
-      .filter(row => currencyFilter === "all" ||
-        String(row.currencyCode || currency.code).toUpperCase() === currencyFilter)
-      .filter((row) => {
-        if (!q) return true;
-        return [
-          row.title,
-          row.description,
-          row.source,
-          row.paymentMethod,
-          row.receivedBy,
-          row.referenceNumber,
-          row.receiptNumber,
-          organizationMap.get(String(row.organizationId)),
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
-      })
-      .sort((a, b) => {
-        const when = (row: AnyRow) => typeof row.date === "string" ?
-          new Date(row.date).getTime() || 0 : n(row.updatedAt || row.createdAt);
-        return when(b) - when(a);
+      setRecords((rows || []).filter(row => inBranch(row,account,school,branch)));
+      setOrganizations((orgs || []).filter(row => inBranch(row,account,school,branch))
+        .sort((a,b) => pickName(a).localeCompare(pickName(b))));
+      setCurrencySettings((currencies || []).filter(row => inBranch(row,account,school,branch)));
+    } catch (error) { console.error(`Failed loading ${kind}`,error);
+      setNotice({message:`Unable to load ${kind}.`,error:true}); }
+    finally { setLoading(false); }
+  }, [kind, authenticated, account, school, branch]);
+  useEffect(() => { if (!accountLoading && !settingsLoading) void load(); },
+    [load, revision, accountLoading, settingsLoading, activeMembership?.role]);
+  const preferredCurrency = useMemo(() => {
+    const row = currencySettings.find(row => row.defaultForIncomeExpense) ||
+      currencySettings.find(row => row.active !== false) || currencySettings[0];
+    return str(row?.currencyCode || records[0]?.currencyCode) || "GHS";
+  }, [currencySettings,records]);
+  useEffect(() => { setCurrencyFilter(v => v === "GHS" ? preferredCurrency : v); }, [preferredCurrency]);
+  const organizationMap = useMemo(() => new Map(organizations.map(row => [idOf(row),pickName(row)])), [organizations]);
+  const displayed = useMemo(() => {
+    const q = query.toLocaleLowerCase().trim();
+    return records.filter(row => academicScope.matchesDate(row.date || row.createdAt))
+      .filter(row => sourceFilter === "all" || str(income ? row.source : row.expenseSourceType) === sourceFilter)
+      .filter(row => methodFilter === "all" || str(row.paymentMethod) === methodFilter)
+      .filter(row => organizationFilter === "all" || idOf(row.organizationId) === organizationFilter)
+      .filter(row => currencyFilter === "all" || str(row.currencyCode || preferredCurrency).toUpperCase() === currencyFilter)
+      .filter(row => !q || [row.title,row.description,row.source,row.expenseSourceType,
+        row.paidTo,row.receivedBy,row.approvedBy,row.referenceNumber,row.receiptNumber,
+        organizationMap.get(idOf(row.organizationId))].join(" ").toLowerCase().includes(q))
+      .sort((a,b) => {
+        const d = (row:AnyRow) => new Date(row.date || row.updatedAt || row.createdAt || 0).getTime() || 0;
+        return d(b)-d(a);
       });
-  }, [
-    incomes,
-    currency.code,
-    currencyFilter,
-    methodFilter,
-    organizationFilter,
-    organizationMap,
-    query,
-    sourceFilter,
-  ]);
-
-  const mixedCurrency = useMemo(() =>
-    new Set(incomeRows.map(row => String(row.currencyCode || currency.code))).size > 1,
-    [incomeRows, currency.code],
-  );
-
-  const summary = useMemo(() => {
-    // Never sum numeric values across different currencies.
-    const singleCurrencyRows = mixedCurrency ?
-      incomeRows.filter(row => String(row.currencyCode || currency.code) === currency.code) : incomeRows;
-    const total = singleCurrencyRows.reduce((sum, row) => sum + n(row.amount), 0);
-    const cash = singleCurrencyRows
-      .filter((row) => String(row.paymentMethod) === "cash")
-      .reduce((sum, row) => sum + n(row.amount), 0);
-    const momo = singleCurrencyRows
-      .filter((row) => String(row.paymentMethod) === "momo")
-      .reduce((sum, row) => sum + n(row.amount), 0);
-    const bank = singleCurrencyRows
-      .filter((row) => String(row.paymentMethod) === "bank")
-      .reduce((sum, row) => sum + n(row.amount), 0);
-    const card = singleCurrencyRows
-      .filter((row) => String(row.paymentMethod) === "card")
-      .reduce((sum, row) => sum + n(row.amount), 0);
-    return {
-      shown: incomeRows.length,
-      mixedCurrency,
-      all: incomes.length,
-      total,
-      cash,
-      momo,
-      bank,
-      card,
-      today: singleCurrencyRows
-        .filter((row) => String(row.date || "").slice(0, 10) === today())
-        .reduce((sum, row) => sum + n(row.amount), 0),
-    };
-  }, [incomeRows, incomes.length, mixedCurrency, currency.code]);
-
-  const sourceRows = useMemo(() => {
-    const map = new Map<string, number>();
-    incomeRows.filter(row => !mixedCurrency || String(row.currencyCode || currency.code) === currency.code).forEach((row) => {
-      const key = sourceLabel(row.source);
-      map.set(key, (map.get(key) || 0) + n(row.amount));
-    });
-    return Array.from(map.entries())
-      .map(([label, value]) => ({ label, value }))
-      .sort((a, b) => b.value - a.value);
-  }, [incomeRows, mixedCurrency, currency.code]);
-
-  const activeFilterCount = useMemo(
-    () =>
-      [
-        methodFilter !== "all",
-        sourceFilter !== "all",
-        organizationFilter !== "all",
-        currencyFilter !== currency.code,
-      ].filter(Boolean).length,
-    [methodFilter, organizationFilter, sourceFilter, currencyFilter, currency.code],
-  );
-
-  function openDrawer(existing?: AnyRow) {
-    setMessage("");
-    setForm(
-      existing
-        ? {
-            id: cleanId(idOf(existing)),
-            title: text(existing.title),
-            description: text(existing.description),
-            amount: String(n(existing.amount) || ""),
-            paymentMethod: (existing.paymentMethod ||
-              "cash") as IncomeForm["paymentMethod"],
-            date: text(existing.date, today()),
-            source: (existing.source || "other") as SourceFilter,
-            organizationId: existing.organizationId
-              ? String(existing.organizationId)
-              : "",
-            receivedBy: text(existing.receivedBy),
-            referenceNumber: text(existing.referenceNumber),
-            receiptNumber: text(existing.receiptNumber),
-            currencyCode: text(existing.currencyCode, currency.code),
-            currencySymbol: getFinanceCurrency(text(existing.currencyCode, currency.code)).symbol,
-          }
-        : {
-            ...emptyIncomeForm,
-            date: today(),
-            currencyCode: currency.code,
-            currencySymbol: currency.symbol,
-            receiptNumber: generateReceipt(),
-          },
-    );
-    setDrawerOpen(true);
+  }, [records, academicScope.filterSignature, sourceFilter,methodFilter,
+      organizationFilter,currencyFilter,preferredCurrency,query,organizationMap,income]);
+  const currencies = useMemo(() => [...new Set(displayed.map(row => str(row.currencyCode || preferredCurrency)))],
+    [displayed,preferredCurrency]);
+  const mixedCurrencies = currencies.length > 1;
+  const totalByCurrency = useMemo(() => currencies.map(code => ({
+    code,total:displayed.filter(row => str(row.currencyCode || preferredCurrency) === code)
+      .reduce((sum,row) => sum + number(row.amount),0),
+  })), [currencies, displayed, preferredCurrency]);
+  const sum = (filter: (row:AnyRow)=>boolean) => displayed
+    .filter(row => str(row.currencyCode || preferredCurrency) ===
+      (currencyFilter === "all" ? preferredCurrency : currencyFilter))
+    .filter(filter).reduce((total,row)=>total+number(row.amount),0);
+  const summaryCode = currencyFilter === "all" ? preferredCurrency : currencyFilter;
+  const total = sum(()=>true);
+  const grouped = sources.map(([source,label,icon])=>({source,label,icon,
+    count:displayed.filter(row => str(income ? row.source : row.expenseSourceType) === source).length,
+    amount:sum(row => str(income ? row.source : row.expenseSourceType) === source),
+  })).filter(row=>row.count>0);
+  const methodAmounts = (["cash","momo","bank","card"] as const).map(method=>({
+    method,amount:sum(row=>str(row.paymentMethod)===method)
+  }));
+  const setField = (key: keyof FormState, value: string) => setForm(old => ({...old,[key]:value}));
+  function edit(row?:AnyRow) {
+    const code = str(row?.currencyCode) || preferredCurrency;
+    setNotice(null);
+    setForm(row ? {
+      id:idOf(row), title:str(row.title), description:str(row.description),
+      amount:str(row.amount), date:str(row.date) || isoToday(),
+      paymentMethod:(row.paymentMethod || "cash") as PaymentMethod,
+      source:str(income ? row.source : row.expenseSourceType) || "other",
+      organizationId:idOf(row.organizationId),paidTo:str(row.paidTo),
+      approvedBy:str(row.approvedBy),receivedBy:str(row.receivedBy),
+      referenceNumber:str(row.referenceNumber),receiptNumber:str(row.receiptNumber),currencyCode:code,
+    } : defaultForm(kind,preferredCurrency));
+    setSelectedRow(null);
+    setEditorOpen(true);
   }
-
-  async function saveIncome() {
-    if (!accountId || !schoolId || !branchId)
-      return setMessage("Select a school and branch before saving income.");
-    if (!form.title.trim()) return setMessage("Enter income title.");
-    if (n(form.amount) <= 0) return setMessage("Enter a valid amount.");
-    if (!form.date) return setMessage("Select income date.");
-
-    setSaving(true);
+  async function save() {
+    if (!account || !school || !branch) {setNotice({message:"Choose a school and branch.",error:true});return;}
+    if (!str(form.title)) {setNotice({message:"Enter a title.",error:true});return;}
+    if (!(number(form.amount)>0)) {setNotice({message:"Enter a valid amount.",error:true});return;}
+    if (!form.date) {setNotice({message:"Select a date.",error:true});return;}
+    setBusy(true);
     try {
-      const payload: AnyRow = {
-        accountId: String(accountId),
-        schoolId,
-        branchId,
-        organizationId: cleanId(form.organizationId) || undefined,
-        title: form.title.trim(),
-        description: form.description.trim(),
-        amount: n(form.amount),
-        paymentMethod: form.paymentMethod,
-        date: form.date,
-        source: form.source,
-        receivedBy: form.receivedBy.trim(),
-        referenceNumber: form.referenceNumber.trim(),
-        receiptNumber: form.receiptNumber.trim() || generateReceipt(),
-        currencyCode: form.currencyCode || currency.code,
-        currencySymbol: getFinanceCurrency(form.currencyCode || currency.code).symbol,
-        active: true,
-        isDeleted: false,
+      const payload:AnyRow = {
+        accountId:account,schoolId:school,branchId:branch,
+        organizationId:idOf(form.organizationId)||undefined,
+        title:form.title.trim(), description:form.description.trim(),
+        amount:validMoney(form.amount),paymentMethod:form.paymentMethod,date:form.date,
+        referenceNumber:form.referenceNumber.trim(),receiptNumber:form.receiptNumber.trim() ||
+          (income ? randomReceipt() : ""),currencyCode:form.currencyCode,
+        currencySymbol:getFinanceCurrency(form.currencyCode).symbol,
+        active:true,isDeleted:false,
+        ...(income ? {source:form.source,receivedBy:form.receivedBy.trim()} :
+          {expenseSourceType:form.source,paidTo:form.paidTo.trim(),approvedBy:form.approvedBy.trim()}),
       };
-
-      if (form.id) await updateLocal("incomes" as any, form.id, payload);
-      else await createLocal("incomes" as any, payload);
-
-      setDrawerOpen(false);
-      showToast("success", form.id ? "Income updated." : "Income recorded.");
+      if (form.id) await updateLocal(kind as any,form.id,payload);
+      else await createLocal(kind as any,payload);
+      setEditorOpen(false);
+      setNotice({message:`${noun} ${form.id?"updated":"saved"}.`});
       await load();
-    } catch (error: any) {
-      console.error("Failed to save income:", error);
-      showToast("error", error?.message || "Failed to save income.");
-    } finally {
-      setSaving(false);
-    }
+    } catch(error) {console.error(error);setNotice({message:`Could not save ${noun.toLowerCase()}.`,error:true});}
+    finally {setBusy(false);}
   }
-
-  async function deleteIncome(row: AnyRow) {
-    const id = cleanId(idOf(row));
-    if (!id) return;
-    if (!window.confirm(`Delete income record ${row.title || ""}?`)) return;
-    try {
-      await softDeleteLocal("incomes" as any, id);
-      showToast("success", "Income deleted.");
-      setSelectedIncome(null);
-      await load();
-    } catch (error: any) {
-      showToast("error", error?.message || "Failed to delete income.");
-    }
+  async function remove(row:AnyRow) {
+    const key = idOf(row);
+    if (!key || !window.confirm(`Delete ${noun.toLowerCase()} ${str(row.title)||"record"}?`)) return;
+    try {await softDeleteLocal(kind as any,key);setSelectedRow(null);
+      setNotice({message:`${noun} deleted.`});await load();}
+    catch(error) {console.error(error);setNotice({message:`Could not delete ${noun.toLowerCase()}.`,error:true});}
   }
-
-  const printIncomes = () => {
-    printBranchTable({
-      title: "Branch Income Records",
-      subtitle: `${incomeRows.length} income record(s) · Selected branch`,
-      columns: [
-        { key: "date", label: "Date" },
-        { key: "income", label: "Income" },
-        { key: "source", label: "Source" },
-        { key: "method", label: "Method" },
-        { key: "receivedBy", label: "Received By" },
-        { key: "amount", label: "Amount" },
-      ],
-      rows: incomeRows.map(row => ({
-        date: dateLabel(row.date),
-        income: row.title || "Income",
-        source: sourceLabel(row.source),
-        method: methodLabel(row.paymentMethod),
-        receivedBy: row.receivedBy || "—",
-        amount: money(row.amount, row.currencyCode || currency.code),
-      })),
-    });
-  };
-
-  // Branch Admin's shared top actions: no duplicated local action strip.
-  useRegisterBranchWorkspaceToolbar("financeWorkspace", {
-    add: () => openDrawer(),
-    search: setQuery,
-    filter: () => setFilterOpen(true),
-    more: () => setMoreOpen(true),
-    print: printIncomes,
+  const printRecords = () => printBranchTable({
+    title:`Branch ${noun} Records`,
+    subtitle:`${displayed.length} ${kind} · ${academicScope.label} · Selected branch`,
+    columns:[
+      {key:"date",label:"Date"},{key:"title",label:noun},
+      {key:"source",label:income?"Source":"Category"},{key:"method",label:"Method"},
+      {key:"person",label:income?"Received By":"Paid To"},{key:"amount",label:"Amount"},
+    ],
+    rows:displayed.map(row => ({
+      date:dateLabel(row.date),title:row.title || noun,
+      source:sourceLabel(income ? row.source : row.expenseSourceType),
+      method:row.paymentMethod || "Cash",
+      person:income ? row.receivedBy || "Not recorded" : row.paidTo || "Not recorded",
+      amount:money(row.amount,row.currencyCode||preferredCurrency),
+    })),
   });
-
-  if (loading || accountLoading || settingsLoading) {
-    return (
-      <State
-        primary={primary}
-        title="Opening incomes..."
-        text="Loading branch income records."
-      />
-    );
-  }
-
-  if (!authenticated || !accountId) {
-    return (
-      <State
-        primary={primary}
-        title="Redirecting to login..."
-        text="You must sign in before managing branch incomes."
-      />
-    );
-  }
-
-  if (!schoolId || !branchId) {
-    return (
-      <State
-        primary={primary}
-        title="Select branch context"
-        text="Incomes are branch-scoped. Choose an active school and branch before continuing."
-      />
-    );
-  }
-
-  return (
-    <main
-      className="bi-page"
-      style={{ "--bi-primary": primary } as React.CSSProperties}
-    >
-      <style>{css}</style>
-
-      {toast && (
-        <section className={`bi-toast ${toast.tone}`}>
-          {toast.message}
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            aria-label="Close notification"
-          >
-            ✕
-          </button>
-        </section>
-      )}
-
-      {(methodFilter !== "all" ||
-        sourceFilter !== "all" ||
-        organizationFilter !== "all" ||
-        currencyFilter !== currency.code ||
-        query.trim()) && (
-        <section className="bi-filter-chips" aria-label="Active filters">
-          {methodFilter !== "all" && (
-            <button type="button" onClick={() => setMethodFilter("all")}>
-              Method: {methodLabel(methodFilter)} ×
-            </button>
-          )}
-          {sourceFilter !== "all" && (
-            <button type="button" onClick={() => setSourceFilter("all")}>
-              Source: {sourceLabel(sourceFilter)} ×
-            </button>
-          )}
-          {currencyFilter !== currency.code && (
-            <button type="button" onClick={() => setCurrencyFilter(currency.code)}>
-              Currency: {currencyFilter} ×
-            </button>
-          )}
-          {organizationFilter !== "all" && (
-            <button type="button" onClick={() => setOrganizationFilter("all")}>
-              Org:{" "}
-              {organizationMap.get(organizationFilter) ||
-                organizationFilter}{" "}
-              ×
-            </button>
-          )}
-          {query.trim() && (
-            <button type="button" onClick={() => setQuery("")}>
-              Search: {query.trim()} ×
-            </button>
-          )}
-        </section>
-      )}
-
-      {view === "analytics" && (
-        mixedCurrency ? (
-          <section className="bi-analysis-grid" aria-label="Income totals by currency">
-            {[...new Set(incomeRows.map(row => String(row.currencyCode || currency.code)))].map(code => (
-              <article className="bi-analysis" key={code}>
-                <span>{code} income</span>
-                <strong>{money(incomeRows.filter(row => (row.currencyCode || currency.code) === code)
-                  .reduce((sum, row) => sum + n(row.amount), 0), code)}</strong>
-                <p>Totals are separate; no currency conversion.</p>
-              </article>
-            ))}
-          </section>
-        ) : (
-          <AnalyticsView
-            summary={summary}
-            sourceRows={sourceRows}
-            currency={incomeRows[0]?.currencyCode || currency.code}
-          />
-        )
-      )}
-
-      {view === "table" && (
-        <TableView
-          rows={incomeRows}
-          organizationMap={organizationMap}
-          currency={currency.code}
-          openDrawer={openDrawer}
-          setSelectedIncome={setSelectedIncome}
-          deleteIncome={deleteIncome}
-        />
-      )}
-
-      {view === "cards" && (
-        <section className="bi-list">
-          {incomeRows.map((income) => (
-            <IncomeCard
-              key={String(idOf(income))}
-              income={income}
-              organizationName={
-                organizationMap.get(String(income.organizationId)) ||
-                "No organization"
-              }
-              currency={income.currencyCode || currency.code}
-              openDrawer={openDrawer}
-              setSelectedIncome={setSelectedIncome}
-              deleteIncome={deleteIncome}
-            />
-          ))}
-
-          {!incomeRows.length && (
-            <Empty
-              title="No income records"
-              text="Record branch income such as donations, forms, services, canteen or other non-fee income."
-            />
-          )}
-        </section>
-      )}
-
-      {(filterOpen || moreOpen || drawerOpen || selectedIncome) && (
-        <FinanceOverlayPortal primary={primary}>
-      {filterOpen && (
-        <FilterSheet
-          methodFilter={methodFilter}
-          setMethodFilter={setMethodFilter}
-          sourceFilter={sourceFilter}
-          setSourceFilter={setSourceFilter}
-          organizationFilter={organizationFilter}
-          setOrganizationFilter={setOrganizationFilter}
-          currencyFilter={currencyFilter}
-          setCurrencyFilter={setCurrencyFilter}
-          defaultCurrency={currency.code}
-          organizations={organizations}
-          onClose={() => setFilterOpen(false)}
-        />
-      )}
-
-      {moreOpen && (
-        <MoreSheet
-          view={view}
-          setView={(mode) => {
-            viewChosenByUser.current = true;
-            setView(mode);
-            setMoreOpen(false);
-          }}
-          summary={summary}
-          currency={currency.code}
-          mixedCurrency={mixedCurrency}
-          onRefresh={async () => {
-            setMoreOpen(false);
-            await load();
-          }}
-          onAdd={() => {
-            setMoreOpen(false);
-            openDrawer();
-          }}
-          onClose={() => setMoreOpen(false)}
-        />
-      )}
-
-      {drawerOpen && (
-        <IncomeDrawer
-          form={form}
-          setForm={setForm}
-          organizations={organizations}
-          message={message}
-          saving={saving}
-          save={saveIncome}
-          close={() => setDrawerOpen(false)}
-        />
-      )}
-
-      {selectedIncome && (
-        <IncomeSheet
-          income={selectedIncome}
-          organizationName={
-            organizationMap.get(String(selectedIncome.organizationId)) ||
-            "No organization"
-          }
-          currency={selectedIncome.currencyCode || currency.code}
-          openDrawer={openDrawer}
-          deleteIncome={deleteIncome}
-          close={() => setSelectedIncome(null)}
-        />
-      )}
-        </FinanceOverlayPortal>
-      )}
-    </main>
-  );
-}
-
-
-/** BODY-level modal host: escapes the role-shell's transformed/sticky header layers. */
-function FinanceOverlayPortal({primary,children}:{primary:string;children:React.ReactNode}) {
+  useRegisterBranchWorkspaceToolbar("financeWorkspace",{
+    add:()=>edit(),search:setQuery,filter:()=>setFilterOpen(true),
+    more:()=>setMoreOpen(true),print:printRecords,
+  });
   useEffect(() => {
-    const previousBody = document.body.style.overflow;
-    const previousHtml = document.documentElement.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousBody; document.documentElement.style.overflow = previousHtml; };
-  }, []);
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div className="bi-page bi-modal-host"
-      style={{"--bi-primary": primary,
-        position: "fixed", inset: 0, width: 0, height: 0, minHeight: 0,
-        background: "transparent", padding: 0, pointerEvents: "none",
-        overflow: "visible", zIndex: 50000} as React.CSSProperties}>
-      {children}
-    </div>, document.body
-  );
+    if (!(filterOpen||moreOpen||editorOpen||selectedRow)) return;
+    const previousBody=document.body.style.overflow;
+    const previousHtml=document.documentElement.style.overflow;
+    document.body.style.overflow="hidden";
+    document.documentElement.style.overflow="hidden";
+    return ()=>{document.body.style.overflow=previousBody;document.documentElement.style.overflow=previousHtml;};
+  },[filterOpen,moreOpen,editorOpen,selectedRow]);
+  const actions = (row:AnyRow) => <div className="fl-actions">
+    {income && <button type="button" onClick={()=>setSelectedRow(row)}>View</button>}
+    <button type="button" onClick={()=>edit(row)}>Edit</button>
+    <button type="button" className="danger" onClick={()=>void remove(row)}>Delete</button>
+  </div>;
+  const field = (label:string, child:React.ReactNode, wide=false) =>
+    <label className={wide?"wide":""}><span>{label}</span>{child}</label>;
+  const input = (key:keyof FormState, props:React.InputHTMLAttributes<HTMLInputElement> = {}) =>
+    <input {...props} value={form[key]} onChange={e=>setField(key,e.target.value)} />;
+  const select = (key:keyof FormState, choices:Array<{value:string;label:string}>) =>
+    <select value={form[key]} onChange={e=>setField(key,e.target.value)}>
+      {choices.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}
+    </select>;
+  const paymentChoices = (["cash","momo","bank","card"] as const)
+    .map(value=>({value,label:value==="momo"?"Mobile Money":value[0].toUpperCase()+value.slice(1)}));
+  const formError = notice?.error && editorOpen ? notice.message : null;
+  const portal = typeof document !== "undefined" ? document.body : null;
+  if (accountLoading || settingsLoading || loading) return <main className="fl-page" style={{"--fl-primary":primary} as React.CSSProperties}>
+    <style>{styles}</style><div className="fl-state">Opening {plural.toLowerCase()}…</div></main>;
+  if (!authenticated || !account) return <main className="fl-page"><div className="fl-state">Sign in to manage branch finances.</div></main>;
+  if (!school || !branch) return <main className="fl-page"><div className="fl-state">Choose a school and branch workspace.</div></main>;
+
+  return <main className="fl-page" style={{"--fl-primary":primary} as React.CSSProperties}>
+    <style>{styles}</style>
+    <AcademicFinancePeriodBar scope={academicScope} title={plural} hint={`Filter: change term · +: ${income?"record income":"record expense"}`} />
+    {notice && !(editorOpen&&notice.error) && <div className={`fl-toast ${notice.error?"error":""}`} role="status">
+      {notice.message}<button type="button" onClick={()=>setNotice(null)} aria-label="Dismiss">×</button></div>}
+    {(sourceFilter!=="all"||methodFilter!=="all"||organizationFilter!=="all"||currencyFilter!==preferredCurrency||query) &&
+      <div className="fl-chips">
+        {sourceFilter!=="all"&&<button onClick={()=>setSourceFilter("all")}>{sourceLabel(sourceFilter)} ×</button>}
+        {methodFilter!=="all"&&<button onClick={()=>setMethodFilter("all")}>{methodFilter} ×</button>}
+        {organizationFilter!=="all"&&<button onClick={()=>setOrganizationFilter("all")}>{organizationMap.get(organizationFilter)||"Organization"} ×</button>}
+        {currencyFilter!==preferredCurrency&&<button onClick={()=>setCurrencyFilter(preferredCurrency)}>{currencyFilter} ×</button>}
+        {query&&<button onClick={()=>setQuery("")}>Search ×</button>}
+      </div>}
+    {view==="analytics" && <section className="fl-analytics" aria-label={`${plural} analytics`}>
+      {mixedCurrencies && <p className="fl-currency-note">Multiple currencies. Totals are kept separate, without conversion.</p>}
+      {(mixedCurrencies ? totalByCurrency.map(row=>({title:`${row.code} total`,amount:row.total,code:row.code})) :
+        [{title:`Total ${plural.toLowerCase()}`,amount:total,code:summaryCode},
+        ...methodAmounts.map(row=>({title:row.method==="momo"?"Mobile Money":row.method,amount:row.amount,code:summaryCode}))])
+        .map(row=><article className="fl-metric" key={row.title}><small>{row.title}</small>
+          <strong>{money(row.amount,row.code)}</strong><span>{displayed.length} records shown</span></article>)}
+      {!mixedCurrencies&&<article className="fl-metric full"><small>{income?"By income source":"By category"}</small>
+        {grouped.map(row=><div key={row.source} className="fl-metric-row"><span>{row.icon} {row.label}</span><b>{money(row.amount,summaryCode)}</b></div>)}
+        {!grouped.length&&<p>No records in this period.</p>}</article>}
+    </section>}
+    {view==="table" && <section className="fl-table-card"><div className="fl-table-scroll">
+      <table><thead><tr><th>{plural} ({displayed.length})</th>
+        <th>{income?"Source":"Category"}</th><th>Organization</th><th>Amount</th>
+        <th>Method</th><th>{income?"Received By":"Paid To"}</th>
+        <th>Date</th><th>Reference</th><th>Actions</th></tr></thead>
+      <tbody>{displayed.map(row=><tr key={idOf(row)}><td><strong>{str(row.title)||noun}</strong>
+          <small>{str(row.description)}</small></td>
+        <td>{sourceIcon(income?row.source:row.expenseSourceType)} {sourceLabel(income?row.source:row.expenseSourceType)}</td>
+        <td>{organizationMap.get(idOf(row.organizationId))||"General branch"}</td>
+        <td><b>{money(row.amount,row.currencyCode||preferredCurrency)}</b></td><td>{str(row.paymentMethod)||"Cash"}</td>
+        <td>{str(income?row.receivedBy:row.paidTo)||"Not set"}</td><td>{dateLabel(row.date)}</td>
+        <td>{str(row.receiptNumber||row.referenceNumber)||"Not set"}</td><td>{actions(row)}</td></tr>)}</tbody></table>
+      {!displayed.length&&<div className="fl-empty">No {kind} found for this period. Use Filter to view another term or + to add a record.</div>}
+    </div></section>}
+    {view==="cards"&&<section className="fl-cards">
+      {displayed.map(row=><article className="fl-card" key={idOf(row)}>
+        <div className="fl-avatar">{sourceIcon(income?row.source:row.expenseSourceType)}</div>
+        <div className="fl-card-main"><strong>{str(row.title)||noun}</strong>
+          <small>{sourceLabel(income?row.source:row.expenseSourceType)} · {organizationMap.get(idOf(row.organizationId))||"General branch"}</small>
+          <small>{dateLabel(row.date)} · {str(income?row.receivedBy:row.paidTo)||"Not specified"}</small></div>
+        <div className="fl-card-bottom"><b>{money(row.amount,row.currencyCode||preferredCurrency)}</b>
+          <span>{str(row.paymentMethod)||"Cash"}</span>{actions(row)}</div></article>)}
+      {!displayed.length&&<div className="fl-empty">No {kind} for {academicScope.label}. Use Filter for other terms, or + to add a record.</div>}
+    </section>}
+    {portal&&(filterOpen||moreOpen||editorOpen||selectedRow)&&createPortal(
+      <div className="fl-modal-host" style={{"--fl-primary":primary} as React.CSSProperties}>
+        <style>{styles}</style>
+        {filterOpen&&<div className="fl-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setFilterOpen(false)}}>
+          <section className="fl-sheet" role="dialog" aria-modal="true" aria-label={`${plural} filters`}>
+            <div className="fl-head"><div><h2>Filters</h2><small>Choose the academic period and other filters.</small></div>
+              <button onClick={()=>setFilterOpen(false)} aria-label="Close">×</button></div>
+            <div className="fl-form-grid">
+              {field("Academic period",<select value={academicScope.selectedKey} onChange={e=>academicScope.setSelectedKey(e.target.value)}>
+                <option value="all">All dates</option>{academicScope.options.map(option=><option key={option.key} value={option.key}>
+                  {option.structure} · {option.period}</option>)}</select>,true)}
+              {field(income?"Source":"Category",<select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)}>
+                <option value="all">All {income?"sources":"categories"}</option>{sources.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>)}
+              {field("Payment method",<select value={methodFilter} onChange={e=>setMethodFilter(e.target.value)}>
+                <option value="all">All methods</option>{paymentChoices.map(row=><option key={row.value} value={row.value}>{row.label}</option>)}</select>)}
+              {field("Currency",<select value={currencyFilter} onChange={e=>setCurrencyFilter(e.target.value)}>
+                <option value="all">All currencies (separate totals)</option>{FINANCE_CURRENCIES.map(row=><option key={row.code} value={row.code}>{row.name} ({row.code})</option>)}</select>)}
+              {field("Organization",<select value={organizationFilter} onChange={e=>setOrganizationFilter(e.target.value)}>
+                <option value="all">All organizations</option>{organizations.map(row=><option key={idOf(row)} value={idOf(row)}>{pickName(row)}</option>)}</select>,true)}
+            </div>
+            <div className="fl-footer"><button onClick={()=>{academicScope.reset();setSourceFilter("all");setMethodFilter("all");setOrganizationFilter("all");setCurrencyFilter(preferredCurrency);}}>Reset</button>
+              <button className="primary" onClick={()=>setFilterOpen(false)}>Apply</button></div>
+          </section></div>}
+        {moreOpen&&<div className="fl-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setMoreOpen(false)}}>
+          <section className="fl-sheet narrow" role="dialog" aria-modal="true" aria-label="More options">
+            <div className="fl-head"><div><h2>More</h2><small>Views and finance actions</small></div><button onClick={()=>setMoreOpen(false)}>×</button></div>
+            <div className="fl-menu">
+              {(["cards","table","analytics"] as View[]).map(mode=><button key={mode} className={mode===view?"active":""} onClick={()=>{viewChosen.current=true;setView(mode);setMoreOpen(false)}}>
+                {mode==="cards"?"☰":mode==="table"?"☷":"◔"} · {mode[0].toUpperCase()+mode.slice(1)} view</button>)}
+              <button onClick={()=>{setMoreOpen(false);edit()}}>+ New {noun.toLowerCase()}</button>
+              <button onClick={()=>{setMoreOpen(false);void load()}}>↻ Refresh records</button>
+            </div>
+          </section></div>}
+        {editorOpen&&<div className="fl-overlay drawer-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setEditorOpen(false)}}>
+          <section className="fl-sheet fl-drawer" role="dialog" aria-modal="true" aria-label={`Edit ${noun}`}>
+            <div className="fl-head"><div><small>{form.id?"Edit":"New"} {noun}</small>
+              <h2>Branch {noun}</h2><small>{form.amount?money(form.amount,form.currencyCode):`Record ${income?"non-fee income":"branch spending"}`}</small></div>
+              <button type="button" onClick={()=>setEditorOpen(false)} aria-label="Close">×</button></div>
+            {formError&&<p className="fl-form-error" role="alert">{formError}</p>}
+            <div className="fl-form-grid">
+              {field("Title",input("title",{placeholder:income?"Donation, Canteen...":"Electricity, chalk..."}))}
+              {field("Amount",input("amount",{type:"number",min:"0.01",step:"0.01",placeholder:"0"}))}
+              {field(income?"Source":"Category",select("source",sources.map(([value,label])=>({value,label}))))}
+              {field("Payment method",select("paymentMethod",paymentChoices))}
+              {field("Date",input("date",{type:"date"}))}
+              {field("Organization",select("organizationId",[{value:"",label:income?"No organization":"General branch"},
+                ...organizations.map(row=>({value:idOf(row),label:pickName(row)}))]))}
+              {income?field("Received by",input("receivedBy")):field("Paid to / Vendor",input("paidTo"))}
+              {!income&&field("Approved by",input("approvedBy"))}
+              {field("Reference number",input("referenceNumber"))}
+              {field("Receipt number",input("receiptNumber"))}
+              {field("Currency",<select value={form.currencyCode} onChange={e=>setField("currencyCode",e.target.value)}>
+                {FINANCE_CURRENCIES.map(row=><option key={row.code} value={row.code}>{row.name} ({row.code})</option>)}
+                {!FINANCE_CURRENCIES.some(row=>row.code===form.currencyCode)&&<option value={form.currencyCode}>{form.currencyCode}</option>}
+              </select>)}
+              {field("Description",<textarea value={form.description} onChange={e=>setField("description",e.target.value)} placeholder="Optional details for audit and reporting"/>,true)}
+            </div>
+            <div className="fl-footer"><button onClick={()=>setEditorOpen(false)}>Cancel</button>
+              <button className="primary" onClick={()=>void save()} disabled={busy}>{busy?"Saving…":`Save ${noun}`}</button></div>
+          </section></div>}
+        {selectedRow&&income&&<div className="fl-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)setSelectedRow(null)}}>
+          <section className="fl-sheet" role="dialog" aria-modal="true" aria-label="Income details">
+            <div className="fl-head"><div><h2>{str(selectedRow.title)||"Income"}</h2>
+              <small>{sourceLabel(selectedRow.source)} · {dateLabel(selectedRow.date)}</small></div>
+              <button onClick={()=>setSelectedRow(null)}>×</button></div>
+            <div className="fl-detail"><strong>{money(selectedRow.amount,selectedRow.currencyCode||preferredCurrency)}</strong>
+              {[["Method",selectedRow.paymentMethod],["Received by",selectedRow.receivedBy],
+                ["Receipt",selectedRow.receiptNumber],["Reference",selectedRow.referenceNumber],
+                ["Organization",organizationMap.get(idOf(selectedRow.organizationId))],
+                ["Description",selectedRow.description]].map(([label,value])=><div key={label}><small>{label}</small><b>{str(value)||"Not set"}</b></div>)}
+            </div>
+            <div className="fl-footer"><button onClick={()=>setSelectedRow(null)}>Close</button>
+              <button onClick={()=>edit(selectedRow)}>Edit</button><button className="danger" onClick={()=>void remove(selectedRow)}>Delete</button></div>
+          </section></div>}
+      </div>,portal)}
+  </main>;
 }
 
-
-function State({
-  primary,
-  title,
-  text: body,
-}: {
-  primary: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <main
-      className="bi-page"
-      style={{ "--bi-primary": primary } as React.CSSProperties}
-    >
-      <style>{css}</style>
-      <section className="bi-state">
-        <div className="bi-spinner" />
-        <h2>{title}</h2>
-        <p>{body}</p>
-      </section>
-    </main>
-  );
-}
-
-function IncomeCard({
-  income,
-  organizationName,
-  currency,
-  openDrawer,
-  setSelectedIncome,
-  deleteIncome,
-}: {
-  income: AnyRow;
-  organizationName: string;
-  currency: string;
-  openDrawer: (income: AnyRow) => void;
-  setSelectedIncome: (income: AnyRow) => void;
-  deleteIncome: (income: AnyRow) => void;
-}) {
-  return (
-    <article className="income-row">
-      <span className="income-avatar">💰</span>
-      <span className="income-main">
-        <strong>{income.title || "Income"}</strong>
-        <small>
-          {sourceLabel(income.source)} · {organizationName}
-        </small>
-        <em>
-          {money(income.amount, currency)} · {methodLabel(income.paymentMethod)}{" "}
-          · {dateLabel(income.date)}
-        </em>
-      </span>
-      <span className="income-side">
-        <Chip tone={methodTone(income.paymentMethod)}>
-          {methodLabel(income.paymentMethod)}
-        </Chip>
-        <button type="button" onClick={() => setSelectedIncome(income)}>
-          View
-        </button>
-        <button type="button" onClick={() => openDrawer(income)}>
-          Edit
-        </button>
-        <button
-          type="button"
-          className="danger"
-          onClick={() => deleteIncome(income)}
-        >
-          ⌫
-        </button>
-      </span>
-    </article>
-  );
-}
-
-function TableView({
-  rows,
-  organizationMap,
-  currency,
-  openDrawer,
-  setSelectedIncome,
-  deleteIncome,
-}: {
-  rows: AnyRow[];
-  organizationMap: Map<string, string>;
-  currency: string;
-  openDrawer: (income: AnyRow) => void;
-  setSelectedIncome: (income: AnyRow) => void;
-  deleteIncome: (income: AnyRow) => void;
-}) {
-  return (
-    <section className="bi-table-card">
-      <div className="bi-table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Incomes ({rows.length})</th>
-              <th>Source</th>
-              <th>Organization</th>
-              <th>Amount</th>
-              <th>Method</th>
-              <th>Date</th>
-              <th>Receipt</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((income) => (
-              <tr key={String(idOf(income))}>
-                <td>
-                  <strong>{income.title || "Income"}</strong>
-                  <span>
-                    {income.description ||
-                      income.receivedBy ||
-                      "No description"}
-                  </span>
-                </td>
-                <td>{sourceLabel(income.source)}</td>
-                <td>
-                  {organizationMap.get(String(income.organizationId)) ||
-                    "No organization"}
-                </td>
-                <td>{money(income.amount, income.currencyCode || currency)}</td>
-                <td>
-                  <Chip tone={methodTone(income.paymentMethod)}>
-                    {methodLabel(income.paymentMethod)}
-                  </Chip>
-                </td>
-                <td>{dateLabel(income.date)}</td>
-                <td>{income.receiptNumber || income.referenceNumber || "—"}</td>
-                <td>
-                  <div className="bi-table-actions">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedIncome(income)}
-                    >
-                      View
-                    </button>
-                    <button type="button" onClick={() => openDrawer(income)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="danger"
-                      onClick={() => deleteIncome(income)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!rows.length && (
-          <div className="bi-empty-table">No income matches your filters.</div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function FilterSheet({
-  methodFilter,
-  setMethodFilter,
-  sourceFilter,
-  setSourceFilter,
-  organizationFilter,
-  setOrganizationFilter,
-  currencyFilter,
-  setCurrencyFilter,
-  defaultCurrency,
-  organizations,
-  onClose,
-}: {
-  methodFilter: MethodFilter;
-  setMethodFilter: (value: MethodFilter) => void;
-  sourceFilter: SourceFilter;
-  setSourceFilter: (value: SourceFilter) => void;
-  organizationFilter: string;
-  setOrganizationFilter: (value: string) => void;
-  currencyFilter: string;
-  setCurrencyFilter: (value: string) => void;
-  defaultCurrency: string;
-  organizations: AnyRow[];
-  onClose: () => void;
-}) {
-  return (
-    <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="bi-sheet small">
-        <div className="bi-sheet-head">
-          <div>
-            <h2>Filters</h2>
-            <p>
-              Filter branch income by source, payment method and organization.
-            </p>
-          </div>
-          <button type="button" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        <div className="bi-form compact">
-          <label>
-            <span>Source</span>
-            <select
-              value={sourceFilter}
-              onChange={(event) =>
-                setSourceFilter(event.target.value as SourceFilter)
-              }
-            >
-              <option value="all">All sources</option>
-              <option value="fees_related">Fees Related</option>
-              <option value="donation">Donation</option>
-              <option value="admission">Admission</option>
-              <option value="service">Service</option>
-              <option value="canteen">Canteen</option>
-              <option value="transport">Transport</option>
-              <option value="uniform">Uniform</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label>
-            <span>Payment Method</span>
-            <select
-              value={methodFilter}
-              onChange={(event) =>
-                setMethodFilter(event.target.value as MethodFilter)
-              }
-            >
-              <option value="all">All methods</option>
-              <option value="cash">Cash</option>
-              <option value="momo">Momo</option>
-              <option value="bank">Bank</option>
-              <option value="card">Card</option>
-            </select>
-          </label>
-          <label>
-            <span>Currency</span>
-            <select value={currencyFilter} onChange={event => setCurrencyFilter(event.target.value)}>
-              <option value="all">All currencies (separate totals)</option>
-              {FINANCE_CURRENCIES.map(item => <option key={item.code} value={item.code}>
-                {item.symbol} · {item.name} ({item.code})
-              </option>)}
-            </select>
-          </label>
-          <label>
-            <span>Organization</span>
-            <select
-              value={organizationFilter}
-              onChange={(event) => setOrganizationFilter(event.target.value)}
-            >
-              <option value="all">All organizations</option>
-              {organizations.map((item) => (
-                <option key={String(idOf(item))} value={String(idOf(item))}>
-                  {rowName(item)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="bi-sheet-actions">
-          <button
-            type="button"
-            onClick={() => {
-              setSourceFilter("all");
-              setMethodFilter("all");
-              setOrganizationFilter("all");
-              setCurrencyFilter(defaultCurrency);
-            }}
-          >
-            Reset
-          </button>
-          <button type="button" className="primary" onClick={onClose}>
-            Apply
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function MoreSheet({
-  view,
-  setView,
-  summary,
-  currency,
-  mixedCurrency,
-  onRefresh,
-  onAdd,
-  onClose,
-}: {
-  view: ViewMode;
-  setView: (value: ViewMode) => void;
-  summary: AnyRow;
-  currency: string;
-  mixedCurrency: boolean;
-  onRefresh: () => void | Promise<void>;
-  onAdd: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="bi-sheet small">
-        <div className="bi-sheet-head">
-          <div>
-            <h2>More</h2>
-            <p>Views and income actions are kept here to save space.</p>
-          </div>
-          <button type="button" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-        <div className="bi-menu-list">
-          <button
-            type="button"
-            className={view === "cards" ? "active" : ""}
-            onClick={() => setView("cards")}
-          >
-            <span>☰</span>
-            <b>Cards view</b>
-            <small>{summary.shown} income record(s)</small>
-          </button>
-          <button
-            type="button"
-            className={view === "table" ? "active" : ""}
-            onClick={() => setView("table")}
-          >
-            <span>☷</span>
-            <b>Table view</b>
-            <small>Dense income records</small>
-          </button>
-          <button
-            type="button"
-            className={view === "analytics" ? "active" : ""}
-            onClick={() => setView("analytics")}
-          >
-            <span>◔</span>
-            <b>Analytics</b>
-            <small>{mixedCurrency ? "Separate currency totals" : `${money(summary.total, currency)} shown`}</small>
-          </button>
-          <button type="button" onClick={onAdd}>
-            <span>💰</span>
-            <b>Record income</b>
-            <small>Add cash, momo, bank or card income</small>
-          </button>
-          <button type="button" onClick={onRefresh}>
-            <span>↻</span>
-            <b>Refresh</b>
-            <small>Reload local branch incomes</small>
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function IncomeDrawer({
-  form,
-  setForm,
-  organizations,
-  message,
-  saving,
-  save,
-  close,
-}: {
-  form: IncomeForm;
-  setForm: React.Dispatch<React.SetStateAction<IncomeForm>>;
-  organizations: AnyRow[];
-  message: string;
-  saving: boolean;
-  save: () => void | Promise<void>;
-  close: () => void;
-}) {
-  return (
-    <div className="bi-drawer-layer" role="dialog" aria-modal="true">
-      <button className="bi-drawer-overlay" type="button" onClick={close} />
-      <aside className="bi-drawer">
-        <div className="bi-drawer-head">
-          <div>
-            <p>{form.id ? "Edit Income" : "New Income"}</p>
-            <h2>Branch Income</h2>
-            <span>
-              {form.amount
-                ? money(form.amount, form.currencyCode)
-                : "Record non-fee income"}
-            </span>
-          </div>
-          <button type="button" onClick={close}>
-            ✕
-          </button>
-        </div>
-        {message && <section className="bi-inline-error">{message}</section>}
-        <section className="bi-form-card">
-          <div className="bi-form-grid">
-            <label>
-              <span>Title</span>
-              <input
-                value={form.title}
-                onChange={(event) =>
-                  setForm({ ...form, title: event.target.value })
-                }
-                placeholder="Donation, Admission forms, Canteen..."
-              />
-            </label>
-            <label>
-              <span>Amount</span>
-              <input
-                type="number"
-                value={form.amount}
-                onChange={(event) =>
-                  setForm({ ...form, amount: event.target.value })
-                }
-                placeholder="0"
-              />
-            </label>
-            <label>
-              <span>Source</span>
-              <select
-                value={form.source}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    source: event.target.value as SourceFilter,
-                  })
-                }
-              >
-                <option value="fees_related">Fees Related</option>
-                <option value="donation">Donation</option>
-                <option value="admission">Admission</option>
-                <option value="service">Service</option>
-                <option value="canteen">Canteen</option>
-                <option value="transport">Transport</option>
-                <option value="uniform">Uniform</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-            <label>
-              <span>Method</span>
-              <select
-                value={form.paymentMethod}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    paymentMethod: event.target
-                      .value as IncomeForm["paymentMethod"],
-                  })
-                }
-              >
-                <option value="cash">Cash</option>
-                <option value="momo">Momo</option>
-                <option value="bank">Bank</option>
-                <option value="card">Card</option>
-              </select>
-            </label>
-            <label>
-              <span>Date</span>
-              <input
-                type="date"
-                value={form.date}
-                onChange={(event) =>
-                  setForm({ ...form, date: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>Organization</span>
-              <select
-                value={form.organizationId}
-                onChange={(event) =>
-                  setForm({ ...form, organizationId: event.target.value })
-                }
-              >
-                <option value="">No organization</option>
-                {organizations.map((item) => (
-                  <option key={String(idOf(item))} value={String(idOf(item))}>
-                    {rowName(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Received By</span>
-              <input
-                value={form.receivedBy}
-                onChange={(event) =>
-                  setForm({ ...form, receivedBy: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>Reference No.</span>
-              <input
-                value={form.referenceNumber}
-                onChange={(event) =>
-                  setForm({ ...form, referenceNumber: event.target.value })
-                }
-              />
-            </label>
-            <label>
-              <span>Receipt No.</span>
-              <input
-                value={form.receiptNumber}
-                onChange={(event) =>
-                  setForm({ ...form, receiptNumber: event.target.value })
-                }
-              />
-            </label>
-              <label>
-                <span>Currency</span>
-                <select value={form.currencyCode} onChange={event => {
-                  const selected = getFinanceCurrency(event.target.value);
-                  setForm({ ...form, currencyCode: selected.code, currencySymbol: selected.symbol });
-                }}>
-                  {FINANCE_CURRENCIES.map(item => (
-                    <option key={item.code} value={item.code}>{item.symbol} · {item.name} ({item.code})</option>
-                  ))}
-                  {!FINANCE_CURRENCIES.some(item => item.code === form.currencyCode) &&
-                    <option value={form.currencyCode}>{form.currencyCode}</option>}
-                </select>
-              </label>
-            <label className="wide">
-              <span>Description</span>
-              <textarea
-                value={form.description}
-                onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
-                }
-                placeholder="Optional notes about this income"
-              />
-            </label>
-          </div>
-        </section>
-        <div className="bi-drawer-actions">
-          <button type="button" onClick={close}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="primary"
-            disabled={saving}
-            onClick={save}
-          >
-            {saving ? "Saving..." : "Save Income"}
-          </button>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function IncomeSheet({
-  income,
-  organizationName,
-  currency,
-  openDrawer,
-  deleteIncome,
-  close,
-}: {
-  income: AnyRow;
-  organizationName: string;
-  currency: string;
-  openDrawer: (income: AnyRow) => void;
-  deleteIncome: (income: AnyRow) => void;
-  close: () => void;
-}) {
-  return (
-    <div className="bi-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="bi-sheet">
-        <div className="bi-sheet-head">
-          <div>
-            <h2>{income.title || "Income"}</h2>
-            <p>
-              {sourceLabel(income.source)} · {organizationName} ·{" "}
-              {dateLabel(income.date)}
-            </p>
-          </div>
-          <button type="button" onClick={close}>
-            ✕
-          </button>
-        </div>
-        <div className="bi-detail-grid">
-          <article>
-            <span>Amount</span>
-            <b>{money(income.amount, currency)}</b>
-          </article>
-          <article>
-            <span>Method</span>
-            <b>{methodLabel(income.paymentMethod)}</b>
-          </article>
-          <article>
-            <span>Receipt</span>
-            <b>{income.receiptNumber || "Not set"}</b>
-          </article>
-        </div>
-        <div className="bi-info-list">
-          <article>
-            <span>Reference</span>
-            <b>{income.referenceNumber || "Not set"}</b>
-          </article>
-          <article>
-            <span>Received By</span>
-            <b>{income.receivedBy || "Not set"}</b>
-          </article>
-          <article>
-            <span>Description</span>
-            <b>{income.description || "No description"}</b>
-          </article>
-        </div>
-        <div className="bi-sheet-actions">
-          <button type="button" onClick={close}>
-            Close
-          </button>
-          <button type="button" onClick={() => openDrawer(income)}>
-            Edit
-          </button>
-          <button
-            type="button"
-            className="danger"
-            onClick={() => deleteIncome(income)}
-          >
-            Delete
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function AnalyticsView({
-  summary,
-  sourceRows,
-  currency,
-}: {
-  summary: AnyRow;
-  sourceRows: { label: string; value: number }[];
-  currency: string;
-}) {
-  const methodRows = [
-    { label: "Cash", value: summary.cash },
-    { label: "Momo", value: summary.momo },
-    { label: "Bank", value: summary.bank },
-    { label: "Card", value: summary.card },
-  ];
-  return (
-    <section className="bi-analysis-grid">
-      <article className="bi-analysis">
-        <span>Total Income</span>
-        <strong>{money(summary.total, currency)}</strong>
-        <p>{summary.shown} income record(s) currently shown.</p>
-      </article>
-      <article className="bi-analysis">
-        <span>Today</span>
-        <strong>{money(summary.today, currency)}</strong>
-        <p>Income recorded for today.</p>
-      </article>
-      <article className="bi-analysis">
-        <span>Cash</span>
-        <strong>{money(summary.cash, currency)}</strong>
-        <p>Cash income in current filter.</p>
-      </article>
-      <article className="bi-analysis">
-        <span>Digital</span>
-        <strong>
-          {money(summary.momo + summary.bank + summary.card, currency)}
-        </strong>
-        <p>Momo, bank and card income.</p>
-      </article>
-      <article className="bi-analysis wide">
-        <span>By Method</span>
-        <strong>{money(summary.total, currency)}</strong>
-        <div className="bi-analysis-list">
-          {methodRows.map((row) => (
-            <section key={row.label}>
-              <div>
-                <b>{row.label}</b>
-                <small>{money(row.value, currency)}</small>
-              </div>
-              <div className="bi-progress">
-                <i
-                  style={{
-                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%`,
-                  }}
-                />
-              </div>
-            </section>
-          ))}
-        </div>
-      </article>
-      <article className="bi-analysis wide">
-        <span>By Source</span>
-        <strong>{sourceRows.length}</strong>
-        <div className="bi-analysis-list">
-          {sourceRows.map((row) => (
-            <section key={row.label}>
-              <div>
-                <b>{row.label}</b>
-                <small>{money(row.value, currency)}</small>
-              </div>
-              <div className="bi-progress">
-                <i
-                  style={{
-                    width: `${Math.max(5, Math.round((row.value / Math.max(1, summary.total)) * 100))}%`,
-                  }}
-                />
-              </div>
-            </section>
-          ))}
-        </div>
-      </article>
-    </section>
-  );
-}
-
-const css = `
-@keyframes spin{to{transform:rotate(360deg)}}.bi-page{--ease:cubic-bezier(.2,.8,.2,1);min-height:100dvh;width:100%;max-width:100%;min-width:0;padding:calc(8px * var(--local-density-scale,1));padding-bottom:max(40px,env(safe-area-inset-bottom));background:radial-gradient(circle at top left,color-mix(in srgb,var(--bi-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb);color:var(--text,#111827);font-family:var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:var(--font-size,14px);overflow-x:hidden}.bi-page *,.bi-page *::before,.bi-page *::after{box-sizing:border-box;min-width:0}.bi-page button,.bi-page input,.bi-page select,.bi-page textarea{font:inherit;max-width:100%}.bi-page button{-webkit-tap-highlight-color:transparent}.bi-page input,.bi-page select,.bi-page textarea{width:100%;min-height:44px;border:1px solid var(--input-border,var(--border,rgba(0,0,0,.10)));border-radius:16px;padding:0 12px;background:var(--input-bg,var(--surface,#fff));color:var(--input-text,var(--text,#111827));outline:none;font-weight:750}.bi-page textarea{min-height:110px;padding:12px;resize:vertical;line-height:1.5}.bi-page input:focus,.bi-page select:focus,.bi-page textarea:focus{border-color:color-mix(in srgb,var(--bi-primary) 52%,var(--border,rgba(0,0,0,.10)));box-shadow:0 0 0 4px color-mix(in srgb,var(--bi-primary) 12%,transparent)}.bi-state,.bi-search-card,.income-row,.bi-table-card,.bi-analysis,.bi-empty,.bi-sheet,.bi-form-card{background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10));box-shadow:0 12px 28px rgba(15,23,42,.045)}.bi-state{min-height:min(420px,calc(100dvh - 32px));width:min(520px,100%);margin:0 auto;display:grid;place-items:center;align-content:center;gap:10px;padding:22px;border-radius:28px;text-align:center}.bi-spinner{width:38px;height:38px;border-radius:999px;border:4px solid color-mix(in srgb,var(--bi-primary) 18%,transparent);border-top-color:var(--bi-primary);animation:spin .8s linear infinite}.bi-state h2{margin:0;font-size:22px;font-weight:1000;letter-spacing:-.04em}.bi-state p{max-width:34rem;margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.bi-toast{position:sticky;top:8px;z-index:40;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:12px 14px;border-radius:18px;font-size:13px;font-weight:850;box-shadow:0 18px 40px rgba(15,23,42,.12)}.bi-toast.success{background:rgba(34,197,94,.14);color:#166534}.bi-toast.error,.bi-inline-error{background:rgba(239,68,68,.12);color:#991b1b}.bi-toast.info{background:rgba(59,130,246,.13);color:#1d4ed8}.bi-toast button{border:0;background:transparent;color:currentColor;font-weight:1000;cursor:pointer}.bi-inline-error{padding:10px 12px;border-radius:18px;font-size:12px;font-weight:850;margin-bottom:10px}.bi-search-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto auto;gap:8px;align-items:center;margin-top:2px;padding:8px;border-radius:24px}.bi-search{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;min-height:44px;padding:0 11px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 7%,transparent)}.bi-search span{color:var(--muted,#64748b);font-size:17px;font-weight:1000}.bi-search input{min-height:42px;border:0;padding:0;border-radius:0;background:transparent;box-shadow:none;font-size:14px}.bi-icon-button,.bi-filter-button,.bi-add-inline{width:42px;height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;display:grid;place-items:center;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);font-size:18px;font-weight:1000;cursor:pointer;box-shadow:0 10px 22px rgba(15,23,42,.045)}.bi-add-inline{border-color:var(--bi-primary);background:var(--bi-primary);color:#fff;font-size:25px;box-shadow:0 12px 28px color-mix(in srgb,var(--bi-primary) 22%,transparent)}.bi-slider-icon{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}.bi-filter-button{position:relative;background:color-mix(in srgb,var(--bi-primary) 8%,var(--card-bg,#fff));color:var(--bi-primary)}.bi-filter-button.active{background:var(--bi-primary);color:#fff;border-color:var(--bi-primary)}.bi-filter-button b{position:absolute;top:-4px;right:-4px;min-width:19px;height:19px;display:grid;place-items:center;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;border:2px solid var(--card-bg,#fff)}.status-dot-mini{width:10px;height:10px;border-radius:999px;display:inline-flex}.status-dot-mini.green{background:#22c55e}.status-dot-mini.gray{background:var(--muted,#64748b)}.bi-filter-chips{display:flex;gap:7px;overflow-x:auto;padding:8px 1px 0;scrollbar-width:none}.bi-filter-chips::-webkit-scrollbar{display:none}.bi-filter-chips button{flex:0 0 auto;min-height:31px;border:0;border-radius:999px;padding:0 10px;background:color-mix(in srgb,var(--bi-primary) 11%,transparent);color:var(--bi-primary);font-size:11px;font-weight:950;white-space:nowrap;cursor:pointer}.bi-list{display:grid;gap:7px;margin-top:10px}.income-row{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;border-radius:22px;text-align:left}.income-avatar{width:48px;height:48px;display:grid;place-items:center;border-radius:18px;background:color-mix(in srgb,var(--bi-primary) 12%,var(--surface,#fff));font-size:22px}.income-main,.income-main strong,.income-main small,.income-main em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.income-main strong{color:var(--text,#111827);font-size:14px;font-weight:1000}.income-main small{margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:850}.income-main em{margin-top:3px;color:color-mix(in srgb,var(--muted,#64748b) 86%,var(--text,#111827));font-size:11px;font-weight:750;font-style:normal}.income-side{display:flex;align-items:center;gap:5px}.income-side button{min-height:31px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-size:11px;font-weight:950;padding:0 9px;cursor:pointer}.income-side button.danger,.bi-table-actions button.danger,.bi-sheet-actions button.danger{color:#991b1b;background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));border-color:color-mix(in srgb,#dc2626 24%,var(--border,rgba(0,0,0,.10)))}.bi-chip{max-width:100%;display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:999px;font-size:10px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-transform:capitalize}.bi-chip.green{background:rgba(34,197,94,.12);color:#16a34a}.bi-chip.red{background:rgba(239,68,68,.12);color:#dc2626}.bi-chip.blue{background:rgba(59,130,246,.12);color:#2563eb}.bi-chip.gray{background:color-mix(in srgb,var(--muted,#64748b) 14%,transparent);color:var(--muted,#64748b)}.bi-chip.orange{background:rgba(245,158,11,.14);color:#b45309}.bi-chip.purple{background:rgba(147,51,234,.12);color:#7e22ce}.bi-sheet-backdrop,.bi-drawer-layer{position:fixed;inset:0;z-index:80;display:grid;place-items:end center;padding:10px;background:rgba(15,23,42,.50);backdrop-filter:blur(12px)}.bi-sheet{width:min(760px,100%);max-height:min(88dvh,760px);overflow-y:auto;padding:14px;border-radius:28px 28px 22px 22px;box-shadow:0 30px 90px rgba(15,23,42,.32);animation:sheetIn .18s var(--ease);background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.10))}.bi-sheet.small{width:min(520px,100%)}@keyframes sheetIn{from{transform:translateY(16px);opacity:.7}to{transform:translateY(0);opacity:1}}.bi-sheet-head,.bi-drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding-bottom:12px}.bi-sheet-head h2,.bi-drawer-head h2{margin:0;color:var(--text,#111827);font-size:21px;font-weight:1000;letter-spacing:-.05em}.bi-sheet-head p,.bi-drawer-head span{margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5;font-weight:750}.bi-drawer-head p{margin:0;color:var(--bi-primary);font-size:10px;font-weight:1000;text-transform:uppercase;letter-spacing:.08em}.bi-sheet-head button,.bi-drawer-head button{width:38px;height:38px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;background:var(--surface,#fff);color:var(--text,#111827);font-weight:1000;cursor:pointer;flex:0 0 auto}.bi-form{display:grid;gap:10px}.bi-form label{display:grid;gap:6px}.bi-form span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-menu-list{display:grid;gap:8px}.bi-menu-list button{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr);column-gap:10px;align-items:center;min-height:58px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:18px;padding:9px;background:var(--surface,#fff);color:var(--text,#111827);text-align:left;cursor:pointer}.bi-menu-list button span{grid-row:span 2;width:42px;height:42px;display:grid;place-items:center;border-radius:16px;background:color-mix(in srgb,var(--bi-primary) 10%,transparent);color:var(--bi-primary);font-weight:1000}.bi-menu-list button b,.bi-menu-list button small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bi-menu-list button b{font-size:13px;font-weight:1000}.bi-menu-list button small{margin-top:2px;color:var(--muted,#64748b);font-size:11px;font-weight:750}.bi-menu-list button.active{border-color:color-mix(in srgb,var(--bi-primary) 34%,var(--border,rgba(0,0,0,.10)));background:color-mix(in srgb,var(--bi-primary) 8%,var(--surface,#fff))}.bi-sheet-actions,.bi-drawer-actions{position:sticky;bottom:-14px;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:14px;padding:12px 0 2px;background:linear-gradient(to top,var(--card-bg,var(--surface,#fff)) 70%,transparent)}.bi-sheet-actions button,.bi-drawer-actions button{min-height:42px;border:1px solid var(--border,rgba(0,0,0,.10));border-radius:999px;padding:0 16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,var(--surface,#fff));color:var(--text,#111827);font-size:12px;font-weight:950;cursor:pointer}.bi-sheet-actions button.primary,.bi-drawer-actions button.primary{border-color:var(--bi-primary);background:var(--bi-primary);color:#fff;box-shadow:0 14px 32px color-mix(in srgb,var(--bi-primary) 25%,transparent)}.bi-drawer-layer{place-items:stretch end;padding:0}.bi-drawer-overlay{position:absolute;inset:0;border:0;background:transparent}.bi-drawer{position:relative;z-index:1;width:min(560px,100%);height:100dvh;overflow-y:auto;padding:14px;background:var(--card-bg,var(--surface,#fff));box-shadow:-30px 0 90px rgba(15,23,42,.32)}.bi-form-card{padding:12px;border-radius:22px}.bi-form-grid{display:grid;grid-template-columns:1fr;gap:10px}.bi-form-grid label{display:grid;gap:6px}.bi-form-grid label.wide{grid-column:1/-1}.bi-form-grid span{color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-table-card,.bi-analysis,.bi-empty{padding:13px;border-radius:24px}.bi-table-card{margin-top:10px}.bi-table-scroll{width:100%;max-width:100%;overflow-x:auto;border-radius:18px;border:1px solid var(--border,rgba(0,0,0,.08))}.bi-table-scroll table{width:100%;min-width:900px;border-collapse:collapse;background:var(--card-bg,var(--surface,var(--bg,transparent)))}.bi-table-scroll th,.bi-table-scroll td{padding:10px;border-bottom:1px solid var(--border,rgba(0,0,0,.08));vertical-align:top;text-align:left;font-size:13px}.bi-table-scroll th{background:var(--table-header-bg,color-mix(in srgb,var(--bi-primary) 6%,var(--card-bg,var(--surface,var(--bg,transparent)))));color:var(--table-header-text,var(--muted,var(--text)));font-size:11px;font-weight:1000;text-transform:uppercase;letter-spacing:.07em}.bi-table-scroll td strong,.bi-table-scroll td span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bi-table-scroll td span{margin-top:3px;color:var(--muted,#64748b);font-size:11px}.bi-table-actions{display:flex;gap:7px;overflow-x:auto}.bi-table-actions button{flex:0 0 auto;min-height:34px;border:1px solid var(--bi-primary);border-radius:999px;padding:0 12px;background:var(--bi-primary);color:#fff;font-size:11px;font-weight:950;cursor:pointer}.bi-empty-table{padding:22px;text-align:center;color:var(--muted,#64748b);font-weight:850}.bi-analysis-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin-top:10px}.bi-analysis span{color:var(--muted,#64748b);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.bi-analysis strong{display:block;margin-top:8px;font-size:clamp(22px,7vw,30px);line-height:1;font-weight:1000;letter-spacing:-.06em;overflow-wrap:anywhere}.bi-analysis p{margin:8px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5}.bi-analysis-list{display:grid;gap:10px;margin-top:12px}.bi-analysis-list section{display:grid;gap:6px;padding:10px;border-radius:16px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.bi-analysis-list section>div:first-child{display:flex;justify-content:space-between;gap:10px}.bi-analysis-list b,.bi-analysis-list small{font-size:12px}.bi-analysis-list small{color:var(--muted,#64748b);font-weight:850}.bi-progress{height:8px;border-radius:999px;background:color-mix(in srgb,var(--muted,#64748b) 18%,transparent);overflow:hidden}.bi-progress i{display:block;height:100%;border-radius:inherit;background:var(--bi-primary)}.bi-empty{display:grid;place-items:center;align-content:center;gap:8px;min-height:220px;text-align:center;border-style:dashed}.bi-empty div{width:56px;height:56px;display:grid;place-items:center;border-radius:22px;background:color-mix(in srgb,var(--bi-primary) 12%,var(--surface,#fff));font-size:28px}.bi-empty h3{margin:0;font-size:18px;font-weight:1000}.bi-empty p{margin:0;color:var(--muted,#64748b);font-size:13px;line-height:1.6}.bi-detail-grid{display:grid;grid-template-columns:1fr;gap:8px}.bi-detail-grid article,.bi-info-list article{padding:12px;border-radius:18px;background:color-mix(in srgb,var(--muted,#64748b) 8%,transparent)}.bi-detail-grid span,.bi-info-list span{display:block;color:var(--muted,#64748b);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.06em}.bi-detail-grid b,.bi-info-list b{display:block;margin-top:5px;font-size:13px;font-weight:1000;overflow-wrap:anywhere}.bi-info-list{display:grid;gap:8px;margin-top:10px}@media (min-width:680px){.bi-page{padding:calc(12px * var(--local-density-scale,1));padding-bottom:44px}.bi-search-card{grid-template-columns:auto minmax(0,1fr) 48px 48px 48px}.bi-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.income-row{border-radius:24px;padding:12px}.income-row{grid-template-columns:auto minmax(0,1fr)}.income-side{grid-column:1/-1;justify-content:flex-end}.bi-analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-analysis.wide{grid-column:span 2}.bi-sheet-backdrop{place-items:center;padding:18px}.bi-sheet{border-radius:28px;padding:18px}.bi-form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bi-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media (min-width:1040px){.bi-page{padding:calc(16px * var(--local-density-scale,1));padding-bottom:48px}.bi-search-card,.bi-list,.bi-analysis-grid,.bi-table-card,.bi-filter-chips{max-width:1180px;margin-left:auto;margin-right:auto}.bi-list{grid-template-columns:repeat(3,minmax(0,1fr))}.bi-analysis-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.bi-analysis.wide{grid-column:span 2}.income-row{grid-template-columns:auto minmax(0,1fr) auto}.income-side{grid-column:auto;justify-content:flex-start}}@media (max-width:520px){.bi-page{padding:calc(7px * var(--local-density-scale,1));padding-bottom:max(38px,env(safe-area-inset-bottom))}.bi-icon-button,.bi-filter-button,.bi-add-inline{width:40px;height:40px}.income-row{grid-template-columns:auto minmax(0,1fr);align-items:start}.income-side{grid-column:1/-1;justify-content:flex-end;overflow-x:auto}.bi-drawer{width:100%}.bi-sheet{border-radius:24px 24px 18px 18px;padding:12px}.bi-sheet-actions,.bi-drawer-actions{display:grid;grid-template-columns:minmax(0,1fr)}.bi-sheet-actions button,.bi-drawer-actions button{width:100%}}
-
-/* Finance V5: match Students/Expenses compact mixed-surface UI. */
-.bi-page{min-height:0;padding:3px!important;background:transparent!important;}
-.bi-list{width:100%;max-width:none;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
-.income-row{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px;
- padding:9px 10px;border-radius:12px;border:1px solid var(--border,rgba(15,23,42,.13));
- background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 92%,var(--text,#182235) 8%);
- box-shadow:none;transform:none;transition:background .15s ease;}
-.income-row:hover{transform:none;box-shadow:none;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 87%,var(--text,#182235) 13%);}
-.income-avatar{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;box-shadow:none;}
-.income-main{min-width:0;overflow-wrap:anywhere;}.income-main strong{font-size:12px;line-height:1.25;}
-.income-main small,.income-main em{font-size:11px;}
-.income-side{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;}
-.income-side button{min-height:29px;padding:4px 9px;border-radius:8px;font-size:10px;}
-.bi-table-card{padding:4px;margin-top:2px;width:100%;max-width:none;overflow:visible;border-radius:12px;}
-.bi-table-scroll{box-sizing:border-box;width:100%;max-width:100%;overflow-x:auto;overflow-y:auto;
- -webkit-overflow-scrolling:touch;border-radius:10px;overscroll-behavior-x:contain;}
-.bi-table-scroll table{width:100%;min-width:850px;margin:0;
- background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);}
-.bi-table-scroll thead th{position:sticky;top:0;z-index:2;
- background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
- color:var(--text,#182235);font-weight:800;letter-spacing:.01em;text-transform:none;}
-.bi-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);}
-.bi-table-scroll th,.bi-table-scroll td{background-color:transparent;padding:9px 10px;font-size:12px;}
-.bi-table-scroll td strong{font-size:12px;}.bi-table-actions{gap:4px;}
-.bi-table-actions button{min-height:30px;padding:0 9px;border-radius:8px;font-size:10px;}
-.bi-analysis{border-radius:12px;box-shadow:none;}
-.bi-empty{padding:24px 12px;border-radius:12px;box-shadow:none;}
-@media(min-width:680px) and (max-width:1023px){.bi-list{grid-template-columns:repeat(2,minmax(0,1fr));}}
-@media(min-width:1024px){.bi-list{grid-template-columns:repeat(4,minmax(0,1fr));}}
-@media(max-width:639px){.bi-list{grid-template-columns:minmax(0,1fr);gap:7px;}}
-
-/* Finance modal fixes: portal out of sticky/transformed portal shell, use full viewport. */
-.bi-modal-host .bi-sheet-backdrop,.bi-modal-host .bi-drawer-layer{position:fixed!important;inset:0!important;
- width:100vw!important;height:100dvh!important;max-height:none!important;pointer-events:auto!important;
- z-index:50001!important;overscroll-behavior:contain;}
-.bi-modal-host .bi-sheet{max-height:calc(100dvh - 36px);overscroll-behavior:contain;}
-.bi-modal-host .bi-drawer{height:100dvh;max-height:100dvh;overscroll-behavior:contain;}
-@media(max-width:679px){
- .bi-modal-host .bi-sheet-backdrop{padding:0!important;place-items:stretch!important;}
- .bi-modal-host .bi-sheet{max-height:100dvh!important;height:100dvh!important;width:100vw!important;
-   max-width:100vw!important;border-radius:0!important;padding:calc(14px + env(safe-area-inset-top)) 12px calc(14px + env(safe-area-inset-bottom));}
- .bi-modal-host .bi-drawer{width:100vw!important;padding-top:calc(14px + env(safe-area-inset-top));}
-}
+const styles = `
+.fl-page,.fl-modal-host{--fl-bg:var(--card-bg,var(--surface,#fff));--fl-text:var(--text,#182235);--fl-muted:var(--muted,#64748b);--fl-border:var(--border,#d4dae3);color:var(--fl-text);font:13px/1.45 var(--font-family,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif)}
+.fl-page{width:100%;min-width:0;padding:4px 5px 20px;background:transparent;}
+.fl-page *,.fl-modal-host *{box-sizing:border-box;min-width:0;}
+.fl-page button,.fl-modal-host button,.fl-modal-host select,.fl-modal-host input,.fl-modal-host textarea{font:inherit;cursor:pointer;}
+.fl-state{padding:24px;text-align:center;color:var(--fl-muted)}
+.fl-toast{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:8px 0;background:color-mix(in srgb,var(--fl-primary) 10%,var(--fl-bg));border:1px solid var(--fl-border);border-radius:10px;padding:9px 12px;font-weight:700;}
+.fl-toast.error,.fl-form-error{color:#b91c1c;background:color-mix(in srgb,#dc2626 8%,var(--fl-bg));}
+.fl-toast button{background:none;border:0;color:inherit;font-size:19px;}
+.fl-chips{display:flex;gap:5px;overflow-x:auto;padding:6px 0;}.fl-chips button{flex:0 0 auto;white-space:nowrap;border:0;border-radius:20px;padding:5px 9px;background:color-mix(in srgb,var(--fl-primary) 11%,var(--fl-bg));color:var(--fl-primary);font-size:11px;}
+.fl-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:8px;}
+.fl-card,.fl-table-card,.fl-metric,.fl-empty{background:color-mix(in srgb,var(--fl-bg) 93%,var(--fl-text) 7%);border:1px solid color-mix(in srgb,var(--fl-border) 85%,var(--fl-text) 15%);border-radius:13px;box-shadow:none;}
+.fl-card{display:grid;grid-template-columns:39px minmax(0,1fr);align-items:start;gap:8px;padding:10px;}
+.fl-avatar{height:39px;width:39px;display:grid;place-items:center;border-radius:11px;background:color-mix(in srgb,var(--fl-primary) 11%,var(--fl-bg));font-size:19px;}
+.fl-card-main{display:grid;gap:2px;}.fl-card-main strong{font-weight:850;font-size:13px;overflow-wrap:anywhere}.fl-card-main small{color:var(--fl-muted);font-size:10.5px;overflow-wrap:anywhere}
+.fl-card-bottom{grid-column:1/-1;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+.fl-card-bottom>b{margin-right:auto;font-size:12px;white-space:nowrap}.fl-card-bottom>span{padding:4px 7px;border-radius:7px;background:color-mix(in srgb,var(--fl-primary) 11%,var(--fl-bg));font-size:10px;text-transform:capitalize;}
+.fl-actions{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.fl-actions button{min-height:29px;border:1px solid var(--fl-border);border-radius:7px;padding:4px 8px;background:var(--fl-bg);color:var(--fl-text);font-weight:750;font-size:10.5px;}
+.fl-actions button.danger,.fl-footer button.danger{color:#b91c1c;border-color:color-mix(in srgb,#dc2626 20%,var(--fl-border));}
+.fl-table-card{padding:5px;margin-top:8px;width:100%;overflow:visible;}.fl-table-scroll{overflow-x:auto;border-radius:10px;-webkit-overflow-scrolling:touch;}.fl-table-scroll table{width:100%;min-width:920px;border-collapse:collapse;text-align:left;}
+.fl-table-scroll th,.fl-table-scroll td{padding:9px 8px;border-bottom:1px solid var(--fl-border);vertical-align:top;text-align:left;font-size:11.5px;}.fl-table-scroll th{position:sticky;top:0;z-index:1;color:var(--fl-text);background:color-mix(in srgb,var(--fl-bg) 84%,var(--fl-text) 16%);font-size:11px;}.fl-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--fl-bg) 92%,var(--fl-text) 8%);}.fl-table-scroll td small{display:block;color:var(--fl-muted);margin-top:3px;}
+.fl-empty{padding:25px 12px;text-align:center;color:var(--fl-muted);font-size:12px;grid-column:1/-1;}
+.fl-analytics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:9px;}.fl-metric{padding:13px;}.fl-metric small,.fl-metric span{color:var(--fl-muted);font-size:11px;display:block;}.fl-metric strong{font-size:clamp(17px,2.2vw,27px);display:block;overflow-wrap:anywhere;margin:6px 0;}.fl-metric.full{grid-column:span 2;}.fl-metric-row{display:flex;justify-content:space-between;gap:8px;border-top:1px solid var(--fl-border);padding:7px 0;font-size:11px;}.fl-currency-note{grid-column:1/-1;color:var(--fl-muted);font-size:11px;margin:0;}
+.fl-modal-host{position:fixed;inset:0;width:0;height:0;pointer-events:none;z-index:50000;}
+.fl-overlay{position:fixed;inset:0;width:100vw;height:100dvh;z-index:50001;display:grid;place-items:center;padding:14px;pointer-events:auto;background:rgba(15,23,42,.52);backdrop-filter:blur(10px);}
+.fl-sheet{width:min(700px,100%);max-height:calc(100dvh - 28px);overflow-y:auto;border-radius:16px;padding:15px;background:var(--fl-bg);color:var(--fl-text);box-shadow:0 30px 80px rgba(0,0,0,.23);overscroll-behavior:contain;}
+.fl-sheet.narrow{width:min(480px,100%)}.fl-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:14px;}.fl-head h2{font-size:19px;margin:0;}.fl-head small{font-size:11px;color:var(--fl-muted);}.fl-head>button{flex:0 0 34px;width:34px;height:34px;border:1px solid var(--fl-border);background:var(--fl-bg);border-radius:50%;color:var(--fl-text);font-size:18px;}
+.fl-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}.fl-form-grid label{display:grid;gap:5px;min-width:0}.fl-form-grid label.wide{grid-column:1/-1}.fl-form-grid label>span{font-size:10.5px;font-weight:800;color:var(--fl-muted);text-transform:uppercase;letter-spacing:.04em;}
+.fl-form-grid input,.fl-form-grid select,.fl-form-grid textarea{width:100%;height:42px;min-height:42px;border-radius:8px;border:1px solid var(--fl-border);background:var(--input-bg,var(--fl-bg));color:var(--input-text,var(--fl-text));padding:9px 10px;outline:none;font-size:13px;}
+.fl-form-grid textarea{height:88px;resize:vertical;}.fl-form-grid input:focus,.fl-form-grid select:focus,.fl-form-grid textarea:focus{border-color:var(--fl-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--fl-primary) 13%,transparent);}
+.fl-footer{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;position:sticky;bottom:-15px;padding:12px 0 2px;margin-top:14px;background:var(--fl-bg);}.fl-footer button{min-height:38px;border:1px solid var(--fl-border);background:var(--fl-bg);color:var(--fl-text);border-radius:8px;padding:7px 14px;font-weight:800;}.fl-footer button.primary{background:var(--fl-primary);color:#fff;border-color:var(--fl-primary);}.fl-footer button:disabled{opacity:.55;cursor:wait}.fl-form-error{padding:9px 10px;border-radius:8px;font-size:12px;font-weight:700;}
+.fl-menu{display:grid;gap:6px;}.fl-menu button{border:1px solid var(--fl-border);border-radius:9px;background:var(--fl-bg);color:var(--fl-text);padding:13px;text-align:left;font-weight:750;}.fl-menu button.active{background:color-mix(in srgb,var(--fl-primary) 9%,var(--fl-bg));border-color:var(--fl-primary);}
+.fl-detail>strong{font-size:23px;margin-bottom:8px;display:block;}.fl-detail>div{padding:9px;background:color-mix(in srgb,var(--fl-bg) 92%,var(--fl-text) 8%);border-radius:8px;margin-bottom:6px;}.fl-detail small{display:block;color:var(--fl-muted);font-size:11px;}.fl-detail b{font-size:12px;overflow-wrap:anywhere;}
+.fl-drawer{width:min(670px,100%);max-height:100dvh;height:100dvh;border-radius:0;}.fl-overlay.drawer-overlay{padding:0;place-items:stretch end;}
+@media(max-width:1030px){.fl-cards{grid-template-columns:repeat(2,minmax(0,1fr));}.fl-analytics{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:639px){.fl-page{padding:3px 4px 12px;}.fl-cards{grid-template-columns:1fr;gap:7px;}.fl-analytics{grid-template-columns:1fr;}.fl-metric.full{grid-column:1/-1;}.fl-overlay{padding:0;place-items:stretch;}.fl-sheet{width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:calc(13px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));}.fl-form-grid{grid-template-columns:1fr;}.fl-footer{display:grid;grid-template-columns:1fr;}.fl-footer button{width:100%;}}
 `;
+
+export default function IncomesPage() {
+  return <FinanceLedgerModule kind="incomes" />;
+}

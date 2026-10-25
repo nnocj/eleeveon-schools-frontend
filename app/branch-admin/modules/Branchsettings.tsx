@@ -245,8 +245,7 @@ type SettingsSection =
   | "portalHighlights"
   | "reportMedia"
   | "reportTemplates"
-  | "identityCredentials"
-  | "identityIssuance"
+  | "idCards"
   | "website"
   | "gallery";
 
@@ -5011,19 +5010,11 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         tone: "blue",
       },
       {
-        key: "identityIssuance" as SettingsSection,
+        key: "idCards" as SettingsSection,
         icon: "🪪",
-        title: "ID Issuance",
-        subtitle: "Automatic or manual student and teacher IDs",
-        detail: "QR verification, validity and public information",
-        tone: "blue",
-      },
-      {
-        key: "identityCredentials" as SettingsSection,
-        icon: "▣",
-        title: "Identity Credential Design",
-        subtitle: "QR cards, school IDs and passes",
-        detail: "Templates, colours, visible fields and print layout",
+        title: "ID Cards",
+        subtitle: "Student and teacher ID designs",
+        detail: "Card layout, logos, visible fields, issuance and QR privacy",
         tone: "blue",
       },
       {
@@ -5044,7 +5035,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
 
     const allowed = view === "reports"
       ? ["reportMedia", "reportTemplates"]
-      : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials", "identityIssuance"];
+      : ["academic", "school", "branch", "admissionNumbers", "appearance", "idCards"];
     const chosen = sections.filter((section) => allowed.includes(section.key));
     if (!searchTerm) return chosen;
 
@@ -5495,16 +5486,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         />
       )}
 
-      {sectionOpen === "identityIssuance" && (
-        <IdentityIssuanceSettings
-          schoolId={String(selectedSchoolId || "")}
-          branchId={String(selectedBranchId || "")}
-          onClose={() => setSectionOpen(null)}
-        />
-      )}
-
-      {sectionOpen === "identityCredentials" && (
-        <CredentialDesignSettings
+      {sectionOpen === "idCards" && (
+        <BranchIDCardSettings
           accountId={selectedAccountId}
           schoolId={selectedSchoolId}
           branchId={selectedBranchId}
@@ -5534,6 +5517,86 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         />
       )}
     </main>
+  );
+}
+
+
+/**
+ * One entry point for ID configuration. All settings live in Branch Settings,
+ * while Generate/View/Replace/Revoke remain person actions in Students/Teachers.
+ * The legacy IdentityCredentials workspace is not imported or needed.
+ */
+function BranchIDCardSettings({
+  accountId,
+  schoolId,
+  branchId,
+  school,
+  branch,
+  primaryColor,
+  onClose,
+}: {
+  accountId?: string | null;
+  schoolId?: string | null;
+  branchId?: string | null;
+  school?: School | null;
+  branch?: Branch | null;
+  primaryColor?: string;
+  onClose: () => void;
+}) {
+  const [pane, setPane] = useState<"home" | "design" | "issuance">("home");
+
+  if (pane === "design") {
+    return (
+      <CredentialDesignSettings
+        accountId={accountId}
+        schoolId={schoolId}
+        branchId={branchId}
+        school={school}
+        branch={branch}
+        primaryColor={primaryColor}
+        onClose={() => setPane("home")}
+      />
+    );
+  }
+
+  if (pane === "issuance") {
+    return (
+      <IdentityIssuanceSettings
+        schoolId={String(schoolId || "")}
+        branchId={String(branchId || "")}
+        onClose={() => setPane("home")}
+      />
+    );
+  }
+
+  return (
+    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"
+      aria-label="ID Card Settings" style={{ zIndex: 1200 }}>
+      <section className="ba-sheet small" style={{ width: "min(100%, 590px)" }}>
+        <header className="ba-sheet-head">
+          <div>
+            <h2>ID Cards</h2>
+            <p>One place to configure the IDs used by this branch.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close ID Card Settings">✕</button>
+        </header>
+        <div className="ba-menu-list">
+          <button type="button" onClick={() => setPane("design")}>
+            <span>▣</span>
+            <b>Card Designs</b>
+            <small>Student and teacher layouts, school logos, front/back, colours and visible details</small>
+          </button>
+          <button type="button" onClick={() => setPane("issuance")}>
+            <span>🪪</span>
+            <b>Issuance & QR Privacy</b>
+            <small>Automatic/manual IDs, expiry and information visible when the QR is scanned</small>
+          </button>
+        </div>
+        <p style={{ fontSize: 11, margin: "16px 0 0", color: "var(--muted,#64748b)" }}>
+          Generate, view, print, replace or revoke an ID from the student's or teacher's record.
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -5902,16 +5965,10 @@ function MoreSheet({
       note: "Template, domain, SEO and publishing",
     },
     {
-      key: "identityIssuance",
+      key: "idCards",
       icon: "🪪",
-      label: "ID Issuance",
-      note: "Automatic/manual student and teacher IDs",
-    },
-    {
-      key: "identityCredentials",
-      icon: "▣",
-      label: "Identity Credential Design",
-      note: "QR cards, school IDs, parent passes and visitor badges",
+      label: "ID Cards",
+      note: "Designs, visible details, student and teacher issuance",
     },
     {
       key: "gallery",
@@ -5935,7 +5992,7 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
-          {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "identityCredentials", "identityIssuance"]).includes(s.key)).map((section) => (
+          {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "idCards"]).includes(s.key)).map((section) => (
             <button
               key={section.key}
               type="button"

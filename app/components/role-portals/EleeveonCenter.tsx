@@ -381,9 +381,7 @@ export default function EleeveonCenter({
 
   const [section, setSection] =
     useState<CenterSection>(
-      isDeveloper
-        ? "inbox"
-        : "updates",
+      "support",
     );
 
   const [
@@ -557,9 +555,7 @@ export default function EleeveonCenter({
 
   useEffect(() => {
     setSection(
-      isDeveloper
-        ? "inbox"
-        : "updates",
+      "support",
     );
   }, [isDeveloper]);
 
@@ -1456,175 +1452,20 @@ export default function EleeveonCenter({
     <main className="center-module hub-module">
       <style>{css}</style>
 
-      <section className="center-intro hub-overview">
-        <div>
-          <span>
-            {isDeveloper
-              ? "Eleeveon Developer Center"
-              : "Eleeveon Hub"}
-          </span>
-          <h2>
-            {isDeveloper
-              ? "Platform support and feedback operations"
-              : "Messages, notices and support"}
-          </h2>
-          <p>
-            {isDeveloper
-              ? "Review customer feedback, investigate support context, manage ticket progress and respond from the same role portal."
-              : "Review platform messages, announcements, support requests and workspace access in one place."}
-          </p>
-        </div>
-
-        <div className="center-workspace">
-          <strong>
-            {isDeveloper
-              ? "Eleeveon Platform"
-              : activeSchool?.name ??
-                account?.name ??
-                "Eleeveon workspace"}
-          </strong>
-          <span>
-            {isDeveloper
-              ? titleText(role)
-              : activeBranch?.name ??
-                titleText(role) ??
-                "Account"}
-          </span>
-        </div>
-      </section>
-
-      <nav className="center-tabs hub-tabs">
-        {isDeveloper ? (
-          <button
-            type="button"
-            className={
-              section === "inbox"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              setSection("inbox")
-            }
-          >
-            Support inbox
-
-          </button>
-        ) : null}
-
-        {isDeveloper ? (
-          <button
-            type="button"
-            className={
-              section ===
-              "communications"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              setSection(
-                "communications",
-              )
-            }
-          >
-            Communications
-          </button>
-        ) : null}
-
-        {isDeveloper ? (
-          <button
-            type="button"
-            className={
-              section === "releases"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              setSection("releases")
-            }
-          >
-            Releases
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          className={
-            section === "updates"
-              ? "active"
-              : ""
-          }
-          onClick={() =>
-            setSection("updates")
-          }
-        >
-          Updates
-          {unreadCount ? (
-            <b>{unreadCount}</b>
-          ) : null}
-        </button>
-
-        {!isDeveloper ? (
-          <button
-            type="button"
-            className={
-              section === "feedback"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              setSection("feedback")
-            }
-          >
-            Survey
-          </button>
-        ) : null}
-
-        {!isDeveloper ? (
-          <button
-            type="button"
-            className={
-              section === "support"
-                ? "active"
-                : ""
-            }
-            onClick={() =>
-              setSection("support")
-            }
-          >
-            Support
-          </button>
-        ) : null}
-
-        <button
-          type="button"
-          className={
-            section === "access"
-              ? "active"
-              : ""
-          }
-          onClick={() =>
-            setSection("access")
-          }
-        >
-          {isDeveloper
-            ? "Platform context"
-            : "Access"}
-        </button>
+      <nav className="center-tabs hub-tabs" aria-label="Eleeveon Center sections">
+        <button type="button" className={section === "support" || section === "inbox" ? "active" : ""}
+          onClick={() => setSection("support")}>Chat Support</button>
+        {!isDeveloper && <button type="button" className={section === "feedback" ? "active" : ""}
+          onClick={() => setSection("feedback")}>Survey</button>}
+        <button type="button" className={section === "updates" ? "active" : ""}
+          onClick={() => setSection("updates")}>Updates{unreadCount ? <b>{unreadCount}</b> : null}</button>
+        {isDeveloper && <button type="button" className={section === "communications" ? "active" : ""}
+          onClick={() => setSection("communications")}>Communications</button>}
+        {isDeveloper && <button type="button" className={section === "releases" ? "active" : ""}
+          onClick={() => setSection("releases")}>Releases</button>}
+        <button type="button" className={section === "access" ? "active" : ""}
+          onClick={() => setSection("access")}>{isDeveloper ? "Platform context" : "Access"}</button>
       </nav>
-
-      {section === "inbox" && isDeveloper ? (
-        <EleeveonSupportChat
-          isDeveloper={true}
-          accountId={idOf(accountId)}
-          schoolId={activeSchoolId}
-          branchId={activeBranchId}
-          userId={userId}
-          membershipId={membershipId}
-          role={role}
-          schoolName={activeSchool?.name}
-          branchName={activeBranch?.name}
-        />
-      ) : null}
 
       {section ===
         "communications" &&
@@ -2614,9 +2455,9 @@ export default function EleeveonCenter({
       ) : null}
 
 
-      {section === "support" && !isDeveloper ? (
+      {section === "support" || section === "inbox" ? (
         <EleeveonSupportChat
-          isDeveloper={false}
+          isDeveloper={isDeveloper}
           accountId={idOf(accountId)}
           schoolId={activeSchoolId}
           branchId={activeBranchId}
@@ -3705,4 +3546,11 @@ span,
   }
 }
 
+
+/* Eleeveon Hub: immediate tabs, unobtrusive navigation and chat-first layout. */
+.center-module.hub-module{min-height:0;display:flex;flex-direction:column;gap:0;padding:0 2px 6px}
+.center-module.hub-module .hub-tabs{margin:0 0 10px;display:flex;gap:5px;align-items:center;overflow-x:auto;white-space:nowrap;padding:2px 1px 9px;scrollbar-width:thin;flex-shrink:0}
+.center-module.hub-module .hub-tabs button{flex-shrink:0;border-radius:11px;padding:9px 13px;min-height:39px;font-size:12px;font-weight:750;white-space:nowrap}
+.center-module.hub-module .hub-tabs button.active{box-shadow:inset 0 -2px 0 var(--dashboard-primary,var(--primary-color,#128c7e))}
+@media(max-width:680px){.center-module.hub-module .hub-tabs{margin:0 0 4px;padding-bottom:6px;gap:3px}.center-module.hub-module .hub-tabs button{padding:8px 12px;font-size:12px}}
 `;

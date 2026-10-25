@@ -39,13 +39,13 @@ export function chooseIdentityCardDesign(
     score(b) - score(a) || Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0));
   return sorted[0] || {
     name: `${subjectType === "teacher" ? "Teacher" : "Student"} ID`,
-    templateKey: "modern_clean", orientation: "landscape", sides: "front_back",
+    templateKey: "modern_clean", orientation: "landscape", sides: "front_and_back",
     primaryColor: "#174777", secondaryColor: "#172554",
     backgroundColor: "#ffffff", textColor: "#111827", mutedTextColor: "#64748b",
     showSchoolLogo: true, showBranchLogo: true, showSchoolName: true,
     showBranchName: true, showPhoto: true, showQrCode: true,
     showExpiryDate: true, showCredentialReference: true,
-    qrPosition: "bottom_right", qrSize: "medium",
+    qrPosition: "front_right", qrSize: "medium",
     visibleFields: { fullName: true, admissionNumber: subjectType === "student",
       staffNumber: subjectType !== "student", className: subjectType === "student" },
     footerText: "Official school identity credential",

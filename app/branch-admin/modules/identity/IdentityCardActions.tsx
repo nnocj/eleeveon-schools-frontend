@@ -29,6 +29,7 @@ export default function IdentityCardActions({
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [person, setPerson] = useState<Record<string, any> | null>(null);
+  const [photoCandidates, setPhotoCandidates] = useState<string[]>([]);
   const [academicYear, setAcademicYear] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const { branding, designFor, refresh } = useIdentityCardPresentation({
@@ -58,8 +59,22 @@ export default function IdentityCardActions({
           ? await db.academicStructures.get(id(settings.currentAcademicStructureId)) : null;
         const orgId = id((record as any)?.organizationId);
         const org = orgId ? await db.organizations.get(orgId) : null;
+        const assets = (await db.mediaAssets.toArray()).filter(asset =>
+          !asset.isDeleted && asset.active !== false &&
+          (!record?.accountId || id(asset.accountId) === id(record.accountId)) &&
+          ((id(asset.ownerTable) === (subjectType === "student" ? "students" : "teachers") &&
+            id(asset.ownerId) === subjectId && id(asset.fieldKey) === "photo") ||
+            (id((record as any)?.photoMediaId) && id(asset.id) === id((record as any)?.photoMediaId))));
+        assets.sort((a,b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+        const urls = Array.from(new Set([
+          ...assets.flatMap(asset => [asset.publicUrl, asset.remoteUrl, asset.previewDataUrl, asset.thumbnailDataUrl]),
+          photoUrl, (record as any)?.photo,
+        ].map(id).filter(v => /^(https?:\/\/|data:image\/|blob:|\/)/i.test(v))));
+        urls.sort((a,b) => Number(/supabase\.co\/storage\/v1\/object/i.test(b)) -
+          Number(/supabase\.co\/storage\/v1\/object/i.test(a)));
         if (!cancelled) {
           setPerson(record || null);
+          setPhotoCandidates(urls);
           setAcademicYear(id(currentStructure?.name));
           setOrganizationName(id(org?.name));
         }
@@ -69,7 +84,7 @@ export default function IdentityCardActions({
     };
     void load();
     return () => { cancelled = true; };
-  }, [schoolId, branchId, subjectId, subjectType]);
+  }, [schoolId, branchId, subjectId, subjectType, photoUrl]);
 
   const subject: IdentityCredentialCardSubject = {
     fullName: name || id(person?.fullName) || "Cardholder",
@@ -82,7 +97,8 @@ export default function IdentityCardActions({
     dateOfBirth: id(person?.dateOfBirth),
     phone: id(person?.phone),
     emergencyPhone: id(person?.emergencyPhone || person?.relativePhone || person?.parentPhone),
-    photoUrl: photoUrl || id(person?.photo),
+    photoUrl: photoCandidates[0] || photoUrl || id(person?.photo),
+    photoCandidates,
   };
 
   const credential: Partial<IdentityCredential> = {
@@ -135,6 +151,9 @@ export default function IdentityCardActions({
           .eleeveon-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
           .eleeveon-card-art{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;align-items:flex-start;overflow-x:auto;padding:15px 0}
           .eleeveon-card-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+          .eleeveon-identity-card,.eleeveon-identity-card *{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
+          .eleeveon-identity-card{box-shadow:none!important;break-inside:avoid!important;page-break-inside:avoid!important}
+          .eleeveon-identity-card svg{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
           @media print{
             @page{margin:7mm}
             body *{visibility:hidden!important}

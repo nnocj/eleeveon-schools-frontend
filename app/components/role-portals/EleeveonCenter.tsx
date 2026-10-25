@@ -14,6 +14,9 @@
  * - school/account roles => updates, feedback, support and access center.
  */
 
+import EleeveonSupportChat from "./EleeveonSupportChat";
+import { supportApi } from "../../lib/support/supportApi";
+
 import {
   useEffect,
   useMemo,
@@ -961,93 +964,24 @@ export default function EleeveonCenter({
     await load();
   };
 
-  const submitFeedback =
-    async () => {
-      if (
-        !accountId ||
-        !subject.trim() ||
-        !messageBody.trim()
-      ) {
-        setNotice(
-          "Add a subject and message.",
-        );
-        return;
-      }
-
-      try {
-        setSaving(true);
-        setNotice(null);
-
-        const input:
-          FeedbackCreateInput = {
-          id: stableId(),
-          accountId,
-          schoolId:
-            activeSchoolId ?? null,
-          branchId:
-            activeBranchId ?? null,
-          userId: userId || null,
-          membershipId:
-            membershipId || null,
-          type: feedbackType,
-          status: "submitted",
-          priority: "normal",
-          subject: subject.trim(),
-          message:
-            messageBody.trim(),
-          appVersion:
-            process.env
-              .NEXT_PUBLIC_APP_VERSION ??
-            null,
-          route: null,
-          submittedAt: Date.now(),
-          deviceInfo:
-            typeof navigator !==
-            "undefined"
-              ? {
-                  userAgent:
-                    navigator.userAgent,
-                  language:
-                    navigator.language,
-                  online:
-                    navigator.onLine,
-                }
-              : null,
-          metadata: {
-            role,
-            schoolName:
-              activeSchool?.name ??
-              null,
-            branchName:
-              activeBranch?.name ??
-              null,
-          },
-        };
-
-        await createLocal<
-          FeedbackCreateInput
-        >(
-          "platformFeedback",
-          input,
-        );
-
-        setSubject("");
-        setMessageBody("");
-        setNotice(
-          "Your message has been saved and queued for Eleeveon.",
-        );
-
-        await load();
-      } catch (error) {
-        setNotice(
-          error instanceof Error
-            ? error.message
-            : "Could not submit your message.",
-        );
-      } finally {
-        setSaving(false);
-      }
-    };
+  const submitFeedback = async () => {
+    if (!subject.trim() || !messageBody.trim()) { setNotice("Enter a subject and a message."); return; }
+    try {
+      setSaving(true);
+      setNotice(null);
+      await supportApi.create({
+        subject: subject.trim(), body: messageBody.trim(), type: feedbackType,
+        schoolId: activeSchoolId ?? undefined,
+        branchId: activeBranchId ?? undefined,
+        membershipId: membershipId || undefined,
+        name: user?.fullName || user?.name || undefined,
+      });
+      setSubject(""); setMessageBody("");
+      setNotice("Survey submitted to Eleeveon. You can continue the conversation in Support.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not send the survey to Eleeveon.");
+    } finally { setSaving(false); }
+  };
 
   const updateFeedbackStatus =
     async (
@@ -1573,11 +1507,7 @@ export default function EleeveonCenter({
             }
           >
             Support inbox
-            {developerSummary.newCount ? (
-              <b>
-                {developerSummary.newCount}
-              </b>
-            ) : null}
+
           </button>
         ) : null}
 
@@ -1645,7 +1575,7 @@ export default function EleeveonCenter({
               setSection("feedback")
             }
           >
-            Feedback
+            Survey
           </button>
         ) : null}
 
@@ -1682,438 +1612,18 @@ export default function EleeveonCenter({
         </button>
       </nav>
 
-      {section === "inbox" &&
-      isDeveloper ? (
-        <>
-          <section className="center-developer-summary">
-            <article className="center-stat">
-              <span>Open</span>
-              <strong>
-                {developerSummary.open}
-              </strong>
-            </article>
-
-            <article className="center-stat">
-              <span>New</span>
-              <strong>
-                {developerSummary.newCount}
-              </strong>
-            </article>
-
-            <article className="center-stat">
-              <span>High priority</span>
-              <strong>
-                {developerSummary.urgent}
-              </strong>
-            </article>
-
-            <article className="center-stat">
-              <span>Resolved</span>
-              <strong>
-                {developerSummary.resolved}
-              </strong>
-            </article>
-          </section>
-
-          <section className="center-card">
-            <div className="center-support-controls">
-              <label>
-                Search
-                <input
-                  value={developerSearch}
-                  onChange={(event) =>
-                    setDeveloperSearch(
-                      event.target.value,
-                    )
-                  }
-                  placeholder="School, subject, type, user or account"
-                />
-              </label>
-
-              <label>
-                Queue
-                <select
-                  value={developerFilter}
-                  onChange={(event) =>
-                    setDeveloperFilter(
-                      event.target.value as
-                        | "open"
-                        | "all"
-                        | PlatformFeedbackStatus,
-                    )
-                  }
-                >
-                  <option value="open">
-                    Open tickets
-                  </option>
-                  <option value="all">
-                    All tickets
-                  </option>
-                  {feedbackStatuses.map(
-                    (status) => (
-                      <option
-                        key={status}
-                        value={status}
-                      >
-                        {titleText(status)}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </label>
-            </div>
-          </section>
-
-          {notice ? (
-            <div className="notice">
-              {notice}
-            </div>
-          ) : null}
-
-          <section className="center-ticket-layout">
-            <div className="center-ticket-list">
-              {developerTickets.length ? (
-                developerTickets.map(
-                  (item) => {
-                    const metadata =
-                      item.metadata as
-                        | Record<
-                            string,
-                            unknown
-                          >
-                        | null
-                        | undefined;
-
-                    const schoolName =
-                      metadataText(
-                        metadata,
-                        "schoolName",
-                      ) ||
-                      item.schoolId ||
-                      "Account";
-
-                    const branchName =
-                      metadataText(
-                        metadata,
-                        "branchName",
-                      );
-
-                    return (
-                      <button
-                        type="button"
-                        key={item.id}
-                        className={`center-ticket ${
-                          item.id ===
-                          selectedFeedbackId
-                            ? "active"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          setSelectedFeedbackId(
-                            item.id,
-                          )
-                        }
-                      >
-                        <div className="center-ticket-top">
-                          <strong>
-                            {item.subject}
-                          </strong>
-                          <span
-                            className={`center-badge priority-${
-                              item.priority ??
-                              "normal"
-                            }`}
-                          >
-                            {item.priority ??
-                              "normal"}
-                          </span>
-                        </div>
-
-                        <p>
-                          {item.message}
-                        </p>
-
-                        <div className="center-ticket-meta">
-                          <span>
-                            {schoolName}
-                            {branchName
-                              ? ` · ${branchName}`
-                              : ""}
-                          </span>
-                          <span>
-                            {titleText(
-                              item.type,
-                            )}
-                          </span>
-                          <span>
-                            {titleText(
-                              item.status,
-                            )}
-                          </span>
-                          <span>
-                            {dateText(
-                              item.submittedAt,
-                            )}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  },
-                )
-              ) : (
-                <div className="center-developer-empty">
-                  No support tickets match
-                  the current queue.
-                </div>
-              )}
-            </div>
-
-            <div className="center-ticket-thread">
-              {selectedFeedback ? (
-                <>
-                  <div className="center-thread-heading">
-                    <h3>
-                      {
-                        selectedFeedback.subject
-                      }
-                    </h3>
-
-                    <span
-                      className={`center-badge priority-${
-                        selectedFeedback.priority ??
-                        "normal"
-                      }`}
-                    >
-                      {selectedFeedback.priority ??
-                        "normal"}
-                    </span>
-                  </div>
-
-                  <p className="center-thread-copy">
-                    {
-                      selectedFeedback.message
-                    }
-                  </p>
-
-                  <div className="center-support-context">
-                    <div>
-                      <span>School</span>
-                      <strong>
-                        {metadataText(
-                          selectedMetadata,
-                          "schoolName",
-                        ) ||
-                          selectedFeedback.schoolId ||
-                          "Not supplied"}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>Branch</span>
-                      <strong>
-                        {metadataText(
-                          selectedMetadata,
-                          "branchName",
-                        ) ||
-                          selectedFeedback.branchId ||
-                          "Not supplied"}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>Role</span>
-                      <strong>
-                        {titleText(
-                          metadataText(
-                            selectedMetadata,
-                            "role",
-                          ) ||
-                            "Unknown",
-                        )}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>Account ID</span>
-                      <strong>
-                        {
-                          selectedFeedback.accountId
-                        }
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>User ID</span>
-                      <strong>
-                        {selectedFeedback.userId ||
-                          "Not supplied"}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>App version</span>
-                      <strong>
-                        {selectedFeedback.appVersion ||
-                          "Not supplied"}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>Route</span>
-                      <strong>
-                        {selectedFeedback.route ||
-                          "Not supplied"}
-                      </strong>
-                    </div>
-
-                    <div>
-                      <span>Device / browser</span>
-                      <strong>
-                        {selectedDeviceInfo
-                          ?.userAgent
-                          ? String(
-                              selectedDeviceInfo.userAgent,
-                            )
-                          : "Not supplied"}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="center-support-controls">
-                    <label>
-                      Status
-                      <select
-                        disabled={saving}
-                        value={
-                          selectedFeedback.status
-                        }
-                        onChange={(event) =>
-                          void updateFeedbackStatus(
-                            selectedFeedback,
-                            event.target
-                              .value as PlatformFeedbackStatus,
-                          )
-                        }
-                      >
-                        {feedbackStatuses.map(
-                          (status) => (
-                            <option
-                              key={status}
-                              value={status}
-                            >
-                              {titleText(
-                                status,
-                              )}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-
-                    <label>
-                      Priority
-                      <select
-                        disabled={saving}
-                        value={
-                          selectedFeedback.priority ??
-                          "normal"
-                        }
-                        onChange={(event) =>
-                          void updateFeedbackPriority(
-                            selectedFeedback,
-                            event.target
-                              .value as FeedbackPriority,
-                          )
-                        }
-                      >
-                        {feedbackPriorities.map(
-                          (priority) => (
-                            <option
-                              key={priority}
-                              value={priority}
-                            >
-                              {titleText(
-                                priority,
-                              )}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-                  </div>
-
-                  <div className="center-thread-messages">
-                    {selectedMessages.map(
-                      (item) => (
-                        <div
-                          key={item.id}
-                          className={`center-message ${
-                            item.senderType ===
-                            "platform"
-                              ? "platform"
-                              : "customer"
-                          }`}
-                        >
-                          <p>{item.body}</p>
-
-                          <div className="center-message-meta">
-                            <span>
-                              {item.senderType ===
-                              "platform"
-                                ? "Eleeveon"
-                                : "Customer"}
-                            </span>
-                            <span>
-                              {dateText(
-                                item.createdAt,
-                              )}
-                            </span>
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-
-                  <div className="center-reply-box">
-                    <label>
-                      Reply
-                      <textarea
-                        value={replyBody}
-                        onChange={(event) =>
-                          setReplyBody(
-                            event.target.value,
-                          )
-                        }
-                        placeholder="Write a support response…"
-                      />
-                    </label>
-
-                    <button
-                      type="button"
-                      className="primary submit"
-                      disabled={
-                        saving ||
-                        !replyBody.trim()
-                      }
-                      onClick={() =>
-                        void sendDeveloperReply()
-                      }
-                    >
-                      {saving
-                        ? "Saving…"
-                        : "Send reply"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <div className="center-developer-empty">
-                  Select a ticket to review
-                  its support context.
-                </div>
-              )}
-            </div>
-          </section>
-        </>
+      {section === "inbox" && isDeveloper ? (
+        <EleeveonSupportChat
+          isDeveloper={true}
+          accountId={idOf(accountId)}
+          schoolId={activeSchoolId}
+          branchId={activeBranchId}
+          userId={userId}
+          membershipId={membershipId}
+          role={role}
+          schoolName={activeSchool?.name}
+          branchName={activeBranch?.name}
+        />
       ) : null}
 
       {section ===
@@ -2983,7 +2493,7 @@ export default function EleeveonCenter({
         <section className="center-grid">
           <article className="center-card">
             <span className="kicker">
-              Send to Eleeveon
+              Survey & feedback
             </span>
             <h3>
               Share an idea or report a
@@ -3066,7 +2576,7 @@ export default function EleeveonCenter({
               Your messages
             </span>
             <h3>
-              Feedback history
+              Previous local feedback
             </h3>
 
             <div className="history">
@@ -3094,7 +2604,7 @@ export default function EleeveonCenter({
                 ))
               ) : (
                 <p>
-                  No feedback submitted
+                  No previous local feedback submitted
                   yet.
                 </p>
               )}
@@ -3103,50 +2613,19 @@ export default function EleeveonCenter({
         </section>
       ) : null}
 
-      {section === "support" &&
-      !isDeveloper ? (
-        <section className="center-grid">
-          <article className="center-card">
-            <span className="kicker">
-              Help
-            </span>
-            <h3>
-              Request workspace support
-            </h3>
-            <p>
-              Your school, branch, role
-              and device context will be
-              included automatically.
-            </p>
-            <button
-              type="button"
-              className="primary"
-              onClick={() => {
-                setFeedbackType(
-                  "support_request",
-                );
-                setSection("feedback");
-              }}
-            >
-              Create support request
-            </button>
-          </article>
 
-          <article className="center-card">
-            <span className="kicker">
-              System status
-            </span>
-            <h3>
-              Review pending data
-            </h3>
-            <p>
-              Tap the connection status
-              in the portal header to
-              inspect pending and failed
-              records by table.
-            </p>
-          </article>
-        </section>
+      {section === "support" && !isDeveloper ? (
+        <EleeveonSupportChat
+          isDeveloper={false}
+          accountId={idOf(accountId)}
+          schoolId={activeSchoolId}
+          branchId={activeBranchId}
+          userId={userId}
+          membershipId={membershipId}
+          role={role}
+          schoolName={activeSchool?.name}
+          branchName={activeBranch?.name}
+        />
       ) : null}
 
       {section === "access" ? (

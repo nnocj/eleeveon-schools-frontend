@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import type {
   IdentityCredential,
   IdentityCredentialDesignSetting,
@@ -19,6 +19,7 @@ export type IdentityCredentialCardSubject = {
   phone?: string | null;
   emergencyPhone?: string | null;
   photoUrl?: string | null;
+  photoCandidates?: string[];
 };
 
 export type IdentityCredentialCardBranding = {
@@ -29,6 +30,10 @@ export type IdentityCredentialCardBranding = {
   schoolLogoUrl?: string | null;
   branchLogoUrl?: string | null;
   signatureUrl?: string | null;
+  // Optional ordered alternatives resolved from the branch's mediaAssets.
+  schoolLogoCandidates?: string[];
+  branchLogoCandidates?: string[];
+  signatureCandidates?: string[];
 };
 
 export type IdentityCredentialCardProps = {
@@ -63,6 +68,47 @@ function qrValue(credential?: Partial<IdentityCredential> | null) {
   );
 }
 
+/**
+ * Image with graceful fallbacks. In particular, an old /media/files/... URL
+ * may return 404 after storage was migrated to Supabase. Never show a broken
+ * image glyph on a printable school ID. The final fallback is an empty slot.
+ */
+function CardAssetImage({
+  sources, alt, style, fallback,
+}: {
+  sources: Array<string | null | undefined>;
+  alt: string;
+  style: React.CSSProperties;
+  fallback?: React.ReactNode;
+}) {
+  const choices = Array.from(new Set(sources.map(v => String(v || "").trim())
+    .filter(v => /^(https?:\/\/|blob:|data:image\/|\/)/i.test(v))));
+  const key = choices.join("\u0001");
+  const [failed, setFailed] = useState(0);
+  useEffect(() => { setFailed(0); }, [key]);
+  const url = choices[failed];
+  return url ? <img src={url} alt={alt} style={style}
+    onError={() => setFailed(index => index + 1)} /> : <>{fallback || null}</>;
+}
+
+/** SVG is actual print content, unlike CSS background graphics that browsers
+ * may suppress unless the user enables "Print backgrounds". */
+function PrintableGradient({ from, to, accent }: {
+  from: string; to: string; accent?: string;
+}) {
+  const id = React.useId().replace(/:/g, "");
+  return <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 1000 100" preserveAspectRatio="none"
+    style={{position:"absolute",inset:0,width:"100%",height:"100%",zIndex:0,pointerEvents:"none",display:"block"}}>
+    <defs><linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stopColor={from}/>
+      <stop offset={accent ? "55%" : "100%"} stopColor={to}/>
+      {accent && <stop offset="100%" stopColor={accent}/>}
+    </linearGradient></defs>
+    <rect x="0" y="0" width="1000" height="100" fill={`url(#${id})`}/>
+  </svg>;
+}
+
 export default function IdentityCredentialCard({
   credential,
   design,
@@ -89,15 +135,17 @@ export default function IdentityCredentialCard({
   const border = design.borderColor || primary;
   const qrPosition = design.qrPosition || "front_right";
   const qrSize = design.qrSize || "medium";
+  const schoolLogoSources = branding.schoolLogoCandidates?.length
+    ? branding.schoolLogoCandidates : [branding.schoolLogoUrl];
+  const branchLogoSources = branding.branchLogoCandidates?.length
+    ? branding.branchLogoCandidates : [branding.branchLogoUrl];
   const logos = [
-    design.showSchoolLogo !== false && branding.schoolLogoUrl ? { key: "school", url: branding.schoolLogoUrl } : null,
-    design.showBranchLogo !== false && branding.branchLogoUrl && branding.branchLogoUrl !== branding.schoolLogoUrl
-      ? { key: "branch", url: branding.branchLogoUrl } : null,
-  ].filter(Boolean) as {key: string; url: string}[];
-  // Branch-only logos should still render even if the two stored URLs match.
-  if (!logos.length && design.showBranchLogo !== false && branding.branchLogoUrl) {
-    logos.push({ key: "branch", url: branding.branchLogoUrl });
-  }
+    design.showSchoolLogo !== false && schoolLogoSources.some(Boolean)
+      ? {key: "school", sources: schoolLogoSources} : null,
+    design.showBranchLogo !== false && branchLogoSources.some(Boolean) &&
+      !(schoolLogoSources[0] && schoolLogoSources[0] === branchLogoSources[0] && design.showSchoolLogo !== false)
+      ? {key: "branch", sources: branchLogoSources} : null,
+  ].filter(Boolean) as {key:string;sources:(string|null|undefined)[]}[];
   const showQr = design.showQrCode !== false && Boolean(qrValue(credential));
   const qrOnBack = qrPosition.startsWith("back_");
 
@@ -155,13 +203,10 @@ export default function IdentityCredentialCard({
 
   if (side === "back") {
     return (
-      <article className={className} style={cardStyle}>
-        <div
-          style={{
-            height: 8,
-            background: `linear-gradient(90deg, ${primary}, ${secondary})`,
-          }}
-        />
+      <article className={`eleeveon-identity-card ${className || ""}`} style={cardStyle}>
+        <div style={{height:8,position:"relative",overflow:"hidden",background:primary}}>
+          <PrintableGradient from={primary} to={secondary}/>
+        </div>
         <div
           style={{
             padding: 18,
@@ -175,7 +220,8 @@ export default function IdentityCredentialCard({
           }}
         >
           {logos.length > 0 && <div style={{display:"flex",gap:6}}>{logos.map(item => (
-          <img key={item.key} src={item.url} alt="" style={{width:42,height:42,objectFit:"contain"}} />
+          <CardAssetImage key={item.key} sources={item.sources} alt={`${item.key} logo`}
+            style={{width:42,height:42,objectFit:"contain"}} />
         ))}</div>}
           {design.showSchoolName !== false && <strong style={{ fontSize: 15 }}>{branding.schoolName}</strong>}
           {design.showBranchName !== false && branding.branchName && <span style={{fontSize:10}}>{branding.branchName}</span>}
@@ -191,7 +237,8 @@ export default function IdentityCredentialCard({
             </code>
           ) : null}
           {design.showSignature && <div style={{fontSize:9,marginTop:"auto"}}>
-            {branding.signatureUrl && <img src={branding.signatureUrl} alt="Authorized signature" style={{height:32,maxWidth:100,objectFit:"contain"}} />}
+            <CardAssetImage sources={branding.signatureCandidates?.length ? branding.signatureCandidates : [branding.signatureUrl]}
+              alt="Authorized signature" style={{height:32,maxWidth:100,objectFit:"contain"}} />
             <span style={{display:"block",borderTop:`1px solid ${muted}`,paddingTop:3}}>{design.signatureLabel || "Authorized Signature"}</span>
           </div>}
           <p style={{ margin: "auto 0 0", fontSize: 9, color: muted }}>
@@ -212,7 +259,7 @@ export default function IdentityCredentialCard({
         : { bottom: 18, right: 12 };
 
   return (
-    <article className={className} style={cardStyle}>
+    <article className={`eleeveon-identity-card ${className || ""}`} style={cardStyle}>
       <header
         style={{
           minHeight: compact ? 34 : classic ? 56 : 44,
@@ -221,13 +268,19 @@ export default function IdentityCredentialCard({
           alignItems: "center",
           gap: 8,
           color: "#fff",
-          background: premium ? `linear-gradient(120deg, ${primary}, ${secondary}, ${design.accentColor || primary})` : classic ? primary : `linear-gradient(120deg, ${primary}, ${secondary})`,
+          position: "relative",
+          isolation: "isolate",
+          overflow: "hidden",
+          background: classic ? primary : secondary,
         }}
       >
-        {logos.map(item => <img key={item.key} src={item.url} alt=""
-          style={{ width: 30, height: 30, borderRadius: 6,
-            objectFit: "contain", background: "#fff", padding: 2 }} />)}
-        <div style={{ minWidth: 0 }}>
+        <PrintableGradient from={primary} to={classic ? primary : secondary}
+          accent={premium ? (design.accentColor || primary) : undefined}/>
+        {logos.map(item => <div key={item.key} style={{position:"relative",zIndex:1,flex:"0 0 auto"}}>
+          <CardAssetImage sources={item.sources} alt={`${item.key} logo`}
+            style={{width:30,height:30,borderRadius:6,objectFit:"contain",background:"#fff",padding:2}} />
+        </div>)}
+        <div style={{ minWidth: 0, position:"relative",zIndex:1 }}>
           {design.showSchoolName !== false ? (
             <strong
               style={{
@@ -277,54 +330,29 @@ export default function IdentityCredentialCard({
           gap: 12,
         }}
       >
-        {design.showPhoto !== false ? (
-          subject.photoUrl ? (
-            <img
-              src={subject.photoUrl}
-              alt="Cardholder photo"
-              style={{
-                width: landscape ? 76 : 88,
-                height: landscape ? 86 : 102,
-                justifySelf: landscape ? "start" : "center",
-                objectFit: "cover",
-                borderRadius:
-                  design.photoShape === "circle"
-                    ? "50%"
-                    : design.photoShape === "square"
-                      ? 4
-                      : 12,
-                border: `2px solid ${primary}`,
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: landscape ? 76 : 88,
-                height: landscape ? 86 : 102,
-                justifySelf: landscape ? "start" : "center",
-                display: "grid",
-                placeItems: "center",
-                borderRadius:
-                  design.photoShape === "circle"
-                    ? "50%"
-                    : design.photoShape === "square"
-                      ? 4
-                      : 12,
-                background: `${primary}18`,
-                color: primary,
-                fontWeight: 800,
-                fontSize: 28,
-              }}
-            >
-              {subject.fullName
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((part) => part[0])
-                .join("")
-                .toUpperCase()}
-            </div>
-          )
-        ) : null}
+        {design.showPhoto !== false && (
+          <CardAssetImage
+            sources={subject.photoCandidates?.length ? subject.photoCandidates : [subject.photoUrl]}
+            alt="Cardholder photo"
+            style={{
+              width: landscape ? 76 : 88,
+              height: landscape ? 86 : 102,
+              justifySelf: landscape ? "start" : "center",
+              objectFit: "cover",
+              borderRadius: design.photoShape === "circle" ? "50%" : design.photoShape === "square" ? 4 : 12,
+              border: `2px solid ${primary}`,
+            }}
+            fallback={<div style={{
+              width: landscape ? 76 : 88, height: landscape ? 86 : 102,
+              justifySelf: landscape ? "start" : "center", display: "grid", placeItems: "center",
+              borderRadius: design.photoShape === "circle" ? "50%" : design.photoShape === "square" ? 4 : 12,
+              background: `${primary}18`, color: primary, fontWeight: 800, fontSize: 28,
+            }}>
+              {subject.fullName.split(/\s+/).slice(0, 2)
+                .map(part => part[0]).join("").toUpperCase()}
+            </div>}
+          />
+        )}
 
         <div style={{ minWidth: 0 }}>
           {visible.fullName !== false ? (
@@ -380,7 +408,8 @@ export default function IdentityCredentialCard({
 
       {design.showSignature && (design.sides === "front_only" || !design.sides) && <div
         style={{position:"absolute",bottom:36,left:12,fontSize:8}}>
-        {branding.signatureUrl && <img src={branding.signatureUrl} alt="Authorized signature" style={{display:"block",height:25,maxWidth:88,objectFit:"contain"}} />}
+        <CardAssetImage sources={branding.signatureCandidates?.length ? branding.signatureCandidates : [branding.signatureUrl]}
+          alt="Authorized signature" style={{display:"block",height:25,maxWidth:88,objectFit:"contain"}} />
         <span style={{borderTop:`1px solid ${muted}`}}>{design.signatureLabel || "Authorized Signature"}</span>
       </div>}
       {design.showAddress && branding.address && <div style={{position:"absolute",bottom:24,left:12,right:12,fontSize:8,color:muted}}>{branding.address}</div>}

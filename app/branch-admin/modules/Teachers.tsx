@@ -51,6 +51,7 @@
 import BranchViewportPortal from "../../components/role-portals/shell/BranchViewportPortal";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import IdentityCardActions from "./identity/IdentityCardActions";
+import IdentityCardBatch from "./identity/IdentityCardBatch";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { useRouter } from "next/navigation";
@@ -555,6 +556,7 @@ export default function TeachersPage() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [batchIdsOpen, setBatchIdsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<TeacherView | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -1861,10 +1863,37 @@ export default function TeachersPage() {
             setMoreOpen(false);
             await load();
           }}
+          onBatchIds={() => { setMoreOpen(false); setBatchIdsOpen(true); }}
           onClose={() => setMoreOpen(false)}
         />
         </BranchViewportPortal>
       )}
+      {batchIdsOpen && (
+        <IdentityCardBatch
+          open={batchIdsOpen}
+          onClose={() => setBatchIdsOpen(false)}
+          subjectType="teacher"
+          schoolId={String(schoolId)}
+          branchId={String(branchId)}
+          accountId={accountId}
+          people={viewRows.filter(item => item.active).map(item => {
+            const row: any = item.row;
+            return {
+              id: item.id,
+              name: String(row.fullName || "Unnamed teacher"),
+              staffNumber: String(row.staffNumber || row.employeeNumber || row.employeeId || ""),
+              organizationName: item.organizationName === "No organization" ? "" : item.organizationName,
+              gender: String(row.gender || ""),
+              dateOfBirth: String(row.dateOfBirth || ""),
+              phone: String(row.phone || ""),
+              emergencyPhone: String(row.emergencyPhone || row.relativePhone || ""),
+              photoMediaId: String(row.photoMediaId || ""),
+              photoUrl: item.photoUrl || "",
+            };
+          })}
+        />
+      )}
+
       {selectedItem && (
         <BranchViewportPortal themeSourceClass=".ba-page" onEscape={() => setSelectedItem(null)}>
         <ActionSheet
@@ -2130,6 +2159,7 @@ function MoreSheet({
   summary,
   setViewMode,
   onRefresh,
+  onBatchIds,
   onClose,
 }: {
   viewMode: ViewMode;
@@ -2144,6 +2174,7 @@ function MoreSheet({
   };
   setViewMode: (mode: ViewMode) => void;
   onRefresh: () => void | Promise<void>;
+  onBatchIds: () => void;
   onClose: () => void;
 }) {
   return (
@@ -2196,6 +2227,11 @@ function MoreSheet({
             <span>◔</span>
             <b>Analytics</b>
             <small>Organization, role, gender and usage summaries</small>
+          </button>
+          <button type="button" onClick={onBatchIds}>
+            <span>▣</span>
+            <b>Batch ID cards</b>
+            <small>Preview and print IDs for all teachers</small>
           </button>
           <button type="button" onClick={onRefresh}>
             <span>↻</span>

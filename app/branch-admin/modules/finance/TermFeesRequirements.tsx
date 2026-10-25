@@ -66,7 +66,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const { activeSchool, activeBranch } = useActiveBranch() as any;
   const { accountId, schoolId, branchId, authenticated, ready, restoring, branchLoading } = workspace;
   const scope = useMemo<Scope | null>(() => accountId && schoolId && branchId ? { accountId: id(accountId), schoolId: id(schoolId), branchId: id(branchId) } : null, [accountId, schoolId, branchId]);
-  const revision = useBranchTableRevision(["feeStructures", "studentFeeInvoices", "studentFeeInvoiceItems", "studentFeePayments", "students", "studentEnrollments", "classes", "organizations", "academicStructures", "academicPeriods", "mediaAssets", "mediaBlobs"]);
+  const revision = useBranchTableRevision(["feeStructures", "studentFeeInvoices", "studentFeeInvoiceItems", "studentFeePayments", "students", "studentEnrollments", "classes", "organizations", "academicStructures", "academicPeriods", "schoolBranchSettings", "mediaAssets", "mediaBlobs"]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [noticeRows, setNoticeRows] = useState<FeeStructure[]>([]);
@@ -82,6 +82,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [appliedClassIds, setAppliedClassIds] = useState<string[]>([]);
   const [structures, setStructures] = useState<AcademicStructure[]>([]);
   const [periods, setPeriods] = useState<AcademicPeriod[]>([]);
+  // Read the same branch settings that Academic Systems updates. This avoids
+  // relying on a potentially stale settings context after changing the term.
+  const [branchAcademicSettings, setBranchAcademicSettings] = useState<any>(null);
   const [invoices, setInvoices] = useState<StudentFeeInvoice[]>([]);
   const [invoiceItems, setInvoiceItems] = useState<StudentFeeInvoiceItem[]>([]);
   const [payments, setPayments] = useState<StudentFeePayment[]>([]);
@@ -169,7 +172,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     if (!scope || !authenticated || !ready) { setLoading(false); return; }
     try {
       setLoading(true);
-      const [a, b, c, d, e, f, g, h, i, j, k] = await Promise.all([
+      const [a, b, c, d, e, f, g, h, i, j, k, l] = await Promise.all([
         readRows<FeeStructure>("feeStructures"), readRows<Student>("students"),
         readRows<StudentEnrollment>("studentEnrollments"), readRows<Class>("classes"),
         readRows<AcademicStructure>("academicStructures"), readRows<AcademicPeriod>("academicPeriods"),
@@ -177,6 +180,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         readRows<StudentFeePayment>("studentFeePayments"),
         readRows<any>("schoolCurrencySettings"),
         readRows<Organization>("organizations"),
+        readRows<any>("schoolBranchSettings"),
       ]);
       setNoticeRows(a.filter(row => isTenant(row, scope)));
       setStudents(b.filter(row => isTenant(row, scope) && row.status !== "withdrawn"));
@@ -189,24 +193,39 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       setInvoiceItems(h.filter(row => isTenant(row, scope)));
       setPayments(i.filter(row => isTenant(row, scope)));
       setCurrencySettings(j.filter((row: any) => isTenant(row, scope)));
+      const matchingBranchSettings = l.filter((row: any) =>
+        usable(row) && id(row.schoolId) === scope.schoolId &&
+        id(row.branchId) === scope.branchId &&
+        (!row.accountId || id(row.accountId) === scope.accountId),
+      );
+      setBranchAcademicSettings(
+        matchingBranchSettings.sort((x: any, y: any) =>
+          Number(y.updatedAt || 0) - Number(x.updatedAt || 0))[0] || null,
+      );
     } catch (e) { console.error("Finance load failed", e); setMessage("Could not load the branch's finance records."); }
     finally { setLoading(false); }
   }, [scope, authenticated, ready]);
   useEffect(() => { void load(); }, [load, revision]);
+  const configuredStructureId = branchAcademicSettings
+    ? id(branchAcademicSettings.currentAcademicStructureId)
+    : id(settings?.currentAcademicStructureId);
+  const configuredPeriodId = branchAcademicSettings
+    ? id(branchAcademicSettings.currentAcademicPeriodId)
+    : id(settings?.currentAcademicPeriodId);
   useEffect(() => {
     if (!structures.length) return;
     setStructureId(current => structures.some(row => row.id === current) ? current :
-      (structures.some(row => row.id === id(settings?.currentAcademicStructureId)) ? id(settings?.currentAcademicStructureId) :
+      (structures.some(row => row.id === configuredStructureId) ? configuredStructureId :
       structures.find(row => periods.some(p => p.academicStructureId === row.id && p.startDate && p.endDate &&
         String(p.startDate).slice(0, 10) <= today() && String(p.endDate).slice(0, 10) >= today()))?.id || structures[0].id));
-  }, [structures, periods, settings?.currentAcademicStructureId]);
+  }, [structures, periods, configuredStructureId]);
   const visiblePeriods = useMemo(() => periods.filter(p => !structureId || p.academicStructureId === structureId), [periods, structureId]);
   useEffect(() => {
     setPeriodId(current => visiblePeriods.some(p => p.id === current) ? current :
-      (visiblePeriods.some(p => p.id === id(settings?.currentAcademicPeriodId)) ? id(settings?.currentAcademicPeriodId) :
+      (visiblePeriods.some(p => p.id === configuredPeriodId) ? configuredPeriodId :
       visiblePeriods.find(row => row.startDate && row.endDate &&
         String(row.startDate).slice(0, 10) <= today() && String(row.endDate).slice(0, 10) >= today())?.id || visiblePeriods[0]?.id || ""));
-  }, [visiblePeriods, settings?.currentAcademicPeriodId]);
+  }, [visiblePeriods, configuredPeriodId]);
   useEffect(() => { if (!classes.some(c => c.id === classId)) setClassId(classes[0]?.id || ""); }, [classes, classId]);
 
   // Prefer the selected student's current class, then their most recent enrollment;
@@ -240,8 +259,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   // context, not the last period browsed in the filter or notice editor.
   // Prefer the configured academic calendar; dates are a safe fallback only.
   const currentAcademicContext = useMemo(() => {
-    const configuredPeriod = periods.find(row => row.id === id(settings?.currentAcademicPeriodId));
-    const configuredStructure = structures.find(row => row.id === id(settings?.currentAcademicStructureId));
+    const configuredPeriod = periods.find(row => row.id === configuredPeriodId);
+    const configuredStructure = structures.find(row => row.id === configuredStructureId);
     const now = today();
     const datedPeriod = periods.find(row => row.startDate && row.endDate &&
       String(row.startDate).slice(0, 10) <= now && String(row.endDate).slice(0, 10) >= now);
@@ -252,7 +271,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     return { structureId: structure?.id || "", periodId: period?.id || "",
       structureName: structure?.name || "Academic structure not set",
       periodName: period?.name || "Academic period not set", confirmed };
-  }, [structures, periods, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
+  }, [structures, periods, configuredStructureId, configuredPeriodId]);
   const openCurrentClass = (targetClassId: string) => {
     if (currentAcademicContext.structureId) setStructureId(currentAcademicContext.structureId);
     if (currentAcademicContext.periodId) setPeriodId(currentAcademicContext.periodId);

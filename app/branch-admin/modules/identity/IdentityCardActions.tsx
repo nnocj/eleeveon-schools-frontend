@@ -28,6 +28,8 @@ export default function IdentityCardActions({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [printStarted, setPrintStarted] = useState(false);
   const [person, setPerson] = useState<Record<string, any> | null>(null);
   const [photoCandidates, setPhotoCandidates] = useState<string[]>([]);
   const [academicYear, setAcademicYear] = useState("");
@@ -108,6 +110,38 @@ export default function IdentityCardActions({
     expiresAt: timestamp(card?.expiresAt),
     metadata: { qrValue: card?.verificationUrl || "" },
   } as Partial<IdentityCredential>;
+  useEffect(() => {
+    if (copyState === "idle" && !printStarted) return;
+    const timer = window.setTimeout(() => {
+      setCopyState("idle");
+      setPrintStarted(false);
+    }, 2600);
+    return () => window.clearTimeout(timer);
+  }, [copyState, printStarted]);
+
+  async function copyVerificationLink() {
+    const url = card?.verificationUrl;
+    if (!url) { setCopyState("error"); return; }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          if (!document.execCommand("copy")) throw new Error("Copy unsupported");
+        } finally { textarea.remove(); }
+      }
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+  }
+
   const hasCard = card?.status === "active" && Boolean(card.verificationUrl);
   const doubleSided = design.sides === "front_and_back";
 
@@ -151,6 +185,12 @@ export default function IdentityCardActions({
           .eleeveon-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
           .eleeveon-card-art{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;align-items:flex-start;overflow-x:auto;padding:15px 0}
           .eleeveon-card-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+          .eleeveon-card-actions button{flex:1 1 140px;min-height:42px;transition:background-color .2s,color .2s,border-color .2s}
+          .eleeveon-card-panel .eleeveon-action-success{background:#dcfce7!important;color:#166534!important;border-color:#86efac!important;font-weight:700}
+          .eleeveon-card-panel .eleeveon-action-error{background:#fee2e2!important;color:#991b1b!important;border-color:#fca5a5!important;font-weight:700}
+          .eleeveon-feedback{font-size:12;text-align:center;margin:7px 0 0}
+          @media(max-width:450px){.eleeveon-card-actions button{flex-basis:100%}}
+
           .eleeveon-identity-card,.eleeveon-identity-card *{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
           .eleeveon-identity-card{box-shadow:none!important;break-inside:avoid!important;page-break-inside:avoid!important}
           .eleeveon-identity-card svg{print-color-adjust:exact!important;-webkit-print-color-adjust:exact!important}
@@ -175,12 +215,20 @@ export default function IdentityCardActions({
             Layout and visible fields follow Branch Settings. Verification needs internet access.
           </p>
           <div className="eleeveon-card-actions">
-            <button type="button" onClick={() => window.print()}>Print ID</button>
-            <button type="button" onClick={() => {
-              if (card.verificationUrl) void navigator.clipboard?.writeText(card.verificationUrl);
-            }}>Copy verification link</button>
+            <button type="button" className={printStarted ? "eleeveon-action-success" : ""}
+              onClick={() => { setPrintStarted(true); window.print(); }}>
+              {printStarted ? "Print dialog opened ✓" : "Print ID"}
+            </button>
+            <button type="button" onClick={() => void copyVerificationLink()}
+              className={copyState === "copied" ? "eleeveon-action-success" : copyState === "error" ? "eleeveon-action-error" : ""}>
+              {copyState === "copied" ? "✓ Link copied" : copyState === "error" ? "Copy failed · Retry" : "Copy verification link"}
+            </button>
             <button type="button" onClick={() => setOpen(false)}>Done</button>
           </div>
+          {copyState !== "idle" && <p className="eleeveon-feedback" role="status"
+            style={{color:copyState === "copied" ? "#15803d" : "#b91c1c"}}>
+            {copyState === "copied" ? "Verification link copied to clipboard." : "Could not copy the link. Try again or check clipboard permissions."}
+          </p>}
         </section>
       </div>, document.body)}
   </>;

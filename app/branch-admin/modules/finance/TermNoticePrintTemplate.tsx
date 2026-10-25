@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Eleeveon Schools â€” printable A4 NEXT-TERM fees and requirements notice.
+ * Eleeveon Schools - printable A4 NEXT-TERM fees and requirements notice.
  *
  * The title identifies BOTH the current and upcoming academic periods.
  * Only next-term fees, requirements and instructions appear in the body.
@@ -61,10 +61,34 @@ function nonNegativeAmount(value: unknown): number {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
+/**
+ * Presentation-only cleanup for legacy text imported with broken encoding or
+ * pasted Markdown/HTML table fragments. Stored data is never changed.
+ */
+function cleanNoticeText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .filter((line) =>
+      !/^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line) &&
+      !/^\s*\|\s*(?:<br\s*\/?>\s*)?(?:\u00e2\u20ac\u201d|\u00e2\u20ac\u201c|—|–|-)?\s*\|\s*$/i.test(line)
+    )
+    .join("\n")
+    .replace(/&(?:nbsp|#x20|#32);/gi, " ")
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/\u00e2\u20ac\u201d|\u00e2\u20ac\u201c/g, " - ")
+    .replace(/\u00e2\u20ac\u00a2|\u00c2\u00b7/g, ", ")
+    .replace(/\u00e2\u20ac\u02dc|\u00e2\u20ac\u2122/g, "'")
+    .replace(/\u00e2\u20ac\u0153|\u00e2\u20ac\u009d/g, '"')
+    .replace(/\u00e2\u201a\u00b5/g, "₵")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function formatQuantity(item: FeeStructureItem): string {
   const supplied = Number(item.quantity);
   const quantity = Number.isFinite(supplied) && supplied > 0 ? supplied : 1;
-  return `${quantity.toLocaleString("en-GH")} ${item.unit?.trim() || "pcs"}`;
+  return `${quantity.toLocaleString("en-GH")} ${cleanNoticeText(item.unit) || "pcs"}`;
 }
 
 export default function TermNoticePrintTemplate({
@@ -92,11 +116,13 @@ export default function TermNoticePrintTemplate({
   nextNotice,
   issuedOn,
 }: TermNoticePrintTemplateProps) {
-  const currentStructure = academicStructure?.trim() || "Not specified";
-  const currentPeriod = academicPeriod?.trim() || "Not specified";
-  const upcomingStructure = nextAcademicStructure?.trim() || "Not configured";
-  const upcomingPeriod = nextAcademicPeriod?.trim() || "Not configured";
-  const hasUpcomingPeriod = Boolean(nextAcademicPeriod?.trim());
+  const currentStructure = cleanNoticeText(academicStructure) || "Not specified";
+  const currentPeriod = cleanNoticeText(academicPeriod) || "Not specified";
+  const upcomingStructure = cleanNoticeText(nextAcademicStructure) || "Not configured";
+  const upcomingPeriod = cleanNoticeText(nextAcademicPeriod) || "Not configured";
+  const hasUpcomingPeriod = Boolean(cleanNoticeText(nextAcademicPeriod));
+  const displayDueDate = cleanNoticeText(nextDueDate);
+  const displayInstructions = cleanNoticeText(nextNotice);
 
   // Only period-specific NEXT-term fee data contributes to next-term fees.
   const nextFeeTotal = nextFees.reduce(
@@ -126,8 +152,8 @@ export default function TermNoticePrintTemplate({
     nextPeriodConfigured ||
       nextFees.length ||
       nextRequirements.length ||
-      nextDueDate ||
-      nextNotice,
+      displayDueDate ||
+      displayInstructions,
   );
   const showNextNotice = hasUpcomingPeriod && hasNextNoticeDetails;
 
@@ -331,22 +357,22 @@ export default function TermNoticePrintTemplate({
           {schoolLogo ? (
             <img className="ef-document-logo" src={schoolLogo} alt="School crest" />
           ) : (
-            <div className="ef-document-logo-fallback">SCHOOL<br />CREST</div>
+            <div className="ef-document-logo-fallback">SCHOOL CREST</div>
           )}
         </div>
         <div style={{ textAlign: "center" }}>
-          <h1 className="ef-document-school">{schoolName}</h1>
-          {schoolMotto && <p className="ef-document-motto">{schoolMotto}</p>}
-          {branchName && (
+          <h1 className="ef-document-school">{cleanNoticeText(schoolName)}</h1>
+          {cleanNoticeText(schoolMotto) && <p className="ef-document-motto">{cleanNoticeText(schoolMotto)}</p>}
+          {cleanNoticeText(branchName) && (
             <p className="ef-document-contact" style={{ fontWeight: 800 }}>
-              {branchName}
+              {cleanNoticeText(branchName)}
             </p>
           )}
-          {(schoolAddress || schoolPhone) && (
+          {(cleanNoticeText(schoolAddress) || cleanNoticeText(schoolPhone)) && (
             <p className="ef-document-contact">
-              {[schoolAddress, schoolPhone ? `Tel: ${schoolPhone}` : ""]
+              {[cleanNoticeText(schoolAddress), cleanNoticeText(schoolPhone) ? `Tel: ${cleanNoticeText(schoolPhone)}` : ""]
                 .filter(Boolean)
-                .join(" â€¢ ")}
+                .join(", ")}
             </p>
           )}
         </div>
@@ -382,9 +408,9 @@ export default function TermNoticePrintTemplate({
       </div>
 
       <div className="ef-document-info">
-        <div><small>Class</small><b>{className}</b></div>
-        <div><small>Student</small><b>{studentName || "All Students"}</b></div>
-        <div><small>Admission No.</small><b>{admissionNumber || "â€”"}</b></div>
+        <div><small>Class</small><b>{cleanNoticeText(className) || "Not specified"}</b></div>
+        <div><small>Student</small><b>{cleanNoticeText(studentName) || "All Students"}</b></div>
+        <div><small>Admission No.</small><b>{cleanNoticeText(admissionNumber) || "Not assigned"}</b></div>
       </div>
 
       {!hasUpcomingPeriod ? (
@@ -412,7 +438,7 @@ export default function TermNoticePrintTemplate({
                 {hasNextFees ? (
                   nextFees.map((item, index) => (
                     <tr key={`${item.itemKey || item.name}-${index}`}>
-                      <td>{item.name}</td>
+                      <td>{cleanNoticeText(item.name) || "Unnamed fee"}</td>
                       <td className="ef-doc-number">
                         {moneyNext(nonNegativeAmount(item.amount))}
                       </td>
@@ -473,13 +499,13 @@ export default function TermNoticePrintTemplate({
                   nextRequirements.map((item, index) => (
                     <tr key={`${item.itemKey || item.name}-${index}`}>
                       <td>
-                        {item.name}
+                        {cleanNoticeText(item.name) || "Unnamed item"}
                         {item.required === false && (
                           <small className="ef-doc-optional">Optional</small>
                         )}
                       </td>
                       <td>{formatQuantity(item)}</td>
-                      <td>{item.instructions?.trim() || "â€”"}</td>
+                      <td>{cleanNoticeText(item.instructions) || "No additional instructions"}</td>
                     </tr>
                   ))
                 ) : (
@@ -495,18 +521,18 @@ export default function TermNoticePrintTemplate({
             </p>
           </section>
 
-          {(nextDueDate || nextNotice) && (
+          {(displayDueDate || displayInstructions) && (
             <div className="ef-doc-note">
-              <strong>School Instructions â€” Next Term</strong>
-              {nextDueDate && <p>Payment / materials submission due date: {nextDueDate}</p>}
-              {nextNotice && <p>{nextNotice}</p>}
+              <strong>School Instructions for Next Term</strong>
+              {displayDueDate && <p>Payment / materials submission due date: {displayDueDate}</p>}
+              {displayInstructions && <p>{displayInstructions}</p>}
             </div>
           )}
         </>
       )}
 
       <footer className="ef-doc-footer">
-        <span>Issued by School Administration Â· {issuedOn}</span>
+        <span>Issued by School Administration on {cleanNoticeText(issuedOn)}</span>
         <span>Keep this notice for your records</span>
       </footer>
     </article>

@@ -67,6 +67,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import IdentityCardActions from "./identity/IdentityCardActions";
+import IdentityCardBatch from "./identity/IdentityCardBatch";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { createPortal } from "react-dom";
@@ -769,6 +770,7 @@ export default function StudentsPage() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [batchIdsOpen, setBatchIdsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<StudentView | null>(null);
 
   // Excel interoperability
@@ -3128,7 +3130,37 @@ export default function StudentsPage() {
           }}
           onExcel={openStudentExcelMenu}
           onPromotion={() => openPromotion("branch")}
+          onBatchIds={() => { setMoreOpen(false); setBatchIdsOpen(true); }}
           onClose={() => setMoreOpen(false)}
+        />
+      )}
+
+      {batchIdsOpen && (
+        <IdentityCardBatch
+          open={batchIdsOpen}
+          onClose={() => setBatchIdsOpen(false)}
+          subjectType="student"
+          schoolId={String(schoolId)}
+          branchId={String(branchId)}
+          accountId={accountId}
+          classes={classes.filter((c: any) => !c.isDeleted && c.active !== false).map(c => ({id:String(c.id),name:String(c.name || "Class")}))}
+          people={viewRows.filter(item => item.active).map(item => {
+            const row: any = item.row;
+            return {
+              id: item.id,
+              name: String(row.fullName || "Unnamed student"),
+              classId: String((item.activeEnrollment as any)?.classId || row.currentClassId || ""),
+              className: item.className === "No class assigned" ? "" : item.className,
+              admissionNumber: String(row.admissionNumber || ""),
+              organizationName: item.organizationName === "No organization" ? "" : item.organizationName,
+              gender: String(row.gender || ""),
+              dateOfBirth: String(row.dateOfBirth || ""),
+              phone: String(row.phone || ""),
+              emergencyPhone: String(row.emergencyPhone || row.parentPhone || ""),
+              photoMediaId: String(row.photoMediaId || ""),
+              photoUrl: item.photoUrl || "",
+            };
+          })}
         />
       )}
 
@@ -3910,6 +3942,7 @@ function MoreSheet({
   onRefresh,
   onExcel,
   onPromotion,
+  onBatchIds,
   onClose,
 }: {
   viewMode: ViewMode;
@@ -3917,6 +3950,7 @@ function MoreSheet({
   onRefresh: () => void | Promise<void>;
   onExcel: () => void;
   onPromotion: () => void;
+  onBatchIds: () => void;
   onClose: () => void;
 }) {
   return (
@@ -3982,6 +4016,12 @@ function MoreSheet({
             <span>⬆</span>
             <b>Promote students</b>
             <small>One student, an entire class or this branch</small>
+          </button>
+
+          <button type="button" onClick={onBatchIds}>
+            <span>▣</span>
+            <b>Batch ID cards</b>
+            <small>Browse classes, preview and print student IDs</small>
           </button>
 
           <button type="button" onClick={onExcel}>

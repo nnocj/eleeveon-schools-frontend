@@ -59,7 +59,7 @@ export default function IdentityCredentialPrintSheet({
         <div className="identity-print-grid">
           {printable.map((item, index) => {
             const selectedDesign = designForCredential?.(item.credential) || design;
-            const twoSides = selectedDesign.sides === "front_back" || selectedDesign.sides === "front_and_back";
+            const twoSides = selectedDesign.sides === "front_and_back";
             return <div className="identity-print-item" key={item.credential.id || item.credential.credentialReference || index}>
               <IdentityCredentialCard design={selectedDesign} credential={item.credential} subject={item.subject} branding={branding} />
               {twoSides && <IdentityCredentialCard side="back" design={selectedDesign} credential={item.credential} subject={item.subject} branding={branding} />}

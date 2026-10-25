@@ -473,6 +473,7 @@ function Avatar({
 function AcademicStructuresWorkspace() {
   const dataRevision = useBranchTableRevision([
     "academicStructures",
+    "schoolBranchSettings",
     "classes",
     "programs",
     "curriculums",
@@ -503,7 +504,14 @@ function AcademicStructuresWorkspace() {
   } = workspace;
 
   const primary = settings?.primaryColor || "var(--primary-color, #2563eb)";
-  const currentStructureId = idOf(settings?.currentAcademicStructureId);
+  // Use the saved branch record as the source of truth, as Academic Periods does.
+  // The settings context alone may still contain the previously current structure.
+  const [branchSetting, setBranchSetting] = useState<Record<string, any> | null>(null);
+  const currentStructureId = idOf(
+    branchSetting
+      ? branchSetting.currentAcademicStructureId
+      : settings?.currentAcademicStructureId,
+  );
 
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
@@ -582,6 +590,7 @@ function AcademicStructuresWorkspace() {
     setClasses([]);
     setClassSubjects([]);
     setAssessmentStructures([]);
+    setBranchSetting(null);
   };
 
   const load = async () => {
@@ -599,6 +608,7 @@ function AcademicStructuresWorkspace() {
         classRows,
         classSubjectRows,
         assessmentStructureRows,
+        branchSettingRows,
       ] = await Promise.all([
         tableSafe("academicStructures")?.toArray?.() || [],
         tableSafe("academicPeriods")?.toArray?.() || [],
@@ -609,14 +619,29 @@ function AcademicStructuresWorkspace() {
         } as any),
         tableSafe("classSubjects")?.toArray?.() || [],
         tableSafe("assessmentStructures")?.toArray?.() || [],
+        tableSafe("schoolBranchSettings")?.toArray?.() || [],
       ]);
+
+      const savedBranchSetting = (branchSettingRows as any[]).find(
+        (row) =>
+          !row.isDeleted &&
+          sameId(row.schoolId, schoolId) &&
+          sameId(row.branchId, branchId) &&
+          (!row.accountId || sameId(row.accountId, accountId)),
+      ) || null;
+      setBranchSetting(savedBranchSetting);
+      const savedCurrentStructureId = idOf(
+        savedBranchSetting
+          ? savedBranchSetting.currentAcademicStructureId
+          : settings?.currentAcademicStructureId,
+      );
 
       setStructures(
         (structureRows as AcademicStructure[])
           .filter((row) => sameTenant(row as TenantRow))
           .sort((a: any, b: any) => {
-            const aCurrent = sameId(a.id, currentStructureId) ? 1 : 0;
-            const bCurrent = sameId(b.id, currentStructureId) ? 1 : 0;
+            const aCurrent = sameId(a.id, savedCurrentStructureId) ? 1 : 0;
+            const bCurrent = sameId(b.id, savedCurrentStructureId) ? 1 : 0;
             return (
               bCurrent - aCurrent ||
               String(a.name || "").localeCompare(String(b.name || ""))
@@ -1078,11 +1103,14 @@ function AcademicStructuresWorkspace() {
   const setAsCurrent = async (item: StructureView) => {
     try {
       const settingsRows = await tableSafe("schoolBranchSettings")?.toArray?.();
-      const branchSetting = (settingsRows || []).find((row: any) =>
-        sameTenant(row),
+      const savedSetting = (settingsRows || []).find((row: any) =>
+        !row.isDeleted &&
+        sameId(row.schoolId, schoolId) &&
+        sameId(row.branchId, branchId) &&
+        (!row.accountId || sameId(row.accountId, accountId)),
       );
 
-      if (!branchSetting?.id) {
+      if (!savedSetting?.id) {
         showToast(
           "error",
           "Create branch settings first before setting current academic structure.",
@@ -1092,7 +1120,7 @@ function AcademicStructuresWorkspace() {
 
       // Keep the configured academic structure and period consistent.
       // An existing current period is valid only if it belongs to this structure.
-      const configuredPeriodId = idOf(branchSetting.currentAcademicPeriodId);
+      const configuredPeriodId = idOf(savedSetting.currentAcademicPeriodId);
       const configuredPeriod = periods.find((period: any) =>
         sameId(period.id, configuredPeriodId) && !period.isDeleted,
       );
@@ -1100,11 +1128,18 @@ function AcademicStructuresWorkspace() {
         configuredPeriod && sameId(configuredPeriod.academicStructureId, item.id),
       );
 
-      await updateLocal("schoolBranchSettings", String(branchSetting.id), {
+      const nextSetting = {
+        ...savedSetting,
+        currentAcademicStructureId: item.id,
+        ...(periodStillBelongsToStructure ? {} : { currentAcademicPeriodId: undefined }),
+      };
+      await updateLocal("schoolBranchSettings", String(savedSetting.id), {
         currentAcademicStructureId: item.id,
         ...(periodStillBelongsToStructure ? {} : { currentAcademicPeriodId: undefined }),
       } as any);
 
+      // Update immediately; the subsequent read keeps it consistent with Dexie.
+      setBranchSetting(nextSetting);
       setSelectedItem(null);
       showToast(
         "success",

@@ -192,12 +192,17 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   useEffect(() => { void load(); }, [load, revision]);
   useEffect(() => {
     if (!structures.length) return;
-    setStructureId(current => structures.some(row => row.id === current) ? current : (id(settings?.currentAcademicStructureId) && structures.some(row => row.id === id(settings?.currentAcademicStructureId)) ? id(settings?.currentAcademicStructureId) : structures[0].id));
-  }, [structures, settings?.currentAcademicStructureId]);
+    setStructureId(current => structures.some(row => row.id === current) ? current :
+      (structures.some(row => row.id === id(settings?.currentAcademicStructureId)) ? id(settings?.currentAcademicStructureId) :
+      structures.find(row => periods.some(p => p.academicStructureId === row.id && p.startDate && p.endDate &&
+        String(p.startDate).slice(0, 10) <= today() && String(p.endDate).slice(0, 10) >= today()))?.id || structures[0].id));
+  }, [structures, periods, settings?.currentAcademicStructureId]);
   const visiblePeriods = useMemo(() => periods.filter(p => !structureId || p.academicStructureId === structureId), [periods, structureId]);
   useEffect(() => {
     setPeriodId(current => visiblePeriods.some(p => p.id === current) ? current :
-      (visiblePeriods.some(p => p.id === id(settings?.currentAcademicPeriodId)) ? id(settings?.currentAcademicPeriodId) : visiblePeriods[0]?.id || ""));
+      (visiblePeriods.some(p => p.id === id(settings?.currentAcademicPeriodId)) ? id(settings?.currentAcademicPeriodId) :
+      visiblePeriods.find(row => row.startDate && row.endDate &&
+        String(row.startDate).slice(0, 10) <= today() && String(row.endDate).slice(0, 10) >= today())?.id || visiblePeriods[0]?.id || ""));
   }, [visiblePeriods, settings?.currentAcademicPeriodId]);
   useEffect(() => { if (!classes.some(c => c.id === classId)) setClassId(classes[0]?.id || ""); }, [classes, classId]);
 
@@ -228,6 +233,32 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const classLabel = (targetClassId: string) => classes.find(row => row.id === targetClassId)?.name || "Class";
   const selectedStructure = structures.find(r => r.id === structureId);
   const selectedPeriod = periods.find(r => r.id === periodId);
+  // Opening a class card always starts with the school's CURRENT academic
+  // context, not the last period browsed in the filter or notice editor.
+  // Prefer the configured academic calendar; dates are a safe fallback only.
+  const currentAcademicContext = useMemo(() => {
+    const configuredPeriod = periods.find(row => row.id === id(settings?.currentAcademicPeriodId));
+    const configuredStructure = structures.find(row => row.id === id(settings?.currentAcademicStructureId));
+    const now = today();
+    const datedPeriod = periods.find(row => row.startDate && row.endDate &&
+      String(row.startDate).slice(0, 10) <= now && String(row.endDate).slice(0, 10) >= now);
+    const confirmed = Boolean(configuredPeriod || datedPeriod);
+    const period = configuredPeriod || datedPeriod ||
+      periods.find(row => row.academicStructureId === configuredStructure?.id) || periods[0];
+    const structure = structures.find(row => row.id === period?.academicStructureId) || configuredStructure || structures[0];
+    return { structureId: structure?.id || "", periodId: period?.id || "",
+      structureName: structure?.name || "Academic structure not set",
+      periodName: period?.name || "Academic period not set", confirmed };
+  }, [structures, periods, settings?.currentAcademicStructureId, settings?.currentAcademicPeriodId]);
+  const openCurrentClass = (targetClassId: string) => {
+    if (currentAcademicContext.structureId) setStructureId(currentAcademicContext.structureId);
+    if (currentAcademicContext.periodId) setPeriodId(currentAcademicContext.periodId);
+    setClassId(targetClassId);
+    setAppliedClassIds([]);
+    setOpenedNoticeClass(true);
+  };
+  const selectedIsCurrent = currentAcademicContext.confirmed && structureId === currentAcademicContext.structureId &&
+    periodId === currentAcademicContext.periodId;
   // Only show a next-term figure if that period and its fee structure truly exist.
   const currentPeriodIndex = visiblePeriods.findIndex(r => r.id === periodId);
   const withinStructureNext = currentPeriodIndex >= 0 ? visiblePeriods[currentPeriodIndex + 1] : undefined;
@@ -622,16 +653,17 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       {message && <div role="status" className="ef-message" onClick={() => setMessage("")}>{message} <span>×</span></div>}
       {section === "notices" && <>
         {!openedNoticeClass ? <>
-          <div className="ef-class-browser-caption">Choose a class <span>{selectedPeriod?.name || "Select an academic period in Filter"}</span></div>
+          <div className="ef-class-browser-caption">Choose a class <span>{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</span></div>
+          <p className="ef-scope-guide">{currentAcademicContext.confirmed ? "Opens the current term." : "Current term not set; showing the first available period."} Use <strong>+</strong> to prepare another term.</p>
           <div className="ef-class-browser" aria-label="Term notice classes">
             {classes.filter(row => !query.trim() || `${row.name} ${row.code || ""}`.toLowerCase().includes(query.toLowerCase())).map(row => {
-              const classNotice = getNoticeForClass(row.id);
+              const classNotice = getNoticeForPeriod(row.id, currentAcademicContext.periodId, currentAcademicContext.structureId);
               const feeItems = (classNotice?.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item));
               const requirements = (classNotice?.items || []).filter(isRequirement);
               const studentCount = studentsForClass(row.id).length;
-              return <button key={row.id} type="button" className="ef-class-card" onClick={() => { setClassId(row.id); setOpenedNoticeClass(true); }}>
+              return <button key={row.id} type="button" className="ef-class-card" onClick={() => openCurrentClass(row.id)}>
                 <span className="ef-class-card-mark">{row.name.slice(0,1).toUpperCase()}</span>
-                <span className="ef-class-card-main"><strong>{row.name}</strong><small>{studentCount} student{studentCount === 1 ? "" : "s"} · {selectedPeriod?.name || "No period"}</small></span>
+                <span className="ef-class-card-main"><strong>{row.name}</strong><small>{studentCount} student{studentCount === 1 ? "" : "s"} · {currentAcademicContext.periodName}</small></span>
                 <span className={`ef-class-card-status ${classNotice ? "configured" : "draft"}`}>
                   <i />{classNotice ? `${feeItems.length} fees · ${requirements.length} items` : "Not prepared"}
                 </span>
@@ -644,8 +676,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         </> : <>
         <div className="ef-class-detail-top">
           <button type="button" className="ef-back-classes" onClick={() => setOpenedNoticeClass(false)}>← Classes</button>
-          <span className="ef-class-context">{classTitle} · {periodTitle}</span>
+          <span className="ef-class-context"><strong>{selectedIsCurrent ? "Current term" : "Selected term"}</strong> · {academicTitle} · {periodTitle}</span>
         </div>
+        <p className="ef-scope-guide">Use <strong>Filter</strong> to view another period; <strong>+</strong> to prepare a notice.</p>
         <div className="ef-grid">
           <article className="ef-panel"><header>Fees Payable <span>{fees.length} entries</span></header>{fees.length ? fees.map((item, n) => <div className="ef-line" key={n}><span>{item.name}</span><b>{formatAmount(item.amount)}</b></div>) : <div className="ef-muted">No fees configured for this class and period.</div>}<div className="ef-line total"><span>Total</span><b>{formatAmount(feesTotal)}</b></div></article>
           <article className="ef-panel"><header>Items to Bring or Purchase <span>{requirements.length} entries</span></header>{requirements.length ? requirements.map((item, n) => <div className="ef-line" key={n}><span>{item.name}{item.instructions ? <small>{item.instructions}</small> : null}</span><b>{item.quantity || 1} {item.unit || "pcs"}</b></div>) : <div className="ef-muted">No physical requirements configured.</div>}</article>
@@ -654,7 +687,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         </>}
       </>}
       {section === "tracking" && <>
-        <div className="ef-heading"><div><strong>Fee Tracking</strong><span>{classTitle} · {periodTitle} · {displayed.length} students</span></div></div>
+        <div className="ef-heading"><div><strong>Fee Tracking</strong><span>{classTitle} · {academicTitle} · {periodTitle} · {displayed.length} students</span></div></div>
+        <p className="ef-scope-guide">Use <strong>Filter</strong> to change term or class; <strong>+</strong> to record a payment.</p>
         {view === "table" ? (
           <section className="ef-table-card" aria-label="Student fee records">
             <div className="ef-table-wrap">
@@ -1011,6 +1045,13 @@ const styles = `
  #eleeveon-finance-print-root .ef-term-notice-a4:last-child{break-after:auto;page-break-after:auto;}
  #eleeveon-finance-print-root .ef-doc-section{break-inside:avoid-page;}
 }
+
+/* Compact academic context, with no competing navigation or extra cards. */
+.ef-scope-guide{margin:2px 3px 9px;font-size:10.5px;line-height:1.4;color:var(--muted,#64748b);font-weight:500;}
+.ef-scope-guide strong{color:var(--text,#182235);font-weight:850;}
+.ef-class-context{max-width:100%;overflow-wrap:anywhere;text-align:right;line-height:1.4;}
+.ef-class-context strong{color:var(--ef-primary,#2563eb);font-weight:900;}
+@media(max-width:520px){.ef-class-browser-caption{flex-wrap:wrap;gap:3px;}.ef-class-browser-caption span{width:100%;}}
 
 /* Assessment Entries-style first step: class cards, then the selected term notice. */
 .ef-class-browser-caption{display:flex;justify-content:space-between;gap:12px;align-items:center;

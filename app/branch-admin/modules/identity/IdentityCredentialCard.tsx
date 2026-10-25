@@ -87,7 +87,7 @@ export default function IdentityCredentialCard({
   const text = design.textColor || "#111827";
   const muted = design.mutedTextColor || "#64748b";
   const border = design.borderColor || primary;
-  const qrPosition = design.qrPosition || "bottom_right";
+  const qrPosition = design.qrPosition || "front_right";
   const qrSize = design.qrSize || "medium";
   const logos = [
     design.showSchoolLogo !== false && branding.schoolLogoUrl ? { key: "school", url: branding.schoolLogoUrl } : null,
@@ -141,7 +141,7 @@ export default function IdentityCredentialCard({
     border:
       design.borderStyle === "none"
         ? "none"
-        : `${design.borderStyle === "double" ? 3 : 1}px ${design.borderStyle === "dashed" ? "dashed" : "solid"} ${border}`,
+        : `${design.borderStyle === "double" ? 3 : 1}px ${design.borderStyle === "double" ? "double" : "solid"} ${border}`,
     borderRadius: Math.max(0, Number(design.borderRadiusPx ?? 16)),
     background: premium ? `linear-gradient(145deg,${background},#f4f7fc)` : background,
     color: text,
@@ -204,14 +204,12 @@ export default function IdentityCredentialCard({
   }
 
   const qrSideBack = qrOnBack;
-  const qrLocation = qrPosition.replace(/^front_/,"bottom_").replace(/^back_/,"bottom_");
   const qrAbsolute: React.CSSProperties =
-    qrLocation === "top_left" ? { top: 55, left: 12 } :
-    qrLocation === "top_right" ? { top: 55, right: 12 } :
-    qrLocation === "bottom_left" ? { bottom: 18, left: 12 } :
-    qrLocation === "center" || qrLocation === "front_center"
-      ? { bottom: 12, left: "50%", transform: "translateX(-50%)" }
-      : { bottom: 18, right: 12 };
+    qrPosition === "front_left"
+      ? { bottom: 18, left: 12 }
+      : qrPosition === "front_center"
+        ? { bottom: 12, left: "50%", transform: "translateX(-50%)" }
+        : { bottom: 18, right: 12 };
 
   return (
     <article className={className} style={cardStyle}>

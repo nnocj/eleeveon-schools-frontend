@@ -74,14 +74,46 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [refreshTime, setRefreshTime] = useState(0);
+  const [serverInboxMeta, setServerInboxMeta] = useState<{
+    inboxScope: "platform" | "account";
+    platformConfigured: boolean;
+    platformAccountMatches: boolean;
+    conversationCount: number;
+  } | null>(null);
   const [offline, setOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
-  const endRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const refreshInFlight = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const selectedRef = useRef(selected);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
+
+  // On mobile, the on-screen keyboard may shrink visualViewport without
+  // changing CSS 100vh. Recalculate available chat height so the input row
+  // remains above the keyboard instead of scrolling out of reach.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const fit = () => {
+      const node = layoutRef.current;
+      if (!node) return;
+      const top = node.getBoundingClientRect().top;
+      const bottom = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight);
+      const available = Math.floor(bottom - top - 10);
+      if (Number.isFinite(available)) setPanelHeight(Math.max(235, Math.min(980, available)));
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    viewport?.addEventListener("resize", fit);
+    viewport?.addEventListener("scroll", fit);
+    return () => {
+      window.removeEventListener("resize", fit);
+      viewport?.removeEventListener("resize", fit);
+      viewport?.removeEventListener("scroll", fit);
+    };
+  }, [serverInboxMeta?.inboxScope]);
 
   const refresh = useCallback(async (quiet = false) => {
     if (refreshInFlight.current) return;
@@ -90,6 +122,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
     try {
       const list = await supportApi.list();
       setConversations(list.conversations || []);
+      setServerInboxMeta(list.meta || null);
       const currentId = selectedRef.current;
       if (currentId) {
         const result = await supportApi.open(currentId);
@@ -101,7 +134,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
       setRefreshTime(Date.now());
       if (!quiet) setError("");
     } catch (cause) {
-      if (!quiet) setError(cause instanceof Error ? cause.message : "Could not load support conversations.");
+      setError(cause instanceof Error ? cause.message : "Could not load support conversations.");
     } finally { refreshInFlight.current = false; if (!quiet) setLoading(false); }
   }, []);
 
@@ -116,7 +149,12 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
     window.addEventListener("offline", onOffline);
     return () => { window.clearInterval(interval); window.removeEventListener("focus", onFocus); window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
   }, [refresh, sending]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [selected, thread.length]);
+  // Scroll only the message pane, never the whole portal page (which would
+  // push the composer outside the viewport on narrow phones).
+  useEffect(() => {
+    const node = messagesRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [selected, thread.length]);
   useEffect(() => () => {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     recordingStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -231,7 +269,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
       .esc{color:var(--text,#17212f);--esc-primary:var(--ba-primary,var(--primary-color,#128c7e));--esc-border:var(--border,rgba(120,137,156,.24));--esc-surface:var(--surface,var(--card-bg,#fff));--esc-muted:var(--surface-muted,rgba(120,137,156,.10));font-size:13px}
       .esc button,.esc input,.esc textarea,.esc select{font:inherit;color:inherit}
       .esc button{cursor:pointer}.esc button:disabled{opacity:.55;cursor:wait}
-      .esc-layout{height:min(76vh,750px);min-height:440px;border:1px solid var(--esc-border);border-radius:15px;overflow:hidden;display:grid;grid-template-columns:minmax(230px,32%) minmax(0,1fr);background:var(--esc-surface)}
+      .esc-layout{height:min(900px,calc(100dvh - 175px));min-height:320px;border:1px solid var(--esc-border);border-radius:17px;overflow:hidden;display:grid;grid-template-columns:minmax(235px,31%) minmax(0,1fr);background:var(--esc-surface);box-shadow:0 5px 20px rgba(23,50,50,.055)}
       .esc-sidebar{min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--esc-border);background:var(--esc-surface)}
       .esc-side-header{padding:13px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--esc-border)}
       .esc-side-header strong{font-size:15px}.esc-header-buttons{display:flex;gap:5px}
@@ -242,28 +280,42 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
       .esc-item:hover,.esc-item.selected{background:var(--esc-muted)!important}.esc-avatar{width:39px;height:39px;border-radius:50%;background:color-mix(in srgb,var(--esc-primary) 18%,transparent);color:var(--esc-primary);display:grid;place-items:center;font-weight:800;flex-shrink:0}
       .esc-item-info{min-width:0;flex:1}.esc-item-name{display:flex;justify-content:space-between;align-items:center;gap:6px}.esc-item-name b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.esc-item-name small{white-space:nowrap;opacity:.6;font-size:10px}
       .esc-item-sub{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;opacity:.7;margin-top:4px}.esc-item-kind{font-size:10px;opacity:.65;margin-top:5px}
-      .esc-chat{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--esc-muted)}
+      .esc-chat{min-width:0;min-height:0;height:100%;display:flex;flex-direction:column;background:var(--esc-muted);overflow:hidden}
       .esc-chat-header{padding:11px 12px;background:var(--esc-surface);border-bottom:1px solid var(--esc-border);display:flex;align-items:center;gap:9px;min-height:58px}
       .esc-chat-head-info{min-width:0;flex:1}.esc-chat-head-info b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.esc-chat-head-info small{display:block;opacity:.65;margin-top:3px}
       .esc-chat-header select{max-width:140px;background:var(--esc-surface);border:1px solid var(--esc-border);border-radius:8px;padding:7px;font-size:11px}
-      .esc-messages{flex:1;min-height:0;overflow:auto;padding:16px clamp(12px,2.4vw,24px)}
-      .esc-message{display:flex;margin:8px 0}.esc-message.mine{justify-content:flex-end}.esc-bubble{max-width:min(88%,480px);background:var(--esc-surface);border:1px solid var(--esc-border);border-radius:12px 12px 12px 3px;padding:10px 12px;word-break:break-word;white-space:pre-wrap;box-shadow:0 1px 2px rgba(0,0,0,.035)}
-      .esc-message.mine .esc-bubble{background:color-mix(in srgb,var(--esc-primary) 13%,var(--esc-surface));border-radius:12px 12px 3px 12px}.esc-bubble-label{font-size:10px;font-weight:750;color:var(--esc-primary);margin-bottom:5px}.esc-stamp{display:block;text-align:right;font-size:10px;opacity:.55;margin-top:6px}
-      .esc-compose{background:var(--esc-surface);border-top:1px solid var(--esc-border);padding:10px;display:flex;align-items:flex-end;gap:7px}
-      .esc-compose textarea{flex:1;min-width:0;resize:none;max-height:120px;min-height:40px;border:1px solid var(--esc-border);border-radius:12px;padding:10px;background:var(--esc-surface)}
+      .esc-messages{flex:1 1 0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:17px clamp(11px,2.5vw,28px);scrollbar-gutter:stable;background-color:color-mix(in srgb,var(--esc-primary) 4%,var(--esc-surface));background-image:radial-gradient(circle at 9px 12px,rgba(71,118,91,.08) 1.3px,transparent 1.6px),radial-gradient(circle at 31px 36px,rgba(65,106,85,.05) 1.5px,transparent 2px);background-size:48px 48px}
+      .esc-message{display:flex;margin:8px 0}.esc-message.mine{justify-content:flex-end}.esc-bubble{max-width:min(85%,560px);background:var(--esc-surface);border:1px solid var(--esc-border);border-radius:15px 15px 15px 4px;padding:10px 13px;word-break:break-word;white-space:pre-wrap;box-shadow:0 2px 6px rgba(0,0,0,.045)}
+      .esc-message.mine .esc-bubble{background:color-mix(in srgb,var(--esc-primary) 15%,var(--esc-surface));border-radius:15px 15px 4px 15px}.esc-bubble-label{font-size:10px;font-weight:750;color:var(--esc-primary);margin-bottom:5px}.esc-stamp{display:block;text-align:right;font-size:10px;opacity:.55;margin-top:6px}
+      .esc-compose{position:relative;z-index:3;flex:0 0 auto;background:var(--esc-surface);border-top:1px solid var(--esc-border);padding:10px 12px max(10px,env(safe-area-inset-bottom));display:flex;align-items:flex-end;gap:8px;box-shadow:0 -4px 14px rgba(20,65,54,.055)}
+      .esc-compose textarea{flex:1;min-width:0;resize:vertical;max-height:125px;min-height:42px;border:1px solid var(--esc-border);border-radius:14px;padding:10px 13px;background:var(--esc-surface);line-height:1.45;outline-offset:2px}
       .esc-send{height:40px;min-width:43px;border:none;color:#fff!important;background:var(--esc-primary);border-radius:11px;font-weight:750}
-      .esc-selected-files{background:var(--esc-surface);display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-top:1px solid var(--esc-border)}
+      .esc-selected-files{flex-shrink:0;max-height:100px;overflow-y:auto;background:var(--esc-surface);display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border-top:1px solid var(--esc-border)}
       .esc-selected-files button{border:1px solid var(--esc-border);border-radius:99px;background:var(--esc-muted);padding:5px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
       .esc-banner{padding:8px 12px;background:var(--esc-surface);border-bottom:1px solid var(--esc-border);font-size:12px}.esc-banner.error{color:#b91c1c}.esc-banner.info{color:var(--esc-primary)}
       .esc-empty{margin:auto;display:grid;place-items:center;gap:10px;text-align:center;padding:20px;color:var(--text-muted,#64748b)}
       .esc-image{max-width:100%;max-height:300px;border-radius:9px;object-fit:contain}.esc-video{max-width:100%;width:min(310px,100%);border-radius:9px}.esc-audio{display:grid;gap:4px}.esc-audio audio{max-width:100%;width:250px}.esc-audio small{opacity:.7}
       .esc-file{display:flex;gap:8px;align-items:center;padding:10px;margin:5px 0;border:1px solid var(--esc-border);border-radius:10px;color:inherit;text-decoration:none}.esc-file span:nth-child(2){display:grid;gap:2px;overflow:hidden}.esc-file b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}.esc-file small{opacity:.6}.esc-attachment-unavailable{font-size:11px;opacity:.7}
-      .esc-compose-form{padding:14px;display:grid;gap:11px}.esc-compose-form input,.esc-compose-form select,.esc-compose-form textarea{width:100%;padding:10px;border:1px solid var(--esc-border);border-radius:10px;background:var(--esc-surface);box-sizing:border-box}
+      .esc-compose-form{padding:14px;display:grid;gap:11px;overflow-y:auto;min-height:0}.esc-compose-form input,.esc-compose-form select,.esc-compose-form textarea{width:100%;padding:10px;border:1px solid var(--esc-border);border-radius:10px;background:var(--esc-surface);box-sizing:border-box}
       .esc-compose-form label{display:grid;gap:5px;font-size:12px}.esc-primary-button{background:var(--esc-primary);color:#fff!important;border:0;border-radius:10px;padding:10px 16px;font-weight:700}.esc-secondary-button{border:1px solid var(--esc-border);background:var(--esc-surface);border-radius:10px;padding:9px 12px}
       .esc-back{display:none}.esc-footer-note{font-size:10px;opacity:.55;padding:8px 12px;border-top:1px solid var(--esc-border)}
-      @media(max-width:680px){.esc-layout{display:block;height:min(79dvh,760px);min-height:430px}.esc-sidebar{height:100%;border-right:0;display:flex}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-sidebar{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:grid}.esc-bubble{max-width:90%}.esc-compose{gap:5px;padding:7px}.esc-square{min-width:35px}.esc-chat-header select{max-width:108px}.esc-messages{padding:11px}.esc-side-header{padding:10px}}
+      @media(max-width:680px){.esc-layout{display:block;height:calc(100dvh - 155px);min-height:300px;border-radius:12px}.esc-sidebar{height:100%;border-right:0;display:flex}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-sidebar{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:grid}.esc-bubble{max-width:92%}.esc-compose{gap:5px;padding:8px 7px max(8px,env(safe-area-inset-bottom))}.esc-square{min-width:35px}.esc-chat-header select{max-width:108px}.esc-messages{padding:11px}.esc-side-header{padding:10px}}
     `}</style>
-    <div className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`}>
+    {isDeveloper && serverInboxMeta?.inboxScope === "account" && (
+      <div className="esc-banner error" role="alert" style={{ marginBottom: 8, border: "1px solid #fecaca", borderRadius: 10 }}>
+        <strong>Platform inbox not connected.</strong> This session can only see its own account.
+        {!serverInboxMeta.platformConfigured
+          ? " Set ELEEVEON_PLATFORM_ACCOUNT_ID on Render to the platform account UUID."
+          : !serverInboxMeta.platformAccountMatches
+            ? " Sign into the actual Eleeveon platform account, not a school account."
+            : " Your platform account needs an active developer or platform_team membership."}
+      </div>
+    )}
+    {isDeveloper && !serverInboxMeta && !loading && !error && (
+      <div className="esc-banner info">Deploy the updated support backend to confirm cross-school inbox permissions.</div>
+    )}
+    <div ref={layoutRef} className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`}
+      style={panelHeight ? { height: `${panelHeight}px` } : undefined}>
       <aside className="esc-sidebar">
         <div className="esc-side-header"><strong>{isDeveloper ? "School conversations" : "Eleeveon Support"}</strong><div className="esc-header-buttons">
           <button className="esc-square" title="Refresh" onClick={() => void refresh()} disabled={loading}>↻</button>
@@ -279,7 +331,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
           <span className="esc-item-info"><span className="esc-item-name"><b>{isDeveloper ? c.organizationName || c.subject : c.subject}</b><small>{day(c.lastMessage?.createdAt || c.updatedAt)}</small></span>
             <span className="esc-item-sub">{c.lastMessage?.body || c.description}</span><span className="esc-item-kind">{friendly(c.status)} · {friendly(c.type)}</span></span>
         </button>) : <div className="esc-empty"><span>💬</span><span>{loading ? "Loading conversations…" : "No conversations yet"}</span></div>}</div>
-        <div className="esc-footer-note">{offline ? "Offline — reconnect to send messages" : `Online · ${refreshTime ? `refreshed ${time(new Date(refreshTime).toISOString())}` : "checking"}`}</div>
+        <div className="esc-footer-note">{offline ? "Offline — reconnect to send messages" : serverInboxMeta?.inboxScope === "platform" ? `Platform inbox · ${serverInboxMeta.conversationCount} conversations` : `Connected · ${refreshTime ? `updated ${time(new Date(refreshTime).toISOString())}` : "checking"}`}</div>
       </aside>
       <div className="esc-chat">
         {newChat && !isDeveloper ? <>
@@ -287,14 +339,14 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
           <div className="esc-compose-form"><label>Category<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
             <label>Subject<input value={subject} maxLength={180} onChange={e => setSubject(e.target.value)} placeholder="What do you need help with?"/></label>
             <label>Your message<textarea rows={6} value={openingText} onChange={e => setOpeningText(e.target.value)} placeholder="Explain the issue or question…"/></label>
-            <div style={{ display: "flex", gap: 8 }}><button className="esc-secondary-button" onClick={() => setNewChat(false)}>Cancel</button><button className="esc-primary-button" disabled={busy || !subject.trim() || !openingText.trim() || offline} onClick={() => void createConversation()}>{busy ? "Starting…" : "Start conversation"}</button></div>
+            <div style={{ display: "flex", gap: 8 }}><button className="esc-secondary-button" onClick={() => { setNewChat(false); setMobileOpen(false); }}>Cancel</button><button className="esc-primary-button" disabled={busy || !subject.trim() || !openingText.trim() || offline} onClick={() => void createConversation()}>{busy ? "Starting…" : "Start conversation"}</button></div>
           </div>
         </> : selected && opened ? <>
           <div className="esc-chat-header"><button className="esc-square esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button><span className="esc-avatar" aria-hidden>💬</span>
             <div className="esc-chat-head-info"><b>{title}</b><small>{isDeveloper ? opened.organizationName || opened.accountId : "Eleeveon Support"} · {friendly(opened.status)}</small></div>
             {isDeveloper && <select value={opened.status} aria-label="Ticket status" disabled={busy} onChange={e => void changeStatus(e.target.value)}>{STATUSES.map(value => <option key={value} value={value}>{friendly(value)}</option>)}</select>}
           </div>
-          <div className="esc-messages">{fullThread.map((item, index) => {
+          <div className="esc-messages" ref={messagesRef}>{fullThread.map((item, index) => {
             const mine = isDeveloper ? item.authorType === "platform" : item.authorType !== "platform";
             const previous = fullThread[index - 1];
             const showDay = index === 0 || day(previous.createdAt) !== day(item.createdAt);
@@ -304,10 +356,10 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, schoolId, 
                 <div className="esc-bubble-label">{mine ? "You" : item.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>
                 {item.body ? <div>{item.body}</div> : null}
                 {(item.attachments || []).map((asset, i) => <MediaDisplay key={`${item.id}-${i}`} asset={asset}/>)}
-                <span className="esc-stamp">{time(item.createdAt)} · Sent</span>
+                <span className="esc-stamp">{time(item.createdAt)} · Saved on server</span>
               </div></div>
             </React.Fragment>;
-          })}<div ref={endRef}/></div>
+          })}</div>
           {files.length ? <div className="esc-selected-files">{files.map((file, i) => <button key={`${file.name}-${i}`} title="Remove attachment" disabled={sending} onClick={() => setFiles(current => current.filter((_, index) => index !== i))}>📎 {file.name} ({niceSize(file.size)}) ×</button>)}</div> : null}
           {recording && <div className="esc-banner info">🎙 Recording voice note… Select Stop when finished.</div>}
           <div className="esc-compose">

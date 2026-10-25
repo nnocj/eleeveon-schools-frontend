@@ -274,8 +274,6 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     setQuery("");
     setStatusFilter("all");
   };
-  const selectedIsCurrent = currentAcademicContext.confirmed && structureId === currentAcademicContext.structureId &&
-    periodId === currentAcademicContext.periodId;
   // Only show a next-term figure if that period and its fee structure truly exist.
   const currentPeriodIndex = visiblePeriods.findIndex(r => r.id === periodId);
   const withinStructureNext = currentPeriodIndex >= 0 ? visiblePeriods[currentPeriodIndex + 1] : undefined;
@@ -672,46 +670,40 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       {message && <div role="status" className="ef-message" onClick={() => setMessage("")}>{message} <span>×</span></div>}
       {section === "notices" && <>
         {!openedNoticeClass ? <>
-          <div className="ef-class-browser-caption">Choose a class <span>{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</span></div>
-          <p className="ef-scope-guide">{currentAcademicContext.confirmed ? "Opens the current term." : "Current term not set; showing the first available period."} Use <strong>+</strong> to prepare another term.</p>
+          <div className="ef-class-browser-caption">{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</div>
+          <p className="ef-scope-guide">Use <strong>+</strong> to prepare another term.</p>
           <div className="ef-class-browser" aria-label="Term notice classes">
             {classes.filter(row => !query.trim() || `${row.name} ${row.code || ""}`.toLowerCase().includes(query.toLowerCase())).map(row => {
               const classNotice = getNoticeForPeriod(row.id, currentAcademicContext.periodId, currentAcademicContext.structureId);
-              const feeItems = (classNotice?.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item));
-              const requirements = (classNotice?.items || []).filter(isRequirement);
-              const studentCount = studentsForClass(row.id).length;
               return <button key={row.id} type="button" className="ef-class-card" onClick={() => openCurrentClass(row.id)}>
                 <span className="ef-class-card-mark">{row.name.slice(0,1).toUpperCase()}</span>
-                <span className="ef-class-card-main"><strong>{row.name}</strong><small>{studentCount} student{studentCount === 1 ? "" : "s"} · {currentAcademicContext.periodName}</small></span>
+                <span className="ef-class-card-main"><strong>{row.name}</strong></span>
                 <span className={`ef-class-card-status ${classNotice ? "configured" : "draft"}`}>
-                  <i />{classNotice ? `${feeItems.length} fees · ${requirements.length} items` : "Not prepared"}
+                  <i />{classNotice ? "Prepared" : "Not prepared"}
                 </span>
                 <span aria-hidden="true" className="ef-class-card-arrow">›</span>
               </button>;
             })}
           </div>
           {!classes.length && <div className="ef-empty">Create classes in Setup before preparing term notices.</div>}
-          <p className="ef-help">Use + to prepare notices for multiple classes or all classes in an organization.</p>
         </> : <>
         <div className="ef-class-detail-top">
           <div className="ef-class-open-left">
             <button type="button" className="ef-back-classes" onClick={() => setOpenedNoticeClass(false)}>← Classes</button>
             <strong className="ef-open-class-name">{classTitle}</strong>
           </div>
-          <span className="ef-class-context"><strong>{selectedIsCurrent ? "Current term" : "Selected term"}</strong> · {academicTitle} · {periodTitle}</span>
+          <span className="ef-class-context">{academicTitle} · {periodTitle}</span>
         </div>
-        <p className="ef-scope-guide">Use <strong>Filter</strong> to view another period; <strong>+</strong> to prepare a notice.</p>
+        <p className="ef-scope-guide">Use <strong>+</strong> to prepare another term.</p>
         <div className="ef-grid">
           <article className="ef-panel"><header>Fees Payable <span>{fees.length} entries</span></header>{fees.length ? fees.map((item, n) => <div className="ef-line" key={n}><span>{item.name}</span><b>{formatAmount(item.amount)}</b></div>) : <div className="ef-muted">No fees configured for this class and period.</div>}<div className="ef-line total"><span>Total</span><b>{formatAmount(feesTotal)}</b></div></article>
           <article className="ef-panel"><header>Items to Bring or Purchase <span>{requirements.length} entries</span></header>{requirements.length ? requirements.map((item, n) => <div className="ef-line" key={n}><span>{item.name}{item.instructions ? <small>{item.instructions}</small> : null}</span><b>{item.quantity || 1} {item.unit || "pcs"}</b></div>) : <div className="ef-muted">No physical requirements configured.</div>}</article>
         </div>
-        <p className="ef-help">Print notices without invoicing, or issue student records to begin tracking payments and materials. Required items have no monetary charge unless separately listed as a fee.</p>
         </>}
       </>}
       {section === "tracking" && <>
         {!openedTrackingClass ? <>
-          <div className="ef-class-browser-caption">Choose a class <span>{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</span></div>
-          <p className="ef-scope-guide">{currentAcademicContext.confirmed ? "Opens the current term." : "Current term not set; showing the first available period."} Select a class to track payments and materials.</p>
+          <div className="ef-class-browser-caption">{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</div>
           <div className="ef-class-browser" aria-label="Fee tracking classes">
             {classes.filter(row => !query.trim() || `${row.name} ${row.code || ""}`.toLowerCase().includes(query.toLowerCase().trim())).map(row => {
               const classStudents = studentsForClass(row.id);
@@ -727,7 +719,6 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
                 <span className="ef-class-card-mark">{row.name.slice(0,1).toUpperCase()}</span>
                 <span className="ef-class-card-main">
                   <strong>{row.name}</strong>
-                  <small>{classStudents.length} student{classStudents.length === 1 ? "" : "s"} · {currentAcademicContext.periodName}</small>
                 </span>
                 <span className={`ef-class-card-status ${issuedCount ? "configured" : "draft"}`}>
                   <i />{issuedCount ? `${issuedCount} issued` : "Not issued"}
@@ -737,16 +728,15 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
             })}
           </div>
           {!classes.length && <div className="ef-empty">Create classes in Setup before tracking fees.</div>}
-          <p className="ef-help">Choose a class first. Use Filter after opening it to view another term.</p>
         </> : <>
           <div className="ef-class-detail-top">
             <div className="ef-class-open-left">
               <button type="button" className="ef-back-classes" onClick={closeTrackingClass}>← Classes</button>
               <strong className="ef-open-class-name">{classTitle}</strong>
             </div>
-            <span className="ef-class-context"><strong>{selectedIsCurrent ? "Current term" : "Selected term"}</strong> · {academicTitle} · {periodTitle}</span>
+            <span className="ef-class-context">{academicTitle} · {periodTitle}</span>
           </div>
-          <p className="ef-scope-guide">Use <strong>Filter</strong> to view another period; <strong>+</strong> to record a payment.</p>
+          <p className="ef-scope-guide">Use <strong>+</strong> to record a payment.</p>
         {view === "table" ? (
           <section className="ef-table-card" aria-label="Student fee records">
             <div className="ef-table-wrap">
@@ -1105,16 +1095,14 @@ const styles = `
 }
 
 /* Compact academic context, with no competing navigation or extra cards. */
-.ef-scope-guide{margin:2px 3px 9px;font-size:10.5px;line-height:1.4;color:var(--muted,#64748b);font-weight:500;}
+.ef-scope-guide{margin:1px 3px 8px;font-size:10.5px;line-height:1.4;color:var(--muted,#64748b);font-weight:500;}
 .ef-scope-guide strong{color:var(--text,#182235);font-weight:850;}
 .ef-class-context{max-width:100%;overflow-wrap:anywhere;text-align:right;line-height:1.4;}
 .ef-class-context strong{color:var(--ef-primary,#2563eb);font-weight:900;}
-@media(max-width:520px){.ef-class-browser-caption{flex-wrap:wrap;gap:3px;}.ef-class-browser-caption span{width:100%;}}
 
 /* Assessment Entries-style first step: class cards, then the selected term notice. */
-.ef-class-browser-caption{display:flex;justify-content:space-between;gap:12px;align-items:center;
- padding:6px 3px 7px;font-size:12px;font-weight:850;color:var(--text,#182235);}
-.ef-class-browser-caption span{font-size:11px;font-weight:650;color:var(--muted,#64748b);}
+.ef-class-browser-caption{padding:5px 3px 4px;font-size:12px;font-weight:800;
+ color:var(--text,#182235);line-height:1.4;overflow-wrap:anywhere;}
 .ef-class-browser{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;}
 .ef-page .ef-class-card{display:flex;align-items:center;gap:10px;min-width:0;min-height:80px;
  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
@@ -1149,9 +1137,11 @@ const styles = `
  min-height:31px;min-width:31px;font-size:12px;border:1px solid var(--border,#d4dae3);
  background:var(--surface,#fff);color:var(--text,#182235);border-radius:7px;padding:4px;}
 @media(min-width:700px) and (max-width:1150px){.ef-class-browser{grid-template-columns:repeat(3,minmax(0,1fr));}}
-@media(max-width:699px){.ef-class-browser{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;}
- .ef-page .ef-class-card{display:grid;grid-template-columns:36px minmax(0,1fr) auto;
-  gap:7px;padding:9px;min-height:92px;align-content:center;}
- .ef-class-card-status{grid-column:2/-1;}.ef-class-card-arrow{grid-column:3;grid-row:1;}
- .ef-register-preview-document{padding:5px;}}
+@media(max-width:699px){
+ .ef-class-browser{grid-template-columns:minmax(0,1fr);gap:7px;width:100%;}
+ .ef-page .ef-class-card{display:flex;width:100%;min-height:64px;gap:10px;padding:10px 12px;}
+ .ef-class-card-status{grid-column:auto;margin-left:auto;}
+ .ef-class-card-arrow{grid-column:auto;grid-row:auto;}
+ .ef-register-preview-document{padding:5px;}
+}
 `;

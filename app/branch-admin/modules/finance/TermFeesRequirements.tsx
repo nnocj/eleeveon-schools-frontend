@@ -120,6 +120,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [view, setView] = useState<"cards" | "table">("cards");
   // Like Assessment Entries, Term Notices starts with a class browser.
   const [openedNoticeClass, setOpenedNoticeClass] = useState(false);
+  // Fee Tracking has its own class browser; keep its navigation independent
+  // from Term Notices while reusing the same compact class-card design.
+  const [openedTrackingClass, setOpenedTrackingClass] = useState(false);
   const [trackingPreviewRows, setTrackingPreviewRows] = useState<TrackingPrintRow[] | null>(null);
   // The preview is separate from the document-only print root. Users can
   // inspect a general class notice or every student's personalised notice.
@@ -256,6 +259,20 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     setClassId(targetClassId);
     setAppliedClassIds([]);
     setOpenedNoticeClass(true);
+  };
+  const openTrackingClass = (targetClassId: string) => {
+    if (currentAcademicContext.structureId) setStructureId(currentAcademicContext.structureId);
+    if (currentAcademicContext.periodId) setPeriodId(currentAcademicContext.periodId);
+    setClassId(targetClassId);
+    // Search in the class browser is for class names; clear it before showing students.
+    setQuery("");
+    setStatusFilter("all");
+    setOpenedTrackingClass(true);
+  };
+  const closeTrackingClass = () => {
+    setOpenedTrackingClass(false);
+    setQuery("");
+    setStatusFilter("all");
   };
   const selectedIsCurrent = currentAcademicContext.confirmed && structureId === currentAcademicContext.structureId &&
     periodId === currentAcademicContext.periodId;
@@ -627,11 +644,13 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     openPreview("student", studentId);
   };
   useRegisterBranchWorkspaceToolbar("financeWorkspace", {
-    add: () => section === "notices" ? openEditor() : setPayPickerOpen(true),
+    add: () => section === "notices" ? openEditor() :
+      openedTrackingClass ? setPayPickerOpen(true) : setMessage("Choose a class card to record a payment."),
     search: setQuery,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
-    print: () => section === "tracking" ? printTrackingList() :
+    print: () => section === "tracking" ?
+      (openedTrackingClass ? printTrackingList() : setMessage("Choose a class card to print fee tracking.")) :
       openedNoticeClass ? openPreview("class") : setMessage("Select a class card to preview its term notice."),
   });
 
@@ -675,7 +694,10 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           <p className="ef-help">Use + to prepare notices for multiple classes or all classes in an organization.</p>
         </> : <>
         <div className="ef-class-detail-top">
-          <button type="button" className="ef-back-classes" onClick={() => setOpenedNoticeClass(false)}>← Classes</button>
+          <div className="ef-class-open-left">
+            <button type="button" className="ef-back-classes" onClick={() => setOpenedNoticeClass(false)}>← Classes</button>
+            <strong className="ef-open-class-name">{classTitle}</strong>
+          </div>
           <span className="ef-class-context"><strong>{selectedIsCurrent ? "Current term" : "Selected term"}</strong> · {academicTitle} · {periodTitle}</span>
         </div>
         <p className="ef-scope-guide">Use <strong>Filter</strong> to view another period; <strong>+</strong> to prepare a notice.</p>
@@ -687,8 +709,44 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         </>}
       </>}
       {section === "tracking" && <>
-        <div className="ef-heading"><div><strong>Fee Tracking</strong><span>{classTitle} · {academicTitle} · {periodTitle} · {displayed.length} students</span></div></div>
-        <p className="ef-scope-guide">Use <strong>Filter</strong> to change term or class; <strong>+</strong> to record a payment.</p>
+        {!openedTrackingClass ? <>
+          <div className="ef-class-browser-caption">Choose a class <span>{currentAcademicContext.structureName} · {currentAcademicContext.periodName}</span></div>
+          <p className="ef-scope-guide">{currentAcademicContext.confirmed ? "Opens the current term." : "Current term not set; showing the first available period."} Select a class to track payments and materials.</p>
+          <div className="ef-class-browser" aria-label="Fee tracking classes">
+            {classes.filter(row => !query.trim() || `${row.name} ${row.code || ""}`.toLowerCase().includes(query.toLowerCase().trim())).map(row => {
+              const classStudents = studentsForClass(row.id);
+              const currentInvoices = invoices.filter(inv =>
+                id(inv.classId) === row.id &&
+                id(inv.academicStructureId) === currentAcademicContext.structureId &&
+                id(inv.academicPeriodId) === currentAcademicContext.periodId &&
+                inv.status !== "void" && inv.status !== "cancelled"
+              );
+              const issuedStudentIds = new Set(currentInvoices.map(inv => inv.studentId));
+              const issuedCount = classStudents.filter(student => issuedStudentIds.has(student.id)).length;
+              return <button key={row.id} type="button" className="ef-class-card" onClick={() => openTrackingClass(row.id)}>
+                <span className="ef-class-card-mark">{row.name.slice(0,1).toUpperCase()}</span>
+                <span className="ef-class-card-main">
+                  <strong>{row.name}</strong>
+                  <small>{classStudents.length} student{classStudents.length === 1 ? "" : "s"} · {currentAcademicContext.periodName}</small>
+                </span>
+                <span className={`ef-class-card-status ${issuedCount ? "configured" : "draft"}`}>
+                  <i />{issuedCount ? `${issuedCount} issued` : "Not issued"}
+                </span>
+                <span aria-hidden="true" className="ef-class-card-arrow">›</span>
+              </button>;
+            })}
+          </div>
+          {!classes.length && <div className="ef-empty">Create classes in Setup before tracking fees.</div>}
+          <p className="ef-help">Choose a class first. Use Filter after opening it to view another term.</p>
+        </> : <>
+          <div className="ef-class-detail-top">
+            <div className="ef-class-open-left">
+              <button type="button" className="ef-back-classes" onClick={closeTrackingClass}>← Classes</button>
+              <strong className="ef-open-class-name">{classTitle}</strong>
+            </div>
+            <span className="ef-class-context"><strong>{selectedIsCurrent ? "Current term" : "Selected term"}</strong> · {academicTitle} · {periodTitle}</span>
+          </div>
+          <p className="ef-scope-guide">Use <strong>Filter</strong> to view another period; <strong>+</strong> to record a payment.</p>
         {view === "table" ? (
           <section className="ef-table-card" aria-label="Student fee records">
             <div className="ef-table-wrap">
@@ -739,7 +797,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           ))}</div>
         )}
         {!displayed.length && <div className="ef-empty">No students match the selected class and filters.</div>}
-
+        </>}
       </>}
     </div>
   </section>
@@ -808,13 +866,13 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
             {appliedClassIds.length > 1 && button("Print Class Batch", () => { setMoreOpen(false); printNotice(appliedClassIds.map(cid => ({ classId: cid }))); })}
             {appliedClassIds.length > 1 && button("Print Student Batch — All Selected Classes", () => { setMoreOpen(false); printNotice(appliedClassIds.flatMap(cid => studentsForClass(cid).map(student => ({ classId: cid, studentId: student.id })))); })}
           </> : <>
-            {button("Issue Student Records", () => { setMoreOpen(false); void issueInvoices(); }, !notice)}
-            {button(`Print Fee Tracking List (${displayed.length})`, () => { setMoreOpen(false); printTrackingList(); }, !displayed.length)}
-            {button(`Preview All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); openPreview("batch"); }, !notice || !targetStudents.length)}
-            {button(`Print All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); printNotice(targetStudents.map(student => ({ classId, studentId: student.id }))); }, !notice || !targetStudents.length)}
-            {button("Print Individual Notice…", () => { setMoreOpen(false); setIndividualPrintStudentId(""); setIndividualPrintPickerOpen(true); }, !notice || !targetStudents.length)}
+            {button("Issue Student Records", () => { setMoreOpen(false); void issueInvoices(); }, !openedTrackingClass || !notice)}
+            {button(`Print Fee Tracking List (${displayed.length})`, () => { setMoreOpen(false); printTrackingList(); }, !openedTrackingClass || !displayed.length)}
+            {button(`Preview All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); openPreview("batch"); }, !openedTrackingClass || !notice || !targetStudents.length)}
+            {button(`Print All Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); printNotice(targetStudents.map(student => ({ classId, studentId: student.id }))); }, !openedTrackingClass || !notice || !targetStudents.length)}
+            {button("Print Individual Notice…", () => { setMoreOpen(false); setIndividualPrintStudentId(""); setIndividualPrintPickerOpen(true); }, !openedTrackingClass || !notice || !targetStudents.length)}
             {button(view === "table" ? "Card View" : "Table View", () => { setMoreOpen(false); setView(view === "table" ? "cards" : "table"); })}
-            {button("Collection Summary", () => { setMoreOpen(false); setSummaryOpen(true); })}
+            {button("Collection Summary", () => { setMoreOpen(false); setSummaryOpen(true); }, !openedTrackingClass)}
           </>}
         </div>
       </section>
@@ -1077,6 +1135,8 @@ const styles = `
 .ef-class-card-status.configured i{background:#16a34a;}
 .ef-class-card-arrow{color:var(--muted,#64748b);font-size:19px;}
 .ef-class-detail-top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:4px 0 8px;}
+.ef-class-open-left{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;}
+.ef-open-class-name{font-size:12px;font-weight:850;color:var(--text,#182235);overflow-wrap:anywhere;}
 .ef-page .ef-back-classes{font-size:11px;border-radius:7px;min-height:31px;}
 .ef-class-context{font-size:11px;font-weight:800;color:var(--muted,#64748b);}
 .ef-register-preview-document{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;

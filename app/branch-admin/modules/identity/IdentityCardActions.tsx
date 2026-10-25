@@ -53,7 +53,7 @@ export default function IdentityCardActions({
           ? await db.students.get(subjectId)
           : await db.teachers.get(subjectId);
         const settings = (await db.schoolBranchSettings.toArray()).find(r =>
-          !r.isDeleted && r.active !== false && id(r.schoolId) === schoolId && id(r.branchId) === branchId);
+          !r.isDeleted && id(r.schoolId) === schoolId && id(r.branchId) === branchId);
         const currentStructure = settings?.currentAcademicStructureId
           ? await db.academicStructures.get(id(settings.currentAcademicStructureId)) : null;
         const orgId = id((record as any)?.organizationId);

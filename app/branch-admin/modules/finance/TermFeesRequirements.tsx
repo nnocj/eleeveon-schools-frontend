@@ -96,7 +96,6 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [editorOpen, setEditorOpen] = useState(false);
   const [feeLines, setFeeLines] = useState<DraftLine[]>([]);
   const [requirementLines, setRequirementLines] = useState<DraftLine[]>([]);
-  const [editingStructure, setEditingStructure] = useState("");
   const [noticeNote, setNoticeNote] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [trackingStudentId, setTrackingStudentId] = useState("");
@@ -305,17 +304,51 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const totalOutstanding = studentRows.reduce((a, r) => a + r.balance, 0);
   const requireScope = () => { if (!scope || !structureId || !periodId || !classId) { setMessage("Select a branch, academic structure, period and class."); return false; } return true; };
 
+  // Keep the notice editor tied to its selected academic period and class.
+  // Changing any selector loads that target's existing notice (or a clean draft),
+  // rather than accidentally carrying another period's fees into a new notice.
+  const loadEditorDraft = (targetStructureId: string, targetPeriodId: string, targetClassId: string) => {
+    const targetNotice = targetStructureId && targetPeriodId && targetClassId
+      ? getNoticeForPeriod(targetClassId, targetPeriodId, targetStructureId)
+      : undefined;
+    const targetItems = targetNotice?.items || [];
+    const targetMeta = targetItems.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+    setCurrencyCode(id(targetMeta?.description) || preferredCurrency);
+    setNoticeNote(targetMeta?.instructions || "");
+    setDueDate(targetMeta?.dueDate || "");
+    setFeeLines(targetItems.filter(item => !isRequirement(item) && !isNoticeMeta(item))
+      .map(item => ({ ...item, key: makeKey() })));
+    setRequirementLines(targetItems.filter(isRequirement)
+      .map(item => ({ ...item, key: makeKey() })));
+  };
+
+  const chooseEditorStructure = (nextStructureId: string) => {
+    const matchingPeriods = periods.filter(row => row.academicStructureId === nextStructureId);
+    const nextPeriodId = matchingPeriods.some(row => row.id === periodId)
+      ? periodId : matchingPeriods[0]?.id || "";
+    setStructureId(nextStructureId);
+    setPeriodId(nextPeriodId);
+    loadEditorDraft(nextStructureId, nextPeriodId, classId);
+  };
+  const chooseEditorPeriod = (nextPeriodId: string) => {
+    setPeriodId(nextPeriodId);
+    loadEditorDraft(structureId, nextPeriodId, classId);
+  };
+  const chooseEditorClass = (nextClassId: string) => {
+    setClassId(nextClassId);
+    setBatchMode("single");
+    setSelectedClassIds(nextClassId ? [nextClassId] : []);
+    loadEditorDraft(structureId, periodId, nextClassId);
+  };
+
   const openEditor = () => {
-    if (!requireScope()) return;
-    setEditingStructure(notice?.id || "");
+    // The editor itself must open even when a period or class is not selected.
+    // saveNotice already validates required targets before saving.
+    if (!scope) return;
     setBatchMode("single");
     setSelectedClassIds(classId ? [classId] : []);
     setSelectedOrganizationId("");
-    setCurrencyCode(noticeCurrency);
-    setNoticeNote(noticeMetadata?.instructions || "");
-    setDueDate(noticeMetadata?.dueDate || "");
-    setFeeLines(fees.map(item => ({ ...item, key: makeKey() })));
-    setRequirementLines(requirements.map(item => ({ ...item, key: makeKey() })));
+    loadEditorDraft(structureId, periodId, classId);
     setEditorOpen(true);
   };
   const saveNotice = async () => {
@@ -684,9 +717,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       <div className="ef-actions">{button("Record Payment", () => {const row = studentRows.find(r => r.student.id === payPickerStudentId); if (!row) return; setPaymentStudent(row.student);setPayAmount(String(row.balance));setPayPickerStudentId("");setPayPickerOpen(false);})}{button("Cancel", () => setPayPickerOpen(false))}</div>
     </section></div>}
     {editorOpen && <div className="ef-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setEditorOpen(false); }}><div role="dialog" aria-modal="true" aria-label="Edit term notice" className="ef-sheet large"><header><strong>Term Fees & Requirements</strong><button onClick={() => setEditorOpen(false)}>×</button></header><div className="ef-editor-context ef-selection">
-          {field("Academic Structure", <select disabled={Boolean(editingStructure)} value={structureId} onChange={e => {setStructureId(e.target.value);setPeriodId("");}}><option value="">Select structure</option>{structures.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
-          {field("Academic Period", <select disabled={Boolean(editingStructure)} value={periodId} onChange={e => setPeriodId(e.target.value)}><option value="">Select period</option>{visiblePeriods.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
-          {field("Class", <select disabled={Boolean(editingStructure)} value={classId} onChange={e => setClassId(e.target.value)}><option value="">Select class</option>{classes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
+          {field("Academic Structure", <select value={structureId} onChange={e => chooseEditorStructure(e.target.value)}><option value="">Select structure</option>{structures.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
+          {field("Academic Period", <select value={periodId} onChange={e => chooseEditorPeriod(e.target.value)}><option value="">Select period</option>{visiblePeriods.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
+          {field("Class", <select value={classId} onChange={e => chooseEditorClass(e.target.value)}><option value="">Select class</option>{classes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
           {field("Currency", <select value={currencyCode} onChange={e => setCurrencyCode(e.target.value)}>{FINANCE_CURRENCIES.map(c => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}</select>)}
         </div>
         <fieldset className="ef-target-scope"><legend>Apply Notice To</legend>
@@ -713,8 +746,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     {receivedEditor && <div className="ef-overlay"><section role="dialog" aria-modal="true" className="ef-sheet"><header><strong>Receive {receivedEditor.name}</strong><button onClick={() => setReceivedEditor(null)}>×</button></header><p>Record an additional quantity received.</p>{field("Quantity", <input type="number" min="1" step="1" value={receiveQty} onChange={e => setReceiveQty(e.target.value)}/>)}{field("Optional note", <input value={receiveNote} onChange={e => setReceiveNote(e.target.value)} placeholder="Received by school office"/>)}<div className="ef-actions">{button("Save Receipt", receiveItem)}{button("Cancel", () => setReceivedEditor(null))}</div></section></div>}
     {paymentStudent && <div className="ef-overlay"><section role="dialog" aria-modal="true" className="ef-sheet"><header><strong>Record Fee Payment</strong><button onClick={() => setPaymentStudent(null)}>×</button></header><p>{titleCase(paymentStudent.fullName)} · Balance {formatFinanceMoney(studentRow(paymentStudent).balance, invoicesByStudent.get(paymentStudent.id)?.currencyCode || noticeCurrency)}</p>{field("Amount", <input type="number" min="0.01" step="0.01" value={payAmount} onChange={e => setPayAmount(e.target.value)}/>)}{field("Method", <select value={payMethod} onChange={e => setPayMethod(e.target.value as PaymentChannel)}><option value="cash">Cash</option><option value="momo">Mobile Money</option><option value="bank">Bank</option><option value="card">Card</option><option value="manual">Manual</option></select>)}{field("Reference (optional)", <input value={payReference} onChange={e => setPayReference(e.target.value)}/>)}<div className="ef-actions">{button("Save Payment", recordPayment)}{button("Cancel", () => setPaymentStudent(null))}</div></section></div>}
     {filterOpen && <div className="ef-overlay"><section role="dialog" aria-modal="true" className="ef-sheet"><header><strong>Filter Students</strong><button onClick={() => setFilterOpen(false)}>×</button></header>{field("Academic Structure", <select value={structureId} onChange={e => { setStructureId(e.target.value);setPeriodId(""); }}><option value="">Choose structure</option>{structures.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
-      {field("Academic Period", <select disabled={Boolean(editingStructure)} value={periodId} onChange={e => setPeriodId(e.target.value)}><option value="">Choose period</option>{visiblePeriods.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
-      {field("Class", <select disabled={Boolean(editingStructure)} value={classId} onChange={e => setClassId(e.target.value)}><option value="">Choose class</option>{classes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
+      {field("Academic Period", <select value={periodId} onChange={e => setPeriodId(e.target.value)}><option value="">Choose period</option>{visiblePeriods.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
+      {field("Class", <select value={classId} onChange={e => setClassId(e.target.value)}><option value="">Choose class</option>{classes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>)}
       {section === "tracking" && field("Fee status", <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="all">All</option><option value="paid">Paid</option><option value="part">Part paid</option><option value="unpaid">Unpaid</option><option value="items_pending">Items pending</option></select>)}<div className="ef-actions">{button("Apply", () => setFilterOpen(false))}{button("Reset", () => { setStatusFilter("all"); setQuery(""); setFilterOpen(false); })}</div></section></div>}
     {summaryOpen && <div className="ef-overlay"><section role="dialog" aria-modal="true" className="ef-sheet large"><header><strong>Collection Summary</strong><button type="button" onClick={() => setSummaryOpen(false)}>×</button></header>
       <div className="ef-summary">{[

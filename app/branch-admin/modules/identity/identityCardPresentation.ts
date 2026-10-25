@@ -16,6 +16,13 @@ type AnyRow = Record<string, any>;
 const id = (v: unknown) => String(v ?? "").trim();
 const active = (r: AnyRow) => !r.isDeleted && r.active !== false;
 const generic = (v: unknown) => !id(v) || id(v) === "all";
+const isImageLocation = (url: string) => /^(https?:\/\/|data:image\/|blob:|\/)/i.test(url);
+function orderedImageUrls(values: unknown[]): string[] {
+  const urls = Array.from(new Set(values.map(id).filter(v => v && isImageLocation(v))));
+  // Stored Supabase URLs are canonical. Legacy Render links may return 404.
+  return urls.sort((a,b) => Number(/supabase\.co\/storage\/v1\/object|supabase\.in\/storage\/v1\/object/i.test(b)) -
+    Number(/supabase\.co\/storage\/v1\/object|supabase\.in\/storage\/v1\/object/i.test(a)));
+}
 
 export function chooseIdentityCardDesign(
   designs: Partial<IdentityCredentialDesignSetting>[],
@@ -88,9 +95,10 @@ export function useIdentityCardPresentation(args: {
     if (!schoolId || !branchId) return;
     const read = async () => {
       try {
-        const [schoolRow, branchRow, settingsRows, designRows] = await Promise.all([
+        const [schoolRow, branchRow, settingsRows, designRows, assetRows] = await Promise.all([
           db.schools.get(schoolId), db.branches.get(branchId),
           db.schoolBranchSettings.toArray(), db.identityCredentialDesignSettings.toArray(),
+          db.mediaAssets.toArray(),
         ]);
         if (cancelled) return;
         const s = (schoolRow || school || {}) as AnyRow;
@@ -124,13 +132,41 @@ export function useIdentityCardPresentation(args: {
           branchSettings ? media("schoolBranchSettings", id(branchSettings.id), "logo", branchSettings.logoMediaId, branchSettings.logo) : "",
           branchSettings ? media("schoolBranchSettings", id(branchSettings.id), "reportCardSignatureImage", branchSettings.reportCardSignatureImageMediaId, branchSettings.reportCardSignatureImage) : "",
         ]);
+        // Supabase's publicUrl/remoteUrl from mediaAssets is authoritative; the
+        // old schools.logo and branches.logo fields are backward compatibility.
+        // Keep multiple candidates so a stale 404 falls back without a broken icon.
+        const candidates = (ownerTable: string, ownerId: string, fieldKey: string,
+          mediaId: unknown, resolved: unknown, legacy: unknown) => {
+          const matching = assetRows.filter(asset => !asset.isDeleted && asset.active !== false &&
+            (!a || !asset.accountId || id(asset.accountId) === a) &&
+            ((id(asset.ownerTable) === ownerTable && id(asset.ownerId) === ownerId && id(asset.fieldKey) === fieldKey) ||
+              (id(mediaId) && id(asset.id) === id(mediaId))));
+          matching.sort((x,y) => Number(y.updatedAt || 0) - Number(x.updatedAt || 0));
+          return orderedImageUrls([
+            ...matching.flatMap(asset => [asset.publicUrl, asset.remoteUrl, asset.previewDataUrl, asset.thumbnailDataUrl]),
+            resolved, legacy,
+          ]);
+        };
+        const settingsLogoCandidates = branchSettings ? candidates("schoolBranchSettings", id(branchSettings.id), "logo",
+          branchSettings.logoMediaId, settingsLogoUrl, branchSettings.logo) : [];
+        const schoolLogoCandidates = orderedImageUrls([
+          ...candidates("schools",schoolId,"logo",s.logoMediaId,schoolLogoUrl,s.logo),
+          ...settingsLogoCandidates,
+        ]);
+        const branchLogoCandidates = orderedImageUrls([
+          ...candidates("branches",branchId,"logo",b.logoMediaId,branchLogoUrl,b.logo),
+          ...settingsLogoCandidates,
+        ]);
+        const signatureCandidates = branchSettings ? candidates("schoolBranchSettings",id(branchSettings.id),
+          "reportCardSignatureImage",branchSettings.reportCardSignatureImageMediaId,signatureUrl,branchSettings.reportCardSignatureImage) : [];
         if (cancelled) { allocated.forEach(revokeMediaObjectUrl); return; }
         setBranding({
           schoolName: id(s.name) || "School Identification", branchName: id(b.name),
           motto: id(s.motto), address: id(b.address || s.address),
-          schoolLogoUrl: schoolLogoUrl || settingsLogoUrl,
-          branchLogoUrl: branchLogoUrl || settingsLogoUrl,
-          signatureUrl,
+          schoolLogoUrl: schoolLogoCandidates[0] || "",
+          branchLogoUrl: branchLogoCandidates[0] || "",
+          signatureUrl: signatureCandidates[0] || "",
+          schoolLogoCandidates, branchLogoCandidates, signatureCandidates,
         });
       } catch (error) {
         console.warn("Could not refresh identity card presentation", error);

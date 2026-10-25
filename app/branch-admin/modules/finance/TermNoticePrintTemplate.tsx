@@ -1,12 +1,17 @@
 "use client";
 
 /**
- * Eleeveon Schools — A4 term fees and requirements notice.
- * This term appears first as a compact, secondary summary.
- * Next term follows as the primary, larger and more visible section.
- * All amounts come from existing period-specific feeStructures, not projections.
- * This component is presentation-only: printing never issues invoices or payments.
+ * Eleeveon Schools â€” printable A4 NEXT-TERM fees and requirements notice.
+ *
+ * The title identifies BOTH the current and upcoming academic periods.
+ * Only next-term fees, requirements and instructions appear in the body.
+ * The sole current-term financial carry-forward is the student's recorded
+ * outstanding balance (arrears), shown separately from next-term fees.
+ *
+ * Presentation only: this component does not read Dexie, issue invoices,
+ * collect payments or update financial records.
  */
+
 import React from "react";
 import type { FeeStructureItem } from "../../../lib/db/db";
 import { formatFinanceMoney, getFinanceCurrency } from "./financeCurrency";
@@ -19,284 +24,491 @@ export type TermNoticePrintTemplateProps = {
   schoolAddress?: string;
   schoolPhone?: string;
   primaryColor?: string;
+
+  // Current term: displayed ONLY in the title, with studentBalance below.
   academicStructure: string;
   academicPeriod: string;
-  nextAcademicPeriod?: string;
+
+  // Upcoming term: the period whose fees and supplies are being announced.
   nextAcademicStructure?: string;
+  nextAcademicPeriod?: string;
   nextPeriodConfigured?: boolean;
+
   className: string;
   studentName?: string;
   admissionNumber?: string;
+
+  // Retained for compatibility; current-term line items are not printed.
   fees: FeeStructureItem[];
   requirements: FeeStructureItem[];
+  dueDate?: string;
+  notice?: string;
+
   nextFees?: FeeStructureItem[];
   nextRequirements?: FeeStructureItem[];
+  nextDueDate?: string;
+  nextNotice?: string;
+
+  // Must be the student's CURRENT-TERM outstanding invoice balance, not fees.
   studentBalance?: number;
   currencyCode?: string;
   nextCurrencyCode?: string;
-  dueDate?: string;
-  nextDueDate?: string;
-  notice?: string;
-  nextNotice?: string;
   issuedOn: string;
 };
 
-function SumRows({items, currency}: {items: FeeStructureItem[]; currency: string}) {
-  const cash = (value: number) => formatFinanceMoney(value, currency);
-  const total = items.reduce((value, item) => value + Math.max(0, Number(item.amount) || 0), 0);
-  return <div className="ef-notice-amounts">
-    {items.length ? <table className="ef-notice-table" aria-label="Term fees">
-      <thead><tr><th>Fee</th><th>Amount ({getFinanceCurrency(currency).code})</th></tr></thead>
-      <tbody>{items.map((item,index) => <tr key={`${item.itemKey || item.name}-${index}`}>
-        <td>{item.name}</td><td>{cash(item.amount)}</td>
-      </tr>)}</tbody>
-    </table> : <p className="ef-notice-muted">No fees entered for this term.</p>}
-    <div className="ef-notice-total"><span>Total fees</span><strong>{items.length ? cash(total) : "Not entered"}</strong></div>
-  </div>;
+function nonNegativeAmount(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
-function SupplyRows({items}: {items: FeeStructureItem[]}) {
-  return items.length ? <ul className="ef-notice-supplies">
-    {items.map((item,index) => <li key={`${item.itemKey || item.name}-${index}`}>
-      <span>{item.name}{item.required === false ? " (Optional)" : ""}
-        {item.instructions ? <small>{item.instructions}</small> : null}</span>
-      <b>{Math.max(1, Number(item.quantity) || 1)} {item.unit || "pcs"}</b>
-    </li>)}
-  </ul> : <p className="ef-notice-muted">No materials specified.</p>;
+function formatQuantity(item: FeeStructureItem): string {
+  const supplied = Number(item.quantity);
+  const quantity = Number.isFinite(supplied) && supplied > 0 ? supplied : 1;
+  return `${quantity.toLocaleString("en-GH")} ${item.unit?.trim() || "pcs"}`;
 }
 
 export default function TermNoticePrintTemplate({
-  schoolName, branchName, schoolLogo, schoolMotto, schoolAddress, schoolPhone,
-  primaryColor = "#1e4f83", academicStructure, academicPeriod, nextAcademicPeriod, nextAcademicStructure,
-  nextPeriodConfigured = false, className, studentName, admissionNumber,
-  fees, requirements, nextFees = [], nextRequirements = [], studentBalance,
-  currencyCode = "GHS", nextCurrencyCode = "GHS", dueDate, nextDueDate, notice,
-  nextNotice, issuedOn,
+  schoolName,
+  branchName,
+  schoolLogo,
+  schoolMotto,
+  schoolAddress,
+  schoolPhone,
+  primaryColor = "#1e4f83",
+  academicStructure,
+  academicPeriod,
+  nextAcademicStructure,
+  nextAcademicPeriod,
+  nextPeriodConfigured = false,
+  className,
+  studentName,
+  admissionNumber,
+  nextFees = [],
+  nextRequirements = [],
+  studentBalance,
+  currencyCode = "GHS",
+  nextCurrencyCode = "GHS",
+  nextDueDate,
+  nextNotice,
+  issuedOn,
 }: TermNoticePrintTemplateProps) {
-  return <article className="ef-print-sheet ef-term-notice-a4" data-a4-paper="portrait"
-    style={{"--notice-accent":primaryColor} as React.CSSProperties}>
-    <style>{`
-      .ef-term-notice-a4{color:#142238;background:#fff;font:11px/1.43 Arial,Helvetica,sans-serif;box-sizing:border-box;
-        width:100%;min-height:265mm;padding:0;overflow:visible;}
-      .ef-term-notice-a4 *{box-sizing:border-box;}
-      .ef-term-notice-a4 .ef-document-head{display:grid;grid-template-columns:70px minmax(0,1fr) 70px;
-        gap:10px;align-items:center;padding-bottom:12px;border-bottom:2px solid #193655;}
-      .ef-term-notice-a4 .ef-document-logo{width:66px;height:66px;object-fit:contain;}
-      .ef-term-notice-a4 .ef-document-logo-fallback{width:66px;height:66px;display:grid;place-items:center;
-        font-size:9px;text-align:center;border:1px solid #98a8bc;}
-      .ef-term-notice-a4 .ef-document-school{font-size:19px;font-weight:900;line-height:1.13;
-        margin:0;text-transform:uppercase;overflow-wrap:anywhere;}
-      .ef-term-notice-a4 .ef-document-motto{font-size:10px;font-style:italic;margin:4px 0 0;}
-      .ef-term-notice-a4 .ef-document-contact{font-size:10px;margin:3px 0 0;}
-      .ef-term-notice-a4 .ef-document-title{text-align:center;margin:14px 0 11px;padding:8px 5px;
-        border:1px solid #bac7d2;border-left:4px solid var(--notice-accent);background:#f4f7fa;}
-      .ef-term-notice-a4 .ef-document-title h2{font-size:16px;margin:0 0 2px;font-weight:900;text-transform:uppercase;}
-      .ef-term-notice-a4 .ef-document-title p{margin:0;color:#475569;font-size:10px;}
-      .ef-term-notice-a4 .ef-document-info{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
-        border:1px solid #c5cfd9;margin:0 0 13px;}
-      .ef-term-notice-a4 .ef-document-info>div{padding:7px 9px;border-right:1px solid #c5cfd9;min-width:0;}
-      .ef-term-notice-a4 .ef-document-info>div:last-child{border:0;}
-      .ef-term-notice-a4 .ef-document-info small{display:block;text-transform:uppercase;font-size:9px;
-        color:#64748b;font-weight:850;letter-spacing:.2px;}
-      .ef-term-notice-a4 .ef-document-info b{display:block;font-size:11px;overflow-wrap:anywhere;}
-      .ef-term-notice-a4 .ef-notice-term-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-        gap:12px;align-items:start;}
-      .ef-term-notice-a4 .ef-notice-term-panel{min-width:0;border:1px solid #b7c5d5;border-radius:5px;
-        overflow:hidden;break-inside:avoid-page;}
-      .ef-term-notice-a4 .ef-notice-term-panel>header{background:#eaf0f6;padding:9px 10px;
-        border-bottom:2px solid var(--notice-accent);}
-      .ef-term-notice-a4 .ef-notice-term-panel.next>header{background:#e9f2ee;}
-      .ef-term-notice-a4 .ef-notice-term-panel>header small{font-weight:900;font-size:9px;
-        text-transform:uppercase;letter-spacing:.65px;display:block;color:#526779;}
-      .ef-term-notice-a4 .ef-notice-term-panel>header strong{display:block;font-size:14px;
-        margin-top:3px;overflow-wrap:anywhere;}
-      .ef-term-notice-a4 .ef-notice-term-body{padding:10px;display:grid;gap:9px;}
-      .ef-term-notice-a4 .ef-notice-section-heading{font-size:11px;font-weight:900;color:#243b53;
-        text-transform:uppercase;margin:0 0 5px;letter-spacing:.1px;}
-      .ef-term-notice-a4 .ef-notice-table{width:100%;border-collapse:collapse;table-layout:fixed;}
-      .ef-term-notice-a4 .ef-notice-table td,.ef-term-notice-a4 .ef-notice-table th{
-        text-align:left;font-size:10px;border:1px solid #bac7d4;padding:6px;overflow-wrap:anywhere;vertical-align:top;}
-      .ef-term-notice-a4 .ef-notice-table th{font-size:9px;background:#f1f5f9;font-weight:850;}
-      .ef-term-notice-a4 .ef-notice-table td:last-child,.ef-term-notice-a4 .ef-notice-table th:last-child{
-        text-align:right;width:38%;font-variant-numeric:tabular-nums;}
-      .ef-term-notice-a4 .ef-notice-total{display:flex;justify-content:space-between;gap:6px;
-        align-items:baseline;padding:7px;background:#f0f4f8;font-size:10px;font-weight:850;}
-      .ef-term-notice-a4 .ef-notice-total strong{text-align:right;}
-      .ef-term-notice-a4 .ef-notice-muted{color:#64748b;font-size:10px;margin:4px 0;}
-      .ef-term-notice-a4 .ef-notice-balance{border:1px solid #c5d1dc;background:#f5f8fb;
-        padding:8px;font-size:10px;display:flex;justify-content:space-between;gap:6px;}
-      .ef-term-notice-a4 .ef-notice-balance b{white-space:nowrap;}
-      .ef-term-notice-a4 .ef-notice-supplies{list-style:none;padding:0;margin:0;}
-      .ef-term-notice-a4 .ef-notice-supplies li{display:flex;justify-content:space-between;
-        align-items:flex-start;gap:6px;border-bottom:1px solid #e2e8ef;padding:6px 0;font-size:10px;}
-      .ef-term-notice-a4 .ef-notice-supplies li span{overflow-wrap:anywhere;min-width:0;}
-      .ef-term-notice-a4 .ef-notice-supplies li b{flex:0 0 auto;font-size:9.5px;white-space:nowrap;}
-      .ef-term-notice-a4 .ef-notice-supplies small{display:block;font-size:9px;color:#64748b;margin-top:2px;}
-      .ef-term-notice-a4 .ef-notice-instructions{border-top:1px solid #d7e0e8;
-        padding-top:7px;font-size:10px;overflow-wrap:anywhere;}
-      .ef-term-notice-a4 .ef-notice-instructions p{margin:3px 0 0;white-space:pre-wrap;}
-      .ef-term-notice-a4 .ef-notice-disclaimer{font-size:10px;margin:13px 0 0;color:#536477;}
-      .ef-term-notice-a4 .ef-doc-footer{margin-top:22px;padding-top:8px;border-top:1px solid #94a3b8;
-        display:flex;justify-content:space-between;font-size:10px;color:#475569;gap:12px;}
-      /* Layout hierarchy: compact current term, then full-width prominent next term. */
-      .ef-term-notice-a4 .ef-notice-term-grid{
-        display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current{
-        background:#fafbfd;border:1px solid #d9e0e8;border-radius:5px;
-        color:#475569;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current>header{
-        background:#f3f6f9;border-bottom:1px solid #d9e0e8;
-        padding:6px 10px;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current>header small{
-        font-size:8.5px;letter-spacing:.4px;color:#64748b;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current>header strong{
-        font-size:11px;margin:0;color:#475569;font-weight:750;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-term-body{
-        display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;
-        padding:8px 10px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-section-heading{
-        font-size:9px;font-weight:750;color:#64748b;margin-bottom:4px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table th,
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table td{
-        font-size:8.5px;padding:3px 5px;border-color:#d5dde5;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-table th{
-        font-size:8px;background:#f4f6f8;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-total{
-        font-size:9px;padding:5px;background:#f0f3f7;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies li{
-        padding:4px 0;font-size:8.5px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies li b,
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-supplies small{
-        font-size:8px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-balance,
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-instructions{
-        font-size:9px;grid-column:1 / -1;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-muted{font-size:9px;}
-      /* The upcoming term is the main notice: larger, bolder and full-width. */
-      .ef-term-notice-a4 .ef-notice-term-panel.next{
-        background:#fff;border:2px solid var(--notice-accent,#1e4f83);
-        border-radius:7px;box-shadow:0 2px 8px rgba(19,45,76,.06);
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next>header{
-        background:#e8f0f9;border-bottom:2px solid var(--notice-accent,#1e4f83);
-        border-left:5px solid var(--notice-accent,#1e4f83);padding:12px 14px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next>header small{
-        font-size:10px;color:#285277;letter-spacing:.85px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next>header strong{
-        font-size:19px;line-height:1.15;font-weight:950;margin-top:5px;color:#142b44;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-term-body{
-        display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-        gap:14px 18px;padding:15px 14px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-section-heading{
-        font-size:12px;color:#18324d;margin-bottom:8px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-table th,
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-table td{
-        font-size:11px;padding:7px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-total{
-        font-size:12px;padding:9px;background:#eaf2fa;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-total strong{
-        font-size:14px;color:#132f49;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-supplies li{
-        font-size:11px;padding:8px 0;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-supplies li b{font-size:10.5px;}
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-instructions{
-        grid-column:1 / -1;font-size:11px;border-top:2px solid #d4e3f0;
-        background:#f5f9fe;padding:9px 10px;
-      }
-      .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-muted{font-size:11px;}
-      @media (max-width:560px){
-        .ef-term-notice-a4 .ef-notice-term-panel.current .ef-notice-term-body,
-        .ef-term-notice-a4 .ef-notice-term-panel.next .ef-notice-term-body{
-          grid-template-columns:minmax(0,1fr);
+  const currentStructure = academicStructure?.trim() || "Not specified";
+  const currentPeriod = academicPeriod?.trim() || "Not specified";
+  const upcomingStructure = nextAcademicStructure?.trim() || "Not configured";
+  const upcomingPeriod = nextAcademicPeriod?.trim() || "Not configured";
+  const hasUpcomingPeriod = Boolean(nextAcademicPeriod?.trim());
+
+  // Only period-specific NEXT-term fee data contributes to next-term fees.
+  const nextFeeTotal = nextFees.reduce(
+    (total, item) => total + nonNegativeAmount(item.amount),
+    0,
+  );
+  const hasNextFees = nextFees.length > 0;
+  const nextCurrency = getFinanceCurrency(nextCurrencyCode).code;
+  const currentCurrency = getFinanceCurrency(currencyCode).code;
+  const moneyNext = (amount: number) =>
+    formatFinanceMoney(amount, nextCurrencyCode);
+  const moneyCurrent = (amount: number) =>
+    formatFinanceMoney(amount, currencyCode);
+
+  // Undefined is different from zero: it means no balance was supplied.
+  const hasRecordedBalance =
+    studentBalance !== undefined &&
+    studentBalance !== null &&
+    Number.isFinite(Number(studentBalance));
+  const currentArrears = hasRecordedBalance
+    ? nonNegativeAmount(studentBalance)
+    : 0;
+  const currenciesMatch = nextCurrency === currentCurrency;
+  const canShowCombinedTotal =
+    hasNextFees && hasRecordedBalance && currenciesMatch;
+  const hasNextNoticeDetails = Boolean(
+    nextPeriodConfigured ||
+      nextFees.length ||
+      nextRequirements.length ||
+      nextDueDate ||
+      nextNotice,
+  );
+  const showNextNotice = hasUpcomingPeriod && hasNextNoticeDetails;
+
+  return (
+    <article
+      className="ef-print-sheet ef-term-notice-a4"
+      data-a4-paper="portrait"
+      style={{ "--notice-accent": primaryColor } as React.CSSProperties}
+    >
+      <style>{`
+        .ef-term-notice-a4 {
+          width:100%;min-height:265mm;padding:0;box-sizing:border-box;
+          color:#142238;background:#fff;font:11px/1.43 Arial,Helvetica,sans-serif;
+          overflow:visible;
         }
-      }
-      @media print{
-        @page{size:A4 portrait;margin:11mm;}
-        .ef-term-notice-a4{width:100%!important;min-width:0!important;min-height:0!important;
-          padding:0!important;margin:0!important;border:0!important;box-shadow:none!important;
-          break-after:page;page-break-after:always;}
-        .ef-term-notice-a4 .ef-notice-term-panel{break-inside:avoid-page;}
-        .ef-term-notice-a4 .ef-notice-table thead{display:table-header-group;}
-        .ef-term-notice-a4 .ef-notice-table tr{break-inside:avoid-page;}
-      }
-    `}</style>
-    <header className="ef-document-head">
-      <div>{schoolLogo ? <img className="ef-document-logo" src={schoolLogo} alt="School crest" /> :
-        <div className="ef-document-logo-fallback">SCHOOL<br/>CREST</div>}</div>
-      <div style={{textAlign:"center"}}>
-        <h1 className="ef-document-school">{schoolName}</h1>
-        {schoolMotto && <p className="ef-document-motto">{schoolMotto}</p>}
-        {branchName && <p className="ef-document-contact" style={{fontWeight:800}}>{branchName}</p>}
-        {(schoolAddress || schoolPhone) && <p className="ef-document-contact">
-          {[schoolAddress,schoolPhone ? `Tel: ${schoolPhone}` : ""].filter(Boolean).join(" • ")}</p>}
+        .ef-term-notice-a4 * {box-sizing:border-box;}
+        .ef-term-notice-a4 .ef-document-head {
+          display:grid;grid-template-columns:76px minmax(0,1fr) 76px;
+          gap:12px;align-items:center;padding:0 0 11px;
+          border-bottom:2px solid #193655;
+        }
+        .ef-term-notice-a4 .ef-document-logo {
+          width:70px;height:70px;object-fit:contain;
+        }
+        .ef-term-notice-a4 .ef-document-logo-fallback {
+          width:70px;height:70px;display:grid;place-items:center;
+          text-align:center;font-size:10px;border:1px solid #98a8bc;
+        }
+        .ef-term-notice-a4 .ef-document-school {
+          margin:0;font-size:20px;line-height:1.12;font-weight:900;
+          text-transform:uppercase;overflow-wrap:anywhere;
+        }
+        .ef-term-notice-a4 .ef-document-motto {
+          margin:4px 0 0;font-size:10px;font-style:italic;
+        }
+        .ef-term-notice-a4 .ef-document-contact {
+          margin:3px 0 0;font-size:10px;overflow-wrap:anywhere;
+        }
+
+        /* Both academic structures and periods sit directly below the title. */
+        .ef-term-notice-a4 .ef-document-title {
+          margin:13px 0 11px;border:1px solid #bac7d2;
+          border-left:4px solid var(--notice-accent,#1e4f83);
+          background:#f6f8fa;
+        }
+        .ef-term-notice-a4 .ef-document-title h2 {
+          margin:0;padding:10px 10px 8px;text-align:center;
+          font-size:17px;line-height:1.2;font-weight:900;
+          letter-spacing:.3px;text-transform:uppercase;
+        }
+        .ef-term-notice-a4 .ef-title-periods {
+          display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+          border-top:1px solid #c6d0db;
+        }
+        .ef-term-notice-a4 .ef-title-period {
+          min-width:0;padding:8px 12px 9px;
+        }
+        .ef-term-notice-a4 .ef-title-period.current {
+          border-right:1px solid #c6d0db;background:#f5f7f9;
+        }
+        .ef-term-notice-a4 .ef-title-period.next {
+          background:#eaf2fa;border-top:2px solid var(--notice-accent,#1e4f83);
+          padding-top:6px;
+        }
+        .ef-term-notice-a4 .ef-title-period-title {
+          display:block;margin-bottom:5px;color:#5e6c7d;
+          font-size:9px;font-weight:900;letter-spacing:.7px;
+          text-transform:uppercase;
+        }
+        .ef-term-notice-a4 .ef-title-period.next .ef-title-period-title {
+          color:var(--notice-accent,#1e4f83);font-size:10px;
+        }
+        .ef-term-notice-a4 .ef-period-field {margin-top:3px;min-width:0;}
+        .ef-term-notice-a4 .ef-period-field small {
+          display:block;color:#66778a;font-size:8.5px;font-weight:750;
+          text-transform:uppercase;letter-spacing:.2px;
+        }
+        .ef-term-notice-a4 .ef-period-field strong {
+          display:block;color:#445468;font-size:11px;font-weight:750;
+          line-height:1.25;overflow-wrap:anywhere;
+        }
+        .ef-term-notice-a4 .ef-title-period.next .ef-period-field strong {
+          color:#18324d;font-size:12px;font-weight:900;
+        }
+
+        .ef-term-notice-a4 .ef-document-info {
+          display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+          margin-bottom:13px;border:1px solid #c5cfd9;
+        }
+        .ef-term-notice-a4 .ef-document-info>div {
+          min-width:0;padding:7px 9px;border-right:1px solid #c5cfd9;
+        }
+        .ef-term-notice-a4 .ef-document-info>div:last-child {border-right:0;}
+        .ef-term-notice-a4 .ef-document-info small {
+          display:block;color:#64748b;font-size:9px;font-weight:850;
+          letter-spacing:.3px;text-transform:uppercase;
+        }
+        .ef-term-notice-a4 .ef-document-info b {
+          display:block;font-size:11.5px;overflow-wrap:anywhere;
+        }
+
+        /* Original-style full-width sections, not two fee/term panels. */
+        .ef-term-notice-a4 .ef-doc-section {margin-top:15px;min-width:0;}
+        .ef-term-notice-a4 .ef-doc-section h3 {
+          margin:0 0 7px;color:#182d47;font-size:13.5px;
+          font-weight:900;text-transform:uppercase;break-after:avoid-page;
+        }
+        .ef-term-notice-a4 .ef-doc-table {
+          width:100%;border-collapse:collapse;table-layout:fixed;
+        }
+        .ef-term-notice-a4 .ef-doc-table th,
+        .ef-term-notice-a4 .ef-doc-table td {
+          padding:8px 9px;border:1px solid #a9b6c5;
+          font-size:11.5px;text-align:left;vertical-align:top;
+          overflow-wrap:anywhere;
+        }
+        .ef-term-notice-a4 .ef-doc-table th {
+          background:#e9eff5;color:#1b3148;font-size:11px;font-weight:900;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-doc-number {
+          width:32%;text-align:right;font-variant-numeric:tabular-nums;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-doc-total {
+          background:#f1f5f9;font-weight:850;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-doc-arrears {
+          background:#fcfcfd;color:#35465c;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-doc-payable {
+          background:#eaf2fa;font-size:13px;font-weight:900;
+          border-top:2px solid var(--notice-accent,#1e4f83);
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-doc-payable .ef-doc-number {
+          color:#173d61;font-size:14px;
+        }
+        .ef-term-notice-a4 .ef-doc-muted {
+          margin:7px 0 0;color:#5f6f83;font-size:10px;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-material-item {width:36%;}
+        .ef-term-notice-a4 .ef-doc-table .ef-material-qty {
+          width:18%;white-space:normal;
+        }
+        .ef-term-notice-a4 .ef-doc-table .ef-material-instructions {width:46%;}
+        .ef-term-notice-a4 .ef-doc-optional {
+          display:block;margin-top:2px;color:#607187;font-size:10px;
+        }
+        .ef-term-notice-a4 .ef-doc-note {
+          margin-top:15px;padding:10px 12px;border:1px solid #bac7d2;
+          border-left:3px solid var(--notice-accent,#1e4f83);
+          background:#f9fbfd;font-size:11px;overflow-wrap:anywhere;
+        }
+        .ef-term-notice-a4 .ef-doc-note strong {
+          display:block;margin-bottom:4px;font-size:11.5px;
+        }
+        .ef-term-notice-a4 .ef-doc-note p {
+          margin:4px 0 0;white-space:pre-wrap;
+        }
+        .ef-term-notice-a4 .ef-doc-status {
+          margin:16px 0;padding:14px;border:1px solid #c3ceda;
+          background:#f8fafc;color:#43566b;font-size:11.5px;
+        }
+        .ef-term-notice-a4 .ef-doc-footer {
+          display:flex;justify-content:space-between;gap:12px;
+          margin-top:23px;padding-top:8px;border-top:1px solid #94a3b8;
+          font-size:10px;color:#475569;
+        }
+        @media (max-width:560px) and (not print) {
+          .ef-term-notice-a4 .ef-document-head {
+            grid-template-columns:52px minmax(0,1fr) 0;gap:8px;
+          }
+          .ef-term-notice-a4 .ef-document-logo,
+          .ef-term-notice-a4 .ef-document-logo-fallback {
+            width:49px;height:49px;
+          }
+          .ef-term-notice-a4 .ef-document-school {font-size:15px;}
+          .ef-term-notice-a4 .ef-title-period {padding-left:7px;padding-right:7px;}
+          .ef-term-notice-a4 .ef-doc-table th,
+          .ef-term-notice-a4 .ef-doc-table td {padding:6px;font-size:10px;}
+          .ef-term-notice-a4 .ef-doc-table .ef-material-qty {width:22%;}
+        }
+        @media print {
+          @page {size:A4 portrait;margin:11mm;}
+          .ef-term-notice-a4 {
+            width:100%!important;min-width:0!important;min-height:0!important;
+            padding:0!important;margin:0!important;border:0!important;
+            box-shadow:none!important;page-break-after:always;break-after:page;
+            print-color-adjust:exact;-webkit-print-color-adjust:exact;
+          }
+          .ef-term-notice-a4 .ef-title-periods,
+          .ef-term-notice-a4 .ef-document-head,
+          .ef-term-notice-a4 .ef-document-info,
+          .ef-term-notice-a4 .ef-doc-note {break-inside:avoid-page;}
+          .ef-term-notice-a4 .ef-doc-table thead {display:table-header-group;}
+          .ef-term-notice-a4 .ef-doc-table tr {break-inside:avoid-page;}
+          .ef-term-notice-a4 .ef-doc-section h3 {break-after:avoid-page;}
+        }
+      `}</style>
+
+      <header className="ef-document-head">
+        <div>
+          {schoolLogo ? (
+            <img className="ef-document-logo" src={schoolLogo} alt="School crest" />
+          ) : (
+            <div className="ef-document-logo-fallback">SCHOOL<br />CREST</div>
+          )}
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <h1 className="ef-document-school">{schoolName}</h1>
+          {schoolMotto && <p className="ef-document-motto">{schoolMotto}</p>}
+          {branchName && (
+            <p className="ef-document-contact" style={{ fontWeight: 800 }}>
+              {branchName}
+            </p>
+          )}
+          {(schoolAddress || schoolPhone) && (
+            <p className="ef-document-contact">
+              {[schoolAddress, schoolPhone ? `Tel: ${schoolPhone}` : ""]
+                .filter(Boolean)
+                .join(" â€¢ ")}
+            </p>
+          )}
+        </div>
+        <div aria-hidden="true" />
+      </header>
+
+      <div className="ef-document-title">
+        <h2>Next Term Fees &amp; Requirements</h2>
+        <div className="ef-title-periods">
+          <div className="ef-title-period current">
+            <span className="ef-title-period-title">Current Term</span>
+            <div className="ef-period-field">
+              <small>Academic Structure</small>
+              <strong>{currentStructure}</strong>
+            </div>
+            <div className="ef-period-field">
+              <small>Academic Period</small>
+              <strong>{currentPeriod}</strong>
+            </div>
+          </div>
+          <div className="ef-title-period next">
+            <span className="ef-title-period-title">Next Term</span>
+            <div className="ef-period-field">
+              <small>Academic Structure</small>
+              <strong>{upcomingStructure}</strong>
+            </div>
+            <div className="ef-period-field">
+              <small>Academic Period</small>
+              <strong>{upcomingPeriod}</strong>
+            </div>
+          </div>
+        </div>
       </div>
-      <div aria-hidden="true" />
-    </header>
-    <div className="ef-document-title"><h2>Term Fees &amp; Requirements Notice</h2>
-      <p>{academicStructure} · This term summary, followed by next term details</p></div>
-    <div className="ef-document-info">
-      <div><small>Class</small><b>{className}</b></div>
-      <div><small>Student</small><b>{studentName || "All Students"}</b></div>
-      <div><small>Admission No.</small><b>{admissionNumber || "—"}</b></div>
-    </div>
-    <div className="ef-notice-term-grid">
-      <section className="ef-notice-term-panel current" aria-label={`Current term: ${academicPeriod}`}>
-        <header><small>This Term · Current Period</small><strong>{academicPeriod}</strong></header>
-        <div className="ef-notice-term-body">
-          <section><h3 className="ef-notice-section-heading">Fees for this term</h3>
-            <SumRows items={fees} currency={currencyCode}/></section>
-          {studentBalance !== undefined && <div className="ef-notice-balance">
-            <span>Outstanding on issued invoice</span><b>{formatFinanceMoney(studentBalance,currencyCode)}</b>
-          </div>}
-          <section><h3 className="ef-notice-section-heading">Materials for this term</h3>
-            <SupplyRows items={requirements}/></section>
-          {(dueDate || notice) && <div className="ef-notice-instructions">
-            <strong>Instructions</strong>{dueDate && <p>Due: {dueDate}</p>}{notice && <p>{notice}</p>}
-          </div>}
+
+      <div className="ef-document-info">
+        <div><small>Class</small><b>{className}</b></div>
+        <div><small>Student</small><b>{studentName || "All Students"}</b></div>
+        <div><small>Admission No.</small><b>{admissionNumber || "â€”"}</b></div>
+      </div>
+
+      {!hasUpcomingPeriod ? (
+        <div className="ef-doc-status">
+          The next academic period has not been configured in the school calendar.
+          Next-term fees and requirements cannot be displayed yet.
         </div>
-      </section>
-      <section className="ef-notice-term-panel next" aria-label={`Next term: ${nextAcademicPeriod || "not configured"}`}>
-        <header><small>Next Term · Upcoming</small><strong>{nextAcademicPeriod || "Not configured"}</strong>
-          {nextAcademicStructure && nextAcademicStructure !== academicStructure && <small>{nextAcademicStructure}</small>}</header>
-        <div className="ef-notice-term-body">
-          {!nextAcademicPeriod ? <p className="ef-notice-muted">The next academic term has not yet been set up in the school calendar.</p> :
-          !nextPeriodConfigured ? <p className="ef-notice-muted">No fee notice has been prepared for {nextAcademicPeriod}. Amounts and requirements will appear here once the school enters them.</p> : <>
-            <section><h3 className="ef-notice-section-heading">Fees for next term</h3>
-              <SumRows items={nextFees} currency={nextCurrencyCode}/></section>
-            <section><h3 className="ef-notice-section-heading">Materials for next term</h3>
-              <SupplyRows items={nextRequirements}/></section>
-            {(nextDueDate || nextNotice) && <div className="ef-notice-instructions">
-              <strong>Next term instructions</strong>{nextDueDate && <p>Due: {nextDueDate}</p>}
+      ) : !showNextNotice ? (
+        <div className="ef-doc-status">
+          No next-term fee notice has been prepared for {upcomingPeriod}.
+          Fees and requirements will appear after the school enters them.
+        </div>
+      ) : (
+        <>
+          <section className="ef-doc-section">
+            <h3>A. Next Term Fees</h3>
+            <table className="ef-doc-table" aria-label="Next term fees and amount payable">
+              <thead>
+                <tr>
+                  <th>Fee Description</th>
+                  <th className="ef-doc-number">Amount ({nextCurrency})</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hasNextFees ? (
+                  nextFees.map((item, index) => (
+                    <tr key={`${item.itemKey || item.name}-${index}`}>
+                      <td>{item.name}</td>
+                      <td className="ef-doc-number">
+                        {moneyNext(nonNegativeAmount(item.amount))}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={2}>No next-term fees have been entered.</td></tr>
+                )}
+                <tr className="ef-doc-total">
+                  <td>Next Term Fees</td>
+                  <td className="ef-doc-number">
+                    {hasNextFees ? moneyNext(nextFeeTotal) : "Not entered"}
+                  </td>
+                </tr>
+                <tr className="ef-doc-arrears">
+                  <td>Outstanding Balance from Current Term (Arrears)</td>
+                  <td className="ef-doc-number">
+                    {hasRecordedBalance ? moneyCurrent(currentArrears) : "Not provided"}
+                  </td>
+                </tr>
+                {canShowCombinedTotal && (
+                  <tr className="ef-doc-payable">
+                    <td>Total Amount Payable</td>
+                    <td className="ef-doc-number">
+                      {moneyNext(nextFeeTotal + currentArrears)}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {!hasRecordedBalance && (
+              <p className="ef-doc-muted">
+                The student's current-term outstanding balance was not supplied.
+                A combined amount payable cannot be calculated.
+              </p>
+            )}
+            {hasRecordedBalance && !currenciesMatch && (
+              <p className="ef-doc-muted">
+                Current-term arrears are recorded in {currentCurrency}, while
+                next-term fees are in {nextCurrency}. The amounts are shown
+                separately and have not been added together.
+              </p>
+            )}
+          </section>
+
+          <section className="ef-doc-section">
+            <h3>B. Next Term Books, Materials &amp; Supplies</h3>
+            <table className="ef-doc-table" aria-label="Next term materials and supplies">
+              <thead>
+                <tr>
+                  <th className="ef-material-item">Item</th>
+                  <th className="ef-material-qty">Quantity</th>
+                  <th className="ef-material-instructions">Instructions / Specification</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nextRequirements.length ? (
+                  nextRequirements.map((item, index) => (
+                    <tr key={`${item.itemKey || item.name}-${index}`}>
+                      <td>
+                        {item.name}
+                        {item.required === false && (
+                          <small className="ef-doc-optional">Optional</small>
+                        )}
+                      </td>
+                      <td>{formatQuantity(item)}</td>
+                      <td>{item.instructions?.trim() || "â€”"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={3}>No next-term materials have been specified.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <p className="ef-doc-muted">
+              These are physical supplies, not additional monetary charges
+              unless they are also listed under Next Term Fees.
+            </p>
+          </section>
+
+          {(nextDueDate || nextNotice) && (
+            <div className="ef-doc-note">
+              <strong>School Instructions â€” Next Term</strong>
+              {nextDueDate && <p>Payment / materials submission due date: {nextDueDate}</p>}
               {nextNotice && <p>{nextNotice}</p>}
-            </div>}
-          </>}
-        </div>
-      </section>
-    </div>
-    <p className="ef-notice-disclaimer">Materials are physical supplies, not additional monetary fees unless listed separately as fees. Current-term balances refer to issued student invoices only.</p>
-    <footer className="ef-doc-footer"><span>Issued by School Administration · {issuedOn}</span>
-      <span>Keep this notice for your records</span></footer>
-  </article>;
+            </div>
+          )}
+        </>
+      )}
+
+      <footer className="ef-doc-footer">
+        <span>Issued by School Administration Â· {issuedOn}</span>
+        <span>Keep this notice for your records</span>
+      </footer>
+    </article>
+  );
 }

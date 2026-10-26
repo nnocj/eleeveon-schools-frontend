@@ -18,6 +18,8 @@ type Props = {
   isDeveloper: boolean; accountId: string; schoolId?: string | null; branchId?: string | null;
   membershipId?: string | null; userId?: string | null; role?: string | null;
   schoolName?: string | null; branchName?: string | null;
+  navigation?: React.ReactNode;
+  mobileNavigation?: React.ReactNode;
 };
 type DisplayAttachment = SupportAttachment & {
   encryptedSourceUrl?:string|null;
@@ -65,7 +67,7 @@ function AttachmentView({ attachment }: { attachment: DisplayAttachment }) {
   return <a className="esc-attachment" href={resolved} download={a.name}>📎 <span>{a.name}<small>{fileSize(a.sizeBytes)}</small></span> ↓</a>;
 }
 
-export default function EleeveonSupportChat({ isDeveloper, accountId, userId, schoolId, branchId, membershipId, schoolName }: Props) {
+export default function EleeveonSupportChat({ isDeveloper, accountId, userId, schoolId, branchId, membershipId, schoolName, navigation, mobileNavigation }: Props) {
   const identity = userId || "";
   const [ready, setReady] = useState(false);
   const [ownId, setOwnId] = useState("");
@@ -121,6 +123,9 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const micRef = useRef<MediaStream | null>(null);
+  // Unsent drafts stay in memory per conversation; never cache plaintext in
+  // persistent browser storage while using experimental E2EE.
+  const drafts = useRef(new Map<string, string>());
   const decryptedCache = useRef(new Map<string, DisplayMessage>());
   const objectUrls = useRef(new Set<string>());
   const [, setRefreshMark] = useState(0);
@@ -133,7 +138,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     selectedRef.current = "";
     setSelected(""); setOpened(null); setThread([]); setRendered([]); setConversations([]);
     setDevices([]); setOwnId(""); setReady(false); setDecryptedSubject({}); setReviewKeys(false);
-    decryptedCache.current.clear();
+    decryptedCache.current.clear(); drafts.current.clear();
     objectUrls.current.forEach(url => URL.revokeObjectURL(url)); objectUrls.current.clear();
   }, [accountId, identity]);
   useEffect(() => { setOnline(typeof navigator !== "undefined" && navigator.onLine); }, []);
@@ -342,8 +347,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   }, [opened, thread, devices, accountId, identity, ready, trustRevision]);
 
   const visible = useMemo(() => conversations.filter(c => {
-    // Historic plaintext support tickets were test runs; retain in DB, hide in this new inbox.
-    if (!isEncrypted(c)) return false;
+    // Display the complete server-authorized history, including earlier chats.
+    // Old messages remain as originally stored; we do not pretend they were E2EE.
     if (filter === "open" && ["resolved", "closed"].includes(c.status)) return false;
     if (filter !== "open" && filter !== "all" && c.status !== filter) return false;
     const q = search.toLowerCase().trim();
@@ -426,7 +431,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       setSelected(id);
       setNewChat(false);
       setMobileOpen(true);
-      setMessage(""); setFiles([]); setAttachMenuOpen(false); setCallOpen(false);
+      setMessage(drafts.current.get(id) || ""); setFiles([]); setAttachMenuOpen(false); setCallOpen(false);
     } catch (cause) {
       if (serial === openingRequest.current) {
         setError(cause instanceof Error ? cause.message : "Could not prepare the conversation. Try again.");
@@ -453,7 +458,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     const active = keys.filter(d => !d.revoked);
     const approved = readTrust(accountId, identity);
     if (!active.some(d => d.id === ownId)) throw new Error("Your current device is missing from the encryption directory.");
-    if (!active.some(d => d.userId !== identity)) throw new Error("No other participant has an enrolled device. Eleeveon support must first open Support to register its device.");
+    if (!active.some(d => d.userId !== identity)) throw new Error("Your message is not sent yet. Eleeveon Support needs to open the Center once to register its device. Refresh keys and retry.");
     if (active.some(d => d.id !== ownId && approved[d.id] !== d.fingerprint)) {
       setReviewKeys(true);
       throw new Error("Review and verify the participant device fingerprints before encrypting.");
@@ -461,22 +466,66 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     return active;
   }
   async function createConversation() {
-    if (!subject.trim() || !openingText.trim() || busy || !online) return;
+    if ((!subject.trim() && !openingText.trim()) || busy || !online || !ready) return;
     setBusy(true); setError("");
+    const initialSubject = subject.trim();
+    const initialText = openingText.trim();
+    const id = crypto.randomUUID();
     try {
-      const recipientKeys = await recipients();
-      const id = crypto.randomUUID();
-      const cipher = await encryptPayload(accountId, identity, id, `${id}-opening`, { subject: subject.trim(), body: openingText.trim() }, recipientKeys);
+      // Persist a PRIVATE, empty E2EE conversation first. Do not send the
+      // subject or draft plaintext to the server while recipients lack keys.
       const { conversation } = await supportApi.create({
-        conversationId: id, encrypted: true, subject: "Encrypted support conversation", body: cipher, type: category,
+        conversationId: id, encrypted: true, pending: true,
+        subject: "Secure support conversation", body: "", type: category,
         schoolId: schoolId || undefined, branchId: branchId || undefined,
         membershipId: membershipId || undefined, name: schoolName || undefined,
       });
+      let delivered = !initialText && !initialSubject;
+      let deliveryProblem = "";
+      if (!delivered) {
+        try {
+          const keyResult = await supportApi.keys(conversation.id);
+          const active = (keyResult.devices || []).filter(d => !d.revoked);
+          const trust = readTrust(accountId, identity);
+          if (!active.some(d => d.id === ownId)) {
+            throw new Error("Your device key is not yet available. Refresh encryption keys.");
+          }
+          if (!active.some(d => d.userId !== identity)) {
+            throw new Error("Eleeveon Support needs to open the Center once to register its encryption device.");
+          }
+          if (active.some(d => d.id !== ownId && trust[d.id] !== d.fingerprint)) {
+            throw new Error("Verify the other participant's device fingerprints before sending.");
+          }
+          const firstMessageId = crypto.randomUUID();
+          const cipher = await encryptPayload(accountId, identity, conversation.id, firstMessageId,
+            { subject: initialSubject || undefined, body: initialText }, active);
+          await supportApi.send(conversation.id, cipher, undefined, firstMessageId, true);
+          delivered = true;
+        } catch (cause) {
+          deliveryProblem = cause instanceof Error ? cause.message : "The recipient is not ready for encrypted messages.";
+        }
+      }
+      await refresh(true);
+      await openConversation(conversation.id);
+      // Keep an unsent opening draft in the composer, not on the server.
+      // The user can send after refreshing/verifying recipient device keys.
+      if (!delivered) {
+        const draft = initialText || (initialSubject ? `Subject: ${initialSubject}` : "");
+        drafts.current.set(conversation.id, draft);
+        setMessage(draft);
+        setError(`Conversation saved. Initial message not sent: ${deliveryProblem}`);
+      } else {
+        drafts.current.delete(conversation.id);
+        setMessage("");
+        setError("");
+      }
+      if (initialSubject) setDecryptedSubject(old => ({ ...old, [conversation.id]: initialSubject }));
       setNewChat(false); setSubject(""); setOpeningText("");
-      await openConversation(conversation.id); await refresh(true);
       setInfo("Saved");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create conversation."); }
-    finally { setBusy(false); }
+    } catch (cause) {
+      // A failed create is NOT reported as saved. Draft fields stay intact.
+      setError(cause instanceof Error ? cause.message : "Could not create conversation. Nothing was saved.");
+    } finally { setBusy(false); }
   }
   function addFiles(next: FileList | File[]) {
     const choices = Array.from(next);
@@ -510,7 +559,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         await supportApi.send(selected, payload, safeFile, mid, true,uploadId);
         completed += 1;
       }
-      setFiles([]); setMessage(""); setInfo("Saved");
+      setFiles([]); drafts.current.delete(selected); setMessage(""); setInfo("Saved");
       await refresh();
     } catch (cause) {
       if (completed > 0) {
@@ -552,7 +601,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       .esc * {box-sizing:border-box}.esc button,.esc input,.esc textarea,.esc select{font:inherit;color:inherit}.esc button{cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .15s ease}.esc button:focus-visible,.esc textarea:focus-visible,.esc input:focus-visible,.esc select:focus-visible{outline:2px solid var(--esc-primary);outline-offset:2px}.esc button:disabled{opacity:.5;cursor:not-allowed}
       .esc-layout{display:grid;grid-template-columns:minmax(220px,29%) minmax(0,1fr);height:100%;min-height:0;min-width:0;border:1px solid var(--esc-line);border-radius:19px;overflow:hidden;background:var(--esc-surface);box-shadow:0 12px 36px rgba(15,50,60,.075)}
       .esc-side{min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--esc-line);background:var(--esc-surface)}
-      .esc-side-title{display:flex;align-items:center;justify-content:space-between;padding:13px 13px 11px;gap:9px}.esc-side-title strong{font-size:13px;letter-spacing:-.2px}.esc-actions{display:flex;gap:7px}
+      .esc-side-title{display:flex;align-items:center;justify-content:space-between;padding:13px 13px 11px;gap:9px;min-width:0}.esc-side-title.has-center-tabs{display:block;min-height:49px;padding:7px 9px 5px}.esc-side-title strong{font-size:13px;letter-spacing:-.2px}.esc-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.esc-actions button.primary{min-height:37px;padding:9px 8px;font-size:11px}.esc-search-row{display:flex;align-items:center;gap:5px;padding:0 8px 7px;min-width:0}.esc-search-row .esc-search{min-width:0;flex:1;width:auto;margin:0;padding:10px 9px;height:38px}.esc-mobile-nav-in-chat{display:none}
       .esc button.primary,.esc button.secondary,.esc button.icon{border-radius:12px;padding:9px 10px;border:1px solid var(--esc-line);background:var(--esc-surface);display:inline-flex;align-items:center;justify-content:center;gap:5px;line-height:1.1;white-space:nowrap}
       .esc button.primary{color:#fff;background:var(--esc-primary);border-color:transparent;font-weight:720;box-shadow:0 3px 10px color-mix(in srgb,var(--esc-primary) 20%,transparent)}.esc button.primary:hover{filter:brightness(1.08)}.esc button.icon{width:39px;height:39px;padding:0;border-radius:13px;background:var(--esc-mute);flex:0 0 auto;font-size:18px}.esc button.icon:hover{background:color-mix(in srgb,var(--esc-primary) 13%,var(--esc-surface))}
       .esc-search,.esc-filter{margin:0 11px 8px;padding:10px 12px;border:1px solid var(--esc-line);border-radius:11px;background:var(--esc-surface);width:calc(100% - 22px)}.esc-search{margin-top:2px}.esc-filter{margin-bottom:7px}
@@ -572,45 +621,61 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       .esc-attach-wrap{position:relative;flex:0 0 auto}.eleeveon-attach-popover{position:fixed;z-index:2147480000;display:grid;gap:3px;max-height:calc(100dvh - 24px);overflow-y:auto;padding:10px;border-radius:18px;background:var(--surface,var(--card-bg,#fff));color:var(--text,#233241);font-size:13px;border:1px solid var(--border,rgba(120,140,155,.24));box-shadow:0 18px 52px rgba(16,41,54,.23)}.eleeveon-attach-popover strong{font-size:11px;padding:7px 9px;color:var(--text,#233241);opacity:.7}.eleeveon-attach-popover button{display:flex;align-items:center;gap:12px;min-height:44px;width:100%;padding:10px 12px;text-align:left;border:0;border-radius:12px;background:transparent;cursor:pointer;color:inherit;font:inherit}.eleeveon-attach-popover button:hover,.eleeveon-attach-popover button:focus-visible{background:color-mix(in srgb,var(--dashboard-primary,#137d79) 10%,var(--surface,#fff))}.eleeveon-attach-popover .icon-mark{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;font-size:17px;background:color-mix(in srgb,var(--dashboard-primary,#137d79) 11%,var(--surface,#fff))}
       .esc-composer-area{flex:0 0 auto;z-index:3;position:relative;margin-top:auto;background:var(--esc-surface);box-shadow:0 -8px 24px rgba(25,70,75,.05)}.esc-composer{display:flex;align-items:flex-end;gap:7px;padding:11px max(12px,2%);min-height:66px;border-top:1px solid var(--esc-line)}.esc-composer textarea{flex:1;min-width:0;height:44px;min-height:44px;resize:none;max-height:116px;overflow-y:auto;background:color-mix(in srgb,var(--esc-surface) 96%,var(--esc-primary));border-radius:15px;border:1px solid var(--esc-line);padding:12px 13px;line-height:1.45}.esc-composer textarea:focus{outline:2px solid color-mix(in srgb,var(--esc-primary) 36%,transparent);outline-offset:0}.esc-files{display:flex;gap:7px;flex-wrap:wrap;padding:8px 13px 2px;max-height:90px;overflow:auto}.esc-files button{border:1px solid var(--esc-line);border-radius:999px;padding:7px 10px;background:var(--esc-mute);max-width:100%;text-overflow:ellipsis;overflow:hidden}.esc-recording{padding:8px 16px;display:flex;align-items:center;gap:8px;color:var(--esc-primary);font-size:11px;font-weight:700}.esc-recording-dot{width:9px;height:9px;background:#e64e65;border-radius:50%;animation:esc-pulse 1s infinite alternate}@keyframes esc-pulse{to{opacity:.3}}
       .esc-banner{font-size:11px;padding:9px 12px;background:var(--esc-surface);border-bottom:1px solid var(--esc-line)}.esc-banner.warn{background:color-mix(in srgb,#e7b650 10%,var(--esc-surface))}.esc-banner.error{color:#b91c1c}.esc-banner.success{color:var(--esc-primary)}.esc-banner button{margin-left:9px;text-decoration:underline;border:0;background:transparent}.esc-form{padding:clamp(14px,2vw,24px);display:grid;gap:13px;overflow:auto}.esc-form label{display:grid;gap:6px;font-weight:600}.esc-form p{line-height:1.5;opacity:.74;margin:0}.esc-form input,.esc-form textarea,.esc-form select{border:1px solid var(--esc-line);background:var(--esc-surface);border-radius:12px;padding:11px;width:100%}.esc-empty{margin:auto;padding:23px;text-align:center;display:grid;gap:11px;justify-items:center;max-width:380px}.esc-empty strong{font-size:15px}.esc-empty p,.esc-empty small{opacity:.7;line-height:1.6}.esc-back{display:none}
-      .esc-key-panel{background:var(--esc-surface);padding:15px;overflow:auto;max-height:52%;border-bottom:2px solid var(--esc-primary)}.esc-key-item{margin:9px 0;padding:10px;background:var(--esc-mute);border-radius:9px}.esc-fingerprint{word-break:break-word;letter-spacing:.7px;font-family:monospace;font-size:11px}.esc-key-buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+      .esc-key-panel{background:var(--esc-surface);padding:15px;overflow:auto;max-height:52%;border-bottom:2px solid var(--esc-primary)}.esc-key-item{margin:9px 0;padding:10px;background:var(--esc-mute);border-radius:9px}
+      .esc-pending-status{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:7px 12px;font-size:11px;background:color-mix(in srgb,var(--esc-primary) 7%,var(--esc-surface));color:var(--esc-text);border-top:1px solid var(--esc-line)}
+      .esc-pending-status span{flex:1;min-width:150px}
+      .esc-pending-status button{padding:5px 8px;border:1px solid var(--esc-line);border-radius:8px;background:var(--esc-surface);font-size:11px;cursor:pointer}.esc-fingerprint{word-break:break-word;letter-spacing:.7px;font-family:monospace;font-size:11px}.esc-key-buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
       @media(max-width:980px) and (min-width:681px){.esc-layout{grid-template-columns:minmax(190px,34%) minmax(0,1fr)}.esc-chat-head{gap:5px;padding:8px}.esc-chat-head select{max-width:92px}.esc-bubble{max-width:94%}}
-      @media(max-width:680px){.esc{height:100%;min-height:0}.esc-layout{display:block;height:100%;min-height:0;border-radius:14px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:inline-flex}.esc-bubble{max-width:94%}.esc-body{padding:11px 10px 16px}.esc-chat-head{min-height:58px;padding:8px;gap:6px}.esc-chat-head select{max-width:96px}.esc-chat-head .esc-avatar{height:36px;width:36px}.esc-composer{padding:9px 8px;gap:5px;min-height:59px}.esc button.icon{height:38px;width:38px}.esc-composer textarea{font-size:16px}.esc-date{margin:10px auto}}
+      @media(max-width:680px){.esc{height:100%;min-height:0}.esc-layout{display:block;height:100%;min-height:0;border-radius:14px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:inline-flex}.esc-mobile-nav-in-chat{display:flex;align-items:center;flex:0 0 auto;max-width:77px}.esc-mobile-nav-in-chat select{width:100%;max-width:77px;min-width:52px;padding:7px 3px;font-size:11px}.esc-bubble{max-width:94%}.esc-body{padding:11px 10px 16px}.esc-chat-head{min-height:56px;padding:7px;gap:5px}.esc-chat-head select{max-width:90px}.esc-chat-head .esc-avatar{display:none}.esc-chat-info strong{font-size:11px}.esc-chat-info small{font-size:9px}.esc-composer{padding:9px 8px;gap:5px;min-height:59px}.esc button.icon{height:36px;width:36px}.esc-composer textarea{font-size:16px}.esc-date{margin:10px auto}}
       @media(prefers-reduced-motion:reduce){.esc *, .esc *::before, .esc *::after{animation:none!important;transition:none!important}}
     `}</style>
     <div ref={layoutRef} className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`} style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}>
       <aside className="esc-side">
-        <div className="esc-side-title"><strong>{isDeveloper ? "Schools · Support" : "Eleeveon Support"}</strong><div className="esc-actions"><button className="icon" title="Refresh" onClick={() => void refresh()} disabled={loading}>↻</button><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>+ New</button></div></div>
-        <input className="esc-search" placeholder="Search conversations" value={search} onChange={e => setSearch(e.target.value)}/>
+        <div className={`esc-side-title ${navigation ? "has-center-tabs" : ""}`}>
+          {navigation ?? <strong>{isDeveloper ? "Schools · Support" : "Eleeveon Support"}</strong>}
+        </div>
+        <div className="esc-search-row">
+          <input className="esc-search" aria-label="Search conversations" placeholder="Search conversations" value={search} onChange={e => setSearch(e.target.value)}/>
+          <div className="esc-actions"><button className="icon" title="Refresh conversations" aria-label="Refresh conversations" onClick={() => void refresh()} disabled={loading}>↻</button><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>+ New</button></div>
+        </div>
         <select className="esc-filter" value={filter} aria-label="Filter conversations" onChange={e => setFilter(e.target.value)}><option value="all">All conversations</option><option value="open">Open</option>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>
         <div className="esc-inbox">{visible.map(c => <button key={c.id} className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => void openConversation(c.id)}>
-          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || (isEncrypted(c) ? "🔒 Encrypted conversation" : c.subject))}</strong><small>{decryptedSubject[c.id] || "Tap to open conversation"}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
-          {!visible.length && <div className="esc-empty">No conversations yet.</div>}</div>
+          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || c.subject || "Support conversation")}</strong><small>{decryptedSubject[c.id] || (isEncrypted(c) ? "Private conversation" : "Earlier support conversation")}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
+          {!visible.length && <div className="esc-empty">{loading ? "Loading conversations…" : conversations.length ? "No conversations match these filters." : "No conversations yet."}</div>}</div>
 
       </aside>
       <div className="esc-chat">
         {openingId && selected && <div className="esc-opening" role="status" aria-live="polite">Preparing conversation…</div>}
         {newChat ? <>
-          <div className="esc-chat-head"><button className="icon esc-back" onClick={() => { setNewChat(false); setMobileOpen(false); }}>←</button><div className="esc-chat-info"><strong>New encrypted conversation</strong><small>Only enrolled participant devices can decrypt</small></div><button className="secondary" onClick={() => setReviewKeys(true)}>🔐 Keys</button></div>
+          <div className="esc-chat-head"><button className="icon esc-back" onClick={() => { setNewChat(false); setMobileOpen(false); }}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-chat-info"><strong>New conversation</strong><small>Private messaging</small></div><button className="secondary" onClick={() => setReviewKeys(true)}>🔐 Keys</button></div>
+          {reviewKeys && !isDeveloper && <div className="esc-key-panel" role="region" aria-label="Recipient device verification">
+            <strong>Recipient devices</strong>
+            <p>New encrypted messages require a recipient device. Check fingerprints with the recipient through another trusted method before approving.</p>
+            {!knownActive.some(d => d.userId !== identity) && <p>Eleeveon Support has not registered a device yet. They must open Eleeveon Center once.</p>}
+            {knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : "Other participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "Verified on this browser" : "Not verified"}</small></div>)}
+            <div className="esc-key-buttons"><button className="secondary" onClick={() => void loadKeys()}>Refresh devices</button><button className="primary" disabled={!knownActive.some(d => d.userId !== identity)} onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); }}>I verified these fingerprints</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div>
+          </div>}
           {isDeveloper ? <div className="esc-form">
             <strong>Start a conversation</strong>
-            <p>Choose the intended account, user or branch role. The invitation carries no plaintext chat content.</p>
+            <p>Choose an account, app user, or school role to begin a private conversation.</p>
             <label>Account<select value={targetAccount} onChange={e=>{setTargetAccount(e.target.value);setTargetUser("");setTargetRole("");}}><option value="">Choose account…</option>{directory.accounts.map(a=><option key={a.id} value={a.id}>{a.name} · {a.email||a.id}</option>)}</select></label>
             <label>Recipients<select value={targetScope} onChange={e=>setTargetScope(e.target.value as "account"|"user"|"role")}><option value="account">All active account users</option><option value="user">Specific app user</option><option value="role">Role in a school or branch</option></select></label>
             {targetScope==="user"&&<label>App user<select value={targetUser} onChange={e=>setTargetUser(e.target.value)}><option value="">Choose user…</option>{directory.users.map(u=><option value={u.id} key={u.id}>{u.fullName} · {u.email}</option>)}</select></label>}
             {targetScope==="role"&&<><label>Role<select value={targetRole} onChange={e=>setTargetRole(e.target.value)}><option value="">Choose role…</option>{[...new Set(directory.memberships.map(m=>m.role))].map(role=><option key={role} value={role}>{readable(role)}</option>)}</select></label><label>School ID (optional)<select value={targetSchool} onChange={e=>setTargetSchool(e.target.value)}><option value="">All schools</option>{[...new Set(directory.memberships.map(m=>m.schoolId).filter((v):v is string=>!!v))].map(id=><option value={id} key={id}>{id}</option>)}</select></label><label>Branch ID (optional)<select value={targetBranch} onChange={e=>setTargetBranch(e.target.value)}><option value="">All branches</option>{[...new Set(directory.memberships.filter(m=>!targetSchool||m.schoolId===targetSchool).map(m=>m.branchId).filter((v):v is string=>!!v))].map(id=><option value={id} key={id}>{id}</option>)}</select></label></>}
             <button className="primary" disabled={!targetAccount||busy||(targetScope==="user"&&!targetUser)||(targetScope==="role"&&!targetRole)} onClick={()=>void startOutreach()}>{busy?"Creating…":"Open secure conversation"}</button>
-          </div> : <div className="esc-form"><label>Category<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Subject<input maxLength={180} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What would you like to discuss?"/></label><label>Message<textarea rows={6} value={openingText} onChange={e => setOpeningText(e.target.value)} placeholder="Explain your issue privately…"/></label><div className="esc-key-buttons"><button className="secondary" onClick={() => setNewChat(false)}>Cancel</button><button className="primary" disabled={!ready || !subject.trim() || !openingText.trim() || busy || !online} onClick={() => void createConversation()}>{busy ? "Encrypting…" : "Start encrypted chat"}</button></div></div>}
+          </div> : <div className="esc-form"><label>Category<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Subject<input maxLength={180} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What would you like to discuss?"/></label><label>Message<textarea rows={6} value={openingText} onChange={e => setOpeningText(e.target.value)} placeholder="Explain your issue privately…"/></label><div className="esc-key-buttons"><button className="secondary" onClick={() => setNewChat(false)}>Cancel</button><button className="primary" disabled={!ready || (!subject.trim() && !openingText.trim()) || busy || !online} onClick={() => void createConversation()}>{busy ? "Creating…" : "Start conversation"}</button></div></div>}
         </> : selected && opened ? <>
-          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button><div className="esc-avatar">🔒</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon" title={changedDevices.length ? "Verify devices before sending" : "Device security"} onClick={() => setReviewKeys(v => !v)}>{changedDevices.length ? "🔐•" : "🔐"}</button>{isDeveloper && <select value={opened.status} disabled={busy} onChange={e => void updateStatus(e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>}</div>
+          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-avatar">{isEncrypted(opened) ? "🔒" : "💬"}</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon" title={changedDevices.length ? "Verify devices before sending" : "Device security"} onClick={() => setReviewKeys(v => !v)}>{changedDevices.length ? "🔐•" : "🔐"}</button>{isDeveloper && <select value={opened.status} disabled={busy} onChange={e => void updateStatus(e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>}</div>
 
 
-          {reviewKeys && <div className="esc-key-panel"><strong>Device identity fingerprints</strong><p>Verify these fingerprints with participants through a separate trusted channel before approving. The server key directory alone cannot prove identity.</p>{knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : d.userId === identity ? "Your other device" : "Conversation participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "✓ Approved on this browser" : trusted[d.id] ? "⚠ Key changed—verify carefully" : "New device—verify before sending"}</small></div>)}<div className="esc-key-buttons"><button className="primary" onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); setInfo("Device fingerprints approved locally. Remember to verify them out of band."); }}>I verified these keys</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div></div>}
+          {reviewKeys && <div className="esc-key-panel"><strong>Device identity fingerprints</strong><p>Verify these fingerprints with participants through a separate trusted channel before approving. The server key directory alone cannot prove identity.</p>{knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : d.userId === identity ? "Your other device" : "Conversation participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "✓ Approved on this browser" : trusted[d.id] ? "⚠ Key changed—verify carefully" : "New device—verify before sending"}</small></div>)}<div className="esc-key-buttons"><button className="secondary" onClick={() => void loadKeys(selected)}>Refresh devices</button><button className="primary" disabled={!knownActive.some(d => d.userId !== identity)} onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); setInfo("Devices verified"); }}>I verified these keys</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div></div>}
           <div ref={messagesRef} className="esc-body">{!rendered.length&&<div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}{rendered.map((m, index) => {
             const mine = isDeveloper ? m.authorType === "platform" : m.authorType !== "platform";
             const prev = rendered[index - 1];
-            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {m.decrypted ? "Saved" : "Unavailable"}</small></div></div></React.Fragment>;
+            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {(m.decrypted || !encryptedEnvelope(m.body)) ? "Saved" : "Unavailable"}</small></div></div></React.Fragment>;
           })}</div>
           <div className="esc-composer-area">
+          {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => setReviewKeys(true)}>Check keys</button></div>}
           {files.length > 0 && <div className="esc-files">{files.map((f, i) => <button key={`${f.name}:${i}`} disabled={busy} onClick={() => setFiles(old => old.filter((_, k) => k !== i))}>📎 {f.name} ({fileSize(f.size)}) ×</button>)}</div>}
           {recording && <div className="esc-recording"><span className="esc-recording-dot"/> Recording voice note · tap stop to attach</div>}
           <EleeveonLiveSupport key={selected} conversationId={selected} open={callOpen} onClose={()=>setCallOpen(false)}/>
@@ -621,7 +686,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
             <input ref={videoRef} type="file" hidden accept="video/*" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <div ref={attachmentMenuRef} className="esc-attach-wrap">
               <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording} onClick={toggleAttachmentMenu}>＋</button>
-            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
+            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
           </div>
         </> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
       </div>

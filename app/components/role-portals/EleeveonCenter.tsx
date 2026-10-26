@@ -983,7 +983,7 @@ export default function EleeveonCenter({
         name: user?.fullName || user?.name || undefined,
       });
       setSubject(""); setMessageBody("");
-      setNotice("Survey submitted to Eleeveon. You can continue the conversation in Support.");
+      setNotice("Sent to Eleeveon.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not send the survey to Eleeveon.");
     } finally { setSaving(false); }
@@ -2651,16 +2651,18 @@ export default function EleeveonCenter({
 }
 
 const css = `
+/* Chat-first desktop workspace. The tab chips sit at the same top edge as chat,
+   without consuming an extra horizontal row above its content. */
 .center-mobile-nav{display:none}
-.center-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:10px;min-height:min(84dvh,850px);align-items:start}
-.center-left-nav{position:sticky;top:10px;background:var(--surface,#fff);border:1px solid var(--border,#dce6e8);border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:4px;min-width:0}
-.center-left-title{padding:10px 9px 6px;font-size:12px;font-weight:800;color:var(--text,#1d3341)}
-.center-left-subtitle{margin-top:6px;border-top:1px solid var(--border,#dce6e8);padding-top:10px;opacity:.65}
-.center-left-nav button{text-align:left;font-size:12px;font-weight:600;background:transparent;border:0;border-radius:9px;padding:10px;color:var(--text,#344255);white-space:normal}
-.center-left-nav button.active{background:color-mix(in srgb,var(--dashboard-primary,#0d847e) 14%,var(--surface,#fff));color:var(--dashboard-primary,#0d847e)}
-.center-left-nav button:hover{background:var(--shell-section-bg,#edf2f2)}
-.center-work-area{min-width:0;min-height:0}
-@media(max-width:680px){.center-shell{display:block}.center-left-nav{display:none}.center-mobile-nav{display:flex;align-items:center;gap:7px;margin-bottom:7px}.center-mobile-nav label{font-size:11px;font-weight:700;flex:0 0 auto}.center-mobile-nav select{flex:1;min-width:0;padding:9px;border:1px solid var(--border,#ccd8dc);border-radius:11px;background:var(--surface,#fff);color:inherit}}
+.center-shell{display:grid;grid-template-columns:154px minmax(0,1fr);gap:8px;height:clamp(500px,calc(100dvh - 155px),930px);min-height:0;align-items:stretch;overflow:hidden}
+.center-left-nav{align-self:start;position:sticky;top:4px;display:flex;flex-direction:row;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:6px;min-width:0;padding:10px 8px;background:var(--surface,#fff);border:1px solid var(--border,#dce6e8);border-radius:15px}
+.center-left-title{display:none}
+.center-left-nav button{flex:1 1 60px;text-align:center;display:inline-flex;justify-content:center;align-items:center;min-height:38px;padding:8px 5px;background:color-mix(in srgb,var(--surface,#fff) 95%,var(--dashboard-primary,#147d79));border:1px solid var(--border,#dae5e5);border-radius:11px;color:var(--text,#30414f);font-size:10.5px;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
+.center-left-nav button.active{color:var(--dashboard-primary,#117e77);background:color-mix(in srgb,var(--dashboard-primary,#147d79) 12%,var(--surface,#fff));border-color:color-mix(in srgb,var(--dashboard-primary,#147d79) 22%,var(--border,#dde9e9))}
+.center-left-nav button:hover{background:color-mix(in srgb,var(--dashboard-primary,#147d79) 8%,var(--surface,#fff))}
+.center-work-area{min-width:0;min-height:0;height:100%;overflow:hidden}.center-work-area:has(.center-publisher-layout),.center-work-area:has(.center-list),.center-work-area:has(.center-grid){overflow:auto}
+@media(max-width:850px) and (min-width:681px){.center-shell{grid-template-columns:114px minmax(0,1fr);gap:6px}.center-left-nav button{flex:1 1 100%;font-size:10px}}
+@media(max-width:680px){.center-shell{display:block;height:clamp(390px,calc(100dvh - 142px),950px);overflow:hidden}.center-left-nav{display:none}.center-mobile-nav{display:flex;align-items:center;gap:7px;margin-bottom:6px;min-height:40px}.center-mobile-nav label{font-size:11px;font-weight:760;flex:0 0 auto}.center-mobile-nav select{flex:1;min-width:0;padding:9px 11px;border:1px solid var(--border,#ccd8dc);border-radius:11px;background:var(--surface,#fff);color:inherit}.center-work-area{height:100%}}
 .center-module {
   width: 100%;
   min-height: 100%;

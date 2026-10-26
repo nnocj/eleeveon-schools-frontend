@@ -1458,29 +1458,62 @@ export default function EleeveonCenter({
       | Record<string, unknown>
       | null;
 
+  const chatSection: CenterSection = isDeveloper ? "inbox" : "support";
+  const centerTabs = (
+    <nav className="center-inline-tabs" aria-label="Eleeveon Center sections">
+      <button type="button" className={section === chatSection ? "active" : ""} aria-current={section === chatSection ? "page" : undefined} onClick={() => setSection(chatSection)}>Chat</button>
+      <button type="button" className={section === "feedback" ? "active" : ""} aria-current={section === "feedback" ? "page" : undefined} onClick={() => setSection("feedback")}>Surveys</button>
+      <button type="button" className={section === "updates" ? "active" : ""} aria-current={section === "updates" ? "page" : undefined} onClick={() => setSection("updates")}>Updates{unreadCount > 0 ? ` · ${unreadCount}` : ""}</button>
+      <button type="button" className={section === "access" ? "active" : ""} aria-current={section === "access" ? "page" : undefined} onClick={() => setSection("access")}>Access</button>
+      {isDeveloper && (
+        <select
+          className="center-inline-more"
+          aria-label="More platform sections"
+          value={section === "communications" || section === "releases" ? section : ""}
+          onChange={event => {
+            if (event.target.value) setSection(event.target.value as CenterSection);
+          }}
+        >
+          <option value="">More ▾</option>
+          <option value="communications">Communications</option>
+          <option value="releases">Releases</option>
+        </select>
+      )}
+    </nav>
+  );
+  // In a phone conversation, the thread header replaces the standalone tabs row.
+  // This compact picker keeps Surveys/Updates/Access reachable without shrinking the chat.
+  const mobileChatNavigation = (
+    <select
+      className="center-mobile-chat-switch"
+      aria-label="Eleeveon Center section"
+      value={section}
+      onChange={event => setSection(event.target.value as CenterSection)}
+    >
+      <option value={chatSection}>Chat</option>
+      <option value="feedback">Surveys</option>
+      <option value="updates">Updates</option>
+      <option value="access">Access</option>
+      {isDeveloper && <option value="communications">Communications</option>}
+      {isDeveloper && <option value="releases">Releases</option>}
+    </select>
+  );
+
   return (
     <main className="center-module hub-module">
       <style>{css}</style>
 
-      <div className="center-mobile-nav"><label htmlFor="center-section">Eleeveon Support</label><select id="center-section" value={section} onChange={e=>setSection(e.target.value as CenterSection)}>
-        <option value={isDeveloper?"inbox":"support"}>Chat Support</option><option value="feedback">Surveys</option><option value="updates">Updates</option>
-        {isDeveloper&&<><option value="communications">Communications</option><option value="releases">Releases</option></>}
-        <option value="access">{isDeveloper?"Platform context":"Access"}</option>
-      </select></div>
       <div className="center-shell">
-        <nav className="center-left-nav" aria-label="Eleeveon Center sections">
-          <div className="center-left-title">Eleeveon Support</div>
-          <button type="button" className={section===(isDeveloper?"inbox":"support")?"active":""} onClick={()=>setSection(isDeveloper?"inbox":"support")}>▣ Chat Support</button>
-          <button type="button" className={section==="feedback"?"active":""} onClick={()=>setSection("feedback")}>☷ Surveys</button>
-          <button type="button" className={section==="updates"?"active":""} onClick={()=>setSection("updates")}>◉ Updates {unreadCount>0?`(${unreadCount})`:""}</button>
-          {isDeveloper&&<><div className="center-left-title center-left-subtitle">Platform</div>
-            <button type="button" className={section==="communications"?"active":""} onClick={()=>setSection("communications")}>✦ Communications</button>
-            <button type="button" className={section==="releases"?"active":""} onClick={()=>setSection("releases")}>▤ Releases</button></>}
-          <button type="button" className={section==="access"?"active":""} onClick={()=>setSection("access")}>⚙ {isDeveloper?"Platform context":"Access"}</button>
-        </nav>
         <div className="center-work-area">
+          {section !== chatSection && (
+            <header className="center-section-header">
+              {centerTabs}
+            </header>
+          )}
       {section === "inbox" && isDeveloper ? (
         <EleeveonSupportChat
+          navigation={centerTabs}
+          mobileNavigation={mobileChatNavigation}
           isDeveloper={true}
           accountId={idOf(accountId)}
           schoolId={activeSchoolId}
@@ -2489,6 +2522,8 @@ export default function EleeveonCenter({
 
       {section === "support" && !isDeveloper ? (
         <EleeveonSupportChat
+          navigation={centerTabs}
+          mobileNavigation={mobileChatNavigation}
           isDeveloper={false}
           accountId={idOf(accountId)}
           schoolId={activeSchoolId}
@@ -2651,18 +2686,24 @@ export default function EleeveonCenter({
 }
 
 const css = `
-/* Chat-first desktop workspace. The tab chips sit at the same top edge as chat,
-   without consuming an extra horizontal row above its content. */
-.center-mobile-nav{display:none}
-.center-shell{display:grid;grid-template-columns:154px minmax(0,1fr);gap:8px;height:clamp(500px,calc(100dvh - 155px),930px);min-height:0;align-items:stretch;overflow:hidden}
-.center-left-nav{align-self:start;position:sticky;top:4px;display:flex;flex-direction:row;flex-wrap:wrap;align-content:flex-start;align-items:flex-start;gap:6px;min-width:0;padding:10px 8px;background:var(--surface,#fff);border:1px solid var(--border,#dce6e8);border-radius:15px}
-.center-left-title{display:none}
-.center-left-nav button{flex:1 1 60px;text-align:center;display:inline-flex;justify-content:center;align-items:center;min-height:38px;padding:8px 5px;background:color-mix(in srgb,var(--surface,#fff) 95%,var(--dashboard-primary,#147d79));border:1px solid var(--border,#dae5e5);border-radius:11px;color:var(--text,#30414f);font-size:10.5px;font-weight:700;line-height:1.25;overflow-wrap:anywhere}
-.center-left-nav button.active{color:var(--dashboard-primary,#117e77);background:color-mix(in srgb,var(--dashboard-primary,#147d79) 12%,var(--surface,#fff));border-color:color-mix(in srgb,var(--dashboard-primary,#147d79) 22%,var(--border,#dde9e9))}
-.center-left-nav button:hover{background:color-mix(in srgb,var(--dashboard-primary,#147d79) 8%,var(--surface,#fff))}
-.center-work-area{min-width:0;min-height:0;height:100%;overflow:hidden}.center-work-area:has(.center-publisher-layout),.center-work-area:has(.center-list),.center-work-area:has(.center-grid){overflow:auto}
-@media(max-width:850px) and (min-width:681px){.center-shell{grid-template-columns:114px minmax(0,1fr);gap:6px}.center-left-nav button{flex:1 1 100%;font-size:10px}}
-@media(max-width:680px){.center-shell{display:block;height:clamp(390px,calc(100dvh - 142px),950px);overflow:hidden}.center-left-nav{display:none}.center-mobile-nav{display:flex;align-items:center;gap:7px;margin-bottom:6px;min-height:40px}.center-mobile-nav label{font-size:11px;font-weight:760;flex:0 0 auto}.center-mobile-nav select{flex:1;min-width:0;padding:9px 11px;border:1px solid var(--border,#ccd8dc);border-radius:11px;background:var(--surface,#fff);color:inherit}.center-work-area{height:100%}}
+/* Inline navigation occupies the existing conversation-list header.
+   There is no separate Center rail or phone selector row. */
+.center-shell{display:block;width:100%;height:clamp(400px,calc(100dvh - 143px),1100px);min-height:0;overflow:hidden}
+.center-work-area{width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}
+.center-work-area:has(.center-section-header){overflow-y:auto;overscroll-behavior:contain}
+.center-section-header{display:flex;align-items:center;min-height:48px;margin-bottom:8px;padding:5px 9px;border:1px solid var(--border,#dce6e8);border-radius:14px;background:var(--surface,#fff)}
+.center-inline-tabs{display:flex;align-items:center;min-width:0;width:100%;gap:3px;white-space:nowrap;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.center-inline-tabs::-webkit-scrollbar{display:none}
+.center-inline-tabs button,.center-inline-tabs select{flex:0 0 auto;min-height:32px;padding:7px 9px;background:transparent;border:1px solid transparent;border-radius:10px;color:var(--text,#30414f);font-size:11px;font-weight:690;line-height:1.25;cursor:pointer}
+.center-inline-tabs button:hover,.center-inline-tabs select:hover{background:color-mix(in srgb,var(--dashboard-primary,#147d79) 7%,var(--surface,#fff))}
+.center-inline-tabs button.active{color:var(--dashboard-primary,#117e77);background:color-mix(in srgb,var(--dashboard-primary,#147d79) 12%,var(--surface,#fff));border-color:color-mix(in srgb,var(--dashboard-primary,#147d79) 18%,var(--border,#dde9e9))}
+.center-inline-tabs select{max-width:68px;appearance:auto;padding-right:4px}
+.center-mobile-chat-switch{max-width:78px;min-width:60px;font-size:11px;padding:7px 3px;border:1px solid var(--border,#dce6e8);border-radius:9px;background:var(--surface,#fff);color:var(--text,#30414f)}
+@media(max-width:680px){
+ .center-shell{height:clamp(340px,calc(100dvh - 120px),1040px)}
+ .center-section-header{min-height:44px;padding:4px 7px}
+ .center-inline-tabs button,.center-inline-tabs select{font-size:11px;min-height:32px;padding:7px 8px}
+}
 .center-module {
   width: 100%;
   min-height: 100%;

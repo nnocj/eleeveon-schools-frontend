@@ -15,6 +15,7 @@
  */
 
 import EleeveonSupportChat from "./EleeveonSupportChat";
+import EleeveonSurveys from "./EleeveonSurveys";
 import { supportApi } from "../../lib/support/supportApi";
 
 import {
@@ -381,7 +382,9 @@ export default function EleeveonCenter({
 
   const [section, setSection] =
     useState<CenterSection>(
-      "support",
+      isDeveloper
+        ? "inbox"
+        : "support",
     );
 
   const [
@@ -555,7 +558,9 @@ export default function EleeveonCenter({
 
   useEffect(() => {
     setSection(
-      "support",
+      isDeveloper
+        ? "inbox"
+        : "support",
     );
   }, [isDeveloper]);
 
@@ -961,6 +966,11 @@ export default function EleeveonCenter({
   };
 
   const submitFeedback = async () => {
+    if (feedbackType === "support_request") {
+      setNotice(null);
+      setSection("support");
+      return;
+    }
     if (!subject.trim() || !messageBody.trim()) { setNotice("Enter a subject and a message."); return; }
     try {
       setSaving(true);
@@ -1452,20 +1462,36 @@ export default function EleeveonCenter({
     <main className="center-module hub-module">
       <style>{css}</style>
 
-      <nav className="center-tabs hub-tabs" aria-label="Eleeveon Center sections">
-        <button type="button" className={section === "support" || section === "inbox" ? "active" : ""}
-          onClick={() => setSection("support")}>Chat Support</button>
-        {!isDeveloper && <button type="button" className={section === "feedback" ? "active" : ""}
-          onClick={() => setSection("feedback")}>Survey</button>}
-        <button type="button" className={section === "updates" ? "active" : ""}
-          onClick={() => setSection("updates")}>Updates{unreadCount ? <b>{unreadCount}</b> : null}</button>
-        {isDeveloper && <button type="button" className={section === "communications" ? "active" : ""}
-          onClick={() => setSection("communications")}>Communications</button>}
-        {isDeveloper && <button type="button" className={section === "releases" ? "active" : ""}
-          onClick={() => setSection("releases")}>Releases</button>}
-        <button type="button" className={section === "access" ? "active" : ""}
-          onClick={() => setSection("access")}>{isDeveloper ? "Platform context" : "Access"}</button>
-      </nav>
+      <div className="center-mobile-nav"><label htmlFor="center-section">Eleeveon Support</label><select id="center-section" value={section} onChange={e=>setSection(e.target.value as CenterSection)}>
+        <option value={isDeveloper?"inbox":"support"}>Chat Support</option><option value="feedback">Surveys</option><option value="updates">Updates</option>
+        {isDeveloper&&<><option value="communications">Communications</option><option value="releases">Releases</option></>}
+        <option value="access">{isDeveloper?"Platform context":"Access"}</option>
+      </select></div>
+      <div className="center-shell">
+        <nav className="center-left-nav" aria-label="Eleeveon Center sections">
+          <div className="center-left-title">Eleeveon Support</div>
+          <button type="button" className={section===(isDeveloper?"inbox":"support")?"active":""} onClick={()=>setSection(isDeveloper?"inbox":"support")}>▣ Chat Support</button>
+          <button type="button" className={section==="feedback"?"active":""} onClick={()=>setSection("feedback")}>☷ Surveys</button>
+          <button type="button" className={section==="updates"?"active":""} onClick={()=>setSection("updates")}>◉ Updates {unreadCount>0?`(${unreadCount})`:""}</button>
+          {isDeveloper&&<><div className="center-left-title center-left-subtitle">Platform</div>
+            <button type="button" className={section==="communications"?"active":""} onClick={()=>setSection("communications")}>✦ Communications</button>
+            <button type="button" className={section==="releases"?"active":""} onClick={()=>setSection("releases")}>▤ Releases</button></>}
+          <button type="button" className={section==="access"?"active":""} onClick={()=>setSection("access")}>⚙ {isDeveloper?"Platform context":"Access"}</button>
+        </nav>
+        <div className="center-work-area">
+      {section === "inbox" && isDeveloper ? (
+        <EleeveonSupportChat
+          isDeveloper={true}
+          accountId={idOf(accountId)}
+          schoolId={activeSchoolId}
+          branchId={activeBranchId}
+          userId={userId}
+          membershipId={membershipId}
+          role={role}
+          schoolName={activeSchool?.name}
+          branchName={activeBranch?.name}
+        />
+      ) : null}
 
       {section ===
         "communications" &&
@@ -2329,13 +2355,17 @@ export default function EleeveonCenter({
         </section>
       ) : null}
 
-      {section === "feedback" &&
+      {false && section === "feedback" &&
       !isDeveloper ? (
         <section className="center-grid">
           <article className="center-card">
             <span className="kicker">
               Survey & feedback
             </span>
+            <p style={{ fontSize: 12, opacity: 0.72 }}>
+              Survey forms are not end-to-end encrypted. For private support,
+              switch to Support and use the encrypted conversation screen.
+            </p>
             <h3>
               Share an idea or report a
               problem
@@ -2352,7 +2382,7 @@ export default function EleeveonCenter({
                   )
                 }
               >
-                {feedbackTypes.map(
+                {feedbackTypes.filter(item => item.value !== "support_request").map(
                   (item) => (
                     <option
                       key={item.value}
@@ -2455,9 +2485,11 @@ export default function EleeveonCenter({
       ) : null}
 
 
-      {section === "support" || section === "inbox" ? (
+      {section === "feedback" ? <EleeveonSurveys isDeveloper={isDeveloper}/> : null}
+
+      {section === "support" && !isDeveloper ? (
         <EleeveonSupportChat
-          isDeveloper={isDeveloper}
+          isDeveloper={false}
           accountId={idOf(accountId)}
           schoolId={activeSchoolId}
           branchId={activeBranchId}
@@ -2612,11 +2644,23 @@ export default function EleeveonCenter({
           )}
         </section>
       ) : null}
+        </div>
+      </div>
     </main>
   );
 }
 
 const css = `
+.center-mobile-nav{display:none}
+.center-shell{display:grid;grid-template-columns:180px minmax(0,1fr);gap:10px;min-height:min(84dvh,850px);align-items:start}
+.center-left-nav{position:sticky;top:10px;background:var(--surface,#fff);border:1px solid var(--border,#dce6e8);border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.center-left-title{padding:10px 9px 6px;font-size:12px;font-weight:800;color:var(--text,#1d3341)}
+.center-left-subtitle{margin-top:6px;border-top:1px solid var(--border,#dce6e8);padding-top:10px;opacity:.65}
+.center-left-nav button{text-align:left;font-size:12px;font-weight:600;background:transparent;border:0;border-radius:9px;padding:10px;color:var(--text,#344255);white-space:normal}
+.center-left-nav button.active{background:color-mix(in srgb,var(--dashboard-primary,#0d847e) 14%,var(--surface,#fff));color:var(--dashboard-primary,#0d847e)}
+.center-left-nav button:hover{background:var(--shell-section-bg,#edf2f2)}
+.center-work-area{min-width:0;min-height:0}
+@media(max-width:680px){.center-shell{display:block}.center-left-nav{display:none}.center-mobile-nav{display:flex;align-items:center;gap:7px;margin-bottom:7px}.center-mobile-nav label{font-size:11px;font-weight:700;flex:0 0 auto}.center-mobile-nav select{flex:1;min-width:0;padding:9px;border:1px solid var(--border,#ccd8dc);border-radius:11px;background:var(--surface,#fff);color:inherit}}
 .center-module {
   width: 100%;
   min-height: 100%;
@@ -3546,11 +3590,4 @@ span,
   }
 }
 
-
-/* Eleeveon Hub: immediate tabs, unobtrusive navigation and chat-first layout. */
-.center-module.hub-module{min-height:0;display:flex;flex-direction:column;gap:0;padding:0 2px 6px}
-.center-module.hub-module .hub-tabs{margin:0 0 10px;display:flex;gap:5px;align-items:center;overflow-x:auto;white-space:nowrap;padding:2px 1px 9px;scrollbar-width:thin;flex-shrink:0}
-.center-module.hub-module .hub-tabs button{flex-shrink:0;border-radius:11px;padding:9px 13px;min-height:39px;font-size:12px;font-weight:750;white-space:nowrap}
-.center-module.hub-module .hub-tabs button.active{box-shadow:inset 0 -2px 0 var(--dashboard-primary,var(--primary-color,#128c7e))}
-@media(max-width:680px){.center-module.hub-module .hub-tabs{margin:0 0 4px;padding-bottom:6px;gap:3px}.center-module.hub-module .hub-tabs button{padding:8px 12px;font-size:12px}}
 `;

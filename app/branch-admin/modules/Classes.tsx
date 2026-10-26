@@ -1339,14 +1339,19 @@ export default function ClassesPage() {
     });
   };
 
-  // The portal owns the action strip. All module actions stay functional.
-  useRegisterBranchWorkspaceToolbar("classes", {
-    add: () => openCreate(),
+  // Keep the + / Search / Filter / Print / More controls in the shared
+  // portal toolbar (as in AssessmentEntries), not in a second module header.
+  // Classes can be opened directly OR as the active editor inside Setup.
+  // The shared shell uses the workspace's route key, so register both keys.
+  const classToolbarActions = {
+    add: openCreate,
     search: setSearch,
     filter: () => setFilterOpen(true),
     more: () => setMoreOpen(true),
     print: printClassesTable,
-  });
+  };
+  useRegisterBranchWorkspaceToolbar("classes", classToolbarActions);
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", classToolbarActions);
 
   // Table is the efficient default on a laptop; mobile starts in cards.
   useEffect(() => {

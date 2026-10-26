@@ -1,15 +1,15 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   db,
   type Branch,
   type IdentityCredentialDesignSetting,
   type School,
-} from "../../../lib/db/db";
+} from "../../../lib/db";
 import IdentityCredentialPreview from "./IdentityCredentialPreview";
-import { useIdentityCardPresentation, IDENTITY_DESIGN_CHANGED_EVENT } from "./identityCardPresentation";
 import { SyncStatus } from "../../../lib/constants/syncStatus";
+import { createLocal, updateLocal } from "../../../lib/sync/syncUtils";
 
 type Props = {
   accountId?: string | null;
@@ -129,10 +129,17 @@ export default function CredentialDesignSettings({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  const { branding } = useIdentityCardPresentation({
-    accountId, schoolId: String(schoolId || ""), branchId: String(branchId || ""),
-    school: school as any, branch: branch as any,
-  });
+  const branding = useMemo(
+    () => ({
+      schoolName: school?.name || "Eleeveon International Academy",
+      branchName: branch?.name || "Main Campus",
+      motto: school?.motto || "Excellence, Character and Service",
+      address: branch?.address || school?.address || "",
+      schoolLogoUrl: school?.logo || "",
+      branchLogoUrl: branch?.logo || "",
+    }),
+    [school, branch],
+  );
 
   const load = async () => {
     if (!accountId || !schoolId) {
@@ -141,22 +148,25 @@ export default function CredentialDesignSettings({
     }
     setLoading(true);
     try {
-      const rows = (await db.identityCredentialDesignSettings.toArray()).filter(
-        (row) =>
+      // IndexedDB compound keys cannot contain null. Branch-less designs must
+      // be found by filtering actual Dexie records instead of querying [..null].
+      const rows = await db.identityCredentialDesignSettings.toArray();
+      const activeRows = rows
+        .filter((row) => !row.isDeleted &&
           String(row.accountId || "") === String(accountId) &&
           String(row.schoolId || "") === String(schoolId) &&
-          String(row.branchId || "") === String(branchId || ""),
-      );
-
-      const activeRows = rows
-        .filter((row) => !row.isDeleted)
-        .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+          String(row.branchId || "") === String(branchId || ""))
+        .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) ||
+          Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
 
       setDesigns(activeRows);
       setForm(
         activeRows[0] ||
           defaultDesign(accountId, schoolId, branchId, primaryColor),
       );
+    } catch (error) {
+      console.error("Could not load ID card designs:", error);
+      setMessage("ID card designs could not be loaded from this device.");
     } finally {
       setLoading(false);
     }
@@ -186,24 +196,10 @@ export default function CredentialDesignSettings({
     if (selected) setForm(selected);
   };
 
-  const createNew = (subjectType: "student" | "teacher") => {
-    const teacher = subjectType === "teacher";
-    const audienceHasDefault = designs.some(
-      (row) => row.subjectType === subjectType && row.isDefault && !row.isDeleted,
+  const createNew = () => {
+    setForm(
+      defaultDesign(accountId, schoolId, branchId, primaryColor),
     );
-    setForm({
-      ...defaultDesign(accountId, schoolId, branchId, primaryColor),
-      name: teacher ? "Teacher ID" : "Student ID",
-      subjectType,
-      credentialType: teacher ? "staff_id" : "student_id",
-      isDefault: !audienceHasDefault,
-      visibleFields: {
-        ...DEFAULT_VISIBLE_FIELDS,
-        admissionNumber: !teacher,
-        staffNumber: teacher,
-        className: !teacher,
-      },
-    });
     setMessage("");
   };
 
@@ -219,23 +215,16 @@ export default function CredentialDesignSettings({
       const currentDeviceId = deviceId();
 
       if (form.isDefault) {
-        // Student and teacher designs can each have their own default.
-        // Saving a teacher ID must not unset the student's default layout.
         const otherDefaults = designs.filter(
-          (item) => item.id !== form.id && item.isDefault &&
-            String(item.subjectType || "all") === String(form.subjectType || "all") &&
-            String(item.credentialType || "all") === String(form.credentialType || "all"),
+          (item) => item.id !== form.id && item.isDefault,
         );
         for (const row of otherDefaults) {
-          await db.identityCredentialDesignSettings.put({
-            ...row,
+          await updateLocal("identityCredentialDesignSettings", row.id, {
             isDefault: false,
             updatedAt: now,
-            version: Number(row.version || 0) + 1,
             updatedByDeviceId: currentDeviceId,
             deviceId: currentDeviceId,
-            synced: SyncStatus.PENDING,
-          });
+          } as any);
         }
       }
 
@@ -259,15 +248,29 @@ export default function CredentialDesignSettings({
         isDeleted: false,
       };
 
-      await db.identityCredentialDesignSettings.put(payload);
-      window.dispatchEvent(new Event(IDENTITY_DESIGN_CHANGED_EVENT));
-      setForm(payload);
-      setMessage("ID card design saved.");
+      const existing = await db.identityCredentialDesignSettings.get(payload.id);
+      let persistedId = payload.id;
+      if (existing) {
+        await updateLocal("identityCredentialDesignSettings", payload.id, payload as any);
+      } else {
+        // createLocal owns ID allocation; use the ID it actually persisted.
+        const { id: _draftId, ...newRecord } = payload;
+        const created = await createLocal("identityCredentialDesignSettings", newRecord as any);
+        persistedId = String(
+          typeof created === "string" || typeof created === "number"
+            ? created
+            : (created as any)?.id || payload.id,
+        );
+      }
+      const stored = await db.identityCredentialDesignSettings.get(persistedId);
+      if (!stored || stored.isDeleted) throw new Error("Design was not persisted in Dexie.");
+      setForm(stored);
+      setMessage("Card design saved.");
       await load();
       onSaved?.();
     } catch (error) {
       console.error(error);
-      setMessage("ID card design could not be saved.");
+      setMessage("Credential design could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -295,10 +298,10 @@ export default function CredentialDesignSettings({
       <section className="credential-settings-sheet">
         <header className="credential-settings-head">
           <div>
-            <h2>ID Card Designs</h2>
+            <h2>Identity Credential Design</h2>
             <p>
-              Choose a design for students, teachers or other people. Saved
-              options are used when their ID cards are viewed or printed.
+              Design student, staff, parent and visitor credentials without
+              changing their QR values or references.
             </p>
           </div>
           <button type="button" onClick={onClose} aria-label="Close">
@@ -322,11 +325,8 @@ export default function CredentialDesignSettings({
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => createNew("student")}>
-            + Student ID
-          </button>
-          <button type="button" onClick={() => createNew("teacher")}>
-            + Teacher ID
+          <button type="button" onClick={createNew}>
+            + New design
           </button>
         </div>
 
@@ -517,17 +517,6 @@ export default function CredentialDesignSettings({
               />
             </label>
             <label>
-              Signature label
-              <input value={form.signatureLabel || ""}
-                onChange={(event) => update("signatureLabel", event.target.value)} />
-            </label>
-            <label>
-              Watermark opacity
-              <input type="number" min={0} max={1} step={0.01}
-                value={Number(form.watermarkOpacity ?? 0.06)}
-                onChange={(event) => update("watermarkOpacity", Math.max(0,Math.min(1,Number(event.target.value))))}/>
-            </label>
-            <label>
               Watermark text
               <input
                 value={form.watermarkText || ""}
@@ -543,9 +532,6 @@ export default function CredentialDesignSettings({
               ["School name", "showSchoolName"],
               ["Branch name", "showBranchName"],
               ["Photo", "showPhoto"],
-              ["Motto", "showMotto"],
-              ["Address", "showAddress"],
-              ["Authorized signature", "showSignature"],
               ["QR code", "showQrCode"],
               ["Credential reference", "showCredentialReference"],
               ["Issue date", "showIssueDate"],
@@ -612,7 +598,7 @@ export default function CredentialDesignSettings({
             disabled={saving}
             onClick={save}
           >
-            {saving ? "Saving..." : "Save ID design"}
+            {saving ? "Saving..." : "Save credential design"}
           </button>
         </div>
       </section>

@@ -1,11 +1,11 @@
 "use client";
 /**
- * Eleeveon Center — experimental end-to-end encrypted support.
- * Text, voice, images, videos, files encrypted on the browser before sending.
- * Legacy support conversations remain visibly labelled unencrypted.
- * Keys are local browser CryptoKeys; no recovery/Signal ratchet in this version.
+ * Eleeveon Center — shared encrypted support chat.
+ * Modern compact workspace, fixed composer and accessible attachment actions.
+ * Security details remain available in the device identity panel.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import EleeveonLiveSupport from "./EleeveonLiveSupport";
 import { supportApi, type SupportDirectory, type SupportAttachment, type SupportConversation, type SupportMessage } from "../../lib/support/supportApi";
 import {
@@ -61,7 +61,7 @@ function AttachmentView({ attachment }: { attachment: DisplayAttachment }) {
   if (!resolved) return <div className="esc-unavailable">🔒 Attachment unavailable on this device.</div>;
   if (a.kind === "image") return <a href={resolved} download={a.name} title={a.name}><img className="esc-media" src={resolved} alt={a.name}/></a>;
   if (a.kind === "video") return <video className="esc-media" src={resolved} controls playsInline preload="metadata"/>;
-  if (a.kind === "audio") return <div className="esc-audio">🎙 <audio controls preload="metadata" src={resolved}/></div>;
+  if (a.kind === "audio") return <div className="esc-audio"><span className="esc-audio-icon" aria-hidden="true">♫</span><div className="esc-audio-player"><strong>Voice message</strong><audio controls preload="metadata" src={resolved} aria-label={`Voice message: ${a.name}`}/></div></div>;
   return <a className="esc-attachment" href={resolved} download={a.name}>📎 <span>{a.name}<small>{fileSize(a.sizeBytes)}</small></span> ↓</a>;
 }
 
@@ -103,26 +103,30 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const [otherPresence, setOtherPresence] = useState("Not in chat");
   const recentTyping = useRef(0);
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const cameraRef = useRef<HTMLInputElement | null>(null);
   const imageRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLInputElement | null>(null);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+  const [, setInfo] = useState("");
   const [online, setOnline] = useState(true);
   const selectedRef = useRef("");
   const refreshBusy = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const micRef = useRef<MediaStream | null>(null);
   const decryptedCache = useRef(new Map<string, DisplayMessage>());
   const objectUrls = useRef(new Set<string>());
-  const [refreshMark, setRefreshMark] = useState(0);
+  const [, setRefreshMark] = useState(0);
   const knownActive = devices.filter(d => !d.revoked);
   const trusted = readTrust(accountId, identity);
   const changedDevices = knownActive.filter(d => d.id !== ownId && trusted[d.id] !== d.fingerprint);
-  const selectedIsEncrypted = isEncrypted(opened);
 
   useEffect(() => {
     openingRequest.current += 1; setOpeningId("");
@@ -196,7 +200,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     micRef.current?.getTracks().forEach(t => t.stop());
     objectUrls.current.forEach(url => URL.revokeObjectURL(url));
   }, []);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" }); }, [rendered.length, selected]);
+  useEffect(() => { const pane = messagesRef.current; if (pane) pane.scrollTop = pane.scrollHeight; }, [rendered.length, selected]);
   useEffect(() => {
     if (!selected || !opened) { setOtherPresence("Not in chat"); return; }
     let mounted=true;
@@ -213,12 +217,69 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     void tick();const timer=window.setInterval(()=>void tick(),3500);
     return()=>{mounted=false;clearInterval(timer);};
   },[selected,opened?.id,recording]);
+  // A body portal prevents the attachment menu being clipped by either sidebar or chat.
+  function toggleAttachmentMenu() {
+    if (attachMenuOpen) { setAttachMenuOpen(false); return; }
+    const rect = attachmentMenuRef.current?.getBoundingClientRect();
+    if (!rect || typeof window === "undefined") return;
+    const width = Math.min(300, Math.max(220, window.innerWidth - 24));
+    const height = Math.min(354, window.innerHeight - 24);
+    const above = rect.top >= height + 18;
+    const top = above ? Math.max(12, rect.top - height - 10) : Math.min(rect.bottom + 10, window.innerHeight - height - 12);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    setMenuPosition({ top: Math.max(12, top), left, width });
+    setAttachMenuOpen(true);
+  }
   useEffect(() => {
     if (!attachMenuOpen) return;
-    const close = (e: PointerEvent) => { if (!attachmentMenuRef.current?.contains(e.target as Node)) setAttachMenuOpen(false); };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    const closeOutside = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!attachmentMenuRef.current?.contains(target) && !popoverRef.current?.contains(target)) setAttachMenuOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setAttachMenuOpen(false); };
+    const onViewport = (e: Event) => {
+      // Scrolling a short mobile menu must not dismiss it.
+      if (e.type === "scroll" && popoverRef.current?.contains(e.target as Node)) return;
+      setAttachMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", escape);
+    window.addEventListener("resize", onViewport);
+    window.addEventListener("scroll", onViewport, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", escape);
+      window.removeEventListener("resize", onViewport);
+      window.removeEventListener("scroll", onViewport, true);
+    };
   }, [attachMenuOpen]);
+  // Keep the input above a phone's virtual keyboard; the message list is the
+  // only scrolling pane. Desktop height comes from the Center workspace.
+  useEffect(() => {
+    const update = () => {
+      if (!window.matchMedia("(max-width: 680px)").matches) { setViewportHeight(null); return; }
+      const bounds = layoutRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const viewport = window.visualViewport;
+      const bottom = (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight);
+      setViewportHeight(Math.max(290, Math.min(layoutRef.current?.parentElement?.clientHeight || 900, Math.floor(bottom - bounds.top - 10))));
+    };
+    update();
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [mobileOpen, newChat]);
+  useEffect(() => {
+    const el = messageInputRef.current;
+    if (!el) return;
+    el.style.height = "44px";
+    el.style.height = `${Math.min(116, Math.max(44, el.scrollHeight))}px`;
+  }, [message]);
   useEffect(() => {
     if (!opened || !identity || !ready) { setRendered([]); return; }
     let cancelled = false;
@@ -281,6 +342,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   }, [opened, thread, devices, accountId, identity, ready, trustRevision]);
 
   const visible = useMemo(() => conversations.filter(c => {
+    // Historic plaintext support tickets were test runs; retain in DB, hide in this new inbox.
+    if (!isEncrypted(c)) return false;
     if (filter === "open" && ["resolved", "closed"].includes(c.status)) return false;
     if (filter !== "open" && filter !== "all" && c.status !== filter) return false;
     const q = search.toLowerCase().trim();
@@ -380,7 +443,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         ...(targetScope==="user"?{userId:targetUser}:{}),
         ...(targetScope==="role"?{role:targetRole,schoolId:targetSchool||undefined,branchId:targetBranch||undefined}:{})});
       setNewChat(false);await refresh(true);await openConversation(response.conversation.id);
-      setInfo("Conversation created. When the recipient has enrolled and verified their encryption keys, you can send an encrypted message.");
+      setInfo("");
     }catch(e){setError(e instanceof Error?e.message:"Could not create conversation");}
     finally{setBusy(false);}
   }
@@ -485,31 +548,44 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const title = (opened && decryptedSubject[opened.id]) || opened?.subject || "Eleeveon Support";
   return <section className="esc" aria-label="Eleeveon encrypted support">
     <style>{`
-      .esc{color:var(--text,#17212f);--esc-primary:var(--ba-primary,var(--primary-color,#168377));--esc-border:var(--border,rgba(115,130,145,.23));--esc-surface:var(--surface,var(--card-bg,#fff));--esc-muted:var(--surface-muted,rgba(120,137,156,.08));font-size:13px}
-      .esc *{box-sizing:border-box}.esc button,.esc input,.esc textarea,.esc select{font:inherit;color:inherit}.esc button{cursor:pointer}.esc button:disabled{opacity:.45;cursor:not-allowed}
-      .esc-layout{height:min(79vh,785px);min-height:480px;border:1px solid var(--esc-border);border-radius:15px;overflow:hidden;display:grid;grid-template-columns:minmax(230px,32%) minmax(0,1fr);background:var(--esc-surface)}
-      .esc-side{min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--esc-border)}.esc-side-title{display:flex;align-items:center;justify-content:space-between;padding:12px;gap:8px;border-bottom:1px solid var(--esc-border)}.esc-actions{display:flex;gap:5px}
-      .esc button.primary,.esc button.secondary,.esc button.icon{border-radius:10px;padding:9px;border:1px solid var(--esc-border);background:var(--esc-surface)}.esc button.primary{color:white;background:var(--esc-primary);border-color:transparent;font-weight:700}.esc button.icon{min-width:36px;height:36px;display:grid;place-items:center;background:var(--esc-muted)}
-      .esc-search,.esc-filter{margin:10px 12px 0;padding:10px;border:1px solid var(--esc-border);border-radius:9px;background:var(--esc-surface);width:calc(100% - 24px)}.esc-filter{margin-top:5px;margin-bottom:10px}
-      .esc-inbox{flex:1;overflow-y:auto;min-height:0}.esc-thread-btn{display:flex;gap:10px;padding:12px;width:100%;text-align:left;background:transparent;border:0;border-bottom:1px solid var(--esc-border);align-items:flex-start}.esc-thread-btn.current,.esc-thread-btn:hover{background:var(--esc-muted)}.esc-avatar{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:color-mix(in srgb,var(--esc-primary) 15%,transparent);font-weight:800;color:var(--esc-primary)}.esc-thread-main{min-width:0;flex:1}.esc-thread-main strong,.esc-thread-main small,.esc-thread-main em{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-thread-main small{opacity:.64;margin-top:4px}.esc-thread-main em{font-style:normal;font-size:10px;opacity:.7;margin-top:3px}
-      .esc-chat{display:flex;flex-direction:column;min-width:0;min-height:0;position:relative;background:linear-gradient(148deg,rgba(115,171,171,.12),transparent 43%),radial-gradient(circle at 12% 18%,rgba(109,152,158,.095) 0 4px,transparent 5px),radial-gradient(circle at 82% 76%,rgba(109,152,158,.075) 0 5px,transparent 6px),var(--esc-muted);background-size:auto,100px 100px,145px 145px,auto}.esc-opening{position:absolute;top:62px;right:14px;z-index:6;background:var(--esc-surface);padding:9px 14px;border:1px solid var(--esc-border);box-shadow:0 6px 22px #0002;border-radius:12px;font-size:12px}.esc-chat-head{background:var(--esc-surface);padding:10px 12px;display:flex;align-items:center;gap:8px;min-height:59px;border-bottom:1px solid var(--esc-border)}.esc-chat-info{flex:1;min-width:0}.esc-chat-info strong,.esc-chat-info small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-chat-info small{font-size:11px;opacity:.7;margin-top:3px}.esc-chat-head select{max-width:135px;font-size:11px;border:1px solid var(--esc-border);background:var(--esc-surface);border-radius:8px;padding:7px}
-      .esc-body{overflow:auto;flex:1;min-height:0;padding:16px 14px}.esc-date{text-align:center;font-size:11px;opacity:.55;margin:12px}.esc-row{display:flex;justify-content:flex-start;margin:8px 0}.esc-row.mine{justify-content:flex-end}.esc-bubble{background:var(--esc-surface);padding:10px 12px;border:1px solid var(--esc-border);border-radius:12px 12px 12px 4px;max-width:min(85%,480px);white-space:pre-wrap;word-wrap:break-word}.esc-row.mine .esc-bubble{background:color-mix(in srgb,var(--esc-primary) 13%,var(--esc-surface));border-radius:12px 12px 4px 12px}.esc-bubble small{display:block;opacity:.6;margin-top:7px;font-size:10px;text-align:right}.esc-label{font-size:10px;font-weight:750;color:var(--esc-primary);margin-bottom:5px}
-      .esc-media{max-width:100%;max-height:310px;object-fit:contain;border-radius:9px;margin-top:7px}.esc-audio{display:flex;align-items:center;gap:6px;margin-top:6px}.esc-audio audio{width:min(255px,100%);max-width:100%}.esc-attachment{display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--esc-border);border-radius:9px;color:inherit;text-decoration:none;margin-top:8px}.esc-attachment span{flex:1;overflow:hidden;overflow-wrap:anywhere}.esc-attachment small{display:block;margin-top:3px;opacity:.6}.esc-unavailable{font-size:11px;opacity:.65;margin-top:8px}.esc-error-text{font-size:11px;color:#be123c;margin-top:5px}
-      .esc-attach-wrap{position:relative;flex:0 0 auto}.esc-attach-menu{position:absolute;bottom:calc(100% + 12px);left:0;z-index:30;min-width:190px;padding:8px;display:grid;gap:3px;max-height:min(340px,65vh);overflow-y:auto;background:var(--esc-surface);border:1px solid var(--esc-border);border-radius:14px;box-shadow:0 10px 35px #0003}.esc-attach-menu button{padding:10px;text-align:left;border:0;border-radius:9px;background:transparent}.esc-attach-menu button:hover,.esc-attach-menu button:focus-visible{background:var(--esc-muted)}
-      .esc-composer{display:flex;align-items:flex-end;gap:7px;padding:9px;background:var(--esc-surface);border-top:1px solid var(--esc-border)}.esc-composer textarea{flex:1;min-width:0;min-height:41px;resize:vertical;max-height:110px;background:var(--esc-surface);border-radius:11px;border:1px solid var(--esc-border);padding:11px}.esc-files{display:flex;gap:7px;flex-wrap:wrap;padding:8px;background:var(--esc-surface);border-top:1px solid var(--esc-border)}.esc-files button{border:1px solid var(--esc-border);border-radius:99px;padding:5px 9px;background:var(--esc-muted);max-width:100%;text-overflow:ellipsis;overflow:hidden}
-      .esc-banner{font-size:12px;padding:9px 11px;background:var(--esc-surface);border-bottom:1px solid var(--esc-border)}.esc-banner.warn{background:rgba(230,160,32,.10)}.esc-banner.error{color:#b91c1c}.esc-banner.success{color:var(--esc-primary)}.esc-banner button{margin-left:9px;text-decoration:underline;border:0;background:transparent}.esc-foot{font-size:10px;opacity:.65;padding:8px 12px;border-top:1px solid var(--esc-border)}.esc-form{padding:16px;display:grid;gap:12px;overflow:auto}.esc-form label{display:grid;gap:5px}.esc-form input,.esc-form textarea,.esc-form select{border:1px solid var(--esc-border);background:var(--esc-surface);border-radius:9px;padding:10px;width:100%}.esc-empty{margin:auto;padding:20px;text-align:center;display:grid;gap:12px;justify-items:center;opacity:.8}.esc-back{display:none}
-      .esc-key-panel{background:var(--esc-surface);padding:14px;overflow:auto;max-height:50%;border-bottom:2px solid var(--esc-primary)}.esc-key-item{margin:9px 0;padding:10px;background:var(--esc-muted);border-radius:8px}.esc-fingerprint{word-break:break-word;letter-spacing:.8px;font-family:monospace;font-size:11px}.esc-key-buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
-      @media(max-width:680px){.esc-layout{display:block;height:min(80dvh,780px);min-height:480px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:grid}.esc-bubble{max-width:93%}.esc-body{padding:10px}.esc-chat-head select{max-width:106px}}
+      .esc {--esc-primary:var(--dashboard-primary,var(--ba-primary,#137d79));--esc-line:var(--border,rgba(110,131,145,.22));--esc-surface:var(--surface,var(--card-bg,#fff));--esc-text:var(--text,#1f3040);--esc-mute:color-mix(in srgb,var(--esc-surface) 89%,var(--esc-primary));color:var(--esc-text);font-size:13px;min-height:0;height:100%;isolation:isolate}
+      .esc * {box-sizing:border-box}.esc button,.esc input,.esc textarea,.esc select{font:inherit;color:inherit}.esc button{cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .15s ease}.esc button:focus-visible,.esc textarea:focus-visible,.esc input:focus-visible,.esc select:focus-visible{outline:2px solid var(--esc-primary);outline-offset:2px}.esc button:disabled{opacity:.5;cursor:not-allowed}
+      .esc-layout{display:grid;grid-template-columns:minmax(220px,29%) minmax(0,1fr);height:100%;min-height:0;min-width:0;border:1px solid var(--esc-line);border-radius:19px;overflow:hidden;background:var(--esc-surface);box-shadow:0 12px 36px rgba(15,50,60,.075)}
+      .esc-side{min-width:0;min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--esc-line);background:var(--esc-surface)}
+      .esc-side-title{display:flex;align-items:center;justify-content:space-between;padding:13px 13px 11px;gap:9px}.esc-side-title strong{font-size:13px;letter-spacing:-.2px}.esc-actions{display:flex;gap:7px}
+      .esc button.primary,.esc button.secondary,.esc button.icon{border-radius:12px;padding:9px 10px;border:1px solid var(--esc-line);background:var(--esc-surface);display:inline-flex;align-items:center;justify-content:center;gap:5px;line-height:1.1;white-space:nowrap}
+      .esc button.primary{color:#fff;background:var(--esc-primary);border-color:transparent;font-weight:720;box-shadow:0 3px 10px color-mix(in srgb,var(--esc-primary) 20%,transparent)}.esc button.primary:hover{filter:brightness(1.08)}.esc button.icon{width:39px;height:39px;padding:0;border-radius:13px;background:var(--esc-mute);flex:0 0 auto;font-size:18px}.esc button.icon:hover{background:color-mix(in srgb,var(--esc-primary) 13%,var(--esc-surface))}
+      .esc-search,.esc-filter{margin:0 11px 8px;padding:10px 12px;border:1px solid var(--esc-line);border-radius:11px;background:var(--esc-surface);width:calc(100% - 22px)}.esc-search{margin-top:2px}.esc-filter{margin-bottom:7px}
+      .esc-inbox{flex:1;overflow:auto;min-height:0;padding:0 6px 8px;scrollbar-gutter:stable}
+      .esc-thread-btn{display:flex;gap:10px;padding:11px 9px;width:100%;text-align:left;background:transparent;border:0;border-radius:12px;margin:2px 0;align-items:center}.esc-thread-btn.current{background:color-mix(in srgb,var(--esc-primary) 12%,var(--esc-surface))}.esc-thread-btn:hover{background:var(--esc-mute)}
+      .esc-avatar{width:40px;height:40px;border-radius:15px;display:grid;place-items:center;flex-shrink:0;background:linear-gradient(145deg,color-mix(in srgb,var(--esc-primary) 16%,var(--esc-surface)),color-mix(in srgb,var(--esc-primary) 7%,var(--esc-surface)));font-weight:800;color:var(--esc-primary);border:1px solid color-mix(in srgb,var(--esc-primary) 15%,transparent)}
+      .esc-thread-main{min-width:0;flex:1}.esc-thread-main strong,.esc-thread-main small,.esc-thread-main em{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-thread-main strong{font-size:12px}.esc-thread-main small{opacity:.65;margin-top:4px;font-size:11px}.esc-thread-main em{font-style:normal;font-size:10px;opacity:.6;margin-top:4px}
+      .esc-chat{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;position:relative;isolation:isolate;background-color:color-mix(in srgb,var(--esc-surface) 91%,var(--esc-primary));background-image:radial-gradient(ellipse 55% 48% at 1% 4%,color-mix(in srgb,var(--esc-primary) 13%,transparent),transparent 82%),radial-gradient(ellipse 55% 48% at 100% 98%,color-mix(in srgb,#8db9cc 15%,transparent),transparent 81%),radial-gradient(circle at 9px 9px,color-mix(in srgb,var(--esc-primary) 10%,transparent) 1.3px,transparent 1.4px),radial-gradient(circle at 39px 39px,color-mix(in srgb,var(--esc-primary) 6%,transparent) 1.1px,transparent 1.3px);background-size:auto,auto,58px 58px,58px 58px}
+      .esc-opening{position:absolute;top:65px;right:12px;z-index:12;background:var(--esc-surface);padding:9px 13px;border:1px solid var(--esc-line);box-shadow:0 6px 24px #0002;border-radius:12px;font-size:11px}
+      .esc-chat-head{background:color-mix(in srgb,var(--esc-surface) 94%,var(--esc-primary));padding:10px 13px;display:flex;align-items:center;gap:9px;min-height:65px;flex:0 0 auto;border-bottom:1px solid var(--esc-line);z-index:2}
+      .esc-chat-info{flex:1;min-width:0}.esc-chat-info strong,.esc-chat-info small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-chat-info strong{font-size:13px;font-weight:780}.esc-chat-info small{font-size:10.5px;opacity:.7;margin-top:4px}.esc-chat-head select{max-width:119px;font-size:11px;border:1px solid var(--esc-line);background:var(--esc-surface);border-radius:10px;padding:8px}
+      .esc-body{overflow:auto;overscroll-behavior:contain;flex:1 1 auto;min-height:0;padding:16px clamp(11px,2vw,26px) 22px;scrollbar-gutter:stable}.esc-date{text-align:center;font-size:10px;width:max-content;margin:15px auto;padding:6px 12px;background:color-mix(in srgb,var(--esc-surface) 85%,transparent);border-radius:999px;border:1px solid var(--esc-line);color:var(--esc-text);opacity:.8}
+      .esc-row{display:flex;justify-content:flex-start;margin:10px 0}.esc-row.mine{justify-content:flex-end}.esc-bubble{background:var(--esc-surface);padding:11px 14px;border:1px solid var(--esc-line);border-radius:18px 18px 18px 6px;box-shadow:0 3px 12px rgba(30,60,75,.055);max-width:min(85%,520px);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.53}
+      .esc-row.mine .esc-bubble{background:color-mix(in srgb,var(--esc-primary) 13%,var(--esc-surface));border-color:color-mix(in srgb,var(--esc-primary) 17%,var(--esc-line));border-radius:18px 18px 6px 18px}.esc-bubble small{display:block;opacity:.6;margin-top:7px;font-size:10px;text-align:right;white-space:nowrap}.esc-label{font-size:10px;font-weight:800;color:var(--esc-primary);margin-bottom:5px;letter-spacing:.15px}
+      .esc-media{max-width:100%;max-height:330px;object-fit:contain;border-radius:13px;margin-top:8px;display:block;background:color-mix(in srgb,var(--esc-text) 5%,transparent)}.esc-audio{display:flex;align-items:center;gap:11px;margin-top:9px;padding:10px;background:color-mix(in srgb,var(--esc-primary) 8%,var(--esc-surface));border:1px solid var(--esc-line);border-radius:15px;max-width:100%}.esc-audio-icon{display:grid;place-items:center;font-size:22px;font-weight:700;color:var(--esc-primary);background:var(--esc-surface);width:41px;height:41px;border-radius:14px;flex-shrink:0}.esc-audio-player{display:grid;gap:5px;flex:1;min-width:0}.esc-audio-player strong{font-size:10px;opacity:.75}.esc-audio audio{width:min(290px,100%);height:36px;display:block;max-width:100%;accent-color:var(--esc-primary)}
+      .esc-attachment{display:flex;gap:11px;align-items:center;padding:11px;border:1px solid var(--esc-line);border-radius:13px;color:inherit;text-decoration:none;margin-top:8px;background:color-mix(in srgb,var(--esc-primary) 5%,var(--esc-surface))}.esc-attachment:hover{background:color-mix(in srgb,var(--esc-primary) 11%,var(--esc-surface))}.esc-attachment span{flex:1;overflow:hidden;overflow-wrap:anywhere}.esc-attachment small{display:block;margin-top:3px;opacity:.6}.esc-unavailable{font-size:11px;opacity:.65;margin-top:8px}.esc-error-text{font-size:11px;color:#b62343;margin-top:5px}
+      .esc-attach-wrap{position:relative;flex:0 0 auto}.eleeveon-attach-popover{position:fixed;z-index:2147480000;display:grid;gap:3px;max-height:calc(100dvh - 24px);overflow-y:auto;padding:10px;border-radius:18px;background:var(--surface,var(--card-bg,#fff));color:var(--text,#233241);font-size:13px;border:1px solid var(--border,rgba(120,140,155,.24));box-shadow:0 18px 52px rgba(16,41,54,.23)}.eleeveon-attach-popover strong{font-size:11px;padding:7px 9px;color:var(--text,#233241);opacity:.7}.eleeveon-attach-popover button{display:flex;align-items:center;gap:12px;min-height:44px;width:100%;padding:10px 12px;text-align:left;border:0;border-radius:12px;background:transparent;cursor:pointer;color:inherit;font:inherit}.eleeveon-attach-popover button:hover,.eleeveon-attach-popover button:focus-visible{background:color-mix(in srgb,var(--dashboard-primary,#137d79) 10%,var(--surface,#fff))}.eleeveon-attach-popover .icon-mark{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;font-size:17px;background:color-mix(in srgb,var(--dashboard-primary,#137d79) 11%,var(--surface,#fff))}
+      .esc-composer-area{flex:0 0 auto;z-index:3;position:relative;margin-top:auto;background:var(--esc-surface);box-shadow:0 -8px 24px rgba(25,70,75,.05)}.esc-composer{display:flex;align-items:flex-end;gap:7px;padding:11px max(12px,2%);min-height:66px;border-top:1px solid var(--esc-line)}.esc-composer textarea{flex:1;min-width:0;height:44px;min-height:44px;resize:none;max-height:116px;overflow-y:auto;background:color-mix(in srgb,var(--esc-surface) 96%,var(--esc-primary));border-radius:15px;border:1px solid var(--esc-line);padding:12px 13px;line-height:1.45}.esc-composer textarea:focus{outline:2px solid color-mix(in srgb,var(--esc-primary) 36%,transparent);outline-offset:0}.esc-files{display:flex;gap:7px;flex-wrap:wrap;padding:8px 13px 2px;max-height:90px;overflow:auto}.esc-files button{border:1px solid var(--esc-line);border-radius:999px;padding:7px 10px;background:var(--esc-mute);max-width:100%;text-overflow:ellipsis;overflow:hidden}.esc-recording{padding:8px 16px;display:flex;align-items:center;gap:8px;color:var(--esc-primary);font-size:11px;font-weight:700}.esc-recording-dot{width:9px;height:9px;background:#e64e65;border-radius:50%;animation:esc-pulse 1s infinite alternate}@keyframes esc-pulse{to{opacity:.3}}
+      .esc-banner{font-size:11px;padding:9px 12px;background:var(--esc-surface);border-bottom:1px solid var(--esc-line)}.esc-banner.warn{background:color-mix(in srgb,#e7b650 10%,var(--esc-surface))}.esc-banner.error{color:#b91c1c}.esc-banner.success{color:var(--esc-primary)}.esc-banner button{margin-left:9px;text-decoration:underline;border:0;background:transparent}.esc-form{padding:clamp(14px,2vw,24px);display:grid;gap:13px;overflow:auto}.esc-form label{display:grid;gap:6px;font-weight:600}.esc-form p{line-height:1.5;opacity:.74;margin:0}.esc-form input,.esc-form textarea,.esc-form select{border:1px solid var(--esc-line);background:var(--esc-surface);border-radius:12px;padding:11px;width:100%}.esc-empty{margin:auto;padding:23px;text-align:center;display:grid;gap:11px;justify-items:center;max-width:380px}.esc-empty strong{font-size:15px}.esc-empty p,.esc-empty small{opacity:.7;line-height:1.6}.esc-back{display:none}
+      .esc-key-panel{background:var(--esc-surface);padding:15px;overflow:auto;max-height:52%;border-bottom:2px solid var(--esc-primary)}.esc-key-item{margin:9px 0;padding:10px;background:var(--esc-mute);border-radius:9px}.esc-fingerprint{word-break:break-word;letter-spacing:.7px;font-family:monospace;font-size:11px}.esc-key-buttons{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+      @media(max-width:980px) and (min-width:681px){.esc-layout{grid-template-columns:minmax(190px,34%) minmax(0,1fr)}.esc-chat-head{gap:5px;padding:8px}.esc-chat-head select{max-width:92px}.esc-bubble{max-width:94%}}
+      @media(max-width:680px){.esc{height:100%;min-height:0}.esc-layout{display:block;height:100%;min-height:0;border-radius:14px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:inline-flex}.esc-bubble{max-width:94%}.esc-body{padding:11px 10px 16px}.esc-chat-head{min-height:58px;padding:8px;gap:6px}.esc-chat-head select{max-width:96px}.esc-chat-head .esc-avatar{height:36px;width:36px}.esc-composer{padding:9px 8px;gap:5px;min-height:59px}.esc button.icon{height:38px;width:38px}.esc-composer textarea{font-size:16px}.esc-date{margin:10px auto}}
+      @media(prefers-reduced-motion:reduce){.esc *, .esc *::before, .esc *::after{animation:none!important;transition:none!important}}
     `}</style>
-    <div className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`}>
+    <div ref={layoutRef} className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`} style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}>
       <aside className="esc-side">
         <div className="esc-side-title"><strong>{isDeveloper ? "Schools · Support" : "Eleeveon Support"}</strong><div className="esc-actions"><button className="icon" title="Refresh" onClick={() => void refresh()} disabled={loading}>↻</button><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>+ New</button></div></div>
         <input className="esc-search" placeholder="Search conversations" value={search} onChange={e => setSearch(e.target.value)}/>
         <select className="esc-filter" value={filter} aria-label="Filter conversations" onChange={e => setFilter(e.target.value)}><option value="all">All conversations</option><option value="open">Open</option>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>
         <div className="esc-inbox">{visible.map(c => <button key={c.id} className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => void openConversation(c.id)}>
-          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || (isEncrypted(c) ? "🔒 Encrypted conversation" : c.subject))}</strong><small>{isEncrypted(c) ? "🔒 Encrypted messages" : "⚠ Legacy unencrypted conversation"}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
+          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || (isEncrypted(c) ? "🔒 Encrypted conversation" : c.subject))}</strong><small>{decryptedSubject[c.id] || "Tap to open conversation"}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
           {!visible.length && <div className="esc-empty">No conversations yet.</div>}</div>
-        <div className="esc-foot">{online ? "Online" : "Offline"} · {ready ? "Encryption device enrolled" : "Encryption unavailable"}{refreshMark ? ` · ${stamp(new Date(refreshMark).toISOString())}` : ""}</div>
+
       </aside>
       <div className="esc-chat">
         {openingId && selected && <div className="esc-opening" role="status" aria-live="polite">Preparing conversation…</div>}
@@ -525,17 +601,18 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
             <button className="primary" disabled={!targetAccount||busy||(targetScope==="user"&&!targetUser)||(targetScope==="role"&&!targetRole)} onClick={()=>void startOutreach()}>{busy?"Creating…":"Open secure conversation"}</button>
           </div> : <div className="esc-form"><label>Category<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Subject<input maxLength={180} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What would you like to discuss?"/></label><label>Message<textarea rows={6} value={openingText} onChange={e => setOpeningText(e.target.value)} placeholder="Explain your issue privately…"/></label><div className="esc-key-buttons"><button className="secondary" onClick={() => setNewChat(false)}>Cancel</button><button className="primary" disabled={!ready || !subject.trim() || !openingText.trim() || busy || !online} onClick={() => void createConversation()}>{busy ? "Encrypting…" : "Start encrypted chat"}</button></div></div>}
         </> : selected && opened ? <>
-          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button><div className="esc-avatar">🔒</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon" title="View encryption keys" onClick={() => setReviewKeys(v => !v)}>🔐</button>{isDeveloper && <select value={opened.status} disabled={busy} onChange={e => void updateStatus(e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>}</div>
-          {selectedIsEncrypted ? <div className="esc-banner success">🔒 Messages and attachments encrypted on your device. The server cannot read their contents. Key verification is recommended.</div> : <div className="esc-banner warn">⚠ This conversation began without E2EE. Earlier messages may have been stored as plaintext. New replies use encryption.</div>}
-          {changedDevices.length > 0 && <div className="esc-banner warn">⚠ New or changed participant keys require verification. <button onClick={() => setReviewKeys(true)}>Review devices</button></div>}
+          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button><div className="esc-avatar">🔒</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon" title={changedDevices.length ? "Verify devices before sending" : "Device security"} onClick={() => setReviewKeys(v => !v)}>{changedDevices.length ? "🔐•" : "🔐"}</button>{isDeveloper && <select value={opened.status} disabled={busy} onChange={e => void updateStatus(e.target.value)}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>}</div>
+
+
           {reviewKeys && <div className="esc-key-panel"><strong>Device identity fingerprints</strong><p>Verify these fingerprints with participants through a separate trusted channel before approving. The server key directory alone cannot prove identity.</p>{knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : d.userId === identity ? "Your other device" : "Conversation participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "✓ Approved on this browser" : trusted[d.id] ? "⚠ Key changed—verify carefully" : "New device—verify before sending"}</small></div>)}<div className="esc-key-buttons"><button className="primary" onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); setInfo("Device fingerprints approved locally. Remember to verify them out of band."); }}>I verified these keys</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div></div>}
-          <div className="esc-body">{!rendered.length&&<div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}{rendered.map((m, index) => {
+          <div ref={messagesRef} className="esc-body">{!rendered.length&&<div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}{rendered.map((m, index) => {
             const mine = isDeveloper ? m.authorType === "platform" : m.authorType !== "platform";
             const prev = rendered[index - 1];
-            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {m.decrypted ? "🔒 Saved" : "⚠ Legacy/locked"}</small></div></div></React.Fragment>;
-          })}<div ref={bottomRef}/></div>
+            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {m.decrypted ? "Saved" : "Unavailable"}</small></div></div></React.Fragment>;
+          })}</div>
+          <div className="esc-composer-area">
           {files.length > 0 && <div className="esc-files">{files.map((f, i) => <button key={`${f.name}:${i}`} disabled={busy} onClick={() => setFiles(old => old.filter((_, k) => k !== i))}>📎 {f.name} ({fileSize(f.size)}) ×</button>)}</div>}
-          {recording && <div className="esc-banner warn">🎙 Recording… select Stop to finish.</div>}
+          {recording && <div className="esc-recording"><span className="esc-recording-dot"/> Recording voice note · tap stop to attach</div>}
           <EleeveonLiveSupport key={selected} conversationId={selected} open={callOpen} onClose={()=>setCallOpen(false)}/>
           <div className="esc-composer">
             <input ref={fileRef} type="file" hidden multiple accept="image/*,audio/*,video/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
@@ -543,20 +620,23 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
             <input ref={imageRef} type="file" hidden accept="image/*" multiple onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <input ref={videoRef} type="file" hidden accept="video/*" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <div ref={attachmentMenuRef} className="esc-attach-wrap">
-              {attachMenuOpen && <div className="esc-attach-menu" role="menu" aria-label="Add to chat">
-                <button role="menuitem" onClick={() => { cameraRef.current?.click(); setAttachMenuOpen(false); }}>📷 Camera</button>
-                <button role="menuitem" onClick={() => { imageRef.current?.click(); setAttachMenuOpen(false); }}>🖼 Photos</button>
-                <button role="menuitem" onClick={() => { videoRef.current?.click(); setAttachMenuOpen(false); }}>🎥 Video</button>
-                <button role="menuitem" onClick={() => { fileRef.current?.click(); setAttachMenuOpen(false); }}>📎 File / Document</button>
-                <button role="menuitem" onClick={() => { setAttachMenuOpen(false); void startRecording(); }}>🎙 Record audio</button>
-                <button role="menuitem" onClick={() => { setAttachMenuOpen(false); setCallOpen(true); }}>▣ Live screen share</button>
-              </div>}
-              <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Attachment options" disabled={busy || recording} onClick={() => setAttachMenuOpen(v => !v)}>＋</button>
-            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea rows={1} placeholder={!ready ? "Setting up encryption…" : online ? "Encrypted message" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
-        </> : <div className="esc-empty"><strong>🔒 Eleeveon secure support</strong><p>Text, voice notes, images, videos and files in continuing conversations.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
+              <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording} onClick={toggleAttachmentMenu}>＋</button>
+            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
+          </div>
+        </> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
       </div>
     </div>
+    {attachMenuOpen && menuPosition && typeof document !== "undefined" && createPortal(
+      <div ref={popoverRef} className="eleeveon-attach-popover" role="menu" aria-label="Add to conversation" style={{ top:menuPosition.top, left:menuPosition.left, width:menuPosition.width }}>
+        <strong>ADD TO CONVERSATION</strong>
+        <button type="button" role="menuitem" onClick={() => { cameraRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">📷</span> Camera</button>
+        <button type="button" role="menuitem" onClick={() => { imageRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">▧</span> Photos</button>
+        <button type="button" role="menuitem" onClick={() => { videoRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">▶</span> Video / demonstration</button>
+        <button type="button" role="menuitem" onClick={() => { fileRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">▤</span> File / document</button>
+        <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); void startRecording(); }}><span className="icon-mark">♫</span> Record voice note</button>
+        <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); setCallOpen(true); }}><span className="icon-mark">▣</span> Live assistance</button>
+      </div>, document.body)}
     {error && <div className="esc-banner error" role="alert">{error} <button onClick={() => setError("")}>Dismiss</button></div>}
-    {info && <div className="esc-banner success" role="status">{info} <button onClick={() => setInfo("")}>×</button></div>}
+
   </section>;
 }

@@ -154,6 +154,7 @@ import WebsiteSettingsSheet from "../../lib/websites/builder/settings/WebsiteSet
 
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
+import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 const TemplatePreviewStudentReportCard =
   StudentReportCard as React.ComponentType<any>;
 const TemplatePreviewCumulativeReportBook =
@@ -2433,6 +2434,8 @@ void softDeleteLocal;
 export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" | "reports" }) {
   const dataRevision = useDataRevision();
 
+  // Shared branch-scoped resolver used by Classes and Assessment Entries.
+  const workspace = useBranchWorkspaceScope();
   const accountContext = useAccount() as any;
   const { accountId, authenticated, loading: accountLoading } = accountContext;
 
@@ -2454,15 +2457,15 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
 
   const openWorkspace = useMemo(() => readOpenWorkspaceSession(), []);
 
-  const selectedAccountId = accountId || settings?.accountId;
-  const selectedSchoolId = selectedWorkspaceSchoolId({
+  const selectedAccountId = workspace.accountId || accountId || settings?.accountId;
+  const selectedSchoolId = workspace.schoolId || selectedWorkspaceSchoolId({
     openWorkspace,
     activeMembership: activeMembership as any,
     activeSchoolId,
     activeSchool: activeSchool as any,
     settings: settings as any,
   });
-  const selectedBranchId = selectedWorkspaceBranchId({
+  const selectedBranchId = workspace.branchId || selectedWorkspaceBranchId({
     openWorkspace,
     activeMembership: activeMembership as any,
     activeBranchId,
@@ -2486,6 +2489,10 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   const [sectionOpen, setSectionOpen] = useState<SettingsSection | null>(null);
   const [admissionDraft, setAdmissionDraft] = useState({ mode: "manual" as "manual" | "automatic" | "automatic_or_manual", prefix: "", separator: "-", nextSequence: 1, padding: 3, scope: "branch" as const });
   const [savingAdmission, setSavingAdmission] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const loadSequenceRef = useRef(0);
+  const [lastSyncedAdmission, setLastSyncedAdmission] = useState<string | null>(null);
+  const [lastSyncedAdmissionSequence, setLastSyncedAdmissionSequence] = useState(0);
 
 
   const [school, setSchool] = useState<School | null>(null);
@@ -2500,8 +2507,54 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   useEffect(() => {
     if (!settingsRow) return;
     const cfg = (settingsRow as any).admissionNumbers;
-    if (cfg) setAdmissionDraft({ mode: cfg.mode || "manual", prefix: cfg.prefix || "", separator: cfg.separator ?? "-", nextSequence: Math.max(1, Number(cfg.nextSequence) || 1), padding: Math.max(1, Number(cfg.padding) || 3), scope: "branch" });
+    setAdmissionDraft({
+      mode: cfg?.mode || "manual",
+      prefix: cfg?.prefix || "",
+      separator: cfg?.separator ?? "-",
+      nextSequence: Math.max(1, Number(cfg?.nextSequence) || 1),
+      padding: Math.max(1, Number(cfg?.padding) || 3),
+      scope: "branch",
+    });
   }, [settingsRow]);
+
+  // Show the latest admission number from locally synchronized student records.
+  // The server AdmissionNumberSequence remains authoritative for allocation.
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) {
+      setLastSyncedAdmission(null);
+      setLastSyncedAdmissionSequence(0);
+      return;
+    }
+    const read = async () => {
+      try {
+        const studentRows = await db.students.toArray();
+        if (cancelled) return;
+        const valid = studentRows.filter((row: any) =>
+          (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
+          sameId(row.schoolId, selectedSchoolId) &&
+          sameId(row.branchId, selectedBranchId) &&
+          typeof row.admissionNumber === "string" && row.admissionNumber.trim(),
+        ).sort((a: any, b: any) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        const prefix = String((settingsRow as any)?.admissionNumbers?.prefix || admissionDraft.prefix).trim();
+        const separator = String((settingsRow as any)?.admissionNumbers?.separator ?? admissionDraft.separator);
+        const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const matches = valid.map((row: any) => {
+          const number = String(row.admissionNumber).trim();
+          const expr = new RegExp(`^${escaped(prefix)}${escaped(separator)}(\\d+)$`, "i");
+          const found = number.match(expr);
+          return { number, sequence: found ? Number(found[1]) : 0 };
+        });
+        matches.sort((a, b) => b.sequence - a.sequence);
+        setLastSyncedAdmission(matches.find(item => item.sequence > 0)?.number || valid[0]?.admissionNumber || null);
+        setLastSyncedAdmissionSequence(matches[0]?.sequence || 0);
+      } catch (error) {
+        console.warn("Could not read synced student admission numbers", error);
+      }
+    };
+    void read();
+    return () => { cancelled = true; };
+  }, [selectedAccountId, selectedSchoolId, selectedBranchId, settingsRow, dataRevision]);
 
   const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
     [],
@@ -2767,6 +2820,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   // ======================================================
 
   const load = async () => {
+    const loadSequence = ++loadSequenceRef.current;
     if (
       !authenticated ||
       !selectedAccountId ||
@@ -2775,11 +2829,12 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     ) {
       clearData();
       setLoading(false);
+      setHasLoaded(true);
       return;
     }
 
     try {
-      setLoading(true);
+      if (!hasLoaded) setLoading(true);
 
       const [
         schoolRows,
@@ -2809,6 +2864,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         (db as any).reportCardTemplateAssignments?.toArray?.() || [],
       ]);
 
+      if (loadSequence !== loadSequenceRef.current) return;
+
       const currentSchool =
         schoolRows.find(
           (row: any) =>
@@ -2837,8 +2894,18 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         ) ||
         null;
 
-      const currentSetting =
-        settingRows.find((row: any) => sameTenant(row)) || null;
+      // A loose tenant match can select account-wide or another branch's row.
+      // Always select the exact school + branch record; use newest on duplicates.
+      const currentSetting = settingRows
+        .filter((row: any) =>
+          !row.isDeleted &&
+          (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
+          sameId(row.schoolId, selectedSchoolId) &&
+          sameId(row.branchId, selectedBranchId),
+        )
+        .sort((a: any, b: any) =>
+          Number(b.updatedAt || 0) - Number(a.updatedAt || 0),
+        )[0] || null;
 
       const dbReportTemplates = (
         reportTemplateRows as ReportTemplateRow[]
@@ -2979,11 +3046,24 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         .filter((row: any) => row.active !== false)
         .sort((a: any, b: any) => Number(a.order || 0) - Number(b.order || 0));
 
-      const mediaUrls = await resolveBranchSettingsMedia({
-        currentSchool,
-        currentBranch,
-        currentSetting,
-      });
+      // Media blobs can be unavailable offline or indefinitely slow. Never block
+      // the settings form itself on thumbnails, logos or signed asset URLs.
+      const mediaFallback = {
+        schoolLogoUrl: "", schoolBannerUrl: "",
+        branchLogoUrl: "", branchBannerUrl: "",
+        settingUrls: {} as Record<string, string>,
+      };
+      const mediaUrls = await Promise.race([
+        resolveBranchSettingsMedia({ currentSchool, currentBranch, currentSetting })
+          .catch((error) => {
+            console.warn("Branch settings media could not be resolved:", error);
+            return mediaFallback;
+          }),
+        new Promise<typeof mediaFallback>((resolve) =>
+          setTimeout(() => resolve(mediaFallback), 4500),
+        ),
+      ]);
+      if (loadSequence !== loadSequenceRef.current) return;
 
       setSchool(currentSchool);
       setBranch(currentBranch);
@@ -3168,17 +3248,25 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
           "compact") as "compact" | "comfortable" | "spacious",
       });
     } catch (error) {
-      console.error("Failed to load branch settings:", error);
-      clearData();
-      showToast("error", "Failed to load branch settings.");
+      if (loadSequence === loadSequenceRef.current) {
+        console.error("Failed to load branch settings:", error);
+        // Keep the last known settings and unsaved input on transient Dexie failures.
+        showToast("error", "Could not refresh settings. Your current values are retained.");
+      }
     } finally {
-      setLoading(false);
+      if (loadSequence === loadSequenceRef.current) {
+        setLoading(false);
+        setHasLoaded(true);
+      }
     }
   };
 
   useEffect(() => {
-    if (accountLoading || settingsLoading || contextLoading) return;
-    load();
+    if (accountLoading || contextLoading || !authenticated) return;
+    // Autosync and media updates must not replace a draft in an open editor.
+    if (sectionOpen !== null || filterOpen || moreOpen || savingAll ||
+        savingSettings || savingSchool || savingBranch || savingReportTemplate || savingAdmission) return;
+    void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     authenticated,
@@ -3189,6 +3277,15 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     settingsLoading,
     contextLoading,
     dataRevision,
+    sectionOpen,
+    filterOpen,
+    moreOpen,
+    savingAll,
+    savingSettings,
+    savingSchool,
+    savingBranch,
+    savingReportTemplate,
+    savingAdmission,
   ]);
 
   useEffect(() => {
@@ -3812,9 +3909,23 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
           }
         : committedAppearance;
 
+      const latestSavedRow = (await db.schoolBranchSettings.toArray())
+        .filter((row: any) => !row.isDeleted &&
+          (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
+          sameId(row.schoolId, selectedSchoolId) &&
+          sameId(row.branchId, selectedBranchId))
+        .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+
       const payload = makeSettingsPayload(
         {
           ...form,
+          // Preserve independent admission/ID configuration during all other saves.
+          admissionNumbers: (latestSavedRow as any)?.admissionNumbers ??
+            (settingsRow as any)?.admissionNumbers,
+          identityIssuancePolicyCache: (latestSavedRow as any)?.identityIssuancePolicyCache ??
+            (settingsRow as any)?.identityIssuancePolicyCache,
+          identityIssuancePolicyPending: (latestSavedRow as any)?.identityIssuancePolicyPending ??
+            (settingsRow as any)?.identityIssuancePolicyPending,
           ...appearancePatch,
           ...settingsMediaPatch,
           accountId: selectedAccountId,
@@ -3825,7 +3936,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
           currentAcademicPeriodId: form.currentAcademicPeriodId || undefined,
           isDeleted: false,
         } as Partial<SchoolBranchSetting>,
-        settingsRow || undefined,
+        latestSavedRow || settingsRow || undefined,
       );
 
       /**
@@ -3842,9 +3953,14 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         isDeleted: false,
       } as any);
 
-      const savedSettingsId = idOf(committedSettings.id);
+      const savedSettingsId = idOf(committedSettings?.id);
+      if (!savedSettingsId) throw new Error("Settings save did not return a record ID.");
+      const locallyPersisted = await db.schoolBranchSettings.get(savedSettingsId);
+      if (!locallyPersisted || locallyPersisted.isDeleted) {
+        throw new Error("Settings could not be verified in Dexie. Please retry.");
+      }
 
-      setSettingsRow(committedSettings);
+      setSettingsRow(locallyPersisted);
       setForm((current) => ({
         ...current,
         ...committedSettings,
@@ -3923,13 +4039,18 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         settingsMediaSessionKeyRef.current = createSettingsMediaSessionKey();
       }
 
-      await persistPendingMediaRemovals();
+      if (shouldPersistRemovals) await persistPendingMediaRemovals();
 
       if (reloadAfterSave) {
         await load();
       }
 
-      await refreshInstitution?.();
+      try {
+        await refreshInstitution?.();
+      } catch (refreshError) {
+        // The Dexie write already succeeded; a refresh failure is not a failed save.
+        console.warn("Institution refresh did not complete:", refreshError);
+      }
 
       /**
        * Phase 10 post-commit propagation:
@@ -4420,23 +4541,44 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     }
   };
 
-  const saveAdmissionNumbers = async () => {
-    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) return;
+  const saveAdmissionNumbers = async (options: { silent?: boolean; close?: boolean } = {}) => {
+    if (!requireTenant()) return false;
     try {
       setSavingAdmission(true);
-      const existing = (await db.schoolBranchSettings.where("branchId").equals(String(selectedBranchId)).toArray()).find((x: any) => String(x.schoolId) === String(selectedSchoolId) && !x.isDeleted);
+      const existing = (await db.schoolBranchSettings.toArray())
+        .filter((row: any) => !row.isDeleted &&
+          (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
+          sameId(row.schoolId, selectedSchoolId) &&
+          sameId(row.branchId, selectedBranchId))
+        .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
       if (!existing) throw new Error("Save Branch Settings once before configuring admission numbers.");
       const previous = (existing as any).admissionNumbers;
-      const next = { ...admissionDraft, prefix: admissionDraft.prefix.trim().toUpperCase(), nextSequence: Math.max(Number(previous?.nextSequence) || 1, Number(admissionDraft.nextSequence) || 1), padding: Math.min(12, Math.max(1, Math.floor(admissionDraft.padding))) };
+      const next = {
+        ...admissionDraft,
+        prefix: admissionDraft.prefix.trim().toUpperCase(),
+        nextSequence: Math.max(1, Number(previous?.nextSequence) || 1,
+          Number(admissionDraft.nextSequence) || 1, lastSyncedAdmissionSequence + 1),
+        padding: Math.min(12, Math.max(1, Math.floor(admissionDraft.padding))),
+        scope: "branch" as const,
+      };
       await updateLocal("schoolBranchSettings", existing.id, { admissionNumbers: next } as any);
-      publishBranchSettingsSaved({ accountId: selectedAccountId, schoolId: cleanId(selectedSchoolId), branchId: cleanId(selectedBranchId) });
+      const verified = await db.schoolBranchSettings.get(existing.id);
+      if (!(verified as any)?.admissionNumbers) throw new Error("Admission settings were not saved in Dexie.");
+      setSettingsRow(verified || null);
       setAdmissionDraft(next);
-      await load();
-      setSectionOpen(null);
-      setToast({ tone: "success", message: "Admission number settings saved." });
+      publishBranchSettingsSaved({
+        accountId: selectedAccountId,
+        schoolId: cleanId(selectedSchoolId), branchId: cleanId(selectedBranchId),
+      });
+      if (options.close !== false) setSectionOpen(null);
+      if (!options.silent) showToast("success", "Admission number settings saved.");
+      return true;
     } catch (error: any) {
-      setToast({ tone: "error", message: error?.message || "Could not save admission number settings." });
-    } finally { setSavingAdmission(false); }
+      showToast("error", error?.message || "Could not save admission number settings.");
+      return false;
+    } finally {
+      setSavingAdmission(false);
+    }
   };
 
   const saveAll = async () => {
@@ -4446,45 +4588,35 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       setSavingAll(true);
 
       if (schoolForm.id) {
-        await saveSchoolIdentity({
-          silent: true,
-          reloadAfterSave: false,
-          persistRemovals: false,
+        const result = await saveSchoolIdentity({
+          silent: true, reloadAfterSave: false, persistRemovals: false,
         });
+        if (!result) throw new Error("School identity could not be saved.");
       }
-
       if (branchForm.id) {
-        await saveBranchIdentity({
-          silent: true,
-          reloadAfterSave: false,
-          persistRemovals: false,
+        const result = await saveBranchIdentity({
+          silent: true, reloadAfterSave: false, persistRemovals: false,
         });
+        if (!result) throw new Error("Branch identity could not be saved.");
       }
+      if (!await saveSchoolBranchSettings({
+        silent: true, reloadAfterSave: false,
+        persistRemovals: false, includeAppearance: true,
+      })) throw new Error("Branch preferences could not be saved.");
 
-      await saveSchoolBranchSettings({
-        silent: true,
-        reloadAfterSave: false,
-        persistRemovals: false,
-        includeAppearance: true,
-      });
+      if (!await saveAdmissionNumbers({ silent: true, close: false }))
+        throw new Error("Admission number settings could not be saved.");
 
-      await saveReportCardTemplateSettings({
-        silent: true,
-        reloadAfterSave: false,
-        persistRemovals: false,
-      });
+      if (!await saveReportCardTemplateSettings({
+        silent: true, reloadAfterSave: false, persistRemovals: false,
+      })) throw new Error("Report template settings could not be saved.");
 
       await persistPendingMediaRemovals();
       await load();
       await refreshInstitution?.();
-
-      /*
-       * saveSchoolBranchSettings() already commits through
-       * SettingsContext.updateSettings(), which updates effectiveSettings
-       * immediately. A second refresh here is unnecessary and previously
-       * reintroduced the stale-settings race.
-       */
-      showToast("success", "All school branch settings saved successfully.");
+      showToast("success", "All branch settings saved in Dexie.");
+    } catch (error: any) {
+      showToast("error", error?.message || "One or more settings could not be saved.");
     } finally {
       setSavingAll(false);
     }
@@ -5046,7 +5178,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     );
   }, [activePeriod, activeStructure, branchForm, form, schoolForm, searchTerm, view, admissionDraft]);
 
-  if (accountLoading || contextLoading || settingsLoading || loading) {
+  if (!hasLoaded && (accountLoading || contextLoading || loading)) {
     return (
       <State
         primary={primary}
@@ -5276,12 +5408,14 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
                 <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
-                <Field label="Next number"><input type="number" min={1} value={admissionDraft.nextSequence} onChange={e => setAdmissionDraft(p => ({...p,nextSequence:Math.max(1, Number(e.target.value)||1)}))}/></Field>
-                <p>Preview: <strong>{admissionDraft.prefix.trim().toUpperCase()}{admissionDraft.separator}{String(admissionDraft.nextSequence).padStart(admissionDraft.padding,"0")}</strong></p>
+                <Field label="Next number (local preference)"><input type="number" min={1} value={admissionDraft.nextSequence} onChange={e => setAdmissionDraft(p => ({...p,nextSequence:Math.max(1, Number(e.target.value)||1)}))}/></Field>
+                <p>Last number in locally synchronized student records: <strong>{lastSyncedAdmission || "None available"}</strong></p>
+                <p>Local next-number preview: <strong>{admissionDraft.prefix.trim().toUpperCase()}{admissionDraft.separator}{String(Math.max(admissionDraft.nextSequence,lastSyncedAdmissionSequence + 1)).padStart(admissionDraft.padding,"0")}</strong></p>
+                <p style={{fontSize:12,opacity:.76}}>The backend's AdmissionNumberSequence is authoritative. This preview is based on the branch settings and locally synchronized records, not a server-confirmed reservation.</p>
               </>}
               <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
             </div>
-            <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={saveAdmissionNumbers}>{savingAdmission ? "Saving..." : "Save"}</button></div>
+            <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={() => void saveAdmissionNumbers()}>{savingAdmission ? "Saving..." : "Save"}</button></div>
           </section>
         </div>
       )}
@@ -5562,6 +5696,7 @@ function BranchIDCardSettings({
   if (pane === "issuance") {
     return (
       <IdentityIssuanceSettings
+        accountId={String(accountId || "")}
         schoolId={String(schoolId || "")}
         branchId={String(branchId || "")}
         onClose={() => setPane("home")}

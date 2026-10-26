@@ -87,7 +87,7 @@ export const supportApi = {
     request<{ device: PublicSupportDevice }>("/support/keys", { method: "POST", body: JSON.stringify(data) }),
   list: () => request<{ conversations: SupportConversation[] }>("/support/conversations"),
   open: (id: string) => request<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${encodeURIComponent(id)}`),
-  create: (data: { subject: string; body: string; type: string; schoolId?: string; branchId?: string; membershipId?: string; name?: string; encrypted?: boolean; conversationId?: string }) =>
+  create: (data: { subject: string; body: string; type: string; schoolId?: string; branchId?: string; membershipId?: string; name?: string; encrypted?: boolean; conversationId?: string; pending?: boolean }) =>
     request<{ conversation: SupportConversation }>("/support/conversations", { method: "POST", body: JSON.stringify(data) }),
   send: (id: string, body: string, file?: File, clientId?: string, encrypted = false, uploadId?:string) => {
     const form = new FormData();

@@ -348,6 +348,28 @@ type StudentView = {
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+/** Local calendar age, not elapsed milliseconds / 365. */
+function ageFromBirthDate(dateOfBirth?: string | null, today = new Date()): number | undefined {
+  if (!dateOfBirth) return undefined;
+  const found = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateOfBirth));
+  if (!found) return undefined;
+  const year = Number(found[1]);
+  const month = Number(found[2]);
+  const day = Number(found[3]);
+  const birth = new Date(year, month - 1, day);
+  if (birth.getFullYear() !== year || birth.getMonth() !== month - 1 || birth.getDate() !== day) return undefined;
+  const currentYear = today.getFullYear();
+  const currentMonth = today.getMonth() + 1;
+  const currentDay = today.getDate();
+  const age = currentYear - year - (currentMonth < month || (currentMonth === month && currentDay < day) ? 1 : 0);
+  return age >= 0 && age <= 150 ? age : undefined;
+}
+
+function displayStudentAge(student: Pick<Student, "dateOfBirth" | "age">): number | string {
+  const calculated = ageFromBirthDate(student.dateOfBirth);
+  return calculated ?? student.age ?? "—";
+}
+
 const emptyEnrollmentForm: EnrollmentFormState = {
   studentId: "",
   classId: "",
@@ -1809,7 +1831,7 @@ export default function StudentsPage() {
       admissionNumber: s.admissionNumber || "",
       fullName: s.fullName || "",
       gender: s.gender || "",
-      age: s.age == null ? "" : String(s.age),
+      age: ageFromBirthDate(s.dateOfBirth) == null ? (s.age == null ? "" : String(s.age)) : String(ageFromBirthDate(s.dateOfBirth)),
       dateOfBirth: s.dateOfBirth || "",
       // Edit safety: do not hydrate the edit form from raw row.photo/row.coverPhoto.
       // Those legacy fields may already be stale or wrong on corrupted student rows.
@@ -2200,7 +2222,7 @@ export default function StudentsPage() {
           fullName: row.fullName || "",
           gender: row.gender || "",
           dateOfBirth: row.dateOfBirth || "",
-          age: row.age ?? "",
+          age: displayStudentAge(row),
           className: item.className === "No class assigned" ? "" : item.className,
           organizationName:
             item.organizationName === "No organization" ? "" : item.organizationName,
@@ -2438,7 +2460,9 @@ export default function StudentsPage() {
     if (!schoolId) return "Select a school first.";
     if (!branchId) return "Select a branch first.";
     if (!form.fullName.trim()) return "Enter student full name.";
-    if (form.age !== "" && Number(form.age) < 0)
+    if (form.dateOfBirth && ageFromBirthDate(form.dateOfBirth) == null)
+      return "Enter a valid date of birth that is not in the future.";
+    if (!form.dateOfBirth && form.age !== "" && Number(form.age) < 0)
       return "Age cannot be negative.";
 
     const hasLatitude = form.latitude.trim() !== "";
@@ -2520,6 +2544,13 @@ export default function StudentsPage() {
         ? rows.find((row: any) => sameId(row.id, form.id))
         : undefined;
 
+      // Never silently overwrite a previously confirmed number. The backend
+      // requires its separately authorized correction workflow for that action.
+      if (form.id && existing && String(existing.admissionNumber || "").trim() &&
+          String(existing.admissionNumber || "").trim() !== form.admissionNumber.trim()) {
+        throw new Error("This admission number is confirmed. Use the authorized admission-number correction workflow; ordinary student edits cannot change it.");
+      }
+
       const resolvedAdmission = !form.id
         ? await resolveAdmissionNumber({ accountId, schoolId, branchId, supplied: form.admissionNumber })
         : { admissionNumber: form.admissionNumber.trim() || undefined, provisional: false };
@@ -2534,7 +2565,9 @@ export default function StudentsPage() {
         currentClassId: form.currentClassId
           ? String(form.currentClassId)
           : undefined,
-        admissionNumber: resolvedAdmission.admissionNumber,
+        admissionNumber: form.id && existing && String(existing.admissionNumber || "").trim()
+          ? existing.admissionNumber
+          : resolvedAdmission.admissionNumber,
         // The offline candidate becomes authoritative only after /sync/push
         // confirms it. Preserve the last confirmed identity on edits.
         admissionNumberProvisional: form.id
@@ -2545,7 +2578,7 @@ export default function StudentsPage() {
           : false,
         fullName: form.fullName.trim(),
         gender: form.gender.trim() || undefined,
-        age: form.age === "" ? undefined : Number(form.age),
+        age: form.dateOfBirth ? ageFromBirthDate(form.dateOfBirth) : (form.age === "" ? undefined : Number(form.age)),
         dateOfBirth: form.dateOfBirth || undefined,
         photo: safeRecordMediaValue(form.photo),
         photoMediaId: form.photoMediaId || undefined,
@@ -2848,7 +2881,7 @@ export default function StudentsPage() {
           class: item.className,
           organization: item.organizationName,
           gender: row.gender || "—",
-          age: row.age ?? "—",
+          age: displayStudentAge(row),
           parent: row.parentName || "—",
           phone: row.parentPhone || "—",
           enrollments: item.enrollmentCount,
@@ -4289,7 +4322,7 @@ function TableView({
                   <td>{item.className}</td>
                   <td>{item.organizationName}</td>
                   <td>{row.gender || "—"}</td>
-                  <td>{row.age ?? "—"}</td>
+                  <td>{displayStudentAge(row)}</td>
                   <td>{row.parentName || "—"}</td>
                   <td>{row.parentPhone || "—"}</td>
                   <td>{item.enrollmentCount}</td>
@@ -4491,7 +4524,10 @@ function StudentModal({
               <input
                 type="date"
                 value={form.dateOfBirth}
-                onChange={(e) => updateForm({ dateOfBirth: e.target.value })}
+                onChange={(e) => updateForm({
+                  dateOfBirth: e.target.value,
+                  age: e.target.value ? String(ageFromBirthDate(e.target.value) ?? "") : "",
+                })}
               />
             </label>
 
@@ -4499,9 +4535,11 @@ function StudentModal({
               <span>Age</span>
               <input
                 type="number"
-                value={form.age}
+                value={form.dateOfBirth ? String(ageFromBirthDate(form.dateOfBirth) ?? "") : form.age}
                 onChange={(e) => updateForm({ age: e.target.value })}
-                placeholder="Age"
+                readOnly={Boolean(form.dateOfBirth)}
+                title={form.dateOfBirth ? "Calculated automatically from date of birth" : "Enter age only if date of birth is unknown"}
+                placeholder={form.dateOfBirth ? "Calculated from birth date" : "Age (if DOB unknown)"}
               />
             </label>
 

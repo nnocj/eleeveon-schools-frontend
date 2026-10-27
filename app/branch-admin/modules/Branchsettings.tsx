@@ -2491,10 +2491,6 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   const [savingAdmission, setSavingAdmission] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const loadSequenceRef = useRef(0);
-  const [lastSyncedAdmission, setLastSyncedAdmission] = useState<string | null>(null);
-  const [lastSyncedAdmissionSequence, setLastSyncedAdmissionSequence] = useState(0);
-  const [lastConfirmedAdmission, setLastConfirmedAdmission] = useState<string | null>(null);
-  const [highestProvisionalAdmission, setHighestProvisionalAdmission] = useState<string | null>(null);
 
 
   const [school, setSchool] = useState<School | null>(null);
@@ -2509,6 +2505,9 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   useEffect(() => {
     if (!settingsRow) return;
     const cfg = (settingsRow as any).admissionNumbers;
+    // If settings rehydration delivers an older row without an admissionNumbers
+    // object, never erase a prefix the user is currently editing.
+    if (!cfg || typeof cfg !== "object") return;
     setAdmissionDraft({
       mode: cfg?.mode || "manual",
       prefix: cfg?.prefix || "",
@@ -2519,58 +2518,12 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     });
   }, [settingsRow]);
 
-  // Read only the active branch, using the exact configured prefix and separator.
-  // Confirmed and provisional admissions are NOT interchangeable. A provisional
-  // student may reserve a higher number than the last confirmed student.
-  useEffect(() => {
-    let cancelled = false;
-    if (!selectedAccountId || !selectedSchoolId || !selectedBranchId) {
-      setLastSyncedAdmission(null);
-      setLastSyncedAdmissionSequence(0);
-      setLastConfirmedAdmission(null);
-      setHighestProvisionalAdmission(null);
-      return;
-    }
-    const read = async () => {
-      try {
-        const rows = await db.students.where("branchId").equals(selectedBranchId).toArray();
-        if (cancelled) return;
-        const config = (settingsRow as any)?.admissionNumbers;
-        const prefix = String(config?.prefix ?? admissionDraft.prefix).trim().toUpperCase();
-        const separator = String(config?.separator ?? admissionDraft.separator);
-        const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const pattern = new RegExp(`^${escaped(prefix)}${escaped(separator)}(\\d+)$`, "i");
-        const parsed = rows
-          .filter((row: any) =>
-            (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
-            sameId(row.schoolId, selectedSchoolId) &&
-            sameId(row.branchId, selectedBranchId))
-          .map((row: any) => {
-            const number = String(row.admissionNumber || "").trim();
-            const match = number.match(pattern);
-            return {
-              number,
-              sequence: match ? Number(match[1]) : 0,
-              confirmed: row.admissionNumberConfirmed === true && row.admissionNumberProvisional !== true,
-              provisional: row.admissionNumberProvisional === true || row.syncStatus === "pending",
-            };
-          })
-          .filter(item => item.sequence > 0 && Number.isSafeInteger(item.sequence))
-          .sort((a, b) => b.sequence - a.sequence);
-        if (cancelled) return;
-        const confirmed = parsed.find(item => item.confirmed);
-        const provisional = parsed.find(item => item.provisional);
-        setLastSyncedAdmission(parsed[0]?.number || null);
-        setLastSyncedAdmissionSequence(parsed[0]?.sequence || 0);
-        setLastConfirmedAdmission(confirmed?.number || null);
-        setHighestProvisionalAdmission(provisional?.number || null);
-      } catch (error) {
-        console.warn("Could not read local admission number information", error);
-      }
-    };
-    void read();
-    return () => { cancelled = true; };
-  }, [selectedAccountId, selectedSchoolId, selectedBranchId, settingsRow, dataRevision]);
+  // Do not estimate the authoritative number from browser data.
+  // Admission allocations belong to the server registry, not IndexedDB.
+  // The backend status is intentionally unavailable until an authenticated
+  // server read endpoint is wired into this module.
+  const backendAdmission: string | null = null;
+  const backendAdmissionState = "unavailable" as const;
 
   const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
     [],
@@ -4573,7 +4526,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         ...admissionDraft,
         prefix: admissionDraft.prefix.trim().toUpperCase(),
         nextSequence: Math.max(1, Number(previous?.nextSequence) || 1,
-          Number(admissionDraft.nextSequence) || 1, lastSyncedAdmissionSequence + 1),
+          Number(admissionDraft.nextSequence) || 1),
         padding: Math.min(12, Math.max(1, Math.floor(admissionDraft.padding))),
         scope: "branch" as const,
       };
@@ -5420,16 +5373,12 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
             <div className="ba-sheet-head"><div><h2>Admission Numbers</h2><p>Numbering rules for new student records in this branch.</p></div><button type="button" onClick={() => setSectionOpen(null)} aria-label="Close">✕</button></div>
             <div className="ba-form compact">
               <Field label="Numbering mode"><select value={admissionDraft.mode} onChange={e => setAdmissionDraft(p => ({...p, mode: e.target.value as any}))}><option value="manual">Manual only</option><option value="automatic">Generate automatically</option><option value="automatic_or_manual">Automatic, allow manual entry</option></select></Field>
-              {admissionDraft.mode !== "manual" && <>
+              <>
                 <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
-                <Field label="Next number (local preference)"><input type="number" min={1} value={admissionDraft.nextSequence} onChange={e => setAdmissionDraft(p => ({...p,nextSequence:Math.max(1, Number(e.target.value)||1)}))}/></Field>
-                <p>Last server-confirmed number visible on this device: <strong>{lastConfirmedAdmission || "Not available locally"}</strong></p>
-                <p>Highest provisional/pending number on this device: <strong>{highestProvisionalAdmission || "None"}</strong></p>
-                <p>Highest number stored locally (including reservations): <strong>{lastSyncedAdmission || "None"}</strong></p>
-                <p>Safe local next-number preview: <strong>{admissionDraft.prefix.trim().toUpperCase()}{admissionDraft.separator}{String(Math.max(admissionDraft.nextSequence,lastSyncedAdmissionSequence + 1)).padStart(admissionDraft.padding,"0")}</strong></p>
-                <p style={{fontSize:12,opacity:.76}}>The highest provisional number is not necessarily the last confirmed admission. The saved next sequence is a high-water mark, not a count of students. The backend sequence registry is authoritative and may be higher. Verify the database registry before resetting any sequence; never reuse a confirmed or reserved number automatically.</p>
+                <p>Last confirmed admission number (backend): <strong>{backendAdmissionState === "ready" ? (backendAdmission || "None issued") : "Not connected to backend status endpoint"}</strong></p>
+                <p style={{fontSize:12,opacity:.76}}>Only the backend admission identity registry can provide this figure. Local student numbers and local nextSequence are deliberately not shown as confirmed values.</p>
               </>}
               <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
             </div>

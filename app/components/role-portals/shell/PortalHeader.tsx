@@ -13,6 +13,7 @@ import {
 import type {
   PortalSearchResult,
 } from "./PortalSearchBridge";
+import { useSupportUnread } from "../../../lib/support/useSupportUnread";
 
 export interface PortalHeaderProps {
   activeLabel: string;
@@ -33,6 +34,8 @@ export interface PortalHeaderProps {
   onToggleSidebar(): void;
   onOpenStatus(): void;
   onOpenAccount(): void;
+  /** Supply navigate("center") from RolePortalShell. */
+  onOpenHub?: () => void;
 }
 
 function initials(
@@ -128,7 +131,9 @@ export default function PortalHeader({
   onToggleSidebar,
   onOpenStatus,
   onOpenAccount,
+  onOpenHub,
 }: PortalHeaderProps) {
+  const hubUnread = useSupportUnread();
   const {
     overlayVisible,
   } =
@@ -419,6 +424,26 @@ export default function PortalHeader({
           </button>
         ) : null}
 
+        {onOpenHub ? (
+          <button
+            type="button"
+            className="icon-btn portal-header-hub-button"
+            onClick={() => { closeSearch(); onOpenHub(); }}
+            aria-label={`Open Eleeveon Hub${hubUnread > 0 ? `, ${hubUnread} unread messages` : ""}`}
+            title="Eleeveon Hub"
+          >
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5 8 8 0 0 1-3.3-.7L4 20l1.7-5.2a8 8 0 0 1-.7-3.3 7.5 7.5 0 0 1 7.5-7.5A7.5 7.5 0 0 1 20 11.5Z" />
+              <path d="M9 11.5h7" />
+            </svg>
+            {hubUnread > 0 && (
+              <span className="portal-header-hub-unread" aria-hidden="true">
+                {hubUnread > 99 ? "99+" : hubUnread}
+              </span>
+            )}
+          </button>
+        ) : null}
+
         <button
           type="button"
           className={`sync-dot-btn header-status ${statusClass}`}
@@ -528,6 +553,9 @@ export default function PortalHeader({
 }
 
 const css = `
+.portal-header-hub-button { position: relative; flex-shrink: 0; display: inline-grid; place-items: center; }
+.portal-header-hub-unread { position: absolute; top: -4px; right: -5px; display: grid; place-items: center; min-width: 17px; height: 17px; border-radius: 99px; padding: 0 4px; background: #dc2626; color: #fff; font: 700 10px/1 system-ui,sans-serif; box-shadow: 0 0 0 2px var(--eds-surface, var(--surface, #fff)); }
+
 /* =====================================================
  * FIXED PORTAL HEADER
  * ===================================================== */

@@ -5373,13 +5373,11 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
             <div className="ba-sheet-head"><div><h2>Admission Numbers</h2><p>Numbering rules for new student records in this branch.</p></div><button type="button" onClick={() => setSectionOpen(null)} aria-label="Close">✕</button></div>
             <div className="ba-form compact">
               <Field label="Numbering mode"><select value={admissionDraft.mode} onChange={e => setAdmissionDraft(p => ({...p, mode: e.target.value as any}))}><option value="manual">Manual only</option><option value="automatic">Generate automatically</option><option value="automatic_or_manual">Automatic, allow manual entry</option></select></Field>
-              <>
-                <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
+              <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
                 <p>Last confirmed admission number (backend): <strong>{backendAdmissionState === "ready" ? (backendAdmission || "None issued") : "Not connected to backend status endpoint"}</strong></p>
                 <p style={{fontSize:12,opacity:.76}}>Only the backend admission identity registry can provide this figure. Local student numbers and local nextSequence are deliberately not shown as confirmed values.</p>
-              </>}
               <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
             </div>
             <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={() => void saveAdmissionNumbers()}>{savingAdmission ? "Saving..." : "Save"}</button></div>

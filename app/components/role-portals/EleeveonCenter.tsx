@@ -3619,7 +3619,7 @@ span,
   overflow:hidden;
   padding:5px;
   border-radius:21px;
-  background:linear-gradient(115deg,rgba(5,37,43,.25),rgba(6,43,39,.08)),url('/hub-pier.jpg') center / cover no-repeat,#b9dcd6;
+  background:linear-gradient(115deg,rgba(5,37,43,.25),rgba(6,43,39,.08)),url('/hub-pier.png') center / cover no-repeat,#b9dcd6;
   color:#23413d;
 }
 .hub-module .center-shell {border-radius:16px}

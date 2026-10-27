@@ -1073,8 +1073,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
 
       /* A room of its own: scenic wallpaper plus unobtrusive, high-contrast glass. */
       .esc{--esc-primary:#11685f;--esc-text:#18342f;--esc-surface:rgba(255,255,254,.94);--esc-line:rgba(24,64,61,.17);--esc-mute:rgba(217,235,227,.69);background:linear-gradient(130deg,#b7d8da,#dfe4d3 50%,#92c2bb);padding:4px;border-radius:22px;position:relative;overflow:hidden}
-      .esc-wallpaper-pier{--hub-scene:url('/hub-pier.jpg')}
-      .esc-wallpaper-garden{--hub-scene:url('/hub-garden.jpg')}
+      .esc-wallpaper-pier{--hub-scene:url('/hub-pier.png')}
+      .esc-wallpaper-garden{--hub-scene:url('/hub-garden.png')}
       .esc-wallpaper-gradient{--hub-scene:linear-gradient(125deg,#c0e7e4,#b5c7de 45%,#e6c9b3)}
       .esc-layout{border-radius:21px;border:1px solid rgba(255,255,255,.55);background:transparent;box-shadow:0 15px 42px rgba(2,35,34,.19)}
       .esc-side{background:rgba(247,250,244,.9);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-right:1px solid rgba(255,255,255,.55)}

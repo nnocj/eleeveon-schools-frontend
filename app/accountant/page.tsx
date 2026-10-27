@@ -60,7 +60,7 @@ function AccountantFinanceWorkspace(props: RouteProps) {
               { key: "records", label: "Fee Records" },
             ]}
           />
-          {feesView === "term" ? <TermFeesRequirements /> : <BranchFees {...props} />}
+          {feesView === "term" ? <TermFeesRequirements /> : <BranchFees />}
         </div>
       ) : (
         <Current {...props} />

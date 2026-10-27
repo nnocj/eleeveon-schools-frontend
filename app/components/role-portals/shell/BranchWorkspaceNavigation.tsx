@@ -8,6 +8,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { RoleNavItem } from "../RolePortalShell";
+import HubUnreadBadge from "./HubUnreadBadge";
 import { printVisibleBranchTable } from "./BranchTablePrint";
 import {
   openExistingModuleAction,
@@ -154,6 +155,7 @@ export default function BranchWorkspaceNavigation({
             aria-label="Open Eleeveon Hub" title="Eleeveon Hub"
             aria-current={activeKey === HUB_KEY ? "page" : undefined}>
             <span aria-hidden="true">✉</span><span className="ba-v7-status-name">Hub</span>
+             <HubUnreadBadge />
           </button>
           <button type="button" className="ba-v7-avatar" onClick={onOpenAccount} aria-label="Open account and workspace">
             {memberImage && !avatarFailed ? (
@@ -230,6 +232,7 @@ const styles = `
 .ba-v7-brand-copy small{font-size:11px;line-height:14px;color:var(--muted,#64748b);}
 .ba-v7-header-actions{display:flex;align-items:center;justify-content:flex-end;flex:0 0 140px;width:140px;min-width:140px;height:42px;gap:8px;}
 .ba-v7-nav .ba-v7-status{flex:0 0 90px;width:90px;min-width:90px;max-width:90px;height:36px;min-height:36px;max-height:36px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 7px;border:1px solid var(--border,#d4dae3);background:var(--surface,#fff);border-radius:10px;color:var(--text,#172033);font-size:11px;font-weight:700;white-space:nowrap;}
+.ba-v7-nav .ba-v12-hub{position:relative;overflow:visible;}
 .ba-v7-dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;}.ba-v7-dot.is-online{background:#16a34a}.ba-v7-dot.is-offline{background:#d97706}
 .ba-v7-nav .ba-v7-avatar{flex:0 0 38px;width:38px;min-width:38px;max-width:38px;height:38px;min-height:38px;max-height:38px;display:grid;place-items:center;padding:0;border:1px solid var(--border,#d4dae3);border-radius:50%;background:var(--surface,#fff);overflow:hidden;color:var(--text,#172033);}
 .ba-v7-avatar img{width:100%;height:100%;object-fit:cover}.ba-v7-avatar span{font-size:15px;line-height:1}

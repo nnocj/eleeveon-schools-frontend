@@ -5,7 +5,7 @@ import type { PublicSupportDevice } from "./supportCrypto";
 
 export type SupportAttachment = { name: string; mimeType: string; sizeBytes: number; kind: "image"|"video"|"audio"|"document"; url: string|null; encrypted?: boolean };
 export type SupportMessage = { id:string; feedbackId:string; authorType:string; authorUserId?:string|null; body:string; attachments?:SupportAttachment[]; internal:boolean; createdAt:string; deletedForEveryone?:boolean };
-export type SupportConversation = {id:string; accountId?:string|null; subject:string; description:string;type:string;status:string;priority?:string;organizationName?:string;createdAt:string;updatedAt:string;metadata?:Record<string,unknown>|null;submittedByUserId?:string|null; unreadCount?:number;lastMessage?:{body:string;createdAt:string;authorType:string}|null};
+export type SupportConversation = {id:string; accountId?:string|null; subject:string; description:string;displayTitle?:string|null;type:string;status:string;priority?:string;organizationName?:string;createdAt:string;updatedAt:string;metadata?:Record<string,unknown>|null;submittedByUserId?:string|null; unreadCount?:number;lastMessage?:{body:string;createdAt:string;authorType:string}|null};
 export type SupportUnread = { total:number; conversations:Array<{id:string;unreadCount:number}> };
 async function request<T>(path:string,init:RequestInit={}):Promise<T>{
  const base=getApiBaseUrl(),token=getAuthToken();
@@ -43,6 +43,8 @@ export const supportApi={
  open:(id:string)=>request<{conversation:SupportConversation;messages:SupportMessage[]}>(`/support/conversations/${enc(id)}`),
  create:(data:{subject:string;body:string;type:string;schoolId?:string;branchId?:string;membershipId?:string;name?:string;encrypted?:boolean;conversationId?:string;pending?:boolean})=>request<{conversation:SupportConversation}>("/support/conversations",{method:"POST",body:JSON.stringify(data)}),
  send:(id:string,body:string,file?:File,clientId?:string,encrypted=false,uploadId?:string)=>{const form=new FormData();form.append("body",body);if(encrypted)form.append("encrypted","true");if(file)form.append("file",file,file.name);if(clientId)form.append("clientId",clientId);if(uploadId)form.append("uploadId",uploadId);return request<{message:SupportMessage}>(`/support/conversations/${enc(id)}/messages`,{method:"POST",body:form});},
+ renameConversation:(id:string,title:string)=>request<{ok:boolean;displayTitle:string}>(`/support/conversations/${enc(id)}/title`,{method:"PATCH",body:JSON.stringify({title})}),
+ removeConversation:(id:string)=>request<{ok:boolean;feedbackId:string}>(`/support/conversations/${enc(id)}`,{method:"DELETE"}),
  status:(id:string,status:string)=>request<{conversation:SupportConversation}>(`/support/conversations/${enc(id)}/status`,{method:"PATCH",body:JSON.stringify({status})}),
  unread:()=>request<SupportUnread>("/support/unread"),
  markRead:(id:string)=>request<{ok:boolean;feedbackId:string;readAt:string}>(`/support/conversations/${enc(id)}/read`,{method:"POST"}),

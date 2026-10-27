@@ -30,7 +30,21 @@ type Props = {
 
 // Built-in route recognized by RolePortalShellContent for every role.
 const HUB_KEY = "__eleeveon_center__";
-const PIN_KEY = "eleeveon_branch_admin_pin_cards";
+// Preserve Branch Admin's existing preference; keep the other portals independent.
+const BRANCH_PIN_KEY = "eleeveon_branch_admin_pin_cards";
+function navIdentity(items: RoleNavItem[]) {
+  const keys = new Set(items.map((item) => item.key));
+  if (keys.has("saasWorkspace")) {
+    return { title: "Developer Portal", icon: "🛠️", pinKey: "eleeveon_developer_pin_cards" };
+  }
+  if (keys.has("ownerDashboard") || keys.has("institutionWorkspace")) {
+    return { title: "Owner Portal", icon: "👑", pinKey: "eleeveon_owner_pin_cards" };
+  }
+  if (keys.size === 1 && keys.has("financeWorkspace")) {
+    return { title: "Accountant Portal", icon: "💼", pinKey: "eleeveon_accountant_pin_cards" };
+  }
+  return { title: "Branch Admin Portal", icon: "🎓", pinKey: BRANCH_PIN_KEY };
+}
 const ACTIONS: Array<{ key: BranchToolbarAction; label: string }> = [
   { key: "add", label: "Add" },
   { key: "filter", label: "Filter" },
@@ -54,6 +68,7 @@ export default function BranchWorkspaceNavigation({
   items, activeKey, onNavigate, branchName, online, memberImage,
   memberName, onOpenStatus, onOpenAccount,
 }: Props) {
+  const identity = navIdentity(items);
   const toolbar = useBranchWorkspaceToolbar();
   const registered = toolbar?.handlers[activeKey];
   const activeLabel = activeKey === HUB_KEY ? "Eleeveon Hub" : items.find((item) => item.key === activeKey)?.label || "Workspace";
@@ -64,8 +79,8 @@ export default function BranchWorkspaceNavigation({
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    try { setPinned(localStorage.getItem(PIN_KEY) === "1"); } catch { /* storage may be blocked */ }
-  }, []);
+    try { setPinned(localStorage.getItem(identity.pinKey) === "1"); } catch { /* storage may be blocked */ }
+  }, [identity.pinKey]);
   useEffect(() => { setFeedback(""); setPickerOpen(false); }, [activeKey]);
   useEffect(() => setAvatarFailed(false), [memberImage]);
   useEffect(() => {
@@ -87,7 +102,7 @@ export default function BranchWorkspaceNavigation({
   const setPinPreference = (next: boolean) => {
     setPinned(next);
     setPickerOpen(false);
-    try { localStorage.setItem(PIN_KEY, next ? "1" : "0"); } catch { /* storage may be blocked */ }
+    try { localStorage.setItem(identity.pinKey, next ? "1" : "0"); } catch { /* storage may be blocked */ }
   };
   const navigateTo = (key: string) => {
     setPickerOpen(false);
@@ -123,7 +138,7 @@ export default function BranchWorkspaceNavigation({
   );
 
   const cards = (
-    <div className="ba-v7-card-grid" role="group" aria-label="Branch Admin workspaces">
+    <div className="ba-v7-card-grid" role="group" aria-label={`${identity.title} workspaces`}>
       {items.map((item) => (
         <button type="button" key={item.key}
           className={`ba-v7-card ${activeKey === item.key ? "is-active" : ""}`}
@@ -142,8 +157,8 @@ export default function BranchWorkspaceNavigation({
       <style>{styles}</style>
       <header className="ba-v7-header">
         <div className="ba-v7-brand">
-          <span className="ba-v7-brand-mark" aria-hidden="true">🎓</span>
-          <div className="ba-v7-brand-copy"><strong>Eleeveon Schools</strong><small title={branchName}>{branchName || "Branch Administration"}</small></div>
+          <span className="ba-v7-brand-mark" aria-hidden="true">{identity.icon}</span>
+          <div className="ba-v7-brand-copy"><strong>Eleeveon Schools</strong><small title={identity.title === "Branch Admin Portal" ? branchName : identity.title}>{identity.title === "Branch Admin Portal" ? (branchName || "Branch Administration") : identity.title}</small></div>
         </div>
         <div className="ba-v7-header-actions">
           <button type="button" className="ba-v7-status" onClick={onOpenStatus}
@@ -167,7 +182,7 @@ export default function BranchWorkspaceNavigation({
       </header>
       <div className="ba-v7-nav-body">
         <div className="ba-v7-desktop-row">
-          <nav className="ba-v7-tabs" aria-label="Branch Admin workspaces">
+          <nav className="ba-v7-tabs" aria-label={`${identity.title} workspaces`}>
             {items.map((item) => (
               <button key={item.key} type="button" onClick={() => navigateTo(item.key)}
                 className={`ba-v7-tab ${activeKey === item.key ? "is-active" : ""}`}

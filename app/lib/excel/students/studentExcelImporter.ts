@@ -27,7 +27,8 @@ import {
   updateLocal,
 } from "../../sync/syncUtils";
 
-import { resolveAdmissionNumber } from "../../students/admissionNumbers";
+import { resolveAdmissionNumber, readAdmissionConfiguration } from "../../students/admissionNumbers";
+import { calculateStudentAge } from "../../students/studentAge";
 
 import type {
   ExcelValidationIssue,
@@ -189,7 +190,7 @@ function buildStudentPayload(
       record.gender as any,
 
     age:
-      record.age as any,
+      (record.dateOfBirth ? calculateStudentAge(String(record.dateOfBirth)) : record.age) as any,
 
     dateOfBirth:
       record.dateOfBirth as any,
@@ -536,6 +537,7 @@ export async function importValidatedStudents(
   context: StudentExcelImportContext,
   options: StudentExcelImportOptions = {},
 ): Promise<StudentExcelImportResult> {
+  const admissionConfig = await readAdmissionConfiguration(context.schoolId, context.branchId, context.accountId);
   const duplicateStrategy =
     options.duplicateStrategy ||
     "skip";
@@ -708,7 +710,7 @@ export async function importValidatedStudents(
           accountId: context.accountId,
           schoolId: context.schoolId,
           branchId: context.branchId,
-          supplied: row.data.admissionNumber,
+          supplied: admissionConfig.mode === "automatic" ? undefined : row.data.admissionNumber,
         });
         payload.admissionNumber = admission.admissionNumber;
         payload.admissionNumberProvisional = admission.provisional;

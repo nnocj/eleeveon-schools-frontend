@@ -1,16 +1,26 @@
+
 "use client";
 
 import React from "react";
 import { useSupportUnread } from "../../../lib/support/useSupportUnread";
 
-/** Place inside the existing Eleeveon Hub button (not the account button). */
+/**
+ * Displays the unread message count on the
+ * existing Eleeveon Hub button.
+ */
 export default function HubUnreadBadge() {
   const unread = useSupportUnread();
+
   if (unread <= 0) return null;
+
   return (
     <span
-      aria-label={`${unread} unread ${unread === 1 ? "message" : "messages"}`}
-      title={`${unread} unread ${unread === 1 ? "message" : "messages"}`}
+      aria-label={`${unread} unread ${
+        unread === 1 ? "message" : "messages"
+      }`}
+      title={`${unread} unread ${
+        unread === 1 ? "message" : "messages"
+      }`}
       style={{
         position: "absolute",
         top: -7,

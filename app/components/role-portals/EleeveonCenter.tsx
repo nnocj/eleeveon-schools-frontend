@@ -3613,6 +3613,39 @@ span,
   font-size: 11px;
 }
 
+/* Shared Hub atmosphere: every Hub section should feel like its own place. */
+.hub-module {
+  position:relative;
+  overflow:hidden;
+  padding:5px;
+  border-radius:21px;
+  background:linear-gradient(115deg,rgba(5,37,43,.25),rgba(6,43,39,.08)),url('/hub-pier.jpg') center / cover no-repeat,#b9dcd6;
+  color:#23413d;
+}
+.hub-module .center-shell {border-radius:16px}
+.hub-module .center-work-area:has(.center-section-header){padding:10px 11px 15px}
+.hub-module .center-section-header{
+  background:rgba(251,255,252,.87);
+  border:1px solid rgba(255,255,255,.75);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  box-shadow:0 6px 24px rgba(8,52,46,.10);
+}
+.hub-module .center-inline-tabs button,.hub-module .center-inline-tabs select{color:#28514b}
+.hub-module .center-inline-tabs button.active{
+  color:#0d685c;
+  background:rgba(181,229,215,.53);
+  border-color:rgba(30,118,103,.16);
+}
+.hub-module .center-card,.hub-module .center-empty,.hub-module .center-stat{
+  background:rgba(249,254,250,.94)!important;
+  border-color:rgba(255,255,255,.80)!important;
+  box-shadow:0 5px 24px rgba(0,43,39,.12);
+  backdrop-filter:blur(13px);
+  -webkit-backdrop-filter:blur(13px);
+}
+@media(max-width:680px){.hub-module{padding:0;border-radius:14px}.hub-module .center-work-area:has(.center-section-header){padding:7px}}
+
 @media (max-width: 900px) {
   .center-publisher-layout {
     grid-template-columns: 1fr;

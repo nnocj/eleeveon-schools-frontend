@@ -2522,8 +2522,6 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
   // Admission allocations belong to the server registry, not IndexedDB.
   // The backend status is intentionally unavailable until an authenticated
   // server read endpoint is wired into this module.
-  const backendAdmission: string | null = null;
-  const backendAdmissionState = "unavailable" as const;
 
   const [reportTemplates, setReportTemplates] = useState<ReportTemplateRow[]>(
     [],
@@ -5376,7 +5374,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
               <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
                 <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
-                <p>Last confirmed admission number (backend): <strong>{backendAdmissionState === "ready" ? (backendAdmission || "None issued") : "Not connected to backend status endpoint"}</strong></p>
+                <p>Last confirmed admission number (backend): <strong>Not connected to backend status endpoint</strong></p>
                 <p style={{fontSize:12,opacity:.76}}>Only the backend admission identity registry can provide this figure. Local student numbers and local nextSequence are deliberately not shown as confirmed values.</p>
               <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
             </div>

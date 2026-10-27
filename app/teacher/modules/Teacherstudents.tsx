@@ -22,6 +22,9 @@ import { updateLocal } from "../../lib/sync/syncUtils";
 import {
   MediaFieldKeys, MediaOwners, saveImageAsset, createMediaSessionKey,
   commitMediaAssetsToOwner,
+  attachCameraStreamToVideo, captureImageFileFromVideo,
+  getCameraUnavailableMessage, isCameraApiAvailable,
+  openCameraStream, stopCameraStream, type CameraFacingMode,
 } from "../../lib/media/mediaAssetUtils";
 import { useSettings } from "../../context/settings-context";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
@@ -148,7 +151,9 @@ export default function Teacherstudents(){
   const [stagedPhoto,setStagedPhoto]=useState<{assetId:string;previewUrl:string}|null>(null);
   const [cameraOpen,setCameraOpen]=useState(false);
   const [cameraError,setCameraError]=useState("");
-  const [cameraReady,setCameraReady]=useState(false);
+  const [cameraStarting,setCameraStarting]=useState(false);
+  const [cameraCapturing,setCameraCapturing]=useState(false);
+  const [cameraFacing,setCameraFacing]=useState<CameraFacingMode>("environment");
   const cameraVideoRef=useRef<HTMLVideoElement|null>(null);
   const cameraStreamRef=useRef<MediaStream|null>(null);
   const cameraInputRef=useRef<HTMLInputElement|null>(null);
@@ -211,51 +216,48 @@ export default function Teacherstudents(){
     mediaSession.current=createMediaSessionKey(MediaOwners.STUDENTS);
     setForm({fullName:value(r.fullName),gender:studentGender(item.row),dateOfBirth:value(r.dateOfBirth).slice(0,10),age:currentStudentAge(item.row),parentName:value(r.parentName),parentPhone:value(r.parentPhone),parentEmail:value(r.parentEmail),address:value(r.address)});
   };
+  // Use the same media camera pipeline and image compression as Branch Admin.
   const stopCamera=()=>{
-    cameraStreamRef.current?.getTracks().forEach(track=>track.stop());
+    stopCameraStream(cameraStreamRef.current);
     cameraStreamRef.current=null;
     if(cameraVideoRef.current)cameraVideoRef.current.srcObject=null;
-    setCameraReady(false);
   };
   useEffect(()=>{
     if(!cameraOpen||!selected)return;
     let cancelled=false;
-    const launch=async()=>{
-      setCameraError("");setCameraReady(false);
-      if(!navigator.mediaDevices?.getUserMedia){setCameraError("This browser does not support a live camera. Use your device camera or upload a photo instead.");return;}
+    const start=async()=>{
+      setCameraError("");setCameraStarting(true);
+      stopCamera();
       try{
-        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
-        if(cancelled){stream.getTracks().forEach(track=>track.stop());return;}
+        const stream=await openCameraStream({facingMode:cameraFacing,width:1280,height:720});
+        if(cancelled){stopCameraStream(stream);return;}
         cameraStreamRef.current=stream;
-        if(cameraVideoRef.current){
-          cameraVideoRef.current.srcObject=stream;
-          await cameraVideoRef.current.play();
-          if(!cancelled)setCameraReady(true);
-        }
+        if(cameraVideoRef.current)await attachCameraStreamToVideo(cameraVideoRef.current,stream);
       }catch(error){
-        if(!cancelled)setCameraError(error instanceof Error ? error.message : "Camera unavailable. Check camera permissions or use a file upload.");
-      }
+        if(!cancelled)setCameraError(error instanceof Error?error.message:getCameraUnavailableMessage());
+      }finally{if(!cancelled)setCameraStarting(false);}
     };
-    void launch();
-    return()=>{cancelled=true;cameraStreamRef.current?.getTracks().forEach(track=>track.stop());cameraStreamRef.current=null;};
-  },[cameraOpen,selected?.row.id]);
-  const closeCamera=()=>{stopCamera();setCameraOpen(false);setCameraError("");};
+    void start();
+    return()=>{cancelled=true;stopCamera();};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[cameraOpen,cameraFacing,selected?.row.id]);
+  const closeCamera=()=>{stopCamera();setCameraOpen(false);setCameraError("");setCameraCapturing(false);};
+  const openCamera=()=>{
+    if(!isCameraApiAvailable()){setFeedback(getCameraUnavailableMessage());return;}
+    setCameraFacing("environment");setCameraError("");setCameraOpen(true);
+  };
   const capturePhoto=async()=>{
-    const video=cameraVideoRef.current;
-    if(!video||!video.videoWidth||!video.videoHeight){setCameraError("Camera image not ready. Please retry.");return;}
-    const canvas=document.createElement("canvas");
-    const maxDimension=1440;
-    const factor=Math.min(1,maxDimension/Math.max(video.videoWidth,video.videoHeight));
-    canvas.width=Math.max(1,Math.round(video.videoWidth*factor));
-    canvas.height=Math.max(1,Math.round(video.videoHeight*factor));
-    const ctx=canvas.getContext("2d");
-    if(!ctx){setCameraError("Unable to capture image on this device.");return;}
-    ctx.drawImage(video,0,0,canvas.width,canvas.height);
-    const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.88));
-    if(!blob){setCameraError("Unable to prepare the captured photo.");return;}
-    const file=new File([blob],`student-${Date.now()}.jpg`,{type:"image/jpeg",lastModified:Date.now()});
-    closeCamera();
-    await choosePhoto(file);
+    if(!cameraVideoRef.current){setCameraError("Camera preview is not ready.");return;}
+    setCameraCapturing(true);setCameraError("");
+    try{
+      const file=await captureImageFileFromVideo(cameraVideoRef.current,{
+        fileName:`student-photo-${Date.now()}.jpg`,mimeType:"image/jpeg",quality:0.88,
+        maxWidth:900,maxHeight:900,
+      });
+      await choosePhoto(file);
+      closeCamera();
+    }catch(error){setCameraError(error instanceof Error?error.message:"Could not capture student photo.");}
+    finally{setCameraCapturing(false);}
   };
   const closeEdit=()=>{if(!saving){closeCamera();setSelected(null);setStagedPhoto(null);}};
   const choosePhoto=async(file?:File)=>{
@@ -329,16 +331,20 @@ export default function Teacherstudents(){
     {selected&&<ScopedDialog primary={primary} onClose={closeEdit}><form className="ba-modal" role="dialog" aria-modal="true" aria-label="Edit student" onSubmit={save} onPointerDown={e=>e.stopPropagation()}><div className="ba-modal-head"><div><h2>Edit Student</h2><p>{(selected.row as any).admissionNumber||"No admission number"} · {selected.className}</p></div><button type="button" className="ba-modal-close" disabled={saving} onClick={closeEdit} aria-label="Close student editor">✕</button></div>
       <section className="ba-form-section"><h3>Student</h3><div className="ba-form"><label><span>Full Name</span><input autoFocus value={form.fullName} onChange={e=>setForm(f=>({...f,fullName:e.target.value}))} required/></label><label><span>Gender</span><select value={form.gender} onChange={e=>setForm(f=>({...f,gender:e.target.value}))}><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>{form.gender&&!(["Male","Female","Other"].includes(form.gender))&&<option value={form.gender}>{form.gender} (existing)</option>}</select></label><label><span>Date of Birth</span><input type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value,age:e.target.value ? String(ageFromDob(e.target.value)??"") : ""}))}/></label><label><span>Age (calculated)</span><input type="number" min="0" max="130" value={form.dateOfBirth ? (ageFromDob(form.dateOfBirth)??"") : form.age} readOnly title="Age is automatically calculated from Date of Birth"/></label></div></section>
       <section className="ba-form-section"><h3>Parent / Guardian</h3><div className="ba-form"><label><span>Parent / Guardian Name</span><input value={form.parentName} onChange={e=>setForm(f=>({...f,parentName:e.target.value}))}/></label><label><span>Parent Phone</span><input value={form.parentPhone} onChange={e=>setForm(f=>({...f,parentPhone:e.target.value}))}/></label><label><span>Parent Email</span><input type="email" value={form.parentEmail} onChange={e=>setForm(f=>({...f,parentEmail:e.target.value}))}/></label><label className="wide"><span>Address</span><textarea value={form.address} onChange={e=>setForm(f=>({...f,address:e.target.value}))}/></label></div></section>
-      <section className="ba-form-section"><h3>Media</h3><div className="ba-media-section"><Avatar name={form.fullName} photo={stagedPhoto?.previewUrl||photoFor(selected.row)} primary={primary}/><label className="ba-media-button secondary">Upload photo<input type="file" accept="image/*" disabled={saving} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></label><button type="button" className="ba-media-button" disabled={saving} onClick={()=>setCameraOpen(true)}>📷 Take Photo</button><input ref={cameraInputRef} type="file" accept="image/*" capture="environment" aria-label="Use device camera" style={{display:"none"}} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></div></section>
+      <section className="ba-form-section"><h3>Media</h3><div className="ba-media-section"><Avatar name={form.fullName} photo={stagedPhoto?.previewUrl||photoFor(selected.row)} primary={primary}/><label className="ba-media-button secondary">Upload photo<input type="file" accept="image/*" disabled={saving} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></label><button type="button" className="ba-media-button" disabled={saving} onClick={openCamera}>📷 Take Photo</button><input ref={cameraInputRef} type="file" accept="image/*" capture="environment" aria-label="Use device camera" style={{display:"none"}} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></div></section>
       <section className="ba-form-section"><div className="ba-school-managed"><strong>School-managed fields</strong><p>Admission number: {(selected.row as any).admissionNumber||"—"} · Class: {selected.className}. Enrollment, class assignment, organization, and student status cannot be edited by teachers.</p></div></section>
       <div className="ba-modal-actions"><button type="button" disabled={saving} onClick={closeEdit}>Cancel</button><button type="submit" disabled={saving}>{saving?"Saving…":"Save changes"}</button></div>
     </form></ScopedDialog>}
     {selected&&cameraOpen&&<ScopedDialog primary={primary} onClose={closeCamera}>
-      <section className="ba-modal teacher-camera-dialog" role="dialog" aria-modal="true" aria-label="Take student photo" onPointerDown={e=>e.stopPropagation()}>
-        <div className="ba-modal-head"><div><h2>Take student photo</h2><p>{selected.row.fullName||"Student"} · The photo will be saved with the student profile.</p></div><button type="button" className="ba-modal-close" onClick={closeCamera} aria-label="Close camera">✕</button></div>
-        <video ref={cameraVideoRef} playsInline autoPlay muted className="teacher-camera-preview" aria-label="Camera preview" />
+      <section className="ba-modal teacher-camera-dialog ba-camera-modal" role="dialog" aria-modal="true" aria-label="Take student photo" onPointerDown={e=>e.stopPropagation()}>
+        <div className="ba-modal-head"><div><h2>Take Student Photo</h2><p>Use the live camera preview, then capture. The photo is compressed and staged until Save.</p></div><button type="button" className="ba-modal-close" onClick={closeCamera} aria-label="Close camera">✕</button></div>
+        <div className="ba-camera-preview"><video ref={cameraVideoRef} autoPlay muted playsInline />{cameraStarting&&<span className="ba-camera-loading">Opening camera…</span>}</div>
         {cameraError&&<p role="alert" className="teacher-camera-error">{cameraError}</p>}
-        <div className="ba-modal-actions"><button type="button" onClick={closeCamera}>Cancel</button><button type="button" onClick={()=>cameraInputRef.current?.click()}>Device camera</button><button type="button" disabled={!cameraReady} onClick={()=>void capturePhoto()}>Capture photo</button></div>
+        <div className="ba-camera-actions">
+          <button type="button" className="ba-camera-secondary" disabled={cameraStarting||cameraCapturing} onClick={()=>setCameraFacing(f=>f==="environment"?"user":"environment")}>Switch Camera</button>
+          <button type="button" className="ba-camera-secondary" disabled={cameraCapturing} onClick={closeCamera}>Cancel</button>
+          <button type="button" className="ba-camera-primary" disabled={cameraStarting||cameraCapturing||!!cameraError} onClick={()=>void capturePhoto()}>{cameraCapturing?"Capturing…":"Capture Photo"}</button>
+        </div>
       </section>
     </ScopedDialog>}
   </main>;
@@ -346,6 +352,14 @@ export default function Teacherstudents(){
 
 const css = `
 .teacher-students-overlay .teacher-camera-dialog{width:min(660px,100%)}
+.teacher-students-overlay .ba-camera-preview{position:relative;background:#0b1220;border-radius:18px;overflow:hidden;min-height:210px;display:grid;place-items:center}
+.teacher-students-overlay .ba-camera-preview video{display:block;width:100%;max-height:58dvh;object-fit:contain}
+.teacher-students-overlay .ba-camera-loading{position:absolute;color:#fff;background:#101828c9;padding:9px 14px;border-radius:12px}
+.teacher-students-overlay .ba-camera-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:9px;margin-top:12px}
+.teacher-students-overlay .ba-camera-actions button{min-height:42px;border-radius:999px;padding:0 14px;font-weight:850;cursor:pointer}
+.teacher-students-overlay .ba-camera-secondary{background:var(--surface,#fff);color:var(--text,#111827);border:1px solid var(--border,#ddd)}
+.teacher-students-overlay .ba-camera-primary{background:var(--ba-primary);color:#fff;border:1px solid var(--ba-primary)}
+.teacher-students-overlay .ba-camera-actions button:disabled{opacity:.5;cursor:not-allowed}
 .teacher-students-overlay .teacher-camera-preview{display:block;width:100%;height:auto;max-height:58dvh;min-height:190px;object-fit:contain;background:#0b1220;border-radius:18px}
 .teacher-students-overlay .teacher-camera-error{color:#dc2626;font-size:12px;margin:9px 0}
 .teacher-students-overlay .ba-media-section{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

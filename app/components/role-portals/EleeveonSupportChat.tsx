@@ -103,7 +103,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [callOpen, setCallOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
-  const [hiddenMessages, setHiddenMessages] = useState<string[]>([]);
+
   const [otherPresence, setOtherPresence] = useState("Not in chat");
   const recentTyping = useRef(0);
   const attachmentMenuRef = useRef<HTMLDivElement | null>(null);
@@ -119,23 +119,29 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const [error, setError] = useState("");
   const [, setInfo] = useState("");
   const [online, setOnline] = useState(true);
-  // Private per-device visibility preference; never purports to delete server data.
-  const hiddenStorageKey = `eleeveon:center:hidden:${accountId}:${identity}`;
-  useEffect(() => {
+  const [deletingId, setDeletingId] = useState("");
+  async function deleteMessageOnServer(messageId: string, scope: "me" | "everyone") {
+    if (!selected || deletingId) return;
+    if (!window.confirm(scope === "everyone"
+      ? "Delete this message for everyone? Its encrypted content will be removed from the service."
+      : "Delete this message for you on every signed-in device?")) return;
+    setDeletingId(messageId);
     try {
-      const parsed = JSON.parse(localStorage.getItem(hiddenStorageKey) || "[]");
-      setHiddenMessages(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : []);
-    } catch { setHiddenMessages([]); }
-  }, [hiddenStorageKey]);
-  function deleteForMe(conversationId: string, messageId: string) {
-    if (!window.confirm("Hide this message on this device? It will remain on the server and on other devices.")) return;
-    const key = `${conversationId}:${messageId}`;
-    setHiddenMessages(current => {
-      const next = current.includes(key) ? current : [...current, key];
-      try { localStorage.setItem(hiddenStorageKey, JSON.stringify(next)); } catch { /* storage unavailable */ }
-      return next;
-    });
+      await supportApi.deleteMessage(selected, messageId, scope);
+      const detail = await supportApi.open(selected);
+      setOpened(detail.conversation);
+      setThread(detail.messages || []);
+      if (scope === "everyone") decryptedCache.current.clear();
+      window.dispatchEvent(new Event("eleeveon:support-unread-refresh"));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete message.");
+    } finally { setDeletingId(""); }
   }
+  const markOpenedRead = useCallback(async (id: string) => {
+    if (typeof document !== "undefined" && document.hidden) return;
+    try { await supportApi.markRead(id); window.dispatchEvent(new Event("eleeveon:support-unread-refresh")); }
+    catch { /* Read state can retry; never block viewing encrypted messages. */ }
+  }, []);
   const selectedRef = useRef("");
   const refreshBusy = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -202,6 +208,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         const result = await supportApi.open(current);
         if (current === selectedRef.current) {
           setOpened(result.conversation); setThread(result.messages || []);
+          if (typeof document !== "undefined" && !document.hidden) void markOpenedRead(current);
           await loadKeys(current);
         }
       } else await loadKeys();
@@ -209,7 +216,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       if (!quiet) setError("");
     } catch (cause) { if (!quiet) setError(cause instanceof Error ? cause.message : "Cannot refresh support."); }
     finally { refreshBusy.current = false; if (!quiet) setLoading(false); }
-  }, [loadKeys]);
+  }, [loadKeys, markOpenedRead]);
   useEffect(() => { if (ready) void refresh(); }, [ready, refresh]);
   useEffect(() => {
     const timer = window.setInterval(() => { if (!document.hidden && navigator.onLine && !busy) void refresh(true); }, 9000);
@@ -313,6 +320,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     const raw = [...(opened.description?[intro]:[]), ...thread];
     const decoded = async (m: SupportMessage): Promise<DisplayMessage> => {
       // Validate the currently pinned sender key BEFORE reusing decrypted cache.
+      if (m.deletedForEveryone) return { ...m, displayBody: "Message deleted", displayAttachments: [], decrypted: true };
       if (encryptedEnvelope(m.body)) {
         try {
           const from = parseEnvelope(m.body).fromDeviceId;
@@ -394,6 +402,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       };
       const subjects: Record<string, string> = {};
       const prepared = await Promise.all([...(detail.conversation.description?[intro]:[]), ...(detail.messages || [])].map(async (m): Promise<DisplayMessage> => {
+        if (m.deletedForEveryone) return { ...m, displayBody: "Message deleted", displayAttachments: [], decrypted: true };
         if (!encryptedEnvelope(m.body)) {
           return { ...m, displayBody: m.body, displayAttachments: m.attachments || [], decrypted: false };
         }
@@ -448,6 +457,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       setThread(detail.messages || []);
       setRendered(prepared);
       setSelected(id);
+      void markOpenedRead(id);
       setNewChat(false);
       setMobileOpen(true);
       setMessage(drafts.current.get(id) || ""); setFiles([]); setAttachMenuOpen(false); setCallOpen(false);
@@ -660,7 +670,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         </div>
         <select className="esc-filter" value={filter} aria-label="Filter conversations" onChange={e => setFilter(e.target.value)}><option value="all">All conversations</option><option value="open">Open</option>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>
         <div className="esc-inbox">{visible.map(c => <button key={c.id} className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => void openConversation(c.id)}>
-          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || c.subject || "Support conversation")}</strong><small>{decryptedSubject[c.id] || (isEncrypted(c) ? "Private conversation" : "Earlier support conversation")}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
+          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || c.subject || "Support conversation")}{Number(c.unreadCount || 0) > 0 && <span aria-label={`${c.unreadCount} unread messages`} style={{float:"right",borderRadius:999,background:"var(--esc-primary)",color:"white",padding:"2px 6px",fontSize:10,marginLeft:6}}>{c.unreadCount! > 99 ? "99+" : c.unreadCount}</span>}</strong><small>{decryptedSubject[c.id] || (isEncrypted(c) ? "Private conversation" : "Earlier support conversation")}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
           {!visible.length && <div className="esc-empty">{loading ? "Loading conversations…" : conversations.length ? "No conversations match these filters." : "No conversations yet."}</div>}</div>
 
       </aside>
@@ -689,10 +699,10 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
 
 
           {reviewKeys && <div className="esc-key-panel"><strong>Device identity fingerprints</strong><p>Verify these fingerprints with participants through a separate trusted channel before approving. The server key directory alone cannot prove identity.</p>{knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : d.userId === identity ? "Your other device" : "Conversation participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "✓ Approved on this browser" : trusted[d.id] ? "⚠ Key changed—verify carefully" : "New device—verify before sending"}</small></div>)}<div className="esc-key-buttons"><button className="secondary" onClick={() => void loadKeys(selected)}>Refresh devices</button><button className="primary" disabled={!knownActive.some(d => d.userId !== identity)} onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); setInfo("Devices verified"); }}>I verified these keys</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div></div>}
-          <div ref={messagesRef} className="esc-body">{!rendered.length&&<div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}{rendered.filter(m => !hiddenMessages.includes(`${selected}:${m.id}`)).map((m, index) => {
+          <div ref={messagesRef} className="esc-body">{!rendered.length&&<div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}{rendered.map((m, index) => {
             const mine = isDeveloper ? m.authorType === "platform" : m.authorType !== "platform";
             const prev = rendered[index - 1];
-            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {(m.decrypted || !encryptedEnvelope(m.body)) ? "Saved" : "Unavailable"}</small><button type="button" className="esc-message-delete" aria-label="Delete message for me on this device" title="Delete for me (this device only)" onClick={() => deleteForMe(selected, m.id)}>Delete for me</button></div></div></React.Fragment>;
+            return <React.Fragment key={m.id}>{(!prev || date(prev.createdAt) !== date(m.createdAt)) && <div className="esc-date">{date(m.createdAt)}</div>}<div className={`esc-row ${mine ? "mine" : ""}`}><div className="esc-bubble"><div className="esc-label">{mine ? "You" : m.authorType === "platform" ? "Eleeveon" : opened.organizationName || "School"}</div>{m.displayBody ? <div>{m.displayBody}</div> : null}{m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}{m.error && <div className="esc-error-text">{m.error}</div>}<small>{stamp(m.createdAt)} · {(m.decrypted || !encryptedEnvelope(m.body)) ? "Saved" : "Unavailable"}</small>{m.id !== `${selected}-opening` && <div className="esc-message-delete-actions"><button type="button" className="esc-message-delete" disabled={deletingId === m.id} onClick={() => void deleteMessageOnServer(m.id, "me")}>Delete for me</button>{m.authorUserId === identity && !m.deletedForEveryone && <button type="button" className="esc-message-delete" disabled={deletingId === m.id} onClick={() => void deleteMessageOnServer(m.id, "everyone")}>Delete for everyone</button>}</div>}</div></div></React.Fragment>;
           })}</div>
           <div className="esc-composer-area">
           {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => setReviewKeys(true)}>Check keys</button></div>}

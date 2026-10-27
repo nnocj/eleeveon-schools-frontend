@@ -116,6 +116,15 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const imageRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLInputElement | null>(null);
   const [recording, setRecording] = useState(false);
+  const [screenRecording, setScreenRecording] = useState(false);
+  const [screenAudioEnabled, setScreenAudioEnabled] = useState(true);
+  const [screenPreview, setScreenPreview] = useState<{file: File; url: string} | null>(null);
+  const screenRecorderRef = useRef<MediaRecorder | null>(null);
+  const screenDisplayRef = useRef<MediaStream | null>(null);
+  const screenMicRef = useRef<MediaStream | null>(null);
+  const screenMixedRef = useRef<MediaStream | null>(null);
+  const screenAudioContextRef = useRef<AudioContext | null>(null);
+  const screenAbortedRef = useRef(false);
   const [error, setError] = useState("");
   const [, setInfo] = useState("");
   const [online, setOnline] = useState(true);
@@ -258,6 +267,12 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     return () => { clearInterval(timer); window.removeEventListener("focus", focus); window.removeEventListener("online", connected); window.removeEventListener("offline", disconnected); };
   }, [refresh, ready, busy]);
   useEffect(() => () => {
+    screenAbortedRef.current = true;
+    if (screenRecorderRef.current?.state === "recording") screenRecorderRef.current.stop();
+    screenDisplayRef.current?.getTracks().forEach(t => t.stop());
+    screenMicRef.current?.getTracks().forEach(t => t.stop());
+    screenMixedRef.current?.getTracks().forEach(t => t.stop());
+    void screenAudioContextRef.current?.close();
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     micRef.current?.getTracks().forEach(t => t.stop());
     objectUrls.current.forEach(url => URL.revokeObjectURL(url));
@@ -628,6 +643,105 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       } else setError(cause instanceof Error ? cause.message : "Encrypted message not sent. Try again.");
     } finally { setBusy(false); }
   }
+  function stopScreenRecording() {
+    if (screenRecorderRef.current?.state === "recording") screenRecorderRef.current.stop();
+    else screenDisplayRef.current?.getTracks().forEach(track => track.stop());
+  }
+
+  async function startScreenRecording() {
+    if (!selected || busy || recording || screenRecording || screenPreview) return;
+    setError("");
+    // Screen capture must originate from a direct click. Browsers always show their
+    // own picker; this feature never captures a display without explicit consent.
+    const media = navigator.mediaDevices as MediaDevices & {
+      getDisplayMedia?: (constraints?: DisplayMediaStreamOptions) => Promise<MediaStream>;
+    };
+    if (!media?.getDisplayMedia || typeof MediaRecorder === "undefined") {
+      setError("Screen recording isn't supported in this browser. On a computer, use an up-to-date Chrome or Edge browser, or attach a recording made with your device.");
+      return;
+    }
+    let display: MediaStream | null = null;
+    let mic: MediaStream | null = null;
+    let audioContext: AudioContext | null = null;
+    try {
+      display = await media.getDisplayMedia({ video: { frameRate: 15 }, audio: true });
+      screenDisplayRef.current = display;
+      const videoTrack = display.getVideoTracks()[0];
+      if (!videoTrack) throw new Error("No screen was selected.");
+
+      if (screenAudioEnabled) {
+        try { mic = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
+        catch { setError("Microphone was unavailable. Recording will continue with any screen audio shared by the browser."); }
+      }
+      screenMicRef.current = mic;
+      const result = new MediaStream([videoTrack]);
+      const sources = [...display.getAudioTracks(), ...(mic?.getAudioTracks() || [])];
+      if (sources.length === 1) result.addTrack(sources[0]);
+      else if (sources.length > 1) {
+        audioContext = new AudioContext();
+        screenAudioContextRef.current = audioContext;
+        const destination = audioContext.createMediaStreamDestination();
+        for (const track of sources) {
+          const source = audioContext.createMediaStreamSource(new MediaStream([track]));
+          source.connect(destination);
+        }
+        destination.stream.getAudioTracks().forEach(track => result.addTrack(track));
+      }
+      screenMixedRef.current = result;
+      const mime = ["video/webm;codecs=vp8,opus", "video/webm", "video/mp4"].find(t => MediaRecorder.isTypeSupported(t));
+      if (!mime) throw new Error("This browser cannot encode screen recordings. Please use Chrome or Edge on a computer.");
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(result, { mimeType: mime, videoBitsPerSecond: 1_200_000 });
+      screenRecorderRef.current = recorder;
+      screenAbortedRef.current = false;
+      const cleanup = () => {
+        screenDisplayRef.current?.getTracks().forEach(track => track.stop());
+        screenMicRef.current?.getTracks().forEach(track => track.stop());
+        screenMixedRef.current?.getTracks().forEach(track => track.stop());
+        void screenAudioContextRef.current?.close();
+        screenDisplayRef.current = null; screenMicRef.current = null;
+        screenMixedRef.current = null; screenAudioContextRef.current = null;
+        screenRecorderRef.current = null;
+        setScreenRecording(false);
+      };
+      recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => { setError("Screen recording failed. Please try again."); };
+      recorder.onstop = () => {
+        cleanup();
+        if (screenAbortedRef.current || !chunks.length) return;
+        const type = recorder.mimeType.split(";")[0] || "video/webm";
+        const blob = new Blob(chunks, {type});
+        if (!blob.size) return;
+        if (blob.size > MAX_BYTES - 100) {
+          setError(`Recording is ${fileSize(blob.size)}. The current encrypted attachment limit is 100 MB. Please make a shorter recording.`);
+          return;
+        }
+        const extension = type === "video/mp4" ? "mp4" : "webm";
+        const file = new File([blob], `screen-recording-${Date.now()}.${extension}`, { type, lastModified: Date.now() });
+        setScreenPreview({file, url: URL.createObjectURL(blob)});
+      };
+      videoTrack.addEventListener("ended", stopScreenRecording, {once:true});
+      recorder.start(1000);
+      setScreenRecording(true);
+    } catch (cause) {
+      display?.getTracks().forEach(track => track.stop());
+      mic?.getTracks().forEach(track => track.stop());
+      void audioContext?.close();
+      screenDisplayRef.current = null; screenMicRef.current = null;
+      screenMixedRef.current = null; screenAudioContextRef.current = null;
+      setScreenRecording(false);
+      if ((cause as Error)?.name !== "NotAllowedError")
+        setError(cause instanceof Error ? cause.message : "Unable to start screen recording.");
+    }
+  }
+
+  function finishScreenPreview(attach: boolean) {
+    if (!screenPreview) return;
+    if (attach) addFiles([screenPreview.file]);
+    URL.revokeObjectURL(screenPreview.url);
+    setScreenPreview(null);
+  }
+
   async function startRecording() {
     try {
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") throw new Error("Voice recording isn't supported in this browser.");
@@ -681,7 +795,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       .esc-card-edit-backdrop{position:fixed;inset:0;background:#07182b88;z-index:2147481000;display:grid;place-items:center;padding:16px}
       .esc-card-edit-dialog{width:min(420px,100%);background:var(--esc-surface);color:var(--esc-text);border:1px solid var(--esc-line);border-radius:18px;padding:21px;display:grid;gap:13px;box-shadow:0 20px 60px #0004}
       .esc-card-edit-dialog input{width:100%;padding:12px;border:1px solid var(--esc-line);border-radius:10px;background:var(--esc-surface);color:var(--esc-text)}
-      .esc-card-edit-dialog footer{display:flex;justify-content:flex-end;gap:9px}
+      .esc-card-edit-dialog footer{display:flex;justify-content:flex-end;gap:9px}.esc-screen-preview-dialog{width:min(650px,100%)}.eleeveon-attach-popover .esc-screen-audio-option{display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:12px}.eleeveon-attach-popover .esc-screen-audio-option input{width:16px;height:16px;margin:0}
       .esc-avatar{width:40px;height:40px;border-radius:15px;display:grid;place-items:center;flex-shrink:0;background:linear-gradient(145deg,color-mix(in srgb,var(--esc-primary) 16%,var(--esc-surface)),color-mix(in srgb,var(--esc-primary) 7%,var(--esc-surface)));font-weight:800;color:var(--esc-primary);border:1px solid color-mix(in srgb,var(--esc-primary) 15%,transparent)}
       .esc-thread-main{min-width:0;flex:1}.esc-thread-main strong,.esc-thread-main small,.esc-thread-main em{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-thread-main strong{font-size:12px}.esc-thread-main small{opacity:.65;margin-top:4px;font-size:11px}.esc-thread-main em{font-style:normal;font-size:10px;opacity:.6;margin-top:4px}
       .esc-chat{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;position:relative;isolation:isolate;background-color:color-mix(in srgb,var(--esc-surface) 91%,var(--esc-primary));background-image:radial-gradient(ellipse 55% 48% at 1% 4%,color-mix(in srgb,var(--esc-primary) 13%,transparent),transparent 82%),radial-gradient(ellipse 55% 48% at 100% 98%,color-mix(in srgb,#8db9cc 15%,transparent),transparent 81%),radial-gradient(circle at 9px 9px,color-mix(in srgb,var(--esc-primary) 10%,transparent) 1.3px,transparent 1.4px),radial-gradient(circle at 39px 39px,color-mix(in srgb,var(--esc-primary) 6%,transparent) 1.1px,transparent 1.3px);background-size:auto,auto,58px 58px,58px 58px}
@@ -763,6 +877,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
           {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => setReviewKeys(true)}>Check keys</button></div>}
           {files.length > 0 && <div className="esc-files">{files.map((f, i) => <button key={`${f.name}:${i}`} disabled={busy} onClick={() => setFiles(old => old.filter((_, k) => k !== i))}>📎 {f.name} ({fileSize(f.size)}) ×</button>)}</div>}
           {recording && <div className="esc-recording"><span className="esc-recording-dot"/> Recording voice note · tap stop to attach</div>}
+          {screenRecording && <div className="esc-recording" role="status"><span className="esc-recording-dot"/> Recording screen and available audio <button type="button" onClick={stopScreenRecording}>■ Stop and preview</button></div>}
           <EleeveonLiveSupport key={selected} conversationId={selected} open={callOpen} onClose={()=>setCallOpen(false)}/>
           <div className="esc-composer">
             <input ref={fileRef} type="file" hidden multiple accept="image/*,audio/*,video/*,.pdf,.txt,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
@@ -770,8 +885,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
             <input ref={imageRef} type="file" hidden accept="image/*" multiple onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <input ref={videoRef} type="file" hidden accept="video/*" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <div ref={attachmentMenuRef} className="esc-attach-wrap">
-              <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording} onClick={toggleAttachmentMenu}>＋</button>
-            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
+              <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording || screenRecording} onClick={toggleAttachmentMenu}>＋</button>
+            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy || screenRecording} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || screenRecording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
           </div>
         </> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
       </div>
@@ -784,8 +899,18 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         <button type="button" role="menuitem" onClick={() => { videoRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">▶</span> Video / demonstration</button>
         <button type="button" role="menuitem" onClick={() => { fileRef.current?.click(); setAttachMenuOpen(false); }}><span className="icon-mark">▤</span> File / document</button>
         <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); void startRecording(); }}><span className="icon-mark">♫</span> Record voice note</button>
+        <label className="esc-screen-audio-option"><input type="checkbox" checked={screenAudioEnabled} onChange={e => setScreenAudioEnabled(e.target.checked)} /> Include microphone commentary</label>
+        <button type="button" role="menuitem" disabled={screenRecording || recording || !!screenPreview} onClick={() => { setAttachMenuOpen(false); void startScreenRecording(); }}><span className="icon-mark">▣</span> Record screen + audio</button>
         <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); setCallOpen(true); }}><span className="icon-mark">▣</span> Live assistance</button>
       </div>, document.body)}
+    {screenPreview && <div className="esc-card-edit-backdrop" role="presentation" onMouseDown={e => { if(e.target === e.currentTarget) finishScreenPreview(false); }}>
+      <div className="esc-card-edit-dialog esc-screen-preview-dialog" role="dialog" aria-modal="true" aria-label="Preview screen recording">
+        <strong>Preview screen recording</strong>
+        <video src={screenPreview.url} controls playsInline preload="metadata" style={{width:"100%",maxHeight:"48dvh",background:"#101820",borderRadius:12}} />
+        <small>{fileSize(screenPreview.file.size)} · Review it before attaching. Your recording is not uploaded until you press Send.</small>
+        <footer><button type="button" onClick={() => finishScreenPreview(false)}>Discard</button><button type="button" className="primary" onClick={() => finishScreenPreview(true)}>Attach to message</button></footer>
+      </div>
+    </div>}
     {editingCardId && <div className="esc-card-edit-backdrop" role="presentation" onMouseDown={e => {if(e.target === e.currentTarget && !savingCard)setEditingCardId("");}}>
       <div className="esc-card-edit-dialog" role="dialog" aria-modal="true" aria-label="Edit conversation title">
         <strong>Edit conversation title</strong>

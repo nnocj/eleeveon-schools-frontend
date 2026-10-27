@@ -120,6 +120,37 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
   const [, setInfo] = useState("");
   const [online, setOnline] = useState(true);
   const [deletingId, setDeletingId] = useState("");
+  const [cardMenuId, setCardMenuId] = useState("");
+  const [editingCardId, setEditingCardId] = useState("");
+  const [editingCardTitle, setEditingCardTitle] = useState("");
+  const [savingCard, setSavingCard] = useState(false);
+  async function saveCardTitle() {
+    const name = editingCardTitle.trim();
+    if (!editingCardId || !name || savingCard) return;
+    setSavingCard(true);
+    try {
+      const updated = await supportApi.renameConversation(editingCardId, name);
+      setConversations(items => items.map(item => item.id === editingCardId ? { ...item, displayTitle: updated.displayTitle } : item));
+      if (opened?.id === editingCardId) setOpened(old => old ? { ...old, displayTitle: updated.displayTitle } : old);
+      setEditingCardId(""); setCardMenuId("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not rename conversation."); }
+    finally { setSavingCard(false); }
+  }
+  async function removeCard(id: string) {
+    if (savingCard || !window.confirm("Remove this conversation from your inbox on all your devices? Other participants will keep their copies.")) return;
+    setSavingCard(true);
+    try {
+      await supportApi.removeConversation(id);
+      setConversations(items => items.filter(item => item.id !== id));
+      if (selectedRef.current === id) {
+        selectedRef.current = ""; setSelected(""); setOpened(null); setThread([]); setRendered([]); setMobileOpen(false);
+      }
+      setCardMenuId("");
+      window.dispatchEvent(new Event("eleeveon:support-unread-refresh"));
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not remove conversation."); }
+    finally { setSavingCard(false); }
+  }
+
   async function deleteMessageOnServer(messageId: string, scope: "me" | "everyone") {
     if (!selected || deletingId) return;
     if (!window.confirm(scope === "everyone"
@@ -623,7 +654,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
     catch (cause) { setError(cause instanceof Error ? cause.message : "Status update failed."); }
     finally { setBusy(false); }
   }
-  const title = (opened && decryptedSubject[opened.id]) || opened?.subject || "Eleeveon Support";
+  const title = opened?.displayTitle || (opened && decryptedSubject[opened.id]) || opened?.subject || "Eleeveon Support";
   return <section className="esc" aria-label="Eleeveon encrypted support">
     <style>{`
       .esc {--esc-primary:var(--dashboard-primary,var(--ba-primary,#137d79));--esc-line:var(--border,rgba(110,131,145,.22));--esc-surface:var(--surface,var(--card-bg,#fff));--esc-text:var(--text,#1f3040);--esc-mute:color-mix(in srgb,var(--esc-surface) 89%,var(--esc-primary));color:var(--esc-text);font-size:13px;min-height:0;height:100%;isolation:isolate}
@@ -636,6 +667,21 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
       .esc-search,.esc-filter{margin:0 11px 8px;padding:10px 12px;border:1px solid var(--esc-line);border-radius:11px;background:var(--esc-surface);width:calc(100% - 22px)}.esc-search{margin-top:2px}.esc-filter{margin-bottom:7px}
       .esc-inbox{flex:1;overflow:auto;min-height:0;padding:0 6px 8px;scrollbar-gutter:stable}
       .esc-thread-btn{display:flex;gap:10px;padding:11px 9px;width:100%;text-align:left;background:transparent;border:0;border-radius:12px;margin:2px 0;align-items:center}.esc-thread-btn.current{background:color-mix(in srgb,var(--esc-primary) 12%,var(--esc-surface))}.esc-thread-btn:hover{background:var(--esc-mute)}
+
+      .esc-thread-card{position:relative;border-radius:12px;margin:2px 0}
+      .esc-thread-card.current{background:color-mix(in srgb,var(--esc-primary) 12%,var(--esc-surface))}
+      .esc-thread-card .esc-thread-btn{margin:0;padding-right:37px}
+      .esc-card-menu-trigger{position:absolute;right:6px;top:10px;width:28px;height:30px;border:0;background:transparent;color:var(--esc-text);font-size:22px;border-radius:9px;cursor:pointer;display:grid;place-items:center}
+      .esc-card-menu-trigger:hover,.esc-card-menu-trigger[aria-expanded=true]{background:var(--esc-mute)}
+      .esc-card-menu{position:absolute;z-index:30;right:5px;top:40px;min-width:175px;padding:5px;background:var(--esc-surface);border:1px solid var(--esc-line);border-radius:12px;box-shadow:0 12px 30px #0002}
+      .esc-card-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:11px 12px;border-radius:8px;font-size:12px;color:var(--esc-text);cursor:pointer}
+      .esc-card-menu button:hover{background:var(--esc-mute)}
+      .esc-card-menu button.esc-card-danger{color:#b32643}
+      .esc-card-unread{float:right;border-radius:999px;background:var(--esc-primary);color:#fff;padding:2px 6px;font-size:10px;margin-left:6px}
+      .esc-card-edit-backdrop{position:fixed;inset:0;background:#07182b88;z-index:2147481000;display:grid;place-items:center;padding:16px}
+      .esc-card-edit-dialog{width:min(420px,100%);background:var(--esc-surface);color:var(--esc-text);border:1px solid var(--esc-line);border-radius:18px;padding:21px;display:grid;gap:13px;box-shadow:0 20px 60px #0004}
+      .esc-card-edit-dialog input{width:100%;padding:12px;border:1px solid var(--esc-line);border-radius:10px;background:var(--esc-surface);color:var(--esc-text)}
+      .esc-card-edit-dialog footer{display:flex;justify-content:flex-end;gap:9px}
       .esc-avatar{width:40px;height:40px;border-radius:15px;display:grid;place-items:center;flex-shrink:0;background:linear-gradient(145deg,color-mix(in srgb,var(--esc-primary) 16%,var(--esc-surface)),color-mix(in srgb,var(--esc-primary) 7%,var(--esc-surface)));font-weight:800;color:var(--esc-primary);border:1px solid color-mix(in srgb,var(--esc-primary) 15%,transparent)}
       .esc-thread-main{min-width:0;flex:1}.esc-thread-main strong,.esc-thread-main small,.esc-thread-main em{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.esc-thread-main strong{font-size:12px}.esc-thread-main small{opacity:.65;margin-top:4px;font-size:11px}.esc-thread-main em{font-style:normal;font-size:10px;opacity:.6;margin-top:4px}
       .esc-chat{display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;position:relative;isolation:isolate;background-color:color-mix(in srgb,var(--esc-surface) 91%,var(--esc-primary));background-image:radial-gradient(ellipse 55% 48% at 1% 4%,color-mix(in srgb,var(--esc-primary) 13%,transparent),transparent 82%),radial-gradient(ellipse 55% 48% at 100% 98%,color-mix(in srgb,#8db9cc 15%,transparent),transparent 81%),radial-gradient(circle at 9px 9px,color-mix(in srgb,var(--esc-primary) 10%,transparent) 1.3px,transparent 1.4px),radial-gradient(circle at 39px 39px,color-mix(in srgb,var(--esc-primary) 6%,transparent) 1.1px,transparent 1.3px);background-size:auto,auto,58px 58px,58px 58px}
@@ -669,8 +715,17 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
           <div className="esc-actions"><button className="icon" title="Refresh conversations" aria-label="Refresh conversations" onClick={() => void refresh()} disabled={loading}>↻</button><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>+ New</button></div>
         </div>
         <select className="esc-filter" value={filter} aria-label="Filter conversations" onChange={e => setFilter(e.target.value)}><option value="all">All conversations</option><option value="open">Open</option>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>
-        <div className="esc-inbox">{visible.map(c => <button key={c.id} className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => void openConversation(c.id)}>
-          <div className="esc-avatar">{(isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject || "S")?.slice(0, 1).toUpperCase()}</div><div className="esc-thread-main"><strong>{isDeveloper ? (c.organizationName || "School") : (decryptedSubject[c.id] || c.subject || "Support conversation")}{Number(c.unreadCount || 0) > 0 && <span aria-label={`${c.unreadCount} unread messages`} style={{float:"right",borderRadius:999,background:"var(--esc-primary)",color:"white",padding:"2px 6px",fontSize:10,marginLeft:6}}>{c.unreadCount! > 99 ? "99+" : c.unreadCount}</span>}</strong><small>{decryptedSubject[c.id] || (isEncrypted(c) ? "Private conversation" : "Earlier support conversation")}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div></button>)}
+        <div className="esc-inbox">{visible.map(c => <div key={c.id} className={`esc-thread-card ${selected === c.id ? "current" : ""}`}>
+          <button type="button" className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => {setCardMenuId("");void openConversation(c.id);}}>
+            <div className="esc-avatar">{(c.displayTitle || (isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject) || "S").slice(0,1).toUpperCase()}</div>
+            <div className="esc-thread-main"><strong>{c.displayTitle || (isDeveloper ? c.organizationName || "School" : decryptedSubject[c.id] || c.subject || "Support conversation")}{Number(c.unreadCount || 0) > 0 && <span aria-label={`${c.unreadCount} unread messages`} className="esc-card-unread">{c.unreadCount! > 99 ? "99+" : c.unreadCount}</span>}</strong><small>{isEncrypted(c) ? "Private conversation" : "Earlier support conversation"}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div>
+          </button>
+          <button type="button" className="esc-card-menu-trigger" aria-label="More actions for this conversation" aria-expanded={cardMenuId === c.id} onClick={() => setCardMenuId(old => old === c.id ? "" : c.id)}>⋮</button>
+          {cardMenuId === c.id && <div className="esc-card-menu" role="group" aria-label="Conversation actions">
+            <button type="button" onClick={() => {setEditingCardTitle(c.displayTitle || decryptedSubject[c.id] || c.subject || "");setEditingCardId(c.id);setCardMenuId("");}}>Edit title</button>
+            <button type="button" className="esc-card-danger" disabled={savingCard} onClick={() => void removeCard(c.id)}>Delete conversation</button>
+          </div>}
+        </div>)}
           {!visible.length && <div className="esc-empty">{loading ? "Loading conversations…" : conversations.length ? "No conversations match these filters." : "No conversations yet."}</div>}</div>
 
       </aside>
@@ -731,6 +786,14 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, sc
         <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); void startRecording(); }}><span className="icon-mark">♫</span> Record voice note</button>
         <button type="button" role="menuitem" onClick={() => { setAttachMenuOpen(false); setCallOpen(true); }}><span className="icon-mark">▣</span> Live assistance</button>
       </div>, document.body)}
+    {editingCardId && <div className="esc-card-edit-backdrop" role="presentation" onMouseDown={e => {if(e.target === e.currentTarget && !savingCard)setEditingCardId("");}}>
+      <div className="esc-card-edit-dialog" role="dialog" aria-modal="true" aria-label="Edit conversation title">
+        <strong>Edit conversation title</strong>
+        <input autoFocus maxLength={100} aria-label="Conversation title" value={editingCardTitle} onChange={e => setEditingCardTitle(e.target.value)} onKeyDown={e => {if(e.key === "Enter")void saveCardTitle();if(e.key === "Escape")setEditingCardId("");}}/>
+        <small>This title is saved privately for your account. The encrypted messages stay unchanged.</small>
+        <footer><button type="button" disabled={savingCard} onClick={() => setEditingCardId("")}>Cancel</button><button type="button" className="primary" disabled={savingCard || !editingCardTitle.trim()} onClick={() => void saveCardTitle()}>{savingCard ? "Saving…" : "Save title"}</button></footer>
+      </div>
+    </div>}
     {error && <div className="esc-banner error" role="alert">{error} <button onClick={() => setError("")}>Dismiss</button></div>}
 
   </section>;

@@ -2,28 +2,23 @@
 
 /**
  * app/accountant/page.tsx
- * ---------------------------------------------------------
- * ACCOUNTANT PORTAL
- * ---------------------------------------------------------
- * Finance workspace for school/branch accountants.
- *
- * Workspace-session aligned:
- * - RolePortalShell opens this portal from the selected workspace session
- *   written by /select-role.
- * - Accountant records are scoped by the selected school/branch when available.
- * - Accountantdashboard receives NAV_SECTIONS from this page.
- * - Adding/removing/reordering nav items here automatically updates dashboard
- *   cards while preserving RolePortalShell routing.
+ * Accountant = one main Finance tab, exactly matching Branch Admin's
+ * Fees (Term Notices & Tracking / Fee Records), Expenses and Payroll views.
+ * Uses the same branch modules so documents and data entry stay consistent.
+ * Existing accountant modules are retained as non-navigation legacy routes.
  */
-
 import React from "react";
-
-import RolePortalShell, {
-  type RoleNavSection,
-} from "../components/role-portals/RolePortalShell";
+import RolePortalShell, { type RoleNavSection } from "../components/role-portals/RolePortalShell";
 import { ACCOUNTANT_ROLES } from "../lib/auth/roleRedirect";
+import WorkspaceSubtabs from "../components/role-portals/WorkspaceSubtabs";
 
-import Accountantdashboard from "./modules/Accountantdashboard";
+// Identical components to Branch Admin Finance. Server permissions remain enforced.
+import BranchFees from "../branch-admin/modules/Fees";
+import TermFeesRequirements from "../branch-admin/modules/finance/TermFeesRequirements";
+import BranchExpenses from "../branch-admin/modules/Expenses";
+import BranchPayroll from "../branch-admin/modules/Payroll";
+
+// Preserve old route targets if an existing accountant module navigates to them.
 import Fees from "./modules/Fees";
 import Payments from "./modules/Payments";
 import Income from "./modules/Income";
@@ -34,65 +29,55 @@ import Announcements from "./modules/Announcements";
 import Messages from "./modules/Messages";
 import Calendar from "./modules/Calendar";
 
-type RouteProps = {
-  navigate: (key: string) => void;
-};
+type RouteProps = { navigate: (key: string) => void };
+type FinanceView = "fees" | "expenses" | "payroll";
+type FeesView = "term" | "records";
 
-// ======================================================
-// NAVIGATION
-// ======================================================
+function AccountantFinanceWorkspace(props: RouteProps) {
+  const [view, setView] = React.useState<FinanceView>("fees");
+  const [feesView, setFeesView] = React.useState<FeesView>("term");
+  const Current: React.ComponentType<RouteProps> =
+    view === "expenses" ? BranchExpenses :
+    view === "payroll" ? BranchPayroll : BranchFees;
 
-export const NAV_SECTIONS: RoleNavSection[] = [
-  {
-    title: "Finance",
-    defaultOpen: true,
-    items: [
-      { key: "accountantDashboard", label: "Dashboard", icon: "💼" },
-      { key: "fees", label: "Fees", icon: "💳" },
-      { key: "payments", label: "Payments", icon: "🧾" },
-      { key: "income", label: "Income", icon: "📈" },
-      { key: "expenses", label: "Expenses", icon: "📉" },
-    ],
-  },
-  {
-    title: "Reports",
-    defaultOpen: false,
-    items: [
-      { key: "balances", label: "Balances", icon: "⚖" },
-      { key: "financeReports", label: "Finance Reports", icon: "📊" },
-    ],
-  },
-  {
-    title: "Communication",
-    defaultOpen: false,
-    items: [
-      { key: "announcements", label: "Announcements", icon: "📢" },
-      { key: "messages", label: "Messages", icon: "✉️" },
-    ],
-  },
-  {
-    title: "Calendar",
-    defaultOpen: false,
-    items: [
-      { key: "calendar", label: "Calendar", icon: "📅" },
-    ],
-  },
-];
-
-// ======================================================
-// DASHBOARD WRAPPER
-// ======================================================
-
-function AccountantDashboardRoute(props: RouteProps) {
-  return <Accountantdashboard {...props} navSections={NAV_SECTIONS} />;
+  return (
+    <div className="ba-workspace-wrapper ba-finance-workspace" style={{ width: "100%", minWidth: 0 }}>
+      <WorkspaceSubtabs<FinanceView>
+        value={view} onChange={setView} ariaLabel="Finance views"
+        tabs={[
+          { key: "fees", label: "Fees" },
+          { key: "expenses", label: "Expenses" },
+          { key: "payroll", label: "Payroll" },
+        ]}
+      />
+      {view === "fees" ? (
+        <div className="ba-finance-fees-pane" style={{ width: "100%", minWidth: 0 }}>
+          <WorkspaceSubtabs<FeesView>
+            secondary
+            value={feesView} onChange={setFeesView} ariaLabel="Fee tools"
+            tabs={[
+              { key: "term", label: "Term Notices & Tracking" },
+              { key: "records", label: "Fee Records" },
+            ]}
+          />
+          {feesView === "term" ? <TermFeesRequirements /> : <BranchFees {...props} />}
+        </div>
+      ) : (
+        <Current {...props} />
+      )}
+    </div>
+  );
 }
 
-// ======================================================
-// ROUTES
-// ======================================================
+export const NAV_SECTIONS: RoleNavSection[] = [{
+  title: "Workspaces", defaultOpen: true,
+  items: [{ key: "financeWorkspace", label: "Finance", icon: "💰" }],
+}];
 
 const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
-  accountantDashboard: AccountantDashboardRoute,
+  financeWorkspace: AccountantFinanceWorkspace,
+  // Old accountant routes are still available to existing internal navigate calls;
+  // they do not appear as extra main tabs.
   fees: Fees,
   payments: Payments,
   income: Income,
@@ -100,8 +85,8 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   balances: Balances,
   financeReports: Financereports,
   announcements: Announcements,
-  calendar: Calendar,
   messages: Messages,
+  calendar: Calendar,
 };
 
 export default function AccountantPage() {
@@ -109,9 +94,10 @@ export default function AccountantPage() {
     <RolePortalShell
       portalTitle="Accountant Portal"
       portalSubtitle="Finance workspace"
-      homeKey="accountantDashboard"
+      homeKey="financeWorkspace"
       allowedRoles={ACCOUNTANT_ROLES}
       navSections={NAV_SECTIONS}
+      navigationMode="branch-workspace"
       routes={ROUTES}
       lockedContext={true}
       requireSchool={true}

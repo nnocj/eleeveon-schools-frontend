@@ -15,6 +15,7 @@
  */
 
 import EleeveonSupportChat from "./EleeveonSupportChat";
+import { useSupportUnread } from "../../lib/support/useSupportUnread";
 import EleeveonSurveys from "./EleeveonSurveys";
 import { supportApi } from "../../lib/support/supportApi";
 
@@ -1458,10 +1459,11 @@ export default function EleeveonCenter({
       | Record<string, unknown>
       | null;
 
+  const supportUnread = useSupportUnread();
   const chatSection: CenterSection = isDeveloper ? "inbox" : "support";
   const centerTabs = (
     <nav className="center-inline-tabs" aria-label="Eleeveon Center sections">
-      <button type="button" className={section === chatSection ? "active" : ""} aria-current={section === chatSection ? "page" : undefined} onClick={() => setSection(chatSection)}>Chat</button>
+      <button type="button" className={section === chatSection ? "active" : ""} aria-current={section === chatSection ? "page" : undefined} onClick={() => setSection(chatSection)}>Chat{supportUnread > 0 ? ` · ${supportUnread > 99 ? "99+" : supportUnread}` : ""}</button>
       <button type="button" className={section === "feedback" ? "active" : ""} aria-current={section === "feedback" ? "page" : undefined} onClick={() => setSection("feedback")}>Surveys</button>
       <button type="button" className={section === "updates" ? "active" : ""} aria-current={section === "updates" ? "page" : undefined} onClick={() => setSection("updates")}>Updates{unreadCount > 0 ? ` · ${unreadCount}` : ""}</button>
       <button type="button" className={section === "access" ? "active" : ""} aria-current={section === "access" ? "page" : undefined} onClick={() => setSection("access")}>Access</button>
@@ -1490,7 +1492,7 @@ export default function EleeveonCenter({
       value={section}
       onChange={event => setSection(event.target.value as CenterSection)}
     >
-      <option value={chatSection}>Chat</option>
+      <option value={chatSection}>Chat{supportUnread > 0 ? ` (${supportUnread})` : ""}</option>
       <option value="feedback">Surveys</option>
       <option value="updates">Updates</option>
       <option value="access">Access</option>

@@ -56,6 +56,22 @@ function normalizeGender(raw:unknown):string{
   if(["o","other","nonbinary","non-binary"].includes(key))return "Other";
   return original;
 }
+/** Age in completed years based on the local calendar day, never a stale imported value. */
+function ageFromDob(input: unknown, today = new Date()): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(value(input).trim());
+  if (!match) return undefined;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const valid = new Date(Date.UTC(year, month - 1, day));
+  if (valid.getUTCFullYear() !== year || valid.getUTCMonth() !== month - 1 || valid.getUTCDate() !== day) return undefined;
+  let years = today.getFullYear() - year;
+  if (today.getMonth() + 1 < month || (today.getMonth() + 1 === month && today.getDate() < day)) years--;
+  return years >= 0 && years <= 130 ? years : undefined;
+}
+function currentStudentAge(row: Student): string {
+  const calculated = ageFromDob((row as any).dateOfBirth);
+  return calculated === undefined ? value((row as any).age) : String(calculated);
+}
+
 function studentGender(row:Student):string {
   return normalizeGender((row as any).gender || (row as any).sex);
 }
@@ -130,6 +146,13 @@ export default function Teacherstudents(){
   const [selected,setSelected]=useState<StudentView|null>(null);
   const [form,setForm]=useState<ProfileForm>(emptyForm);
   const [stagedPhoto,setStagedPhoto]=useState<{assetId:string;previewUrl:string}|null>(null);
+  const [cameraOpen,setCameraOpen]=useState(false);
+  const [cameraError,setCameraError]=useState("");
+  const [cameraReady,setCameraReady]=useState(false);
+  const cameraVideoRef=useRef<HTMLVideoElement|null>(null);
+  const cameraStreamRef=useRef<MediaStream|null>(null);
+  const cameraInputRef=useRef<HTMLInputElement|null>(null);
+
   const [feedback,setFeedback]=useState("");
   const mediaSession=useRef("");
   const mediaRows=useMemo(()=>rows.map(r=>r.row),[rows]);
@@ -186,9 +209,55 @@ export default function Teacherstudents(){
     const r:any=item.row;
     setSelected(item);setFeedback("");setStagedPhoto(null);
     mediaSession.current=createMediaSessionKey(MediaOwners.STUDENTS);
-    setForm({fullName:value(r.fullName),gender:studentGender(item.row),dateOfBirth:value(r.dateOfBirth).slice(0,10),age:value(r.age),parentName:value(r.parentName),parentPhone:value(r.parentPhone),parentEmail:value(r.parentEmail),address:value(r.address)});
+    setForm({fullName:value(r.fullName),gender:studentGender(item.row),dateOfBirth:value(r.dateOfBirth).slice(0,10),age:currentStudentAge(item.row),parentName:value(r.parentName),parentPhone:value(r.parentPhone),parentEmail:value(r.parentEmail),address:value(r.address)});
   };
-  const closeEdit=()=>{if(!saving){setSelected(null);setStagedPhoto(null);}};
+  const stopCamera=()=>{
+    cameraStreamRef.current?.getTracks().forEach(track=>track.stop());
+    cameraStreamRef.current=null;
+    if(cameraVideoRef.current)cameraVideoRef.current.srcObject=null;
+    setCameraReady(false);
+  };
+  useEffect(()=>{
+    if(!cameraOpen||!selected)return;
+    let cancelled=false;
+    const launch=async()=>{
+      setCameraError("");setCameraReady(false);
+      if(!navigator.mediaDevices?.getUserMedia){setCameraError("This browser does not support a live camera. Use your device camera or upload a photo instead.");return;}
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+        if(cancelled){stream.getTracks().forEach(track=>track.stop());return;}
+        cameraStreamRef.current=stream;
+        if(cameraVideoRef.current){
+          cameraVideoRef.current.srcObject=stream;
+          await cameraVideoRef.current.play();
+          if(!cancelled)setCameraReady(true);
+        }
+      }catch(error){
+        if(!cancelled)setCameraError(error instanceof Error ? error.message : "Camera unavailable. Check camera permissions or use a file upload.");
+      }
+    };
+    void launch();
+    return()=>{cancelled=true;cameraStreamRef.current?.getTracks().forEach(track=>track.stop());cameraStreamRef.current=null;};
+  },[cameraOpen,selected?.row.id]);
+  const closeCamera=()=>{stopCamera();setCameraOpen(false);setCameraError("");};
+  const capturePhoto=async()=>{
+    const video=cameraVideoRef.current;
+    if(!video||!video.videoWidth||!video.videoHeight){setCameraError("Camera image not ready. Please retry.");return;}
+    const canvas=document.createElement("canvas");
+    const maxDimension=1440;
+    const factor=Math.min(1,maxDimension/Math.max(video.videoWidth,video.videoHeight));
+    canvas.width=Math.max(1,Math.round(video.videoWidth*factor));
+    canvas.height=Math.max(1,Math.round(video.videoHeight*factor));
+    const ctx=canvas.getContext("2d");
+    if(!ctx){setCameraError("Unable to capture image on this device.");return;}
+    ctx.drawImage(video,0,0,canvas.width,canvas.height);
+    const blob=await new Promise<Blob|null>(resolve=>canvas.toBlob(resolve,"image/jpeg",0.88));
+    if(!blob){setCameraError("Unable to prepare the captured photo.");return;}
+    const file=new File([blob],`student-${Date.now()}.jpg`,{type:"image/jpeg",lastModified:Date.now()});
+    closeCamera();
+    await choosePhoto(file);
+  };
+  const closeEdit=()=>{if(!saving){closeCamera();setSelected(null);setStagedPhoto(null);}};
   const choosePhoto=async(file?:File)=>{
     if(!file||!selected)return;
     if(!file.type.startsWith("image/")){setFeedback("Choose an image file.");return;}
@@ -202,7 +271,8 @@ export default function Teacherstudents(){
     event?.preventDefault();
     if(!selected||!access.permitted||saving)return;
     const name=form.fullName.trim();if(!name){setFeedback("Student name is required.");return;}
-    const age=form.age.trim()===""?undefined:Number(form.age);
+    const age=form.dateOfBirth ? ageFromDob(form.dateOfBirth) : (form.age.trim()===""?undefined:Number(form.age));
+    if(form.dateOfBirth && age===undefined){setFeedback("Enter a valid date of birth that is not in the future.");return;}
     if(age!==undefined&&(!Number.isFinite(age)||age<0||age>130)){setFeedback("Enter a valid age.");return;}
     const sid=asId(selected.row.id);
     setSaving(true);
@@ -243,7 +313,7 @@ export default function Teacherstudents(){
         <span className="student-side"><StatusDot row={item.row}/><i aria-hidden="true">✎</i></span>
       </button>)}</section>}
       {view==="table"&&<section className="ba-table-card"><div className="ba-table-scroll"><table><thead><tr><th>Students ({shown.length})</th><th>Admission No.</th><th>Class</th><th>Organization</th><th>Gender</th><th>Age</th><th>Parent</th><th>Phone</th><th>Enrollments</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
-        {shown.map(item=><tr key={asId(item.row.id)}><td><div className="ba-table-person"><Avatar name={value(item.row.fullName)} photo={photoFor(item.row)} primary="var(--ba-primary,#64748b)"/><div><strong>{item.row.fullName}</strong><span>{(item.row as any).address||""}</span></div></div></td><td>{(item.row as any).admissionNumber||"—"}</td><td>{item.className}</td><td>{item.organizationName}</td><td>{studentGender(item.row)||"—"}</td><td>{(item.row as any).age??"—"}</td><td>{(item.row as any).parentName||"—"}</td><td>{(item.row as any).parentPhone||"—"}</td><td>{item.enrollmentCount}</td><td><span className={`ba-chip ${statusTone(item.row)}`}>{studentStatus(item.row)}</span></td><td>{formatDate((item.row as any).updatedAt||(item.row as any).createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={()=>startEdit(item)}>Edit</button></div></td></tr>)}
+        {shown.map(item=><tr key={asId(item.row.id)}><td><div className="ba-table-person"><Avatar name={value(item.row.fullName)} photo={photoFor(item.row)} primary="var(--ba-primary,#64748b)"/><div><strong>{item.row.fullName}</strong><span>{(item.row as any).address||""}</span></div></div></td><td>{(item.row as any).admissionNumber||"—"}</td><td>{item.className}</td><td>{item.organizationName}</td><td>{studentGender(item.row)||"—"}</td><td>{currentStudentAge(item.row)||"—"}</td><td>{(item.row as any).parentName||"—"}</td><td>{(item.row as any).parentPhone||"—"}</td><td>{item.enrollmentCount}</td><td><span className={`ba-chip ${statusTone(item.row)}`}>{studentStatus(item.row)}</span></td><td>{formatDate((item.row as any).updatedAt||(item.row as any).createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={()=>startEdit(item)}>Edit</button></div></td></tr>)}
       </tbody></table>{!shown.length&&<div className="ba-empty-table">No student matches your filters.</div>}</div></section>}
       {!shown.length&&view==="cards"&&<section className="ba-state"><h2>No students found</h2><p>No assigned students match your current filters.</p></section>}
     </>}
@@ -257,16 +327,31 @@ export default function Teacherstudents(){
       <button type="button" onClick={()=>{setMoreOpen(false);void load();}}><span>↻</span><b>Refresh</b><small>Reload assigned students</small></button>
     </div></section></ScopedDialog>}
     {selected&&<ScopedDialog primary={primary} onClose={closeEdit}><form className="ba-modal" role="dialog" aria-modal="true" aria-label="Edit student" onSubmit={save} onPointerDown={e=>e.stopPropagation()}><div className="ba-modal-head"><div><h2>Edit Student</h2><p>{(selected.row as any).admissionNumber||"No admission number"} · {selected.className}</p></div><button type="button" className="ba-modal-close" disabled={saving} onClick={closeEdit} aria-label="Close student editor">✕</button></div>
-      <section className="ba-form-section"><h3>Student</h3><div className="ba-form"><label><span>Full Name</span><input autoFocus value={form.fullName} onChange={e=>setForm(f=>({...f,fullName:e.target.value}))} required/></label><label><span>Gender</span><select value={form.gender} onChange={e=>setForm(f=>({...f,gender:e.target.value}))}><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>{form.gender&&!(["Male","Female","Other"].includes(form.gender))&&<option value={form.gender}>{form.gender} (existing)</option>}</select></label><label><span>Date of Birth</span><input type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value}))}/></label><label><span>Age</span><input type="number" min="0" max="130" value={form.age} onChange={e=>setForm(f=>({...f,age:e.target.value}))}/></label></div></section>
+      <section className="ba-form-section"><h3>Student</h3><div className="ba-form"><label><span>Full Name</span><input autoFocus value={form.fullName} onChange={e=>setForm(f=>({...f,fullName:e.target.value}))} required/></label><label><span>Gender</span><select value={form.gender} onChange={e=>setForm(f=>({...f,gender:e.target.value}))}><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option>{form.gender&&!(["Male","Female","Other"].includes(form.gender))&&<option value={form.gender}>{form.gender} (existing)</option>}</select></label><label><span>Date of Birth</span><input type="date" value={form.dateOfBirth} onChange={e=>setForm(f=>({...f,dateOfBirth:e.target.value,age:e.target.value ? String(ageFromDob(e.target.value)??"") : ""}))}/></label><label><span>Age (calculated)</span><input type="number" min="0" max="130" value={form.dateOfBirth ? (ageFromDob(form.dateOfBirth)??"") : form.age} readOnly title="Age is automatically calculated from Date of Birth"/></label></div></section>
       <section className="ba-form-section"><h3>Parent / Guardian</h3><div className="ba-form"><label><span>Parent / Guardian Name</span><input value={form.parentName} onChange={e=>setForm(f=>({...f,parentName:e.target.value}))}/></label><label><span>Parent Phone</span><input value={form.parentPhone} onChange={e=>setForm(f=>({...f,parentPhone:e.target.value}))}/></label><label><span>Parent Email</span><input type="email" value={form.parentEmail} onChange={e=>setForm(f=>({...f,parentEmail:e.target.value}))}/></label><label className="wide"><span>Address</span><textarea value={form.address} onChange={e=>setForm(f=>({...f,address:e.target.value}))}/></label></div></section>
-      <section className="ba-form-section"><h3>Media</h3><div className="ba-media-section"><Avatar name={form.fullName} photo={stagedPhoto?.previewUrl||photoFor(selected.row)} primary={primary}/><label className="ba-media-button secondary">Upload photo<input type="file" accept="image/*" disabled={saving} onChange={e=>void choosePhoto(e.target.files?.[0])}/></label></div></section>
+      <section className="ba-form-section"><h3>Media</h3><div className="ba-media-section"><Avatar name={form.fullName} photo={stagedPhoto?.previewUrl||photoFor(selected.row)} primary={primary}/><label className="ba-media-button secondary">Upload photo<input type="file" accept="image/*" disabled={saving} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></label><button type="button" className="ba-media-button" disabled={saving} onClick={()=>setCameraOpen(true)}>📷 Take Photo</button><input ref={cameraInputRef} type="file" accept="image/*" capture="environment" aria-label="Use device camera" style={{display:"none"}} onChange={e=>{void choosePhoto(e.target.files?.[0]);e.target.value="";}}/></div></section>
       <section className="ba-form-section"><div className="ba-school-managed"><strong>School-managed fields</strong><p>Admission number: {(selected.row as any).admissionNumber||"—"} · Class: {selected.className}. Enrollment, class assignment, organization, and student status cannot be edited by teachers.</p></div></section>
       <div className="ba-modal-actions"><button type="button" disabled={saving} onClick={closeEdit}>Cancel</button><button type="submit" disabled={saving}>{saving?"Saving…":"Save changes"}</button></div>
     </form></ScopedDialog>}
+    {selected&&cameraOpen&&<ScopedDialog primary={primary} onClose={closeCamera}>
+      <section className="ba-modal teacher-camera-dialog" role="dialog" aria-modal="true" aria-label="Take student photo" onPointerDown={e=>e.stopPropagation()}>
+        <div className="ba-modal-head"><div><h2>Take student photo</h2><p>{selected.row.fullName||"Student"} · The photo will be saved with the student profile.</p></div><button type="button" className="ba-modal-close" onClick={closeCamera} aria-label="Close camera">✕</button></div>
+        <video ref={cameraVideoRef} playsInline autoPlay muted className="teacher-camera-preview" aria-label="Camera preview" />
+        {cameraError&&<p role="alert" className="teacher-camera-error">{cameraError}</p>}
+        <div className="ba-modal-actions"><button type="button" onClick={closeCamera}>Cancel</button><button type="button" onClick={()=>cameraInputRef.current?.click()}>Device camera</button><button type="button" disabled={!cameraReady} onClick={()=>void capturePhoto()}>Capture photo</button></div>
+      </section>
+    </ScopedDialog>}
   </main>;
 }
 
 const css = `
+.teacher-students-overlay .teacher-camera-dialog{width:min(660px,100%)}
+.teacher-students-overlay .teacher-camera-preview{display:block;width:100%;height:auto;max-height:58dvh;min-height:190px;object-fit:contain;background:#0b1220;border-radius:18px}
+.teacher-students-overlay .teacher-camera-error{color:#dc2626;font-size:12px;margin:9px 0}
+.teacher-students-overlay .ba-media-section{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.teacher-students-overlay .ba-media-section .ba-media-button{width:auto}
+@media(max-width:520px){.teacher-students-overlay .ba-media-section .ba-media-button{flex:1 1 125px}}
+
 @keyframes  spin { to { transform: rotate(360deg); } }
 .teacher-students-page{
   --ease: cubic-bezier(.2,.8,.2,1);

@@ -7,7 +7,7 @@
  * Non-cash requirements are always zero-value invoice items; delivery counts
  * are encoded in the existing description string and never change fee totals.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import TermNoticePrintTemplate from "./TermNoticePrintTemplate";
 import StudentTrackingPrintTemplate, { type TrackingPrintRow } from "./StudentTrackingPrintTemplate";
@@ -69,6 +69,12 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const revision = useBranchTableRevision(["feeStructures", "studentFeeInvoices", "studentFeeInvoiceItems", "studentFeePayments", "students", "studentEnrollments", "classes", "organizations", "academicStructures", "academicPeriods", "schoolBranchSettings", "mediaAssets", "mediaBlobs"]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // An issuance writes many local-first records. Revision events from those writes
+  // must not reload/unmount Finance until the entire operation has completed.
+  const writeLockRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const loadedScopeRef = useRef("");
+  const [issueProgress, setIssueProgress] = useState<{ done: number; total: number; created: number } | null>(null);
   const [noticeRows, setNoticeRows] = useState<FeeStructure[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [enrollments, setEnrollments] = useState<StudentEnrollment[]>([]);
@@ -131,6 +137,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   // inspect a general class notice or every student's personalised notice.
   const [previewMode, setPreviewMode] = useState<"class" | "batch" | "student" | "classes" | "all_students" | null>(null);
   const [previewStudentId, setPreviewStudentId] = useState("");
+  // Prevent all-student previews from mounting hundreds of A4 components at once.
+  const [previewVisibleCount, setPreviewVisibleCount] = useState(8);
   const resolvedMediaById = useEntityMediaUrls({
     accountId,
     ownerTable: "students",
@@ -148,6 +156,14 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   };
 
   useEffect(() => { setCanPortal(true); }, []);
+  useEffect(() => {
+    const clearPrintRoot = () => {
+      setPrintJobs([]);
+      setTrackingPrintRows(null);
+    };
+    window.addEventListener("afterprint", clearPrintRoot);
+    return () => window.removeEventListener("afterprint", clearPrintRoot);
+  }, []);
   // Keep body and shell content behind the modal; restore previous scroll values on exit.
   const anyFinanceDialogOpen = Boolean(trackingStudentId || payPickerOpen || editorOpen || receivedEditor ||
     paymentStudent || filterOpen || summaryOpen || moreOpen || individualPrintPickerOpen ||
@@ -168,20 +184,29 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     if (typeof window !== "undefined") setView(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
   }, []);
 
-  const load = useCallback(async () => {
-    if (!scope || !authenticated || !ready) { setLoading(false); return; }
+  const load = useCallback(async (force = false) => {
+    if (!scope || !authenticated || !ready) {
+      if (!writeLockRef.current) setLoading(false);
+      return;
+    }
+    // Thousands of local-first change notifications can occur while issuing
+    // invoices. Re-read once after the operation, not after every Dexie write.
+    if (writeLockRef.current && !force) return;
+    const scopeKey = `${scope.accountId}:${scope.schoolId}:${scope.branchId}`;
+    const isNewScope = loadedScopeRef.current !== scopeKey;
+    const sequence = ++loadSequenceRef.current;
+    if (isNewScope) setLoading(true);
     try {
-      setLoading(true);
       const [a, b, c, d, e, f, g, h, i, j, k, l] = await Promise.all([
         readRows<FeeStructure>("feeStructures"), readRows<Student>("students"),
         readRows<StudentEnrollment>("studentEnrollments"), readRows<Class>("classes"),
         readRows<AcademicStructure>("academicStructures"), readRows<AcademicPeriod>("academicPeriods"),
         readRows<StudentFeeInvoice>("studentFeeInvoices"), readRows<StudentFeeInvoiceItem>("studentFeeInvoiceItems"),
-        readRows<StudentFeePayment>("studentFeePayments"),
-        readRows<any>("schoolCurrencySettings"),
-        readRows<Organization>("organizations"),
-        readRows<any>("schoolBranchSettings"),
+        readRows<StudentFeePayment>("studentFeePayments"), readRows<any>("schoolCurrencySettings"),
+        readRows<Organization>("organizations"), readRows<any>("schoolBranchSettings"),
       ]);
+      // Do not publish an old snapshot after a newer load or during a write.
+      if (sequence !== loadSequenceRef.current || (writeLockRef.current && !force)) return;
       setNoticeRows(a.filter(row => isTenant(row, scope)));
       setStudents(b.filter(row => isTenant(row, scope) && row.status !== "withdrawn"));
       setEnrollments(c.filter(row => isTenant(row, scope) && row.status !== "withdrawn"));
@@ -198,14 +223,23 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         id(row.branchId) === scope.branchId &&
         (!row.accountId || id(row.accountId) === scope.accountId),
       );
-      setBranchAcademicSettings(
-        matchingBranchSettings.sort((x: any, y: any) =>
-          Number(y.updatedAt || 0) - Number(x.updatedAt || 0))[0] || null,
-      );
-    } catch (e) { console.error("Finance load failed", e); setMessage("Could not load the branch's finance records."); }
-    finally { setLoading(false); }
+      setBranchAcademicSettings(matchingBranchSettings.sort((x: any, y: any) =>
+        Number(y.updatedAt || 0) - Number(x.updatedAt || 0))[0] || null);
+      loadedScopeRef.current = scopeKey;
+    } catch (error) {
+      console.error("Finance load failed", error);
+      if (sequence === loadSequenceRef.current) {
+        setMessage("Could not load the branch's finance records.");
+      }
+    } finally {
+      if (sequence === loadSequenceRef.current && (!writeLockRef.current || force)) {
+        setLoading(false);
+      }
+    }
   }, [scope, authenticated, ready]);
-  useEffect(() => { void load(); }, [load, revision]);
+  useEffect(() => {
+    if (!writeLockRef.current) void load();
+  }, [load, revision]);
   const configuredStructureId = branchAcademicSettings
     ? id(branchAcademicSettings.currentAcademicStructureId)
     : id(settings?.currentAcademicStructureId);
@@ -417,6 +451,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     setEditorOpen(true);
   };
   const saveNotice = async () => {
+    if (writeLockRef.current) return;
     if (!scope || !structureId || !periodId) {
       setMessage("Choose an academic structure and period before saving."); return;
     }
@@ -440,6 +475,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     }
     if (targetIds.length > 1 && !window.confirm(`Apply the same fees and materials to ${targetIds.length} classes: ${targetIds.map(classLabel).join(", ")}? Existing invoices and payments will not be changed.`)) return;
     try {
+      writeLockRef.current = true;
+      loadSequenceRef.current++;
       setBusy(true);
       let completed: string[] = [];
       // Fetch before writing, to avoid duplicating a notice if another device
@@ -462,71 +499,167 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       setClassId(completed[0] || classId);
       setOpenedNoticeClass(true);
       setEditorOpen(false);
-      await load();
+      await load(true);
       setMessage(`Notice saved for ${completed.length} ${completed.length === 1 ? "class" : "classes"}: ${completed.map(classLabel).join(", ")}. You can preview, print, or issue student records.`);
     } catch (error) {
       console.error("Unable to save class batch", error);
-      await load();
+      await load(true);
       setMessage("Some class notices may have saved. Reopen and verify the targeted classes before retrying; existing records were not deleted.");
-    } finally { setBusy(false); }
+    } finally { writeLockRef.current = false; setBusy(false); }
   };
 
   const issueInvoices = async () => {
-    if (!scope || !structureId || !periodId || !requireScope()) return;
-    const classIds = section === "notices" && appliedClassIds.length ? appliedClassIds : [classId];
+    if (writeLockRef.current || !scope || !structureId || !periodId || !requireScope()) return;
+    // Never carry a previous class-batch selection into a different class.
+    const classIds = [...new Set(section === "notices" && appliedClassIds.includes(classId) && appliedClassIds.length
+      ? appliedClassIds : [classId])].filter(Boolean);
     const jobs = classIds.flatMap(cid => studentsForClass(cid).map(student => ({ cid, student })));
     if (!jobs.length) { setMessage("There are no students in the selected classes."); return; }
     if (!window.confirm(`Create missing student invoices and material checklists for ${jobs.length} students across ${classIds.length} class(es)? Existing invoices and payments will be kept.`)) return;
+
+    // Synchronous ref lock prevents a second click or a competing write while
+    // React is scheduling the busy-state render.
+    writeLockRef.current = true;
+    loadSequenceRef.current++;
+    setBusy(true);
+    setIssueProgress({ done: 0, total: jobs.length, created: 0 });
+    let processed = 0;
+    let created = 0;
+    let addedItems = 0;
     try {
-      setBusy(true);
-      const freshInvoices = (await readRows<StudentFeeInvoice>("studentFeeInvoices")).filter(row => isTenant(row, scope));
-      const freshItems = (await readRows<StudentFeeInvoiceItem>("studentFeeInvoiceItems")).filter(row => isTenant(row, scope));
-      const classNotices = new Map(classIds.map(cid => [cid, getNoticeForClass(cid)]));
-      const missing = classIds.filter(cid => !classNotices.get(cid));
-      if (missing.length) { setMessage(`Save notices for ${missing.map(classLabel).join(", ")} before issuing records.`); return; }
-      const incompatible = jobs.find(({ cid, student }) => {
-        const n = classNotices.get(cid)!;
-        const meta = (n.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-        const code = id(meta?.description) || preferredCurrency;
-        const due = freshInvoices.find(row => row.studentId === student.id && id(row.classId) === cid && id(row.academicStructureId) === structureId && id(row.academicPeriodId) === periodId && row.status !== "void" && row.status !== "cancelled");
-        return due && due.currencyCode && due.currencyCode !== code;
-      });
-      if (incompatible) { setMessage(`Currency conflict for ${classLabel(incompatible.cid)}. Existing invoices are preserved.`); return; }
-      let created = 0;
+      // Read authoritative local rows ONCE. Do not use possibly stale React
+      // notice state or rebuild all student lists after each invoice write.
+      const [allInvoices, allItems, latestNotices] = await Promise.all([
+        readRows<StudentFeeInvoice>("studentFeeInvoices"),
+        readRows<StudentFeeInvoiceItem>("studentFeeInvoiceItems"),
+        readRows<FeeStructure>("feeStructures"),
+      ]);
+      const activeInvoices = allInvoices.filter(row => isTenant(row, scope) && row.status !== "void" && row.status !== "cancelled");
+      const activeItems = allItems.filter(row => isTenant(row, scope));
+      const currentNotices = latestNotices.filter(row => isTenant(row, scope));
+      const classNotices = new Map<string, FeeStructure>();
+      for (const cid of classIds) {
+        const noticeForClass = currentNotices
+          .filter(row => id(row.classId) === cid && id(row.academicStructureId) === structureId && id(row.academicPeriodId) === periodId)
+          .sort((a, b) =>
+            Number((b.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER)) -
+            Number((a.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER)) ||
+            (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+        if (noticeForClass) classNotices.set(cid, noticeForClass);
+      }
+      const missing = classIds.filter(cid => !classNotices.has(cid));
+      if (missing.length) {
+        setMessage(`Save notices for ${missing.map(classLabel).join(", ")} before issuing records.`);
+        return;
+      }
+
+      const invoiceKey = (studentId: string, cid: string) => `${studentId}:${cid}:${structureId}:${periodId}`;
+      const invoiceByKey = new Map<string, StudentFeeInvoice>();
+      const invoiceKeysWithDuplicates = new Set<string>();
+      for (const invoice of activeInvoices) {
+        const key = invoiceKey(invoice.studentId, id(invoice.classId));
+        if (invoiceByKey.has(key)) invoiceKeysWithDuplicates.add(key);
+        else invoiceByKey.set(key, invoice);
+      }
+      const duplicatesInJobs = jobs.filter(({ cid, student }) => invoiceKeysWithDuplicates.has(invoiceKey(student.id, cid)));
+      if (duplicatesInJobs.length) {
+        setMessage("Multiple active invoices already exist for a selected student and term. Resolve those records before issuing again; no changes were made.");
+        return;
+      }
+      const itemsByInvoice = new Map<string, StudentFeeInvoiceItem[]>();
+      for (const item of activeItems) {
+        const rows = itemsByInvoice.get(item.invoiceId) || [];
+        rows.push(item);
+        itemsByInvoice.set(item.invoiceId, rows);
+      }
+
+      // Validate every target before writing anything. Existing invoices and
+      // payments must never be repriced or automatically replaced.
       for (const { cid, student } of jobs) {
-        const n = classNotices.get(cid)!;
-        const meta = (n.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+        const invoice = invoiceByKey.get(invoiceKey(student.id, cid));
+        if (!invoice) continue;
+        const noticeForClass = classNotices.get(cid)!;
+        const meta = (noticeForClass.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
         const code = id(meta?.description) || preferredCurrency;
-        const payable = money((n.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item)).reduce((total, line) => total + money(line.amount), 0));
-        let invoice = freshInvoices.find(row => row.studentId === student.id && id(row.classId) === cid && id(row.academicStructureId) === structureId && id(row.academicPeriodId) === periodId && row.status !== "void" && row.status !== "cancelled");
+        if (invoice.currencyCode && invoice.currencyCode !== code) {
+          setMessage(`Currency conflict for ${classLabel(cid)} (${titleCase(student.fullName)}). Existing invoices are preserved.`);
+          return;
+        }
+      }
+
+      for (const { cid, student } of jobs) {
+        const noticeForClass = classNotices.get(cid)!;
+        const contents = noticeForClass.items || [];
+        const meta = contents.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+        const code = id(meta?.description) || preferredCurrency;
+        const payable = money(contents.filter(item => !isRequirement(item) && !isNoticeMeta(item))
+          .reduce((total, line) => total + money(line.amount), 0));
+        const key = invoiceKey(student.id, cid);
+        let invoice = invoiceByKey.get(key);
         const alreadyIssued = Boolean(invoice);
         if (!invoice) {
           const invoiceNumber = `EFE-${id(selectedPeriod?.name).replace(/\W/g, "").slice(0, 5).toUpperCase() || "TERM"}-${student.id.slice(0, 8)}-${Date.now().toString(36).slice(-5)}-${Math.random().toString(36).slice(2, 5)}`;
-          invoice = await createLocal("studentFeeInvoices", { ...scope, studentId: student.id, classId: cid, academicStructureId: structureId, academicPeriodId: periodId, invoiceNumber, currencyCode: code, subtotal: payable, total: payable, amountPaid: 0, balance: payable, status: "issued", issueDate: today() } as StudentFeeInvoice) as StudentFeeInvoice;
-          freshInvoices.push(invoice);
+          invoice = await createLocal("studentFeeInvoices", {
+            ...scope, studentId: student.id, classId: cid,
+            academicStructureId: structureId, academicPeriodId: periodId,
+            invoiceNumber, currencyCode: code,
+            subtotal: payable, total: payable, amountPaid: 0,
+            balance: payable, status: "issued", issueDate: today(),
+          } as StudentFeeInvoice) as StudentFeeInvoice;
+          if (!invoice?.id) throw new Error(`The invoice for ${student.fullName} could not be verified after saving.`);
+          invoiceByKey.set(key, invoice);
           created++;
         }
-        const existingForInvoice = freshItems.filter(row => row.invoiceId === invoice!.id);
-        for (let index = 0; index < (n.items || []).length; index++) {
-          const item = n.items[index];
+        const existing = itemsByInvoice.get(invoice.id) || [];
+        for (let index = 0; index < contents.length; index++) {
+          const item = contents[index];
           if (!item || isNoticeMeta(item) || (alreadyIssued && !isRequirement(item))) continue;
-          const sourceKey = item.itemKey || `${n.id}:${index}`;
-          const found = existingForInvoice.some(row => row.feeStructureId === n.id && (parseRequirement(row.description)?.sourceKey === sourceKey || (!isRequirement(item) && row.name === item.name && row.amount === money(item.amount))));
+          const sourceKey = item.itemKey || `${noticeForClass.id}:${index}`;
+          const found = existing.some(row => row.feeStructureId === noticeForClass.id &&
+            (parseRequirement(row.description)?.sourceKey === sourceKey ||
+              (!isRequirement(item) && row.name === item.name && money(row.amount) === money(item.amount))));
           if (found) continue;
-          const description = isRequirement(item) ? serializeRequirement({ sourceKey, unit: id(item.unit) || "pcs", required: item.required !== false, instructions: item.instructions, received: 0, events: [] }) : undefined;
-          const saved = await createLocal("studentFeeInvoiceItems", { ...scope, invoiceId: invoice.id, feeStructureId: n.id, currencyCode: code, name: item.name, description, quantity: isRequirement(item) ? Math.max(1, Number(item.quantity) || 1) : 1, unitAmount: isRequirement(item) ? 0 : money(item.amount), amount: isRequirement(item) ? 0 : money(item.amount), required: item.required !== false, order: index + 1 } as StudentFeeInvoiceItem) as StudentFeeInvoiceItem;
-          freshItems.push(saved); existingForInvoice.push(saved);
+          const description = isRequirement(item)
+            ? serializeRequirement({ sourceKey, unit: id(item.unit) || "pcs", required: item.required !== false,
+                instructions: item.instructions, received: 0, events: [] })
+            : undefined;
+          const saved = await createLocal("studentFeeInvoiceItems", {
+            ...scope, invoiceId: invoice.id, feeStructureId: noticeForClass.id,
+            currencyCode: code, name: item.name, description,
+            quantity: isRequirement(item) ? Math.max(1, Number(item.quantity) || 1) : 1,
+            unitAmount: isRequirement(item) ? 0 : money(item.amount),
+            amount: isRequirement(item) ? 0 : money(item.amount),
+            required: item.required !== false, order: index + 1,
+          } as StudentFeeInvoiceItem) as StudentFeeInvoiceItem;
+          if (!saved?.id) throw new Error(`Could not verify the saved item for ${student.fullName}.`);
+          existing.push(saved);
+          addedItems++;
+        }
+        itemsByInvoice.set(invoice.id, existing);
+        processed++;
+        // Allow a real render between batches. Large classes no longer freeze
+        // the browser while updating hundreds of Dexie objects.
+        if (processed % 8 === 0 || processed === jobs.length) {
+          setIssueProgress({ done: processed, total: jobs.length, created });
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
         }
       }
-      await load();
-      setMessage(`Prepared ${jobs.length} student records across ${classIds.length} classes, including ${created} new invoices. Existing payments were preserved.`);
+      await load(true);
+      setMessage(`Prepared ${processed} student records across ${classIds.length} classes: ${created} new invoices and ${addedItems} new line items. Existing payments were preserved.`);
     } catch (error) {
-      console.error(error);
-      setMessage("Some records could not be issued. Review payment history before retrying; existing invoices are checked before new ones are created.");
-      await load();
-    } finally { setBusy(false); }
+      console.error("Term notice issuance failed", error);
+      // Successful records remain intact. The operation is idempotent on retry
+      // for the same device; we must not erase any existing payments or invoices.
+      setMessage(`Issuance stopped after ${processed} of ${jobs.length} students. Saved records remain in place. Reopen Finance, verify the records and retry the missing ones. ${error instanceof Error ? error.message.slice(0, 140) : ""}`);
+      await load(true);
+    } finally {
+      writeLockRef.current = false;
+      setIssueProgress(null);
+      setBusy(false);
+    }
   };
   const receiveItem = async () => {
+    if (writeLockRef.current) return;
     const item = receivedEditor;
     if (!item) return;
     const state = parseRequirement(item.description);
@@ -535,15 +668,18 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     const remaining = Math.max(0, (Number(item.quantity) || 0) - state.received);
     if (!Number.isInteger(count) || count <= 0 || count > remaining) { setMessage(`Enter a whole quantity from 1 to ${remaining}.`); return; }
     try {
+      writeLockRef.current = true;
+      loadSequenceRef.current++;
       setBusy(true);
       const next = { ...state, received: state.received + count, events: [...state.events, { quantity: count, at: new Date().toISOString(), note: id(receiveNote) || undefined }] };
       await updateLocal("studentFeeInvoiceItems", item.id, { description: serializeRequirement(next) });
-      setReceivedEditor(null); setReceiveQty("1"); setReceiveNote(""); await load();
+      setReceivedEditor(null); setReceiveQty("1"); setReceiveNote(""); await load(true);
       setMessage("Item receipt recorded.");
     } catch (e) { console.error(e); setMessage("Could not record item receipt."); }
-    finally { setBusy(false); }
+    finally { writeLockRef.current = false; setBusy(false); }
   };
   const recordPayment = async () => {
+    if (writeLockRef.current) return;
     if (!scope || !paymentStudent) return;
     const invoice = invoicesByStudent.get(paymentStudent.id);
     if (!invoice) { setMessage("Issue this student's invoice before recording a payment."); return; }
@@ -551,13 +687,15 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     const amount = Number(payAmount);
     if (!Number.isFinite(amount) || amount <= 0 || amount > row.balance + 0.005) { setMessage(`Enter an amount between ${formatFinanceMoney(0.01, invoice.currencyCode || noticeCurrency)} and ${formatFinanceMoney(row.balance, invoice.currencyCode || noticeCurrency)}.`); return; }
     try {
+      writeLockRef.current = true;
+      loadSequenceRef.current++;
       setBusy(true);
       await createLocal("studentFeePayments", { ...scope, invoiceId: invoice.id, studentId: paymentStudent.id, currencyCode: invoice.currencyCode || noticeCurrency, amount: money(amount), method: payMethod, status: "paid", date: today(), paidAt: new Date().toISOString(), referenceNumber: id(payReference) || undefined } as StudentFeePayment);
       const settled = money(row.paid + amount);
       await updateLocal("studentFeeInvoices", invoice.id, { amountPaid: settled, balance: money(Math.max(0, row.billed - settled)), status: settled + 0.005 >= row.billed ? "paid" : "part_paid", paidAt: settled + 0.005 >= row.billed ? today() : undefined });
-      setPaymentStudent(null); setPayAmount(""); setPayReference(""); setMessage("Payment recorded."); await load();
+      setPaymentStudent(null); setPayAmount(""); setPayReference(""); setMessage("Payment recorded."); await load(true);
     } catch (e) { console.error(e); setMessage("Payment could not be saved. Check payment history before retrying."); }
-    finally { setBusy(false); }
+    finally { writeLockRef.current = false; setBusy(false); }
   };
 
   type NoticeJob = { classId: string; studentId?: string };
@@ -573,6 +711,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       setMessage("No students belong to those classes yet."); return;
     }
     setPreviewStudentId(studentId);
+    setPreviewVisibleCount(8);
     setPreviewMode(kind);
   };
   const renderDocument = (job: NoticeJob, key: string) => {
@@ -686,6 +825,13 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   return <><section className="ef-page">
     <style>{styles}</style>
     <div className="ef-no-print">
+      {issueProgress && (
+        <div className="ef-issue-progress" role="status" aria-live="polite" aria-label="Issuing student records">
+          <div><strong>Issuing student records</strong><span>{issueProgress.done} / {issueProgress.total} students · {issueProgress.created} new invoices</span></div>
+          <progress max={Math.max(1, issueProgress.total)} value={issueProgress.done} />
+          <small>Do not close this page until issuance finishes. Existing payments remain unchanged.</small>
+        </div>
+      )}
       {message && <div role="status" className="ef-message" onClick={() => setMessage("")}>{message} <span>×</span></div>}
       {section === "notices" && <>
         {!openedNoticeClass ? <>
@@ -921,11 +1067,19 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           <div className="ef-register-preview-document ef-notice-preview-document">
             <BranchReportPreview printZoneId="finance-term-notice-preview" naturalWidth={794}>
               <div className="ef-notice-batch-pages">
-                {previewJobs.map((job, index) => (
+                {previewJobs.slice(0, previewVisibleCount).map((job, index) => (
                   <div className="ef-notice-preview-paper" key={`preview-${job.classId}-${job.studentId || "class"}-${index}`}>
                     {renderDocument(job, `preview-${job.classId}-${job.studentId || "class"}-${index}`)}
                   </div>
                 ))}
+                {previewJobs.length > previewVisibleCount && (
+                  <div className="ef-preview-loadmore report-no-print">
+                    <span>{previewVisibleCount} of {previewJobs.length} notices displayed</span>
+                    <button type="button" onClick={() => setPreviewVisibleCount(value => Math.min(value + 8, previewJobs.length))}>
+                      Show 8 more notices
+                    </button>
+                  </div>
+                )}
               </div>
             </BranchReportPreview>
           </div>
@@ -979,6 +1133,12 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
 }
 
 const styles = `
+.ef-preview-loadmore{display:grid;justify-items:center;gap:9px;padding:20px 10px;margin:4px 0 12px;color:var(--muted,#64748b);font-size:12px;border:1px dashed #c7cfda;border-radius:10px;background:#f8fafc;}
+.ef-preview-loadmore button{color:#144582!important;background:#fff!important;padding:8px 16px!important;border:1px solid #bac9db!important;border-radius:8px!important;cursor:pointer;}
+.ef-issue-progress{display:grid;gap:7px;border:1px solid color-mix(in srgb,var(--primary-color,#2563eb) 35%,var(--border,#d4dae3));border-radius:12px;background:color-mix(in srgb,var(--primary-color,#2563eb) 6%,var(--surface,#fff));padding:12px;color:var(--text,#172033);}
+.ef-issue-progress>div{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;}
+.ef-issue-progress strong{font-size:12px;}.ef-issue-progress span,.ef-issue-progress small{font-size:11px;color:var(--muted,#64748b);}
+.ef-issue-progress progress{width:100%;height:9px;accent-color:var(--primary-color,#2563eb);}
 .ef-page.ef-modal-host{position:fixed!important;inset:0!important;z-index:30000!important;min-height:0!important;height:0!important;width:0!important;min-width:0!important;padding:0!important;background:transparent!important;overflow:visible!important;pointer-events:none!important;}
 .ef-modal-host .ef-overlay{position:fixed!important;inset:0!important;width:100vw;height:100dvh;max-height:none;z-index:30000!important;pointer-events:auto;overscroll-behavior:contain;padding:max(10px,env(safe-area-inset-top)) 10px max(10px,env(safe-area-inset-bottom));}
 .ef-modal-host .ef-sheet{max-height:calc(100dvh - 20px);min-height:0;overflow-y:auto;overscroll-behavior:contain;}

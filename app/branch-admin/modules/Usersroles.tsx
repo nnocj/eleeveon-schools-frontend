@@ -27,7 +27,9 @@ import { useSettings } from "../../context/settings-context";
 
 import { db, Parent, Student, Teacher } from "../../lib/db/db";
 import { apiRequest } from "../../lib/platformApi";
-import { listActiveLocal, prepareSyncData } from "../../lib/sync/syncUtils";
+import { listActiveLocal, updateLocal } from "../../lib/sync/syncUtils";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printVisibleBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
@@ -41,7 +43,7 @@ type EntityId = string | number;
 type ViewMode = "cards" | "table";
 type AccessFilter = "all" | "enabled" | "notEnabled" | "inactive";
 type BranchAssignableRole = "accountant" | "teacher" | "student" | "parent";
-type RoleFilter = "all" | BranchAssignableRole;
+type RoleFilter = "staff" | "all" | BranchAssignableRole;
 
 type TenantRow = {
   accountId?: string | null;
@@ -235,12 +237,6 @@ function normalizePhone(phone?: string) {
     .replace(/\s+/g, " ");
 }
 
-function tempPasswordFromEmail(email: string) {
-  const prefix = normalizeEmail(email)
-    .split("@")[0]
-    .replace(/[^a-zA-Z0-9._-]/g, "");
-  return `${prefix || "user"}@123`;
-}
 
 function num(value?: string | number | null): string | undefined {
   const id = idOf(value);
@@ -634,9 +630,10 @@ function extractBackendUsersAndMemberships(remote: any) {
     remote,
   ];
 
-  const users = userCandidates
-    .flatMap(arrayFromAny)
-    .filter(Boolean) as AppUser[];
+  const users = [
+    ...userCandidates.flatMap(arrayFromAny),
+    ...(remote?.id && remote?.email ? [remote] : []),
+  ].filter(Boolean) as AppUser[];
 
   const topLevelMemberships = [
     remote?.memberships,
@@ -782,76 +779,31 @@ async function updateLinkedProfileContactLocally(args: {
   accountId: string;
   schoolId: EntityId;
   branchId: EntityId;
+  confirmedUser?: AppUser;
 }) {
-  // PROFILE DATA FIX:
-  // Teacher/student/parent records are normal school operational data.
-  // They must use prepareSyncData() and the normal pending-sync metadata.
-  //
-  // Auth/access tables are different: appUsers/userMemberships stay backend-auth-first
-  // and are cached locally only after backend success. But if a branch admin edits
-  // a student's email in this Users & Roles drawer, that email belongs to the
-  // student profile table too. Without this, portal access saves correctly but the
-  // student profile still reloads with a blank/old email.
   if (args.form.mode !== "profile") return;
-
   const role = args.form.role;
-  const email = normalizeEmail(args.form.email);
-  const phone = normalizePhone(args.form.phone);
-
-  let table: any = null;
-  let id: EntityId | undefined;
-
-  if (role === "teacher") {
-    table = (db as any).teachers;
-    id = num(args.form.teacherId);
+  const tableName = role === "teacher" ? "teachers" : role === "student" ? "students" : role === "parent" ? "parents" : null;
+  const profileId = role === "teacher" ? args.form.teacherId : role === "student" ? args.form.studentId : args.form.parentId;
+  if (!tableName || !profileId) return;
+  const table = (db as any)[tableName];
+  if (!table?.get) return;
+  const existing = await table.get(profileId);
+  if (!existing || existing.isDeleted || String(existing.accountId) !== String(args.accountId) ||
+    String(existing.schoolId) !== String(args.schoolId) || String(existing.branchId) !== String(args.branchId)) {
+    throw new Error("Linked profile not found in the current branch. Refresh the workspace before editing access.");
   }
-
-  if (role === "student") {
-    table = (db as any).students;
-    id = num(args.form.studentId);
-  }
-
-  if (role === "parent") {
-    table = (db as any).parents;
-    id = num(args.form.parentId);
-  }
-
-  if (!table?.get || !table?.update || !id) return;
-
-  const existing = await table.get(id).catch(() => undefined);
-  if (!existing) return;
-
-  const profilePatch: any = {
-    ...existing,
-    accountId: existing.accountId || args.accountId,
-    schoolId: existing.schoolId ?? args.schoolId,
-    branchId: existing.branchId ?? args.branchId,
-    email,
-  };
-
-  // Keep backward compatibility with older Student shapes that used studentEmail.
-  if (role === "student") {
-    profilePatch.studentEmail = email;
-  }
-
-  // Only write phone if the profile already has a phone-like field or the form contains one.
-  if (phone) {
-    if (role === "student") {
-      profilePatch.phone = phone;
-    } else {
-      profilePatch.phone = phone;
-    }
-  }
-
-  // Preserve names by default. Only fill common name fields if they already exist.
-  if (args.form.fullName.trim()) {
-    if ("fullName" in existing)
-      profilePatch.fullName = args.form.fullName.trim();
-    if ("name" in existing) profilePatch.name = args.form.fullName.trim();
-  }
-
-  const prepared = prepareSyncData(profilePatch, existing);
-  await table.update(id, prepared);
+  const verifiedEmail = normalizeEmail(args.confirmedUser?.email || args.form.email);
+  const verifiedName = String(args.confirmedUser?.fullName || args.form.fullName).trim();
+  const verifiedPhone = normalizePhone(args.confirmedUser?.phone ?? args.form.phone);
+  const patch: Record<string, unknown> = { email: verifiedEmail };
+  if (role === "student") patch.studentEmail = verifiedEmail;
+  if (verifiedName && "fullName" in existing) patch.fullName = verifiedName;
+  if (verifiedName && "name" in existing) patch.name = verifiedName;
+  if (verifiedPhone) patch.phone = verifiedPhone;
+  // The canonical sync helper publishes revision events and schedules a push,
+  // so the Teachers/Students/Parents modules react to this write.
+  await updateLocal(tableName, String(profileId), patch as any);
 }
 
 async function saveBackendBranchAccess(args: {
@@ -874,15 +826,25 @@ async function saveBackendBranchAccess(args: {
   let membershipsFromCreatedUser: UserMembership[] = [];
 
   if (user && userIdOf(user)) {
-    /*
-     * EXISTING USER:
-     * A Branch Admin manages branch-scoped access through UserMembership.
-     * Do not PATCH /accounts/users/:id here because that is an account-level
-     * identity endpoint and may be restricted to owner/admin roles.
-     *
-     * Keep the existing AppUser and continue below to create or update the
-     * matching membership for this school and branch.
-     */
+    // Identity is owned by AppUser on the backend. Update it through a
+    // dedicated, branch-authorized endpoint BEFORE changing the membership
+    // and syncing teacher/student/parent contact fields in Dexie.
+    const identityChanged =
+      normalizeEmail(user.email) !== email ||
+      String(user.fullName || "").trim() !== args.form.fullName.trim() ||
+      normalizePhone(user.phone) !== normalizePhone(args.form.phone) ||
+      Boolean(args.form.temporaryPassword.trim());
+    if (identityChanged) {
+      user = await authApi<AppUser>(
+        `/accounts/me/branch-users/${encodeURIComponent(String(userIdOf(user)))}/identity`,
+        { method: "PATCH", body: {
+          schoolId: String(args.schoolId), branchId: String(args.branchId),
+          email, fullName: args.form.fullName.trim(),
+          phone: normalizePhone(args.form.phone),
+          ...(args.form.temporaryPassword.trim() ? { password: args.form.temporaryPassword } : {}),
+        } },
+      );
+    }
     membershipsFromCreatedUser =
       extractBackendUsersAndMemberships(user).memberships;
   } else {
@@ -997,23 +959,22 @@ async function cacheAuthUserLocally(args: {
 
   const id = userIdOf(args.user) || makeLocalAuthId("user");
   const timestamp = dateishNowForAuthTable(table);
+  // Never cache passwords or plaintext temporary credentials in IndexedDB.
+  // Keep only safe login metadata; ensure older cached passwords are cleared.
+  const { password: _oldPassword, temporaryPassword: _oldTemporary,
+    passwordHash: _oldHash, ...safeUser } = args.user as any;
   const payload: Partial<AppUser> = {
-    ...args.user,
+    ...safeUser,
     id,
     accountId: args.accountId,
     schoolId: args.schoolId,
     branchId: args.branchId,
-    title: args.form.title.trim() || args.user.title,
-    fullName: args.form.fullName.trim(),
-    name: args.form.fullName.trim(),
-    email: normalizeEmail(args.form.email),
-    phone: normalizePhone(args.form.phone) || undefined,
-    role: args.form.role,
-    active: args.form.active,
-    status: args.form.active ? "active" : "inactive",
-    temporaryPassword: args.form.temporaryPassword.trim(),
-    password: args.form.temporaryPassword.trim(),
-    mustChangePassword: true,
+    fullName: args.user.fullName || args.form.fullName.trim(),
+    name: args.user.fullName || args.form.fullName.trim(),
+    email: normalizeEmail(args.user.email || args.form.email),
+    phone: normalizePhone(args.user.phone ?? args.form.phone) || undefined,
+    role: args.user.role || args.form.role,
+    active: args.user.active !== false,
     isDeleted: false,
     updatedAt: timestamp as any,
   };
@@ -1029,6 +990,9 @@ async function cacheAuthUserLocally(args: {
   if (existing?.id) {
     await table.update(authTableId(existing), {
       ...payload,
+      password: undefined,
+      temporaryPassword: undefined,
+      passwordHash: undefined,
       version: Number(existing.version || 0) + 1,
     });
     return;
@@ -1079,7 +1043,7 @@ async function cacheAuthMembershipLocally(args: {
       args.form.role === "student" ? num(args.form.studentId) || null : null,
     parentId:
       args.form.role === "parent" ? num(args.form.parentId) || null : null,
-    mustChangePassword: true,
+    mustChangePassword: Boolean(args.user.mustChangePassword || args.membership.mustChangePassword),
     isDeleted: false,
     updatedAt: timestamp as any,
   };
@@ -1253,7 +1217,7 @@ export default function Usersroles() {
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("staff");
   const [accessFilter, setAccessFilter] = useState<AccessFilter>("all");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -1270,6 +1234,7 @@ export default function Usersroles() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [message, setMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (accountLoading || contextLoading) return;
@@ -1361,9 +1326,7 @@ export default function Usersroles() {
               membership.status !== "inactive" &&
               user.active !== false &&
               user.status !== "inactive",
-            temporaryPassword:
-              user.temporaryPassword ||
-              tempPasswordFromEmail(membership.email || user.email || ""),
+            temporaryPassword: "",
             teacherId: membership.teacherId ? String(membership.teacherId) : "",
             studentId: membership.studentId ? String(membership.studentId) : "",
             parentId: membership.parentId ? String(membership.parentId) : "",
@@ -1490,16 +1453,17 @@ export default function Usersroles() {
       item: Teacher | Student | Parent,
     ) => {
       const profileId = item.id;
-      const email = profileEmail(role, item);
+      const profileMail = profileEmail(role, item);
       const phone = profilePhone(role, item);
       const fullName = respectfulName(item as any);
       const match = findUserAndMembership({
         role,
         profileId,
-        email,
+        email: profileMail,
         users,
         memberships,
       });
+      const email = normalizeEmail(match.user?.email || match.membership?.email || profileMail);
       const state = accessState(match.user, match.membership);
 
       list.push({
@@ -1580,7 +1544,8 @@ export default function Usersroles() {
     const query = search.trim().toLowerCase();
 
     return candidates.filter((candidate) => {
-      if (roleFilter !== "all" && candidate.role !== roleFilter) return false;
+      if (roleFilter === "staff" && candidate.role !== "teacher" && candidate.role !== "accountant") return false;
+      if (roleFilter !== "staff" && roleFilter !== "all" && candidate.role !== roleFilter) return false;
       if (accessFilter === "enabled" && !candidate.enabled) return false;
       if (
         accessFilter === "notEnabled" &&
@@ -1620,16 +1585,7 @@ export default function Usersroles() {
     setForm((current) => {
       const next = { ...current, [key]: value };
 
-      if (key === "email") {
-        const email = normalizeEmail(String(value));
-        next.email = email;
-        if (
-          !current.temporaryPassword ||
-          current.temporaryPassword === tempPasswordFromEmail(current.email)
-        ) {
-          next.temporaryPassword = tempPasswordFromEmail(email);
-        }
-      }
+      if (key === "email") next.email = normalizeEmail(String(value));
 
       if (key === "role") {
         next.teacherId = value === "teacher" ? current.teacherId : "";
@@ -1645,6 +1601,7 @@ export default function Usersroles() {
   const openManual = () => {
     setForm({ ...DEFAULT_FORM, temporaryPassword: "" });
     setMessage("");
+    setShowPassword(false);
     setDrawerOpen(true);
   };
 
@@ -1660,9 +1617,7 @@ export default function Usersroles() {
       phone: candidate.user?.phone || candidate.phone,
       role: candidate.role,
       active: !candidate.inactive,
-      temporaryPassword:
-        candidate.user?.temporaryPassword ||
-        tempPasswordFromEmail(candidate.email),
+      temporaryPassword: "",
       teacherId:
         candidate.role === "teacher" && candidate.profileId
           ? String(candidate.profileId)
@@ -1677,6 +1632,7 @@ export default function Usersroles() {
           : String(candidate.membership?.parentId || ""),
     });
     setMessage("");
+    setShowPassword(false);
     setDrawerOpen(true);
   };
 
@@ -1688,8 +1644,10 @@ export default function Usersroles() {
     if (!form.fullName.trim()) return "Full name is required.";
     if (!ROLES.some((role) => role.value === form.role))
       return "Branch admin can assign only accountant, teacher, student, or parent.";
-    if (!form.temporaryPassword.trim())
-      return "Temporary password is required.";
+    if (!form.userId && !form.temporaryPassword.trim())
+      return "Enter an initial password for a new login.";
+    if (form.temporaryPassword && form.temporaryPassword.trim().length < 8)
+      return "New passwords must contain at least 8 characters.";
     if (form.role === "teacher" && !form.teacherId)
       return "Teacher role must be linked to a teacher profile.";
     if (form.role === "student" && !form.studentId)
@@ -1752,8 +1710,10 @@ export default function Usersroles() {
         accountId: resolvedAccountId,
         schoolId: resolvedSchoolId,
         branchId: resolvedBranchId,
+        confirmedUser: response.user,
       });
 
+      setForm(current => ({ ...current, temporaryPassword: "" }));
       setDrawerOpen(false);
       await load();
     } catch (error: any) {
@@ -1819,9 +1779,7 @@ export default function Usersroles() {
         phone: candidate.user?.phone || candidate.phone,
         role: candidate.role,
         active: nextActive,
-        temporaryPassword:
-          candidate.user?.temporaryPassword ||
-          tempPasswordFromEmail(candidate.email),
+        temporaryPassword: "",
         teacherId:
           candidate.role === "teacher" && candidate.profileId
             ? String(candidate.profileId)
@@ -1898,11 +1856,29 @@ export default function Usersroles() {
   const activeFilterCount = useMemo(
     () =>
       [
-        roleFilter !== "all" ? roleFilter : undefined,
+        roleFilter !== "staff" ? roleFilter : undefined,
         accessFilter !== "all" ? accessFilter : undefined,
       ].filter(Boolean).length,
     [roleFilter, accessFilter],
   );
+
+  // Same shared action strip as the approved Teachers module.
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", {
+    add: openManual,
+    search: setSearch,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: () => printVisibleBranchTable("Users & Roles"),
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(min-width: 900px)");
+    const apply = () => setViewMode(media.matches ? "table" : "cards");
+    apply();
+    media.addEventListener?.("change", apply);
+    return () => media.removeEventListener?.("change", apply);
+  }, []);
 
   if (accountLoading || contextLoading || settingsLoading || loading) {
     return (
@@ -1941,56 +1917,13 @@ export default function Usersroles() {
     >
       <style>{css}</style>
 
-      <section
-        className="ba-search-card"
-        aria-label="Users and roles search and actions"
-      >
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            placeholder="Search users..."
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label="Search users and roles"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={openManual}
-          aria-label="Add accountant"
-          title="Add accountant"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`ba-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="ba-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
+      {/* Add, Search, Filter, Print and More live in the shared portal navigation. */}
 
       {activeFilterCount > 0 && (
         <section className="ba-filter-chips" aria-label="Active user filters">
-          {roleFilter !== "all" && (
-            <button type="button" onClick={() => setRoleFilter("all")}>
-              Role: {roleLabel(roleFilter)} ×
+          {roleFilter !== "staff" && (
+            <button type="button" onClick={() => setRoleFilter("staff")}>
+              Role: {roleFilter === "all" ? "All roles" : roleLabel(roleFilter)} ×
             </button>
           )}
           {accessFilter !== "all" && (
@@ -2154,6 +2087,8 @@ export default function Usersroles() {
         <FilterSheet
           roleFilter={roleFilter}
           accessFilter={accessFilter}
+          search={search}
+          setSearch={setSearch}
           setRoleFilter={setRoleFilter}
           setAccessFilter={setAccessFilter}
           onClose={() => setFilterOpen(false)}
@@ -2221,11 +2156,8 @@ export default function Usersroles() {
             )}
 
             <section className="usersroles-note">
-              <strong>Temporary password rule</strong>
-              <span>
-                Password is generated from the email prefix plus @123. The user
-                must change it after login.
-              </span>
+              <strong>Login credentials</strong>
+              <span>{form.userId ? "Existing passwords cannot be viewed. Enter a new password only to reset this user's login." : "Create a unique initial password. The eye button shows only what you type before saving; it is never stored in Dexie."}</span>
             </section>
 
             <div className="ba-form compact">
@@ -2286,13 +2218,21 @@ export default function Usersroles() {
                 />
               </label>
               <label>
-                <span>Temporary Password</span>
-                <input
-                  value={form.temporaryPassword}
-                  onChange={(event) =>
-                    updateForm("temporaryPassword", event.target.value)
-                  }
-                />
+                <span>{form.userId ? "Reset Password (optional)" : "Initial Password"}</span>
+                <span className="usersroles-password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={form.temporaryPassword}
+                    placeholder={form.userId ? "Leave blank to keep existing password" : "Enter a unique password"}
+                    onChange={(event) => updateForm("temporaryPassword", event.target.value)}
+                  />
+                  <button type="button" className="usersroles-password-eye"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword(p => !p)}>{showPassword ? "🙈" : "👁"}</button>
+                </span>
               </label>
             </div>
 
@@ -2442,12 +2382,16 @@ function Empty({
 function FilterSheet({
   roleFilter,
   accessFilter,
+  search,
+  setSearch,
   setRoleFilter,
   setAccessFilter,
   onClose,
 }: {
   roleFilter: RoleFilter;
   accessFilter: AccessFilter;
+  search: string;
+  setSearch: (query: string) => void;
   setRoleFilter: (value: RoleFilter) => void;
   setAccessFilter: (value: AccessFilter) => void;
   onClose: () => void;
@@ -2466,6 +2410,10 @@ function FilterSheet({
         </div>
         <div className="ba-form compact">
           <label>
+            <span>Search people</span>
+            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Name, email or role" />
+          </label>
+          <label>
             <span>Role</span>
             <select
               value={roleFilter}
@@ -2473,6 +2421,7 @@ function FilterSheet({
                 setRoleFilter(event.target.value as RoleFilter)
               }
             >
+              <option value="staff">Teachers &amp; Accountants (default)</option>
               <option value="all">All Roles</option>
               {ROLES.map((role) => (
                 <option key={role.value} value={role.value}>
@@ -2500,7 +2449,7 @@ function FilterSheet({
           <button
             type="button"
             onClick={() => {
-              setRoleFilter("all");
+              setRoleFilter("staff");
               setAccessFilter("all");
             }}
           >
@@ -4512,4 +4461,22 @@ const css = `
   }
 }
 
+
+/* Users & Roles — Teachers V2-compatible density, texture and adaptive layout. */
+.usersroles-page { min-width:0; padding:8px; width:100%; max-width:100%;
+  background:radial-gradient(circle at top left,color-mix(in srgb,var(--ba-primary) 9%,transparent),transparent 30rem),var(--bg,#f7f8fb); }
+.usersroles-page .usersroles-list { grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:8px; }
+.usersroles-page .student-row { border:1px solid var(--border,rgba(0,0,0,.1));
+  background:var(--card-bg,var(--surface,#fff)); border-radius:16px;
+  box-shadow:0 12px 28px rgba(15,23,42,.045); }
+.usersroles-page .usersroles-table-card { margin-top:0; border-radius:18px; overflow:hidden;
+  background:var(--card-bg,var(--surface,#fff)); border:1px solid var(--border,rgba(0,0,0,.1)); }
+.usersroles-page .ba-table-scroll th,.usersroles-page .ba-table-scroll td { font-size:12px; }
+.usersroles-page .ba-filter-chips { margin-bottom:8px; }
+.usersroles-password-field { display:flex!important; align-items:center; gap:6px; position:relative; }
+.usersroles-password-field input { flex:1 1 0; min-width:0; padding-right:8px; }
+.usersroles-password-eye { flex:0 0 40px!important; width:40px!important; height:42px!important;
+  border:1px solid var(--border,rgba(0,0,0,.14)); border-radius:12px;
+  background:var(--surface,#fff); color:var(--text,#111827); cursor:pointer; }
+@media(max-width:899px){.usersroles-page{padding:6px}.usersroles-page .usersroles-list{grid-template-columns:minmax(0,1fr)} }
 `;

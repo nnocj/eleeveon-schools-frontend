@@ -788,26 +788,50 @@ export default function ClassesPage() {
     return map;
   }, [classTeachers]);
 
+  /** A class card counts distinct CURRENT students, never past-term enrollments. */
+  const currentRosterPeriodId = cleanId(settings?.currentAcademicPeriodId);
+  const currentStudentIds = useMemo(() => new Set(
+    students
+      .filter((student: any) =>
+        isActiveRow(student) &&
+        !["withdrawn", "graduated", "transferred", "deleted", "archived"].includes(
+          safeLower(student.status),
+        ),
+      )
+      .map((student: any) => idOf(student.id))
+      .filter(Boolean),
+  ), [students]);
+
   const activeEnrollmentCounts = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, Set<string>>();
+    // A missing current period must not silently aggregate several years.
+    if (!currentRosterPeriodId) return new Map<string, number>();
     enrollments.forEach((enrollment: any) => {
-      if (enrollment.status !== "active") return;
+      if (enrollment.status !== "active" || enrollment.active === false || enrollment.isDeleted) return;
+      if (!sameId(enrollment.academicPeriodId, currentRosterPeriodId)) return;
       const classId = idOf(enrollment.classId);
-      if (!classId) return;
-      map.set(classId, (map.get(classId) || 0) + 1);
+      const studentId = idOf(enrollment.studentId);
+      if (!classId || !studentId || !currentStudentIds.has(studentId)) return;
+      if (!map.has(classId)) map.set(classId, new Set<string>());
+      map.get(classId)!.add(studentId);
     });
-    return map;
-  }, [enrollments]);
+    return new Map([...map].map(([classId, ids]) => [classId, ids.size]));
+  }, [enrollments, currentRosterPeriodId, currentStudentIds]);
 
   const fallbackCurrentClassCounts = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, Set<string>>();
+    // Without a configured current academic period, use profile placements.
+    // Do not interpret historical active enrollment rows as the current roster.
     students.forEach((student: any) => {
+      if (!currentStudentIds.has(idOf(student.id))) return;
       const classId = idOf(student.currentClassId);
-      if (!classId) return;
-      map.set(classId, (map.get(classId) || 0) + 1);
+      const studentId = idOf(student.id);
+      if (!classId || !studentId) return;
+      if (!map.has(classId)) map.set(classId, new Set<string>());
+      map.get(classId)!.add(studentId);
     });
-    return map;
-  }, [students]);
+    return new Map([...map].map(([classId, ids]) => [classId, ids.size]));
+  }, [students, currentStudentIds]);
 
   const classSubjectCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -826,10 +850,9 @@ export default function ClassesPage() {
       const organization = row.organizationId
         ? (organizationMap.get(idOf(row.organizationId)) as any)
         : undefined;
-      const studentCount =
-        activeEnrollmentCounts.get(id) ||
-        fallbackCurrentClassCounts.get(id) ||
-        0;
+      const studentCount = currentRosterPeriodId
+        ? (activeEnrollmentCounts.get(id) ?? 0)
+        : (fallbackCurrentClassCounts.get(id) ?? 0);
       const subjectCount = classSubjectCounts.get(id) || 0;
       const capacity = Number(row.capacity || 0);
       const classTeacherLink = classTeacherMap.get(id);
@@ -865,6 +888,7 @@ export default function ClassesPage() {
     });
   }, [
     activeEnrollmentCounts,
+    currentRosterPeriodId,
     classSubjectCounts,
     classTeacherMap,
     fallbackCurrentClassCounts,

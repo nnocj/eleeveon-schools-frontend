@@ -5278,68 +5278,9 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         </button>
       </section>
 
-      {activeFilterCount > 0 && (
-        <section
-          className="ba-filter-chips"
-          aria-label="Active branch setting filters"
-        >
-          {form.currentAcademicStructureId && (
-            <button
-              type="button"
-              onClick={() =>
-                updateForm("currentAcademicStructureId", undefined)
-              }
-            >
-              Structure: {activeStructure?.name || "Selected"} ×
-            </button>
-          )}
-          {form.currentAcademicPeriodId && (
-            <button
-              type="button"
-              onClick={() => updateForm("currentAcademicPeriodId", undefined)}
-            >
-              Period: {activePeriod?.name || "Selected"} ×
-            </button>
-          )}
-          {form.academicYear && (
-            <button
-              type="button"
-              onClick={() => updateForm("academicYear", "")}
-            >
-              Year: {form.academicYear} ×
-            </button>
-          )}
-          {form.theme !== "light" && (
-            <button type="button" onClick={() => updateForm("theme", "light")}>
-              Theme: {form.theme} ×
-            </button>
-          )}
-        </section>
-      )}
-
-      <section className="branch-live-preview" style={previewStyle}>
-        <div
-          className="branch-preview-aa"
-          style={{
-            background: form.primaryColor,
-            color: getContrastTextColor(form.primaryColor),
-          }}
-        >
-          Aa
-        </div>
-        <div>
-          <strong>
-            {school?.name || activeSchool?.name || "School"} ·{" "}
-            {branch?.name || activeBranch?.name || "Branch"}
-          </strong>
-          <span>
-            {completion}% complete · {assetCount} asset(s)
-          </span>
-        </div>
-      </section>
-
       {viewMode === "table" ? (
         <section className="ba-table-card branch-settings-table-card" aria-label="Settings sections table">
+          <div className="ba-table-scroll">
           <table className="branch-settings-table">
             <thead>
               <tr>
@@ -5354,8 +5295,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
               {visibleSections.map(section => (
                 <tr key={section.key}>
                   <td>
-                    <span className="branch-setting-table-name">
-                      <span className="branch-settings-icon">{section.icon}</span>
+                    <span className="ba-table-person branch-setting-table-name">
+                      <span className="ba-avatar branch-settings-icon">{section.icon}</span>
                       <strong>{section.title}</strong>
                     </span>
                   </td>
@@ -5373,6 +5314,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
               ))}
             </tbody>
           </table>
+          </div>
           {!visibleSections.length && (
             <Empty icon="⚙️" title="No settings found" text="Try another search term or open More to refresh settings." />
           )}
@@ -5386,7 +5328,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
             className="student-row"
             onClick={() => setSectionOpen(section.key)}
           >
-            <span className="branch-settings-icon">{section.icon}</span>
+            <span className="ba-avatar branch-settings-icon">{section.icon}</span>
 
             <span className="student-main">
               <strong>{section.title}</strong>
@@ -11007,6 +10949,120 @@ const css = `
 .branch-settings-page .branch-setting-table-edit:hover {background:color-mix(in srgb,var(--ba-primary) 15%,var(--surface,#fff));}
 .branch-settings-page .ba-sheet,.branch-settings-page .ba-modal {border-radius:15px;}
 @media (max-width:899px) {.branch-settings-table {min-width:620px;}}
+
+/* V10 — STUDENTS.tsx RECORD SURFACE PARITY. Keep complex editor sheets unchanged. */
+.ba-page {
+  width:100%; max-width:none; min-width:0; min-height:0;
+  margin:0; padding:5px; padding-bottom:max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7)); overflow-x:clip;
+}
+.ba-page .ba-list,.ba-page .ba-table-card,.ba-page .ba-analysis-grid {
+  box-sizing:border-box; width:100%; max-width:none; min-width:0;
+  margin-left:0; margin-right:0;
+}
+.ba-page .ba-list {display:grid;gap:9px;margin-top:2px;align-items:stretch;grid-template-columns:minmax(0,1fr)}
+.ba-page .ba-list > .student-row {
+  box-sizing:border-box;position:relative;width:100%;min-width:0;margin:0;
+  padding:9px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;gap:10px;text-align:left;cursor:pointer;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  color:var(--text,#182235);box-shadow:none;border-radius:13px;
+  transition:border-color .12s ease;
+}
+.ba-page .ba-list > .student-row:hover,.ba-page .ba-list > .student-row:focus-visible {
+  transform:none;box-shadow:none;border-color:color-mix(in srgb,var(--ba-primary) 45%,var(--border,#d4dae3));
+}
+.ba-page .ba-list > .student-row::before {display:none}
+.ba-page .student-main,.ba-page .student-main strong,.ba-page .student-main small,.ba-page .student-main em {
+  display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ba-page .student-main strong {color:var(--text,#182235);font-size:14px;font-weight:850;letter-spacing:-.02em}
+.ba-page .student-main small {margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:700;font-style:normal}
+.ba-page .student-main em {margin-top:3px;color:var(--muted,#64748b);font-size:11px;font-weight:650;font-style:normal}
+.ba-page .student-side {display:grid;justify-items:end;gap:6px;flex:0 0 auto}
+.ba-page .student-side i {color:var(--muted,#64748b);font-size:18px;font-weight:900;font-style:normal;line-height:1}
+.ba-page .grading-icon,.ba-page .rule-icon,.ba-page .branch-settings-icon {
+  width:40px;height:40px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:12px;box-shadow:none;font-size:17px;
+  color:var(--ba-primary);background:color-mix(in srgb,var(--ba-primary) 11%,var(--card-bg,var(--surface,#fff)));
+}
+.ba-page .ba-table-card {
+  display:block;width:100%;max-width:none;min-width:0;margin-top:2px;padding:4px;overflow:visible;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  border-radius:13px;box-shadow:none;
+}
+.ba-page .ba-table-scroll {
+  box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:0;
+  overflow-x:auto;overflow-y:auto;overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;border-radius:10px;
+  border:1px solid var(--border,#d4dae3);
+}
+.ba-page .ba-table-scroll table {
+  width:100%;min-width:780px;max-width:none;margin:0;border-collapse:collapse;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+}
+.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td {
+  padding:9px 10px;vertical-align:middle;text-align:left;font-size:12px;
+  border-bottom:1px solid var(--border,rgba(148,163,184,.18));
+}
+.ba-page .ba-table-scroll thead th {
+  position:sticky;top:0;z-index:2;
+  color:var(--muted,#64748b);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.045em;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+}
+.ba-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);
+}
+.ba-page .ba-table-scroll tbody tr:hover {background:color-mix(in srgb,var(--ba-primary) 5%,transparent)}
+.ba-page .ba-table-scroll td {background:transparent}
+.ba-page .ba-table-person {display:flex;align-items:center;gap:9px;min-width:160px}
+.ba-page .ba-table-person .table-avatar {width:32px;height:32px;flex:0 0 32px;border-radius:10px;font-size:13px}
+.ba-page .ba-table-person > div {min-width:0}
+.ba-page .ba-table-person strong,.ba-page .ba-table-person span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ba-page .ba-table-person span {color:var(--muted,#64748b);font-size:11px;margin-top:2px}
+.ba-page .ba-table-actions {display:flex;align-items:center;gap:7px;flex-wrap:nowrap;width:100%;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.ba-page .ba-table-actions::-webkit-scrollbar {display:none}
+.ba-page .ba-table-actions button,.ba-page .branch-setting-table-edit {
+  flex:0 0 auto;min-height:34px;padding:0 10px;border-radius:999px;
+  border:1px solid var(--border,#d4dae3);background:var(--surface,#fff);
+  color:var(--text,#182235);font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;
+}
+.ba-page .ba-table-actions button:first-child,.ba-page .branch-setting-table-edit {
+  background:var(--ba-primary);color:#fff;border-color:var(--ba-primary);
+}
+.ba-page .ba-table-actions button.ba-delete {
+  background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));color:#991b1b;
+  border-color:color-mix(in srgb,#dc2626 24%,var(--border,#d4dae3));
+}
+/* Students uses the shell toolbar, not duplicated content toolbar/chips. */
+.role-shell.branch-workspace-layout .ba-page > .ba-search-card,
+.role-shell.branch-workspace-layout .ba-page > .ba-filter-chips {display:none!important}
+@media(min-width:680px) and (max-width:1023px){.ba-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1024px){.ba-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:679px){.ba-page .ba-list{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:639px){.ba-page{padding:3px;padding-bottom:max(14px,env(safe-area-inset-bottom))}.ba-page .ba-list{gap:7px}.ba-page .ba-list>.student-row{padding:9px}.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td{padding:8px 9px}}
+@media(prefers-reduced-motion:reduce){.ba-page .ba-list>.student-row{transition:none}}
+
+/* Branch/Report Settings: exactly the same Students compact record presentation. */
+.branch-settings-page .branch-settings-list{grid-template-columns:minmax(0,1fr);gap:9px;margin-top:2px}
+.branch-settings-page .branch-settings-list>.student-row {border-radius:13px;box-shadow:none;padding:9px 10px}
+.branch-settings-page .branch-settings-icon {width:40px;height:40px;border-radius:12px;font-size:17px;flex-shrink:0;box-shadow:none}
+.branch-settings-page .ba-table-card.branch-settings-table-card {padding:4px;border-radius:13px;box-shadow:none;overflow:visible;margin-top:2px}
+.branch-settings-page .branch-settings-table {width:100%;min-width:780px;border-collapse:collapse;font-size:12px}
+.branch-settings-page .branch-settings-table th,.branch-settings-page .branch-settings-table td{padding:9px 10px;border-bottom:1px solid var(--border,#d4dae3);text-align:left;vertical-align:middle}
+.branch-settings-page .branch-settings-table th{position:sticky;top:0;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);font-size:10px}
+.branch-settings-page .branch-settings-table td:nth-child(2){font-weight:650}
+.branch-settings-page .branch-settings-table td:nth-child(3){color:var(--muted,#64748b);font-size:11px}
+.branch-settings-page .branch-setting-table-name {display:flex;align-items:center;gap:9px;min-width:160px}
+.branch-settings-page .branch-setting-table-name strong{font-weight:850;font-size:12px}
+.branch-settings-page .ba-table-person .branch-settings-icon{color:var(--ba-primary);font-size:16px;display:grid;margin:0}
+.branch-settings-page .branch-setting-table-edit{min-height:34px;border-radius:999px;color:#fff;background:var(--ba-primary)}
+.branch-settings-page .ba-sheet,.branch-settings-page .ba-modal{border-radius:15px}
+@media(min-width:680px) and (max-width:1023px){.branch-settings-page .branch-settings-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1024px){.branch-settings-page .branch-settings-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:679px){.branch-settings-page .branch-settings-list{grid-template-columns:minmax(0,1fr)}}
 
 `;
 /** Operational branch settings; report controls have their own module. */

@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * app/branch-admin/modules/AssessmentEntries.tsx
+ * app/teacher/modules/Assessmententry.tsx
  * Eleeveon Schools — Teacher Assessment Entries V2.
  *
  * Built from the old AssessmentEntries logic and upgraded to the compact
  * Students.tsx branch-admin UI pattern:
  * - role-portal workspace scope resolved through useBranchWorkspaceScope()
- * - branch-wide access to every active ClassSubject in the selected branch
+ * - assigned ClassSubjects only, based on verified teacher workspace access
  * - mobile-first card score entry
  * - responsive score table entry for tablet/laptop/desktop
  * - More sheet for cards/table/summary modes
@@ -715,6 +715,56 @@ export default function AssessmentEntries() {
     );
   }, [classSubjectOptions, selectedClassId]);
 
+  /**
+   * Current roster rules for CLASS CARDS.
+   * Historical enrollments may remain status=active for reporting; they must
+   * never be added together across academic periods in a current-class total.
+   * A filter-selected period takes precedence over the branch's current period.
+   * Without either one, use currentClassId (current profile placement) rather
+   * than counting enrollment records from all past years.
+   */
+  const cardRosterPeriodId =
+    filterPeriodId !== "all"
+      ? idOf(filterPeriodId)
+      : idOf(settings?.currentAcademicPeriodId);
+  const cardPeriod = periods.find((p: any) => sameId(p.id, cardRosterPeriodId));
+  // The selected academic period alone identifies its academic structure.
+  // Do not reject valid enrollments because of an outdated branch structure setting.
+  const cardRosterStructureId = idOf((cardPeriod as any)?.academicStructureId);
+  const eligibleStudentIds = useMemo(
+    () => new Set(
+      students
+        .filter((student: any) =>
+          isActiveRow(student) &&
+          !["graduated", "transferred", "inactive"].includes(safeLower(student.status)),
+        )
+        .map((student: any) => idOf(student.id))
+        .filter(Boolean),
+    ),
+    [students],
+  );
+  const activeEnrolledIds = useMemo(
+    () => (
+      classId: string,
+      academicStructureId: string,
+      academicPeriodId: string,
+    ): Set<string> => new Set(
+      enrollments
+        .filter((enrollment: any) =>
+          sameId(enrollment.classId, classId) &&
+          enrollment.status === "active" &&
+          enrollment.active !== false &&
+          !enrollment.isDeleted &&
+          (!academicStructureId || sameId(enrollment.academicStructureId, academicStructureId)) &&
+          (!academicPeriodId || sameId(enrollment.academicPeriodId, academicPeriodId)) &&
+          eligibleStudentIds.has(idOf(enrollment.studentId)),
+        )
+        .map((enrollment: any) => idOf(enrollment.studentId))
+        .filter(Boolean),
+    ),
+    [enrollments, eligibleStudentIds],
+  );
+
   const classSubjectEntryViews = useMemo<ClassSubjectEntryView[]>(() => {
     return selectedClassSubjectOptions.map((option) => {
       const app = applicabilityMap.get(option.id) as any;
@@ -725,34 +775,34 @@ export default function AssessmentEntries() {
               isActiveRow(row),
           )
         : [];
-      const periodId = idOf((option.row as any).academicPeriodId);
-      const studentCount = enrollments.filter((row: any) => {
-        if (!sameId(row.classId, (option.row as any).classId)) return false;
-        if (
-          !sameId(
-            row.academicStructureId,
-            (option.row as any).academicStructureId,
+      const periodId = idOf((option.row as any).academicPeriodId) || cardRosterPeriodId;
+      const classId = idOf((option.row as any).classId);
+      const studentIds = periodId
+        ? activeEnrolledIds(
+            classId,
+            idOf((option.row as any).academicStructureId),
+            periodId,
           )
-        )
-          return false;
-        if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
-        return row.status === "active" && !row.isDeleted;
-      }).length;
-      const expected = studentCount * optionItems.length;
-      const entered = entries.filter((entry: any) => {
-        if (!sameId(entry.classSubjectId, option.id)) return false;
-        if (
-          !app ||
-          !sameId(entry.assessmentStructureId || "", app.assessmentStructureId)
-        )
-          return false;
-        return (
-          !entry.isDeleted &&
-          entry.score !== undefined &&
-          entry.score !== null &&
-          entry.score !== ""
-        );
-      }).length;
+        : new Set(
+            students
+              .filter((student: any) =>
+                eligibleStudentIds.has(idOf(student.id)) &&
+                sameId(student.currentClassId, classId),
+              )
+              .map((student: any) => idOf(student.id))
+              .filter(Boolean),
+          );
+      const studentCount = studentIds.size;
+      const itemIds = new Set(optionItems.map((item: any) => idOf(item.id)).filter(Boolean));
+      const expected = studentCount * itemIds.size;
+      const entered = new Set(entries.filter((entry: any) =>
+        sameId(entry.classSubjectId, option.id) &&
+        !!app && sameId(entry.assessmentStructureId, app.assessmentStructureId) &&
+        studentIds.has(idOf(entry.studentId)) &&
+        itemIds.has(idOf(entry.assessmentStructureItemId)) &&
+        !entry.isDeleted && entry.active !== false &&
+        entry.score !== undefined && entry.score !== null && entry.score !== "",
+      ).map((entry: any) => scoreKey(idOf(entry.studentId), idOf(entry.assessmentStructureItemId)))).size;
       const completion = expected
         ? Math.round((Math.min(entered, expected) / expected) * 100)
         : 0;
@@ -772,6 +822,10 @@ export default function AssessmentEntries() {
     items,
     enrollments,
     entries,
+    students,
+    eligibleStudentIds,
+    cardRosterPeriodId,
+    activeEnrolledIds,
   ]);
 
   const classCards = useMemo<ClassEntryView[]>(() => {
@@ -784,17 +838,17 @@ export default function AssessmentEntries() {
           sameId((option.row as any).classId, id),
         );
         const readyCount = options.filter((option) => option.ready).length;
-        const studentIds = new Set(
-          enrollments
-            .filter(
-              (row: any) =>
-                sameId(row.classId, id) &&
-                row.status === "active" &&
-                !row.isDeleted,
-            )
-            .map((row: any) => idOf(row.studentId))
-            .filter(Boolean),
-        );
+        const studentIds = cardRosterPeriodId
+          ? activeEnrolledIds(id, cardRosterStructureId, cardRosterPeriodId)
+          : new Set(
+              students
+                .filter((student: any) =>
+                  eligibleStudentIds.has(idOf(student.id)) &&
+                  sameId(student.currentClassId, id),
+                )
+                .map((student: any) => idOf(student.id))
+                .filter(Boolean),
+            );
         return {
           id,
           row: classRow,
@@ -814,7 +868,10 @@ export default function AssessmentEntries() {
             .includes(term),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [classes, classSubjectOptions, enrollments, search]);
+  }, [
+    classes, classSubjectOptions, enrollments, students, search,
+    eligibleStudentIds, cardRosterPeriodId, cardRosterStructureId, activeEnrolledIds,
+  ]);
 
   const selectedOption = useMemo(() => {
     const selectedId = idOf(classSubjectId);
@@ -1023,29 +1080,30 @@ export default function AssessmentEntries() {
     if (!sessionStarted) setScores(nextScores);
   }, [currentClassSubject, applicability, relevantEntries, sessionStarted]);
 
+  // The score-entry roster must agree with the card count. A ClassSubject's
+  // explicit period takes precedence; otherwise use the selected/current term.
+  // With no term configured, currentClassId is a placement fallback, NOT a
+  // reason to include every historical active enrollment.
   const enrolledStudents = useMemo(() => {
     if (!currentClassSubject) return [];
-    const periodId = idOf((currentClassSubject as any).academicPeriodId);
+    const currentClassId = idOf((currentClassSubject as any).classId);
+    const periodId = idOf((currentClassSubject as any).academicPeriodId) || cardRosterPeriodId;
+    const structureId = idOf((currentClassSubject as any).academicStructureId);
     return students
+      .filter((student: any) => eligibleStudentIds.has(idOf(student.id)))
       .map((student: any) => {
+        if (!periodId && !sameId(student.currentClassId, currentClassId)) return undefined;
         const enrollment = enrollments.find((row: any) => {
           if (!sameId(row.studentId, student.id)) return false;
-          if (!sameId(row.classId, (currentClassSubject as any).classId))
-            return false;
-          if (
-            !sameId(
-              row.academicStructureId,
-              (currentClassSubject as any).academicStructureId,
-            )
-          )
-            return false;
+          if (!sameId(row.classId, currentClassId)) return false;
+          if (structureId && !sameId(row.academicStructureId, structureId)) return false;
           if (periodId && !sameId(row.academicPeriodId, periodId)) return false;
-          return row.status === "active";
+          return row.status === "active" && row.active !== false && !row.isDeleted;
         });
         return enrollment ? { student, enrollment } : undefined;
       })
       .filter(Boolean) as { student: Student; enrollment: StudentEnrollment }[];
-  }, [students, enrollments, currentClassSubject]);
+  }, [students, enrollments, currentClassSubject, cardRosterPeriodId, eligibleStudentIds]);
 
   const existingEntryMap = useMemo(() => {
     const m = new Map<string, AssessmentEntry>();
@@ -1727,12 +1785,14 @@ export default function AssessmentEntries() {
         const hasItems = !!structureId && items.some((item: any) =>
           isActiveRow(item) && sameId(item.assessmentStructureId, structureId),
         );
-        const hasStudents = enrollments.some((enrollment: any) =>
-          enrollment.status === "active" && !enrollment.isDeleted &&
-          sameId(enrollment.classId, row.classId) &&
-          sameId(enrollment.academicStructureId, row.academicStructureId) &&
-          (!row.academicPeriodId || sameId(enrollment.academicPeriodId, row.academicPeriodId)),
-        );
+        const effectivePeriodId = idOf(row.academicPeriodId) ||
+          (next.periodId !== "all" ? idOf(next.periodId) : preferredPeriodId);
+        const hasStudents = effectivePeriodId
+          ? activeEnrolledIds(idOf(row.classId), idOf(row.academicStructureId), effectivePeriodId).size > 0
+          : students.some((student: any) =>
+              eligibleStudentIds.has(idOf(student.id)) &&
+              sameId(student.currentClassId, row.classId),
+            );
         const hasScores = entries.some((entry: any) =>
           !entry.isDeleted && sameId(entry.classSubjectId, option.id) &&
           entry.score !== null && entry.score !== undefined && entry.score !== "",

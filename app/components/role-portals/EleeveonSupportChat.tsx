@@ -367,8 +367,13 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       const current = selectedRef.current;
       const [list, detailResult] = await Promise.all([
         supportApi.list(),
-        current ? Promise.all([supportApi.open(current),supportApi.messagePage(current,undefined,100,ownId||undefined)])
-          .then(([detail,page]) => ({detail,page})).catch(error => ({ error })) : Promise.resolve(null),
+        current ? Promise.allSettled([
+          supportApi.open(current),
+          supportApi.messagePage(current, undefined, 100, ownId || undefined),
+        ]).then(([detailResult, pageResult]) => detailResult.status === "fulfilled"
+          ? { detail: detailResult.value,
+              page: pageResult.status === "fulfilled" ? pageResult.value : null }
+          : { error: detailResult.reason }) : Promise.resolve(null),
       ]);
       if (activeCacheScope.current !== requestedScope) return;
       const items = list.conversations || [];
@@ -383,9 +388,17 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
           previous.status === detail.conversation.status &&
           previous.displayTitle === detail.conversation.displayTitle ? previous : detail.conversation);
         const page = detailResult.page;
-        mergeHistoryKeys(page.historyKeys||[],page.openingHistoryKey);
-        if(!historyPagingStarted.current){setHasOlderHistory(page.hasMore);setHistoryCursor(page.nextCursor);}
-        setThread(previous => mergeMessagePages(previous, page.messages||[]));
+        if (page) {
+          mergeHistoryKeys(page.historyKeys || [], page.openingHistoryKey);
+          if (!historyPagingStarted.current) {
+            setHasOlderHistory(page.hasMore);
+            setHistoryCursor(page.nextCursor);
+          }
+        }
+        // Never discard the working original open() response simply because
+        // optional history pagination failed on the server.
+        const visibleMessages = page?.messages || detail.messages || [];
+        setThread(previous => mergeMessagePages(previous, visibleMessages));
         let freshKeys: (PublicSupportDevice & { revoked?: boolean })[] | undefined;
         // Device directories change much less often than chat messages.
         if (Date.now() - lastRefreshedKeys.current > 60000) {
@@ -394,7 +407,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             lastRefreshedKeys.current = Date.now();
           } catch { /* stale public keys can still verify cached ciphertext */ }
         }
-        void hubSaveThread(requestedScope, detail.conversation, page.messages || [], freshKeys);
+        void hubSaveThread(requestedScope, detail.conversation, visibleMessages, freshKeys);
         if (!document.hidden) void markOpenedRead(current);
       }
       if (!quiet) setError("");
@@ -743,29 +756,46 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       }
 
       // Remote authority and public sender keys refresh concurrently.
-      const [detail, keyResult, firstPage] = await Promise.all([
+      // The original conversation read and the newer pagination/key services
+      // can fail independently. A history-key error must not hide a perfectly
+      // valid conversation or its existing eight (or more) messages.
+      const [detailResult, keyResult, pageResult] = await Promise.allSettled([
         supportApi.open(id),
-        supportApi.keys(id).catch(() => ({ devices: cached?.devices || [] })),
-        supportApi.messagePage(id,undefined,100,ownId||undefined),
+        supportApi.keys(id),
+        supportApi.messagePage(id, undefined, 100, ownId || undefined),
       ]);
+      if (detailResult.status === "rejected") throw detailResult.reason;
       if (serial !== openingRequest.current || activeCacheScope.current !== requestedScope) return;
-      const people = keyResult.devices || [];
+      const detail = detailResult.value;
+      const people = keyResult.status === "fulfilled" ? (keyResult.value.devices || []) : (cached?.devices || []);
+      const firstPage = pageResult.status === "fulfilled" ? pageResult.value : null;
       lastRefreshedKeys.current = Date.now();
       setDevices(people);
       selectedRef.current = id;
       setSelected(id);
       setOpened(detail.conversation);
-      mergeHistoryKeys(firstPage.historyKeys||[],firstPage.openingHistoryKey);
-      setHasOlderHistory(firstPage.hasMore);setHistoryCursor(firstPage.nextCursor);
-      setThread(firstPage.messages||[]);
+      if (firstPage) {
+        mergeHistoryKeys(firstPage.historyKeys || [], firstPage.openingHistoryKey);
+        setHasOlderHistory(firstPage.hasMore);
+        setHistoryCursor(firstPage.nextCursor);
+      }
+      const visibleMessages = firstPage?.messages || detail.messages || [];
+      setThread(visibleMessages);
       // Old decrypted messages are only reused after checking the CURRENT pinned
       // sender fingerprint in the effect; decrypted text is never persisted.
       setNewChat(false);
       setMobileOpen(true);
       setMessage(drafts.current.get(id) || "");
       setFiles([]); setReplyTarget(null); setEditTarget(null); setMessageMenuId(""); setAttachMenuOpen(false); setCallOpen(false);
-      void hubSaveThread(requestedScope, detail.conversation, firstPage.messages || [], people);
+      void hubSaveThread(requestedScope, detail.conversation, visibleMessages, people);
       void markOpenedRead(id);
+      // Surface a pagination problem without disguising it as an unavailable
+      // conversation. The original encrypted messages stay visible.
+      if (pageResult.status === "rejected") {
+        const reason = pageResult.reason;
+        setError("Showing conversation messages. Older history is temporarily unavailable: " +
+          (reason instanceof Error ? reason.message : "history request failed"));
+      }
     } catch (cause) {
       if (serial === openingRequest.current) {
         setError(hadCache
@@ -811,6 +841,16 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   async function recipients(id?: string) {
     if (!ready) throw new Error("Encryption keys have not finished initializing.");
     const keys = await loadKeys(id);
+    // The backend rejects ciphertext signed by a pending device. Show the
+    // user the required action BEFORE attempting a message upload.
+    const linked = await supportApi.devices();
+    const own = linked.devices.find(device => device.id === ownId);
+    if (!own || own.status !== "linked") {
+      onOpenHubSettings?.();
+      throw new Error(own?.status === "pending"
+        ? "This browser is awaiting device approval. Open Hub Settings → Linked Devices and approve it from an existing trusted device."
+        : "This encryption device is not active. Open Hub Settings → Linked Devices to resolve it.");
+    }
     const active = keys.filter(d => !d.revoked);
     const approved = readTrust(accountId, identity);
     if (!active.some(d => d.id === ownId)) throw new Error("Your current device is missing from the encryption directory.");

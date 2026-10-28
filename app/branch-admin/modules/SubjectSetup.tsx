@@ -1,4 +1,5 @@
 "use client";
+import {createPortal} from "react-dom";
 
 /**
  * app/branch-admin/modules/SubjectSetup.tsx
@@ -62,6 +63,7 @@ import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useEntityMediaUrls } from "../../hooks/useEntityMediaUrls";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 
 import {
   attachCameraStreamToVideo,
@@ -87,6 +89,103 @@ type SubjectSetupMode =
   | "curriculum"
   | "prerequisites"
   | "classes";
+
+
+
+/** Render all sheets, editors and previews above the portal chrome. */
+const eleeveonFullscreenOverlayCss = String.raw`
+.eleeveon-modal-root{position:fixed;inset:0;z-index:2147483000;pointer-events:none;isolation:isolate}
+.eleeveon-modal-root>.ba-sheet-backdrop,
+.eleeveon-modal-root>.ba-modal-backdrop,
+.eleeveon-modal-root>.cs-overlay {
+ position:fixed!important;inset:0!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
+ width:100vw!important;height:100dvh!important;min-width:0!important;max-width:none!important;max-height:none!important;
+ margin:0!important;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))!important;
+ box-sizing:border-box!important;z-index:1!important;pointer-events:auto!important;
+ display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;
+ background:rgba(10,18,32,.66)!important;backdrop-filter:blur(8px)!important;-webkit-backdrop-filter:blur(8px)!important;
+}
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet,
+.eleeveon-modal-root>.ba-modal-backdrop>.ba-modal,
+.eleeveon-modal-root>.ba-modal-backdrop>.ba-camera-modal,
+.eleeveon-modal-root>.cs-overlay>.cs-modal,
+.eleeveon-modal-root>.cs-overlay>.cs-sheet {
+ position:relative!important;z-index:2!important;display:block!important;box-sizing:border-box!important;
+ top:auto!important;left:auto!important;right:auto!important;bottom:auto!important;margin:0!important;
+ width:min(1100px,100%)!important;max-width:100%!important;min-width:0!important;
+ height:auto!important;max-height:calc(100dvh - 24px)!important;min-height:0!important;
+ overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain!important;
+ border-radius:18px!important;border:1px solid var(--border,rgba(148,163,184,.24))!important;
+ color:var(--text,#111827)!important;background:var(--card-bg,var(--surface,#fff))!important;
+ box-shadow:0 24px 75px rgba(0,0,0,.34)!important;scrollbar-width:thin;
+}
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet.small,
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet.compact,
+.eleeveon-modal-root>.cs-overlay>.cs-sheet {width:min(680px,100%)!important}
+.eleeveon-modal-root :is(.ba-sheet-head,.ba-modal-head,.cs-sheet-head){
+ position:sticky!important;top:0!important;z-index:9!important;flex-shrink:0!important;
+ padding-top:9px!important;padding-bottom:11px!important;
+ background:var(--card-bg,var(--surface,#fff))!important;
+ border-bottom:1px solid var(--border,rgba(148,163,184,.18))!important;
+}
+.eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions){
+ position:sticky!important;bottom:0!important;z-index:9!important;
+ padding:12px 4px max(10px,env(safe-area-inset-bottom))!important;
+ margin-top:16px!important;background:var(--card-bg,var(--surface,#fff))!important;
+ border-top:1px solid var(--border,rgba(148,163,184,.18))!important;
+}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input,select,textarea,button){max-width:100%}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet){font-family:var(--font-family,system-ui,sans-serif);font-size:13px}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea){
+ box-sizing:border-box;min-height:41px;max-width:100%;padding:9px 11px;border-radius:10px;
+ color:var(--text,#111827);background:var(--input-bg,var(--surface,#fff));
+ border:1px solid var(--input-border,var(--border,rgba(148,163,184,.3)));font:inherit;
+}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(textarea){min-height:90px;resize:vertical}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input[type="file"]){width:100%;padding:9px}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(button){cursor:pointer}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(button,input,select,textarea):focus-visible{outline:2px solid var(--ba-primary,var(--primary-color,#2563eb));outline-offset:2px}
+.eleeveon-modal-root :is(.ba-modal-head,.ba-sheet-head,.cs-sheet-head) button {flex-shrink:0;min-width:36px;min-height:36px}
+.eleeveon-modal-root .cs-overlay>.cs-backdrop {position:absolute!important;inset:0!important;z-index:0!important;background:transparent!important}
+.eleeveon-modal-root>.cs-menu-overlay>.cs-menu{
+ position:relative!important;z-index:2!important;inset:auto!important;top:auto!important;left:auto!important;right:auto!important;
+ transform:none!important;display:grid!important;gap:5px!important;box-sizing:border-box!important;
+ width:min(460px,100%)!important;max-width:100%!important;max-height:calc(100dvh - 24px)!important;overflow-y:auto!important;
+ padding:14px!important;border-radius:18px!important;background:var(--card-bg,var(--surface,#fff))!important;
+ box-shadow:0 24px 75px rgba(0,0,0,.34)!important;
+}
+@media(max-width:640px){
+ .eleeveon-modal-root>.ba-sheet-backdrop,.eleeveon-modal-root>.ba-modal-backdrop,.eleeveon-modal-root>.cs-overlay{padding:0!important}
+ .eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet,
+ .eleeveon-modal-root>.ba-modal-backdrop>.ba-modal,
+ .eleeveon-modal-root>.ba-modal-backdrop>.ba-camera-modal,
+ .eleeveon-modal-root>.cs-overlay>.cs-modal,
+ .eleeveon-modal-root>.cs-overlay>.cs-sheet{
+  width:100vw!important;height:100dvh!important;max-height:100dvh!important;max-width:100vw!important;
+  padding:12px!important;border-radius:0!important;
+ }
+ .eleeveon-modal-root>.cs-menu-overlay>.cs-menu{width:calc(100vw - 20px)!important}
+ .eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions){
+  display:flex!important;flex-wrap:wrap!important;justify-content:flex-end!important;gap:8px!important
+ }
+ .eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions)>button{flex:1 1 125px;min-height:42px}
+}
+`;
+function EleeveonFullscreenOverlay({children}:{children:React.ReactNode}){
+ const [target,setTarget]=React.useState<HTMLElement|null>(null);
+ const [theme,setTheme]=React.useState<React.CSSProperties>({});
+ React.useEffect(()=>{
+  const page=document.querySelector<HTMLElement>(".role-shell .app-content .ba-page, .role-shell .app-content .cs-page, .role-shell .app-content .subject-setup-root, .ba-page, .cs-page");
+  if(page){const cs=window.getComputedStyle(page);const vars:Record<string,string>={};
+   for(const key of ["--ba-primary","--cs-primary","--cs-surface","--cs-text","--cs-border"]){const v=cs.getPropertyValue(key).trim();if(v)vars[key]=v;}
+   setTheme(vars as React.CSSProperties);
+  }
+  setTarget(document.body);
+  const previous=document.body.style.overflow;document.body.style.overflow="hidden";
+  return()=>{document.body.style.overflow=previous;};
+ },[]);
+ return target?createPortal(<div className="eleeveon-modal-root" style={theme}><style>{eleeveonFullscreenOverlayCss}</style>{children}</div>,target):null;
+}
 
 const SUBJECT_SETUP_MODE_KEY =
   "eleeveon_subject_setup_mode";
@@ -466,6 +565,9 @@ function SubjectsWorkspace() {
   const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [filterOrganizationId, setFilterOrganizationId] = useState("all");
   const [filterCategory, setFilterCategory] = useState<"all" | SubjectCategory>(
@@ -476,6 +578,15 @@ function SubjectsWorkspace() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const subjectSetupToolbar = {
+    add: () => openCreate(),
+    search: (query: string) => setSearch(query),
+    filter: () => setFilterOpen(true),
+    print: () => window.print(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", subjectSetupToolbar);
+  useRegisterBranchWorkspaceToolbar("subjectSetup", subjectSetupToolbar);
   const [selectedItem, setSelectedItem] = useState<SubjectView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -1375,7 +1486,7 @@ function FilterSheet(props: {
   onClose: () => void;
 }) {
   return (
-    <section className="ba-sheet-backdrop" onClick={props.onClose}>
+    <EleeveonFullscreenOverlay><section className="ba-sheet-backdrop" onClick={props.onClose}>
       <div className="ba-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="ba-sheet-head">
           <div>
@@ -1439,7 +1550,7 @@ function FilterSheet(props: {
           </button>
         </div>
       </div>
-    </section>
+    </section></EleeveonFullscreenOverlay>
   );
 }
 
@@ -1455,7 +1566,7 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <section className="ba-sheet-backdrop" onClick={onClose}>
+    <EleeveonFullscreenOverlay><section className="ba-sheet-backdrop" onClick={onClose}>
       <div className="ba-sheet compact" onClick={(e) => e.stopPropagation()}>
         <div className="ba-sheet-head">
           <div>
@@ -1493,7 +1604,7 @@ function MoreSheet({
           </button>
         </div>
       </div>
-    </section>
+    </section></EleeveonFullscreenOverlay>
   );
 }
 
@@ -1512,7 +1623,7 @@ function ActionSheet({
 }) {
   const row: any = item.row;
   return (
-    <section className="ba-sheet-backdrop" onClick={onClose}>
+    <EleeveonFullscreenOverlay><section className="ba-sheet-backdrop" onClick={onClose}>
       <div className="ba-sheet compact" onClick={(e) => e.stopPropagation()}>
         <div className="ba-sheet-head">
           <div>
@@ -1538,7 +1649,7 @@ function ActionSheet({
           </button>
         </div>
       </div>
-    </section>
+    </section></EleeveonFullscreenOverlay>
   );
 }
 
@@ -1560,7 +1671,7 @@ function SubjectModal({
   save: (event?: React.FormEvent) => void;
 }) {
   return (
-    <div className="ba-modal-backdrop">
+    <EleeveonFullscreenOverlay><div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
@@ -1692,7 +1803,7 @@ function SubjectModal({
           </button>
         </div>
       </form>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -2080,6 +2191,9 @@ function CurriculumSubjectsWorkspace() {
   const [offerings, setOfferings] = useState<SubjectOffering[]>([]);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [filterCurriculumId, setFilterCurriculumId] = useState("all");
   const [filterPathwayId, setFilterPathwayId] = useState("all");
@@ -2091,6 +2205,15 @@ function CurriculumSubjectsWorkspace() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const subjectSetupToolbar = {
+    add: () => openCreate(),
+    search: (query: string) => setSearch(query),
+    filter: () => setFilterOpen(true),
+    print: () => window.print(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", subjectSetupToolbar);
+  useRegisterBranchWorkspaceToolbar("subjectSetup", subjectSetupToolbar);
   const [selectedItem, setSelectedItem] =
     useState<CurriculumSubjectView | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -2745,13 +2868,15 @@ function CurriculumSubjectsWorkspace() {
 
           {moreOpen ? (
             <>
-              <button
-                type="button"
-                className="cs-menu-backdrop"
-                onClick={() => setMoreOpen(false)}
-                aria-label="Close menu"
-              />
-              <div className="cs-menu">
+              <EleeveonFullscreenOverlay>
+                <div className="cs-overlay cs-menu-overlay" role="dialog" aria-modal="true" aria-label="More subject setup actions">
+                  <button
+                    type="button"
+                    className="cs-backdrop"
+                    onClick={() => setMoreOpen(false)}
+                    aria-label="Close menu"
+                  />
+                  <div className="cs-menu">
                 <button
                   type="button"
                   className={viewMode === "cards" ? "active" : ""}
@@ -2802,7 +2927,9 @@ function CurriculumSubjectsWorkspace() {
                 >
                   <span>×</span> Reset view
                 </button>
-              </div>
+                  </div>
+                </div>
+              </EleeveonFullscreenOverlay>
             </>
           ) : null}
         </div>
@@ -3035,7 +3162,7 @@ function CurriculumSubjectsWorkspace() {
       )}
 
       {filterOpen ? (
-        <div className="cs-overlay">
+        <EleeveonFullscreenOverlay><div className="cs-overlay">
           <button
             type="button"
             className="cs-backdrop"
@@ -3150,11 +3277,11 @@ function CurriculumSubjectsWorkspace() {
               </button>
             </div>
           </aside>
-        </div>
+        </div></EleeveonFullscreenOverlay>
       ) : null}
 
       {modalOpen ? (
-        <div className="cs-overlay">
+        <EleeveonFullscreenOverlay><div className="cs-overlay">
           <button
             type="button"
             className="cs-backdrop"
@@ -3371,11 +3498,11 @@ function CurriculumSubjectsWorkspace() {
               </div>
             </form>
           </section>
-        </div>
+        </div></EleeveonFullscreenOverlay>
       ) : null}
 
       {selectedItem ? (
-        <div className="cs-overlay">
+        <EleeveonFullscreenOverlay><div className="cs-overlay">
           <button
             type="button"
             className="cs-backdrop"
@@ -3493,7 +3620,7 @@ function CurriculumSubjectsWorkspace() {
               </button>
             </div>
           </aside>
-        </div>
+        </div></EleeveonFullscreenOverlay>
       ) : null}
 
       {toast ? (
@@ -4830,6 +4957,9 @@ function SubjectPrerequisitesWorkspace() {
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -4846,6 +4976,15 @@ function SubjectPrerequisitesWorkspace() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const subjectSetupToolbar = {
+    add: () => openCreate(),
+    search: (query: string) => setSearch(query),
+    filter: () => setFilterOpen(true),
+    print: () => window.print(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", subjectSetupToolbar);
+  useRegisterBranchWorkspaceToolbar("subjectSetup", subjectSetupToolbar);
   const [selectedRule, setSelectedRule] = useState<PrerequisiteViewRow | null>(
     null,
   );
@@ -5695,7 +5834,7 @@ function FilterSheet(props: {
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -5781,7 +5920,7 @@ function FilterSheet(props: {
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -5797,7 +5936,7 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
@@ -5843,7 +5982,7 @@ function MoreSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -5863,7 +6002,7 @@ function ActionSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-profile">
           <div>
@@ -5925,7 +6064,7 @@ function ActionSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6041,7 +6180,7 @@ function RuleModal(props: {
 }) {
   const selectedType = props.form.type || "prerequisite";
   return (
-    <div className="ba-modal-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-modal-backdrop" role="dialog" aria-modal="true">
       <section className="ba-modal">
         <div className="ba-sheet-head">
           <div>
@@ -6173,7 +6312,7 @@ function RuleModal(props: {
           </div>
         </form>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6694,6 +6833,9 @@ function ClassSubjectsWorkspace() {
   >({});
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+  }, []);
   const [search, setSearch] = useState("");
   const [filterClassId, setFilterClassId] = useState("all");
   const [filterStructureId, setFilterStructureId] = useState("all");
@@ -6705,6 +6847,15 @@ function ClassSubjectsWorkspace() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const subjectSetupToolbar = {
+    add: () => openCreate(),
+    search: (query: string) => setSearch(query),
+    filter: () => setFilterOpen(true),
+    print: () => window.print(),
+    more: () => setMoreOpen(true),
+  };
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", subjectSetupToolbar);
+  useRegisterBranchWorkspaceToolbar("subjectSetup", subjectSetupToolbar);
   const [selectedItem, setSelectedItem] = useState<ClassSubjectView | null>(
     null,
   );
@@ -8324,7 +8475,7 @@ function FilterSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -8441,7 +8592,7 @@ function FilterSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -8467,7 +8618,7 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
@@ -8517,7 +8668,7 @@ function MoreSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -8538,7 +8689,7 @@ function ActionSheet({
 }) {
   const row: any = item.row;
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-profile">
           <div>
@@ -8602,7 +8753,7 @@ function ActionSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -8730,7 +8881,7 @@ function ClassSubjectModal({
   save: (event?: React.FormEvent) => void;
 }) {
   return (
-    <div className="ba-modal-backdrop">
+    <EleeveonFullscreenOverlay><div className="ba-modal-backdrop">
       <form className="ba-modal" onSubmit={save}>
         <div className="ba-modal-head">
           <div>
@@ -9063,7 +9214,7 @@ function ClassSubjectModal({
           </button>
         </div>
       </form>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -9093,7 +9244,7 @@ function CameraCaptureModal({
       ? `Take ${entityLabel} Photo`
       : `Take ${entityLabel} Banner Photo`;
   return (
-    <div
+    <EleeveonFullscreenOverlay><div
       className="ba-modal-backdrop camera-backdrop"
       role="dialog"
       aria-modal="true"
@@ -9146,7 +9297,7 @@ function CameraCaptureModal({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -9771,9 +9922,59 @@ export default function SubjectSetup() {
           </section>
         )}
       </section>
+      <style>{subjectSetupStudentsParityCss}</style>
     </main>
   );
 }
+
+const subjectSetupStudentsParityCss = `
+/* STUDENTS V2 parity: compact full-width cards, table headers and actions. */
+.subject-setup-root{width:100%;max-width:none;min-width:0;gap:5px!important}
+.subject-setup-root .subject-setup-command{margin:0!important;padding:5px!important;border-radius:12px!important;box-shadow:none!important}
+.subject-setup-root .subject-setup-command-copy{display:none!important}
+.subject-setup-root .subject-setup-mode-switch{width:100%;gap:4px!important}
+.subject-setup-root .subject-setup-mode-switch button{padding:6px 8px!important;box-shadow:none!important}
+.subject-setup-root .subject-setup-mode-switch small{display:none!important}
+.subject-setup-root .ba-page,.subject-setup-root .cs-page{
+ width:100%!important;max-width:none!important;min-width:0!important;min-height:0!important;
+ padding:5px!important;margin:0!important;overflow-x:clip!important;
+ background:var(--bg,var(--background,#f2f4f7))!important;
+}
+/* Main controls are registered in the shared portal toolbar, not duplicated. */
+.role-shell.branch-workspace-layout .subject-setup-root .ba-search-card,
+.role-shell.branch-workspace-layout .subject-setup-root .cs-toolbar,
+.subject-setup-root .ba-filter-chips,.subject-setup-root .cs-compact-summary{display:none!important}
+.subject-setup-root .ba-list,.subject-setup-root .cs-grid {width:100%!important;max-width:none!important;margin:2px 0!important;display:grid!important;gap:9px!important;grid-template-columns:minmax(0,1fr)!important}
+.subject-setup-root .ba-list > :is(.subject-row,.student-row,.class-subject-row),
+.subject-setup-root .cs-grid > .cs-card {
+ position:relative!important;box-sizing:border-box!important;min-width:0!important;width:100%!important;max-width:none!important;
+ margin:0!important;padding:10px!important;border-radius:13px!important;box-shadow:none!important;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%)!important;
+ border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%)!important;
+ color:var(--text,#182235)!important;
+}
+.subject-setup-root .ba-list > :is(.subject-row,.student-row,.class-subject-row)::before{display:none!important}
+.subject-setup-root :is(.subject-main,.student-main,.class-subject-main,.cs-card-copy){min-width:0!important}
+.subject-setup-root :is(.subject-main,.student-main,.class-subject-main,.cs-card-copy) strong{font-size:13px!important;font-weight:850!important;color:var(--text,#182235)!important}
+.subject-setup-root :is(.subject-main,.student-main,.class-subject-main,.cs-card-copy) :is(small,em){font-size:11px!important;color:var(--muted,#64748b)!important}
+.subject-setup-root :is(.ba-avatar,.cs-card-avatar){width:40px!important;height:40px!important;border-radius:12px!important;box-shadow:none!important}
+.subject-setup-root :is(.ba-table-card,.cs-table-wrap) {
+ box-sizing:border-box!important;width:100%!important;max-width:none!important;min-width:0!important;
+ margin:2px 0!important;padding:4px!important;border-radius:13px!important;box-shadow:none!important;
+ background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%)!important;
+ border:1px solid var(--border,#d4dae3)!important;
+}
+.subject-setup-root :is(.ba-table-scroll,.cs-table-wrap){max-width:100%!important;overflow-x:auto!important;overscroll-behavior-x:contain!important;scrollbar-width:thin}
+.subject-setup-root :is(.ba-table-scroll table,.cs-table){width:100%!important;max-width:none!important;min-width:780px!important;border-collapse:collapse!important;background:var(--card-bg,var(--surface,#fff))!important}
+.subject-setup-root :is(.ba-table-scroll th,.ba-table-scroll td,.cs-table th,.cs-table td){padding:9px 10px!important;font-size:12px!important;vertical-align:middle!important;border-bottom:1px solid var(--border,rgba(148,163,184,.2))!important}
+.subject-setup-root :is(.ba-table-scroll thead th,.cs-table thead th){position:sticky!important;top:0!important;z-index:2!important;text-transform:uppercase!important;letter-spacing:.045em!important;font-size:10px!important;font-weight:850!important;color:var(--muted,#64748b)!important;background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%)!important}
+.subject-setup-root :is(.ba-table-scroll tbody tr,.cs-table tbody tr):nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 90%,var(--text,#182235) 10%)!important}
+.subject-setup-root :is(.ba-table-scroll tbody tr,.cs-table tbody tr):hover{background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--surface,#fff))!important}
+.subject-setup-root :is(.ba-table-actions button,.cs-table-actions button){min-height:32px!important;padding:0 9px!important;border-radius:999px!important;box-shadow:none!important;font-size:11px!important}
+@media(min-width:680px){.subject-setup-root .ba-list,.subject-setup-root .cs-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(min-width:1040px){.subject-setup-root .ba-list,.subject-setup-root .cs-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important}}
+@media(max-width:639px){.subject-setup-root .ba-page,.subject-setup-root .cs-page{padding:3px!important}.subject-setup-root .ba-list,.subject-setup-root .cs-grid{gap:7px!important;grid-template-columns:minmax(0,1fr)!important}}
+`;
 
 const subjectSetupShellCss = `
 .subject-setup-root {

@@ -15,6 +15,8 @@
  */
 
 import EleeveonSupportChat from "./EleeveonSupportChat";
+import HubSettingsPanel from "./HubSettingsPanel";
+import { useHubAppearance } from "../../lib/support/useHubAppearance";
 import { useSupportUnread } from "../../lib/support/useSupportUnread";
 import EleeveonSurveys from "./EleeveonSurveys";
 import { supportApi } from "../../lib/support/supportApi";
@@ -24,6 +26,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import type { CSSProperties } from "react";
 
 import {
   db,
@@ -366,6 +369,10 @@ export default function EleeveonCenter({
     useOptionalAccess();
 
   const userId = idOf(user?.id);
+  const hubAppearance = useHubAppearance(idOf(accountId), userId);
+  const [hubSettingsOpen, setHubSettingsOpen] = useState(false);
+  const [hubSettingsConversationId,setHubSettingsConversationId]=useState('');
+  const openHubSettings=(conversationId?:string)=>{setHubSettingsConversationId(conversationId||'');setHubSettingsOpen(true);};
 
   const membershipId = idOf(
     activeMembership?.id,
@@ -1462,6 +1469,7 @@ export default function EleeveonCenter({
   const supportUnread = useSupportUnread();
   const chatSection: CenterSection = isDeveloper ? "inbox" : "support";
   const centerTabs = (
+    <div className="hub-nav-with-settings">
     <nav className="center-inline-tabs" aria-label="Eleeveon Center sections">
       <button type="button" className={section === chatSection ? "active" : ""} aria-current={section === chatSection ? "page" : undefined} onClick={() => setSection(chatSection)}>Chat{supportUnread > 0 ? ` · ${supportUnread > 99 ? "99+" : supportUnread}` : ""}</button>
       <button type="button" className={section === "feedback" ? "active" : ""} aria-current={section === "feedback" ? "page" : undefined} onClick={() => setSection("feedback")}>Surveys</button>
@@ -1482,6 +1490,8 @@ export default function EleeveonCenter({
         </select>
       )}
     </nav>
+    <button type="button" className="hub-settings-gear" title="Hub settings" aria-label="Hub settings" onClick={() => openHubSettings()}>⚙</button>
+    </div>
   );
   // In a phone conversation, the thread header replaces the standalone tabs row.
   // This compact picker keeps Surveys/Updates/Access reachable without shrinking the chat.
@@ -1502,8 +1512,9 @@ export default function EleeveonCenter({
   );
 
   return (
-    <main className="center-module hub-module">
+    <main className="center-module hub-module" style={{ "--hub-scene": hubAppearance.imageCss } as CSSProperties}>
       <style>{css}</style>
+      {hubSettingsOpen && <HubSettingsPanel onClose={() => setHubSettingsOpen(false)} conversationId={hubSettingsConversationId} accountId={idOf(accountId)} userId={userId} images={hubAppearance.images} selectedId={hubAppearance.selectedId} select={hubAppearance.select} addUpload={hubAppearance.addUpload} removeUpload={hubAppearance.removeUpload} reload={hubAppearance.reload} error={hubAppearance.error} />}
 
       <div className="center-shell">
         <div className="center-work-area">
@@ -1515,6 +1526,7 @@ export default function EleeveonCenter({
       {section === "inbox" && isDeveloper ? (
         <EleeveonSupportChat
           navigation={centerTabs}
+          onOpenHubSettings={openHubSettings}
           mobileNavigation={mobileChatNavigation}
           isDeveloper={true}
           accountId={idOf(accountId)}
@@ -2525,6 +2537,7 @@ export default function EleeveonCenter({
       {section === "support" && !isDeveloper ? (
         <EleeveonSupportChat
           navigation={centerTabs}
+          onOpenHubSettings={openHubSettings}
           mobileNavigation={mobileChatNavigation}
           isDeveloper={false}
           accountId={idOf(accountId)}
@@ -2688,6 +2701,14 @@ export default function EleeveonCenter({
 }
 
 const css = `
+
+/* Shared scenic background for every Hub section; no chat-only overrides. */
+.hub-module .center-work-area{background-image:var(--hub-scene);background-size:cover;background-position:center;background-attachment:local}
+.hub-module .center-card{background:color-mix(in srgb,var(--surface,#fff) 94%,transparent)}
+.hub-nav-with-settings{display:flex;align-items:center;width:100%;min-width:0;gap:5px}
+.hub-nav-with-settings .center-inline-tabs{flex:1;width:auto;min-width:0}
+.hub-settings-gear{flex:0 0 auto;display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border,#dce6e8);border-radius:10px;background:var(--surface,#fff);color:var(--text,#30414f);font-size:19px;cursor:pointer}
+.hub-settings-gear:hover{background:color-mix(in srgb,var(--dashboard-primary,#147d79) 9%,var(--surface,#fff))}
 /* Inline navigation occupies the existing conversation-list header.
    There is no separate Center rail or phone selector row. */
 .center-shell{display:block;width:100%;height:clamp(400px,calc(100dvh - 143px),1100px);min-height:0;overflow:hidden}

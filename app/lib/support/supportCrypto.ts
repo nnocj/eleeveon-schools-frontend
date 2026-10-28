@@ -161,7 +161,7 @@ export function parseEnvelope(value: string): Envelope {
   if (envelope.v !== 1 || !Array.isArray(envelope.keys) || !envelope.signature || !envelope.fromDeviceId) throw new Error("Unsupported or damaged encrypted message.");
   return envelope;
 }
-export async function decryptPayload(accountId: string, userId: string, conversationId: string, messageId: string, value: string, known: PublicSupportDevice[]) {
+export async function decryptPayload(accountId: string, userId: string, conversationId: string, messageId: string, value: string, known: PublicSupportDevice[], historyKey?: SupportHistoryKeyRecord) {
   const own = await ensureOwnDevice(accountId, userId);
   const envelope = parseEnvelope(value);
   if (envelope.conversationId !== conversationId || envelope.messageId !== messageId) throw new Error("Encrypted message identity does not match.");
@@ -172,10 +172,16 @@ export async function decryptPayload(accountId: string, userId: string, conversa
   const authentic = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, verificationKey, toBuf(un64(signature)), encoded(JSON.stringify(unsigned)));
   if (!authentic) throw new Error("Sender signature verification failed. The message may have been tampered with.");
   const keyEnvelope = envelope.keys.find(item => item.deviceId === own.id);
-  if (!keyEnvelope) throw new Error("This message was not encrypted for this device. You may need the original enrolled device.");
-  const ephemeral = await crypto.subtle.importKey("jwk", keyEnvelope.publicKey, { name: "ECDH", namedCurve: "P-256" }, false, []);
-  const wrapKey = await deriveWrap(own.encryptionKey.privateKey, ephemeral, un64(keyEnvelope.salt), `${conversationId}|${messageId}|${own.id}`);
-  const rawKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(keyEnvelope.iv)), tagLength: 128 }, wrapKey, toBuf(un64(keyEnvelope.ciphertext)));
+  let rawKey: ArrayBuffer;
+  if (keyEnvelope) {
+    const ephemeral = await crypto.subtle.importKey("jwk", keyEnvelope.publicKey, { name: "ECDH", namedCurve: "P-256" }, false, []);
+    const wrapKey = await deriveWrap(own.encryptionKey.privateKey, ephemeral, un64(keyEnvelope.salt), `${conversationId}|${messageId}|${own.id}`);
+    rawKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(keyEnvelope.iv)), tagLength: 128 }, wrapKey, toBuf(un64(keyEnvelope.ciphertext)));
+  } else if (historyKey) {
+    rawKey = await historicalContentKey(accountId, userId, conversationId, messageId, historyKey, known);
+  } else {
+    throw new Error("This historical message needs key transfer from your original device.");
+  }
   const contentKey = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["decrypt"]);
   const clear = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(envelope.iv)), additionalData: encoded(`${conversationId}|${messageId}`), tagLength: 128 }, contentKey, toBuf(un64(envelope.ciphertext)));
   return JSON.parse(decoder.decode(clear)) as ClearSupportPayload;
@@ -208,4 +214,107 @@ export function saveTrust(accountId: string, userId: string, devices: PublicSupp
   const previous = readTrust(accountId, userId);
   for (const device of devices) previous[device.id] = device.fingerprint;
   localStorage.setItem(`eleeveon-support-trust:${accountId}:${userId}`, JSON.stringify(previous));
+}
+
+/** A server-relayed, signed rewrap of ONE historical symmetric message key. */
+export type SupportHistoryKeyRecord = {
+  linkId: string;
+  messageId: string;
+  sourceDeviceId: string;
+  wrappedKey: {
+    v: 1;
+    algorithm: "ECDH-P256-AES-GCM";
+    ephemeralPublicJwk: JsonWebKey;
+    iv: string;
+    ciphertext: string;
+  };
+  signature: string;
+};
+
+const HISTORY_AAD = (conversationId: string, messageId: string, deviceId: string) =>
+  `eleeveon-hub-history-v1|${conversationId}|${messageId}|${deviceId}`;
+
+/** Deterministic, domain-separated HKDF salt so wrapping needs no additional public metadata. */
+async function historyWrapKey(secret: CryptoKey, peer: CryptoKey, conversationId: string, messageId: string, targetId: string): Promise<CryptoKey> {
+  const shared = await crypto.subtle.deriveBits({ name: "ECDH", public: peer }, secret, 256);
+  const hkdf = await crypto.subtle.importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+  const salt = await crypto.subtle.digest("SHA-256", encoded(HISTORY_AAD(conversationId, messageId, targetId)));
+  return crypto.subtle.deriveKey({ name: "HKDF", hash: "SHA-256", salt, info: encoded("eleeveon-hub-history-content-key-v1") },
+    hkdf, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+/** Authenticate the ORIGINAL sender before transferring or using a message key. */
+async function checkedEnvelope(value: string, conversationId: string, messageId: string, known: PublicSupportDevice[]): Promise<Envelope> {
+  const envelope = parseEnvelope(value);
+  if (envelope.conversationId !== conversationId || envelope.messageId !== messageId) throw new Error("Encrypted message identity mismatch.");
+  const sender = known.find(d => d.id === envelope.fromDeviceId);
+  if (!sender) throw new Error("The message signer is not available in the device directory.");
+  const key = await crypto.subtle.importKey("jwk", sender.signingPublicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  const { signature, ...unsigned } = envelope;
+  if (!await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, toBuf(un64(signature)), encoded(JSON.stringify(unsigned))))
+    throw new Error("Original message signature is invalid.");
+  return envelope;
+}
+
+async function originalContentKey(accountId: string, userId: string, conversationId: string, messageId: string, envelope: Envelope): Promise<ArrayBuffer> {
+  const own = await ensureOwnDevice(accountId, userId);
+  const wrap = envelope.keys.find(e => e.deviceId === own.id);
+  if (!wrap) throw new Error("This trusted device cannot decrypt the historical message key.");
+  const ephemeral = await crypto.subtle.importKey("jwk", wrap.publicKey, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const aes = await deriveWrap(own.encryptionKey.privateKey, ephemeral, un64(wrap.salt), `${conversationId}|${messageId}|${own.id}`);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(wrap.iv)), tagLength: 128 }, aes, toBuf(un64(wrap.ciphertext)));
+}
+
+export async function signHubDeviceProof(accountId: string, userId: string, value: string): Promise<string> {
+  const own = await ensureOwnDevice(accountId, userId);
+  return b64(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, own.signingKey.privateKey, encoded(value)));
+}
+
+/** Run on the APPROVING source device, one message at a time. Never send rawKey to the server. */
+export async function makeHistoricalKeyTransfer(accountId: string, userId: string, linkId: string,
+  conversationId: string, messageId: string, ciphertext: string,
+  devices: PublicSupportDevice[], target: PublicSupportDevice) {
+  const own = await ensureOwnDevice(accountId, userId);
+  if (own.id === target.id || target.userId !== userId || target.accountId !== accountId)
+    throw new Error("The target is not another device for this signed-in user.");
+  const signerId = parseEnvelope(ciphertext).fromDeviceId;
+  const signer = devices.find(d => d.id === signerId);
+  if (!signer || readTrust(accountId,userId)[signerId] !== signer.fingerprint)
+    throw new Error("The original sender fingerprint has not been verified.");
+  const original = await checkedEnvelope(ciphertext, conversationId, messageId, devices);
+  const raw = await originalContentKey(accountId, userId, conversationId, messageId, original);
+  const peer = await crypto.subtle.importKey("jwk", target.encryptionPublicJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const ephemeral = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const wrap = await historyWrapKey(ephemeral.privateKey, peer, conversationId, messageId, target.id);
+  const iv = rand(12);
+  const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv: toBuf(iv), additionalData: encoded(HISTORY_AAD(conversationId, messageId, target.id)), tagLength: 128 }, wrap, raw);
+  const wrappedKey = { v: 1 as const, algorithm: "ECDH-P256-AES-GCM" as const,
+    ephemeralPublicJwk: await crypto.subtle.exportKey("jwk", ephemeral.publicKey), iv: b64(iv), ciphertext: b64(wrapped) };
+  const signedItem = JSON.stringify({ v: 1, linkId, sourceDeviceId: own.id, targetDeviceId: target.id,
+    conversationId, messageId, wrappedKey });
+  const signature = await signHubDeviceProof(accountId, userId, signedItem);
+  return { conversationId, messageId, wrappedKey, signature };
+}
+
+/** Run on the NEW device. Require pinned identity and the backend's signed record. */
+async function historicalContentKey(accountId: string, userId: string, conversationId: string,
+  messageId: string, record: SupportHistoryKeyRecord, known: PublicSupportDevice[]): Promise<ArrayBuffer> {
+  const own = await ensureOwnDevice(accountId, userId);
+  const source = known.find(d => d.id === record.sourceDeviceId);
+  if (!source || readTrust(accountId, userId)[source.id] !== source.fingerprint)
+    throw new Error("Verify your original device fingerprint in Hub Settings to unlock this message.");
+  if (record.messageId !== messageId || record.wrappedKey.v !== 1 || record.wrappedKey.algorithm !== "ECDH-P256-AES-GCM")
+    throw new Error("Invalid historical key record.");
+  const signedItem = JSON.stringify({ v: 1, linkId: record.linkId, sourceDeviceId: record.sourceDeviceId,
+    targetDeviceId: own.id, conversationId, messageId, wrappedKey: record.wrappedKey });
+  const signer = await crypto.subtle.importKey("jwk", source.signingPublicJwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+  const valid = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, signer,
+    toBuf(un64(record.signature)), encoded(signedItem));
+  if (!valid) throw new Error("Historical key signature verification failed.");
+  const ephemeral = await crypto.subtle.importKey("jwk", record.wrappedKey.ephemeralPublicJwk,
+    { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const wrap = await historyWrapKey(own.encryptionKey.privateKey, ephemeral, conversationId, messageId, own.id);
+  return crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(record.wrappedKey.iv)),
+    additionalData: encoded(HISTORY_AAD(conversationId, messageId, own.id)), tagLength: 128 },
+    wrap, toBuf(un64(record.wrappedKey.ciphertext)));
 }

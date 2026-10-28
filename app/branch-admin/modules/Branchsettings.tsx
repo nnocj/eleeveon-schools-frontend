@@ -1,4 +1,5 @@
 "use client";
+import {createPortal} from "react-dom";
 
 /**
  * app/branch-admin/modules/Branchsettings.tsx
@@ -157,6 +158,103 @@ import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
+
+
+/** Render all sheets, editors and previews above the portal chrome. */
+const eleeveonFullscreenOverlayCss = String.raw`
+.eleeveon-modal-root{position:fixed;inset:0;z-index:2147483000;pointer-events:none;isolation:isolate}
+.eleeveon-modal-root>.ba-sheet-backdrop,
+.eleeveon-modal-root>.ba-modal-backdrop,
+.eleeveon-modal-root>.cs-overlay {
+ position:fixed!important;inset:0!important;top:0!important;left:0!important;right:0!important;bottom:0!important;
+ width:100vw!important;height:100dvh!important;min-width:0!important;max-width:none!important;max-height:none!important;
+ margin:0!important;padding:max(10px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(10px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left))!important;
+ box-sizing:border-box!important;z-index:1!important;pointer-events:auto!important;
+ display:flex!important;align-items:center!important;justify-content:center!important;overflow:hidden!important;
+ background:rgba(10,18,32,.66)!important;backdrop-filter:blur(8px)!important;-webkit-backdrop-filter:blur(8px)!important;
+}
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet,
+.eleeveon-modal-root>.ba-modal-backdrop>.ba-modal,
+.eleeveon-modal-root>.ba-modal-backdrop>.ba-camera-modal,
+.eleeveon-modal-root>.cs-overlay>.cs-modal,
+.eleeveon-modal-root>.cs-overlay>.cs-sheet {
+ position:relative!important;z-index:2!important;display:block!important;box-sizing:border-box!important;
+ top:auto!important;left:auto!important;right:auto!important;bottom:auto!important;margin:0!important;
+ width:min(1100px,100%)!important;max-width:100%!important;min-width:0!important;
+ height:auto!important;max-height:calc(100dvh - 24px)!important;min-height:0!important;
+ overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain!important;
+ border-radius:18px!important;border:1px solid var(--border,rgba(148,163,184,.24))!important;
+ color:var(--text,#111827)!important;background:var(--card-bg,var(--surface,#fff))!important;
+ box-shadow:0 24px 75px rgba(0,0,0,.34)!important;scrollbar-width:thin;
+}
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet.small,
+.eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet.compact,
+.eleeveon-modal-root>.cs-overlay>.cs-sheet {width:min(680px,100%)!important}
+.eleeveon-modal-root :is(.ba-sheet-head,.ba-modal-head,.cs-sheet-head){
+ position:sticky!important;top:0!important;z-index:9!important;flex-shrink:0!important;
+ padding-top:9px!important;padding-bottom:11px!important;
+ background:var(--card-bg,var(--surface,#fff))!important;
+ border-bottom:1px solid var(--border,rgba(148,163,184,.18))!important;
+}
+.eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions){
+ position:sticky!important;bottom:0!important;z-index:9!important;
+ padding:12px 4px max(10px,env(safe-area-inset-bottom))!important;
+ margin-top:16px!important;background:var(--card-bg,var(--surface,#fff))!important;
+ border-top:1px solid var(--border,rgba(148,163,184,.18))!important;
+}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input,select,textarea,button){max-width:100%}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet){font-family:var(--font-family,system-ui,sans-serif);font-size:13px}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea){
+ box-sizing:border-box;min-height:41px;max-width:100%;padding:9px 11px;border-radius:10px;
+ color:var(--text,#111827);background:var(--input-bg,var(--surface,#fff));
+ border:1px solid var(--input-border,var(--border,rgba(148,163,184,.3)));font:inherit;
+}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(textarea){min-height:90px;resize:vertical}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input[type="file"]){width:100%;padding:9px}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(button){cursor:pointer}
+.eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(button,input,select,textarea):focus-visible{outline:2px solid var(--ba-primary,var(--primary-color,#2563eb));outline-offset:2px}
+.eleeveon-modal-root :is(.ba-modal-head,.ba-sheet-head,.cs-sheet-head) button {flex-shrink:0;min-width:36px;min-height:36px}
+.eleeveon-modal-root .cs-overlay>.cs-backdrop {position:absolute!important;inset:0!important;z-index:0!important;background:transparent!important}
+.eleeveon-modal-root>.cs-menu-overlay>.cs-menu{
+ position:relative!important;z-index:2!important;inset:auto!important;top:auto!important;left:auto!important;right:auto!important;
+ transform:none!important;display:grid!important;gap:5px!important;box-sizing:border-box!important;
+ width:min(460px,100%)!important;max-width:100%!important;max-height:calc(100dvh - 24px)!important;overflow-y:auto!important;
+ padding:14px!important;border-radius:18px!important;background:var(--card-bg,var(--surface,#fff))!important;
+ box-shadow:0 24px 75px rgba(0,0,0,.34)!important;
+}
+@media(max-width:640px){
+ .eleeveon-modal-root>.ba-sheet-backdrop,.eleeveon-modal-root>.ba-modal-backdrop,.eleeveon-modal-root>.cs-overlay{padding:0!important}
+ .eleeveon-modal-root>.ba-sheet-backdrop>.ba-sheet,
+ .eleeveon-modal-root>.ba-modal-backdrop>.ba-modal,
+ .eleeveon-modal-root>.ba-modal-backdrop>.ba-camera-modal,
+ .eleeveon-modal-root>.cs-overlay>.cs-modal,
+ .eleeveon-modal-root>.cs-overlay>.cs-sheet{
+  width:100vw!important;height:100dvh!important;max-height:100dvh!important;max-width:100vw!important;
+  padding:12px!important;border-radius:0!important;
+ }
+ .eleeveon-modal-root>.cs-menu-overlay>.cs-menu{width:calc(100vw - 20px)!important}
+ .eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions){
+  display:flex!important;flex-wrap:wrap!important;justify-content:flex-end!important;gap:8px!important
+ }
+ .eleeveon-modal-root :is(.ba-sheet-actions,.ba-modal-actions,.ba-sheet-footer,.cs-sheet-actions,.cs-modal-actions)>button{flex:1 1 125px;min-height:42px}
+}
+`;
+function EleeveonFullscreenOverlay({children}:{children:React.ReactNode}){
+ const [target,setTarget]=React.useState<HTMLElement|null>(null);
+ const [theme,setTheme]=React.useState<React.CSSProperties>({});
+ React.useEffect(()=>{
+  const page=document.querySelector<HTMLElement>(".role-shell .app-content .ba-page, .role-shell .app-content .cs-page, .role-shell .app-content .subject-setup-root, .ba-page, .cs-page");
+  if(page){const cs=window.getComputedStyle(page);const vars:Record<string,string>={};
+   for(const key of ["--ba-primary","--cs-primary","--cs-surface","--cs-text","--cs-border"]){const v=cs.getPropertyValue(key).trim();if(v)vars[key]=v;}
+   setTheme(vars as React.CSSProperties);
+  }
+  setTarget(document.body);
+  const previous=document.body.style.overflow;document.body.style.overflow="hidden";
+  return()=>{document.body.style.overflow=previous;};
+ },[]);
+ return target?createPortal(<div className="eleeveon-modal-root" style={theme}><style>{eleeveonFullscreenOverlayCss}</style>{children}</div>,target):null;
+}
+
 const TemplatePreviewStudentReportCard =
   StudentReportCard as React.ComponentType<any>;
 const TemplatePreviewCumulativeReportBook =
@@ -5387,7 +5485,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       )}
 
       {sectionOpen === "admissionNumbers" && (
-        <div className="ba-sheet-backdrop" role="dialog" aria-modal="true" aria-label="Admission number settings">
+        <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true" aria-label="Admission number settings">
           <section className="ba-sheet">
             <div className="ba-sheet-head"><div><h2>Admission Numbers</h2><p>Numbering rules for new student records in this branch.</p></div><button type="button" onClick={() => setSectionOpen(null)} aria-label="Close">✕</button></div>
             <div className="ba-form compact">
@@ -5401,7 +5499,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
             </div>
             <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={() => void saveAdmissionNumbers()}>{savingAdmission ? "Saving..." : "Save"}</button></div>
           </section>
-        </div>
+        </div></EleeveonFullscreenOverlay>
       )}
 
       {sectionOpen === "academic" && (
@@ -5689,7 +5787,7 @@ function BranchIDCardSettings({
   }
 
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true"
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true"
       aria-label="ID Card Settings" style={{ zIndex: 1200 }}>
       <section className="ba-sheet small" style={{ width: "min(100%, 590px)" }}>
         <header className="ba-sheet-head">
@@ -5715,7 +5813,7 @@ function BranchIDCardSettings({
           Generate, view, print, replace or revoke an ID from the student's or teacher's record.
         </p>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -5884,7 +5982,7 @@ function AcademicFilterSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -6003,7 +6101,7 @@ function AcademicFilterSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6102,7 +6200,7 @@ function MoreSheet({
   ];
 
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet small">
         <div className="ba-sheet-head">
           <div>
@@ -6148,7 +6246,7 @@ function MoreSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6172,7 +6270,7 @@ function AcademicSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -6284,7 +6382,7 @@ function AcademicSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6309,7 +6407,7 @@ function SchoolSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -6420,7 +6518,7 @@ function SchoolSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6445,7 +6543,7 @@ function BranchSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -6563,7 +6661,7 @@ function BranchSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -6617,7 +6715,7 @@ function AppearanceSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -6707,7 +6805,7 @@ function AppearanceSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -7464,7 +7562,7 @@ function ReportTemplateSheet({
   };
 
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet report-template-suite-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -8290,7 +8388,7 @@ function ReportTemplateSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -8352,7 +8450,7 @@ function PortalHighlightsSheet({
   };
 
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet portal-highlight-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -8620,7 +8718,7 @@ function PortalHighlightsSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 
@@ -8644,7 +8742,7 @@ function MediaSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
+    <EleeveonFullscreenOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
       <section className="ba-sheet">
         <div className="ba-sheet-head">
           <div>
@@ -8676,7 +8774,7 @@ function MediaSheet({
           </button>
         </div>
       </section>
-    </div>
+    </div></EleeveonFullscreenOverlay>
   );
 }
 

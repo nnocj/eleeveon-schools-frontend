@@ -155,6 +155,8 @@ import WebsiteSettingsSheet from "../../lib/websites/builder/settings/WebsiteSet
 import { useDataRevision } from "../../hooks/useDataRevision";
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 const TemplatePreviewStudentReportCard =
   StudentReportCard as React.ComponentType<any>;
 const TemplatePreviewCumulativeReportBook =
@@ -229,6 +231,7 @@ const generatedDateLabelOptions = [
 ];
 
 type ToastTone = "success" | "error" | "info";
+type SettingsDisplayMode = "cards" | "table";
 type ReportTemplateReportType =
   | "student_report"
   | "cumulative_book"
@@ -2484,6 +2487,12 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     message: string;
   } | null>(null);
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<SettingsDisplayMode>("cards");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+    }
+  }, []);
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [sectionOpen, setSectionOpen] = useState<SettingsSection | null>(null);
@@ -5145,6 +5154,32 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     );
   }, [activePeriod, activeStructure, branchForm, form, schoolForm, searchTerm, view, admissionDraft]);
 
+  // Report Card Settings uses this same editor with view="reports".
+  // The shared actions work under both the Setup route and the legacy direct routes.
+  const settingsToolbar = {
+    add: () => setSectionOpen(view === "reports" ? "reportTemplates" : "academic"),
+    search: (value: string) => setSearch(value),
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: () => printBranchTable({
+      title: view === "reports" ? "Report card settings" : "Branch settings",
+      subtitle: `${visibleSections.length} settings sections`,
+      columns: [
+        { key: "setting", label: "Section" },
+        { key: "summary", label: "Current details" },
+        { key: "description", label: "Configuration" },
+      ],
+      rows: visibleSections.map(section => ({
+        setting: section.title,
+        summary: section.subtitle,
+        description: section.detail,
+      })),
+    }),
+  };
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", settingsToolbar);
+  useRegisterBranchWorkspaceToolbar("branchSettings", settingsToolbar);
+  useRegisterBranchWorkspaceToolbar("reportCardSettings", settingsToolbar);
+
   if (!hasLoaded && (accountLoading || contextLoading || loading)) {
     return (
       <State
@@ -5303,6 +5338,46 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         </div>
       </section>
 
+      {viewMode === "table" ? (
+        <section className="ba-table-card branch-settings-table-card" aria-label="Settings sections table">
+          <table className="branch-settings-table">
+            <thead>
+              <tr>
+                <th scope="col">Setting</th>
+                <th scope="col">Current details</th>
+                <th scope="col">Configuration</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span className="sr-only">Action</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleSections.map(section => (
+                <tr key={section.key}>
+                  <td>
+                    <span className="branch-setting-table-name">
+                      <span className="branch-settings-icon">{section.icon}</span>
+                      <strong>{section.title}</strong>
+                    </span>
+                  </td>
+                  <td>{section.subtitle}</td>
+                  <td>{section.detail}</td>
+                  <td><span className={`status-dot-mini ${section.tone}`} aria-label="Current status" /></td>
+                  <td>
+                    <button type="button" className="branch-setting-table-edit"
+                      onClick={() => setSectionOpen(section.key)}
+                      aria-label={`Configure ${section.title}`}>
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!visibleSections.length && (
+            <Empty icon="⚙️" title="No settings found" text="Try another search term or open More to refresh settings." />
+          )}
+        </section>
+      ) : (
       <section className="ba-list branch-settings-list">
         {visibleSections.map((section) => (
           <button
@@ -5335,6 +5410,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         )}
       </section>
 
+      )}
+
       {filterOpen && (
         <AcademicFilterSheet
           form={form}
@@ -5348,6 +5425,8 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       {moreOpen && (
         <MoreSheet
           view={view}
+          viewMode={viewMode}
+          onChangeView={setViewMode}
           savingAll={savingAll}
           onSave={async () => {
             setMoreOpen(false);
@@ -5988,6 +6067,8 @@ function AcademicFilterSheet({
 
 function MoreSheet({
   view = "branch",
+  viewMode,
+  onChangeView,
   savingAll,
   onSave,
   onRefresh,
@@ -5995,6 +6076,8 @@ function MoreSheet({
   onClose,
 }: {
   view?: "branch" | "reports";
+  viewMode: SettingsDisplayMode;
+  onChangeView: (mode: SettingsDisplayMode) => void;
   savingAll: boolean;
   onSave: () => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
@@ -6090,6 +6173,14 @@ function MoreSheet({
         </div>
 
         <div className="ba-menu-list">
+          <button type="button" className={viewMode === "cards" ? "active" : ""}
+            onClick={() => { onChangeView("cards"); onClose(); }}>
+            <span>▦</span><b>Cards</b><small>Compact cards, best for phones</small>
+          </button>
+          <button type="button" className={viewMode === "table" ? "active" : ""}
+            onClick={() => { onChangeView("table"); onClose(); }}>
+            <span>☷</span><b>Table</b><small>Compact columns, best for laptops</small>
+          </button>
           {sections.filter(s => (view === "reports" ? ["reportMedia", "reportTemplates"] : ["academic", "school", "branch", "admissionNumbers", "appearance", "idCards"]).includes(s.key)).map((section) => (
             <button
               key={section.key}
@@ -10894,6 +10985,28 @@ const css = `
     max-width:calc(100vw - var(--portal-content-left,0px) - 20px);
   }
 }
+
+/* Shared portal styling: scope changes only to Branch / Report settings. */
+.branch-settings-page { min-height:0; background:transparent; padding:3px 0 14px; }
+.role-shell.branch-workspace-layout .branch-settings-page > .ba-search-card {display:none;}
+.branch-settings-page .branch-live-preview { margin:0 0 8px; border-radius:12px; box-shadow:none; padding:8px 10px; }
+.branch-settings-page .branch-settings-list { margin-top:4px; gap:7px; }
+.branch-settings-page .branch-settings-list .student-row {border-radius:13px; padding:10px; box-shadow:0 2px 9px rgba(15,23,42,.035);}
+.branch-settings-page .branch-settings-icon {width:34px;height:34px;border-radius:10px;font-size:16px;flex-shrink:0;}
+.branch-settings-page .ba-table-card.branch-settings-table-card {overflow-x:auto;border-radius:12px;margin-top:4px;box-shadow:0 3px 12px rgba(15,23,42,.045);}
+.branch-settings-table {width:100%;border-collapse:collapse;table-layout:auto;font-size:12px;}
+.branch-settings-table th {background:var(--surface-2,var(--bg,#f7f8fb));font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted,#64748b);font-weight:800;}
+.branch-settings-table th, .branch-settings-table td {text-align:left;padding:10px 12px;border-bottom:1px solid var(--border,rgba(148,163,184,.15));vertical-align:middle;}
+.branch-settings-table tbody tr:last-child td {border-bottom:0;}
+.branch-settings-table tbody tr:hover {background:color-mix(in srgb,var(--ba-primary) 3%,transparent);}
+.branch-settings-table td:nth-child(2) {font-weight:650;}
+.branch-settings-table td:nth-child(3) {font-size:11px;color:var(--muted,#64748b);}
+.branch-setting-table-name {display:flex;align-items:center;gap:9px;min-width:155px;}
+.branch-setting-table-name strong {font-size:12px;font-weight:850;}
+.branch-settings-page .branch-setting-table-edit {width:auto;min-height:30px;padding:5px 12px;border-radius:8px;background:color-mix(in srgb,var(--ba-primary) 8%,var(--surface,#fff));color:var(--ba-primary);border:1px solid color-mix(in srgb,var(--ba-primary) 25%,var(--border,#d6dce4));font-weight:750;cursor:pointer;}
+.branch-settings-page .branch-setting-table-edit:hover {background:color-mix(in srgb,var(--ba-primary) 15%,var(--surface,#fff));}
+.branch-settings-page .ba-sheet,.branch-settings-page .ba-modal {border-radius:15px;}
+@media (max-width:899px) {.branch-settings-table {min-width:620px;}}
 
 `;
 /** Operational branch settings; report controls have their own module. */

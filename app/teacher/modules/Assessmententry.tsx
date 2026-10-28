@@ -22,6 +22,7 @@ import { useTeacherWorkspaceAccess, verifyTeacherSubjectAssignment, idsEqual } f
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import { useAccount } from "../../context/account-context";
 import { useSettings } from "../../context/settings-context";
 import { useActiveBranch } from "../../context/active-branch-context";
 
@@ -271,6 +272,7 @@ export default function AssessmentEntries() {
 
   const router = useRouter();
   const teacherAccess = useTeacherWorkspaceAccess();
+  const { user: signedInUser } = useAccount();
   const { settings, loading: settingsLoading } = useSettings();
   const { activeBranch } = useActiveBranch();
   const workspace = useBranchWorkspaceScope();
@@ -625,9 +627,29 @@ export default function AssessmentEntries() {
         const id = idOf(row.id);
         const cls: any = classMap.get(idOf(row.classId));
         const subj: any = subjectMap.get(idOf(row.subjectId));
+        // The assigned teacher may be missing from the locally cached teachers
+        // table on a teacher's device. This page only exposes their own assigned
+        // class-subjects, so fall back to the authenticated user's identity ONLY
+        // when the assignment's teacherId matches this teacher membership.
         const teacher: any = row.teacherId
           ? teacherMap.get(idOf(row.teacherId))
           : undefined;
+        const teacherIdMatchesSession = idsEqual(
+          row.teacherId, teacherAccess.teacherId,
+        );
+        const signedInTeacherName = teacherIdMatchesSession
+          ? String(
+              (workspace.membership as any)?.teacher?.fullName ||
+              (workspace.membership as any)?.teacher?.name ||
+              signedInUser?.fullName ||
+              (signedInUser as any)?.name ||
+              "",
+            ).trim()
+          : "";
+        const assignedTeacherName =
+          String(teacher?.fullName || teacher?.name || "").trim() ||
+          signedInTeacherName ||
+          (teacherIdMatchesSession ? "You" : "No teacher assigned");
         const academicStructure: any = academicStructureMap.get(
           idOf(row.academicStructureId),
         );
@@ -655,7 +677,7 @@ export default function AssessmentEntries() {
           className,
           subjectName,
           subjectCode,
-          teacherName: teacher?.fullName || "No teacher assigned",
+          teacherName: assignedTeacherName,
           academicStructureName: academicStructure?.name || "Unknown structure",
           academicPeriodName,
           curriculumName: curriculum?.name || "No curriculum",
@@ -672,6 +694,9 @@ export default function AssessmentEntries() {
     classMap,
     subjectMap,
     teacherMap,
+    teacherAccess.teacherId,
+    workspace.membership,
+    signedInUser?.fullName,
     academicStructureMap,
     periodMap,
     curriculumSubjectMap,
@@ -2624,8 +2649,11 @@ function ClassSubjectPickerRow({
       <span className="app-icon">📝</span>
       <span className="student-main">
         <strong>{item.option.subjectName}</strong>
-        <small>
-          {item.option.teacherName} · {item.option.academicPeriodName}
+        <small className="ae-subject-teacher-name">
+          <span aria-hidden="true">👤</span> Teacher: {item.option.teacherName}
+        </small>
+        <small className="ae-subject-period-name">
+          {item.option.academicPeriodName}
         </small>
         <em>
           {ready
@@ -3974,4 +4002,14 @@ const css = `
   .ae-page .ae-entry-list .ae-score-grid label > small { font-size: 9px; }
 }
 
+
+/* Assigned teacher identity: visible on class-subject cards, in both themes. */
+.ae-page .ae-picker-list .ae-subject-teacher-name {
+  display:block; color:var(--ae-text); font-weight:700;
+  font-size:11.5px; line-height:1.45; white-space:normal;
+  overflow-wrap:anywhere;
+}
+.ae-page .ae-picker-list .ae-subject-period-name {
+  display:block; color:var(--ae-muted); font-size:10.5px; line-height:1.3;
+}
 `;

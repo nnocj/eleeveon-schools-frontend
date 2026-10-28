@@ -11,7 +11,7 @@ import { supportApi, type SupportDirectory, type SupportAttachment, type Support
 import {
   ensureOwnDevice, ownPublicDevice, encryptPayload, decryptPayload,
   encryptAttachment, decryptAttachment, encryptedEnvelope,
-  readTrust, saveTrust, parseEnvelope, type PublicSupportDevice, type ClearSupportPayload, type SupportAttachmentManifest,
+  readTrust, saveTrust, parseEnvelope, type PublicSupportDevice, type ClearSupportPayload, type SupportAttachmentManifest, type SupportHistoryKeyRecord,
 } from "../../lib/support/supportCrypto";
 import { hubScope, hubCachedInbox, hubSaveInbox, hubCachedThread, hubSaveThread, hubAppendConfirmedMessage, hubRemoveCachedConversation } from "../../lib/support/hubCache";
 
@@ -21,6 +21,7 @@ type Props = {
   schoolName?: string | null; branchName?: string | null;
   navigation?: React.ReactNode;
   mobileNavigation?: React.ReactNode;
+  onOpenHubSettings?: (conversationId?:string) => void;
 };
 type DisplayAttachment = SupportAttachment & {
   encryptedSourceUrl?:string|null;
@@ -80,6 +81,17 @@ const CATEGORIES = [
 ] as const;
 const STATUSES = ["submitted", "acknowledged", "under_review", "in_progress", "planned", "resolved", "closed"];
 const MAX_BYTES = 100 * 1024 * 1024;
+function mergeConversationPages(existing:SupportConversation[],incoming:SupportConversation[]):SupportConversation[]{
+  const combined=new Map(existing.map(c=>[c.id,c]));for(const row of incoming)combined.set(row.id,row);
+  const sorted=[...combined.values()].sort((a,b)=>new Date(b.lastMessage?.createdAt||b.updatedAt).getTime()-new Date(a.lastMessage?.createdAt||a.updatedAt).getTime());
+  return existing.length===sorted.length && existing.every((c,i)=>c.id===sorted[i].id && c.updatedAt===sorted[i].updatedAt && c.unreadCount===sorted[i].unreadCount && c.displayTitle===sorted[i].displayTitle)?existing:sorted;
+}
+function mergeMessagePages(existing:SupportMessage[], incoming:SupportMessage[]):SupportMessage[]{
+  const combined=new Map(existing.map(m=>[m.id,m]));
+  for(const m of incoming)combined.set(m.id,m);
+  const sorted=[...combined.values()].sort((a,b)=>new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()||a.id.localeCompare(b.id));
+  return existing.length===sorted.length && existing.every((row,i)=>row.id===sorted[i].id && row.body===sorted[i].body && row.deletedForEveryone===sorted[i].deletedForEveryone && JSON.stringify(row.attachments)===JSON.stringify(sorted[i].attachments))?existing:sorted;
+}
 function readable(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase()); }
 function stamp(s?: string) { if (!s) return ""; const d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleTimeString("en-GH", { hour: "2-digit", minute: "2-digit" }); }
 function date(s?: string) { if (!s) return ""; const d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GH", { day: "numeric", month: "short", year: "numeric" }); }
@@ -112,7 +124,7 @@ function AttachmentView({ attachment }: { attachment: DisplayAttachment }) {
   return <a className="esc-attachment" href={resolved} download={a.name}>📎 <span>{a.name}<small>{fileSize(a.sizeBytes)}</small></span> ↓</a>;
 }
 
-export default function EleeveonSupportChat({ isDeveloper, accountId, userId, role, schoolId, branchId, membershipId, schoolName, navigation, mobileNavigation }: Props) {
+export default function EleeveonSupportChat({ isDeveloper, accountId, userId, role, schoolId, branchId, membershipId, schoolName, navigation, mobileNavigation, onOpenHubSettings }: Props) {
   const identity = userId || "";
   const cacheScope = hubScope(accountId, identity, isDeveloper ? "platform_developer" : (role || "school"), schoolId, branchId);
   const activeCacheScope = useRef(cacheScope);
@@ -120,12 +132,31 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const [ready, setReady] = useState(false);
   const [ownId, setOwnId] = useState("");
   const [devices, setDevices] = useState<(PublicSupportDevice & { revoked?: boolean })[]>([]);
-  const [reviewKeys, setReviewKeys] = useState(false);
   const [trustRevision, setTrustRevision] = useState(0);
   const [conversations, setConversations] = useState<SupportConversation[]>([]);
+  const [inboxCursor,setInboxCursor] = useState<string|null>(null);
+  const [inboxMore,setInboxMore] = useState(false);
+  const [inboxLoading,setInboxLoading] = useState(false);
+  const inboxPagingStarted = useRef(false);
   const [selected, setSelected] = useState("");
   const [opened, setOpened] = useState<SupportConversation | null>(null);
   const [thread, setThread] = useState<SupportMessage[]>([]);
+  const [historyKeys,setHistoryKeys] = useState<Record<string,SupportHistoryKeyRecord>>({});
+  const [historyCursor,setHistoryCursor] = useState<string|null>(null);
+  const [hasOlderHistory,setHasOlderHistory] = useState(false);
+  const [historyBusy,setHistoryBusy] = useState(false);
+  const historyScrollRef=useRef<{top:number;height:number}|null>(null);
+  const historyPagingStarted=useRef(false);
+  const mergeHistoryKeys=useCallback((records:SupportHistoryKeyRecord[],opening?:SupportHistoryKeyRecord|null)=>{
+    if(!records.length&&!opening)return;
+    setHistoryKeys(previous=>{const next={...previous};let changed=false;
+      for(const row of [...records,...(opening?[opening]:[])]){
+        if(!next[row.messageId]||next[row.messageId].signature!==row.signature){next[row.messageId]=row;changed=true;}
+      }
+      return changed?next:previous;
+    });
+  },[]);
+
   const [rendered, setRendered] = useState<DisplayMessage[]>([]);
   const [decryptedSubject, setDecryptedSubject] = useState<Record<string, string>>({});
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -151,13 +182,13 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const voiceAnalyserRef = useRef<AnalyserNode | null>(null);
   const voiceAudioContextRef = useRef<AudioContext | null>(null);
   const voiceRafRef = useRef(0);
-  const [wallpaper, setWallpaper] = useState<"pier" | "garden" | "gradient">("pier");
 
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [openingId, setOpeningId] = useState("");
   const openingRequest = useRef(0);
+  const openingIdRef = useRef('');
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [callOpen, setCallOpen] = useState(false);
   const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
@@ -257,16 +288,15 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const objectUrls = useRef(new Set<string>());
   const [, setRefreshMark] = useState(0);
   const knownActive = devices.filter(d => !d.revoked);
-  const trusted = readTrust(accountId, identity);
-  const changedDevices = knownActive.filter(d => d.id !== ownId && trusted[d.id] !== d.fingerprint);
+  const changedDevices = knownActive.filter(d => d.id !== ownId && readTrust(accountId, identity)[d.id] !== d.fingerprint);
 
   useEffect(() => {
-    openingRequest.current += 1; setOpeningId("");
+    openingRequest.current += 1; openingIdRef.current = ''; setOpeningId("");
     lastRefreshedKeys.current = 0;
     selectedRef.current = "";
-    setSelected(""); setOpened(null); setThread([]); setRendered([]); setConversations([]);
+    setSelected(""); setOpened(null); setThread([]); setRendered([]);setHistoryKeys({});setHistoryCursor(null);setHasOlderHistory(false);historyPagingStarted.current=false; setConversations([]);setInboxCursor(null);setInboxMore(false);inboxPagingStarted.current=false;
     setReplyTarget(null); setEditTarget(null); setMessageMenuId("");
-    setDevices([]); setOwnId(""); setReady(false); setDecryptedSubject({}); setReviewKeys(false);
+    setDevices([]); setOwnId(""); setReady(false); setDecryptedSubject({});
     decryptedCache.current.clear(); drafts.current.clear();
     objectUrls.current.forEach(url => URL.revokeObjectURL(url)); objectUrls.current.clear();
   }, [cacheScope]);
@@ -284,19 +314,6 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     return () => { cancelled = true; };
   }, [cacheScope, accountId, identity]);
   useEffect(() => { setOnline(typeof navigator !== "undefined" && navigator.onLine); }, []);
-  useEffect(() => {
-    if (!identity) return;
-    try {
-      const value = window.localStorage.getItem(`eleeveon:hub:wallpaper:${identity}`);
-      if (value === "pier" || value === "garden" || value === "gradient") setWallpaper(value);
-    } catch { /* No persistent preference in private mode. */ }
-  }, [identity]);
-  function chooseWallpaper(next: "pier" | "garden" | "gradient") {
-    setWallpaper(next);
-    try { window.localStorage.setItem(`eleeveon:hub:wallpaper:${identity}`, next); } catch { /* optional */ }
-    setHeaderMoreOpen(false);
-  }
-
   useEffect(()=>{
     if(!isDeveloper)return;
     let active=true;
@@ -305,8 +322,12 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   },[isDeveloper,targetAccount]);
   const loadKeys = useCallback(async (conversationId?: string) => {
     const result = await supportApi.keys(conversationId);
-    setDevices(result.devices || []);
-    return result.devices || [];
+    const incoming = result.devices || [];
+    // Background key-directory polls must not reset decrypted message UI.
+    setDevices(current => current.length === incoming.length && current.every((row, i) =>
+      row.id === incoming[i].id && row.fingerprint === incoming[i].fingerprint &&
+      Boolean(row.revoked) === Boolean(incoming[i].revoked)) ? current : incoming);
+    return incoming;
   }, []);
   const bootstrap = useCallback(async () => {
     if (!identity || !accountId) return;
@@ -346,16 +367,25 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       const current = selectedRef.current;
       const [list, detailResult] = await Promise.all([
         supportApi.list(),
-        current ? supportApi.open(current).then(detail => ({ detail })).catch(error => ({ error })) : Promise.resolve(null),
+        current ? Promise.all([supportApi.open(current),supportApi.messagePage(current,undefined,100,ownId||undefined)])
+          .then(([detail,page]) => ({detail,page})).catch(error => ({ error })) : Promise.resolve(null),
       ]);
       if (activeCacheScope.current !== requestedScope) return;
       const items = list.conversations || [];
-      setConversations(items);
-      void hubSaveInbox(requestedScope, items);
-      if (current && current === selectedRef.current && detailResult && "detail" in detailResult) {
+      if(!inboxPagingStarted.current){setInboxCursor(items.length?items[items.length-1].id:null);setInboxMore(Boolean(items.length));}
+      setConversations(previous=>mergeConversationPages(previous,items));
+      // Cache current server inbox, never persist plaintext; older pages remain server authoritative.
+      void hubSaveInbox(requestedScope,items);
+      if (current && current === selectedRef.current && !openingIdRef.current && detailResult && "detail" in detailResult) {
         const detail = detailResult.detail;
-        setOpened(detail.conversation);
-        setThread(detail.messages || []);
+        setOpened(previous => previous?.id === detail.conversation.id &&
+          previous.updatedAt === detail.conversation.updatedAt &&
+          previous.status === detail.conversation.status &&
+          previous.displayTitle === detail.conversation.displayTitle ? previous : detail.conversation);
+        const page = detailResult.page;
+        mergeHistoryKeys(page.historyKeys||[],page.openingHistoryKey);
+        if(!historyPagingStarted.current){setHasOlderHistory(page.hasMore);setHistoryCursor(page.nextCursor);}
+        setThread(previous => mergeMessagePages(previous, page.messages||[]));
         let freshKeys: (PublicSupportDevice & { revoked?: boolean })[] | undefined;
         // Device directories change much less often than chat messages.
         if (Date.now() - lastRefreshedKeys.current > 60000) {
@@ -364,7 +394,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             lastRefreshedKeys.current = Date.now();
           } catch { /* stale public keys can still verify cached ciphertext */ }
         }
-        void hubSaveThread(requestedScope, detail.conversation, detail.messages || [], freshKeys);
+        void hubSaveThread(requestedScope, detail.conversation, page.messages || [], freshKeys);
         if (!document.hidden) void markOpenedRead(current);
       }
       if (!quiet) setError("");
@@ -376,8 +406,13 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       refreshBusy.current = false;
       if (!quiet) setLoading(false);
     }
-  }, [cacheScope, loadKeys, markOpenedRead]);
+  }, [cacheScope, loadKeys, markOpenedRead, ownId, mergeHistoryKeys]);
   useEffect(() => { if (ready) void refresh(); }, [ready, refresh]);
+  useEffect(() => {
+    const recheck = () => { setTrustRevision(n => n + 1); void loadKeys(selectedRef.current || undefined).catch(()=>undefined); };
+    window.addEventListener('eleeveon:hub:keys-reviewed', recheck);
+    return () => window.removeEventListener('eleeveon:hub:keys-reviewed', recheck);
+  }, [loadKeys]);
   useEffect(() => {
     const timer = window.setInterval(() => { if (!document.hidden && navigator.onLine && !busy) void refresh(true); }, 9000);
     const focus = () => { if (navigator.onLine && ready) void refresh(true); };
@@ -399,7 +434,13 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     void voiceAudioContextRef.current?.close();
     objectUrls.current.forEach(url => URL.revokeObjectURL(url));
   }, []);
-  useEffect(() => { const pane = messagesRef.current; if (pane) pane.scrollTop = pane.scrollHeight; }, [rendered.length, selected]);
+  useEffect(() => { const pane = messagesRef.current;if(!pane)return;
+    if(historyScrollRef.current){const prior=historyScrollRef.current;historyScrollRef.current=null;
+      pane.scrollTop=Math.max(0,pane.scrollHeight-prior.height+prior.top);return;}
+    // Preserve the reader's scroll position while new ciphertext is decrypted.
+    const nearBottom=pane.scrollHeight-pane.scrollTop-pane.clientHeight<250;
+    if(nearBottom||selected!==selectedRef.current)pane.scrollTop=pane.scrollHeight;
+  }, [rendered.length, selected]);
   useEffect(() => {
     if (!messageMenuId) return;
     const close = (e: KeyboardEvent) => { if (e.key === "Escape") setMessageMenuId(""); };
@@ -519,7 +560,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         const signedBy = devices.find(d => d.id === fromDeviceId);
         const pinned = readTrust(accountId, identity)[fromDeviceId];
         if (!signedBy || (m.authorUserId && signedBy.userId !== m.authorUserId) || !pinned || pinned !== signedBy.fingerprint) throw new Error("Verify this sender's device fingerprint before reading the message.");
-        const content: ClearSupportPayload = await decryptPayload(accountId, identity, id, m.id, m.body, devices);
+        const content: ClearSupportPayload = await decryptPayload(accountId, identity, id, m.id, m.body, devices, historyKeys[m.id]);
         const displayAttachments: DisplayAttachment[] = [];
         if (content.attachment && m.attachments?.length) {
           const cipher = m.attachments[0];
@@ -552,12 +593,17 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
           error: cause instanceof Error ? cause.message : "The encryption keys are unavailable." };
       }
     };
-    setRendered(raw.map(m => ({
-      ...m,
-      displayBody: m.deletedForEveryone ? "Message deleted" : encryptedEnvelope(m.body) ? "🔒 Decrypting saved message…" : m.body,
-      displayAttachments: [],
-      decrypted: Boolean(m.deletedForEveryone),
-    })));
+    setRendered(previous => previous.length === raw.length && previous.every((item,index) =>
+      item.id === raw[index].id && item.body === raw[index].body &&
+      item.deletedForEveryone === raw[index].deletedForEveryone)
+      ? previous
+      : raw.map(m => ({
+          ...m,
+          displayBody: m.deletedForEveryone ? "Message deleted" : encryptedEnvelope(m.body) ? "🔒 Decrypting saved message…" : m.body,
+          displayAttachments: [],
+          decrypted: Boolean(m.deletedForEveryone),
+        })));
+
     // Decrypt newest messages first, in small batches, so older attachments
     // cannot hold the entire visible conversation hostage.
     void (async () => {
@@ -569,13 +615,21 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         setRendered(current => {
           if (current.length !== raw.length) return current;
           const updated = [...current];
-          slice.forEach((index, i) => { updated[index] = completed[i]; });
-          return updated;
+          let changed = false;
+          slice.forEach((index, i) => {
+            const next = completed[i], existing = updated[index];
+            if (existing?.id !== next.id || existing?.body !== next.body ||
+                existing?.displayBody !== next.displayBody || existing?.decrypted !== next.decrypted ||
+                existing?.displayAttachments?.length !== next.displayAttachments?.length) {
+              updated[index] = next; changed = true;
+            }
+          });
+          return changed ? updated : current;
         });
       }
     })();
     return () => { cancelled = true; };
-  }, [opened, thread, devices, accountId, identity, ready, trustRevision]);
+  }, [opened, thread, devices, accountId, identity, ready, trustRevision, historyKeys]);
 
   // Apply only signed, successfully decrypted revisions by the original author.
   // Revision events remain in the server's immutable message history.
@@ -639,10 +693,32 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   // Cache-first navigation: never wait for the network or attachment downloads
   // before selecting a conversation. The decryption effect independently validates
   // the sender's pinned fingerprint and decrypts only on this device.
+  async function loadEarlierConversations(){
+    if(inboxLoading||!inboxMore||!inboxCursor||!navigator.onLine)return;
+    setInboxLoading(true);setError('');
+    try{
+      const page=await supportApi.conversationPage(inboxCursor,50);
+      inboxPagingStarted.current=true;
+      setConversations(previous=>mergeConversationPages(previous,page.conversations));
+      setInboxMore(page.hasMore);setInboxCursor(page.nextCursor);
+    }catch(cause){setError(cause instanceof Error?cause.message:'Cannot load earlier conversations.');}
+    finally{setInboxLoading(false);}
+  }
   async function openConversation(id: string) {
     if (!id || (id === selectedRef.current && opened && !openingId)) return;
     const serial = ++openingRequest.current;
     const requestedScope = cacheScope;
+    // Commit the clicked selection immediately. Previous thread content must
+    // never flash while this device reads encrypted cache or downloads keys.
+    selectedRef.current = id;
+    setSelected(id);
+    setOpened(null);
+    setThread([]);
+    setHistoryKeys({});setHistoryCursor(null);setHasOlderHistory(false);historyPagingStarted.current=false;
+    setRendered([]);
+    setNewChat(false);
+    setMobileOpen(true);
+    openingIdRef.current = id;
     setOpeningId(id);
     setError("");
     let hadCache = false;
@@ -656,7 +732,6 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         setOpened(cached.conversation);
         setThread(cached.messages);
         setDevices(cached.devices);
-        setRendered([]);
         setNewChat(false);
         setMobileOpen(true);
         setMessage(drafts.current.get(id) || "");
@@ -668,8 +743,10 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       }
 
       // Remote authority and public sender keys refresh concurrently.
-      const [detail, keyResult] = await Promise.all([
-        supportApi.open(id), supportApi.keys(id),
+      const [detail, keyResult, firstPage] = await Promise.all([
+        supportApi.open(id),
+        supportApi.keys(id).catch(() => ({ devices: cached?.devices || [] })),
+        supportApi.messagePage(id,undefined,100,ownId||undefined),
       ]);
       if (serial !== openingRequest.current || activeCacheScope.current !== requestedScope) return;
       const people = keyResult.devices || [];
@@ -678,15 +755,16 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       selectedRef.current = id;
       setSelected(id);
       setOpened(detail.conversation);
-      setThread(detail.messages || []);
+      mergeHistoryKeys(firstPage.historyKeys||[],firstPage.openingHistoryKey);
+      setHasOlderHistory(firstPage.hasMore);setHistoryCursor(firstPage.nextCursor);
+      setThread(firstPage.messages||[]);
       // Old decrypted messages are only reused after checking the CURRENT pinned
       // sender fingerprint in the effect; decrypted text is never persisted.
-      setRendered([]);
       setNewChat(false);
       setMobileOpen(true);
       setMessage(drafts.current.get(id) || "");
       setFiles([]); setReplyTarget(null); setEditTarget(null); setMessageMenuId(""); setAttachMenuOpen(false); setCallOpen(false);
-      void hubSaveThread(requestedScope, detail.conversation, detail.messages || [], people);
+      void hubSaveThread(requestedScope, detail.conversation, firstPage.messages || [], people);
       void markOpenedRead(id);
     } catch (cause) {
       if (serial === openingRequest.current) {
@@ -695,8 +773,24 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
           : cause instanceof Error ? cause.message : "Could not open this conversation.");
       }
     } finally {
-      if (serial === openingRequest.current) setOpeningId("");
+      if (serial === openingRequest.current) { openingIdRef.current = ''; setOpeningId(""); }
     }
+  }
+  async function loadOlderMessages(){
+    const id=selectedRef.current;const before=historyCursor;
+    if(!id||!hasOlderHistory||!before||historyBusy||!navigator.onLine)return;
+    setHistoryBusy(true);setError('');
+    const pane=messagesRef.current;
+    if(pane)historyScrollRef.current={top:pane.scrollTop,height:pane.scrollHeight};
+    try{
+      const page=await supportApi.messagePage(id,before,100,ownId||undefined);
+      if(id!==selectedRef.current)return;
+      historyPagingStarted.current=true;
+      mergeHistoryKeys(page.historyKeys||[],page.openingHistoryKey);
+      setThread(existing=>mergeMessagePages(existing,page.messages));
+      setHasOlderHistory(page.hasMore);setHistoryCursor(page.nextCursor);
+    }catch(cause){setError(cause instanceof Error?cause.message:'Could not load older messages.');historyScrollRef.current=null;}
+    finally{setHistoryBusy(false);}
   }
   async function startOutreach(){
     if(!isDeveloper||!targetAccount||busy)return;
@@ -722,7 +816,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     if (!active.some(d => d.id === ownId)) throw new Error("Your current device is missing from the encryption directory.");
     if (!active.some(d => d.userId !== identity)) throw new Error("Your message is not sent yet. Eleeveon Support needs to open the Center once to register its device. Refresh keys and retry.");
     if (active.some(d => d.id !== ownId && approved[d.id] !== d.fingerprint)) {
-      setReviewKeys(true);
+      onOpenHubSettings?.();
       throw new Error("Review and verify the participant device fingerprints before encrypting.");
     }
     return active;
@@ -1024,7 +1118,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     finally { setBusy(false); }
   }
   const title = opened?.displayTitle || (opened && decryptedSubject[opened.id]) || opened?.subject || "Eleeveon Support";
-  return <section className={`esc esc-wallpaper-${wallpaper}`} aria-label="Eleeveon encrypted support">
+  return <section className="esc" aria-label="Eleeveon encrypted support">
     <style>{`
       .esc {--esc-primary:var(--dashboard-primary,var(--ba-primary,#137d79));--esc-line:var(--border,rgba(110,131,145,.22));--esc-surface:var(--surface,var(--card-bg,#fff));--esc-text:var(--text,#1f3040);--esc-mute:color-mix(in srgb,var(--esc-surface) 89%,var(--esc-primary));color:var(--esc-text);font-size:13px;min-height:0;height:100%;isolation:isolate}
       .esc * {box-sizing:border-box}.esc button,.esc input,.esc textarea,.esc select{font:inherit;color:inherit}.esc button{cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .15s ease}.esc button:focus-visible,.esc textarea:focus-visible,.esc input:focus-visible,.esc select:focus-visible{outline:2px solid var(--esc-primary);outline-offset:2px}.esc button:disabled{opacity:.5;cursor:not-allowed}
@@ -1073,15 +1167,16 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
 
       /* A room of its own: scenic wallpaper plus unobtrusive, high-contrast glass. */
       .esc{--esc-primary:#11685f;--esc-text:#18342f;--esc-surface:rgba(255,255,254,.94);--esc-line:rgba(24,64,61,.17);--esc-mute:rgba(217,235,227,.69);background:linear-gradient(130deg,#b7d8da,#dfe4d3 50%,#92c2bb);padding:4px;border-radius:22px;position:relative;overflow:hidden}
-      .esc-wallpaper-pier{--hub-scene:url('/hub-pier.png')}
-      .esc-wallpaper-garden{--hub-scene:url('/hub-garden.png')}
-      .esc-wallpaper-gradient{--hub-scene:linear-gradient(125deg,#c0e7e4,#b5c7de 45%,#e6c9b3)}
+
+
+
       .esc-layout{border-radius:21px;border:1px solid rgba(255,255,255,.55);background:transparent;box-shadow:0 15px 42px rgba(2,35,34,.19)}
       .esc-side{background:rgba(247,250,244,.9);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-right:1px solid rgba(255,255,255,.55)}
       .esc-chat{background:linear-gradient(180deg,rgba(9,37,43,.18),rgba(7,37,30,.05) 45%,rgba(11,45,45,.25)),var(--hub-scene);background-size:cover;background-position:center;}
-      .esc-wallpaper-gradient .esc-chat{background:linear-gradient(140deg,#cbece8 0%,#d1ddd7 44%,#d8cabc 100%)}
+
       .esc-chat-head,.esc-composer-area{background:rgba(248,253,250,.88);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border-color:rgba(255,255,255,.7)}
       .esc-chat-head{min-height:62px}
+      .esc-loading-thread{display:grid;align-content:center;justify-content:center;gap:7px;text-align:center;min-height:200px;flex:1;color:#47605c}.esc-loading-thread strong{font-size:13px}.esc-loading-thread span{font-size:11px}.esc-chat-settings-button{display:none!important}
       .esc-body{padding:14px clamp(11px,2.4vw,33px) 22px}
       .esc-thread-card{border:1px solid transparent;transition:background .2s ease,border-color .2s ease}
       .esc-thread-card.current{background:rgba(36,119,108,.13);border-color:rgba(36,119,108,.13)}
@@ -1116,7 +1211,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       @media(max-width:680px){.esc{padding:0;border-radius:14px}.esc-layout{border-radius:14px}.esc-row{margin:5px 0}.esc-bubble{max-width:89%;font-size:12px;padding:7px 9px}.esc-chat-head{min-height:57px}.esc-body{padding:12px 10px 18px}.esc-waveform{gap:1px}.esc-waveform i{width:2px}}
 
       @media(max-width:980px) and (min-width:681px){.esc-layout{grid-template-columns:minmax(190px,34%) minmax(0,1fr)}.esc-chat-head{gap:5px;padding:8px}.esc-chat-head select{max-width:92px}.esc-bubble{max-width:94%}}
-      @media(max-width:680px){.esc{height:100%;min-height:0}.esc-layout{display:block;height:100%;min-height:0;border-radius:14px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:inline-flex}.esc-mobile-nav-in-chat{display:flex;align-items:center;flex:0 0 auto;max-width:77px}.esc-mobile-nav-in-chat select{width:100%;max-width:77px;min-width:52px;padding:7px 3px;font-size:11px}.esc-bubble{max-width:94%}.esc-body{padding:11px 10px 16px}.esc-chat-head{min-height:56px;padding:7px;gap:5px}.esc-chat-head select{max-width:90px}.esc-chat-head .esc-avatar{display:none}.esc-mobile-nav-in-chat{display:none}.esc-chat-head .esc-call-action{display:none}.esc-chat-head .esc-chat-info{min-width:0}.esc-chat-info strong{font-size:11px}.esc-chat-info small{font-size:9px}.esc-composer{padding:9px 8px;gap:5px;min-height:59px}.esc button.icon{height:36px;width:36px}.esc-composer textarea{font-size:16px}.esc-date{margin:10px auto}}
+      @media(max-width:680px){.esc-chat-settings-button{display:grid!important}.esc{height:100%;min-height:0}.esc-layout{display:block;height:100%;min-height:0;border-radius:14px}.esc-side{height:100%;border:0}.esc-chat{height:100%;display:none}.esc-layout.mobile-chat .esc-side{display:none}.esc-layout.mobile-chat .esc-chat{display:flex}.esc-back{display:inline-flex}.esc-mobile-nav-in-chat{display:flex;align-items:center;flex:0 0 auto;max-width:77px}.esc-mobile-nav-in-chat select{width:100%;max-width:77px;min-width:52px;padding:7px 3px;font-size:11px}.esc-bubble{max-width:94%}.esc-body{padding:11px 10px 16px}.esc-chat-head{min-height:56px;padding:7px;gap:5px}.esc-chat-head select{max-width:90px}.esc-chat-head .esc-avatar{display:none}.esc-mobile-nav-in-chat{display:none}.esc-chat-head .esc-call-action{display:none}.esc-chat-head .esc-chat-info{min-width:0}.esc-chat-info strong{font-size:11px}.esc-chat-info small{font-size:9px}.esc-composer{padding:9px 8px;gap:5px;min-height:59px}.esc button.icon{height:36px;width:36px}.esc-composer textarea{font-size:16px}.esc-date{margin:10px auto}}
       @media(prefers-reduced-motion:reduce){.esc *, .esc *::before, .esc *::after{animation:none!important;transition:none!important}}
     `}</style>
     <div ref={layoutRef} className={`esc-layout ${mobileOpen ? "mobile-chat" : ""}`} style={viewportHeight ? { height: `${viewportHeight}px` } : undefined}>
@@ -1131,7 +1226,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         <select className="esc-filter" value={filter} aria-label="Filter conversations" onChange={e => setFilter(e.target.value)}><option value="all">All conversations</option><option value="open">Open</option>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select>
         {!online && <small role="status" style={{padding:"3px 12px",color:"var(--muted,#667085)"}}>Offline · showing encrypted messages saved on this device</small>}
         <div className="esc-inbox">{visible.map(c => <div key={c.id} className={`esc-thread-card ${selected === c.id ? "current" : ""}`}>
-          <button type="button" className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} disabled={!!openingId && openingId !== c.id} onClick={() => {setCardMenuId("");void openConversation(c.id);}}>
+          <button type="button" className={`esc-thread-btn ${selected === c.id ? "current" : ""}`} aria-busy={openingId === c.id} onClick={() => {setCardMenuId("");void openConversation(c.id);}}>
             <div className="esc-avatar">{(c.displayTitle || (isDeveloper ? c.organizationName : decryptedSubject[c.id] || c.subject) || "S").slice(0,1).toUpperCase()}</div>
             <div className="esc-thread-main"><strong>{c.displayTitle || (isDeveloper ? c.organizationName || "School" : decryptedSubject[c.id] || c.subject || "Support conversation")}{Number(c.unreadCount || 0) > 0 && <span aria-label={`${c.unreadCount} unread messages`} className="esc-card-unread">{c.unreadCount! > 99 ? "99+" : c.unreadCount}</span>}</strong><small>{isEncrypted(c) ? "Private conversation" : "Earlier support conversation"}</small><em>{openingId === c.id ? "◌ Opening conversation…" : `${readable(c.status)} · ${date(c.lastMessage?.createdAt || c.updatedAt)}`}</em></div>
           </button>
@@ -1141,20 +1236,15 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             <button type="button" className="esc-card-danger" disabled={savingCard} onClick={() => void removeCard(c.id)}>Delete conversation</button>
           </div>}
         </div>)}
-          {!visible.length && <div className="esc-empty">{loading ? "Loading conversations…" : conversations.length ? "No conversations match these filters." : "No conversations yet."}</div>}</div>
+          {!visible.length && <div className="esc-empty">{loading ? "Loading conversations…" : conversations.length ? "No conversations match these filters." : "No conversations yet."}</div>}
+          {inboxMore&&<div style={{display:'flex',justifyContent:'center',padding:'10px'}}><button type="button" className="secondary" disabled={inboxLoading||!online} onClick={()=>void loadEarlierConversations()}>{inboxLoading?'Loading…':'Load earlier conversations'}</button></div>}</div>
 
       </aside>
       <div className="esc-chat">
         {openingId && selected && <div className="esc-opening" role="status" aria-live="polite">Preparing conversation…</div>}
+        {openingId && selected && !opened && !newChat && <div className="esc-loading-thread" role="status"><strong>Opening conversation…</strong><span>Loading saved messages and encryption keys</span></div>}
         {newChat ? <>
-          <div className="esc-chat-head"><button className="icon esc-back" onClick={() => { setNewChat(false); setMobileOpen(false); }}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-chat-info"><strong>New conversation</strong><small>Private messaging</small></div><button className="secondary" onClick={() => setReviewKeys(true)}>🔐 Keys</button></div>
-          {reviewKeys && !isDeveloper && <div className="esc-key-panel" role="region" aria-label="Recipient device verification">
-            <strong>Recipient devices</strong>
-            <p>New encrypted messages require a recipient device. Check fingerprints with the recipient through another trusted method before approving.</p>
-            {!knownActive.some(d => d.userId !== identity) && <p>Eleeveon Support has not registered a device yet. They must open Eleeveon Center once.</p>}
-            {knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : "Other participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "Verified on this browser" : "Not verified"}</small></div>)}
-            <div className="esc-key-buttons"><button className="secondary" onClick={() => void loadKeys()}>Refresh devices</button><button className="primary" disabled={!knownActive.some(d => d.userId !== identity)} onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); }}>I verified these fingerprints</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div>
-          </div>}
+          <div className="esc-chat-head"><button className="icon esc-back" onClick={() => { setNewChat(false); setMobileOpen(false); }}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-chat-info"><strong>New conversation</strong><small>Private messaging</small></div><button className="secondary" onClick={() => onOpenHubSettings?.()}>⚙ Settings</button></div>
           {isDeveloper ? <div className="esc-form">
             <strong>Start a conversation</strong>
             <p>Choose an account, app user, or school role to begin a private conversation.</p>
@@ -1165,13 +1255,14 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             <button className="primary" disabled={!targetAccount||busy||(targetScope==="user"&&!targetUser)||(targetScope==="role"&&!targetRole)} onClick={()=>void startOutreach()}>{busy?"Creating…":"Open secure conversation"}</button>
           </div> : <div className="esc-form"><label>Category<select value={category} onChange={e => setCategory(e.target.value)}>{CATEGORIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>Subject<input maxLength={180} value={subject} onChange={e => setSubject(e.target.value)} placeholder="What would you like to discuss?"/></label><label>Message<textarea rows={6} value={openingText} onChange={e => setOpeningText(e.target.value)} placeholder="Explain your issue privately…"/></label><div className="esc-key-buttons"><button className="secondary" onClick={() => setNewChat(false)}>Cancel</button><button className="primary" disabled={!ready || (!subject.trim() && !openingText.trim()) || busy || !online} onClick={() => void createConversation()}>{busy ? "Creating…" : "Start conversation"}</button></div></div>}
         </> : selected && opened ? <>
-          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-avatar">{isEncrypted(opened) ? "🔒" : "💬"}</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon esc-call-action" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon esc-more-trigger" aria-label="More conversation actions" aria-expanded={headerMoreOpen} onClick={() => setHeaderMoreOpen(v => !v)}>⋮</button>{headerMoreOpen && <div className="esc-header-more" role="group" aria-label="Conversation actions"><button type="button" onClick={() => {setReviewKeys(v => !v);setHeaderMoreOpen(false);}}>🔐 Device security{changedDevices.length ? " • Review keys" : ""}</button><button type="button" onClick={() => {setCallOpen(true);setHeaderMoreOpen(false);}}>☎ Live call</button><label>Scene<select aria-label="Hub background" value={wallpaper} onChange={e => chooseWallpaper(e.target.value as "pier" | "garden" | "gradient")}><option value="pier">Quiet coast</option><option value="garden">Garden retreat</option><option value="gradient">Soft colour</option></select></label>{isDeveloper && <label>Conversation status<select value={opened.status} disabled={busy} onChange={e => {void updateStatus(e.target.value);setHeaderMoreOpen(false);}}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select></label>}</div>}</div>
+          <div className="esc-chat-head"><button className="icon esc-back" aria-label="Back to conversations" onClick={() => setMobileOpen(false)}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-avatar">{isEncrypted(opened) ? "🔒" : "💬"}</div><div className="esc-chat-info"><strong>{title}</strong><small><span style={{color:otherPresence==="Online in chat"?"#169e67":undefined}}>● {otherPresence}</span> · {readable(opened.status)}</small></div><button className="icon esc-chat-settings-button" type="button" aria-label="Hub settings" onClick={() => onOpenHubSettings?.(selected)}>⚙</button><button className="icon esc-call-action" title="Start voice or video call" aria-label="Start voice or video call" onClick={()=>setCallOpen(true)}>☎</button><button className="icon esc-more-trigger" aria-label="More conversation actions" aria-expanded={headerMoreOpen} onClick={() => setHeaderMoreOpen(v => !v)}>⋮</button>{headerMoreOpen && <div className="esc-header-more" role="group" aria-label="Conversation actions"><button type="button" onClick={() => {onOpenHubSettings?.(selected);setHeaderMoreOpen(false);}}>🔐 Device security{changedDevices.length ? " • Review keys" : ""}</button><button type="button" onClick={() => {setCallOpen(true);setHeaderMoreOpen(false);}}>☎ Live call</button>{isDeveloper && <label>Conversation status<select value={opened.status} disabled={busy} onChange={e => {void updateStatus(e.target.value);setHeaderMoreOpen(false);}}>{STATUSES.map(s => <option key={s} value={s}>{readable(s)}</option>)}</select></label>}</div>}</div>
 
 
-          {reviewKeys && <div className="esc-key-panel"><strong>Device identity fingerprints</strong><p>Verify these fingerprints with participants through a separate trusted channel before approving. The server key directory alone cannot prove identity.</p>{knownActive.map(d => <div className="esc-key-item" key={d.id}><b>{d.id === ownId ? "This device" : d.userId === identity ? "Your other device" : "Conversation participant"}</b><div className="esc-fingerprint">{d.fingerprint}</div><small>{trusted[d.id] === d.fingerprint ? "✓ Approved on this browser" : trusted[d.id] ? "⚠ Key changed—verify carefully" : "New device—verify before sending"}</small></div>)}<div className="esc-key-buttons"><button className="secondary" onClick={() => void loadKeys(selected)}>Refresh devices</button><button className="primary" disabled={!knownActive.some(d => d.userId !== identity)} onClick={() => { saveTrust(accountId, identity, knownActive); setTrustRevision(n => n + 1); setReviewKeys(false); setInfo("Devices verified"); }}>I verified these keys</button><button className="secondary" onClick={() => setReviewKeys(false)}>Close</button></div></div>}
+
           <div ref={messagesRef} className="esc-body" onClick={e => {
             if (messageMenuId && !(e.target as HTMLElement).closest(".esc-bubble-action-wrap")) setMessageMenuId("");
           }}>
+            {hasOlderHistory && <div style={{display:'flex',justifyContent:'center',margin:'3px 0 15px'}}><button type="button" className="secondary" disabled={historyBusy} onClick={()=>void loadOlderMessages()}>{historyBusy?'Loading…':'↑ Load earlier messages'}</button></div>}
             {!displayThread.length && <div className="esc-empty" role="status"><strong>Conversation ready</strong><small>No messages yet. Start the conversation when participant encryption keys are available.</small></div>}
             {displayThread.map((m, index) => {
               const mine = m.authorUserId ? m.authorUserId === identity : isDeveloper ? m.authorType === "platform" : m.authorType !== "platform";
@@ -1208,7 +1299,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             })}
           </div>
           <div className="esc-composer-area">
-          {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => setReviewKeys(true)}>Check keys</button></div>}
+          {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => onOpenHubSettings?.(selected)}>Check keys</button></div>}
           {files.length > 0 && <div className="esc-files">{files.map((f, i) => <button key={`${f.name}:${i}`} disabled={busy} onClick={() => setFiles(old => old.filter((_, k) => k !== i))}>📎 {f.name} ({fileSize(f.size)}) ×</button>)}</div>}
           {(replyTarget || editTarget) && <div className="esc-compose-reference" role="status">
             <div><strong>{editTarget ? "✎ Editing your message" : `↪ Replying to ${replyTarget?.name}`}</strong><span>{(editTarget?.body || replyTarget?.preview || "").slice(0, 135)}</span></div>
@@ -1229,7 +1320,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
               <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording || screenRecording} onClick={toggleAttachmentMenu}>＋</button>
             </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy || screenRecording} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : editTarget ? "Edit your message…" : replyTarget ? "Write a reply…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || screenRecording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
           </div>
-        </> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
+        </> : selected && !opened ? <div className="esc-empty" role="status"><strong>{openingId ? "Opening conversation…" : "Conversation unavailable"}</strong><p>{openingId ? "Preparing locally saved messages and device keys." : error || "Reconnect and try opening this conversation again."}</p>{!openingId && <button className="primary" type="button" onClick={() => void openConversation(selected)}>Try again</button>}</div> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
       </div>
     </div>
     {attachMenuOpen && menuPosition && typeof document !== "undefined" && createPortal(

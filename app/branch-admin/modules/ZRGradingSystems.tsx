@@ -703,16 +703,6 @@ function GradingStructuresWorkspace() {
         </button>
       </section>
 
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {statusFilter !== "all" && (
-            <button type="button" onClick={() => setStatusFilter("all")}>
-              Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
-            </button>
-          )}
-        </section>
-      )}
-
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
           <AnalysisCard
@@ -849,10 +839,10 @@ function SystemListRow({
   onOpen: () => void;
 }) {
   return (
-    <button type="button" className="subject-row grading-row" onClick={onOpen}>
+    <button type="button" className="student-row grading-row" onClick={onOpen}>
       <span className="grading-icon">🧮</span>
 
-      <span className="subject-main">
+      <span className="student-main">
         <strong>{item.name}</strong>
         <small>
           {item.code || "No code"} · {item.activeRuleCount} active rule(s)
@@ -863,7 +853,7 @@ function SystemListRow({
         </em>
       </span>
 
-      <span className="subject-side">
+      <span className="student-side">
         <span
           className={`status-dot-mini ${item.ready ? "green" : "orange"}`}
           title={item.ready ? "Rules ready" : "Needs rules"}
@@ -1118,8 +1108,13 @@ function TableView({
               return (
                 <tr key={String(system.id)}>
                   <td>
-                    <strong>{system.name}</strong>
-                    <span>{system.description || "No description"}</span>
+                    <div className="ba-table-person">
+                      <span className="grading-icon table-avatar" aria-hidden="true">🧮</span>
+                      <div>
+                        <strong>{system.name}</strong>
+                        <span>{system.description || "No description"}</span>
+                      </div>
+                    </div>
                   </td>
                   <td>{system.code || "—"}</td>
                   <td>{system.ruleCount}</td>
@@ -1460,6 +1455,101 @@ const css = `
 .ba-form.compact{grid-template-columns:minmax(0,1fr)}
 .ba-form-section{padding:12px;border-radius:20px;background:color-mix(in srgb,var(--muted,#64748b) 5%,transparent);border:1px solid var(--border,rgba(148,163,184,.16))}.ba-form-section h3{margin:0 0 10px;font-size:13px;font-weight:1000}.ba-note{margin-top:10px;padding:11px 12px;border-radius:18px;background:color-mix(in srgb,var(--ba-primary) 7%,transparent);border:1px solid color-mix(in srgb,var(--ba-primary) 14%,var(--border,transparent));color:var(--muted,#64748b);font-size:11px;line-height:1.5}.ba-note strong{color:var(--text,#111827)}
 @media(max-width:520px){.grading-icon,.rule-icon{width:42px;height:42px;border-radius:16px}.student-detail-strip{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.student-detail-strip span{padding:8px}.ba-current-card{border-radius:20px;padding:11px}}
+
+/* V10 — STUDENTS.tsx RECORD SURFACE PARITY. Keep complex editor sheets unchanged. */
+.ba-page {
+  width:100%; max-width:none; min-width:0; min-height:0;
+  margin:0; padding:5px; padding-bottom:max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7)); overflow-x:clip;
+}
+.ba-page .ba-list,.ba-page .ba-table-card,.ba-page .ba-analysis-grid {
+  box-sizing:border-box; width:100%; max-width:none; min-width:0;
+  margin-left:0; margin-right:0;
+}
+.ba-page .ba-list {display:grid;gap:9px;margin-top:2px;align-items:stretch;grid-template-columns:minmax(0,1fr)}
+.ba-page .ba-list > .student-row {
+  box-sizing:border-box;position:relative;width:100%;min-width:0;margin:0;
+  padding:9px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;gap:10px;text-align:left;cursor:pointer;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  color:var(--text,#182235);box-shadow:none;border-radius:13px;
+  transition:border-color .12s ease;
+}
+.ba-page .ba-list > .student-row:hover,.ba-page .ba-list > .student-row:focus-visible {
+  transform:none;box-shadow:none;border-color:color-mix(in srgb,var(--ba-primary) 45%,var(--border,#d4dae3));
+}
+.ba-page .ba-list > .student-row::before {display:none}
+.ba-page .student-main,.ba-page .student-main strong,.ba-page .student-main small,.ba-page .student-main em {
+  display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ba-page .student-main strong {color:var(--text,#182235);font-size:14px;font-weight:850;letter-spacing:-.02em}
+.ba-page .student-main small {margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:700;font-style:normal}
+.ba-page .student-main em {margin-top:3px;color:var(--muted,#64748b);font-size:11px;font-weight:650;font-style:normal}
+.ba-page .student-side {display:grid;justify-items:end;gap:6px;flex:0 0 auto}
+.ba-page .student-side i {color:var(--muted,#64748b);font-size:18px;font-weight:900;font-style:normal;line-height:1}
+.ba-page .grading-icon,.ba-page .rule-icon,.ba-page .branch-settings-icon {
+  width:40px;height:40px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:12px;box-shadow:none;font-size:17px;
+  color:var(--ba-primary);background:color-mix(in srgb,var(--ba-primary) 11%,var(--card-bg,var(--surface,#fff)));
+}
+.ba-page .ba-table-card {
+  display:block;width:100%;max-width:none;min-width:0;margin-top:2px;padding:4px;overflow:visible;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  border-radius:13px;box-shadow:none;
+}
+.ba-page .ba-table-scroll {
+  box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:0;
+  overflow-x:auto;overflow-y:auto;overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;border-radius:10px;
+  border:1px solid var(--border,#d4dae3);
+}
+.ba-page .ba-table-scroll table {
+  width:100%;min-width:780px;max-width:none;margin:0;border-collapse:collapse;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+}
+.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td {
+  padding:9px 10px;vertical-align:middle;text-align:left;font-size:12px;
+  border-bottom:1px solid var(--border,rgba(148,163,184,.18));
+}
+.ba-page .ba-table-scroll thead th {
+  position:sticky;top:0;z-index:2;
+  color:var(--muted,#64748b);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.045em;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+}
+.ba-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);
+}
+.ba-page .ba-table-scroll tbody tr:hover {background:color-mix(in srgb,var(--ba-primary) 5%,transparent)}
+.ba-page .ba-table-scroll td {background:transparent}
+.ba-page .ba-table-person {display:flex;align-items:center;gap:9px;min-width:160px}
+.ba-page .ba-table-person .table-avatar {width:32px;height:32px;flex:0 0 32px;border-radius:10px;font-size:13px}
+.ba-page .ba-table-person > div {min-width:0}
+.ba-page .ba-table-person strong,.ba-page .ba-table-person span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ba-page .ba-table-person span {color:var(--muted,#64748b);font-size:11px;margin-top:2px}
+.ba-page .ba-table-actions {display:flex;align-items:center;gap:7px;flex-wrap:nowrap;width:100%;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.ba-page .ba-table-actions::-webkit-scrollbar {display:none}
+.ba-page .ba-table-actions button,.ba-page .branch-setting-table-edit {
+  flex:0 0 auto;min-height:34px;padding:0 10px;border-radius:999px;
+  border:1px solid var(--border,#d4dae3);background:var(--surface,#fff);
+  color:var(--text,#182235);font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;
+}
+.ba-page .ba-table-actions button:first-child,.ba-page .branch-setting-table-edit {
+  background:var(--ba-primary);color:#fff;border-color:var(--ba-primary);
+}
+.ba-page .ba-table-actions button.ba-delete {
+  background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));color:#991b1b;
+  border-color:color-mix(in srgb,#dc2626 24%,var(--border,#d4dae3));
+}
+/* Students uses the shell toolbar, not duplicated content toolbar/chips. */
+.role-shell.branch-workspace-layout .ba-page > .ba-search-card,
+.role-shell.branch-workspace-layout .ba-page > .ba-filter-chips {display:none!important}
+@media(min-width:680px) and (max-width:1023px){.ba-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1024px){.ba-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:679px){.ba-page .ba-list{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:639px){.ba-page{padding:3px;padding-bottom:max(14px,env(safe-area-inset-bottom))}.ba-page .ba-list{gap:7px}.ba-page .ba-list>.student-row{padding:9px}.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td{padding:8px 9px}}
+@media(prefers-reduced-motion:reduce){.ba-page .ba-list>.student-row{transition:none}}
 
 `;
 
@@ -2308,40 +2398,6 @@ function GradeRulesWorkspace() {
         </section>
       )}
 
-      {activeFilterCount > 0 && (
-        <section className="ba-filter-chips" aria-label="Active filters">
-          {systemFilter !== "all" && (
-            <button type="button" onClick={() => setSystemFilter("all")}>
-              System:{" "}
-              {(systemMap.get(idOf(systemFilter)) as any)?.name || systemFilter}{" "}
-              ×
-            </button>
-          )}
-          {statusFilter !== "all" && (
-            <button type="button" onClick={() => setStatusFilter("all")}>
-              Status: {statusFilter === "active" ? "Active" : "Inactive"} ×
-            </button>
-          )}
-        </section>
-      )}
-
-      {selectedSystem && viewMode === "cards" && !search && (
-        <section className="ba-current-card">
-          <div>
-            <span>Selected grading system</span>
-            <strong>{selectedSystem.name}</strong>
-            <p>
-              {selectedCoverage?.activeRules || 0} active rule(s) ·{" "}
-              {usageCountBySystem.get(idOf(selectedSystem.id)) || 0}{" "}
-              applicability usage
-            </p>
-          </div>
-          <Chip tone={(selectedCoverage?.overlaps || 0) > 0 ? "red" : "green"}>
-            {(selectedCoverage?.overlaps || 0) > 0 ? "Overlaps" : "Clean"}
-          </Chip>
-        </section>
-      )}
-
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">
           <AnalysisCard
@@ -2384,33 +2440,6 @@ function GradeRulesWorkspace() {
               onOpen={() => setSelectedItem(rule)}
             />
           ))}
-
-          {!!systems.length && (
-            <button
-              type="button"
-              className="subject-row seed-row"
-              onClick={() => seedBasicRules(systems[0] as any)}
-            >
-              <span className="rule-icon seed">⚡</span>
-              <span className="subject-main">
-                <strong>Quick seed rules</strong>
-                <small>
-                  Create a basic A-F rule set under a grading system.
-                </small>
-                <em>
-                  Tap to seed{" "}
-                  {String(
-                    (systems[0] as any)?.name || "the first grading system",
-                  )}
-                  .
-                </em>
-              </span>
-              <span className="subject-side">
-                <span className="status-dot-mini purple" />
-                <i>⋯</i>
-              </span>
-            </button>
-          )}
 
           {!filteredRows.length && (
             <Empty
@@ -2515,12 +2544,12 @@ function RuleListRow({
   return (
     <button
       type="button"
-      className="subject-row grade-rule-row"
+      className="student-row grade-rule-row"
       onClick={onOpen}
     >
       <span className="rule-icon">📏</span>
 
-      <span className="subject-main">
+      <span className="student-main">
         <strong>{item.grade}</strong>
         <small>
           {item.gradingSystemName} · {numberText(item.minScore)}-
@@ -2532,7 +2561,7 @@ function RuleListRow({
         </em>
       </span>
 
-      <span className="subject-side">
+      <span className="student-side">
         <span
           className={`status-dot-mini ${item.systemOverlapCount > 0 ? "red" : item.systemComplete ? "green" : "orange"}`}
           title={
@@ -2840,8 +2869,13 @@ function TableView({
               return (
                 <tr key={String(rule.id)}>
                   <td>
-                    <strong>{rule.grade}</strong>
-                    <span>Grade rule</span>
+                    <div className="ba-table-person">
+                      <span className="rule-icon table-avatar" aria-hidden="true">📏</span>
+                      <div>
+                        <strong>{rule.grade}</strong>
+                        <span>{rule.gradingSystemName}</span>
+                      </div>
+                    </div>
                   </td>
                   <td>{rule.gradingSystemName}</td>
                   <td>
@@ -3245,6 +3279,101 @@ const css = `
 .ba-form.compact{grid-template-columns:minmax(0,1fr)}
 .ba-form-section{padding:12px;border-radius:20px;background:color-mix(in srgb,var(--muted,#64748b) 5%,transparent);border:1px solid var(--border,rgba(148,163,184,.16))}.ba-form-section h3{margin:0 0 10px;font-size:13px;font-weight:1000}.ba-note{margin-top:10px;padding:11px 12px;border-radius:18px;background:color-mix(in srgb,var(--ba-primary) 7%,transparent);border:1px solid color-mix(in srgb,var(--ba-primary) 14%,var(--border,transparent));color:var(--muted,#64748b);font-size:11px;line-height:1.5}.ba-note strong{color:var(--text,#111827)}
 @media(max-width:520px){.grading-icon,.rule-icon{width:42px;height:42px;border-radius:16px}.student-detail-strip{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.student-detail-strip span{padding:8px}.ba-current-card{border-radius:20px;padding:11px}}
+
+/* V10 — STUDENTS.tsx RECORD SURFACE PARITY. Keep complex editor sheets unchanged. */
+.ba-page {
+  width:100%; max-width:none; min-width:0; min-height:0;
+  margin:0; padding:5px; padding-bottom:max(20px,env(safe-area-inset-bottom));
+  background:var(--bg,var(--background,#f2f4f7)); overflow-x:clip;
+}
+.ba-page .ba-list,.ba-page .ba-table-card,.ba-page .ba-analysis-grid {
+  box-sizing:border-box; width:100%; max-width:none; min-width:0;
+  margin-left:0; margin-right:0;
+}
+.ba-page .ba-list {display:grid;gap:9px;margin-top:2px;align-items:stretch;grid-template-columns:minmax(0,1fr)}
+.ba-page .ba-list > .student-row {
+  box-sizing:border-box;position:relative;width:100%;min-width:0;margin:0;
+  padding:9px 10px;display:grid;grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;gap:10px;text-align:left;cursor:pointer;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  color:var(--text,#182235);box-shadow:none;border-radius:13px;
+  transition:border-color .12s ease;
+}
+.ba-page .ba-list > .student-row:hover,.ba-page .ba-list > .student-row:focus-visible {
+  transform:none;box-shadow:none;border-color:color-mix(in srgb,var(--ba-primary) 45%,var(--border,#d4dae3));
+}
+.ba-page .ba-list > .student-row::before {display:none}
+.ba-page .student-main,.ba-page .student-main strong,.ba-page .student-main small,.ba-page .student-main em {
+  display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.ba-page .student-main strong {color:var(--text,#182235);font-size:14px;font-weight:850;letter-spacing:-.02em}
+.ba-page .student-main small {margin-top:3px;color:var(--muted,#64748b);font-size:12px;font-weight:700;font-style:normal}
+.ba-page .student-main em {margin-top:3px;color:var(--muted,#64748b);font-size:11px;font-weight:650;font-style:normal}
+.ba-page .student-side {display:grid;justify-items:end;gap:6px;flex:0 0 auto}
+.ba-page .student-side i {color:var(--muted,#64748b);font-size:18px;font-weight:900;font-style:normal;line-height:1}
+.ba-page .grading-icon,.ba-page .rule-icon,.ba-page .branch-settings-icon {
+  width:40px;height:40px;flex:0 0 auto;display:grid;place-items:center;
+  border-radius:12px;box-shadow:none;font-size:17px;
+  color:var(--ba-primary);background:color-mix(in srgb,var(--ba-primary) 11%,var(--card-bg,var(--surface,#fff)));
+}
+.ba-page .ba-table-card {
+  display:block;width:100%;max-width:none;min-width:0;margin-top:2px;padding:4px;overflow:visible;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  border-radius:13px;box-shadow:none;
+}
+.ba-page .ba-table-scroll {
+  box-sizing:border-box;width:100%;max-width:100%;min-width:0;margin:0;
+  overflow-x:auto;overflow-y:auto;overscroll-behavior-x:contain;
+  -webkit-overflow-scrolling:touch;border-radius:10px;
+  border:1px solid var(--border,#d4dae3);
+}
+.ba-page .ba-table-scroll table {
+  width:100%;min-width:780px;max-width:none;margin:0;border-collapse:collapse;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+}
+.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td {
+  padding:9px 10px;vertical-align:middle;text-align:left;font-size:12px;
+  border-bottom:1px solid var(--border,rgba(148,163,184,.18));
+}
+.ba-page .ba-table-scroll thead th {
+  position:sticky;top:0;z-index:2;
+  color:var(--muted,#64748b);font-size:10px;font-weight:850;text-transform:uppercase;letter-spacing:.045em;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+}
+.ba-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%);
+}
+.ba-page .ba-table-scroll tbody tr:hover {background:color-mix(in srgb,var(--ba-primary) 5%,transparent)}
+.ba-page .ba-table-scroll td {background:transparent}
+.ba-page .ba-table-person {display:flex;align-items:center;gap:9px;min-width:160px}
+.ba-page .ba-table-person .table-avatar {width:32px;height:32px;flex:0 0 32px;border-radius:10px;font-size:13px}
+.ba-page .ba-table-person > div {min-width:0}
+.ba-page .ba-table-person strong,.ba-page .ba-table-person span {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ba-page .ba-table-person span {color:var(--muted,#64748b);font-size:11px;margin-top:2px}
+.ba-page .ba-table-actions {display:flex;align-items:center;gap:7px;flex-wrap:nowrap;width:100%;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.ba-page .ba-table-actions::-webkit-scrollbar {display:none}
+.ba-page .ba-table-actions button,.ba-page .branch-setting-table-edit {
+  flex:0 0 auto;min-height:34px;padding:0 10px;border-radius:999px;
+  border:1px solid var(--border,#d4dae3);background:var(--surface,#fff);
+  color:var(--text,#182235);font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;
+}
+.ba-page .ba-table-actions button:first-child,.ba-page .branch-setting-table-edit {
+  background:var(--ba-primary);color:#fff;border-color:var(--ba-primary);
+}
+.ba-page .ba-table-actions button.ba-delete {
+  background:color-mix(in srgb,#dc2626 7%,var(--surface,#fff));color:#991b1b;
+  border-color:color-mix(in srgb,#dc2626 24%,var(--border,#d4dae3));
+}
+/* Students uses the shell toolbar, not duplicated content toolbar/chips. */
+.role-shell.branch-workspace-layout .ba-page > .ba-search-card,
+.role-shell.branch-workspace-layout .ba-page > .ba-filter-chips {display:none!important}
+@media(min-width:680px) and (max-width:1023px){.ba-page .ba-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1024px){.ba-page .ba-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:679px){.ba-page .ba-list{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:639px){.ba-page{padding:3px;padding-bottom:max(14px,env(safe-area-inset-bottom))}.ba-page .ba-list{gap:7px}.ba-page .ba-list>.student-row{padding:9px}.ba-page .ba-table-scroll th,.ba-page .ba-table-scroll td{padding:8px 9px}}
+@media(prefers-reduced-motion:reduce){.ba-page .ba-list>.student-row{transition:none}}
 
 `;
 
@@ -3668,5 +3797,19 @@ button > span:last-child {
   .grading-systems-root .grading-mode-switch { width:100%; }
   .grading-systems-root .grading-mode-switch button { min-width:0; }
 }
+
+/* Students: full-width and neutral record containers; no duplicate second header. */
+.grading-systems-root {width:100%;max-width:none;gap:5px;min-width:0}
+.grading-systems-root .subject-setup-workspace{width:100%;max-width:none;margin:0;min-width:0}
+.grading-systems-root .subject-setup-workspace>.ba-page{width:100%;max-width:none;margin:0;min-width:0;padding:5px 0 18px;background:transparent}
+.grading-systems-root .ba-list,.grading-systems-root .ba-table-card,.grading-systems-root .ba-analysis-grid{max-width:none;width:100%;margin-left:0;margin-right:0}
+.grading-systems-root .ba-list>.student-row{border-radius:13px;box-shadow:none}
+.grading-systems-root .ba-table-card{box-shadow:none;border-radius:13px;overflow:visible}
+.grading-systems-root .ba-table-scroll{overflow-x:auto;width:100%;max-width:100%}
+.grading-systems-root .ba-table-scroll table{width:100%}
+.grading-systems-root .ba-table-scroll tbody tr:nth-child(even){background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%)}
+@media(min-width:680px) and (max-width:1023px){.grading-systems-root .ba-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(min-width:1024px){.grading-systems-root .ba-list{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:679px){.grading-systems-root .ba-list{grid-template-columns:minmax(0,1fr)}}
 
 `;

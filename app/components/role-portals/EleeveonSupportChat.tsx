@@ -381,13 +381,18 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       setConversations(previous=>mergeConversationPages(previous,items));
       // Cache current server inbox, never persist plaintext; older pages remain server authoritative.
       void hubSaveInbox(requestedScope,items);
-      if (current && current === selectedRef.current && !openingIdRef.current && detailResult && "detail" in detailResult) {
-        const detail = detailResult.detail;
+      // The settled request result is a union: success includes `detail`,
+      // failure contains only `error`. Narrow before passing the value into
+      // a React state-updater callback, where TypeScript needs certainty.
+      const detail = detailResult && "detail" in detailResult
+        ? detailResult.detail
+        : undefined;
+      if (current && current === selectedRef.current && !openingIdRef.current && detail) {
         setOpened(previous => previous?.id === detail.conversation.id &&
           previous.updatedAt === detail.conversation.updatedAt &&
           previous.status === detail.conversation.status &&
           previous.displayTitle === detail.conversation.displayTitle ? previous : detail.conversation);
-        const page = detailResult.page;
+        const page = detailResult && "page" in detailResult ? detailResult.page : null;
         if (page) {
           mergeHistoryKeys(page.historyKeys || [], page.openingHistoryKey);
           if (!historyPagingStarted.current) {

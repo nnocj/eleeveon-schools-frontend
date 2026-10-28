@@ -1,43 +1,51 @@
 "use client";
+
 /**
- * Teacher portal assignment resolver — UI-level scoping only.
- * Server routes and sync MUST independently validate teacher assignments.
- * Selected role workspace determines account, school and branch.
+ * app/hooks/useTeacherWorkspaceAccess.ts
+ * ------------------------------------------------------------
+ * Teacher assignment access for the selected, ACTIVE membership.
  *
- * Performance:
- * - Watch only assignment tables (not students/enrollments/teacher profiles).
- * - Do not blank confirmed assignments during a same-identity refresh.
- * - Ignore old asynchronous results when identity/revision changes.
- * - Publish unchanged assignment sets without triggering a new render.
- * - Mutation verification ALWAYS reads live local assignments again.
+ * Fix: do not memoize and then trust eleeveon_open_workspace.teacherId.
+ * A role/teacher can switch without account/school/branch changing, making
+ * a stored teacherId stale. The reactive membership selected by the portal
+ * is the identity authority.
+ *
+ * Permissions are fail-closed. This only reads locally synchronized
+ * assignments; the backend MUST enforce the same scope for reads/writes.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useBranchWorkspaceScope } from "./useBranchWorkspaceScope";
-import { useActiveMembership } from "../context/active-membership-context";
 import { useBranchTableRevision } from "./useBranchTableRevision";
 import { db } from "../lib/db/db";
 
-export const asId = (v: unknown) => v == null ? "" : String(v).trim();
-export const idsEqual = (a: unknown, b: unknown) => !!asId(a) && asId(a) === asId(b);
+export const asId = (value: unknown): string =>
+  value == null ? "" : String(value).trim();
 
-function currentWorkspace(): any {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(
-      window.localStorage.getItem("eleeveon_open_workspace") ||
-      window.sessionStorage.getItem("eleeveon_open_workspace") || "{}",
-    );
-  } catch {
-    return {};
-  }
+export const idsEqual = (a: unknown, b: unknown): boolean =>
+  Boolean(asId(a)) && asId(a) === asId(b);
+
+function normalizedRole(value: unknown): string {
+  return asId(value).toLowerCase().replace(/-/g, "_");
 }
 
-function usable(row: any, accountId: string, schoolId: string, branchId: string) {
-  // Missing scope is NOT permission. Keep assignment checks fail-closed.
-  return !!row && row.isDeleted !== true && row.active !== false &&
+/** Explicit denials must never be treated as active assignments. */
+function usable(
+  row: any,
+  accountId: string,
+  schoolId: string,
+  branchId: string,
+): boolean {
+  if (!row || row.isDeleted === true || row.active === false) return false;
+  if (["inactive", "deleted", "archived", "suspended", "revoked"].includes(
+    asId(row.status).toLowerCase(),
+  )) return false;
+
+  // No missing/wildcard tenant IDs: a teacher must be authorized explicitly.
+  return (
     idsEqual(row.accountId, accountId) &&
     idsEqual(row.schoolId, schoolId) &&
-    idsEqual(row.branchId, branchId);
+    idsEqual(row.branchId, branchId)
+  );
 }
 
 type AssignmentSnapshot = {
@@ -49,8 +57,13 @@ type AssignmentSnapshot = {
   error?: string;
 };
 
-const empty = (key: string, ready = false, error?: string): AssignmentSnapshot => ({
-  key, ready,
+const empty = (
+  key: string,
+  ready = false,
+  error?: string,
+): AssignmentSnapshot => ({
+  key,
+  ready,
   subjects: new Set<string>(),
   classes: new Set<string>(),
   teachingClasses: new Set<string>(),
@@ -59,76 +72,123 @@ const empty = (key: string, ready = false, error?: string): AssignmentSnapshot =
 
 function sameSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
-  for (const item of a) if (!b.has(item)) return false;
+  for (const entry of a) if (!b.has(entry)) return false;
   return true;
+}
+
+function activeEnrollment(row: any): boolean {
+  const status = asId(row?.status).toLowerCase();
+  return status === "active" || (status === "" && row?.active !== false);
 }
 
 export function useTeacherWorkspaceAccess() {
   const workspace = useBranchWorkspaceScope();
-  const { activeMembership } = useActiveMembership() as any;
-  // Enrollment/teacher-profile revisions must not restart authorization reads.
   const revision = useBranchTableRevision(["classSubjects", "classTeachers"]);
-  const { accountId, schoolId, branchId, authenticated, restoring, branchLoading } = workspace;
-  const ws = useMemo(currentWorkspace, [accountId, schoolId, branchId]);
-  const membership = ws?.membership || activeMembership || {};
-  const role = String(ws?.role || membership.role || "").toLowerCase().trim();
+
+  const {
+    accountId,
+    schoolId,
+    branchId,
+    authenticated,
+    restoring,
+    branchLoading,
+    membership,
+    role: workspaceRole,
+  } = workspace;
+
+  // Critical: resolve from the LIVE selected membership, not localStorage.
+  // Both role and profile ID must refer to this same selected membership.
+  const role = normalizedRole(workspaceRole || membership?.role);
   const teacherId = asId(
-    ws?.teacherId || membership.teacherLocalId || membership.teacherId ||
-    membership.teacher?.id || (activeMembership as any)?.teacherLocalId ||
-    (activeMembership as any)?.teacherId,
+    (membership as any)?.teacherId ||
+    (membership as any)?.teacherLocalId ||
+    (membership as any)?.teacher?.id,
   );
+
   const account = asId(accountId);
   const school = asId(schoolId);
   const branch = asId(branchId);
   const identityKey = [account, school, branch, teacherId, role].join("|");
-  const permitted = !!authenticated && role === "teacher" && !!teacherId &&
-    !!account && !!school && !!branch;
+  const permitted = Boolean(
+    authenticated &&
+    !workspace.error &&
+    membership &&
+    role === "teacher" &&
+    teacherId &&
+    account &&
+    school &&
+    branch,
+  );
 
   const [assigned, setAssigned] = useState<AssignmentSnapshot>(() => empty(""));
 
   useEffect(() => {
     let cancelled = false;
     if (!permitted) {
-      setAssigned(previous => previous.key === identityKey && previous.ready &&
-        !previous.subjects.size && !previous.classes.size && !previous.teachingClasses.size &&
-        !previous.error ? previous : empty(identityKey, true));
+      setAssigned((previous) =>
+        previous.key === identityKey &&
+        previous.ready &&
+        !previous.subjects.size &&
+        !previous.classes.size &&
+        !previous.teachingClasses.size &&
+        !previous.error
+          ? previous
+          : empty(identityKey, true),
+      );
       return () => { cancelled = true; };
     }
 
-    // A different identity must never temporarily see another teacher's data.
-    setAssigned(previous => previous.key === identityKey ? previous : empty(identityKey));
+    // Do not reveal a former teacher's assignments during a role switch.
+    setAssigned((previous) =>
+      previous.key === identityKey ? previous : empty(identityKey),
+    );
 
     Promise.all([
-      (db as any).classSubjects.toArray(),
-      (db as any).classTeachers.toArray(),
+      db.classSubjects.toArray(),
+      db.classTeachers.toArray(),
     ]).then(([subjectRows, classRows]) => {
       if (cancelled) return;
-      const ownSubjects = (subjectRows as any[]).filter(row =>
-        usable(row, account, school, branch) && idsEqual(row.teacherId, teacherId));
-      const ownClasses = (classRows as any[]).filter(row =>
-        usable(row, account, school, branch) && idsEqual(row.teacherId, teacherId));
-      const subjects = new Set<string>(ownSubjects.map(row => asId(row.id)).filter(Boolean));
-      const classes = new Set<string>(ownClasses.map(row => asId(row.classId)).filter(Boolean));
-      const teachingClasses = new Set<string>(ownSubjects.map(row => asId(row.classId)).filter(Boolean));
-      setAssigned(previous => previous.key === identityKey && previous.ready &&
-        !previous.error && sameSet(previous.subjects, subjects) &&
+
+      const ownSubjects = (subjectRows as any[]).filter((row) =>
+        usable(row, account, school, branch) && idsEqual(row.teacherId, teacherId),
+      );
+      const ownClasses = (classRows as any[]).filter((row) =>
+        usable(row, account, school, branch) && idsEqual(row.teacherId, teacherId),
+      );
+
+      const subjects = new Set<string>(
+        ownSubjects.map((row) => asId(row.id)).filter(Boolean),
+      );
+      const classes = new Set<string>(
+        ownClasses.map((row) => asId(row.classId)).filter(Boolean),
+      );
+      const teachingClasses = new Set<string>(
+        ownSubjects.map((row) => asId(row.classId)).filter(Boolean),
+      );
+
+      setAssigned((previous) =>
+        previous.key === identityKey &&
+        previous.ready &&
+        !previous.error &&
+        sameSet(previous.subjects, subjects) &&
         sameSet(previous.classes, classes) &&
         sameSet(previous.teachingClasses, teachingClasses)
-        ? previous
-        : { key: identityKey, ready: true, subjects, classes, teachingClasses });
-    }).catch((error) => {
+          ? previous
+          : { key: identityKey, ready: true, subjects, classes, teachingClasses },
+      );
+    }).catch((error: unknown) => {
       if (cancelled) return;
-      // Initial read fails closed. Existing same-identity permissions remain
-      // visible on refresh failure; server/mutation routes still revalidate.
-      setAssigned(previous => previous.key === identityKey && previous.ready
-        ? { ...previous, error: String(error) }
-        : empty(identityKey, true, String(error)));
+      const message = error instanceof Error ? error.message : String(error);
+      setAssigned((previous) =>
+        previous.key === identityKey && previous.ready
+          ? { ...previous, error: message }
+          : empty(identityKey, true, message),
+      );
     });
-    return () => { cancelled = true; };
-  }, [authenticated, permitted, identityKey, account, school, branch, teacherId, revision]);
 
-  // Snapshot identity must match the current role's workspace, even during
-  // the render before useEffect runs after a role switch.
+    return () => { cancelled = true; };
+  }, [permitted, identityKey, account, school, branch, teacherId, revision]);
+
   const current = assigned.key === identityKey ? assigned : empty(identityKey);
   const allowedClassIds = useMemo(
     () => new Set<string>([...current.classes, ...current.teachingClasses]),
@@ -136,10 +196,13 @@ export function useTeacherWorkspaceAccess() {
   );
 
   return {
-    accountId: account, schoolId: school, branchId: branch, teacherId,
+    accountId: account,
+    schoolId: school,
+    branchId: branch,
+    teacherId,
     permitted,
     ready: !restoring && !branchLoading && current.ready,
-    error: current.error,
+    error: workspace.error || current.error,
     classTeacherClassIds: current.classes,
     teachingClassIds: current.teachingClasses,
     allowedClassIds,
@@ -147,44 +210,65 @@ export function useTeacherWorkspaceAccess() {
   };
 }
 
-/** Recheck a teacher's CURRENT assignment immediately before a mutation. */
+/** Verify a live class-subject link before allowing a score write. */
 export async function verifyTeacherSubjectAssignment(
   identity: { accountId: string; schoolId: string; branchId: string; teacherId: string },
   subjectId: string,
-) {
-  const rows = await (db as any).classSubjects.toArray();
-  return rows.some((row: any) => usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
-    idsEqual(row.teacherId, identity.teacherId) && idsEqual(row.id, subjectId));
+): Promise<boolean> {
+  if (!subjectId || !identity.teacherId) return false;
+  const rows = await db.classSubjects.toArray();
+  return rows.some((row: any) =>
+    usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
+    idsEqual(row.teacherId, identity.teacherId) &&
+    idsEqual(row.id, subjectId),
+  );
 }
 
-/** A teacher can edit student demographics only for assigned active classes. */
+/** Verify live teacher-class access AND active student enrollment. */
 export async function verifyTeacherStudentAssignment(
   identity: { accountId: string; schoolId: string; branchId: string; teacherId: string },
   studentId: string,
-) {
+): Promise<boolean> {
+  if (!studentId || !identity.teacherId) return false;
   const [enrollments, subjects, classTeachers] = await Promise.all([
-    (db as any).studentEnrollments.toArray(),
-    (db as any).classSubjects.toArray(),
-    (db as any).classTeachers.toArray(),
+    db.studentEnrollments.toArray(),
+    db.classSubjects.toArray(),
+    db.classTeachers.toArray(),
   ]);
+
   const allowed = new Set<string>([
-    ...subjects.filter((row: any) => usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
-      idsEqual(row.teacherId, identity.teacherId)).map((row: any) => asId(row.classId)),
-    ...classTeachers.filter((row: any) => usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
-      idsEqual(row.teacherId, identity.teacherId)).map((row: any) => asId(row.classId)),
+    ...subjects
+      .filter((row: any) =>
+        usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
+        idsEqual(row.teacherId, identity.teacherId),
+      )
+      .map((row: any) => asId(row.classId)),
+    ...classTeachers
+      .filter((row: any) =>
+        usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
+        idsEqual(row.teacherId, identity.teacherId),
+      )
+      .map((row: any) => asId(row.classId)),
   ]);
-  return (enrollments as any[]).some((row: any) =>
+
+  return enrollments.some((row: any) =>
     usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
-    idsEqual(row.studentId, studentId) && row.status === "active" &&
-    allowed.has(asId(row.classId)));
+    idsEqual(row.studentId, studentId) &&
+    activeEnrollment(row) &&
+    allowed.has(asId(row.classId)),
+  );
 }
 
-/** Fresh class-teacher authorization before writing remarks/attendance. */
+/** Verify class-teacher permission (subject-teacher access isn't enough). */
 export async function verifyTeacherClassAssignment(
   identity: { accountId: string; schoolId: string; branchId: string; teacherId: string },
   classId: string,
-) {
-  const rows = await (db as any).classTeachers.toArray();
-  return rows.some((row: any) => usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
-    idsEqual(row.teacherId, identity.teacherId) && idsEqual(row.classId, classId));
+): Promise<boolean> {
+  if (!classId || !identity.teacherId) return false;
+  const rows = await db.classTeachers.toArray();
+  return rows.some((row: any) =>
+    usable(row, identity.accountId, identity.schoolId, identity.branchId) &&
+    idsEqual(row.teacherId, identity.teacherId) &&
+    idsEqual(row.classId, classId),
+  );
 }

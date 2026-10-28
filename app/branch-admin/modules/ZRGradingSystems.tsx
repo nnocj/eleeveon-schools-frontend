@@ -33,6 +33,8 @@ import {
 import { useBackgroundLoader } from "../../hooks/useBackgroundLoader";
 import { useBranchWorkspaceScope } from "../../hooks/useBranchWorkspaceScope";
 import { useBranchTableRevision } from "../../hooks/useBranchTableRevision";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 
 type GradingSystemsMode = "structures" | "rules";
 const GRADING_SYSTEMS_MODE_KEY = "eleeveon_grading_systems_mode";
@@ -180,6 +182,11 @@ function GradingStructuresWorkspace() {
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+    }
+  }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
 
@@ -564,6 +571,31 @@ function GradingStructuresWorkspace() {
       showToast("error", "Failed to duplicate grading system.");
     }
   };
+
+  // Same toolbar as Students / Assessment Entries, including nested Setup.
+  const gradingActions = {
+    add: () => openCreate(),
+    search: (value: string) => setSearch(value),
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: () => printBranchTable({
+      title: "Grading structures",
+      subtitle: `${filteredRows.length} matching structures`,
+      columns: [
+        { key: "name", label: "Structure" },
+        { key: "code", label: "Code" },
+        { key: "rules", label: "Active rules" },
+        { key: "usage", label: "In use" },
+        { key: "status", label: "Status" },
+      ],
+      rows: filteredRows.map(row => ({
+        name: row.name, code: row.code || "—", rules: row.activeRuleCount,
+        usage: row.usageCount, status: row.active ? "Active" : "Inactive",
+      })),
+    }),
+  };
+  useRegisterBranchWorkspaceToolbar("gradingSystems", gradingActions);
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", gradingActions);
 
   if (loading || accountLoading || settingsLoading || contextLoading || (!workspaceReady && !workspaceError)) {
     return (
@@ -1595,6 +1627,11 @@ function GradeRulesWorkspace() {
   const [saving, setSaving] = useState(false);
 
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setViewMode(window.matchMedia("(min-width: 900px)").matches ? "table" : "cards");
+    }
+  }, []);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [systemFilter, setSystemFilter] = useState("all");
@@ -2122,6 +2159,33 @@ function GradeRulesWorkspace() {
       showToast("error", "Failed to seed grade rules.");
     }
   };
+
+  // Keep the Grade Rules editor's toolbar in sync when its subtab is active.
+  const gradeRuleActions = {
+    add: () => openCreate(systemFilter !== "all" ? idOf(systemFilter) : undefined),
+    search: (value: string) => setSearch(value),
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: () => printBranchTable({
+      title: "Grade rules",
+      subtitle: `${filteredRows.length} matching rules`,
+      columns: [
+        { key: "system", label: "Grading system" },
+        { key: "grade", label: "Grade" },
+        { key: "minimum", label: "Min" },
+        { key: "maximum", label: "Max" },
+        { key: "remark", label: "Remark" },
+        { key: "status", label: "Status" },
+      ],
+      rows: filteredRows.map(row => ({
+        system: row.gradingSystemName, grade: row.grade,
+        minimum: row.minScore, maximum: row.maxScore,
+        remark: row.remark || "—", status: row.active ? "Active" : "Inactive",
+      })),
+    }),
+  };
+  useRegisterBranchWorkspaceToolbar("gradingSystems", gradeRuleActions);
+  useRegisterBranchWorkspaceToolbar("setupWorkspace", gradeRuleActions);
 
   if (loading || accountLoading || settingsLoading || contextLoading || (!workspaceReady && !workspaceError)) {
     return (
@@ -3211,18 +3275,9 @@ export default function GradingSystems() {
       <style>{gradingSystemsShellCss}</style>
 
       <section
-        className="subject-setup-command"
+        className="subject-setup-command grading-subtabs"
         aria-label="Grading systems workspace"
       >
-        <div className="subject-setup-command-copy">
-          <strong>Grading Systems</strong>
-          <small>
-            {mode === "structures"
-              ? "Create grading structures and review their rule coverage."
-              : "Configure score ranges, grades, remarks and ordering."}
-          </small>
-        </div>
-
         <div className="subject-setup-mode-switch grading-mode-switch" role="tablist">
           <button
             type="button"
@@ -3583,5 +3638,35 @@ button > span:last-child {
 
 .grading-mode-switch{grid-template-columns:repeat(2,minmax(0,1fr))}
 
+
+/* V34 compact shared-portal navigation — matches Students/Assessment Entries. */
+.grading-systems-root { gap: 4px; background: transparent; }
+.grading-systems-root .grading-subtabs {
+  padding: 4px 0 7px; border: 0; border-bottom: 1px solid var(--border,rgba(148,163,184,.19));
+  border-radius: 0; box-shadow: none; background: transparent; backdrop-filter: none;
+  justify-content: flex-start;
+}
+.grading-systems-root .grading-mode-switch {
+  width: max-content; max-width: 100%; grid-template-columns: repeat(2, minmax(0,1fr));
+  background: var(--surface-2,var(--card-bg,var(--surface,#fff)));
+  border-radius: 10px; border-color: var(--border,rgba(148,163,184,.2));
+}
+.grading-systems-root .grading-mode-switch button { min-height: 34px; min-width: 124px; padding: 4px 9px; border-radius: 8px; }
+.grading-systems-root .grading-mode-switch button small { display: none; }
+.grading-systems-root .grading-mode-switch button strong { font-size: 11px; }
+.grading-systems-root .subject-setup-tab-icon { width: 24px; height: 24px; border-radius: 7px; font-size: 10px; }
+.grading-systems-root .subject-setup-workspace { width:100%; min-width:0; }
+.grading-systems-root .subject-setup-workspace > .ba-page {
+  min-height: 0; background: transparent; padding: 2px 0 12px; overflow: visible;
+}
+.role-shell.branch-workspace-layout .grading-systems-root .ba-page > .ba-search-card { display:none; }
+.grading-systems-root .ba-table-card { border-radius: 12px; overflow-x: auto; }
+.grading-systems-root .ba-table-card table { font-size: 12px; width:100%; }
+.grading-systems-root .student-row { border-radius: 12px; }
+.grading-systems-root .ba-sheet, .grading-systems-root .ba-modal { border-radius: 16px; }
+@media (max-width: 899px) {
+  .grading-systems-root .grading-mode-switch { width:100%; }
+  .grading-systems-root .grading-mode-switch button { min-width:0; }
+}
 
 `;

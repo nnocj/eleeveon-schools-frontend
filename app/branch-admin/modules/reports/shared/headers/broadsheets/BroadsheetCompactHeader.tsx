@@ -92,7 +92,7 @@ export default function BroadsheetCompactHeader({
         alignItems: "center",
         gap: compact ? 6 : 8,
         marginBottom: compact ? 4 : 5,
-        padding: compact ? "5px 7px" : "6px 8px",
+        padding: compact ? "4px 7px" : "5px 8px",
         border: "1px solid #cbd5e1",
         borderLeft: `4px solid ${primary}`,
         borderRadius: 6,
@@ -130,10 +130,10 @@ export default function BroadsheetCompactHeader({
 
         <div
           style={{
-            marginTop: 1,
-            fontSize: compact ? 5.9 : 6.6,
+            marginTop: 0,
+            fontSize: compact ? 8.1 : 8.8,
             fontWeight: 760,
-            color: "#64748b",
+            color: "#475569",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -146,7 +146,7 @@ export default function BroadsheetCompactHeader({
       <div style={{ textAlign: "right", minWidth: 0 }}>
         <div
           style={{
-            fontSize: compact ? 7.2 : 8,
+            fontSize: compact ? 9.2 : 10,
             fontWeight: 950,
             textTransform: "uppercase",
             color: primary,
@@ -159,8 +159,8 @@ export default function BroadsheetCompactHeader({
         {subtitle && (
           <div
             style={{
-              marginTop: 1,
-              fontSize: compact ? 5.5 : 6.1,
+              marginTop: 0,
+              fontSize: compact ? 8.1 : 8.8,
               fontWeight: 700,
               color: "#475569",
               whiteSpace: "nowrap",
@@ -173,10 +173,10 @@ export default function BroadsheetCompactHeader({
         {generated && (
           <div
             style={{
-              marginTop: 1,
-              fontSize: compact ? 5.2 : 5.8,
+              marginTop: 0,
+              fontSize: compact ? 7.8 : 8.4,
               fontWeight: 760,
-              color: "#64748b",
+              color: "#475569",
               whiteSpace: "nowrap",
             }}
           >

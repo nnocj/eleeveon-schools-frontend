@@ -89,10 +89,10 @@ export default function LetterHeadPremiumHeader({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `${logoSize + 10}px minmax(0, 1fr) ${compact ? 142 : 164}px`,
+          gridTemplateColumns: `${logoSize + 7}px minmax(0, 1fr) ${compact ? 126 : 150}px`,
           gap: compact ? 8 : 10,
           alignItems: "center",
-          padding: compact ? "7px 9px 6px" : "8px 11px 7px",
+          padding: compact ? "0px 9px 1px" : "5px 11px 5px",
         }}
       >
         <div
@@ -136,7 +136,7 @@ export default function LetterHeadPremiumHeader({
           ) : (
             <span
               style={{
-                fontSize: compact ? 6.6 : 7.2,
+                fontSize: compact ? 8 : 8.7,
                 fontWeight: 950,
                 color: primary,
                 textAlign: "center",
@@ -171,12 +171,12 @@ export default function LetterHeadPremiumHeader({
           {branding.motto && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 8 : 8.8,
+                marginTop: 1,
+                fontSize: compact ? 9.5 : 10.3,
                 fontWeight: 760,
                 fontStyle: "italic",
                 color: "#5f5642",
-                lineHeight: 1.16,
+                lineHeight: 1.08,
               }}
             >
               “{branding.motto}”
@@ -186,11 +186,11 @@ export default function LetterHeadPremiumHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 6.9 : 7.7,
-                lineHeight: 1.18,
+                marginTop: 1,
+                fontSize: compact ? 9.4 : 10.2,
+                lineHeight: 1.08,
                 fontWeight: 700,
-                color: "#64748b",
+                color: "#475569",
                 overflowWrap: "anywhere",
               }}
             >
@@ -201,9 +201,9 @@ export default function LetterHeadPremiumHeader({
           {branchLine && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 6.9 : 7.7,
-                lineHeight: 1.18,
+                marginTop: 1,
+                fontSize: compact ? 9.4 : 10.2,
+                lineHeight: 1.08,
                 fontWeight: 900,
                 color: primary,
                 overflowWrap: "anywhere",
@@ -233,7 +233,7 @@ export default function LetterHeadPremiumHeader({
         >
           <div
             style={{
-              fontSize: compact ? 7.4 : 8.2,
+              fontSize: compact ? 9 : 9.7,
               fontWeight: 950,
               textTransform: "uppercase",
               letterSpacing: 0.45,
@@ -247,13 +247,13 @@ export default function LetterHeadPremiumHeader({
             style={{
               width: "74%",
               height: 1,
-              margin: "5px 0 4px",
+              margin: "3px 0 2px",
               background: "rgba(255,255,255,.72)",
             }}
           />
           <div
             style={{
-              fontSize: compact ? 6.6 : 7.2,
+              fontSize: compact ? 8 : 8.7,
               fontWeight: 850,
               letterSpacing: 0.25,
               opacity: 0.95,
@@ -277,7 +277,7 @@ export default function LetterHeadPremiumHeader({
         }}
       >
         <span style={{ flex: 1, height: 1, background: "#e7ddbf" }} />
-        <span style={{ fontSize: compact ? 8 : 9 }}>◆</span>
+        <span style={{ fontSize: compact ? 8 : 9}}>◆</span>
         <span style={{ flex: 1, height: 1, background: "#e7ddbf" }} />
       </div>
 

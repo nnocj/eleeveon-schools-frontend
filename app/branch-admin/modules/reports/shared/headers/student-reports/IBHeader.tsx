@@ -62,10 +62,10 @@ export default function IBHeader({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `minmax(0, 1fr) ${compact ? 172 : 198}px ${logoSize}px`,
-          gap: compact ? 8 : 10,
+          gridTemplateColumns: `minmax(0, 1fr) ${compact ? 164 : 182}px ${logoSize}px`,
+          gap: compact ? 7 : 9,
           alignItems: "center",
-          padding: compact ? "8px 10px" : "10px 12px",
+          padding: compact ? "1px 10px" : "7px 12px",
           background: "linear-gradient(180deg, #ffffff, #f6fffb)",
           borderBottom: "1px solid #c7ebe4",
         }}
@@ -88,9 +88,9 @@ export default function IBHeader({
           {(branding.motto || contactLine || branchLine) && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9.2 : 9.8,
-                lineHeight: 1.25,
+                marginTop: 2,
+                fontSize: compact ? 9.8 : 10.6,
+                lineHeight: 1.12,
                 fontWeight: 720,
                 color: "#475569",
                 overflowWrap: "anywhere",
@@ -109,9 +109,9 @@ export default function IBHeader({
             background: "#ffffff",
             color: "#0f766e",
             borderRadius: 4,
-            padding: compact ? "6px 8px" : "7px 10px",
+            padding: compact ? "5px 8px" : "6px 10px",
             textAlign: "left",
-            fontSize: compact ? 8 : 8.9,
+            fontSize: compact ? 9.2 : 10,
             fontWeight: 950,
             lineHeight: 1.15,
             textTransform: "uppercase",
@@ -119,7 +119,7 @@ export default function IBHeader({
           }}
         >
           {title}
-          <div style={{ marginTop: 2, fontSize: compact ? 9.2 : 9.8, color: "#64748b", fontWeight: 850 }}>
+          <div style={{ marginTop: 2, fontSize: compact ? 9.6 : 10.1, color: "#64748b", fontWeight: 850 }}>
             IB-style progress record
           </div>
         </div>
@@ -141,7 +141,7 @@ export default function IBHeader({
           {branding.logo ? (
             <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }} />
           ) : (
-            <span style={{ fontSize: compact ? 6.6 : 7.2, fontWeight: 950, color: "#64748b", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
+            <span style={{ fontSize: compact ? 7.6 : 8.1, fontWeight: 950, color: "#64748b", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
               School<br />Logo
             </span>
           )}

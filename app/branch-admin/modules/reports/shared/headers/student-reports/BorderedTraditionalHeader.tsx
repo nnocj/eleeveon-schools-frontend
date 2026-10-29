@@ -69,7 +69,7 @@ export default function BorderedTraditionalHeader({
         color: "#111827",
         background: "#fffdf7",
         border: "2px double #111827",
-        padding: compact ? 9 : 11,
+        padding: compact ? 6 : 9,
         position: "relative",
         overflow: "hidden",
       }}
@@ -118,7 +118,7 @@ export default function BorderedTraditionalHeader({
             ) : (
               <span
                 style={{
-                  fontSize: compact ? 7 : 7.8,
+                  fontSize: compact ? 8.1 : 8.8,
                   fontWeight: 950,
                   color: primary,
                   textAlign: "center",
@@ -136,7 +136,7 @@ export default function BorderedTraditionalHeader({
 
         <div
           style={{
-            marginTop: compact ? 5 : 7,
+            marginTop: compact ? 4 : 5,
             textAlign: "center",
           }}
         >
@@ -157,12 +157,12 @@ export default function BorderedTraditionalHeader({
           {branding.motto && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9.7 : 10.5,
+                marginTop: 2,
+                fontSize: compact ? 10.2 : 10.9,
                 fontWeight: 760,
                 fontStyle: "italic",
                 color: "#334155",
-                lineHeight: 1.18,
+                lineHeight: 1.1,
               }}
             >
               “{branding.motto}”
@@ -172,11 +172,11 @@ export default function BorderedTraditionalHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 4,
-                fontSize: compact ? 9.3 : 10,
+                marginTop: 2,
+                fontSize: compact ? 10.5 : 11.1,
                 fontWeight: 700,
                 color: "#475569",
-                lineHeight: 1.22,
+                lineHeight: 1.1,
                 overflowWrap: "anywhere",
               }}
             >
@@ -188,10 +188,10 @@ export default function BorderedTraditionalHeader({
             <div
               style={{
                 marginTop: 2,
-                fontSize: compact ? 9.3 : 10,
+                fontSize: compact ? 10.4 : 11,
                 fontWeight: 900,
                 color: primary,
-                lineHeight: 1.22,
+                lineHeight: 1.1,
                 overflowWrap: "anywhere",
               }}
             >
@@ -203,14 +203,14 @@ export default function BorderedTraditionalHeader({
         <div
           data-report-color-block="true"
           style={{
-            margin: compact ? "8px auto 0" : "10px auto 0",
+            margin: compact ? "6px auto 0" : "8px auto 0",
             width: "fit-content",
             maxWidth: "82%",
             border: `2px double ${primary}`,
             background: "#f3efe4",
-            padding: compact ? "5px 18px" : "6px 22px",
+            padding: compact ? "4px 18px" : "5px 22px",
             textAlign: "center",
-            fontSize: compact ? 9 : 10.5,
+            fontSize: compact ? 9.8 : 11,
             fontWeight: 950,
             color: "#111827",
             lineHeight: 1.1,

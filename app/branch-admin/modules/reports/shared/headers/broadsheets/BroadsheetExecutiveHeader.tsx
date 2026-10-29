@@ -106,7 +106,7 @@ export default function BroadsheetExecutiveHeader({
               : `minmax(0,1fr) ${compact ? 195 : 230}px`,
           gap: compact ? 10 : 13,
           alignItems: "center",
-          padding: compact ? "9px 11px" : "11px 14px",
+          padding: compact ? "5px 11px" : "9px 14px",
           background: "#ffffff",
         }}
       >
@@ -156,8 +156,8 @@ export default function BroadsheetExecutiveHeader({
           {(branding.motto || branding.branchName) && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 7 : 7.8,
+                marginTop: 2,
+                fontSize: compact ? 9.2 : 10,
                 fontWeight: 760,
                 color: "#475569",
               }}
@@ -171,9 +171,9 @@ export default function BroadsheetExecutiveHeader({
           <div
             style={{
               marginTop: 4,
-              fontSize: compact ? 6.2 : 6.9,
+              fontSize: compact ? 9.2 : 10,
               fontWeight: 650,
-              color: "#64748b",
+              color: "#475569",
             }}
           >
             {[branding.address, branding.phone, branding.email]
@@ -186,7 +186,7 @@ export default function BroadsheetExecutiveHeader({
           data-report-color-block="true"
           style={{
             minWidth: 0,
-            padding: compact ? "9px 11px" : "11px 13px",
+            padding: compact ? "7px 11px" : "9px 13px",
             borderRadius: 12,
             background: `linear-gradient(135deg, ${primary}, #0f172a)`,
             color: "#fff",
@@ -195,9 +195,9 @@ export default function BroadsheetExecutiveHeader({
         >
           <div
             style={{
-              fontSize: compact ? 8.7 : 9.8,
+              fontSize: compact ? 9.5 : 10.4,
               fontWeight: 950,
-              lineHeight: 1.12,
+              lineHeight: 1.07,
               textTransform: "uppercase",
               letterSpacing: 0.28,
             }}
@@ -208,11 +208,11 @@ export default function BroadsheetExecutiveHeader({
           {subtitle && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 6.4 : 7.1,
+                marginTop: 2,
+                fontSize: compact ? 8.5 : 9.3,
                 fontWeight: 720,
                 opacity: 0.92,
-                lineHeight: 1.2,
+                lineHeight: 1.08,
               }}
             >
               {subtitle}
@@ -223,9 +223,9 @@ export default function BroadsheetExecutiveHeader({
             <div
               style={{
                 marginTop: 5,
-                paddingTop: 5,
+                paddingTop: 3,
                 borderTop: "1px solid rgba(255,255,255,.25)",
-                fontSize: compact ? 5.8 : 6.5,
+                fontSize: compact ? 8 : 8.7,
                 fontWeight: 760,
               }}
             >
@@ -250,17 +250,17 @@ export default function BroadsheetExecutiveHeader({
               key={`${item.label}-${item.value}`}
               style={{
                 minWidth: 0,
-                padding: compact ? "5px 8px" : "6px 9px",
+                padding: compact ? "2px 8px" : "4px 9px",
                 borderLeft: index === 0 ? "0" : "1px solid #e2e8f0",
               }}
             >
               <div
                 style={{
-                  fontSize: compact ? 5.7 : 6.3,
+                  fontSize: compact ? 7.8 : 8.5,
                   fontWeight: 900,
                   textTransform: "uppercase",
                   letterSpacing: 0.25,
-                  color: "#64748b",
+                  color: "#475569",
                 }}
               >
                 {item.label}
@@ -269,7 +269,7 @@ export default function BroadsheetExecutiveHeader({
               <div
                 style={{
                   marginTop: 1,
-                  fontSize: compact ? 7.2 : 8,
+                  fontSize: compact ? 9 : 9.7,
                   fontWeight: 900,
                   color: "#0f172a",
                   overflow: "hidden",

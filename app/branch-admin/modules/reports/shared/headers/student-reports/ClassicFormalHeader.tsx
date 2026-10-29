@@ -77,7 +77,7 @@ export default function ClassicFormalHeader({
         color: "#111",
         background: "#fff",
         borderBottom: `2px solid ${primary}`,
-        paddingBottom: compact ? 5 : 7,
+        paddingBottom: compact ? 3 : 5,
       }}
     >
       <div
@@ -117,7 +117,7 @@ export default function ClassicFormalHeader({
           ) : (
             <span
               style={{
-                fontSize: compact ? 7.5 : 8.5,
+                fontSize: compact ? 8.5 : 9.2,
                 fontWeight: 950,
                 color: "#555",
                 textAlign: "center",
@@ -150,12 +150,12 @@ export default function ClassicFormalHeader({
           {branding.motto && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 8.6 : 9.6,
+                marginTop: 1,
+                fontSize: compact ? 9.8 : 10.6,
                 fontWeight: 800,
                 fontStyle: "italic",
                 color: "#333",
-                lineHeight: 1.18,
+                lineHeight: 1.1,
               }}
             >
               {branding.motto}
@@ -165,9 +165,9 @@ export default function ClassicFormalHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 7.5 : 8.4,
-                lineHeight: 1.22,
+                marginTop: 1,
+                fontSize: compact ? 10 : 10.7,
+                lineHeight: 1.1,
                 fontWeight: 700,
                 color: "#444",
                 overflowWrap: "anywhere",
@@ -180,9 +180,9 @@ export default function ClassicFormalHeader({
           {branchLine && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 7.5 : 8.4,
-                lineHeight: 1.22,
+                marginTop: 1,
+                fontSize: compact ? 9.9 : 10.7,
+                lineHeight: 1.1,
                 fontWeight: 850,
                 color: "#111",
                 overflowWrap: "anywhere",
@@ -239,7 +239,7 @@ export default function ClassicFormalHeader({
 
       <div
         style={{
-          marginTop: compact ? 5 : 7,
+          marginTop: compact ? 3 : 5,
           display: "grid",
           gridTemplateColumns: "1fr auto 1fr",
           alignItems: "center",
@@ -262,7 +262,7 @@ export default function ClassicFormalHeader({
             color: contrast,
             borderRadius: 999,
             padding: compact ? "3.5px 12px" : "4.5px 16px",
-            fontSize: compact ? 8.8 : 10,
+            fontSize: compact ? 9.5 : 10.5,
             fontWeight: 950,
             textTransform: "uppercase",
             letterSpacing: 0.3,

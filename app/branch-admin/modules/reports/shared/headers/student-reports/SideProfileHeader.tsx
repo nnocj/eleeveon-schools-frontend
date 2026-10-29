@@ -70,9 +70,9 @@ export default function SideProfileHeader({
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1fr) auto",
-          gap: compact ? 8 : 10,
+          gap: compact ? 8 : 8,
           alignItems: "center",
-          padding: compact ? "8px 10px" : "9px 12px",
+          padding: compact ? "5px 10px" : "5px 12px",
           borderBottom: "1px solid #e5e7eb",
           background: "linear-gradient(180deg, #ffffff, #f8fafc)",
         }}
@@ -95,11 +95,11 @@ export default function SideProfileHeader({
           {(branding.motto || contactLine || branchLine) && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9.2 : 9.8,
-                lineHeight: 1.25,
+                marginTop: 2,
+                fontSize: compact ? 10.3 : 10.6,
+                lineHeight: 1.12,
                 fontWeight: 720,
-                color: "#64748b",
+                color: "#475569",
                 overflowWrap: "anywhere",
               }}
             >
@@ -114,10 +114,10 @@ export default function SideProfileHeader({
             background: primary,
             color: contrast,
             borderRadius: 999,
-            padding: compact ? "6px 10px" : "7px 12px",
-            maxWidth: 170,
+            padding: compact ? "5px 10px" : "5px 12px",
+            maxWidth: 152,
             textAlign: "center",
-            fontSize: compact ? 7.8 : 8.6,
+            fontSize: compact ? 9.2 : 10,
             fontWeight: 950,
             lineHeight: 1.12,
             textTransform: "uppercase",

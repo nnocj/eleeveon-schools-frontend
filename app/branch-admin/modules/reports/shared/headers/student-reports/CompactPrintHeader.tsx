@@ -72,7 +72,7 @@ export default function CompactPrintHeader({
         color: "#111",
         border: "1.5px solid #111827",
         borderTop: `5px solid ${primary}`,
-        padding: "6px 7px",
+        padding: "5px 7px",
         background: "rgba(255,255,255,.98)",
       }}
     >
@@ -145,7 +145,7 @@ export default function CompactPrintHeader({
             <div
               style={{
                 marginTop: 1,
-                fontSize: 9.8,
+                fontSize: 10.2,
                 fontWeight: 750,
                 fontStyle: "italic",
                 color: "#444",
@@ -161,9 +161,9 @@ export default function CompactPrintHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: 9.4,
-                lineHeight: 1.2,
+                marginTop: 1,
+                fontSize: 10.5,
+                lineHeight: 1.08,
                 fontWeight: 650,
                 color: "#555",
                 overflow: "hidden",
@@ -179,8 +179,8 @@ export default function CompactPrintHeader({
             <div
               style={{
                 marginTop: 1,
-                fontSize: 9.4,
-                lineHeight: 1.2,
+                fontSize: 10.3,
+                lineHeight: 1.08,
                 fontWeight: 800,
                 color: "#333",
                 overflow: "hidden",

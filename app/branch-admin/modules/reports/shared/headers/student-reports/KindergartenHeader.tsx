@@ -65,7 +65,7 @@ export default function KindergartenHeader({
           gridTemplateColumns: `minmax(0, 1fr) ${compact ? 172 : 198}px ${logoSize}px`,
           gap: compact ? 8 : 10,
           alignItems: "center",
-          padding: compact ? "8px 10px" : "10px 12px",
+          padding: compact ? "6px 10px" : "8px 12px",
           background: "linear-gradient(180deg, #ffffff, #fff7ed)",
           borderBottom: "1px solid #ffedd5",
         }}
@@ -88,9 +88,9 @@ export default function KindergartenHeader({
           {(branding.motto || contactLine || branchLine) && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9.2 : 9.8,
-                lineHeight: 1.25,
+                marginTop: 2,
+                fontSize: compact ? 10.3 : 11.1,
+                lineHeight: 1.12,
                 fontWeight: 720,
                 color: "#6b7280",
                 overflowWrap: "anywhere",
@@ -109,9 +109,9 @@ export default function KindergartenHeader({
             background: "linear-gradient(135deg, #fff7ed, #ecfeff)",
             color: "#ea580c",
             borderRadius: 999,
-            padding: compact ? "6px 8px" : "7px 10px",
+            padding: compact ? "5px 8px" : "6px 10px",
             textAlign: "left",
-            fontSize: compact ? 8 : 8.9,
+            fontSize: compact ? 9.2 : 10,
             fontWeight: 950,
             lineHeight: 1.15,
             textTransform: "uppercase",
@@ -119,7 +119,7 @@ export default function KindergartenHeader({
           }}
         >
           {title}
-          <div style={{ marginTop: 2, fontSize: compact ? 9.2 : 9.8, color: "#78716c", fontWeight: 850 }}>
+          <div style={{ marginTop: 2, fontSize: compact ? 9.6 : 10.1, color: "#78716c", fontWeight: 850 }}>
             Kindergarten progress record
           </div>
         </div>
@@ -141,7 +141,7 @@ export default function KindergartenHeader({
           {branding.logo ? (
             <img src={branding.logo} alt="School logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, boxSizing: "border-box" }} />
           ) : (
-            <span style={{ fontSize: compact ? 6.6 : 7.2, fontWeight: 950, color: "#78716c", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
+            <span style={{ fontSize: compact ? 7.6 : 8.1, fontWeight: 950, color: "#78716c", textAlign: "center", lineHeight: 1.05, textTransform: "uppercase" }}>
               School<br />Logo
             </span>
           )}

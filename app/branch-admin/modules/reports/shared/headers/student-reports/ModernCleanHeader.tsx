@@ -86,10 +86,10 @@ export default function ModernCleanHeader({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `${logoSize + 20}px minmax(0, 1fr) ${compact ? 150 : 172}px`,
-          gap: compact ? 9 : 12,
+          gridTemplateColumns: `${logoSize + 14}px minmax(0, 1fr) ${compact ? 138 : 154}px`,
+          gap: compact ? 8 : 10,
           alignItems: "stretch",
-          padding: compact ? 10 : 12,
+          padding: compact ? 6 : 8,
         }}
       >
         <div
@@ -179,11 +179,11 @@ export default function ModernCleanHeader({
             <div
               style={{
                 marginTop: 3,
-                fontSize: compact ? 8.6 : 9.6,
+                fontSize: compact ? 9.9 : 10.6,
                 fontWeight: 760,
                 fontStyle: "italic",
                 color: "#475569",
-                lineHeight: 1.2,
+                lineHeight: 1.1,
               }}
             >
               {branding.motto}
@@ -193,11 +193,11 @@ export default function ModernCleanHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 6,
-                fontSize: compact ? 7.4 : 8.2,
-                lineHeight: 1.25,
+                marginTop: 3,
+                fontSize: compact ? 9.9 : 10.3,
+                lineHeight: 1.09,
                 fontWeight: 680,
-                color: "#64748b",
+                color: "#475569",
                 overflowWrap: "anywhere",
               }}
             >
@@ -208,15 +208,15 @@ export default function ModernCleanHeader({
           {branchLine && (
             <div
               style={{
-                marginTop: 4,
+                marginTop: 2,
                 display: "inline-flex",
                 width: "fit-content",
                 maxWidth: "100%",
                 borderRadius: 999,
-                padding: compact ? "3px 8px" : "4px 10px",
+                padding: compact ? "2px 8px" : "3px 10px",
                 background: "#f8fafc",
                 border: "1px solid #e5e7eb",
-                fontSize: compact ? 7.3 : 8.1,
+                fontSize: compact ? 9.6 : 10,
                 lineHeight: 1.15,
                 fontWeight: 900,
                 color: primary,

@@ -103,7 +103,7 @@ export default function BroadsheetClassicHeader({
               : "minmax(0,1fr) auto",
           alignItems: "center",
           gap: compact ? 8 : 11,
-          padding: compact ? "5px 7px" : "7px 9px",
+          padding: compact ? "4px 7px" : "6px 9px",
           borderTop: "3px double #111",
           borderBottom: "3px double #111",
           background: "#fff",
@@ -153,10 +153,10 @@ export default function BroadsheetClassicHeader({
           {(branding.motto || branding.branchName) && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 7.2 : 8,
+                marginTop: 1,
+                fontSize: compact ? 9.1 : 9.9,
                 fontWeight: 750,
-                lineHeight: 1.2,
+                lineHeight: 1.06,
               }}
             >
               {[branding.motto, branding.branchName]
@@ -168,9 +168,9 @@ export default function BroadsheetClassicHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 6.5 : 7.2,
-                lineHeight: 1.2,
+                marginTop: 1,
+                fontSize: compact ? 9.2 : 10,
+                lineHeight: 1.06,
                 color: "#333",
                 overflowWrap: "anywhere",
               }}
@@ -192,7 +192,7 @@ export default function BroadsheetClassicHeader({
         >
           <div
             style={{
-              fontSize: compact ? 9 : 10.5,
+              fontSize: compact ? 9.5 : 11,
               fontWeight: 950,
               textTransform: "uppercase",
               letterSpacing: 0.35,
@@ -204,9 +204,9 @@ export default function BroadsheetClassicHeader({
           {subtitle && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 6.8 : 7.5,
-                lineHeight: 1.2,
+                marginTop: 1,
+                fontSize: compact ? 8.5 : 9.2,
+                lineHeight: 1.06,
                 fontWeight: 750,
               }}
             >
@@ -231,16 +231,16 @@ export default function BroadsheetClassicHeader({
               key={`${item.label}-${item.value}`}
               style={{
                 minWidth: 0,
-                padding: compact ? "3px 5px" : "4px 6px",
+                padding: compact ? "1px 5px" : "1px 6px",
                 borderRight: "1px solid #111",
               }}
             >
               <div
                 style={{
-                  fontSize: compact ? 5.8 : 6.5,
+                  fontSize: compact ? 7.8 : 8.5,
                   fontWeight: 900,
                   textTransform: "uppercase",
-                  letterSpacing: 0.22,
+                  letterSpacing: 0.08,
                   color: "#444",
                 }}
               >
@@ -248,8 +248,8 @@ export default function BroadsheetClassicHeader({
               </div>
               <div
                 style={{
-                  marginTop: 1,
-                  fontSize: compact ? 7.2 : 8,
+                  marginTop: 0,
+                  fontSize: compact ? 9 : 9.7,
                   fontWeight: 850,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
@@ -266,9 +266,9 @@ export default function BroadsheetClassicHeader({
       {settings.showBroadsheetGeneratedDate && (
         <div
           style={{
-            marginTop: 3,
+            marginTop: 2,
             textAlign: "right",
-            fontSize: compact ? 6.2 : 7,
+            fontSize: compact ? 8.2 : 8.9,
             fontWeight: 750,
           }}
         >

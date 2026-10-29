@@ -110,7 +110,7 @@ export default function BroadsheetModernHeader({
         position: "relative",
         overflow: "hidden",
         marginBottom: compact ? 7 : 9,
-        padding: compact ? 8 : 10,
+        padding: compact ? 6 : 7,
         border: "1px solid #dbe3ee",
         borderRadius: compact ? 13 : 16,
         background: "#ffffff",
@@ -190,9 +190,9 @@ export default function BroadsheetModernHeader({
           {(branding.motto || branding.branchName) && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 7 : 7.8,
-                lineHeight: 1.2,
+                marginTop: 1,
+                fontSize: compact ? 9.1 : 9.9,
+                lineHeight: 1.08,
                 fontWeight: 760,
                 color: "#475569",
                 overflowWrap: "anywhere",
@@ -207,11 +207,11 @@ export default function BroadsheetModernHeader({
           {contactLine && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 6.3 : 7,
-                lineHeight: 1.22,
+                marginTop: 1,
+                fontSize: compact ? 9.2 : 10,
+                lineHeight: 1.08,
                 fontWeight: 650,
-                color: "#64748b",
+                color: "#475569",
                 overflowWrap: "anywhere",
               }}
             >
@@ -225,7 +225,7 @@ export default function BroadsheetModernHeader({
           style={{
             minWidth: 0,
             borderRadius: compact ? 12 : 14,
-            padding: compact ? "7px 9px" : "8px 11px",
+            padding: compact ? "5px 9px" : "6px 11px",
             background: `linear-gradient(135deg, ${primary}, ${primary}dd)`,
             color: "#fff",
             textAlign: "left",
@@ -234,7 +234,7 @@ export default function BroadsheetModernHeader({
         >
           <div
             style={{
-              fontSize: compact ? 8.3 : 9.5,
+              fontSize: compact ? 9.2 : 10,
               fontWeight: 950,
               lineHeight: 1.12,
               textTransform: "uppercase",
@@ -248,10 +248,10 @@ export default function BroadsheetModernHeader({
           {subtitle && (
             <div
               style={{
-                marginTop: 2,
-                fontSize: compact ? 6.3 : 7,
+                marginTop: 1,
+                fontSize: compact ? 8.5 : 9.3,
                 fontWeight: 720,
-                lineHeight: 1.2,
+                lineHeight: 1.08,
                 opacity: 0.92,
                 overflowWrap: "anywhere",
               }}
@@ -263,10 +263,10 @@ export default function BroadsheetModernHeader({
           {generatedDate && (
             <div
               style={{
-                marginTop: 4,
-                paddingTop: 4,
+                marginTop: 2,
+                paddingTop: 2,
                 borderTop: "1px solid rgba(255,255,255,.28)",
-                fontSize: compact ? 5.9 : 6.5,
+                fontSize: compact ? 7.8 : 8.5,
                 fontWeight: 800,
                 lineHeight: 1.15,
                 opacity: 0.95,
@@ -282,7 +282,7 @@ export default function BroadsheetModernHeader({
       {metadata.length > 0 && (
         <div
           style={{
-            marginTop: compact ? 7 : 9,
+            marginTop: compact ? 5 : 5,
             display: "grid",
             gridTemplateColumns: `repeat(${Math.min(metadata.length, 6)}, minmax(0,1fr))`,
             gap: compact ? 4 : 6,
@@ -297,16 +297,16 @@ export default function BroadsheetModernHeader({
                 border: "1px solid #e2e8f0",
                 borderRadius: compact ? 9 : 11,
                 background: "#f8fafc",
-                padding: compact ? "4px 6px" : "5px 7px",
+                padding: compact ? "2px 6px" : "3px 7px",
               }}
             >
               <div
                 style={{
-                  fontSize: compact ? 5.6 : 6.2,
+                  fontSize: compact ? 7.8 : 8.5,
                   fontWeight: 900,
                   textTransform: "uppercase",
                   letterSpacing: 0.22,
-                  color: "#64748b",
+                  color: "#475569",
                 }}
               >
                 {item.label}
@@ -315,7 +315,7 @@ export default function BroadsheetModernHeader({
               <div
                 style={{
                   marginTop: 1,
-                  fontSize: compact ? 7 : 7.8,
+                  fontSize: compact ? 8.9 : 9.6,
                   fontWeight: 880,
                   color: "#172033",
                   overflow: "hidden",

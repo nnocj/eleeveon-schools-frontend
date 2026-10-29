@@ -93,23 +93,25 @@ function tableStyles(compact: boolean): TableStyleSet {
       width: "100%",
       borderCollapse: "collapse",
       tableLayout: "auto",
-      fontSize: compact ? 6.7 : 7.6,
+      fontSize: compact ? 8.5 : 9.5,
       lineHeight: 1.15,
       color: "#111",
     },
     th: {
       border: "1px solid #111",
-      padding: compact ? "3px 3px" : "4px 4px",
+      padding: compact ? "2.5px 2px" : "3px 2.5px",
       background: "#e9e9e9",
       color: "#111",
       textAlign: "center",
       verticalAlign: "middle",
       fontWeight: 900,
-      whiteSpace: "nowrap",
+      whiteSpace: "normal",
+      overflowWrap: "anywhere",
+      lineHeight: 1.15,
     },
     td: {
       border: "1px solid #111",
-      padding: compact ? "2.5px 3px" : "3.5px 4px",
+      padding: compact ? "1.5px 2px" : "2px 2.5px",
       verticalAlign: "middle",
       whiteSpace: "nowrap",
     },
@@ -133,7 +135,7 @@ function SummaryStrip({
         gridTemplateColumns: `repeat(${Math.min(visible.length, 8)}, minmax(0,1fr))`,
         borderTop: "1px solid #111",
         borderLeft: "1px solid #111",
-        marginBottom: compact ? 6 : 8,
+        marginBottom: compact ? 5 : 7,
       }}
     >
       {visible.map((item) => (
@@ -141,7 +143,7 @@ function SummaryStrip({
           key={item.label}
           style={{
             minWidth: 0,
-            padding: compact ? "3px 5px" : "4px 6px",
+            padding: compact ? "2.5px 4px" : "3px 5px",
             borderRight: "1px solid #111",
             borderBottom: "1px solid #111",
             background: "#fff",
@@ -149,10 +151,10 @@ function SummaryStrip({
         >
           <div
             style={{
-              fontSize: compact ? 5.6 : 6.3,
+              fontSize: compact ? 8.2 : 9,
               fontWeight: 900,
               textTransform: "uppercase",
-              letterSpacing: 0.2,
+              letterSpacing: 0,
               color: "#444",
             }}
           >
@@ -161,7 +163,7 @@ function SummaryStrip({
           <div
             style={{
               marginTop: 1,
-              fontSize: compact ? 7.2 : 8.2,
+              fontSize: compact ? 10 : 11,
               fontWeight: 900,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -224,7 +226,7 @@ function StudentIdentityCell({
           {student.studentName || "-"}
         </div>
         {student.admissionNumber && (
-          <div style={{ marginTop: 1, fontSize: "0.88em", color: "#444" }}>
+          <div style={{ marginTop: 1, fontSize: "0.96em", color: "#444" }}>
             {student.admissionNumber}
           </div>
         )}
@@ -249,14 +251,14 @@ function Footer({
   return (
     <footer
       style={{
-        marginTop: compact ? 6 : 8,
-        paddingTop: compact ? 3 : 4,
+        marginTop: compact ? 5 : 7,
+        paddingTop: compact ? 2 : 3,
         borderTop: "1px solid #111",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
         gap: 10,
-        fontSize: compact ? 5.8 : 6.6,
+        fontSize: compact ? 8.5 : 9.5,
         color: "#333",
       }}
     >
@@ -415,7 +417,7 @@ export default function ClassicBroadsheetTemplate({
         {resolvedSettings.showBroadsheetSignatures && (
           <div
             style={{
-              marginTop: compact ? 10 : 14,
+              marginTop: compact ? 8 : 12,
               display: "grid",
               gridTemplateColumns: "repeat(3,minmax(0,1fr))",
               gap: compact ? 18 : 28,
@@ -424,12 +426,12 @@ export default function ClassicBroadsheetTemplate({
             {["Prepared By", "Checked By", "Headteacher / Principal"].map(
               (label) => (
                 <div key={label} style={{ textAlign: "center" }}>
-                  <div style={{ height: compact ? 15 : 20 }} />
+                  <div style={{ height: compact ? 12 : 17 }} />
                   <div
                     style={{
                       borderTop: "1px solid #111",
                       paddingTop: 3,
-                      fontSize: compact ? 6.2 : 7,
+                      fontSize: compact ? 8.5 : 9.5,
                       fontWeight: 850,
                     }}
                   >
@@ -503,7 +505,7 @@ function SubjectMode({
         />
       )}
 
-      <div style={{ overflow: "hidden" }}>
+      <div style={{ overflowX: "auto", overflowY: "hidden", maxWidth: "100%" }}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -520,8 +522,8 @@ function SubjectMode({
                         <div
                           style={{
                             marginBottom: 1,
-                            fontSize: "0.76em",
-                            opacity: 0.72,
+                            fontSize: "0.92em",
+                            opacity: 0.92,
                             textTransform: "uppercase",
                           }}
                         >
@@ -541,7 +543,7 @@ function SubjectMode({
                       <div
                         style={{
                           marginTop: 1,
-                          fontSize: "0.86em",
+                          fontSize: "0.96em",
                         }}
                       >
                         {settings.showAssessmentWeights
@@ -726,7 +728,7 @@ function ClassMode({
         />
       )}
 
-      <div style={{ overflow: "hidden" }}>
+      <div style={{ overflowX: "auto", overflowY: "hidden", maxWidth: "100%" }}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -746,7 +748,7 @@ function ClassMode({
                         marginTop: 1,
                         maxWidth: 65,
                         whiteSpace: "normal",
-                        fontSize: "0.82em",
+                        fontSize: "0.94em",
                       }}
                     >
                       {subject.subjectName}
@@ -802,7 +804,7 @@ function ClassMode({
                           <>
                             <strong>{formatNumber(cell.percentage, 1)}</strong>
                             {settings.showBroadsheetSubjectGrades && (
-                              <div style={{ marginTop: 1, fontSize: "0.86em" }}>
+                              <div style={{ marginTop: 1, fontSize: "0.96em" }}>
                                 {cell.grade || "-"}
                               </div>
                             )}
@@ -914,7 +916,7 @@ function AnnualMode({
         <div
           style={{
             marginBottom: compact ? 5 : 7,
-            fontSize: compact ? 6.2 : 7,
+            fontSize: compact ? 8.5 : 9.5,
             fontWeight: 800,
           }}
         >
@@ -922,7 +924,7 @@ function AnnualMode({
         </div>
       )}
 
-      <div style={{ overflow: "hidden" }}>
+      <div style={{ overflowX: "auto", overflowY: "hidden", maxWidth: "100%" }}>
         <table style={styles.table}>
           <thead>
             <tr>
@@ -944,7 +946,7 @@ function AnnualMode({
                       marginTop: 1,
                       maxWidth: 62,
                       whiteSpace: "normal",
-                      fontSize: "0.82em",
+                      fontSize: "0.94em",
                     }}
                   >
                     {subject.subjectName}
@@ -1002,7 +1004,7 @@ function AnnualMode({
                               <div
                                 style={{
                                   marginTop: 1,
-                                  fontSize: "0.75em",
+                                  fontSize: "0.92em",
                                   whiteSpace: "normal",
                                   lineHeight: 1.15,
                                 }}
@@ -1088,7 +1090,7 @@ function AnnualStudentIdentityCell({
         {student.studentName || "-"}
       </div>
       {student.admissionNumber && (
-        <div style={{ marginTop: 1, fontSize: "0.88em", color: "#444" }}>
+        <div style={{ marginTop: 1, fontSize: "0.96em", color: "#444" }}>
           {student.admissionNumber}
         </div>
       )}

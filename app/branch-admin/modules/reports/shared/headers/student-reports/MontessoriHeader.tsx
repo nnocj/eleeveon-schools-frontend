@@ -60,10 +60,10 @@ export default function MontessoriHeader({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: `${logoSize}px minmax(0, 1fr) ${compact ? 164 : 188}px`,
-          gap: compact ? 8 : 10,
+          gridTemplateColumns: `${logoSize}px minmax(0, 1fr) ${compact ? 155 : 169}px`,
+          gap: compact ? 7 : 8,
           alignItems: "center",
-          padding: compact ? "8px 10px" : "9px 12px",
+          padding: compact ? "6px 10px" : "4px 12px",
           background: "linear-gradient(180deg, #fffdf7, #ffffff)",
           borderBottom: "1px solid #e7ddc8",
           position: "relative",
@@ -123,9 +123,9 @@ export default function MontessoriHeader({
           {(branding.motto || contactLine || branchLine) && (
             <div
               style={{
-                marginTop: 3,
-                fontSize: compact ? 9.2 : 9.7,
-                lineHeight: 1.25,
+                marginTop: 2,
+                fontSize: compact ? 10.1 : 10.6,
+                lineHeight: 1.12,
                 fontWeight: 680,
                 color: "#6f6a5f",
                 overflowWrap: "anywhere",
@@ -143,9 +143,9 @@ export default function MontessoriHeader({
             background: "#f6f3ea",
             color: "#243126",
             borderRadius: 6,
-            padding: compact ? "6px 8px" : "7px 10px",
+            padding: compact ? "5px 8px" : "6px 10px",
             textAlign: "left",
-            fontSize: compact ? 8 : 8.8,
+            fontSize: compact ? 9.3 : 10,
             fontWeight: 920,
             lineHeight: 1.15,
             textTransform: "uppercase",
@@ -153,7 +153,7 @@ export default function MontessoriHeader({
           }}
         >
           {title}
-          <div style={{ marginTop: 2, fontSize: compact ? 9.2 : 9.8, color: "#6f6a5f", fontWeight: 760 }}>
+          <div style={{ marginTop: 2, fontSize: compact ? 9.6 : 10.2, color: "#6f6a5f", fontWeight: 760 }}>
             calm early-years learning record
           </div>
         </div>

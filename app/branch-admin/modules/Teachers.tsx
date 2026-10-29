@@ -55,6 +55,7 @@ import IdentityCardBatch from "./identity/IdentityCardBatch";
 import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
 import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { useRouter } from "next/navigation";
+import { apiRequest } from "../../lib/platformApi";
 import { useSettings } from "../../context/settings-context";
 import SignaturePadModal from "../../components/media/SignaturePadModal";
 import {
@@ -264,6 +265,13 @@ type FormState = {
   active: boolean;
 };
 
+type TeacherAuthContact = {
+  userId: string;
+  email: string;
+  phone: string;
+  fullName: string;
+};
+
 type TeacherView = {
   id: string;
   row: Teacher;
@@ -426,6 +434,90 @@ const safeRecordMediaValue = (value?: string) => {
   return media;
 };
 
+
+/**
+ * Mirror Users & Roles' authenticated account directory, without mutating
+ * local profile records during a read. Teacher links must be explicit and
+ * branch-scoped. The teacher's own contact values remain offline fallbacks.
+ */
+async function linkedTeacherContacts(args: {
+  accountId: string;
+  schoolId: string;
+  branchId: string;
+}): Promise<Record<string, TeacherAuthContact>> {
+  const array = (value: any): any[] =>
+    Array.isArray(value) ? value : Array.isArray(value?.data) ? value.data
+    : Array.isArray(value?.items) ? value.items : Array.isArray(value?.rows) ? value.rows : [];
+
+  let remote: any = null;
+  try {
+    remote = await apiRequest<any>(
+      `/accounts/me/users?schoolId=${encodeURIComponent(args.schoolId)}&branchId=${encodeURIComponent(args.branchId)}`,
+      { method: "GET" } as any,
+    );
+  } catch (error) {
+    // Offline support: keep using cached auth records when the server is unavailable.
+    console.info("Teacher access contacts: using the local auth cache.", error);
+  }
+
+  const responseUsers = remote ? [remote?.users, remote?.appUsers, remote?.accountUsers,
+    remote?.data?.users, remote?.data?.appUsers, remote?.data?.accountUsers,
+    remote?.data, remote?.items, remote?.rows, remote?.results, remote].flatMap(array) : [];
+  const responseMemberships = remote ? [remote?.memberships, remote?.userMemberships,
+    remote?.data?.memberships, remote?.data?.userMemberships].flatMap(array) : [];
+
+  const [cachedUsers, cachedMemberships] = await Promise.all([
+    Promise.all(["appUsers", "accountUsers", "users"].map(async name =>
+      await tableSafe(name)?.toArray?.().catch(() => []) || [])),
+    Promise.all(["userMemberships", "memberships"].map(async name =>
+      await tableSafe(name)?.toArray?.().catch(() => []) || [])),
+  ]);
+  const users = [...responseUsers, ...cachedUsers.flat()].filter(Boolean);
+  const memberships = [
+    ...responseMemberships,
+    ...responseUsers.flatMap((user: any) => [
+      user?.memberships, user?.userMemberships,
+      user?.membership ? [user.membership] : [],
+      user?.userMembership ? [user.userMembership] : [],
+    ].flatMap(array).map((membership: any) => ({
+      ...membership, userId: membership.userId || user.id,
+      accountId: membership.accountId || user.accountId,
+      schoolId: membership.schoolId ?? user.schoolId,
+      branchId: membership.branchId ?? user.branchId,
+      email: membership.email || user.email,
+    }))),
+    ...cachedMemberships.flat(),
+  ].filter(Boolean);
+
+  const inScope = (entry: any) =>
+    (!entry.accountId || String(entry.accountId) === args.accountId) &&
+    (!entry.schoolId || String(entry.schoolId) === args.schoolId) &&
+    (!entry.branchId || String(entry.branchId) === args.branchId);
+
+  const userById = new Map<string, any>();
+  for (const user of users.slice().reverse()) {
+    if (user?.id && inScope(user)) userById.set(String(user.id), user);
+  }
+
+  const found: Record<string, TeacherAuthContact> = {};
+  // Local cached memberships are fallback; remote memberships take precedence.
+  for (const membership of memberships.slice().reverse()) {
+    if (String(membership?.role || "").toLowerCase() !== "teacher" ||
+        !membership?.teacherId || !inScope(membership) || membership.isDeleted) continue;
+    const teacherId = String(membership.teacherId);
+    const userId = String(membership.userId || membership.accountUserId || "");
+    const user = userById.get(userId);
+    if (user && !inScope(user)) continue;
+    found[teacherId] = {
+      userId,
+      email: String(user?.email || membership.email || "").trim(),
+      phone: String(user?.phone || membership.phone || "").trim(),
+      fullName: String(user?.fullName || user?.name || membership.fullName || "").trim(),
+    };
+  }
+  return found;
+}
+
 const TEACHER_MEDIA_OWNER_TABLE = MediaOwners.TEACHERS;
 const TEACHER_MEDIA_ENTITY_LABEL = "Teacher";
 
@@ -505,6 +597,8 @@ export default function TeachersPage() {
     "teacherAttendance",
     "mediaAssets",
     "mediaBlobs",
+    "appUsers",
+    "userMemberships",
   ]);
   const router = useRouter();
   const { settings, loading: settingsLoading } = useSettings();
@@ -526,6 +620,8 @@ export default function TeachersPage() {
   const { loading, setLoading } = useBackgroundLoader();
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<Teacher[]>([]);
+  const [teacherAccessContacts, setTeacherAccessContacts] = useState<Record<string, TeacherAuthContact>>({});
+  const authContactRequest = useRef(0);
   const resolvedMediaById = useEntityMediaUrls({
     accountId,
     ownerTable: "teachers",
@@ -678,7 +774,9 @@ export default function TeachersPage() {
   };
 
   const clearData = () => {
+    authContactRequest.current += 1;
     Object.values(mediaPreviewUrls).forEach(revokeMediaObjectUrl);
+    setTeacherAccessContacts({});
     setRows([]);
     setOrganizations([]);
     setAssignments([]);
@@ -777,6 +875,13 @@ export default function TeachersPage() {
         );
 
       setRows(scopedTeachers);
+      // Load login contacts independently so the offline teacher list opens immediately.
+      const contactRequest = ++authContactRequest.current;
+      void linkedTeacherContacts({
+        accountId: String(accountId), schoolId: String(schoolId), branchId: String(branchId),
+      }).then(contacts => {
+        if (authContactRequest.current === contactRequest) setTeacherAccessContacts(contacts);
+      }).catch(cause => console.warn("Teacher portal contacts could not be resolved", cause));
       await resolveTeacherMediaUrls(scopedTeachers);
       setOrganizations(
         (organizationRows as Organization[]).sort((a: any, b: any) =>
@@ -920,8 +1025,15 @@ export default function TeachersPage() {
 
   const viewRows = useMemo<TeacherView[]>(
     () =>
-      rows.map((row: any) => {
-        const id = idOf(row.id);
+      rows.map((profileRow: any) => {
+        const id = idOf(profileRow.id);
+        const linked = teacherAccessContacts[id];
+        // Show authoritative access contacts without overwriting offline profile data.
+        const row: Teacher = linked ? {
+          ...profileRow,
+          email: linked.email || profileRow.email,
+          phone: linked.phone || profileRow.phone,
+        } : profileRow;
         const organization: any = row.organizationId
           ? organizationMap.get(idOf(row.organizationId))
           : undefined;
@@ -963,6 +1075,7 @@ export default function TeachersPage() {
       organizationMap,
       resolvedMediaById,
       rows,
+      teacherAccessContacts,
       usageMaps,
     ],
   );
@@ -1293,7 +1406,8 @@ export default function TeachersPage() {
   };
 
   const openEdit = (row: Teacher) => {
-    const t: any = row;
+    const linked = teacherAccessContacts[idOf(row.id)];
+    const t: any = linked ? { ...row, email: linked.email || row.email, phone: linked.phone || row.phone } : row;
     mediaSessionKey.current = makeMediaSessionKey();
     uploadedMediaAssetIds.current = {};
     setSelectedItem(null);
@@ -1361,6 +1475,8 @@ export default function TeachersPage() {
     if (!schoolId) return "Select a school first.";
     if (!branchId) return "Select a branch first.";
     if (!form.fullName.trim()) return "Enter teacher full name.";
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()))
+      return "Enter a valid email address.";
     if (!form.role) return "Select teacher role.";
     if (form.age !== "" && Number(form.age) < 0)
       return "Age cannot be negative.";
@@ -1408,6 +1524,23 @@ export default function TeachersPage() {
       const existing = form.id
         ? rows.find((row: any) => sameId(row.id, form.id))
         : undefined;
+      const linked = form.id ? teacherAccessContacts[idOf(form.id)] : undefined;
+      if (linked?.userId &&
+          (safeLower(linked.email) !== safeLower(form.email) ||
+           String(linked.phone || "").trim() !== form.phone.trim())) {
+        // Both pages now update the same backend AppUser identity. If the
+        // authorization fails, do not save a contradictory local teacher contact.
+        if (!form.email.trim()) throw new Error("A linked portal user must keep a login email.");
+        await apiRequest(
+          `/accounts/me/branch-users/${encodeURIComponent(linked.userId)}/identity`,
+          { method: "PATCH", body: JSON.stringify({
+            schoolId: String(schoolId), branchId: String(branchId),
+            email: form.email.trim().toLowerCase(),
+            phone: form.phone.trim(),
+            fullName: linked.fullName || form.fullName.trim(),
+          }) } as any,
+        );
+      }
       const payload: Partial<Teacher> = {
         accountId,
         schoolId: schoolId,
@@ -1999,11 +2132,9 @@ function TeacherListItem({
           {roleLabel(row.role)} · {item.organizationName}
         </small>
         <em>
-          {row.phone
-            ? `Phone: ${row.phone}`
-            : row.email
-              ? `Email: ${row.email}`
-              : row.qualification || moneyText(row.salary)}
+          {row.phone ? `Phone: ${row.phone}` : "Phone not set"}
+          {" · "}
+          {row.email ? `Email: ${row.email}` : "Email not set"}
         </em>
       </span>
       <span className="student-side">
@@ -4610,6 +4741,7 @@ const css = `
   background: var(--input-bg, var(--surface,#fff)); color: var(--text,#182235); }
 .ba-page .ba-search-card, .ba-page .ba-filter-chips { display: none !important; }
 .ba-page .student-row::before { display: none; }
+.ba-page .student-main em { white-space:normal; overflow-wrap:anywhere; line-height:1.35; }
 @media (min-width: 1024px) { .ba-list { grid-template-columns: repeat(4,minmax(0,1fr)); } }
 @media (max-width: 639px) { .ba-page { padding: 3px; } .student-row { padding: 9px; } }
 @media (prefers-reduced-motion: reduce) { .student-row, .ba-card { transition: none; } }

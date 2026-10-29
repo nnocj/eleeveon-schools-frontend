@@ -2,7 +2,7 @@
 
 /**
  * app/teacher/modules/Teacherstudents.tsx
- * Eleeveon Schools — Teacher Students V31, Branch Admin visual parity.
+ * Eleeveon Schools — Teacher Students V32, refresh-safe mobile saves.
  *
  * Visual contract: copies Branch Admin Students class names, hierarchy, and
  * cascade-preserving CSS for the student cards, table, modal, and More/Filter.
@@ -15,7 +15,7 @@
  * placement, status, deletion, and organization are never mutated here.
  * Server and sync layers MUST independently enforce this contract.
  */
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { db, type Student } from "../../lib/db/db";
 import { updateLocal } from "../../lib/sync/syncUtils";
@@ -136,7 +136,9 @@ export default function Teacherstudents(){
   const access=useTeacherWorkspaceAccess();
   const {settings}=useSettings();
   const primary=settings?.primaryColor||"var(--primary-color,#2563eb)";
-  const revision=useBranchTableRevision(["students","studentEnrollments","classes","organizations","mediaAssets","mediaBlobs"]);
+  // Student list data must not be reloaded merely because a photo/blob changed.
+  // useEntityMediaUrls independently handles media updates.
+  const revision=useBranchTableRevision(["students","studentEnrollments","classes","organizations"]);
   const [rows,setRows]=useState<StudentView[]>([]);
   const [busy,setBusy]=useState(false);
   const [saving,setSaving]=useState(false);
@@ -160,9 +162,26 @@ export default function Teacherstudents(){
 
   const [feedback,setFeedback]=useState("");
   const mediaSession=useRef("");
-  const mediaRows=useMemo(()=>rows.map(r=>r.row),[rows]);
-  const photoMedia=useEntityMediaUrls({accountId:access.accountId,ownerTable:"students",rows:mediaRows,fields:[{fieldKey:"photo",mediaIdKey:"photoMediaId"}]});
+  // Keep list snapshots tied to the selected teacher identity; never display
+  // a previous role/branch's students while a different scope is loading.
+  const scopeKey=[access.accountId,access.schoolId,access.branchId,access.teacherId].join("|");
+  const scopeRef=useRef(scopeKey);
+  scopeRef.current=scopeKey;
+  const loadSerial=useRef(0);
+  const [loadedScope,setLoadedScope]=useState("");
   const classScopeKey=[...access.allowedClassIds].sort().join("|");
+  const allowedClasses=useMemo(
+    ()=>new Set(classScopeKey.split("|").filter(Boolean)),
+    [classScopeKey],
+  );
+  const visibleRows=useMemo(
+    ()=>access.permitted&&loadedScope===scopeKey
+      ? rows.filter(item=>allowedClasses.has(item.classId))
+      : [],
+    [access.permitted,loadedScope,scopeKey,rows,allowedClasses],
+  );
+  const mediaRows=useMemo(()=>visibleRows.map(r=>r.row),[visibleRows]);
+  const photoMedia=useEntityMediaUrls({accountId:access.accountId,ownerTable:"students",rows:mediaRows,fields:[{fieldKey:"photo",mediaIdKey:"photoMediaId"}]});
 
   // Exact Branch Admin default breakpoint. Deliberate user view changes persist
   // within the mounted workspace (screen width changes do not reset their choice).
@@ -170,44 +189,94 @@ export default function Teacherstudents(){
     if(typeof window!=="undefined")setView(window.matchMedia("(min-width: 900px)").matches?"table":"cards");
   },[]);
 
-  const load=async()=>{
-    if(!access.permitted||!access.ready){setRows([]);setBusy(false);return;}
+  // A refresh is a read, not a destructive reset. Older overlapping reads
+  // cannot overwrite newer results after photo saves or sync notifications.
+  const load=useCallback(async()=>{
+    const requestId=++loadSerial.current;
+    const requestScope=scopeKey;
+    if(!access.permitted||!access.ready){
+      // Leave the last same-scope snapshot intact during a transient refresh.
+      // visibleRows already hides it if identity/permissions change.
+      return;
+    }
     setBusy(true);
     try{
-      const [studentRows,enrollments,classes,organizations]=await Promise.all([
-        db.students.toArray(),db.studentEnrollments.toArray(),db.classes.toArray(),(db as any).organizations?.toArray?.()||Promise.resolve([]),
-      ]);
-      const sameTenant=(r:any)=>r?.isDeleted!==true && r?.active!==false && idsEqual(r.accountId,access.accountId) && idsEqual(r.schoolId,access.schoolId) && idsEqual(r.branchId,access.branchId);
+      const orgTable=(db as any).organizations;
+      const tables:any[]=[db.students,db.studentEnrollments,db.classes];
+      if(orgTable)tables.push(orgTable);
+      // Read a consistent local snapshot: a sync write cannot briefly provide
+      // students from one revision and enrollments from another revision.
+      const [studentRows,enrollments,classes,organizations]=await db.transaction(
+        "r",tables,
+        async()=>Promise.all([
+          db.students.toArray(),
+          db.studentEnrollments.toArray(),
+          db.classes.toArray(),
+          orgTable?orgTable.toArray():Promise.resolve([]),
+        ]),
+      );
+      if(requestId!==loadSerial.current||scopeRef.current!==requestScope)return;
+      const sameTenant=(r:any)=>r?.isDeleted!==true&&r?.active!==false&&
+        idsEqual(r.accountId,access.accountId)&&idsEqual(r.schoolId,access.schoolId)&&idsEqual(r.branchId,access.branchId);
       const classNames=new Map<string,string>((classes as any[]).filter(sameTenant).map(r=>[asId(r.id),value(r.name)]));
       const orgNames=new Map<string,string>((organizations as any[]).filter(sameTenant).map(r=>[asId(r.id),value(r.name)]));
-      const allEligible=(enrollments as any[]).filter(r=>sameTenant(r)&&access.allowedClassIds.has(asId(r.classId)));
-      const active=allEligible.filter(r=>r.status==="active"||(!r.status&&r.active!==false));
+      const allEligible=(enrollments as any[]).filter(r=>sameTenant(r)&&allowedClasses.has(asId(r.classId)));
+      const active=allEligible.filter(r=>{
+        const state=value(r.status).trim().toLowerCase();
+        return state==="active"||(!state&&r.active!==false);
+      });
       const byStudent=new Map<string,{classId:string;className:string}>();
       active.forEach(r=>{
         const sid=asId(r.studentId),cls=asId(r.classId);
         if(sid&&!byStudent.has(sid))byStudent.set(sid,{classId:cls,className:classNames.get(cls)||"Class"});
       });
       const counts=new Map<string,number>();
-      allEligible.forEach(r=>{const sid=asId(r.studentId);counts.set(sid,(counts.get(sid)||0)+1);});
-      const next=(studentRows as Student[]).filter(r=>sameTenant(r)&&byStudent.has(asId(r.id))&&!(["withdrawn","graduated","deleted"].includes(studentStatus(r))))
-        .map(r=>({row:r,...byStudent.get(asId(r.id))!,organizationName:orgNames.get(asId((r as any).organizationId))||"—",enrollmentCount:counts.get(asId(r.id))||0}))
+      allEligible.forEach(r=>{
+        const sid=asId(r.studentId);
+        counts.set(sid,(counts.get(sid)||0)+1);
+      });
+      const next=(studentRows as Student[])
+        .filter(r=>sameTenant(r)&&byStudent.has(asId(r.id))&&
+          !["withdrawn","graduated","deleted"].includes(studentStatus(r)))
+        .map(r=>({
+          row:r,
+          ...byStudent.get(asId(r.id))!,
+          organizationName:orgNames.get(asId((r as any).organizationId))||"—",
+          enrollmentCount:counts.get(asId(r.id))||0,
+        }))
         .sort((a,b)=>value(a.row.fullName).localeCompare(value(b.row.fullName)));
       setRows(next);
-    }catch(err){console.error("Teacher Students load:",err);setRows([]);setFeedback("Unable to open students in your assigned classes.");}
-    finally{setBusy(false);}
-  };
-  useEffect(()=>{void load();/* eslint-disable-next-line react-hooks/exhaustive-deps */},[access.ready,access.permitted,access.teacherId,access.accountId,access.schoolId,access.branchId,classScopeKey,revision]);
+      setLoadedScope(requestScope);
+    }catch(err){
+      if(requestId===loadSerial.current&&scopeRef.current===requestScope){
+        console.error("Teacher Students load:",err);
+        // Crucial: do not erase successfully loaded students for a transient
+        // IndexedDB error, quota event, or media-triggered refresh failure.
+        setFeedback("Student refresh could not complete. Your existing list is retained; try Refresh.");
+      }
+    }finally{
+      if(requestId===loadSerial.current&&scopeRef.current===requestScope)setBusy(false);
+    }
+  },[
+    scopeKey,access.permitted,access.ready,
+    access.accountId,access.schoolId,access.branchId,allowedClasses,
+  ]);
+  useEffect(()=>{
+    if(access.permitted&&access.ready)void load();
+    else loadSerial.current++;
+    return()=>{loadSerial.current++;};
+  },[load,revision,access.permitted,access.ready]);
   const photoFor=(row:Student):string|undefined=>{
     const raw=photoMedia[asId(row.id)]?.photo||value((row as any).photo);
     return raw||undefined; // blob: URLs are valid offline images; don't discard them.
   };
-  const classOptions=useMemo(()=>[...new Map(rows.map(r=>[r.classId,r.className])).entries()].sort((a,b)=>a[1].localeCompare(b[1])),[rows]);
-  const shown=useMemo(()=>rows.filter(item=>{
+  const classOptions=useMemo(()=>[...new Map(visibleRows.map(r=>[r.classId,r.className])).entries()].sort((a,b)=>a[1].localeCompare(b[1])),[visibleRows]);
+  const shown=useMemo(()=>visibleRows.filter(item=>{
     if(filterClass!=="all"&&item.classId!==filterClass)return false;
     if(filterGender!=="all"&&studentGender(item.row)!==filterGender)return false;
     const q=search.toLowerCase().trim();
     return !q||`${item.row.fullName||""} ${(item.row as any).admissionNumber||""} ${item.className} ${(item.row as any).parentPhone||""}`.toLowerCase().includes(q);
-  }),[rows,filterClass,filterGender,search]);
+  }),[visibleRows,filterClass,filterGender,search]);
   useRegisterBranchWorkspaceToolbar("teacherStudents",{search:setSearch,filter:()=>setFilterOpen(true),more:()=>setMoreOpen(true)});
 
   const startEdit=(item:StudentView)=>{
@@ -281,13 +350,12 @@ export default function Teacherstudents(){
     try{
       if(!await verifyTeacherStudentAssignment(access,sid))throw new Error("This student is no longer assigned to one of your classes.");
       const existing=await db.students.get(sid);
-      if(!existing || !idsEqual(existing.accountId,access.accountId) || !idsEqual(existing.schoolId,access.schoolId) || !idsEqual(existing.branchId,access.branchId) || (existing as any).isDeleted)throw new Error("Student record is no longer available.");
-      // Whitelist only these fields; never spread the form or student record.
-      // Preserve unmodified legacy 'sex' / 'gender' data; save canonical gender
-      // only when the teacher actually selects a different value.
+      if(!existing||!idsEqual(existing.accountId,access.accountId)||!idsEqual(existing.schoolId,access.schoolId)||!idsEqual(existing.branchId,access.branchId)||(existing as any).isDeleted)
+        throw new Error("Student record is no longer available.");
+      // Whitelist editable profile fields. Never overwrite enrollment/scope.
       const genderChanged=form.gender!==studentGender(existing);
       const update:Partial<Student>={
-        fullName:name, dateOfBirth:form.dateOfBirth||undefined,age,
+        fullName:name,dateOfBirth:form.dateOfBirth||undefined,age,
         parentName:form.parentName.trim()||undefined,
         parentPhone:form.parentPhone.trim()||undefined,
         parentEmail:form.parentEmail.trim()||undefined,
@@ -295,12 +363,46 @@ export default function Teacherstudents(){
         ...(genderChanged?{gender:form.gender||undefined}:{}),
       };
       await updateLocal("students",sid,update);
-      if(stagedPhoto?.assetId){
-        const committed=await commitMediaAssetsToOwner({accountId:access.accountId,ownerTable:MediaOwners.STUDENTS,ownerId:sid,ownerTempKey:mediaSession.current,assets:[{assetId:stagedPhoto.assetId,fieldKey:MediaFieldKeys.PHOTO}]});
-        const assetId=committed.find(r=>r.fieldKey===MediaFieldKeys.PHOTO)?.assetId;
-        if(assetId)await updateLocal("students",sid,{photoMediaId:assetId} as Partial<Student>);
+      // The student was saved locally. Reflect it immediately, before any
+      // asynchronous photo attachment or list refresh on slow mobile storage.
+      const saved=await db.students.get(sid);
+      if(saved&&scopeRef.current===scopeKey){
+        setRows(previous=>previous.map(item=>
+          asId(item.row.id)===sid?{...item,row:saved}:item,
+        ));
       }
-      setSelected(null);setStagedPhoto(null);setFeedback("Student details saved.");await load();
+      let photoError="";
+      if(stagedPhoto?.assetId){
+        try{
+          const committed=await commitMediaAssetsToOwner({
+            accountId:access.accountId,ownerTable:MediaOwners.STUDENTS,
+            ownerId:sid,ownerTempKey:mediaSession.current,
+            assets:[{assetId:stagedPhoto.assetId,fieldKey:MediaFieldKeys.PHOTO}],
+          });
+          const assetId=committed.find(r=>r.fieldKey===MediaFieldKeys.PHOTO)?.assetId;
+          if(!assetId)throw new Error("The photo could not be attached to this student.");
+          await updateLocal("students",sid,{photoMediaId:assetId} as Partial<Student>);
+          const withPhoto=await db.students.get(sid);
+          if(withPhoto&&scopeRef.current===scopeKey){
+            setRows(previous=>previous.map(item=>
+              asId(item.row.id)===sid?{...item,row:withPhoto}:item,
+            ));
+          }
+        }catch(error){
+          console.error("Teacher Student photo attachment:",error);
+          photoError=error instanceof Error?error.message:"Unable to attach the photo.";
+        }
+      }
+      if(photoError){
+        // Do not claim the profile save failed or discard an uncommitted photo.
+        setFeedback(`Student details saved locally, but the photo needs attention: ${photoError}`);
+      }else{
+        setSelected(null);
+        setStagedPhoto(null);
+        setFeedback("Student details saved locally. Cloud sync may still be pending.");
+      }
+      // Refresh in the background; a read failure must not erase the list.
+      void load();
     }catch(error){console.error("Teacher Student save:",error);setFeedback(error instanceof Error?error.message:"Could not save student.");}
     finally{setSaving(false);}
   };
@@ -308,7 +410,7 @@ export default function Teacherstudents(){
   return <main className="ba-page students-page teacher-students-page" style={{"--ba-primary":primary,"--ba-primary-text":readableTextColor(primary)} as React.CSSProperties}>
     <style>{css}</style>
     {feedback&&<section className="ba-toast info" role="status">{feedback}<button type="button" onClick={()=>setFeedback("")} aria-label="Dismiss message">✕</button></section>}
-    {!access.ready||busy?<div className="teacher-loading">Loading assigned students…</div>:!access.permitted?<section className="ba-state"><h2>Teacher workspace required</h2><p>Select your teacher role to view assigned students.</p></section>:<>
+    {!access.ready?<div className="teacher-loading">Loading assigned students…</div>:!access.permitted?<section className="ba-state"><h2>Teacher workspace required</h2><p>Select your teacher role to view assigned students.</p></section>:(busy&&!visibleRows.length&&loadedScope!==scopeKey)?<div className="teacher-loading">Loading assigned students…</div>:<>
       {view==="cards"&&<section className="ba-list">{shown.map(item=><button key={asId(item.row.id)} type="button" className="student-row" onClick={()=>startEdit(item)} aria-label={`Edit ${value(item.row.fullName)}`}>
         <Avatar name={value(item.row.fullName)} photo={photoFor(item.row)} primary={primary}/>
         <span className="student-main"><strong>{item.row.fullName||"Unnamed student"}</strong><small>{item.className}{(item.row as any).admissionNumber?` · ${(item.row as any).admissionNumber}`:""}</small><em>{(item.row as any).parentPhone?`Parent: ${(item.row as any).parentPhone}`:(item.row as any).parentName?`Parent: ${(item.row as any).parentName}`:item.organizationName}</em></span>
@@ -317,7 +419,7 @@ export default function Teacherstudents(){
       {view==="table"&&<section className="ba-table-card"><div className="ba-table-scroll"><table><thead><tr><th>Students ({shown.length})</th><th>Admission No.</th><th>Class</th><th>Organization</th><th>Gender</th><th>Age</th><th>Parent</th><th>Phone</th><th>Enrollments</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
         {shown.map(item=><tr key={asId(item.row.id)}><td><div className="ba-table-person"><Avatar name={value(item.row.fullName)} photo={photoFor(item.row)} primary="var(--ba-primary,#64748b)"/><div><strong>{item.row.fullName}</strong><span>{(item.row as any).address||""}</span></div></div></td><td>{(item.row as any).admissionNumber||"—"}</td><td>{item.className}</td><td>{item.organizationName}</td><td>{studentGender(item.row)||"—"}</td><td>{currentStudentAge(item.row)||"—"}</td><td>{(item.row as any).parentName||"—"}</td><td>{(item.row as any).parentPhone||"—"}</td><td>{item.enrollmentCount}</td><td><span className={`ba-chip ${statusTone(item.row)}`}>{studentStatus(item.row)}</span></td><td>{formatDate((item.row as any).updatedAt||(item.row as any).createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={()=>startEdit(item)}>Edit</button></div></td></tr>)}
       </tbody></table>{!shown.length&&<div className="ba-empty-table">No student matches your filters.</div>}</div></section>}
-      {!shown.length&&view==="cards"&&<section className="ba-state"><h2>No students found</h2><p>No assigned students match your current filters.</p></section>}
+      {!shown.length&&view==="cards"&&<section className="ba-state"><h2>No students found</h2><p>{!allowedClasses.size?"No class assignment is available on this device. Check the selected teacher workspace and synchronization.":"No assigned students match your current filters, or their enrollment records are not yet available on this device."}</p></section>}
     </>}
     {filterOpen&&<ScopedDialog type="sheet" primary={primary} onClose={()=>setFilterOpen(false)}><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Student filters" onPointerDown={e=>e.stopPropagation()}><div className="ba-sheet-head"><div><h2>Filters</h2><p>Find students in your assigned classes.</p></div><button className="ba-modal-close" type="button" onClick={()=>setFilterOpen(false)} aria-label="Close filters">✕</button></div>
       <div className="ba-form two"><label><span>Search</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Name or admission number"/></label><label><span>Class</span><select value={filterClass} onChange={e=>setFilterClass(e.target.value)}><option value="all">All assigned classes</option>{classOptions.map(([id,name])=><option value={id} key={id}>{name}</option>)}</select></label><label><span>Gender</span><select value={filterGender} onChange={e=>setFilterGender(e.target.value)}><option value="all">All genders</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></label></div>

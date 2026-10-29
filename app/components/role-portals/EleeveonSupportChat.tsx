@@ -215,6 +215,9 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const screenAudioContextRef = useRef<AudioContext | null>(null);
   const screenAbortedRef = useRef(false);
   const [error, setError] = useState("");
+  // A failed encryption check must explain what to do within Chat;
+  // never navigate away from an unsent draft automatically.
+  const [needsDeviceReview, setNeedsDeviceReview] = useState(false);
   const [, setInfo] = useState("");
   const [online, setOnline] = useState(true);
   const [deletingId, setDeletingId] = useState("");
@@ -381,13 +384,18 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       setConversations(previous=>mergeConversationPages(previous,items));
       // Cache current server inbox, never persist plaintext; older pages remain server authoritative.
       void hubSaveInbox(requestedScope,items);
-      if (current && current === selectedRef.current && !openingIdRef.current && detailResult && "detail" in detailResult) {
-        const detail = detailResult.detail;
+      // The settled request result is a union: success includes `detail`,
+      // failure contains only `error`. Narrow before passing the value into
+      // a React state-updater callback, where TypeScript needs certainty.
+      const detail = detailResult && "detail" in detailResult
+        ? detailResult.detail
+        : undefined;
+      if (current && current === selectedRef.current && !openingIdRef.current && detail) {
         setOpened(previous => previous?.id === detail.conversation.id &&
           previous.updatedAt === detail.conversation.updatedAt &&
           previous.status === detail.conversation.status &&
           previous.displayTitle === detail.conversation.displayTitle ? previous : detail.conversation);
-        const page = detailResult.page;
+        const page = detailResult && "page" in detailResult ? detailResult.page : null;
         if (page) {
           mergeHistoryKeys(page.historyKeys || [], page.openingHistoryKey);
           if (!historyPagingStarted.current) {
@@ -846,18 +854,19 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     const linked = await supportApi.devices();
     const own = linked.devices.find(device => device.id === ownId);
     if (!own || own.status !== "linked") {
-      onOpenHubSettings?.();
+      setNeedsDeviceReview(true);
       throw new Error(own?.status === "pending"
-        ? "This browser is awaiting device approval. Open Hub Settings → Linked Devices and approve it from an existing trusted device."
-        : "This encryption device is not active. Open Hub Settings → Linked Devices to resolve it.");
+        ? "Message not sent: this browser is awaiting trusted-device approval. Your draft is saved. Use Review devices below to complete pairing."
+        : "Message not sent: this encryption device is not linked. Your draft is saved. Use Review devices below.");
     }
     const active = keys.filter(d => !d.revoked);
     const approved = readTrust(accountId, identity);
     if (!active.some(d => d.id === ownId)) throw new Error("Your current device is missing from the encryption directory.");
     if (!active.some(d => d.userId !== identity)) throw new Error("Your message is not sent yet. Eleeveon Support needs to open the Center once to register its device. Refresh keys and retry.");
-    if (active.some(d => d.id !== ownId && approved[d.id] !== d.fingerprint)) {
-      onOpenHubSettings?.();
-      throw new Error("Review and verify the participant device fingerprints before encrypting.");
+    const unverified = active.filter(d => d.id !== ownId && approved[d.id] !== d.fingerprint);
+    if (unverified.length) {
+      setNeedsDeviceReview(true);
+      throw new Error(`Message not sent: ${unverified.length} linked encryption device${unverified.length === 1 ? " needs" : "s need"} fingerprint verification. Your draft is saved. Select Review devices below, confirm the fingerprints through a trusted channel, and retry.`);
     }
     return active;
   }
@@ -937,7 +946,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     if (editTarget && (!message.trim() || files.length)) {
       setError("Edited messages must contain text only. Send attachments separately."); return;
     }
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNeedsDeviceReview(false);
     const text = message.trim(); const queue = [...files];
     let completed = 0;
     try {
@@ -1358,7 +1367,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             <input ref={videoRef} type="file" hidden accept="video/*" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/>
             <div ref={attachmentMenuRef} className="esc-attach-wrap">
               <button className="icon" aria-expanded={attachMenuOpen} aria-haspopup="menu" aria-label="Attachment options" title="Add an attachment" disabled={busy || recording || screenRecording} onClick={toggleAttachmentMenu}>＋</button>
-            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy || screenRecording} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : editTarget ? "Edit your message…" : replyTarget ? "Write a reply…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button className="primary" disabled={busy || !online || !ready || recording || screenRecording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
+            </div><button className="icon" title={recording ? "Stop recording" : "Record voice note"} disabled={busy || screenRecording} onClick={() => recording ? recorderRef.current?.stop() : void startRecording()}>{recording ? "■" : "🎙"}</button><textarea ref={messageInputRef} rows={1} aria-label="Message" placeholder={!ready ? "Preparing chat…" : editTarget ? "Edit your message…" : replyTarget ? "Write a reply…" : online ? "Type a message…" : "Offline"} value={message} disabled={busy || !ready} onChange={e => { setMessage(e.target.value); if (selectedRef.current) drafts.current.set(selectedRef.current, e.target.value); recentTyping.current=Date.now(); }} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendMessage(); } }}/><button type="button" className="primary" aria-label="Send encrypted message" disabled={busy || !online || !ready || recording || screenRecording || (!message.trim() && !files.length)} onClick={() => void sendMessage()}>{busy ? "…" : "➤"}</button></div>
           </div>
         </> : selected && !opened ? <div className="esc-empty" role="status"><strong>{openingId ? "Opening conversation…" : "Conversation unavailable"}</strong><p>{openingId ? "Preparing locally saved messages and device keys." : error || "Reconnect and try opening this conversation again."}</p>{!openingId && <button className="primary" type="button" onClick={() => void openConversation(selected)}>Try again</button>}</div> : <div className="esc-empty"><strong>Need a hand?</strong><p>Open a conversation to get help, share a file or speak with Eleeveon Support.</p><button className="primary" onClick={() => { setNewChat(true); setMobileOpen(true); }}>New conversation</button>{!ready && <small>Setting up your device encryption…</small>}</div>}
       </div>
@@ -1391,7 +1400,10 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         <footer><button type="button" disabled={savingCard} onClick={() => setEditingCardId("")}>Cancel</button><button type="button" className="primary" disabled={savingCard || !editingCardTitle.trim()} onClick={() => void saveCardTitle()}>{savingCard ? "Saving…" : "Save title"}</button></footer>
       </div>
     </div>}
-    {error && <div className="esc-banner error" role="alert">{error} <button onClick={() => setError("")}>Dismiss</button></div>}
+    {error && <div className="esc-banner error" role="alert">{error}
+      {needsDeviceReview && onOpenHubSettings && <button type="button" onClick={() => onOpenHubSettings(selected || undefined)}>Review devices</button>}
+      <button type="button" onClick={() => { setError(""); setNeedsDeviceReview(false); }}>Dismiss</button>
+    </div>}
 
   </section>;
 }

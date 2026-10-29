@@ -1,4 +1,6 @@
 "use client";
+import SyncedHorizontalTableScroll from "../../components/role-portals/shell/SyncedHorizontalTableScroll";
+
 
 /**
  * app/branch-admin/modules/Students.tsx
@@ -4288,7 +4290,7 @@ function TableView({
 }) {
   return (
     <section className="ba-table-card">
-      <div className="ba-table-scroll">
+      <SyncedHorizontalTableScroll label="Scroll students table horizontally">
         <table>
           <thead>
             <tr>
@@ -4375,7 +4377,7 @@ function TableView({
         {!rows.length && (
           <div className="ba-empty-table">No student matches your filters.</div>
         )}
-      </div>
+      </SyncedHorizontalTableScroll>
     </section>
   );
 }

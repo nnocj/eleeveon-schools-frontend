@@ -47,6 +47,7 @@ import {
 import { resolveSyncPolicy } from "./resolveSyncPolicy";
 import { assertSyncRegistryMatchesDatabase } from "./syncRegistryAudit";
 import { repairPendingSyncRecords } from "./pendingRecordRepair";
+import { markSuccessfulSyncPhase } from "./syncSuccessTimestamps";
 
 export type SyncTrigger =
   | "startup"
@@ -375,6 +376,12 @@ async function executeSync(job: SyncJob): Promise<RunOutcome> {
       ? await pushSync({ accountId })
       : { pushed: 0, errors: [] as string[] };
 
+    // Track an actual successful API push, including one with zero changes.
+    // Skipped/offline/failed pushes do not update the timestamp.
+    if (plan.shouldPush && !filtered && (push.errors?.length ?? 0) === 0) {
+      markSuccessfulSyncPhase(accountId, "push");
+    }
+
     assertAccountUnchanged(accountId, "before pull");
     const pull = plan.shouldPull
       ? await pullSync({
@@ -398,6 +405,12 @@ async function executeSync(job: SyncJob): Promise<RunOutcome> {
         };
 
     const yielded = pull.yielded === true;
+    // Only a complete, successfully applied pull counts. An intentional
+    // yield or a skipped network phase must not appear as a successful pull.
+    if (plan.shouldPull && !yielded && pull.completed === true &&
+        (pull.errors?.length ?? 0) === 0) {
+      markSuccessfulSyncPhase(accountId, "pull");
+    }
     const cacheErrors: string[] = [];
     if (plan.shouldRefreshPlatformCache && !filtered && !yielded) {
       assertAccountUnchanged(accountId, "before platform-cache refresh");

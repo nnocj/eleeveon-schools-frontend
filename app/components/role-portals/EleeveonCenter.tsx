@@ -1514,7 +1514,7 @@ export default function EleeveonCenter({
   return (
     <main className="center-module hub-module" style={{ "--hub-scene": hubAppearance.imageCss } as CSSProperties}>
       <style>{css}</style>
-      {hubSettingsOpen && <HubSettingsPanel onClose={() => setHubSettingsOpen(false)} conversationId={hubSettingsConversationId} accountId={idOf(accountId)} userId={userId} images={hubAppearance.images} selectedId={hubAppearance.selectedId} select={hubAppearance.select} addUpload={hubAppearance.addUpload} removeUpload={hubAppearance.removeUpload} reload={hubAppearance.reload} error={hubAppearance.error} />}
+      {hubSettingsOpen && <HubSettingsPanel onClose={() => setHubSettingsOpen(false)} conversationId={hubSettingsConversationId} accountId={idOf(accountId)} userId={userId} currentUserName={idOf(user?.fullName || user?.name || [user?.firstName,user?.lastName].filter(Boolean).join(' '))} currentAccountName={idOf(account?.name || account?.displayName)} images={hubAppearance.images} selectedId={hubAppearance.selectedId} select={hubAppearance.select} addUpload={hubAppearance.addUpload} removeUpload={hubAppearance.removeUpload} reload={hubAppearance.reload} error={hubAppearance.error} />}
 
       <div className="center-shell">
         <div className="center-work-area">

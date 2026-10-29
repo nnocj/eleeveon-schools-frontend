@@ -43,7 +43,11 @@
  * - Prevents stale branch payroll data after role/workspace switching.
  */
 
+import FinanceOperationsExcel from "../../components/excel/FinanceOperationsExcel";
 import React, { useEffect, useMemo, useState } from "react";
+import SyncedHorizontalTableScroll from "../../components/role-portals/shell/SyncedHorizontalTableScroll";
+import { useRegisterBranchWorkspaceToolbar } from "../../components/role-portals/shell/BranchWorkspaceToolbar";
+import { printBranchTable } from "../../components/role-portals/shell/BranchTablePrint";
 import { useRouter } from "next/navigation";
 
 import { useAccount } from "../../context/account-context";
@@ -318,19 +322,6 @@ function Chip({
   tone?: Tone;
 }) {
   return <span className={`pr-chip ${tone}`}>{children}</span>;
-}
-
-function SliderIcon() {
-  return (
-    <svg className="pr-slider-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9" />
-      <path d="M17 7h3" />
-      <circle cx="15" cy="7" r="2" />
-      <path d="M4 17h3" />
-      <path d="M11 17h9" />
-      <circle cx="9" cy="17" r="2" />
-    </svg>
-  );
 }
 
 function Empty({ title, text: body }: { title: string; text: string }) {
@@ -764,12 +755,6 @@ export default function PayrollPage() {
     };
   }, [payments.length, payrollItemRows, profiles, runs.length]);
 
-  const activeFilterCount = useMemo(
-    () =>
-      [statusFilter !== "all", methodFilter !== "all"].filter(Boolean).length,
-    [methodFilter, statusFilter],
-  );
-
   function openProfileDrawer(existing?: AnyRow) {
     const preferred = currency;
     setMessage("");
@@ -1102,6 +1087,45 @@ export default function PayrollPage() {
     }
   }
 
+  // Shared Branch Admin Finance toolbar (same action namespace as Expenses).
+  const printPayroll = () => {
+    const rows = view === "payments" || view === "paymentsTable" || view === "receipts"
+      ? filteredPayments.map(row => ({
+          name: text(row.fullName || row.recipientName, "Staff payment"),
+          amount: money(row.amount, row.currencyCode || currency.code),
+          method: text(row.method || row.paymentMethod, "—"),
+          status: text(row.status, "Paid"),
+          reference: text(row.referenceNumber || row.receiptNumber, "—"),
+        }))
+      : filteredProfiles.map(row => ({
+          name: text(row.fullName, "Staff"),
+          amount: money(row.baseSalary, row.currencyCode || currency.code),
+          method: text(row.preferredPaymentMethod, "—"),
+          status: row.active === false ? "Inactive" : "Active",
+          reference: text(row.role, "—"),
+        }));
+    printBranchTable({
+      title: "Branch Payroll",
+      subtitle: `${rows.length} records · ${view === "payments" || view === "paymentsTable" || view === "receipts" ? "Payments" : "Payroll profiles"}`,
+      columns: [
+        { key: "name", label: "Staff / Recipient" },
+        { key: "amount", label: "Amount" },
+        { key: "method", label: "Payment Method" },
+        { key: "status", label: "Status" },
+        { key: "reference", label: "Role / Reference" },
+      ],
+      rows,
+    });
+  };
+
+  useRegisterBranchWorkspaceToolbar("financeWorkspace", {
+    add: () => openProfileDrawer(),
+    search: setQuery,
+    filter: () => setFilterOpen(true),
+    more: () => setMoreOpen(true),
+    print: printPayroll,
+  });
+
   if (loading || accountLoading || settingsLoading) {
     return (
       <State
@@ -1138,6 +1162,7 @@ export default function PayrollPage() {
       style={{ "--pr-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
+      <FinanceOperationsExcel kind="staffPayrollProfiles" accountId={String(accountId||"")} schoolId={schoolId} branchId={branchId} existing={profiles} onComplete={load} />
 
       {toast && (
         <section className={`pr-toast ${toast.tone}`}>
@@ -1151,55 +1176,6 @@ export default function PayrollPage() {
           </button>
         </section>
       )}
-
-      <section
-        className="pr-search-card"
-        aria-label="Payroll search and actions"
-      >
-        <span
-          className={`status-dot-mini ${summary.balance ? "orange" : summary.profiles ? "green" : "gray"}`}
-          title={`${summary.profiles} profile(s)`}
-        />
-
-        <label className="pr-search">
-          <span>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search payroll..."
-            aria-label="Search payroll"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="pr-add-inline"
-          onClick={() => openProfileDrawer()}
-          aria-label="Add payroll profile"
-        >
-          +
-        </button>
-
-        <button
-          type="button"
-          className={`pr-filter-button ${activeFilterCount ? "active" : ""}`}
-          onClick={() => setFilterOpen(true)}
-          aria-label="Open filters"
-          title="Filters"
-        >
-          <SliderIcon />
-          {activeFilterCount ? <b>{activeFilterCount}</b> : null}
-        </button>
-
-        <button
-          type="button"
-          className="pr-icon-button"
-          onClick={() => setMoreOpen(true)}
-          aria-label="More options"
-        >
-          ⋯
-        </button>
-      </section>
 
       {(statusFilter !== "all" || methodFilter !== "all" || query.trim()) && (
         <section className="pr-filter-chips" aria-label="Active filters">
@@ -1536,7 +1512,7 @@ function PaymentsTableView({
 }) {
   return (
     <section className="pr-table-card">
-      <div className="pr-table-scroll">
+      <SyncedHorizontalTableScroll label="Scroll payroll table horizontally">
         <table>
           <thead>
             <tr>
@@ -1588,7 +1564,7 @@ function PaymentsTableView({
             No salary payment matches your filters.
           </div>
         )}
-      </div>
+      </SyncedHorizontalTableScroll>
     </section>
   );
 }
@@ -1602,7 +1578,7 @@ function ReceiptsTableView({
 }) {
   return (
     <section className="pr-table-card">
-      <div className="pr-table-scroll">
+      <SyncedHorizontalTableScroll label="Scroll payroll table horizontally">
         <table>
           <thead>
             <tr>
@@ -1650,7 +1626,7 @@ function ReceiptsTableView({
         {!rows.length && (
           <div className="pr-empty-table">No receipt records yet.</div>
         )}
-      </div>
+      </SyncedHorizontalTableScroll>
     </section>
   );
 }
@@ -1668,7 +1644,7 @@ function ProfilesTableView({
 }) {
   return (
     <section className="pr-table-card">
-      <div className="pr-table-scroll">
+      <SyncedHorizontalTableScroll label="Scroll payroll table horizontally">
         <table>
           <thead>
             <tr>
@@ -1759,7 +1735,7 @@ function ProfilesTableView({
             No payroll profile matches your filters.
           </div>
         )}
-      </div>
+      </SyncedHorizontalTableScroll>
     </section>
   );
 }
@@ -1775,7 +1751,7 @@ function TableView({
 }) {
   return (
     <section className="pr-table-card">
-      <div className="pr-table-scroll">
+      <SyncedHorizontalTableScroll label="Scroll payroll table horizontally">
         <table>
           <thead>
             <tr>
@@ -1833,7 +1809,7 @@ function TableView({
             No payroll item matches your filters.
           </div>
         )}
-      </div>
+      </SyncedHorizontalTableScroll>
     </section>
   );
 }

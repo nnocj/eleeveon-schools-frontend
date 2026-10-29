@@ -3,8 +3,9 @@
 /**
  * Shared branch expense / income workspace.
  * Replaces no database fields and makes no schema changes.
- * Academic terms filter existing transactions by configured inclusive dates. Yea
+ * Academic terms filter existing transactions by configured inclusive dates. Yeah
  */
+import FinanceOperationsExcel from "../../components/excel/FinanceOperationsExcel";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -313,6 +314,7 @@ function FinanceLedgerModule({kind}: {kind: Kind}) {
 
   return <main className="fl-page" style={{"--fl-primary":primary} as React.CSSProperties}>
     <style>{styles}</style>
+    <FinanceOperationsExcel kind={kind} accountId={account} schoolId={school} branchId={branch} existing={records} onComplete={load} />
     <AcademicFinancePeriodBar scope={academicScope} title={plural} hint={`Filter: change term · +: ${income?"record income":"record expense"}`} />
     {notice && !(editorOpen&&notice.error) && <div className={`fl-toast ${notice.error?"error":""}`} role="status">
       {notice.message}<button type="button" onClick={()=>setNotice(null)} aria-label="Dismiss">×</button></div>}

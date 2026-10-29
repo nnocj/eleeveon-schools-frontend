@@ -1,3 +1,4 @@
+import RemarksExcelActions from "../../components/excel/RemarksExcelActions";
 "use client";
 
 /**
@@ -901,6 +902,8 @@ export default function TeacherReportRemarks() {
       }
     >
       <style>{css}</style>
+      <RemarksExcelActions rows={studentRows.map(row=>({student:row.student,enrollment:row.enrollment,reportCard:row.reportCard}))} scope={{accountId:selectedAccountId||"",schoolId:schoolId||"",branchId:branchId||"",academicStructureId:academicStructureId||"",academicPeriodId:academicPeriodId||"",teacherOnly:true}} onImported={load}/>
+ 
 
       <section
         className="ba-search-card"

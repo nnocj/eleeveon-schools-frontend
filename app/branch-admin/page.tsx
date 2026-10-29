@@ -24,6 +24,8 @@ import Classes from "./modules/Classes";
 import TermFeesRequirements from "./modules/finance/TermFeesRequirements";
 import Expenses from "./modules/Expenses";
 import Incomes from "./modules/Incomes";
+import Payroll from "./modules/Payroll";
+import FinanceHistoricalReviewWorkspace from "./modules/finance/FinanceHistoricalReviewWorkspace";
 import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
 import Broadsheets from "./modules/reports/Broadsheets";
@@ -321,11 +323,11 @@ function BranchReportsWorkspace(props: RouteProps) {
 }
 
 // ======================================================
-// FINANCE — FEES / EXPENSES / PAYROLL
-// Existing branch-scoped modules are rendered without modifying their internals.
+// FINANCE — TERM NOTICES / FEE TRACKING / INCOMES / EXPENSES / PAYROLL
+// Mount only the selected module so shared portal toolbar registration stays scoped.
 // ======================================================
 
-type FinanceView = "notices" | "tracking" | "incomes" | "expenses";
+type FinanceView = "notices" | "tracking" | "historical" | "incomes" | "expenses" | "payroll";
 
 function BranchFinanceWorkspace(_props: RouteProps) {
   const [view, setView] = React.useState<FinanceView>("notices");
@@ -337,8 +339,10 @@ function BranchFinanceWorkspace(_props: RouteProps) {
           {([
             ["notices", "Term Notices"],
             ["tracking", "Fee Tracking"],
+             ["historical", "Historical Review"],
             ["incomes", "Incomes"],
             ["expenses", "Expenses"],
+             ["payroll", "Payroll"],
           ] as const).map(([key, label]) => (
             <button
               type="button"
@@ -357,7 +361,11 @@ function BranchFinanceWorkspace(_props: RouteProps) {
         </div>
       </div>
       {/* Mount one workspace at a time so the shared toolbar belongs to the active tab. */}
-      {view === "expenses" ? (
+      {view === "historical" ? (
+        <FinanceHistoricalReviewWorkspace />
+      ) : view === "payroll" ? (
+        <Payroll />
+      ) : view === "expenses" ? (
         <Expenses />
       ) : view === "incomes" ? (
         <Incomes />
@@ -716,6 +724,7 @@ const ROUTES: Record<string, React.ComponentType<RouteProps>> = {
   parents: Parents,
   expenses: Expenses,
   incomes: Incomes,
+  payroll: Payroll,
   fees: BranchFinanceWorkspace,
   studentReports: StudentReports,
   broadsheets: Broadsheets,

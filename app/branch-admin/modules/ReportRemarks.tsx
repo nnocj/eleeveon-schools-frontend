@@ -1,3 +1,4 @@
+import RemarksExcelActions from "../../components/excel/RemarksExcelActions";
 "use client";
 
 /**
@@ -2306,6 +2307,8 @@ export default function ReportRemarks() {
   return (
     <main className={`ba-page report-remarks-page ${viewMode === "cards" ? "rr-force-cards" : viewMode === "table" ? "rr-force-table" : ""}`} style={{"--ba-primary":primary,"--primary-color":primary} as React.CSSProperties}>
       <style>{css}</style>
+      <RemarksExcelActions rows={studentRows.map(row=>({student:row.student,enrollment:row.enrollment,reportCard:row.reportCard}))} scope={{accountId:selectedAccountId||"",schoolId:schoolId||"",branchId:branchId||"",academicStructureId:academicStructureId||"",academicPeriodId:academicPeriodId||"",teacherOnly:false}} onImported={load}/>
+ 
       <header className="rr-command-row report-no-print">
         <button type="button" className="rr-context" onClick={openFilters} aria-label="Choose group, class and term">
           <strong>{scopeMode === "group" ? "All classes" : selectedClassName}</strong>

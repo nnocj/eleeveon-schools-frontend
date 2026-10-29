@@ -153,25 +153,25 @@ type OpenWorkspaceSession = {
 
 const OPEN_WORKSPACE_KEY = "eleeveon_open_workspace";
 
-const BRANCH_SETUP_OPTIONS: Array<{
-  value: BranchSetupMode;
-  label: string;
-  note: string;
-}> = [
-  { value: "none", label: "No automatic setup", note: "Create only the branch record." },
-  { value: "ghana-early-childhood-v1", label: "Early Childhood", note: "Nursery and kindergarten foundation." },
-  { value: "ghana-primary-v1", label: "Primary School", note: "Primary classes, subjects, curriculum and assessment foundation." },
-  { value: "ghana-jhs-v1", label: "Junior High School", note: "JHS classes, subjects, curriculum and assessment foundation." },
-  { value: "ghana-basic-school-v1", label: "Basic School", note: "Primary and JHS foundational setup." },
-  { value: "ghana-shs-v1", label: "Senior High School", note: "SHS core foundational setup." },
-  { value: "ghana-full-school-v1", label: "Full School", note: "Early childhood, primary, JHS and SHS foundation." },
+const BRANCH_SETUP_OPTIONS: Array<{value:BranchSetupMode;label:string;note:string}> = [
+ {value:"none",label:"No automatic setup",note:"Create only the branch."},
+ {value:"ghana-kg-v2",label:"KG",note:"KG 1–2"},
+ {value:"ghana-primary-v1",label:"Primary",note:"Basic 1–6"},
+ {value:"ghana-jhs-v1",label:"JHS",note:"JHS 1–3"},
+ {value:"ghana-shs-v1",label:"SHS",note:"SHS 1–3"},
+ {value:"ghana-kg-primary-v2",label:"KG + Primary",note:"KG 1–2 and Basic 1–6"},
+ {value:"ghana-basic-school-v1",label:"Primary + JHS",note:"Basic 1–6 and JHS 1–3"},
+ {value:"ghana-kg-primary-jhs-v2",label:"KG + Primary + JHS",note:"KG 1–2, Basic 1–6 and JHS 1–3"},
+ {value:"ghana-jhs-shs-v2",label:"JHS + SHS",note:"JHS 1–3 and SHS 1–3"},
+ {value:"ghana-full-school-v1",label:"KG + Primary + JHS + SHS",note:"KG 1–2, Basic 1–6, JHS 1–3 and SHS 1–3"},
+ {value:"ghana-early-childhood-v1",label:"Nursery + KG",note:"Nursery 1–2 and KG 1–2"},
 ];
 
 function defaultAcademicYear() {
   const now = new Date();
   const startYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear() - 1;
   return {
-    name: `${startYear}/${startYear + 1}`,
+    name: `${startYear}/${startYear + 1} Academic Year`,
     start: `${startYear}-09-01`,
     end: `${startYear + 1}-08-31`,
   };
@@ -230,7 +230,7 @@ const emptyForm: FormState = {
   bannerImage: "",
   bannerImageMediaId: undefined,
   active: true,
-  setupMode: "ghana-basic-school-v1",
+  setupMode: "ghana-kg-primary-jhs-v2",
   academicYearName: initialAcademicYear.name,
   academicYearStart: initialAcademicYear.start,
   academicYearEnd: initialAcademicYear.end,
@@ -248,6 +248,9 @@ const tableSafe = (name: string) => (db as any)[name];
 const branchSetupStore: SeedStore = {
   async create(table, value) {
     return (await createLocal(table as any, value as any)) as any;
+  },
+  async update(table,id,patch) {
+    return updateLocal(table as any,id,patch as any);
   },
   async findOne(table, query) {
     const rows = (await tableSafe(table)?.toArray?.()) || [];

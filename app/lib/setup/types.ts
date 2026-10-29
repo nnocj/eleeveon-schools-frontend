@@ -4,12 +4,16 @@ export type SetupTemplateCode =
   | "ghana-jhs-v1"
   | "ghana-basic-school-v1"
   | "ghana-shs-v1"
-  | "ghana-full-school-v1";
+  | "ghana-full-school-v1"
+  | "ghana-kg-v2"
+  | "ghana-kg-primary-v2"
+  | "ghana-kg-primary-jhs-v2"
+  | "ghana-jhs-shs-v2";
 
 export type SeedEntityName =
   | "organizations" | "academicStructures" | "academicPeriods" | "classes"
   | "subjects" | "curriculums" | "curriculumPathways" | "curriculumSubjects"
-  | "subjectPrerequisites" | "classSubjects" | "gradingSystems" | "gradeRules"
+  | "subjectPrerequisites" | "classSubjects" | "gradingStructures" | "gradeRules"
   | "assessmentStructures" | "assessmentStructureItems" | "assessmentApplicabilities";
 
 export interface SeedDefinition { key: string; [key: string]: unknown }
@@ -36,6 +40,7 @@ export interface SeedTemplate {
 
 export interface SeedStore {
   create<T extends Record<string, unknown>>(table: SeedEntityName, value: T): Promise<T & { id: string }>;
+  update?(table: SeedEntityName, id: string, patch: Record<string, unknown>): Promise<unknown>;
   findOne<T extends Record<string, unknown>>(table: SeedEntityName, query: Record<string, unknown>): Promise<(T & { id: string }) | undefined>;
 }
 

@@ -1,3 +1,3 @@
 import type { SeedContext, SeedDefinition } from "../types";
 import { upsertSeed } from "../seedUtils";
-export async function seedGradingSystems(ctx:SeedContext,definitions:SeedDefinition[]){for(const d of definitions)await upsertSeed(ctx,"gradingSystems",d,{...d,key:undefined});}
+export async function seedGradingSystems(ctx:SeedContext,definitions:SeedDefinition[]){for(const d of definitions)await upsertSeed(ctx,"gradingStructures",d,{...d,key:undefined});}

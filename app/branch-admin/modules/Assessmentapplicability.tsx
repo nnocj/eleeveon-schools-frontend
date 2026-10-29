@@ -382,6 +382,33 @@ export default function Assessmentapplicability() {
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [modalClassId, setModalClassId] = useState<string>("");
 
+  // Match Assessment Entries: when moving between Classes and a selected class,
+  // bring this module's navigation into view. Setup embeds this page inside a
+  // longer workspace, so scroll to this module rather than the portal's top.
+  const applicabilityMainRef = React.useRef<HTMLElement>(null);
+  const previousClassSelection = React.useRef(selectedClassId);
+  React.useLayoutEffect(() => {
+    if (previousClassSelection.current === selectedClassId) return;
+    previousClassSelection.current = selectedClassId;
+
+    const target = applicabilityMainRef.current;
+    if (!target) return;
+
+    const scrollPane = document.querySelector<HTMLElement>(
+      ".role-shell.workspace-locked-scroll .app-content",
+    ) || document.querySelector<HTMLElement>(
+      ".role-shell.branch-workspace-layout .app-content",
+    );
+
+    if (scrollPane) {
+      const top = scrollPane.scrollTop + target.getBoundingClientRect().top
+        - scrollPane.getBoundingClientRect().top - 8;
+      scrollPane.scrollTop = Math.max(0, top);
+    } else {
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  }, [selectedClassId]);
+
   const [applicabilities, setApplicabilities] = useState<
     AssessmentApplicability[]
   >([]);
@@ -1154,6 +1181,7 @@ export default function Assessmentapplicability() {
 
   return (
     <main
+      ref={applicabilityMainRef}
       className="ba-page assessment-applicability-page"
       style={{ "--ba-primary": primary } as React.CSSProperties}
     >
@@ -1212,22 +1240,40 @@ export default function Assessmentapplicability() {
       ) : (
         <>
           <section
-            className="ba-filter-chips class-breadcrumb"
-            aria-label="Selected class"
+            className="ba-applicability-class-nav"
+            aria-label="Selected class navigation"
           >
             <button
               type="button"
+              className="ba-applicability-class-back"
+              aria-label="Back to classes"
+              title="Back to classes"
               onClick={() => {
                 setSelectedClassId("");
                 setSelectedItem(null);
                 setSearch("");
               }}
             >
-              ← Classes
+              <span className="ba-applicability-back-arrow" aria-hidden="true">←</span>
+              <span className="ba-applicability-back-label">Classes</span>
             </button>
-            <button type="button" onClick={() => setFilterOpen(true)}>
-              {(selectedClass as any)?.name || "Selected class"} ·{" "}
-              {selectedClassSubjectOptions.length} class subject(s)
+            <strong
+              className="ba-applicability-class-name"
+              title={(selectedClass as any)?.name || "Selected class"}
+            >
+              {(selectedClass as any)?.name || "Selected class"}
+            </strong>
+            <span className="ba-applicability-class-count">
+              {selectedClassSubjectOptions.length} subject(s)
+            </span>
+            <button
+              type="button"
+              className="ba-applicability-class-filter"
+              aria-label="Filter class applicability"
+              title="Filter applicability"
+              onClick={() => setFilterOpen(true)}
+            >
+              Filter
             </button>
           </section>
 
@@ -2458,6 +2504,49 @@ const css = `
   background:var(--bg,var(--background,#f2f4f7));overflow-x:clip;
 }
 .assessment-applicability-page .ba-search-card,.assessment-applicability-page .ba-filter-chips,.assessment-applicability-page .ba-hero {display:none!important;}
+
+/* Like Assessment Entries: visible class name next to a true back arrow.
+   Don't reuse .ba-filter-chips: Setup deliberately hides those legacy chips. */
+.assessment-applicability-page .ba-applicability-class-nav {
+  display:flex; align-items:center; gap:8px; min-width:0; min-height:38px;
+  margin:0 0 8px; padding:2px 0; white-space:nowrap;
+}
+.assessment-applicability-page .ba-applicability-class-nav button {
+  flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center;
+  gap:6px; min-height:32px; width:auto; padding:5px 10px;
+  border-radius:9px; border:1px solid var(--border,#d4dae3);
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 90%,var(--text,#182235) 10%);
+  color:var(--text,#182235); font-size:12px; font-weight:750;
+  line-height:1.2; cursor:pointer;
+}
+.assessment-applicability-page .ba-applicability-class-nav button:hover {
+  border-color:color-mix(in srgb,var(--ba-primary,#2563eb) 45%,var(--border,#d4dae3));
+}
+.assessment-applicability-page .ba-applicability-class-nav button:focus-visible {
+  outline:2px solid var(--ba-primary,#2563eb); outline-offset:2px;
+}
+.assessment-applicability-page .ba-applicability-back-arrow {
+  font-size:18px; font-weight:800; line-height:1;
+}
+.assessment-applicability-page .ba-applicability-class-name {
+  flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  font-size:14px; line-height:1.35; font-weight:800; color:var(--text,#182235);
+}
+.assessment-applicability-page .ba-applicability-class-count {
+  flex:0 0 auto; font-size:11px; font-weight:650; color:var(--muted,#64748b);
+}
+.assessment-applicability-page .ba-applicability-class-filter {
+  color:var(--ba-primary,#2563eb)!important;
+}
+@media(max-width:599px) {
+  .assessment-applicability-page .ba-applicability-class-nav {gap:6px;}
+  .assessment-applicability-page .ba-applicability-class-back {width:34px!important; padding:5px!important;}
+  .assessment-applicability-page .ba-applicability-back-label {display:none;}
+  .assessment-applicability-page .ba-applicability-class-name {font-size:13px;}
+  .assessment-applicability-page .ba-applicability-class-count {font-size:10px;}
+  .assessment-applicability-page .ba-applicability-class-filter {padding:5px 7px!important; font-size:11px!important;}
+}
+
 .assessment-applicability-page .ba-list{width:100%;min-width:0;max-width:none;margin:2px 0 0;gap:9px;align-items:stretch;}
 .assessment-applicability-page .ba-list > .student-row,.assessment-applicability-page .ba-list > .curriculum-row,
 .assessment-applicability-page .ba-list > .pathway-row,.assessment-applicability-page .ba-list > .organization-row{width:100%;min-width:0;margin:0;padding:9px 10px;}

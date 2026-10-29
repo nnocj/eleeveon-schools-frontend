@@ -17,6 +17,11 @@ export type PublicSupportDevice = {
   encryptionPublicJwk: JsonWebKey;
   signingPublicJwk: JsonWebKey;
   fingerprint: string;
+  // Optional presentation metadata from the server; never trusted for crypto.
+  userName?: string;
+  displayName?: string;
+  accountName?: string;
+  deviceName?: string;
 };
 type StoredDevice = { id: string; accountId: string; userId: string; encryptionKey: CryptoKeyPair; signingKey: CryptoKeyPair };
 export type SupportAttachmentManifest = {
@@ -196,12 +201,19 @@ export async function encryptAttachment(conversationId: string, messageId: strin
   return { file: new File([cipher], "encrypted.bin", { type: "application/octet-stream" }), manifest: { name: file.name, mimeType, kind, sizeBytes: file.size, key: b64(keyRaw), iv: b64(iv) } };
 }
 export async function decryptAttachment(conversationId: string, messageId: string, url: string, manifest: SupportAttachmentManifest): Promise<string> {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error("Could not download the encrypted attachment.");
+  let response: Response;
+  try { response = await fetch(url, { cache: "no-store" }); }
+  catch { throw new Error("Encrypted file download failed (network, expired URL or blocked cross-origin request). Retry the file link."); }
+  if (!response.ok) throw new Error(`Encrypted file download failed (HTTP ${response.status}). The file URL may be expired or missing.`);
   const blob = await response.arrayBuffer();
   if (blob.byteLength > 101 * 1024 * 1024) throw new Error("This encrypted file exceeds the 100 MB demonstration limit. Download a smaller video.");
   const key = await crypto.subtle.importKey("raw", toBuf(un64(manifest.key)), "AES-GCM", false, ["decrypt"]);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(manifest.iv)), additionalData: encoded(`${conversationId}|${messageId}|attachment`) }, key, blob);
+  let plain: ArrayBuffer;
+  try {
+    plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: toBuf(un64(manifest.iv)), additionalData: encoded(`${conversationId}|${messageId}|attachment`) }, key, blob);
+  } catch {
+    throw new Error("Encrypted file authentication failed. The downloaded bytes do not match the message's attachment key. Check the backend file reference.");
+  }
   // Documents are served for download only, not interpreted as HTML/script.
   return URL.createObjectURL(new Blob([plain], { type: manifest.kind === "document" ? "application/octet-stream" : manifest.mimeType }));
 }

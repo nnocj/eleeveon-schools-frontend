@@ -1,8 +1,6 @@
 /**
  * app/lib/sync/syncDiagnostics.ts
- * ---------------------------------------------------------
- * SYNC COUNTS + HEALTH HELPERS FOR DASHBOARD STRIPS
- * ---------------------------------------------------------
+ * Account-scoped sync counts and real successful network-phase timestamps.
  */
 
 import { db } from "../db/db";
@@ -15,6 +13,7 @@ import {
   normalizeSyncStatus,
 } from "./syncConfig";
 import { getSyncTables } from "./syncTables";
+import { getSyncSuccessTimestamps } from "./syncSuccessTimestamps";
 
 export type SyncDiagnostics = {
   accountId: string | null;
@@ -24,6 +23,8 @@ export type SyncDiagnostics = {
   synced: number;
   deleted: number;
   lastSyncOkAt: number;
+  lastPushAt: number | null;
+  lastPullAt: number | null;
   lastSyncError: string | null;
   byTable: Record<string, {
     pending: number;
@@ -40,7 +41,13 @@ export type SyncDiagnostics = {
   }>;
 };
 
-export async function getSyncDiagnostics(options?: { tables?: string[]; excludeTables?: string[] }): Promise<SyncDiagnostics> {
+export async function getSyncDiagnostics(options?: {
+  accountId?: string | null;
+  tables?: string[];
+  excludeTables?: string[];
+}): Promise<SyncDiagnostics> {
+  // The active sync account is authoritative: never read the history of
+  // a different account solely because a caller passed its ID.
   const accountId = getAccountId();
   const byTable: SyncDiagnostics["byTable"] = {};
   let pending = 0;
@@ -48,14 +55,19 @@ export async function getSyncDiagnostics(options?: { tables?: string[]; excludeT
   let synced = 0;
   let deleted = 0;
 
-  for (const tableName of getSyncTables({ include: options?.tables, exclude: options?.excludeTables })) {
+  for (const tableName of getSyncTables({
+    include: options?.tables,
+    exclude: options?.excludeTables,
+  })) {
     const table = (db as any)[tableName];
     if (!table) continue;
 
     const rows = await table.toArray();
-    const scopedRows = accountId ? rows.filter((row: any) => !row.accountId || row.accountId === accountId) : rows;
+    const scopedRows = accountId
+      ? rows.filter((row: any) => !row.accountId || row.accountId === accountId)
+      : rows;
 
-    const tableCounts: SyncDiagnostics["byTable"][string] = {
+    const counts: SyncDiagnostics["byTable"][string] = {
       pending: 0,
       errors: 0,
       synced: 0,
@@ -66,15 +78,13 @@ export async function getSyncDiagnostics(options?: { tables?: string[]; excludeT
 
     for (const row of scopedRows) {
       const status = normalizeSyncStatus(row.synced);
-      if (status === SYNC_STATUS_VALUE.PENDING) tableCounts.pending++;
-      else if (status === SYNC_STATUS_VALUE.ERROR) tableCounts.errors++;
-      else if (status === SYNC_STATUS_VALUE.SYNCED) tableCounts.synced++;
-      if (row.isDeleted) tableCounts.deleted++;
-      if (
-        status === SYNC_STATUS_VALUE.PENDING ||
-        status === SYNC_STATUS_VALUE.ERROR
-      ) {
-        tableCounts.records.push({
+      if (status === SYNC_STATUS_VALUE.PENDING) counts.pending++;
+      else if (status === SYNC_STATUS_VALUE.ERROR) counts.errors++;
+      else if (status === SYNC_STATUS_VALUE.SYNCED) counts.synced++;
+      if (row.isDeleted) counts.deleted++;
+
+      if (status === SYNC_STATUS_VALUE.PENDING || status === SYNC_STATUS_VALUE.ERROR) {
+        counts.records.push({
           id: String(row.id ?? ""),
           label: String(row.name ?? row.title ?? row.subject ?? row.code ?? row.id ?? "Record"),
           status: row.synced,
@@ -83,13 +93,14 @@ export async function getSyncDiagnostics(options?: { tables?: string[]; excludeT
       }
     }
 
-    pending += tableCounts.pending;
-    errors += tableCounts.errors;
-    synced += tableCounts.synced;
-    deleted += tableCounts.deleted;
-    byTable[tableName] = tableCounts;
+    pending += counts.pending;
+    errors += counts.errors;
+    synced += counts.synced;
+    deleted += counts.deleted;
+    byTable[tableName] = counts;
   }
 
+  const times = getSyncSuccessTimestamps(accountId);
   return {
     accountId,
     online: isOnline(),
@@ -98,6 +109,8 @@ export async function getSyncDiagnostics(options?: { tables?: string[]; excludeT
     synced,
     deleted,
     lastSyncOkAt: getLastSyncOkAt(accountId),
+    lastPushAt: times.lastPushAt,
+    lastPullAt: times.lastPullAt,
     lastSyncError: getLastSyncError(accountId),
     byTable,
   };

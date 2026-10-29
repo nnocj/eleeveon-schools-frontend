@@ -407,6 +407,23 @@ export function useSystemStatus() {
   }, []);
 
   useEffect(() => {
+    const onSuccessfulPhase = () => {
+      void refresh();
+    };
+
+    window.addEventListener(
+      "eleeveon:sync-success-timestamps-updated",
+      onSuccessfulPhase,
+    );
+    return () => {
+      window.removeEventListener(
+        "eleeveon:sync-success-timestamps-updated",
+        onSuccessfulPhase,
+      );
+    };
+  }, [refresh]);
+
+  useEffect(() => {
     void refresh();
 
     const timer =

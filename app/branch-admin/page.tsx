@@ -458,6 +458,32 @@ function BranchSetupWorkspace(props: RouteProps) {
   // All sections start collapsed, and editing begins only on a deliberate tap.
   const [openSection, setOpenSection] = React.useState<string | null>(null);
   const [openedEditor, setOpenedEditor] = React.useState<string | null>(null);
+  const setupRootRef = React.useRef<HTMLDivElement | null>(null);
+  const [scrollRequest, setScrollRequest] = React.useState<{ key: string; tick: number } | null>(null);
+
+  React.useLayoutEffect(() => {
+    if (!scrollRequest || openSection !== scrollRequest.key) return;
+    let frame1 = 0;
+    let frame2 = 0;
+    frame1 = window.requestAnimationFrame(() => {
+      frame2 = window.requestAnimationFrame(() => {
+        const root = setupRootRef.current;
+        const section = Array.from(root?.querySelectorAll<HTMLElement>(".ba-setup-section") || [])
+          .find((item) => item.dataset.setupKey === scrollRequest.key);
+        if (!section) return;
+        const pane = section.closest<HTMLElement>(".role-shell.workspace-locked-scroll .app-content")
+          || section.closest<HTMLElement>(".app-content");
+        if (pane && pane.scrollHeight > pane.clientHeight + 1) {
+          // Keep the portal header in place; scroll only its workspace viewport.
+          const delta = section.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+          pane.scrollTo({ top: Math.max(0, pane.scrollTop + delta), behavior: "auto" });
+        } else {
+          section.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+        }
+      });
+    });
+    return () => { window.cancelAnimationFrame(frame1); window.cancelAnimationFrame(frame2); };
+  }, [openSection, scrollRequest]);
 
   function toggleSection(section: SetupSection) {
     if (openSection === section.title) {
@@ -466,18 +492,19 @@ function BranchSetupWorkspace(props: RouteProps) {
     } else {
       setOpenSection(section.title);
       setOpenedEditor(section.editors[0]?.key ?? null);
+      setScrollRequest({ key: section.title, tick: Date.now() });
     }
   }
 
   return (
-    <div className="ba-setup-page">
+    <div className="ba-setup-page" ref={setupRootRef}>
       <style>{branchWorkspaceCss}</style>
       {SETUP_SECTIONS.map((section, index) => {
         const isOpen = openSection === section.title;
         const sectionId = `ba-setup-section-${index}`;
         const ActiveEditor = section.editors.find((editor) => editor.key === openedEditor)?.Component;
         return (
-          <section className={`ba-setup-section ${isOpen ? "is-open" : ""}`} key={section.title}>
+          <section data-setup-key={section.title} className={`ba-setup-section ${isOpen ? "is-open" : ""}`} key={section.title}>
             <button
               type="button"
               className="ba-setup-section-toggle"
@@ -634,7 +661,7 @@ const branchWorkspaceCss = `
 .ba-setup-intro { padding:2px 2px 8px; }
 .ba-setup-intro h2 { margin:0; font-size:21px; color:var(--text,#111827); }
 .ba-setup-intro p { margin:5px 0 0; font-size:12px; line-height:1.5; color:var(--muted,#64748b); }
-.ba-setup-section { min-width:0; overflow:hidden; border:1px solid var(--border,rgba(0,0,0,.12)); border-radius:13px; background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%); box-shadow:none; }
+.ba-setup-section { scroll-margin-top:8px; min-width:0; overflow:hidden; border:1px solid var(--border,rgba(0,0,0,.12)); border-radius:13px; background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%); box-shadow:none; }
 .ba-setup-section.is-open { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 38%,var(--border,rgba(0,0,0,.1))); }
 .ba-setup-section-toggle { display:flex; width:100%; min-height:58px; align-items:center; gap:10px; text-align:left; padding:10px 12px; border:0; color:var(--text,#111827); background:transparent; cursor:pointer; font:inherit; }
 .ba-setup-section-toggle:hover, .ba-setup-section.is-open .ba-setup-section-toggle { background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--surface,#fff)); }

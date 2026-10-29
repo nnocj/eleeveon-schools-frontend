@@ -28,6 +28,7 @@ type DisplayAttachment = SupportAttachment & {
   manifest?:SupportAttachmentManifest;
   conversationId?:string;
   messageId?:string;
+  unavailableReason?:string;
 };
 type HubReplyTarget = { id: string; preview: string; name: string };
 type HubWire =
@@ -97,27 +98,59 @@ function stamp(s?: string) { if (!s) return ""; const d = new Date(s); return is
 function date(s?: string) { if (!s) return ""; const d = new Date(s); return isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-GH", { day: "numeric", month: "short", year: "numeric" }); }
 function fileSize(n: number) { return n >= 1024 * 1024 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`; }
 function isEncrypted(c: SupportConversation | null | undefined) { return c?.metadata?.e2ee === true; }
-function AttachmentView({ attachment }: { attachment: DisplayAttachment }) {
-  const [resolved,setResolved] = useState<string|null>(attachment.url);
-  const [busy,setBusy] = useState(false);
-  const [error,setError] = useState("");
-  useEffect(()=>{setResolved(attachment.url);},[attachment.url]);
-  useEffect(()=>()=>{
-    // Lazy blob URLs are owned by this attachment; eagerly-prepared URLs
-    // are managed by the surrounding conversation component.
-    if(attachment.encryptedSourceUrl && resolved?.startsWith("blob:"))URL.revokeObjectURL(resolved);
-  },[resolved,attachment.encryptedSourceUrl]);
-  const a=attachment;
-  if(!resolved && a.encryptedSourceUrl && a.manifest && a.conversationId && a.messageId){
-    return <div className="esc-attachment"><span>🔒 {a.name}<small>{fileSize(a.sizeBytes)} · decrypt on demand</small></span>
-      <button type="button" disabled={busy} onClick={async()=>{
-        setBusy(true);setError("");
-        try{const url=await decryptAttachment(a.conversationId!,a.messageId!,a.encryptedSourceUrl!,a.manifest!);setResolved(url);}
-        catch(cause){setError(cause instanceof Error?cause.message:"Cannot decrypt this file. Refresh the conversation and retry.");}
-        finally{setBusy(false);}
-      }}>{busy?"Preparing…":"Open"}</button>{error&&<small role="alert">{error}</small>}</div>;
+function AttachmentView({ attachment, onRetry }: { attachment: DisplayAttachment; onRetry?: () => Promise<void> }) {
+  const [resolved, setResolved] = useState<string | null>(attachment.url);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(attachment.unavailableReason || "");
+  const createdBlobUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Keep a successfully opened attachment visible if metadata refreshes.
+    // A fresh server-side URL can replace a missing/expired download link.
+    if (attachment.url) {
+      setResolved(attachment.url);
+      setError("");
+    } else {
+      setError(attachment.unavailableReason || "");
+    }
+  }, [attachment.url, attachment.encryptedSourceUrl, attachment.unavailableReason]);
+  useEffect(() => () => {
+    if (createdBlobUrl.current) URL.revokeObjectURL(createdBlobUrl.current);
+  }, []);
+
+  const a = attachment;
+  const reopen = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      // A missing link needs a fresh message from the server. A present link
+      // is downloaded and decrypted locally using the authenticated manifest.
+      if (!a.encryptedSourceUrl || !a.manifest || !a.conversationId || !a.messageId) {
+        if (!onRetry) throw new Error("This attachment has no download link. Reopen the conversation to check again.");
+        await onRetry();
+      } else {
+        const next = await decryptAttachment(a.conversationId, a.messageId, a.encryptedSourceUrl, a.manifest);
+        if (createdBlobUrl.current) URL.revokeObjectURL(createdBlobUrl.current);
+        createdBlobUrl.current = next;
+        setResolved(next);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The encrypted attachment could not be opened.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!resolved) {
+    return <div className="esc-attachment" role="group" aria-label={`Encrypted attachment: ${a.name}`}>
+      <span>🔒 {a.name}<small>{fileSize(a.sizeBytes)} · {a.kind}</small>
+        {error && <small role="alert">{error}</small>}
+      </span>
+      <button type="button" disabled={busy} onClick={() => void reopen()}>
+        {busy ? "Checking…" : a.encryptedSourceUrl ? "Open securely" : "Retry file link"}
+      </button>
+    </div>;
   }
-  if (!resolved) return <div className="esc-unavailable">🔒 Attachment unavailable on this device.</div>;
   if (a.kind === "image") return <a href={resolved} download={a.name} title={a.name}><img className="esc-media" src={resolved} alt={a.name}/></a>;
   if (a.kind === "video") return <video className="esc-media" src={resolved} controls playsInline preload="metadata"/>;
   if (a.kind === "audio") return <div className="esc-audio"><span className="esc-audio-icon" aria-hidden="true">♫</span><div className="esc-audio-player"><strong>Voice message</strong><audio controls preload="metadata" src={resolved} aria-label={`Voice message: ${a.name}`}/></div></div>;
@@ -133,6 +166,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const [ownId, setOwnId] = useState("");
   const [devices, setDevices] = useState<(PublicSupportDevice & { revoked?: boolean })[]>([]);
   const [trustRevision, setTrustRevision] = useState(0);
+  const [attachmentRefreshRevision, setAttachmentRefreshRevision] = useState(0);
   const [conversations, setConversations] = useState<SupportConversation[]>([]);
   const [inboxCursor,setInboxCursor] = useState<string|null>(null);
   const [inboxMore,setInboxMore] = useState(false);
@@ -289,6 +323,49 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   // persistent browser storage while using experimental E2EE.
   const drafts = useRef(new Map<string, string>());
   const decryptedCache = useRef(new Map<string, DisplayMessage>());
+  // Include the server attachment record in the cache identity. A signed
+  // message body can remain unchanged while its download URL becomes ready.
+  const decryptedMessageKey = (conversationId: string, message: SupportMessage) =>
+    `${conversationId}:${message.id}:${message.body}:${JSON.stringify(message.attachments || [])}`;
+  const reloadAttachment = async (conversationId: string, messageId: string): Promise<void> => {
+    if (!navigator.onLine) throw new Error("Connect to the internet to fetch this attachment.");
+    const [openedResult, pageResult] = await Promise.allSettled([
+      supportApi.open(conversationId),
+      supportApi.messagePage(conversationId, undefined, 100, ownId || undefined),
+    ]);
+    if (openedResult.status === "rejected" && pageResult.status === "rejected") {
+      throw new Error("Could not refresh the attachment record. Try again when connected.");
+    }
+    // Either endpoint may omit older messages or return attachment data at
+    // different stages. Prefer a usable file link when both contain the same
+    // signed ciphertext; never restore a deleted-for-everyone message.
+    const freshById = new Map<string, SupportMessage>();
+    const candidates = [
+      ...(openedResult.status === "fulfilled" ? openedResult.value.messages : []),
+      ...(pageResult.status === "fulfilled" ? pageResult.value.messages : []),
+    ];
+    for (const item of candidates) {
+      const previous = freshById.get(item.id);
+      const hasLink = (message: SupportMessage) => Boolean(message.attachments?.some(file => Boolean(file.url)));
+      if (previous?.deletedForEveryone && !item.deletedForEveryone) continue;
+      if (previous && previous.body === item.body && hasLink(previous) && !hasLink(item) && !item.deletedForEveryone) continue;
+      freshById.set(item.id, item);
+    }
+    const fresh = [...freshById.values()];
+    const record = freshById.get(messageId);
+    if (selectedRef.current === conversationId && fresh.length) {
+      setThread(previous => mergeMessagePages(previous, fresh));
+    }
+    // Remove cached decrypted results for just the retried message. Never
+    // discard locally retained private keys, verified fingerprints, or history.
+    for (const key of decryptedCache.current.keys()) {
+      if (key.startsWith(`${conversationId}:${messageId}:`)) decryptedCache.current.delete(key);
+    }
+    setAttachmentRefreshRevision(value => value + 1);
+    if (!record?.attachments?.some(file => Boolean(file.url))) {
+      throw new Error("The message was saved, but its encrypted file link is not available from the server yet. The backend upload/storage record may need repair.");
+    }
+  };
   const objectUrls = useRef(new Set<string>());
   const [, setRefreshMark] = useState(0);
   const knownActive = devices.filter(d => !d.revoked);
@@ -570,7 +647,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
           }
         } catch { return { ...m, displayBody: "🔒 Invalid encrypted message.", displayAttachments: [], decrypted: false }; }
       }
-      const cached = decryptedCache.current.get(`${id}:${m.id}:${m.body}`);
+      const cacheKey = decryptedMessageKey(id, m);
+      const cached = decryptedCache.current.get(cacheKey);
       if (cached) return cached;
       if (!encryptedEnvelope(m.body)) {
         const legacy = { ...m, displayBody: m.body, displayAttachments: m.attachments || [], decrypted: false };
@@ -584,19 +662,35 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         if (!signedBy || (m.authorUserId && signedBy.userId !== m.authorUserId) || !pinned || pinned !== signedBy.fingerprint) throw new Error("Verify this sender's device fingerprint before reading the message.");
         const content: ClearSupportPayload = await decryptPayload(accountId, identity, id, m.id, m.body, devices, historyKeys[m.id]);
         const displayAttachments: DisplayAttachment[] = [];
-        if (content.attachment && m.attachments?.length) {
-          const cipher = m.attachments[0];
+        if (content.attachment) {
+          const cipher = m.attachments?.[0];
+          const sourceUrl = cipher?.url || null;
           let url: string | null = null;
-          const lazy = content.attachment.sizeBytes > 8*1024*1024 && Boolean(cipher.url);
-          if (cipher.url && !lazy) {
+          let unavailableReason = sourceUrl ? "" :
+            "The encrypted message was saved, but the server has not supplied a file link.";
+          // Videos and large files download on demand. Never block rendering
+          // the message, or repeatedly fetch a large video during polling.
+          const lazy = content.attachment.kind === "video" || content.attachment.sizeBytes > 8 * 1024 * 1024;
+          if (sourceUrl && !lazy) {
             try {
-              url = await decryptAttachment(id, m.id, cipher.url, content.attachment);
+              url = await decryptAttachment(id, m.id, sourceUrl, content.attachment);
               objectUrls.current.add(url);
-            } catch { /* keep message readable even if attachment retrieval fails */ }
+            } catch (cause) {
+              unavailableReason = cause instanceof Error ? cause.message : "Encrypted attachment could not be opened.";
+            }
           }
-          displayAttachments.push({ name: content.attachment.name, mimeType: content.attachment.mimeType,
-            sizeBytes: content.attachment.sizeBytes, kind: content.attachment.kind, url, encrypted: true,
-            ...(lazy?{encryptedSourceUrl:cipher.url,manifest:content.attachment,conversationId:id,messageId:m.id}:{}) });
+          displayAttachments.push({
+            name: content.attachment.name,
+            mimeType: content.attachment.mimeType,
+            sizeBytes: content.attachment.sizeBytes,
+            kind: content.attachment.kind,
+            url, encrypted: true,
+            encryptedSourceUrl: sourceUrl,
+            manifest: content.attachment,
+            conversationId: id,
+            messageId: m.id,
+            unavailableReason,
+          });
         }
         const wire = unpackHubWire(content.body);
         const result: DisplayMessage = {
@@ -607,7 +701,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
           ...(wire?.kind === "message" && wire.replyTo ? { replyTo: wire.replyTo } : {}),
           ...(wire?.kind === "edit" ? { editTargetId: wire.targetId, isEditEvent: true } : {}),
         };
-        decryptedCache.current.set(`${id}:${m.id}:${m.body}`, result);
+        decryptedCache.current.set(cacheKey, result);
         if (content.subject && !cancelled) setDecryptedSubject(old => old[id] === content.subject ? old : { ...old, [id]: content.subject! });
         return result;
       } catch (cause) {
@@ -617,7 +711,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     };
     setRendered(previous => previous.length === raw.length && previous.every((item,index) =>
       item.id === raw[index].id && item.body === raw[index].body &&
-      item.deletedForEveryone === raw[index].deletedForEveryone)
+      item.deletedForEveryone === raw[index].deletedForEveryone &&
+      JSON.stringify(item.attachments || []) === JSON.stringify(raw[index].attachments || []))
       ? previous
       : raw.map(m => ({
           ...m,
@@ -642,7 +737,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             const next = completed[i], existing = updated[index];
             if (existing?.id !== next.id || existing?.body !== next.body ||
                 existing?.displayBody !== next.displayBody || existing?.decrypted !== next.decrypted ||
-                existing?.displayAttachments?.length !== next.displayAttachments?.length) {
+                existing?.displayAttachments?.length !== next.displayAttachments?.length ||
+                JSON.stringify(existing?.displayAttachments) !== JSON.stringify(next.displayAttachments)) {
               updated[index] = next; changed = true;
             }
           });
@@ -651,7 +747,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       }
     })();
     return () => { cancelled = true; };
-  }, [opened, thread, devices, accountId, identity, ready, trustRevision, historyKeys]);
+  }, [opened, thread, devices, accountId, identity, ready, trustRevision, historyKeys, attachmentRefreshRevision]);
 
   // Apply only signed, successfully decrypted revisions by the original author.
   // Revision events remain in the server's immutable message history.
@@ -1349,7 +1445,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
                       <strong>↪ {m.replyTo.name}</strong><span>{m.replyTo.preview || "Attachment"}</span>
                     </button>}
                     {m.displayBody ? <div className="esc-message-text">{m.displayBody}</div> : null}
-                    {m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a}/>)}
+                    {m.displayAttachments.map((a, n) => <AttachmentView key={`${m.id}:${n}`} attachment={a} onRetry={() => reloadAttachment(selected, m.id)}/>)}
                     {m.error && <div className="esc-error-text">{m.error}</div>}
                     <small className="esc-message-meta">{m.edited ? "Edited · " : ""}{stamp(m.createdAt)} · {(m.decrypted || !encryptedEnvelope(m.body)) ? "Saved" : "Unavailable"}</small>
                   </div>

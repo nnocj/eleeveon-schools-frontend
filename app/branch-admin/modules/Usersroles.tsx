@@ -1476,7 +1476,7 @@ export default function Usersroles() {
         title: (item as any).title,
         fullName,
         email,
-        phone,
+        phone: normalizePhone(match.user?.phone || phone),
         photo: (item as any).photo,
         subLabel: profileSub(role, item),
         ...state,
@@ -1942,10 +1942,10 @@ export default function Usersroles() {
                 <tr>
                   <th>People ({filteredCandidates.length})</th>
                   <th>Role</th>
-                  <th>Email</th>
-                  <th>Source</th>
+                  <th>Contact</th>
                   <th>Access</th>
                   <th>Password</th>
+                  <th>Source</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -1953,8 +1953,15 @@ export default function Usersroles() {
                 {filteredCandidates.map((candidate) => (
                   <tr key={candidate.key}>
                     <td>
-                      <strong>{candidate.fullName}</strong>
-                      <span>{candidate.phone || candidate.subLabel}</span>
+                      <div className="ba-table-person">
+                        <span className="usersroles-avatar" aria-hidden="true">
+                          {candidate.photo ? <img src={candidate.photo} alt="" loading="lazy" /> : initials(candidate.fullName)}
+                        </span>
+                        <div className="ba-table-person-details">
+                          <strong>{candidate.fullName}</strong>
+                          <span>{candidate.subLabel}</span>
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <Chip tone={roleTone(candidate.role)}>
@@ -1962,11 +1969,9 @@ export default function Usersroles() {
                       </Chip>
                     </td>
                     <td>
-                      {candidate.email || (
-                        <span className="usersroles-warn">Email needed</span>
-                      )}
+                      <strong>{candidate.phone || "—"}</strong>
+                      <span>{candidate.email || "Email needed"}</span>
                     </td>
-                    <td>{candidate.source}</td>
                     <td>
                       <Chip
                         tone={
@@ -2001,6 +2006,7 @@ export default function Usersroles() {
                             : "No login"}
                       </Chip>
                     </td>
+                    <td>{candidate.source}</td>
                     <td>
                       <div className="ba-table-actions">
                         <button
@@ -2060,10 +2066,13 @@ export default function Usersroles() {
               <span className="student-main">
                 <strong>{candidate.fullName}</strong>
                 <small>
-                  {roleIcon(candidate.role)} {roleLabel(candidate.role)} ·{" "}
-                  {candidate.email || "Email needed"}
+                  {roleIcon(candidate.role)} {roleLabel(candidate.role)} · {candidate.subLabel}
                 </small>
-                <em>{candidate.phone || candidate.subLabel}</em>
+                <em>
+                  {candidate.phone ? `Phone: ${candidate.phone}` : "Phone not set"}
+                  {" · "}
+                  {candidate.email ? `Email: ${candidate.email}` : "Email needed"}
+                </em>
               </span>
               <span className="student-side">
                 <span
@@ -4479,4 +4488,42 @@ const css = `
   border:1px solid var(--border,rgba(0,0,0,.14)); border-radius:12px;
   background:var(--surface,#fff); color:var(--text,#111827); cursor:pointer; }
 @media(max-width:899px){.usersroles-page{padding:6px}.usersroles-page .usersroles-list{grid-template-columns:minmax(0,1fr)} }
+
+/* Eleeveon Teachers V2 — exact compact record texture for Access cards/table. */
+.usersroles-page { width:100%; max-width:none; min-width:0; min-height:0; margin:0; padding:5px;
+  background:var(--bg,var(--background,#f2f4f7)); }
+.usersroles-page .usersroles-list { gap:9px; margin-top:2px; }
+.usersroles-page .student-row,
+.usersroles-page .ba-card,
+.usersroles-page .ba-table-card {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 93%,var(--text,#182235) 7%);
+  border:1px solid color-mix(in srgb,var(--border,#d4dae3) 85%,var(--text,#182235) 15%);
+  border-radius:13px; box-shadow:none; transition:border-color .12s ease;
+}
+.usersroles-page .student-row { padding:9px; }
+.usersroles-page .student-row:hover { transform:none; box-shadow:none; }
+.usersroles-page .student-row::before { display:none; }
+.usersroles-page .usersroles-avatar { width:48px; height:48px; flex:0 0 48px; border-radius:12px;
+  background:color-mix(in srgb,var(--ba-primary) 14%,var(--card-bg,#fff));
+  color:var(--ba-primary); font-size:14px; box-shadow:none; }
+.usersroles-page .usersroles-table-card { padding:4px; margin-top:2px; border-radius:13px; overflow:visible; }
+.usersroles-page .ba-table-scroll { border-radius:10px; }
+.usersroles-page .ba-table-scroll table {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 95%,var(--text,#182235) 5%);
+  min-width:940px;
+}
+.usersroles-page .ba-table-scroll thead th { position:sticky; top:0; z-index:2;
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 85%,var(--text,#182235) 15%);
+  font-size:11px; }
+.usersroles-page .ba-table-scroll tbody tr:nth-child(even) {
+  background:color-mix(in srgb,var(--card-bg,var(--surface,#fff)) 89%,var(--text,#182235) 11%); }
+.usersroles-page .ba-table-scroll td { background:transparent; font-size:13px; }
+.usersroles-page .ba-table-person { display:flex; align-items:center; gap:9px; min-width:155px; }
+.usersroles-page .ba-table-person-details { display:grid; gap:3px; min-width:0; }
+.usersroles-page .ba-table-person-details span { margin-top:0; }
+.usersroles-page .student-main em { white-space:normal; overflow-wrap:anywhere; line-height:1.35; }
+.usersroles-page .ba-filter-chips { display:none!important; }
+@media (min-width:1024px) { .usersroles-page .usersroles-list { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media (max-width:639px) { .usersroles-page { padding:3px; } .usersroles-page .usersroles-list { grid-template-columns:minmax(0,1fr); } }
+@media (prefers-reduced-motion:reduce) { .usersroles-page .student-row { transition:none; } }
 `;

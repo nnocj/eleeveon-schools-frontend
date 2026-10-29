@@ -174,6 +174,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [message, setMessage] = useState("");
+  const [recipientNotice, setRecipientNotice] = useState("");
   const [replyTarget, setReplyTarget] = useState<HubReplyTarget | null>(null);
   const [editTarget, setEditTarget] = useState<{ id: string; body: string } | null>(null);
   const draftBeforeEditRef = useRef("");
@@ -846,33 +847,49 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     }catch(e){setError(e instanceof Error?e.message:"Could not create conversation");}
     finally{setBusy(false);}
   }
+  /**
+   * Never include unverified keys in a ciphertext envelope. An unverified old
+   * device must not block every message if a verified device belonging to the
+   * actual other participant exists. Excluded devices need approved history
+   * key sharing before they can decrypt these newer messages.
+   */
   async function recipients(id?: string) {
     if (!ready) throw new Error("Encryption keys have not finished initializing.");
     const keys = await loadKeys(id);
-    // The backend rejects ciphertext signed by a pending device. Show the
-    // user the required action BEFORE attempting a message upload.
     const linked = await supportApi.devices();
     const own = linked.devices.find(device => device.id === ownId);
     if (!own || own.status !== "linked") {
       setNeedsDeviceReview(true);
       throw new Error(own?.status === "pending"
-        ? "Message not sent: this browser is awaiting trusted-device approval. Your draft is saved. Use Review devices below to complete pairing."
-        : "Message not sent: this encryption device is not linked. Your draft is saved. Use Review devices below.");
+        ? "This browser is awaiting trusted-device approval. Your message has not been sent."
+        : "This browser is not linked. Approve it from an existing trusted device before sending.");
     }
-    const active = keys.filter(d => !d.revoked);
-    const approved = readTrust(accountId, identity);
-    if (!active.some(d => d.id === ownId)) throw new Error("Your current device is missing from the encryption directory.");
-    if (!active.some(d => d.userId !== identity)) throw new Error("Your message is not sent yet. Eleeveon Support needs to open the Center once to register its device. Refresh keys and retry.");
-    const unverified = active.filter(d => d.id !== ownId && approved[d.id] !== d.fingerprint);
-    if (unverified.length) {
+    const active = keys.filter(device => !device.revoked);
+    if (!active.some(device => device.id === ownId)) {
+      throw new Error("Your linked device is missing from this conversation's encryption directory. Refresh the conversation.");
+    }
+    // The recipient must be on the OTHER account, not another developer or
+    // another device owned by the current sender. This also protects outreach.
+    const otherAccount = active.filter(device => device.accountId !== accountId);
+    if (!otherAccount.length) {
       setNeedsDeviceReview(true);
-      throw new Error(`Message not sent: ${unverified.length} linked encryption device${unverified.length === 1 ? " needs" : "s need"} fingerprint verification. Your draft is saved. Select Review devices below, confirm the fingerprints through a trusted channel, and retry.`);
+      throw new Error("The other participant has no linked encryption device yet. They need to open Eleeveon Hub and register their device.");
     }
-    return active;
+    const trustedFingerprints = readTrust(accountId, identity);
+    const usable = active.filter(device => device.id === ownId || trustedFingerprints[device.id] === device.fingerprint);
+    if (!usable.some(device => device.accountId !== accountId)) {
+      setNeedsDeviceReview(true);
+      throw new Error("No encryption device belonging to the other participant has been verified on this browser. Review and verify a recipient fingerprint before sending.");
+    }
+    const excluded = active.length - usable.length;
+    setRecipientNotice(excluded
+      ? `${excluded} unverified device${excluded === 1 ? " is" : "s are"} excluded from this encrypted message. Those devices will need secure history-key sharing to read it later.`
+      : "");
+    return usable;
   }
   async function createConversation() {
     if ((!subject.trim() && !openingText.trim()) || busy || !online || !ready) return;
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setNeedsDeviceReview(false); setRecipientNotice("");
     const initialSubject = subject.trim();
     const initialText = openingText.trim();
     const id = crypto.randomUUID();
@@ -891,18 +908,10 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
       let deliveryProblem = "";
       if (!delivered) {
         try {
-          const keyResult = await supportApi.keys(conversation.id);
-          const active = (keyResult.devices || []).filter(d => !d.revoked);
-          const trust = readTrust(accountId, identity);
-          if (!active.some(d => d.id === ownId)) {
-            throw new Error("Your device key is not yet available. Refresh encryption keys.");
-          }
-          if (!active.some(d => d.userId !== identity)) {
-            throw new Error("Eleeveon Support needs to open the Center once to register its encryption device.");
-          }
-          if (active.some(d => d.id !== ownId && trust[d.id] !== d.fingerprint)) {
-            throw new Error("Verify the other participant's device fingerprints before sending.");
-          }
+          // Use exactly the same linked-device and recipient-verification
+          // checks for the FIRST message as for every subsequent message.
+          // Never encrypt to an unverified device, and never send plaintext.
+          const active = await recipients(conversation.id);
           const firstMessageId = crypto.randomUUID();
           const cipher = await encryptPayload(accountId, identity, conversation.id, firstMessageId,
             { subject: initialSubject || undefined, body: initialText }, active);
@@ -946,7 +955,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
     if (editTarget && (!message.trim() || files.length)) {
       setError("Edited messages must contain text only. Send attachments separately."); return;
     }
-    setBusy(true); setError(""); setNeedsDeviceReview(false);
+    setBusy(true); setError(""); setNeedsDeviceReview(false); setRecipientNotice("");
     const text = message.trim(); const queue = [...files];
     let completed = 0;
     try {
@@ -1293,6 +1302,7 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
         {openingId && selected && <div className="esc-opening" role="status" aria-live="polite">Preparing conversation…</div>}
         {openingId && selected && !opened && !newChat && <div className="esc-loading-thread" role="status"><strong>Opening conversation…</strong><span>Loading saved messages and encryption keys</span></div>}
         {newChat ? <>
+          {error && <div className="esc-banner error" role="alert">{error}{needsDeviceReview && onOpenHubSettings && <button type="button" onClick={() => onOpenHubSettings()}>Review devices</button>}</div>}
           <div className="esc-chat-head"><button className="icon esc-back" onClick={() => { setNewChat(false); setMobileOpen(false); }}>←</button>{mobileNavigation && <div className="esc-mobile-nav-in-chat">{mobileNavigation}</div>}<div className="esc-chat-info"><strong>New conversation</strong><small>Private messaging</small></div><button className="secondary" onClick={() => onOpenHubSettings?.()}>⚙ Settings</button></div>
           {isDeveloper ? <div className="esc-form">
             <strong>Start a conversation</strong>
@@ -1348,6 +1358,8 @@ export default function EleeveonSupportChat({ isDeveloper, accountId, userId, ro
             })}
           </div>
           <div className="esc-composer-area">
+          {error && <div className="esc-banner error" role="alert" style={{borderRadius:10,margin:"6px 10px"}}>{error}{needsDeviceReview && onOpenHubSettings && <button type="button" onClick={() => onOpenHubSettings(selected)}>Review devices</button>}</div>}
+          {recipientNotice && <div className="esc-banner warn" role="status" style={{borderRadius:10,margin:"6px 10px"}}>{recipientNotice}</div>}
           {opened?.metadata?.pendingRecipientKeys === true && <div className="esc-pending-status" role="status"><span>Conversation saved. The first encrypted message is still pending.</span><button type="button" onClick={() => void loadKeys(selected)}>Refresh devices</button><button type="button" onClick={() => onOpenHubSettings?.(selected)}>Check keys</button></div>}
           {files.length > 0 && <div className="esc-files">{files.map((f, i) => <button key={`${f.name}:${i}`} disabled={busy} onClick={() => setFiles(old => old.filter((_, k) => k !== i))}>📎 {f.name} ({fileSize(f.size)}) ×</button>)}</div>}
           {(replyTarget || editTarget) && <div className="esc-compose-reference" role="status">

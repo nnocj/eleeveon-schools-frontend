@@ -3,12 +3,12 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {QRCodeSVG} from 'qrcode.react';
-import {supportApi} from '../../lib/support/supportApi';
+import {supportApi,type SupportDirectory,type SupportConversation} from '../../lib/support/supportApi';
 import {ownPublicDevice,readTrust,saveTrust,signHubDeviceProof,type PublicSupportDevice} from '../../lib/support/supportCrypto';
 import {transferAllHubHistory,type HistoryTransferProgress} from '../../lib/support/supportDeviceTransfer';
 import type {HubBackground} from '../../lib/support/useHubAppearance';
 
-type Props={onClose:()=>void;accountId:string;userId:string;conversationId?:string;images:HubBackground[];selectedId:string;
+type Props={onClose:()=>void;accountId:string;userId:string;conversationId?:string;currentUserName?:string;currentAccountName?:string;images:HubBackground[];selectedId:string;
   select:(id:string)=>void|Promise<void>;addUpload:(file:File)=>Promise<void>;removeUpload:(id:string)=>Promise<void>;
   reload:()=>Promise<void>;error?:string};
 type DeviceStatus={id:string;fingerprint:string;deviceName?:string|null;status:'linked'|'pending'|'revoked';linkedAt:string|null};
@@ -18,6 +18,8 @@ const PROOF='ELEEVEON_HUB_PAIR_V1';
 export default function HubSettingsPanel(props:Props){
  const [tab,setTab]=useState<'backgrounds'|'devices'>('backgrounds');
  const [devices,setDevices]=useState<DeviceStatus[]>([]);
+ const [directory,setDirectory]=useState<SupportDirectory|null>(null);
+ const [conversation,setConversation]=useState<SupportConversation|null>(null);
  const [publicKeys,setPublicKeys]=useState<(PublicSupportDevice&{revoked?:boolean})[]>([]);
  const [mine,setMine]=useState<(PublicSupportDevice&{fingerprint:string})|null>(null);
  const [pending,setPending]=useState<NewLink|null>(null);
@@ -35,7 +37,33 @@ export default function HubSettingsPanel(props:Props){
  const scanStream=useRef<MediaStream|null>(null);
  const [scanning,setScanning]=useState(false);
  const [mounted,setMounted]=useState(false);
- const ownStatus=devices.find(d=>d.id===mine?.id)?.status;
+ const ownDevice=devices.find(d=>d.id===mine?.id);
+ const ownStatus=ownDevice?.status;
+ const shortId=(id:string)=>id ? `${id.slice(0,8)}…` : 'Unknown';
+ const userName=(id:string)=>{
+   if(id===props.userId&&props.currentUserName?.trim())return props.currentUserName.trim();
+   const member=directory?.users.find(u=>u.id===id);
+   if(member?.fullName?.trim())return member.fullName.trim();
+   const key=publicKeys.find(k=>k.userId===id);
+   const keyName=key?.userName?.trim() || key?.displayName?.trim();
+   if(keyName)return keyName;
+   // A conversation's organization is a safe label only when this participant
+   // is the actual submitter; never assign it to an unrelated user/device.
+   if(conversation?.submittedByUserId===id && conversation.organizationName?.trim())
+     return conversation.organizationName.trim();
+   return id===props.userId?'You':`Participant ${shortId(id)}`;
+ };
+ const accountName=(id:string)=>{
+   if(id===props.accountId&&props.currentAccountName?.trim())return props.currentAccountName.trim();
+   return directory?.accounts.find(a=>a.id===id)?.name || publicKeys.find(k=>k.accountId===id)?.accountName || '';
+ };
+ const participantDevices=publicKeys.filter(k=>k.userId!==props.userId);
+ const keysByPerson=new Map<string,PublicSupportDevice[]>();
+ for(const key of participantDevices){
+   const person=keysByPerson.get(key.userId)||[];
+   if(!person.some(device=>device.id===key.id))person.push(key);
+   keysByPerson.set(key.userId,person);
+ }
  const closeCamera=()=>{scanStream.current?.getTracks().forEach(t=>t.stop());scanStream.current=null;setScanning(false);};
  useEffect(()=>{setMounted(true);return()=>{cancelTransfer.current=true;closeCamera();setMounted(false);};},[]);
  useEffect(()=>{
@@ -56,6 +84,17 @@ export default function HubSettingsPanel(props:Props){
    setMine({...pub,accountId:props.accountId,userId:props.userId});setDevices(listed.devices);setPublicKeys(keys.devices);
  };
  useEffect(()=>{if(tab==='devices')void refreshDevices().catch(e=>setError(e instanceof Error?e.message:'Could not load devices.'));},[tab,props.accountId,props.userId,props.conversationId]);
+ useEffect(()=>{
+   if(tab!=='devices')return;
+   let alive=true;
+   // Directory access may be restricted by role. Do not widen permissions;
+   // use meaningful fallbacks if a school user cannot fetch other profiles.
+   void supportApi.directory().then(value=>{if(alive)setDirectory(value);}).catch(()=>{});
+   if(props.conversationId){
+     void supportApi.open(props.conversationId).then(value=>{if(alive)setConversation(value.conversation);}).catch(()=>{});
+   } else setConversation(null);
+   return()=>{alive=false;};
+ },[tab,props.conversationId,props.accountId,props.userId]);
  useEffect(()=>{if(!pending)return;let active=true;
    const check=async()=>{try{const r=await supportApi.linkStatus(pending.id);if(!active)return;
      if(r.status==='approved'||r.status==='completed'){setStatus('Your device has been approved. Verify the original device fingerprint below, then open a conversation.');void refreshDevices();}
@@ -131,6 +170,7 @@ export default function HubSettingsPanel(props:Props){
     .hub-settings-tabs{display:flex;gap:8px;padding:10px 14px 0}.hub-settings-tabs button{border:0;background:transparent;border-radius:10px;padding:9px 12px;font-weight:700}.hub-settings-tabs .active{background:color-mix(in srgb,var(--dashboard-primary,#128578) 13%,var(--surface,#fff))}
     .hub-settings-body{overflow-y:auto;flex:1;min-height:0;padding:15px}.hub-settings-body p{color:var(--muted,#65737d);line-height:1.6;font-size:12px}.hub-settings-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0}.hub-settings-actions button,.hub-settings-actions label,.hub-device-card button{border:1px solid var(--border,#dae3e7);background:var(--surface,#fff);padding:9px 12px;border-radius:10px;font-size:12px;font-weight:650}
     .hub-settings-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:10px}.hub-background-choice{min-width:0;position:relative;border:1px solid var(--border,#ddd);border-radius:12px;overflow:hidden;background:var(--surface,#fff)}.hub-background-choice.selected{border:2px solid var(--dashboard-primary,#127f74)}.hub-background-choice>button{width:100%;border:0;background:none;text-align:left;padding:0}.hub-background-choice .preview{height:95px;width:100%;display:block;object-fit:cover;background:linear-gradient(120deg,#d3e9e2,#d8d4be)}.hub-background-choice span{display:block;padding:8px 9px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hub-background-choice .remove{position:absolute;right:3px;top:3px;border:0;background:#fff;color:#9d1935;border-radius:8px;padding:4px 8px}
+     .hub-person-group{margin:16px 0 12px}.hub-person-group>h3{margin:0 0 5px;font-size:14px;line-height:1.3}.hub-person-group>small{display:block;color:var(--muted,#687880);font-size:12px}.hub-device-owner{font-size:12px;font-weight:650}.hub-device-fingerprint{letter-spacing:.02em}.hub-device-header{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.hub-device-header strong{margin:0}.hub-device-count{font-size:11px;color:var(--muted,#687880)}
     .hub-device-card{border:1px solid var(--border,#dce4e9);border-radius:13px;padding:13px;margin:11px 0;background:var(--surface,#fff)}.hub-device-card strong{display:block;margin-bottom:8px}.hub-device-card small{display:block;color:var(--muted,#687880);margin:5px 0}.hub-device-card code{display:block;word-break:break-all;line-height:1.7;font-size:11px;background:var(--surface-secondary,#f3f6f6);padding:8px;border-radius:8px}.hub-device-card input{width:100%;max-width:480px;margin:8px 0;padding:10px;border:1px solid var(--border,#ddd);border-radius:9px;background:var(--surface,#fff)}.hub-device-card button{margin:5px 6px 0 0}.hub-settings-status{background:color-mix(in srgb,var(--dashboard-primary,#128578) 7%,var(--surface,#fff));border-radius:10px;padding:11px;margin:9px 0;font-size:12px}.hub-settings-error{color:#a52341;border:1px solid #d98293;padding:10px;border-radius:10px;margin:9px 0}.hub-qr{display:inline-grid;padding:14px;border-radius:13px;background:#fff;color:#121212;margin:10px 0}.hub-big-code{font:700 27px ui-monospace,monospace;letter-spacing:3px;word-break:break-word}.hub-settings-warning{padding:10px;border-left:3px solid #b68822;background:color-mix(in srgb,#ffd374 13%,var(--surface,#fff));font-size:12px;margin:10px 0;line-height:1.6}
     @media(max-width:600px){.hub-settings-backdrop{padding:0}.hub-settings-dialog{width:100%;height:100dvh;border-radius:0}.hub-settings-gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
    `}</style>
@@ -146,7 +186,9 @@ export default function HubSettingsPanel(props:Props){
    </>:<>
      <p>Link a second browser or phone using a temporary QR or numeric code. An existing trusted device must approve it and transfer historical encryption keys before the new device can read older messages.</p>
      <div className="hub-settings-actions"><button type="button" disabled={busy} onClick={()=>void execute(refreshDevices)}>↻ Refresh devices</button></div>
-     {mine&&<div className="hub-device-card"><strong>This device · {ownStatus||'Checking'}</strong><small>{mine.id}</small><code>{mine.fingerprint}</code></div>}
+     {mine&&<div className="hub-device-card"><strong>{ownDevice?.deviceName || 'This device'} · {ownStatus||'Checking'}</strong>
+       <small className="hub-device-owner">{userName(props.userId)}{accountName(props.accountId)?` · ${accountName(props.accountId)}`:''}</small>
+       <small>This device · {mine.id}</small><code className="hub-device-fingerprint">{mine.fingerprint}</code></div>}
      {ownStatus==='pending'&&<div className="hub-device-card"><strong>Get a linking code (new device)</strong><p>Leave this screen open, then use your original trusted device to approve.</p>
        {!pending?<button type="button" disabled={busy} onClick={()=>void start()}>Generate QR and numeric code</button>:<><div className="hub-qr"><QRCodeSVG value={pending.qrPayload} size={168}/></div><div className="hub-big-code">{pending.code}</div><small>Expires {new Date(pending.expiresAt).toLocaleTimeString()}</small><code>{pending.targetFingerprint}</code><button type="button" onClick={()=>void execute(async()=>{await supportApi.linkCancel(pending.id);setPending(null);})}>Cancel pairing</button></>}
      </div>}
@@ -161,18 +203,27 @@ export default function HubSettingsPanel(props:Props){
        </div>}
      </div>}
      <div className="hub-settings-warning">Historical access requires an existing device capable of reading those messages. If it has lost its keys, those messages cannot be recovered through the server. Revocation cannot remotely erase messages previously decrypted on another device.</div>
-     {props.conversationId&&publicKeys.filter(k=>k.userId!==props.userId).map(key=>{
-       const verified=readTrust(props.accountId,props.userId)[key.id]===key.fingerprint;
-       return <div className="hub-device-card" key={key.id}><strong>Conversation participant · {key.userId}</strong><code>{key.fingerprint}</code>
-         <small>{verified?'✓ Verified here':'Not verified here. Compare using a separate trusted channel.'}</small>
-         {verifyId===key.id?<><input value={verifyInput} onChange={e=>setVerifyInput(e.target.value)} placeholder="Enter matching fingerprint" aria-label="Participant fingerprint"/><button type="button" onClick={()=>void verify(key)}>Confirm matching fingerprint</button><button type="button" onClick={()=>setVerifyId('')}>Cancel</button></>:<button type="button" onClick={()=>{setVerifyId(key.id);setVerifyInput('');}}>Verify participant key</button>}
-       </div>;
-     })}
-     {devices.filter(d=>d.status!=='revoked').map(d=>{
+     {props.conversationId&&[...keysByPerson.entries()].map(([participantId,keys])=><section className="hub-person-group" key={participantId} aria-label={`Identity keys for ${userName(participantId)}`}>
+       <h3>{userName(participantId)}</h3><small>{accountName(keys[0].accountId) ? `${accountName(keys[0].accountId)} · ` : ''}{keys.length} encryption {keys.length===1?'key':'keys'} · Account user ID: {participantId}</small>
+       {keys.map((key,index)=>{
+         const verified=readTrust(props.accountId,props.userId)[key.id]===key.fingerprint;
+         return <div className="hub-device-card" key={key.id}>
+           <div className="hub-device-header"><strong>{key.deviceName?.trim() || `Encryption device ${index+1}`}</strong><span className="hub-device-count">{index+1} of {keys.length}</span></div>
+           <small>Device ID: {key.id}</small><code className="hub-device-fingerprint">{key.fingerprint}</code>
+           <small>{verified?'✓ Verified on this browser':'Not verified here — compare using a separate trusted channel.'}</small>
+           {verifyId===key.id?<><input value={verifyInput} onChange={e=>setVerifyInput(e.target.value)} placeholder="Enter matching fingerprint from other device" aria-label={`Fingerprint for ${userName(participantId)}`}/><button type="button" disabled={busy} onClick={()=>void verify(key)}>Confirm matching fingerprint</button><button type="button" onClick={()=>{setVerifyId('');setVerifyInput('');}}>Cancel</button></>
+             :<button type="button" onClick={()=>{setVerifyId(key.id);setVerifyInput('');}}>{verified?'Reverify key':'Verify participant key'}</button>}
+         </div>;
+       })}
+     </section>)}
+     {devices.filter(d=>d.status!=='revoked'&&d.id!==mine?.id).map(d=>{
        const key=publicKeys.find(k=>k.id===d.id);const verified=key&&readTrust(props.accountId,props.userId)[key.id]===key.fingerprint;
-       return <div className="hub-device-card" key={d.id}><strong>{d.deviceName||'Device'} {d.id===mine?.id?'· This device':''} · {d.status}</strong><small>{d.id}</small><code>{d.fingerprint}</code>
-         {key&&d.id!==mine?.id&&<><small>{verified?'✓ Verified here':'Fingerprint not verified on this browser'}</small>
-           {verifyId===d.id?<><input value={verifyInput} onChange={e=>setVerifyInput(e.target.value)} aria-label="Full fingerprint to verify" placeholder="Compare and enter the full fingerprint"/><button type="button" onClick={()=>void verify(key)}>Confirm fingerprint</button><button type="button" onClick={()=>{setVerifyId('');setVerifyInput('');}}>Cancel</button></>:<button type="button" onClick={()=>{setVerifyId(d.id);setVerifyInput('');}}>Verify key</button>}
+       return <div className="hub-device-card" key={d.id}><strong>{d.deviceName||'Additional device'} · {d.status}</strong>
+         <small className="hub-device-owner">{userName(props.userId)}{accountName(props.accountId)?` · ${accountName(props.accountId)}`:''}</small>
+         <small>Device ID: {d.id}</small><code className="hub-device-fingerprint">{d.fingerprint}</code>
+         {key&&<><small>{verified?'✓ Verified here':'Fingerprint not verified on this browser'}</small>
+           {verifyId===d.id?<><input value={verifyInput} onChange={e=>setVerifyInput(e.target.value)} aria-label="Full fingerprint to verify" placeholder="Compare and enter the full fingerprint"/><button type="button" disabled={busy} onClick={()=>void verify(key)}>Confirm fingerprint</button><button type="button" onClick={()=>{setVerifyId('');setVerifyInput('');}}>Cancel</button></>
+             :<button type="button" onClick={()=>{setVerifyId(d.id);setVerifyInput('');}}>{verified?'Reverify key':'Verify key'}</button>}
            {d.status==='linked'&&ownStatus==='linked'&&<button type="button" disabled={busy} onClick={()=>void revoke(d.id)}>Revoke device</button>}
          </>}
        </div>;

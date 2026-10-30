@@ -1,5 +1,4 @@
 "use client";
-import SyncedHorizontalTableScroll from "../../components/role-portals/shell/SyncedHorizontalTableScroll";
 
 
 /**
@@ -418,9 +417,9 @@ export default function Teacherstudents(){
         <span className="student-main"><strong>{item.row.fullName||"Unnamed student"}</strong><small>{item.className}{(item.row as any).admissionNumber?` · ${(item.row as any).admissionNumber}`:""}</small><em>{(item.row as any).parentPhone?`Parent: ${(item.row as any).parentPhone}`:(item.row as any).parentName?`Parent: ${(item.row as any).parentName}`:item.organizationName}</em></span>
         <span className="student-side"><StatusDot row={item.row}/><i aria-hidden="true">✎</i></span>
       </button>)}</section>}
-      {view==="table"&&<section className="ba-table-card"><SyncedHorizontalTableScroll label="Scroll teacher students table horizontally"><table><thead><tr><th>Students ({shown.length})</th><th>Admission No.</th><th>Class</th><th>Organization</th><th>Gender</th><th>Age</th><th>Parent</th><th>Phone</th><th>Enrollments</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
+      {view==="table"&&<section className="ba-table-card"><div className="eds-workspace-table-scroll" data-workspace-hscroll="true" role="region" aria-label="Teacher students table" tabIndex={0}><table><thead><tr><th>Students ({shown.length})</th><th>Admission No.</th><th>Class</th><th>Organization</th><th>Gender</th><th>Age</th><th>Parent</th><th>Phone</th><th>Enrollments</th><th>Status</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
         {shown.map(item=><tr key={asId(item.row.id)}><td><div className="ba-table-person"><Avatar name={value(item.row.fullName)} photo={photoFor(item.row)} primary="var(--ba-primary,#64748b)"/><div><strong>{item.row.fullName}</strong><span>{(item.row as any).address||""}</span></div></div></td><td>{(item.row as any).admissionNumber||"—"}</td><td>{item.className}</td><td>{item.organizationName}</td><td>{studentGender(item.row)||"—"}</td><td>{currentStudentAge(item.row)||"—"}</td><td>{(item.row as any).parentName||"—"}</td><td>{(item.row as any).parentPhone||"—"}</td><td>{item.enrollmentCount}</td><td><span className={`ba-chip ${statusTone(item.row)}`}>{studentStatus(item.row)}</span></td><td>{formatDate((item.row as any).updatedAt||(item.row as any).createdAt)}</td><td><div className="ba-table-actions"><button type="button" onClick={()=>startEdit(item)}>Edit</button></div></td></tr>)}
-      </tbody></table>{!shown.length&&<div className="ba-empty-table">No student matches your filters.</div>}</SyncedHorizontalTableScroll></section>}
+      </tbody></table>{!shown.length&&<div className="ba-empty-table">No student matches your filters.</div>}</div></section>}
       {!shown.length&&view==="cards"&&<section className="ba-state"><h2>No students found</h2><p>{!allowedClasses.size?"No class assignment is available on this device. Check the selected teacher workspace and synchronization.":"No assigned students match your current filters, or their enrollment records are not yet available on this device."}</p></section>}
     </>}
     {filterOpen&&<ScopedDialog type="sheet" primary={primary} onClose={()=>setFilterOpen(false)}><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Student filters" onPointerDown={e=>e.stopPropagation()}><div className="ba-sheet-head"><div><h2>Filters</h2><p>Find students in your assigned classes.</p></div><button className="ba-modal-close" type="button" onClick={()=>setFilterOpen(false)} aria-label="Close filters">✕</button></div>

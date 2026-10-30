@@ -1,5 +1,8 @@
-import RemarksExcelActions from "../../components/excel/RemarksExcelActions";
 "use client";
+
+
+import RemarksExcelActions from "../../components/excel/RemarksExcelActions";
+
 
 /**
  * app/branch-admin/modules/ReportRemarks.tsx

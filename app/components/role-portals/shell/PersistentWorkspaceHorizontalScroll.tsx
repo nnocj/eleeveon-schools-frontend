@@ -3,9 +3,8 @@
 import React, { useEffect, useRef, useState } from "react";
 
 /**
- * Portal-owned horizontal scrollbar. Lives outside .app-content, beside the
- * persistent portal navigation, and follows the horizontally overflowing
- * visible data table. No second synchronized scrollbar component is mounted.
+ * Persistent horizontal scrollbar placed between portal navigation and page content.
+ * It mirrors the first visible horizontally overflowing workspace table/container.
  */
 export default function PersistentWorkspaceHorizontalScroll({
   activeRoute,
@@ -19,78 +18,75 @@ export default function PersistentWorkspaceHorizontalScroll({
   useEffect(() => {
     const host = hostRef.current;
     const spacer = spacerRef.current;
-    const pane = host?.parentElement?.querySelector<HTMLElement>(".app-content");
-    if (!host || !spacer || !pane) return;
+    if (!host || !spacer) return;
 
     let target: HTMLElement | null = null;
     let targetObserver: ResizeObserver | null = null;
     let animation = 0;
-    let fromHost = false;
-    let fromTable = false;
+    let syncingHost = false;
+    let syncingTarget = false;
 
-    const disconnect = () => {
-      if (target) target.removeEventListener("scroll", onTableScroll);
+    const disconnectTarget = () => {
+      if (target) target.removeEventListener("scroll", onTargetScroll);
       targetObserver?.disconnect();
       targetObserver = null;
       target = null;
     };
 
-    const onTableScroll = () => {
-      if (!target || fromHost) return;
-      fromTable = true;
+    const onTargetScroll = () => {
+      if (!target || syncingHost) return;
+      syncingTarget = true;
       host.scrollLeft = target.scrollLeft;
-      fromTable = false;
+      syncingTarget = false;
     };
 
     const onHostScroll = () => {
-      if (!target || fromTable) return;
-      fromHost = true;
+      if (!target || syncingTarget) return;
+      syncingHost = true;
       target.scrollLeft = host.scrollLeft;
-      fromHost = false;
+      syncingHost = false;
+    };
+
+    const isVisible = (node: HTMLElement) => {
+      if (!node.isConnected || node.clientWidth <= 0 || node.getClientRects().length === 0) return false;
+      let current: HTMLElement | null = node;
+      while (current) {
+        const style = window.getComputedStyle(current);
+        if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+        current = current.parentElement;
+      }
+      return true;
     };
 
     const selectTarget = () => {
-      // Ignore hidden tab panels, card views and offscreen dialogs.
-      const candidates = Array.from(pane.querySelectorAll<HTMLElement>(
-        '[data-workspace-hscroll="true"]',
+      // Prefer explicitly marked table containers; include the legacy class as a safe fallback.
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+        '[data-workspace-hscroll="true"], .ba-table-scroll',
       ));
-      const matching = candidates.find((node) => {
-        if (!node.isConnected || node.clientWidth <= 0 || node.getClientRects().length === 0) return false;
-
-        // Check the whole ancestor chain. A table inside an inactive tab can
-        // still have a client rect even when one of its ancestors is hidden.
-        let ancestor: HTMLElement | null = node;
-        while (ancestor && ancestor !== pane) {
-          const style = window.getComputedStyle(ancestor);
-          if (
-            style.display === "none" ||
-            style.visibility === "hidden" ||
-            style.visibility === "collapse"
-          ) return false;
-          ancestor = ancestor.parentElement;
-        }
-
-        return node.scrollWidth > node.clientWidth + 2;
-      }) || null;
+      const matching = candidates.find((node) =>
+        isVisible(node) && node.scrollWidth > node.clientWidth + 2 &&
+        node.closest('[aria-hidden="true"]') === null
+      ) || null;
 
       if (matching !== target) {
-        disconnect();
+        disconnectTarget();
         target = matching;
         if (target) {
-          target.addEventListener("scroll", onTableScroll, { passive: true });
+          target.addEventListener("scroll", onTargetScroll, { passive: true });
           targetObserver = new ResizeObserver(schedule);
           targetObserver.observe(target);
-          if (target.firstElementChild) targetObserver.observe(target.firstElementChild);
+          if (target.firstElementChild instanceof HTMLElement) targetObserver.observe(target.firstElementChild);
         }
       }
-      const isNeeded = Boolean(target && target.scrollWidth > target.clientWidth + 2);
-      setNeeded(isNeeded);
-      if (target && isNeeded) {
-        // Give the top track the same horizontal scroll range as the table.
-        spacer.style.width = `${Math.max(host.clientWidth, host.clientWidth + target.scrollWidth - target.clientWidth)}px`;
+
+      const available = host.clientWidth;
+      const overflow = Boolean(target && target.scrollWidth > target.clientWidth + 2 && available > 0);
+      setNeeded(overflow);
+      if (target && overflow) {
+        spacer.style.width = `${available + target.scrollWidth - target.clientWidth}px`;
         host.scrollLeft = target.scrollLeft;
       } else {
-        spacer.style.width = "100%";
+        spacer.style.width = `${Math.max(available, 1)}px`;
         host.scrollLeft = 0;
       }
     };
@@ -100,10 +96,11 @@ export default function PersistentWorkspaceHorizontalScroll({
       animation = requestAnimationFrame(selectTarget);
     }
 
-    const contentObserver = new MutationObserver(schedule);
-    contentObserver.observe(pane, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
-    const paneObserver = new ResizeObserver(schedule);
-    paneObserver.observe(pane);
+    const mutationObserver = new MutationObserver(schedule);
+    mutationObserver.observe(document.body, {
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+    });
     const hostObserver = new ResizeObserver(schedule);
     hostObserver.observe(host);
     host.addEventListener("scroll", onHostScroll, { passive: true });
@@ -112,9 +109,8 @@ export default function PersistentWorkspaceHorizontalScroll({
 
     return () => {
       cancelAnimationFrame(animation);
-      disconnect();
-      contentObserver.disconnect();
-      paneObserver.disconnect();
+      disconnectTarget();
+      mutationObserver.disconnect();
       hostObserver.disconnect();
       host.removeEventListener("scroll", onHostScroll);
       window.removeEventListener("resize", schedule);
@@ -122,10 +118,10 @@ export default function PersistentWorkspaceHorizontalScroll({
   }, [activeRoute]);
 
   return (
-    <div className={`eds-portal-hscroll-slot${needed ? " is-visible" : ""}`}>
+    <div className="eds-portal-hscroll-slot" aria-label="Table horizontal scrolling">
       <div
         ref={hostRef}
-        className="eds-portal-hscroll"
+        className={`eds-portal-hscroll${needed ? " is-needed" : ""}`}
         role="region"
         aria-label="Scroll the current table horizontally"
         tabIndex={needed ? 0 : -1}
@@ -133,31 +129,41 @@ export default function PersistentWorkspaceHorizontalScroll({
         <div ref={spacerRef} className="eds-portal-hscroll-spacer" />
       </div>
       <style>{`
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll-slot {
-          display: block; flex: 0 0 auto; min-width: 0;
-          padding: 0 12px; background: var(--surface, transparent);
+        .eds-portal-hscroll-slot {
+          display: block !important;
+          flex: 0 0 auto;
+          width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
+          padding: 0 12px;
+          background: var(--surface, #f8fafc);
+          position: relative;
+          z-index: 5;
         }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll {
-          width: 100%; height: 12px; overflow-x: auto; overflow-y: hidden;
-          scrollbar-width: thin;
-          scrollbar-color: var(--primary-color, #2563eb)
-            color-mix(in srgb, var(--primary-color, #2563eb) 9%, transparent);
+        .eds-portal-hscroll {
+          display: block;
+          width: 100%;
+          height: 16px;
+          min-height: 16px;
+          box-sizing: border-box;
+          overflow-x: auto;
+          overflow-y: hidden;
+          overscroll-behavior-x: contain;
+          scrollbar-width: auto;
+          scrollbar-color: #64748b #dbe3ee;
+          border-radius: 999px;
         }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll-spacer { height: 1px; }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll::-webkit-scrollbar { height: 9px; }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll::-webkit-scrollbar-track {
-          background: color-mix(in srgb, var(--primary-color, #2563eb) 9%, transparent);
-        }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll::-webkit-scrollbar-thumb {
-          background: color-mix(in srgb, var(--primary-color, #2563eb) 70%, #64748b);
-          border: 2px solid transparent; background-clip: padding-box; border-radius: 999px;
-        }
+        .eds-portal-hscroll-spacer { height: 1px; min-height: 1px; }
+        .eds-portal-hscroll::-webkit-scrollbar { height: 12px; }
+        .eds-portal-hscroll::-webkit-scrollbar-track { background: #dbe3ee; border-radius: 999px; }
+        .eds-portal-hscroll::-webkit-scrollbar-thumb { background: #64748b; border: 2px solid #dbe3ee; border-radius: 999px; }
+        .eds-portal-hscroll:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
         .eds-workspace-table-scroll {
           width: 100%; max-width: 100%; min-width: 0;
           overflow-x: auto; overscroll-behavior-x: contain;
           scrollbar-width: none;
         }
-        .eds-workspace-table-scroll::-webkit-scrollbar { display: none; }
+        .eds-workspace-table-scroll::-webkit-scrollbar { height: 0 !important; display: none !important; }
       `}</style>
     </div>
   );

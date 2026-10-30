@@ -55,9 +55,21 @@ export default function PersistentWorkspaceHorizontalScroll({
         '[data-workspace-hscroll="true"]',
       ));
       const matching = candidates.find((node) => {
-        if (!node.isConnected || node.getClientRects().length === 0) return false;
-        const style = window.getComputedStyle(node);
-        if (style.display === "none" || style.visibility === "hidden") return false;
+        if (!node.isConnected || node.clientWidth <= 0 || node.getClientRects().length === 0) return false;
+
+        // Check the whole ancestor chain. A table inside an inactive tab can
+        // still have a client rect even when one of its ancestors is hidden.
+        let ancestor: HTMLElement | null = node;
+        while (ancestor && ancestor !== pane) {
+          const style = window.getComputedStyle(ancestor);
+          if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            style.visibility === "collapse"
+          ) return false;
+          ancestor = ancestor.parentElement;
+        }
+
         return node.scrollWidth > node.clientWidth + 2;
       }) || null;
 
@@ -74,7 +86,8 @@ export default function PersistentWorkspaceHorizontalScroll({
       const isNeeded = Boolean(target && target.scrollWidth > target.clientWidth + 2);
       setNeeded(isNeeded);
       if (target && isNeeded) {
-        spacer.style.width = `${host.clientWidth + target.scrollWidth - target.clientWidth}px`;
+        // Give the top track the same horizontal scroll range as the table.
+        spacer.style.width = `${Math.max(host.clientWidth, host.clientWidth + target.scrollWidth - target.clientWidth)}px`;
         host.scrollLeft = target.scrollLeft;
       } else {
         spacer.style.width = "100%";
@@ -115,16 +128,15 @@ export default function PersistentWorkspaceHorizontalScroll({
         className="eds-portal-hscroll"
         role="region"
         aria-label="Scroll the current table horizontally"
-                tabIndex={needed ? 0 : -1}
+        tabIndex={needed ? 0 : -1}
       >
         <div ref={spacerRef} className="eds-portal-hscroll-spacer" />
       </div>
       <style>{`
         .role-shell.workspace-locked-scroll .eds-portal-hscroll-slot {
-          display: none; flex: 0 0 auto; min-width: 0;
+          display: block; flex: 0 0 auto; min-width: 0;
           padding: 0 12px; background: var(--surface, transparent);
         }
-        .role-shell.workspace-locked-scroll .eds-portal-hscroll-slot.is-visible { display: block; }
         .role-shell.workspace-locked-scroll .eds-portal-hscroll {
           width: 100%; height: 12px; overflow-x: auto; overflow-y: hidden;
           scrollbar-width: thin;

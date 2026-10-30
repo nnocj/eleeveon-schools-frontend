@@ -1,5 +1,4 @@
 "use client";
-import SyncedHorizontalTableScroll from "../../components/role-portals/shell/SyncedHorizontalTableScroll";
 
 
 /**
@@ -4290,7 +4289,7 @@ function TableView({
 }) {
   return (
     <section className="ba-table-card">
-      <SyncedHorizontalTableScroll label="Scroll students table horizontally">
+      <div className="eds-workspace-table-scroll" data-workspace-hscroll="true" role="region" aria-label="Students table" tabIndex={0}>
         <table>
           <thead>
             <tr>
@@ -4377,7 +4376,7 @@ function TableView({
         {!rows.length && (
           <div className="ba-empty-table">No student matches your filters.</div>
         )}
-      </SyncedHorizontalTableScroll>
+      </div>
     </section>
   );
 }

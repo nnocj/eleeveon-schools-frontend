@@ -68,6 +68,7 @@ import PortalSidebar from "./PortalSidebar";
 import BranchWorkspaceNavigation from "./BranchWorkspaceNavigation";
 import PortalHeader from "./PortalHeader";
 import PortalContent from "./PortalContent";
+import PersistentWorkspaceHorizontalScroll from "./PersistentWorkspaceHorizontalScroll";
 import AccountWorkspaceDrawer from "./AccountWorkspaceDrawer";
 
 import { useSyncContext } from "../../../context/sync-context";
@@ -2394,6 +2395,7 @@ function RolePortalShellContent({
         />
         )}
 
+        <PersistentWorkspaceHorizontalScroll activeRoute={tab} />
         <PortalContent>
           {/* Preserve readiness and retry wiring without reserving banner space.
               Detailed status remains accessible from the existing Sync control. */}

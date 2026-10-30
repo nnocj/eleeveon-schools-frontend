@@ -4289,7 +4289,7 @@ function TableView({
 }) {
   return (
     <section className="ba-table-card">
-      <div className="eds-workspace-table-scroll" data-workspace-hscroll="true" role="region" aria-label="Students table" tabIndex={0}>
+      <div className="ba-table-scroll eds-workspace-table-scroll" data-workspace-hscroll="true" role="region" aria-label="Students table" tabIndex={0}>
         <table>
           <thead>
             <tr>

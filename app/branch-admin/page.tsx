@@ -25,7 +25,6 @@ import TermFeesRequirements from "./modules/finance/TermFeesRequirements";
 import Expenses from "./modules/Expenses";
 import Incomes from "./modules/Incomes";
 import Payroll from "./modules/Payroll";
-import Transactions from "./modules/Transactions";
 import FinanceHistoricalReviewWorkspace from "./modules/finance/FinanceHistoricalReviewWorkspace";
 import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
@@ -324,11 +323,11 @@ function BranchReportsWorkspace(props: RouteProps) {
 }
 
 // ======================================================
-// FINANCE — TERM NOTICES / FEE TRACKING / INCOMES / EXPENSES / PAYROLL
+// FINANCE — TERM NOTICES / FEE TRACKING / INCOMES / EXPENSES
 // Mount only the selected module so shared portal toolbar registration stays scoped.
 // ======================================================
 
-type FinanceView = "notices" | "tracking" | "payroll" | "transactions";
+type FinanceView = "notices" | "tracking" | "incomes" | "expenses";
 
 function BranchFinanceWorkspace(_props: RouteProps) {
   const [view, setView] = React.useState<FinanceView>("notices");
@@ -346,8 +345,8 @@ function BranchFinanceWorkspace(_props: RouteProps) {
           {([
             ["notices", "Term Notices"],
             ["tracking", "Fee Tracking"],
-            ["payroll", "Payroll"],
-            ["transactions", "Transactions"],
+            ["incomes", "Incomes"],
+            ["expenses", "Expenses"],
           ] as const).map(([key, label]) => (
             <button
               type="button"
@@ -373,10 +372,10 @@ function BranchFinanceWorkspace(_props: RouteProps) {
             className="ba-finance-history-back" aria-label="Return to Finance">← Back to Finance</button>
           <FinanceHistoricalReviewWorkspace />
         </section>
-      ) : view === "payroll" ? (
-        <Payroll />
-      ) : view === "transactions" ? (
-        <Transactions />
+      ) : view === "incomes" ? (
+        <Incomes />
+      ) : view === "expenses" ? (
+        <Expenses />
       ) : (
         <TermFeesRequirements key={view} mode={view} />
       )}

@@ -3,6 +3,11 @@
  * Historical student balances and actual payment posting are NOT handled here.
  */
 import React,{useMemo,useState} from "react";
+import ExcelExportSheet from "./ExcelExportSheet";
+import ExcelImportSheet, {type ExcelImportStep} from "./ExcelImportSheet";
+import ExcelFilePicker from "./ExcelFilePicker";
+import ExcelColumnMapping from "./ExcelColumnMapping";
+import ExcelImportPreview from "./ExcelImportPreview";
 import {parseExcelFile,downloadExcelWorkbook} from "../../lib/excel/excelWorkbook";
 import {createLocal,listActiveLocal} from "../../lib/sync/syncUtils";
 
@@ -24,10 +29,11 @@ function keyFor(kind:Kind,r:Row){const ref=norm(r.referenceNumber||r.receiptNumb
  return teacherId?"teacher|"+teacherId:staffUserId?"user|"+staffUserId:"unverified|"+norm(r.fullName)+"|"+norm(r.role);
  }return ref?"ref|"+ref:"fallback|"+[r.date,r.title,r.amount,r.source||r.expenseSourceType,r.receivedBy||r.paidTo].map(norm).join('|');}
 export default function FinanceOperationsExcel({kind,accountId,schoolId,branchId,existing,onComplete,open:controlledOpen,onClose}:Props){
- const [open,setOpen]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
+ const [open,setOpen]=useState(false),[step,setStep]=useState<ExcelImportStep>("file"),[importOpen,setImportOpen]=useState(false),[file,setFile]=useState<File|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
  const [sheets,setSheets]=useState<Array<{name:string;rows:any[][]}>>([]),[sheet,setSheet]=useState(""),[headerIndex,setHeaderIndex]=useState(0),[mapping,setMapping]=useState<Record<string,number>>({});
  const shown=controlledOpen ?? open;
- const close=()=>{if(controlledOpen===undefined)setOpen(false);else onClose?.();};
+ const close=()=>{if(busy)return;setImportOpen(false);if(controlledOpen===undefined)setOpen(false);else onClose?.();};
+ const closeImport=()=>{if(busy)return;setImportOpen(false);setStep("file");};
  const current=sheets.find(s=>s.name===sheet),fields=FIELDS[kind],head=current?.rows[headerIndex]||[];
  const proposed=useMemo(()=>{if(!current)return [];return current.rows.slice(headerIndex+1).map((cells,i)=>{
  const row:Row={};fields.forEach(f=>{const ix=mapping[f];if(ix!==undefined&&ix>=0)row[f]=cells[ix]});return {excelRow:headerIndex+i+2,row};
@@ -55,7 +61,7 @@ export default function FinanceOperationsExcel({kind,accountId,schoolId,branchId
  return {...item,row:r,problems};
  });},[proposed,existing,kind]);
  const ok=checks.filter(r=>r.problems.length===0),invalid=checks.filter(r=>r.problems.length!==0);
- async function load(file?:File){if(!file)return;setBusy(true);setError("");setMessage("");try{const w=await parseExcelFile(file);setSheets(w.sheets);const first=w.sheets[0];setSheet(first?.name||"");apply(first,0);}catch(e){setError(e instanceof Error?e.message:"Cannot read workbook");}finally{setBusy(false);}}
+ async function load(file?:File){if(!file)return;setFile(file);setBusy(true);setError("");setMessage("");try{const w=await parseExcelFile(file);setSheets(w.sheets);const first=w.sheets[0];setSheet(first?.name||"");apply(first,0);setStep("sheet");}catch(e){setError(e instanceof Error?e.message:"Cannot read workbook");}finally{setBusy(false);}}
  function apply(s:{name:string;rows:any[][]}|undefined,index:number){setHeaderIndex(index);const h=s?.rows[index]||[];const next:Record<string,number>={};fields.forEach(f=>{const acceptable=[f,...(aliases[f]||[])].map(norm);const found=h.findIndex(x=>acceptable.includes(norm(x)));next[f]=found;});setMapping(next);}
  function download(rows:Row[],suffix:string){downloadExcelWorkbook({fileName:`eleeveon-${kind}-${suffix}.xlsx`,sheets:[{name:kind.slice(0,31),rows,columns:[...fields,...(suffix==="review"?["validationErrors"]:[])].map(k=>({key:k,header:k}))}]});}
  async function save(){if(!accountId||!schoolId||!branchId){setError("Missing school/branch workspace");return;}if(invalid.length){setError("Resolve invalid or existing rows before saving; export the rejected rows or choose a clean worksheet.");return;}if(!ok.length)return;
@@ -63,37 +69,48 @@ export default function FinanceOperationsExcel({kind,accountId,schoolId,branchId
  setBusy(true);setError("");let saved=0;try{for(const entry of ok){const currentKey=keyFor(kind,entry.row);const latest=(await listActiveLocal<Row>(kind as any)||[]).filter(r=>r.accountId===accountId&&String(r.schoolId)===schoolId&&String(r.branchId)===branchId&&!r.isDeleted);
  if(latest.some(x=>keyFor(kind,x)===currentKey))throw Error("Duplicate detected in current local records. Stop and refresh.");
  await createLocal(kind as any,{...entry.row,accountId,schoolId,branchId,active:true,isDeleted:false});saved++;}
- setMessage(`${saved} records saved locally. Check synchronization before another import.`);await onComplete();
+ setMessage(`${saved} records saved locally. Check synchronization before another import.`);setStep("result");await onComplete();
  }catch(e){setError(`${saved} saved before failure. Refresh before retrying. ${e instanceof Error?e.message:"Import failed"}`);}finally{setBusy(false);}}
+ const columns=head.map((h,i)=>({index:i,header:str(h)||`Column ${i+1}`,columnLetter:(()=>{let n=i+1,out="";while(n){n--;out=String.fromCharCode(65+n%26)+out;n=Math.floor(n/26);}return out;})()}));
+ const mappingArray=Object.entries(mapping).filter(([,i])=>i>=0).map(([targetKey,sourceIndex])=>({targetKey,sourceIndex,sourceHeader:columns[sourceIndex]?.header||"",confidence:1}));
+ const fieldDefs=fields.map(key=>({key,label:key.replace(/([A-Z])/g," $1").replace(/^./,x=>x.toUpperCase()),required:false,aliases:aliases[key]||[]}));
+ const validation={totalRows:checks.length,validRows:ok.length,invalidRows:invalid.length,warningRows:0,
+  rows:checks.map(x=>({rowNumber:x.excelRow,valid:x.problems.length===0,data:x.row,issues:x.problems.map(message=>({rowNumber:x.excelRow,field:"record",code:"invalid",severity:"error",message}))})),
+  issues:checks.flatMap(x=>x.problems.map(message=>({rowNumber:x.excelRow,field:"record",code:"invalid",severity:"error",message})))
+ };
+ const label=kind==="staffPayrollProfiles"?"Payroll":kind==="incomes"?"Income":"Expenses";
  return <>
- {controlledOpen===undefined && <button type="button" onClick={()=>setOpen(true)}>Excel · Import / Export</button>}
- {shown && <div className="fx-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)close();}}>
- <style>{`
- .fx-backdrop{position:fixed;inset:0;z-index:60020;background:rgba(15,23,42,.60);display:grid;place-items:center;padding:14px;backdrop-filter:blur(5px)}
- .fx-panel{width:min(840px,100%);max-height:calc(100dvh - 28px);overflow:auto;background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);border:1px solid var(--border,#d4dae3);border-radius:17px;padding:18px;font:13px/1.5 system-ui,sans-serif;box-shadow:0 28px 70px #0003}
- .fx-panel *{box-sizing:border-box;min-width:0}.fx-head{display:flex;justify-content:space-between;gap:12px;align-items:start}.fx-head h2{margin:0;font-size:19px}.fx-head p{margin:3px 0 0;color:var(--muted,#64748b)}
- .fx-steps{display:flex;flex-wrap:wrap;gap:7px;margin:16px 0}.fx-step{background:color-mix(in srgb,var(--primary-color,#2563eb) 9%,var(--surface,#fff));border:1px solid var(--border,#ddd);border-radius:8px;padding:7px 10px;font-size:11px;font-weight:750}
- .fx-panel button,.fx-panel select,.fx-panel input{font:inherit}.fx-panel button{cursor:pointer;padding:9px 12px;border:1px solid var(--border,#d4dae3);border-radius:9px;background:var(--surface,#fff);color:var(--text,#111827);font-weight:750}.fx-panel button.primary{background:var(--primary-color,#2563eb);color:#fff;border-color:var(--primary-color,#2563eb)}.fx-panel button:disabled{opacity:.5;cursor:not-allowed}
- .fx-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.fx-selectors{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0}.fx-panel label{display:grid;gap:5px;font-weight:650}.fx-panel select,.fx-panel input[type=file]{border:1px solid var(--border,#d4dae3);border-radius:8px;padding:9px;background:var(--surface,#fff);color:var(--text,#111827);width:100%}
- .fx-mapping{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}.fx-preview{overflow:auto;max-height:290px;border:1px solid var(--border,#ddd);border-radius:9px}.fx-preview table{width:100%;min-width:650px;border-collapse:collapse;text-align:left}.fx-preview th,.fx-preview td{padding:9px;border-bottom:1px solid var(--border,#ddd);vertical-align:top}.fx-preview th{position:sticky;top:0;background:var(--card-bg,var(--surface,#fff))}.fx-error{color:#b91c1c}.fx-note{font-size:11px;color:var(--muted,#64748b)}
- @media(max-width:640px){.fx-backdrop{padding:0}.fx-panel{height:100dvh;max-height:100dvh;border-radius:0;padding:15px}.fx-selectors{grid-template-columns:1fr}}
- `}</style>
- <section className="fx-panel" role="dialog" aria-modal="true" aria-label="Finance Excel">
- <header className="fx-head"><div><h2>{kind==="staffPayrollProfiles"?"Payroll":kind==="incomes"?"Income":"Expenses"} · Excel</h2><p>Import, review and export branch records</p></div><button type="button" onClick={close} aria-label="Close Excel">✕</button></header>
- <div className="fx-steps"><span className="fx-step">1 · Workbook</span><span className="fx-step">2 · Worksheet</span><span className="fx-step">3 · Map columns</span><span className="fx-step">4 · Review</span></div>
- <div className="fx-actions"><button onClick={()=>download([],"template")}>↓ Download template</button><button onClick={()=>download(existing.filter(r=>!r.isDeleted),"export")}>↗ Export existing</button></div>
- <label>Choose Excel workbook<input type="file" accept=".xlsx,.xls" onChange={e=>void load(e.target.files?.[0])}/></label>
- {!!sheets.length&&<>
- <div className="fx-selectors"><label>Worksheet<select value={sheet} onChange={e=>{const v=sheets.find(s=>s.name===e.target.value);setSheet(e.target.value);apply(v,0);}}>{sheets.map(s=><option key={s.name} value={s.name}>{s.name}</option>)}</select></label>
- <label>Header row<select value={headerIndex} onChange={e=>apply(current,Number(e.target.value))}>{(current?.rows||[]).slice(0,Math.min(20,current?.rows.length||0)).map((_,i)=><option key={i} value={i}>{i+1}</option>)}</select></label></div>
- <h3 style={{fontSize:14,margin:"16px 0 9px"}}>Match workbook columns</h3>
- <div className="fx-mapping">{fields.map(f=><label key={f}>{f}<select value={mapping[f]??-1} onChange={e=>setMapping(x=>({...x,[f]:Number(e.target.value)}))}><option value={-1}>Not mapped</option>{head.map((h,i)=><option key={i} value={i}>{String(h||`Column ${i+1}`)}</option>)}</select></label>)}</div>
- <h3 style={{fontSize:14,margin:"17px 0 6px"}}>Preview and validation</h3><p>{checks.length} candidate rows · {ok.length} valid new · {invalid.length} blocked. Nothing is saved until confirmation.</p>
- <div className="fx-preview"><table><thead><tr><th>Excel row</th><th>Name / title</th><th>Amount</th><th>Validation</th></tr></thead><tbody>{checks.slice(0,150).map(r=><tr key={r.excelRow}><td>{r.excelRow}</td><td>{r.row.fullName||r.row.title||"—"}</td><td>{r.row.amount??r.row.baseSalary??"—"}</td><td className={r.problems.length?"fx-error":""}>{r.problems.join("; ")||"Ready"}</td></tr>)}</tbody></table></div>
- <div className="fx-actions"><button onClick={()=>download(invalid.map(x=>({...x.row,validationErrors:x.problems.join('; ')})),"review")} disabled={!invalid.length}>Download rejected rows</button><button className="primary" disabled={busy||!ok.length||!!invalid.length} onClick={()=>void save()}>Approve & import {ok.length}</button></div>
- </>}
- {busy&&<p role="status">Processing…</p>}{error&&<p className="fx-error" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
- <p className="fx-note">Historical student balances and actual payment posting are excluded. Existing records are never overwritten by this importer.</p>
- </section></div>}
+  {controlledOpen===undefined&&<button type="button" onClick={()=>setOpen(true)}>Excel · Import / Export</button>}
+  <ExcelExportSheet open={shown&&!importOpen} onClose={close} title={`${label} Excel`}
+   subtitle="Import an existing workbook, download a template, or export records."
+   actions={[
+    {key:"import",title:`Import ${label.toLowerCase()}`,description:"Choose worksheet, match columns, and review before saving",onClick:()=>{setError("");setMessage("");setFile(null);setSheets([]);setStep("file");setImportOpen(true);}},
+    {key:"template",title:"Download Excel template",description:"A clean workbook with the supported fields",onClick:()=>download([],"template")},
+    {key:"export",title:`Export ${label.toLowerCase()} records`,description:"Download existing records for this branch",onClick:()=>download(existing.filter(r=>!r.isDeleted),"export")}
+   ]}/>
+  <ExcelImportSheet open={shown&&importOpen} onClose={closeImport} title={`Import ${label.toLowerCase()} from Excel`}
+   subtitle="Use the same guided workbook workflow as Students. No records are saved before confirmation."
+   step={step} busy={busy} width={920}
+   footer={<div className="excel-finance-footer">
+    {step!=="file"&&step!=="result"&&<button type="button" className="secondary" disabled={busy} onClick={()=>setStep(step==="preview"?"mapping":step==="mapping"?"sheet":"file")}>Back</button>}
+    {step==="file"&&<button type="button" className="secondary" disabled={busy} onClick={closeImport}>Cancel</button>}
+    {step==="sheet"&&<button type="button" className="primary" disabled={!current||busy} onClick={()=>setStep("mapping")}>Next · Match columns</button>}
+    {step==="mapping"&&<button type="button" className="primary" disabled={!mappingArray.length||busy} onClick={()=>setStep("preview")}>Review records</button>}
+    {step==="preview"&&<button type="button" className="primary" disabled={busy||!ok.length||!!invalid.length} onClick={()=>void save()}>Confirm import · {ok.length}</button>}
+    {step==="result"&&<button type="button" className="primary" onClick={closeImport}>Done</button>}
+   </div>}>
+   <style>{`.excel-finance-footer{display:flex;gap:9px;justify-content:flex-end;flex-wrap:wrap}.excel-finance-stage{display:grid;gap:13px}.excel-finance-stage label{display:grid;gap:5px;font-weight:650}.excel-finance-stage select{width:100%;padding:9px;border-radius:9px;border:1px solid var(--border,#d4dae3);background:var(--surface,#fff);color:var(--text,#111827)}.excel-finance-stage p{color:var(--muted,#64748b)}.excel-finance-choice{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.excel-finance-error{color:#b91c1c}`}</style>
+   {step==="file"&&<ExcelFilePicker value={file} disabled={busy} onChange={f=>{setFile(f);setSheets([]);setError("");if(f)void load(f);}} label={`Choose ${label.toLowerCase()} workbook`} description="Choose an existing Excel workbook or drag it here."/>}
+   {step==="sheet"&&<section className="excel-finance-stage"><h3>Choose worksheet and header row</h3><p>Use the sheet with {label.toLowerCase()} records. You can adjust the header row for workbooks with titles above the column headings.</p>
+    <div className="excel-finance-choice"><label>Worksheet<select value={sheet} onChange={e=>{const next=sheets.find(x=>x.name===e.target.value);setSheet(e.target.value);apply(next,0);}}>{sheets.map(x=><option key={x.name} value={x.name}>{x.name}</option>)}</select></label>
+    <label>Header row<select value={headerIndex} onChange={e=>apply(current,Number(e.target.value))}>{(current?.rows||[]).slice(0,Math.min(current?.rows.length||0,40)).map((_,i)=><option key={i} value={i}>Row {i+1}</option>)}</select></label></div>
+    <p>{current?.rows.length||0} worksheet rows available.</p></section>}
+   {step==="mapping"&&<section className="excel-finance-stage"><ExcelColumnMapping columns={columns as any} fields={fieldDefs as any} mappings={mappingArray as any} onChange={m=>{const next:Record<string,number>={};fields.forEach(f=>next[f]=-1);m.forEach(x=>next[x.targetKey]=x.sourceIndex);setMapping(next);}} title={`Match ${label.toLowerCase()} columns`} description="Match each Excel heading with the relevant Eleeveon field, or ignore unnecessary columns."/></section>}
+   {step==="preview"&&<section className="excel-finance-stage"><ExcelImportPreview validation={validation as any} columns={[{key:"title",label:"Title / staff",render:(r:any)=>(r.title||r.fullName||"—")},{key:"amount",label:"Amount / salary",render:(r:any)=>(r.amount??r.baseSalary??"—")},{key:"date",label:"Date"}]} title={`${label} import preview`} description="Records with errors must be corrected before import. Existing records are not overwritten."/>
+   {!!invalid.length&&<button type="button" onClick={()=>download(invalid.map(x=>({...x.row,validationErrors:x.problems.join("; ")})),"review")}>Download rejected rows</button>}</section>}
+   {step==="result"&&<section className="excel-finance-stage"><h3>Import completed</h3><p role="status">{message}</p><p>Records are saved locally. Confirm successful synchronization before repeating an import.</p></section>}
+   {busy&&<p role="status">Processing…</p>}{error&&<p role="alert" className="excel-finance-error">{error}</p>}
+   <p style={{fontSize:12,opacity:.76}}>Historical balances and actual fee-payment posting are excluded. Existing records are never overwritten.</p>
+  </ExcelImportSheet>
  </>;
 }

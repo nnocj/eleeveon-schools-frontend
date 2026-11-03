@@ -135,18 +135,17 @@ export default function ExcelExportSheet({
       style={{
         position: "fixed",
         inset: 0,
+        width: "100vw",
+        height: "100dvh",
         zIndex: 2147483000,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         boxSizing: "border-box",
-        paddingTop:
-          "calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px) + 10px)",
-        paddingRight: "10px",
-        paddingBottom:
-          "calc(82px + env(safe-area-inset-bottom, 0px))",
-        paddingLeft: "10px",
+        padding: "max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px))",
         overflow: "hidden",
+        background: "rgba(2, 6, 23, 0.76)",
+        backdropFilter: "blur(5px)",
       }}
       className={[
         "excel-export-overlay",
@@ -170,7 +169,8 @@ export default function ExcelExportSheet({
         style={{
           width: "min(560px, calc(100vw - 20px))",
           maxWidth: "100%",
-          maxHeight: "calc(100% - 4px)",
+          height: "min(840px, calc(100dvh - 24px))",
+          maxHeight: "100%",
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
@@ -328,15 +328,9 @@ export default function ExcelExportSheet({
           color-scheme: normal;
           color: var(--eds-text);
           position: fixed;
-          top: calc(
-            var(--eds-shell-top-offset, 0px) +
-            var(--portal-header-height, 48px)
-          );
+          top: 0;
           right: 0;
-          bottom: calc(
-            64px +
-            env(safe-area-inset-bottom, 0px)
-          );
+          bottom: 0;
           left: 0;
           z-index: 120;
 
@@ -403,7 +397,8 @@ export default function ExcelExportSheet({
         .excel-export-sheet {
           width: min(560px, calc(100vw - 24px));
           max-width: 100%;
-          max-height: min(720px, calc(100% - 8px));
+          height: min(840px, calc(100dvh - 24px));
+          max-height: 100%;
           min-height: 0;
           display: flex;
           flex-direction: column;
@@ -566,9 +561,11 @@ export default function ExcelExportSheet({
 
         @media (min-width: 980px) {
           .excel-export-overlay {
-            left: var(--portal-content-left, 0px);
+            left: 0;
+            right: 0;
+            top: 0;
             bottom: 0;
-            padding: 20px;
+            padding: 16px;
           }
         }
 
@@ -579,7 +576,7 @@ export default function ExcelExportSheet({
 
           .excel-export-sheet {
             width: calc(100vw - 20px);
-            max-height: calc(100% - 4px);
+            max-height: 100%;
             border-radius: 20px;
           }
 
@@ -667,7 +664,23 @@ export default function ExcelExportSheet({
             }
           }
 
-      `}</style>
+      
+          /* Close control: fixed high-contrast pair in every theme. */
+          .excel-export-close,
+          .excel-export-close:hover:not(:disabled) {
+            background: #1e293b !important;
+            color: #ffffff !important;
+            border: 1px solid #64748b !important;
+            font-size: 24px !important;
+            font-weight: 800 !important;
+            opacity: 1 !important;
+          }
+          .excel-export-close:focus-visible {
+            outline: 3px solid #60a5fa !important;
+            outline-offset: 3px;
+          }
+          .excel-export-close:disabled { opacity: .48 !important; }
+`}</style>
       </section>
     <style>{`
 .excel-export-overlay .excel-export-footer {

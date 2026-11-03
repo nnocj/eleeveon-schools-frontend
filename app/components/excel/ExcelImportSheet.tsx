@@ -332,18 +332,17 @@ export default function ExcelImportSheet({
       style={{
         position: "fixed",
         inset: 0,
+        width: "100vw",
+        height: "100dvh",
         zIndex: 2147483000,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         boxSizing: "border-box",
-        paddingTop:
-          "calc(var(--eds-shell-top-offset, 0px) + var(--portal-header-height, 48px) + 10px)",
-        paddingRight: "10px",
-        paddingBottom:
-          "calc(82px + env(safe-area-inset-bottom, 0px))",
-        paddingLeft: "10px",
+        padding: "max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px))",
         overflow: "hidden",
+        background: "rgba(2, 6, 23, 0.76)",
+        backdropFilter: "blur(5px)",
       }}
 
       className={[
@@ -403,7 +402,8 @@ export default function ExcelImportSheet({
         style={{
           width: "min(100%, calc(100vw - 20px))",
           maxWidth: `${width}px`,
-          maxHeight: "calc(100% - 4px)",
+          height: "min(940px, calc(100dvh - 24px))",
+          maxHeight: "100%",
           minHeight: 0,
           display: "flex",
           flexDirection: "column",
@@ -639,15 +639,9 @@ export default function ExcelImportSheet({
           color-scheme: normal;
           color: var(--eds-text);
           position: fixed;
-          top: calc(
-            var(--eds-shell-top-offset, 0px) +
-            var(--portal-header-height, 48px)
-          );
+          top: 0;
           right: 0;
-          bottom: calc(
-            64px +
-            env(safe-area-inset-bottom, 0px)
-          );
+          bottom: 0;
           left: 0;
           z-index: 120;
 
@@ -732,7 +726,8 @@ export default function ExcelImportSheet({
         .excel-import-sheet {
           position: relative;
           width: 100%;
-          max-height: min(860px, calc(100% - 8px));
+          height: min(940px, calc(100dvh - 24px));
+          max-height: 100%;
           min-height: 0;
           display: flex;
           flex-direction: column;
@@ -898,9 +893,11 @@ export default function ExcelImportSheet({
 
         @media (min-width: 980px) {
           .excel-import-overlay {
-            left: var(--portal-content-left, 0px);
+            left: 0;
+            right: 0;
+            top: 0;
             bottom: 0;
-            padding: 20px;
+            padding: 16px;
           }
         }
 
@@ -911,7 +908,7 @@ export default function ExcelImportSheet({
 
           .excel-import-sheet {
             max-width: calc(100vw - 20px) !important;
-            max-height: calc(100% - 4px);
+            max-height: 100%;
             border-radius: 20px;
           }
 
@@ -1031,7 +1028,23 @@ export default function ExcelImportSheet({
             }
           }
 
-      `}</style>
+      
+          /* Close control: fixed high-contrast pair in every theme. */
+          .excel-import-close,
+          .excel-import-close:hover:not(:disabled) {
+            background: #1e293b !important;
+            color: #ffffff !important;
+            border: 1px solid #64748b !important;
+            font-size: 24px !important;
+            font-weight: 800 !important;
+            opacity: 1 !important;
+          }
+          .excel-import-close:focus-visible {
+            outline: 3px solid #60a5fa !important;
+            outline-offset: 3px;
+          }
+          .excel-import-close:disabled { opacity: .48 !important; }
+`}</style>
 
     <style>{`
 /* Scoped, theme-aware action controls shared by every Excel importer. */

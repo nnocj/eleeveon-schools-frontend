@@ -28,6 +28,25 @@ import type {
 
 const MARKER = "ELEEVEON_REQUIREMENT_V1:";
 const NOTICE_MARKER = "ELEEVEON_TERM_NOTICE_V1";
+// Student-specific notice details live inside the existing synchronized class
+// feeStructure.items JSON, without creating another billable FeeStructure.
+const STUDENT_NOTICE_MARKER = "ELEEVEON_STUDENT_NOTICE_V1:";
+type StudentNoticeOverride = {
+  currencyCode: string; notice: string; dueDate: string;
+  fees: FeeStructureItem[]; requirements: FeeStructureItem[];
+};
+function readStudentNotice(structure: FeeStructure | undefined, studentId: string): StudentNoticeOverride | null {
+  if (!structure || !studentId) return null;
+  const item = (structure.items || []).find(row =>
+    row.kind === "notice_meta" && row.name === `${STUDENT_NOTICE_MARKER}${studentId}`);
+  if (!item?.description) return null;
+  try {
+    const data = JSON.parse(item.description) as StudentNoticeOverride;
+    if (!Array.isArray(data.fees) || !Array.isArray(data.requirements)) return null;
+    return { currencyCode: id(data.currencyCode), notice: id(data.notice),
+      dueDate: id(data.dueDate), fees: data.fees, requirements: data.requirements };
+  } catch { return null; }
+}
 type Section = "notices" | "tracking";
 type RequirementEvent = { quantity: number; at: string; note?: string };
 type RequirementState = { sourceKey: string; unit: string; required: boolean; instructions?: string; received: number; events: RequirementEvent[] };
@@ -82,8 +101,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   // Batch application is deliberately class-scoped: one canonical feeStructure
   // per class/term, no duplicate shared fee record or duplicate student billing.
-  const [batchMode, setBatchMode] = useState<"single" | "selected" | "organization">("single");
+  const [batchMode, setBatchMode] = useState<"single" | "selected" | "organization" | "student">("single");
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
+  const [selectedNoticeStudentId, setSelectedNoticeStudentId] = useState("");
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
   const [appliedClassIds, setAppliedClassIds] = useState<string[]>([]);
   const [structures, setStructures] = useState<AcademicStructure[]>([]);
@@ -119,6 +139,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const [printJobs, setPrintJobs] = useState<Array<{ classId: string; studentId?: string }>>([]);
   const [trackingPrintRows, setTrackingPrintRows] = useState<TrackingPrintRow[] | null>(null);
   const [individualPrintPickerOpen, setIndividualPrintPickerOpen] = useState(false);
+  const [individualIssuePickerOpen, setIndividualIssuePickerOpen] = useState(false);
+  const [individualIssueStudentId, setIndividualIssueStudentId] = useState("");
   const [individualPrintStudentId, setIndividualPrintStudentId] = useState("");
   const [canPortal, setCanPortal] = useState(false);
   const [currencyCode, setCurrencyCode] = useState("GHS");
@@ -166,7 +188,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   }, []);
   // Keep body and shell content behind the modal; restore previous scroll values on exit.
   const anyFinanceDialogOpen = Boolean(trackingStudentId || payPickerOpen || editorOpen || receivedEditor ||
-    paymentStudent || filterOpen || summaryOpen || moreOpen || individualPrintPickerOpen ||
+    paymentStudent || filterOpen || summaryOpen || moreOpen || individualPrintPickerOpen || individualIssuePickerOpen ||
     previewMode || trackingPreviewRows);
   useEffect(() => {
     if (!anyFinanceDialogOpen || typeof document === "undefined") return;
@@ -276,7 +298,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
   const targetStudents = useMemo(() => studentsForClass(classId), [students, latestClassByStudent, classId]);
   const eligibleClasses = classes;
-  const editTargetClassIds = batchMode === "single" ? (classId ? [classId] : [])
+  const editTargetClassIds = batchMode === "single" || batchMode === "student" ? (classId ? [classId] : [])
     : batchMode === "selected" ? eligibleClasses.filter(row => selectedClassIds.includes(row.id)).map(row => row.id)
     : eligibleClasses.filter(row => row.organizationId && row.organizationId === selectedOrganizationId).map(row => row.id);
   const getNoticeForClass = (targetClassId: string): FeeStructure | undefined => noticeRows
@@ -406,18 +428,19 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   // Keep the notice editor tied to its selected academic period and class.
   // Changing any selector loads that target's existing notice (or a clean draft),
   // rather than accidentally carrying another period's fees into a new notice.
-  const loadEditorDraft = (targetStructureId: string, targetPeriodId: string, targetClassId: string) => {
+  const loadEditorDraft = (targetStructureId: string, targetPeriodId: string, targetClassId: string, targetStudentId = "") => {
     const targetNotice = targetStructureId && targetPeriodId && targetClassId
       ? getNoticeForPeriod(targetClassId, targetPeriodId, targetStructureId)
       : undefined;
     const targetItems = targetNotice?.items || [];
     const targetMeta = targetItems.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-    setCurrencyCode(id(targetMeta?.description) || preferredCurrency);
-    setNoticeNote(targetMeta?.instructions || "");
-    setDueDate(targetMeta?.dueDate || "");
-    setFeeLines(targetItems.filter(item => !isRequirement(item) && !isNoticeMeta(item))
+    const override = readStudentNotice(targetNotice, targetStudentId);
+    setCurrencyCode(override?.currencyCode || id(targetMeta?.description) || preferredCurrency);
+    setNoticeNote(override ? override.notice : (targetMeta?.instructions || ""));
+    setDueDate(override ? override.dueDate : (targetMeta?.dueDate || ""));
+    setFeeLines((override?.fees || targetItems.filter(item => !isRequirement(item) && !isNoticeMeta(item)))
       .map(item => ({ ...item, key: makeKey() })));
-    setRequirementLines(targetItems.filter(isRequirement)
+    setRequirementLines((override?.requirements || targetItems.filter(isRequirement))
       .map(item => ({ ...item, key: makeKey() })));
   };
 
@@ -427,16 +450,17 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       ? periodId : matchingPeriods[0]?.id || "";
     setStructureId(nextStructureId);
     setPeriodId(nextPeriodId);
-    loadEditorDraft(nextStructureId, nextPeriodId, classId);
+    loadEditorDraft(nextStructureId, nextPeriodId, classId, batchMode === "student" ? selectedNoticeStudentId : "");
   };
   const chooseEditorPeriod = (nextPeriodId: string) => {
     setPeriodId(nextPeriodId);
-    loadEditorDraft(structureId, nextPeriodId, classId);
+    loadEditorDraft(structureId, nextPeriodId, classId, batchMode === "student" ? selectedNoticeStudentId : "");
   };
   const chooseEditorClass = (nextClassId: string) => {
     setClassId(nextClassId);
     setBatchMode("single");
     setSelectedClassIds(nextClassId ? [nextClassId] : []);
+    setSelectedNoticeStudentId("");
     loadEditorDraft(structureId, periodId, nextClassId);
   };
 
@@ -445,6 +469,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     // saveNotice already validates required targets before saving.
     if (!scope) return;
     setBatchMode("single");
+    setSelectedNoticeStudentId("");
     setSelectedClassIds(classId ? [classId] : []);
     setSelectedOrganizationId("");
     loadEditorDraft(structureId, periodId, classId);
@@ -463,6 +488,51 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     if (validFees.some(row => row.amount <= 0)) { setMessage("Fees must have positive amounts."); return; }
     const nextTotal = money(validFees.reduce((sum, line) => sum + line.amount, 0));
     const freshInvoices = (await readRows<StudentFeeInvoice>("studentFeeInvoices")).filter(row => isTenant(row, scope));
+    if (batchMode === "student") {
+      const student = studentsForClass(classId).find(row => row.id === selectedNoticeStudentId);
+      if (!student) { setMessage("Select a student from the chosen class."); return; }
+      const existingNotice = getNoticeForPeriod(classId, periodId, structureId);
+      if (!existingNotice) {
+        setMessage("Save the class notice first, then customize it for an individual student. Other students will keep the class notice.");
+        return;
+      }
+      const billed = freshInvoices.filter(row => row.studentId === student.id &&
+        id(row.classId) === classId && id(row.academicStructureId) === structureId &&
+        id(row.academicPeriodId) === periodId && row.status !== "void" && row.status !== "cancelled");
+      if (billed.length > 1 || billed.some(row =>
+        Math.abs(money(row.total) - nextTotal) > 0.005 ||
+        Boolean(row.currencyCode && row.currencyCode !== currencyCode))) {
+        setMessage("This student's existing invoice cannot be repriced or changed to another currency. Its payments remain protected.");
+        return;
+      }
+      try {
+        writeLockRef.current = true; loadSequenceRef.current++;
+        setBusy(true);
+        const latest = (await readRows<FeeStructure>("feeStructures")).filter(row => isTenant(row, scope));
+        const stored = latest.find(row => row.id === existingNotice.id);
+        if (!stored) throw new Error("The class notice has changed. Reload and try again.");
+        const markerName = `${STUDENT_NOTICE_MARKER}${student.id}`;
+        const payload: StudentNoticeOverride = {
+          currencyCode, notice: id(noticeNote).slice(0, 1000), dueDate: id(dueDate),
+          fees: validFees.map(row => ({ ...row, itemKey: row.itemKey || makeKey() })),
+          requirements: validReqs.map(row => ({ ...row, itemKey: row.itemKey || makeKey() })),
+        };
+        const updatedItems: FeeStructureItem[] = [
+          ...(stored.items || []).filter(item => !(item.kind === "notice_meta" && item.name === markerName)),
+          { kind: "notice_meta", name: markerName, amount: 0, description: JSON.stringify(payload) },
+        ];
+        await updateLocal("feeStructures", stored.id, { items: updatedItems });
+        setAppliedClassIds([]);
+        setEditorOpen(false);
+        await load(true);
+        setMessage(`Individual notice saved for ${titleCase(student.fullName)}. Other students retain the class notice.`);
+      } catch (error) {
+        console.error("Student notice save failed", error);
+        setMessage("Unable to save the student's notice. Please verify and retry.");
+        await load(true);
+      } finally { writeLockRef.current = false; setBusy(false); }
+      return;
+    }
     // Prevent hidden repricing of students who already received invoices.
     const blocked = targetIds.filter(cid => freshInvoices.some(inv =>
       id(inv.classId) === cid && id(inv.academicStructureId) === structureId && id(inv.academicPeriodId) === periodId &&
@@ -487,6 +557,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           .sort((a, b) => Number((b.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER)) - Number((a.items || []).some(item => isNoticeMeta(item) && item.name === NOTICE_MARKER)) || (b.updatedAt || 0) - (a.updatedAt || 0));
         const existing = candidates[0];
         const items: FeeStructureItem[] = [
+          // Preserve student overrides when updating the shared class notice.
+          ...(existing?.items || []).filter(item => item.kind === "notice_meta" && item.name?.startsWith(STUDENT_NOTICE_MARKER)),
           { kind: "notice_meta", name: NOTICE_MARKER, amount: 0, instructions: id(noticeNote).slice(0, 1000), dueDate: id(dueDate), description: currencyCode },
           ...validFees.map(line => ({ ...line, itemKey: line.itemKey || makeKey() })),
           ...validReqs.map(line => ({ ...line, itemKey: line.itemKey || makeKey() })),
@@ -508,12 +580,13 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
     } finally { writeLockRef.current = false; setBusy(false); }
   };
 
-  const issueInvoices = async () => {
+  const issueInvoices = async (onlyStudentId = "") => {
     if (writeLockRef.current || !scope || !structureId || !periodId || !requireScope()) return;
     // Never carry a previous class-batch selection into a different class.
-    const classIds = [...new Set(section === "notices" && appliedClassIds.includes(classId) && appliedClassIds.length
+    const classIds = [...new Set(!onlyStudentId && section === "notices" && appliedClassIds.includes(classId) && appliedClassIds.length
       ? appliedClassIds : [classId])].filter(Boolean);
-    const jobs = classIds.flatMap(cid => studentsForClass(cid).map(student => ({ cid, student })));
+    const jobs = classIds.flatMap(cid => studentsForClass(cid).map(student => ({ cid, student })))
+      .filter(({ student }) => !onlyStudentId || student.id === onlyStudentId);
     if (!jobs.length) { setMessage("There are no students in the selected classes."); return; }
     if (!window.confirm(`Create missing student invoices and material checklists for ${jobs.length} students across ${classIds.length} class(es)? Existing invoices and payments will be kept.`)) return;
 
@@ -580,7 +653,8 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         if (!invoice) continue;
         const noticeForClass = classNotices.get(cid)!;
         const meta = (noticeForClass.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-        const code = id(meta?.description) || preferredCurrency;
+        const override = readStudentNotice(noticeForClass, student.id);
+        const code = override?.currencyCode || id(meta?.description) || preferredCurrency;
         if (invoice.currencyCode && invoice.currencyCode !== code) {
           setMessage(`Currency conflict for ${classLabel(cid)} (${titleCase(student.fullName)}). Existing invoices are preserved.`);
           return;
@@ -589,9 +663,12 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
 
       for (const { cid, student } of jobs) {
         const noticeForClass = classNotices.get(cid)!;
-        const contents = noticeForClass.items || [];
-        const meta = contents.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-        const code = id(meta?.description) || preferredCurrency;
+        const meta = (noticeForClass.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
+        const override = readStudentNotice(noticeForClass, student.id);
+        const contents = override
+          ? [...override.fees, ...override.requirements]
+          : (noticeForClass.items || []).filter(item => !isNoticeMeta(item));
+        const code = override?.currencyCode || id(meta?.description) || preferredCurrency;
         const payable = money(contents.filter(item => !isRequirement(item) && !isNoticeMeta(item))
           .reduce((total, line) => total + money(line.amount), 0));
         const key = invoiceKey(student.id, cid);
@@ -717,17 +794,19 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
   const renderDocument = (job: NoticeJob, key: string) => {
     const documentNotice = getNoticeForClass(job.classId);
     if (!documentNotice) return null;
-    const documentFees = (documentNotice.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item));
-    const documentRequirements = (documentNotice.items || []).filter(isRequirement);
+    const personalNotice = job.studentId ? readStudentNotice(documentNotice, job.studentId) : null;
+    const documentFees = personalNotice?.fees || (documentNotice.items || []).filter(item => !isRequirement(item) && !isNoticeMeta(item));
+    const documentRequirements = personalNotice?.requirements || (documentNotice.items || []).filter(isRequirement);
     const meta = (documentNotice.items || []).find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-    const documentCurrency = id(meta?.description) || preferredCurrency;
+    const documentCurrency = personalNotice?.currencyCode || id(meta?.description) || preferredCurrency;
     const student = job.studentId ? students.find(row => row.id === job.studentId) : undefined;
     const nextNotice = nextPeriod ? getNoticeForPeriod(job.classId, nextPeriod.id, id(nextPeriod.academicStructureId)) : undefined;
     const nextItems = nextNotice?.items || [];
-    const nextFees = nextItems.filter(item => !isRequirement(item) && !isNoticeMeta(item));
-    const nextRequirements = nextItems.filter(isRequirement);
+    const nextPersonalNotice = job.studentId ? readStudentNotice(nextNotice, job.studentId) : null;
+    const nextFees = nextPersonalNotice?.fees || nextItems.filter(item => !isRequirement(item) && !isNoticeMeta(item));
+    const nextRequirements = nextPersonalNotice?.requirements || nextItems.filter(isRequirement);
     const nextMeta = nextItems.find(item => isNoticeMeta(item) && item.name === NOTICE_MARKER);
-    const nextCurrency = id(nextMeta?.description) || preferredCurrency;
+    const nextCurrency = nextPersonalNotice?.currencyCode || id(nextMeta?.description) || preferredCurrency;
     const studentInvoice = student && invoices.find(inv => inv.studentId === student.id && id(inv.classId) === job.classId && id(inv.academicStructureId) === structureId && id(inv.academicPeriodId) === periodId && inv.status !== "void" && inv.status !== "cancelled");
     const paid = studentInvoice ? payments.filter(pay => pay.invoiceId === studentInvoice.id && pay.status === "paid").reduce((a, pay) => a + money(pay.amount), 0) : 0;
     return <TermNoticePrintTemplate
@@ -747,15 +826,15 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       nextFees={nextFees}
       nextRequirements={nextRequirements}
       nextCurrencyCode={nextCurrency}
-      nextDueDate={nextMeta?.dueDate}
-      nextNotice={nextMeta?.instructions}
+       nextDueDate={nextPersonalNotice ? nextPersonalNotice.dueDate : nextMeta?.dueDate}
+      nextNotice={nextPersonalNotice ? nextPersonalNotice.notice : nextMeta?.instructions}
       className={classLabel(job.classId)}
       studentName={student ? titleCase(student.fullName) : undefined}
       admissionNumber={student?.admissionNumber}
       fees={documentFees}
       requirements={documentRequirements}
-      dueDate={meta?.dueDate}
-      notice={meta?.instructions}
+       dueDate={personalNotice ? personalNotice.dueDate : meta?.dueDate}
+      notice={personalNotice ? personalNotice.notice : meta?.instructions}
       studentBalance={studentInvoice && (!studentInvoice.currencyCode || studentInvoice.currencyCode === documentCurrency) ? money(Math.max(0, studentInvoice.total - paid)) : undefined}
       currencyCode={documentCurrency}
       issuedOn={today()}
@@ -971,10 +1050,22 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
         </div>
         <fieldset className="ef-target-scope"><legend>Apply Notice To</legend>
           <div className="ef-batch-choices">
-            {([ ["single", "One class"], ["selected", "Selected classes"], ["organization", "Entire organization"] ] as const).map(([value, label]) =>
-              <label key={value}><input type="radio" name="term-notice-target" value={value} checked={batchMode === value} onChange={() => setBatchMode(value)} />{label}</label>
+            {([ ["single", "One class"], ["student", "Individual student"], ["selected", "Selected classes"], ["organization", "Entire organization"] ] as const).map(([value, label]) =>
+              <label key={value}><input type="radio" name="term-notice-target" value={value} checked={batchMode === value} onChange={() => {
+                setBatchMode(value);
+                loadEditorDraft(structureId, periodId, classId, value === "student" ? selectedNoticeStudentId : "");
+              }} />{label}</label>
             )}
           </div>
+          {batchMode === "student" && field("Individual student", <select value={selectedNoticeStudentId} onChange={e => {
+            const studentId = e.target.value;
+            setSelectedNoticeStudentId(studentId);
+            loadEditorDraft(structureId, periodId, classId, studentId);
+          }}><option value="">Choose a student in {classLabel(classId)}</option>
+            {targetStudents.map(student => <option key={student.id} value={student.id}>
+              {titleCase(student.fullName)} · {student.admissionNumber || "No admission number"}
+            </option>)}
+          </select>)}
           {batchMode === "selected" && <div className="ef-batch-class-grid" role="group" aria-label="Select classes to receive notice">
             {eligibleClasses.map(row => <label key={row.id}>
               <input type="checkbox" checked={selectedClassIds.includes(row.id)} onChange={event => setSelectedClassIds(previous => event.target.checked ? [...new Set([...previous, row.id])] : previous.filter(value => value !== row.id))}/>
@@ -984,7 +1075,9 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           {batchMode === "organization" && field("Organization", <select value={selectedOrganizationId} onChange={e => setSelectedOrganizationId(e.target.value)}>
             <option value="">Choose organization</option>{organizations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}
           </select>)}
-          <p className="ef-help">{editTargetClassIds.length} selected {editTargetClassIds.length === 1 ? "class" : "classes"}{editTargetClassIds.length ? `: ${editTargetClassIds.map(classLabel).join(", ")}` : ". Select a class or organization."}. Each class gets its own term notice, and existing invoices are never silently repriced.</p>
+          <p className="ef-help">{batchMode === "student"
+            ? "Only the selected student receives these custom fees and requirements. Save a class notice first; all other students retain that class notice. Existing invoices and payments are protected."
+            : `${editTargetClassIds.length} selected ${editTargetClassIds.length === 1 ? "class" : "classes"}${editTargetClassIds.length ? `: ${editTargetClassIds.map(classLabel).join(", ")}` : ". Select a class or organization."}. Each class gets its own term notice, and existing invoices are never silently repriced.`}</p>
         </fieldset>
         <h3>Fees Payable</h3>{feeLines.map((line, i) => <div key={line.key} className="ef-edit-row"><input aria-label="Fee name" placeholder="Tuition, ICT, Examination…" value={line.name} onChange={e => setFeeLines(rows => rows.map(r => r.key === line.key ? { ...r, name: e.target.value } : r))}/><input aria-label="Amount" type="number" min="0" step="0.01" placeholder="Amount" value={line.amount} onChange={e => setFeeLines(rows => rows.map(r => r.key === line.key ? { ...r, amount: Number(e.target.value) } : r))}/><button aria-label={`Remove fee ${i + 1}`} onClick={() => setFeeLines(rows => rows.filter(r => r.key !== line.key))}>×</button></div>)}{button("+ Fee", () => setFeeLines(rows => [...rows, { key: makeKey(), kind: "fee", name: "", amount: 0 }]))}<h3>Items to Bring / Purchase</h3>{requirementLines.map((line, i) => <div key={line.key} className="ef-item-edit"><div className="ef-edit-row"><input aria-label="Item name" placeholder="Exercise books, toiletries…" value={line.name} onChange={e => setRequirementLines(rows => rows.map(r => r.key === line.key ? { ...r, name: e.target.value } : r))}/><input aria-label="Quantity" type="number" min="1" step="1" value={line.quantity || 1} onChange={e => setRequirementLines(rows => rows.map(r => r.key === line.key ? { ...r, quantity: Number(e.target.value) } : r))}/><button aria-label={`Remove item ${i + 1}`} onClick={() => setRequirementLines(rows => rows.filter(r => r.key !== line.key))}>×</button></div><div className="ef-edit-row"><input aria-label="Unit" placeholder="Unit (pcs, rolls…)" value={line.unit || ""} onChange={e => setRequirementLines(rows => rows.map(r => r.key === line.key ? { ...r, unit: e.target.value } : r))}/><input aria-label="Instructions" placeholder="Textbook title or purchase instructions" value={line.instructions || ""} onChange={e => setRequirementLines(rows => rows.map(r => r.key === line.key ? { ...r, instructions: e.target.value } : r))}/></div><label className="ef-option"><input type="checkbox" checked={line.required !== false} onChange={e => setRequirementLines(rows => rows.map(r => r.key === line.key ? { ...r, required: e.target.checked } : r))} /> Required item</label></div>)}{button("+ Item", () => setRequirementLines(rows => [...rows, { key: makeKey(), kind: "requirement", name: "", amount: 0, quantity: 1, unit: "pcs", required: true }]))}
         {field("Payment / collection instructions", <input value={noticeNote} onChange={e => setNoticeNote(e.target.value)} placeholder="Pay at school office or use account details shown on receipts" />)}
@@ -1013,6 +1106,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
           {section === "notices" ? <>
             {button("Edit / Apply Term Notice", () => { setMoreOpen(false); openEditor(); })}
             {button("Issue Student Records", () => { setMoreOpen(false); void issueInvoices(); }, !notice)}
+            {button("Issue One Student Record…", () => { setMoreOpen(false); setIndividualIssueStudentId(""); setIndividualIssuePickerOpen(true); }, !notice || !targetStudents.length)}
             {button("Preview Class Notice", () => { setMoreOpen(false); openPreview("class"); }, !notice)}
             {button(`Preview Individual Notices (${targetStudents.length})`, () => { setMoreOpen(false); openPreview("batch"); }, !notice || !targetStudents.length)}
             {appliedClassIds.length > 1 && button(`Preview Class Batch (${appliedClassIds.length})`, () => { setMoreOpen(false); openPreview("classes"); })}
@@ -1030,6 +1124,27 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
             {button(view === "table" ? "Card View" : "Table View", () => { setMoreOpen(false); setView(view === "table" ? "cards" : "table"); })}
             {button("Collection Summary", () => { setMoreOpen(false); setSummaryOpen(true); }, !openedTrackingClass)}
           </>}
+        </div>
+      </section>
+    </div>}
+    {individualIssuePickerOpen && <div className="ef-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setIndividualIssuePickerOpen(false); }}>
+      <section className="ef-sheet" role="dialog" aria-modal="true" aria-label="Issue one student's fee record">
+        <header><strong>Issue One Student Record</strong><button aria-label="Close" onClick={() => setIndividualIssuePickerOpen(false)}>×</button></header>
+        {field("Student", <select value={individualIssueStudentId} onChange={e => setIndividualIssueStudentId(e.target.value)}>
+          <option value="">Select student</option>
+          {targetStudents.map(student => <option key={student.id} value={student.id}>
+            {titleCase(student.fullName)} · {student.admissionNumber || "No admission number"}
+          </option>)}
+        </select>)}
+        <p className="ef-help">Only this student's missing invoice and requirements will be issued. Existing payments and billings remain unchanged.</p>
+        <div className="ef-actions">
+          {button("Issue Student Record", () => {
+            const studentId = individualIssueStudentId;
+            if (!studentId || !targetStudents.some(student => student.id === studentId)) return;
+            setIndividualIssuePickerOpen(false);
+            void issueInvoices(studentId);
+          }, !individualIssueStudentId)}
+          {button("Cancel", () => setIndividualIssuePickerOpen(false))}
         </div>
       </section>
     </div>}

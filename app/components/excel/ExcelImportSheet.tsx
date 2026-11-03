@@ -1033,7 +1033,7 @@ export default function ExcelImportSheet({
 
       `}</style>
 
-    <style jsx global>{`
+    <style>{`
 /* Scoped, theme-aware action controls shared by every Excel importer. */
 .excel-import-overlay .excel-import-footer {
   display: flex !important;

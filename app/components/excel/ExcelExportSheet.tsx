@@ -669,7 +669,7 @@ export default function ExcelExportSheet({
 
       `}</style>
       </section>
-    <style jsx global>{`
+    <style>{`
 .excel-export-overlay .excel-export-footer {
   display: flex !important;
   flex-wrap: wrap;

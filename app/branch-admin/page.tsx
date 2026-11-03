@@ -25,6 +25,7 @@ import TermFeesRequirements from "./modules/finance/TermFeesRequirements";
 import Expenses from "./modules/Expenses";
 import Incomes from "./modules/Incomes";
 import Payroll from "./modules/Payroll";
+import Transactions from "./modules/Transactions";
 import FinanceHistoricalReviewWorkspace from "./modules/finance/FinanceHistoricalReviewWorkspace";
 import AssessmentEntries from "./modules/AssessmentEntries";
 import StudentReports from "./modules/reports/StudentReports";
@@ -327,22 +328,26 @@ function BranchReportsWorkspace(props: RouteProps) {
 // Mount only the selected module so shared portal toolbar registration stays scoped.
 // ======================================================
 
-type FinanceView = "notices" | "tracking" | "historical" | "incomes" | "expenses" | "payroll";
+type FinanceView = "notices" | "tracking" | "payroll" | "transactions";
 
 function BranchFinanceWorkspace(_props: RouteProps) {
   const [view, setView] = React.useState<FinanceView>("notices");
+  const [historicalOpen, setHistoricalOpen] = React.useState(false);
+  React.useEffect(() => {
+    const open = () => setHistoricalOpen(true);
+    window.addEventListener("eleeveon:finance-historical-review", open);
+    return () => window.removeEventListener("eleeveon:finance-historical-review", open);
+  }, []);
   return (
     <div className="ba-workspace-wrapper ba-finance-workspace">
       <style>{branchWorkspaceCss}</style>
-      <div className="ba-contextual-actions ba-report-subtabs ba-finance-subtabs report-no-print" aria-label="Finance workspaces">
+      {!historicalOpen && <div className="ba-contextual-actions ba-report-subtabs ba-finance-subtabs report-no-print" aria-label="Finance workspaces">
         <div className="ba-report-subtab-list ba-finance-subtab-list" role="group" aria-label="Finance sections">
           {([
             ["notices", "Term Notices"],
             ["tracking", "Fee Tracking"],
-             ["historical", "Historical Review"],
-            ["incomes", "Incomes"],
-            ["expenses", "Expenses"],
-             ["payroll", "Payroll"],
+            ["payroll", "Payroll"],
+            ["transactions", "Transactions"],
           ] as const).map(([key, label]) => (
             <button
               type="button"
@@ -351,6 +356,7 @@ function BranchFinanceWorkspace(_props: RouteProps) {
               className={view === key ? "is-active" : ""}
               onClick={() => {
                 setView(key);
+                setHistoricalOpen(false);
                 const pane = document.querySelector<HTMLElement>(
                   ".role-shell.workspace-locked-scroll .app-content",
                 );
@@ -359,16 +365,18 @@ function BranchFinanceWorkspace(_props: RouteProps) {
             >{label}</button>
           ))}
         </div>
-      </div>
+      </div>}
       {/* Mount one workspace at a time so the shared toolbar belongs to the active tab. */}
-      {view === "historical" ? (
-        <FinanceHistoricalReviewWorkspace />
+      {historicalOpen ? (
+        <section className="ba-finance-history-context">
+          <button type="button" onClick={() => setHistoricalOpen(false)}
+            className="ba-finance-history-back" aria-label="Return to Finance">← Back to Finance</button>
+          <FinanceHistoricalReviewWorkspace />
+        </section>
       ) : view === "payroll" ? (
         <Payroll />
-      ) : view === "expenses" ? (
-        <Expenses />
-      ) : view === "incomes" ? (
-        <Incomes />
+      ) : view === "transactions" ? (
+        <Transactions />
       ) : (
         <TermFeesRequirements key={view} mode={view} />
       )}
@@ -632,6 +640,7 @@ const branchWorkspaceCss = `
 
 /* FINANCE subtabs use exactly the same dimensions, surfaces and active
    state as the Reports contextual subtabs; no separate finance treatment. */
+.ba-finance-history-back { margin:10px 0; padding:9px 12px; border:1px solid var(--border,#d4dae3); border-radius:9px; background:var(--surface,#fff); color:var(--text,#111827); font-weight:700; cursor:pointer; }
 .ba-finance-workspace { width:100%; max-width:none; min-width:0; margin:0; padding:0; }
 .ba-finance-workspace .ba-report-subtabs {
   display:flex; align-items:center; gap:6px; flex-wrap:nowrap;

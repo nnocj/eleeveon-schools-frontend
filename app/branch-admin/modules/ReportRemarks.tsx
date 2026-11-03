@@ -567,6 +567,7 @@ export default function ReportRemarks() {
   const [search, setSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
 
   const [drafts, setDrafts] = useState<DraftMap>({});
   const [bulkClassRemark, setBulkClassRemark] = useState("");
@@ -2310,7 +2311,7 @@ export default function ReportRemarks() {
   return (
     <main className={`ba-page report-remarks-page ${viewMode === "cards" ? "rr-force-cards" : viewMode === "table" ? "rr-force-table" : ""}`} style={{"--ba-primary":primary,"--primary-color":primary} as React.CSSProperties}>
       <style>{css}</style>
-      <RemarksExcelActions rows={studentRows.map(row=>({student:row.student,enrollment:row.enrollment,reportCard:row.reportCard}))} scope={{accountId:selectedAccountId||"",schoolId:schoolId||"",branchId:branchId||"",academicStructureId:academicStructureId||"",academicPeriodId:academicPeriodId||"",teacherOnly:false}} onImported={load}/>
+      <RemarksExcelActions rows={studentRows.map(row=>({student:row.student,enrollment:row.enrollment,reportCard:row.reportCard}))} scope={{accountId:selectedAccountId||"",schoolId:schoolId||"",branchId:branchId||"",academicStructureId:academicStructureId||"",academicPeriodId:academicPeriodId||"",teacherOnly:false}} onImported={load} open={excelOpen} onClose={()=>setExcelOpen(false)}/>
  
       <header className="rr-command-row report-no-print">
         <button type="button" className="rr-context" onClick={openFilters} aria-label="Choose group, class and term">
@@ -2428,6 +2429,7 @@ export default function ReportRemarks() {
           onBulk={()=>{setMoreOpen(false);setBulkOpen(true);}}
           onPublishShown={(value)=>{togglePublishShown(value);setEditing(true);setMoreOpen(false);}}
           onRemarksBasis={()=>{setMoreOpen(false);setEditing(true);setBasisOpen(true);}}
+          onExcel={()=>{setMoreOpen(false);setExcelOpen(true);}}
           onClose={()=>setMoreOpen(false)}/>
       </BranchViewportPortal>}
     </main>
@@ -2690,13 +2692,14 @@ function BulkRemarksSheet({classRemark,setClassRemark,headRemark,setHeadRemark,o
   </section></div>;
 }
 
-function MoreSheet({onRefresh,onCards,onTable,onAnalytics,onBulk,onPublishShown,onRemarksBasis,onClose}: {
+function MoreSheet({onRefresh,onCards,onTable,onAnalytics,onBulk,onPublishShown,onRemarksBasis,onExcel,onClose}: {
   onRefresh:()=>void|Promise<void>;onCards:()=>void;onTable:()=>void;onAnalytics:()=>void;
-  onBulk:()=>void;onPublishShown:(value:boolean)=>void;onRemarksBasis:()=>void;onClose:()=>void;
+  onBulk:()=>void;onPublishShown:(value:boolean)=>void;onRemarksBasis:()=>void;onExcel:()=>void;onClose:()=>void;
 }) { return <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
   <section className="ba-sheet small"><header className="ba-sheet-head"><h2>More</h2>
     <button type="button" onClick={onClose} aria-label="Close menu">✕</button></header>
   <div className="ba-menu-list">
+    <button type="button" onClick={onExcel}><span>▤</span><b>Excel import / export</b><small>Review and import report remarks</small></button>
     <button type="button" onClick={onCards}><span>▦</span><b>Cards</b><small>Compact mobile-friendly rows</small></button>
     <button type="button" onClick={onTable}><span>▤</span><b>Table</b><small>Editable desktop-style list</small></button>
     <button type="button" onClick={onAnalytics}><span>◫</span><b>Analytics</b><small>Remarks completion statistics</small></button>

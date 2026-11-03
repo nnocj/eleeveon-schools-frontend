@@ -1009,6 +1009,7 @@ export default function TermFeesRequirements({ mode = "notices" }: { mode?: Sect
       <section role="dialog" aria-modal="true" aria-label="Finance actions" className="ef-sheet">
         <header><strong>More Actions</strong><button aria-label="Close menu" onClick={() => setMoreOpen(false)}>×</button></header>
         <div className="ef-more-actions">
+          {button("Historical Review", () => { setMoreOpen(false); window.dispatchEvent(new Event("eleeveon:finance-historical-review")); })}
           {section === "notices" ? <>
             {button("Edit / Apply Term Notice", () => { setMoreOpen(false); openEditor(); })}
             {button("Issue Student Records", () => { setMoreOpen(false); void issueInvoices(); }, !notice)}

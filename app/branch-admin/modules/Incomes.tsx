@@ -131,6 +131,7 @@ function FinanceLedgerModule({kind}: {kind: Kind}) {
   const [currencyFilter, setCurrencyFilter] = useState("GHS");
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState<AnyRow|null>(null);
   const [form, setForm] = useState<FormState>(() => defaultForm(kind,"GHS"));
@@ -314,7 +315,7 @@ function FinanceLedgerModule({kind}: {kind: Kind}) {
 
   return <main className="fl-page" style={{"--fl-primary":primary} as React.CSSProperties}>
     <style>{styles}</style>
-    <FinanceOperationsExcel kind={kind} accountId={account} schoolId={school} branchId={branch} existing={records} onComplete={load} />
+    <FinanceOperationsExcel kind={kind} accountId={account} schoolId={school} branchId={branch} existing={records} onComplete={load} open={excelOpen} onClose={()=>setExcelOpen(false)} />
     <AcademicFinancePeriodBar scope={academicScope} title={plural} hint={`Filter: change term · +: ${income?"record income":"record expense"}`} />
     {notice && !(editorOpen&&notice.error) && <div className={`fl-toast ${notice.error?"error":""}`} role="status">
       {notice.message}<button type="button" onClick={()=>setNotice(null)} aria-label="Dismiss">×</button></div>}
@@ -390,6 +391,8 @@ function FinanceLedgerModule({kind}: {kind: Kind}) {
             <div className="fl-menu">
               {(["cards","table","analytics"] as View[]).map(mode=><button key={mode} className={mode===view?"active":""} onClick={()=>{viewChosen.current=true;setView(mode);setMoreOpen(false)}}>
                 {mode==="cards"?"☰":mode==="table"?"☷":"◔"} · {mode[0].toUpperCase()+mode.slice(1)} view</button>)}
+              <button onClick={()=>{setMoreOpen(false);setExcelOpen(true)}}>▤ Excel · Import / Export / Template</button>
+              <button onClick={()=>{setMoreOpen(false);window.dispatchEvent(new Event("eleeveon:finance-historical-review"))}}>◷ Historical review</button>
               <button onClick={()=>{setMoreOpen(false);edit()}}>+ New {noun.toLowerCase()}</button>
               <button onClick={()=>{setMoreOpen(false);void load()}}>↻ Refresh records</button>
             </div>

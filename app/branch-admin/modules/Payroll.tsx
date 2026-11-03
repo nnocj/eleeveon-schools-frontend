@@ -406,6 +406,7 @@ export default function PayrollPage() {
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [excelOpen, setExcelOpen] = useState(false);
   const [profileDrawer, setProfileDrawer] = useState(false);
   const [runDrawer, setRunDrawer] = useState(false);
   const [paymentDrawer, setPaymentDrawer] = useState(false);
@@ -1162,7 +1163,7 @@ export default function PayrollPage() {
       style={{ "--pr-primary": primary } as React.CSSProperties}
     >
       <style>{css}</style>
-      <FinanceOperationsExcel kind="staffPayrollProfiles" accountId={String(accountId||"")} schoolId={schoolId} branchId={branchId} existing={profiles} onComplete={load} />
+      <FinanceOperationsExcel kind="staffPayrollProfiles" accountId={String(accountId||"")} schoolId={schoolId} branchId={branchId} existing={profiles} onComplete={load} open={excelOpen} onClose={()=>setExcelOpen(false)} />
 
       {toast && (
         <section className={`pr-toast ${toast.tone}`}>
@@ -1322,6 +1323,8 @@ export default function PayrollPage() {
             setMoreOpen(false);
             await load();
           }}
+          onExcel={() => {setMoreOpen(false);setExcelOpen(true);}}
+          onHistory={() => {setMoreOpen(false);window.dispatchEvent(new Event("eleeveon:finance-historical-review"));}}
           onClose={() => setMoreOpen(false)}
         />
       )}
@@ -1905,6 +1908,8 @@ function MoreSheet({
   onRun,
   onPayment,
   onRefresh,
+  onExcel,
+  onHistory,
   onClose,
 }: {
   view: ViewMode;
@@ -1915,6 +1920,8 @@ function MoreSheet({
   onRun: () => void;
   onPayment: () => void;
   onRefresh: () => void | Promise<void>;
+  onExcel: () => void;
+  onHistory: () => void;
   onClose: () => void;
 }) {
   return (
@@ -1930,6 +1937,8 @@ function MoreSheet({
           </button>
         </div>
         <div className="pr-menu-list">
+          <button type="button" onClick={onExcel}><span>▤</span><b>Excel · Import / Export</b><small>Profiles, templates and workbook review</small></button>
+          <button type="button" onClick={onHistory}><span>◷</span><b>Historical review</b><small>Review old finance workbooks safely</small></button>
           <button
             type="button"
             className={view === "profiles" ? "active" : ""}

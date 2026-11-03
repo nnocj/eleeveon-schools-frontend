@@ -12,6 +12,7 @@ import {useBranchWorkspaceScope} from "../../hooks/useBranchWorkspaceScope";
 import {useBranchTableRevision} from "../../hooks/useBranchTableRevision";
 
 type Row=Record<string,any>;
+type TransactionRow=Row & {transactionType:"incomes"|"expenses"};
 type TypeFilter="all"|"incomes"|"expenses";
 const display=(v:unknown)=>String(v??"").trim();
 const currencyAmount=(value:unknown,code:string)=>{
@@ -35,7 +36,7 @@ export default function Transactions(){
   }catch(err){setError(err instanceof Error?err.message:"Unable to load transactions");}finally{setLoading(false);}
  },[accountId,schoolId,branchId]);
  useEffect(()=>{void load()},[load,revision]);
- const records=useMemo(()=>[...income.map(row=>({...row,transactionType:"incomes" as const})),...expenses.map(row=>({...row,transactionType:"expenses" as const}))]
+ const records=useMemo<TransactionRow[]>(()=>[...income.map(row=>({...row,transactionType:"incomes" as const})),...expenses.map(row=>({...row,transactionType:"expenses" as const}))]
   .filter(r=>type==="all"||r.transactionType===type)
   .filter(r=>!query.trim()||[r.title,r.description,r.referenceNumber,r.receiptNumber,r.paidTo,r.receivedBy].join(" ").toLowerCase().includes(query.toLowerCase()))
   .sort((a,b)=>new Date(b.date||b.createdAt||0).getTime()-new Date(a.date||a.createdAt||0).getTime()),[income,expenses,type,query]);

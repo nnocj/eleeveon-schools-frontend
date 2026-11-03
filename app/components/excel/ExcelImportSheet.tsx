@@ -636,7 +636,7 @@ export default function ExcelImportSheet({
             var(--eds-accent) 12%,
             var(--eds-surface)
           );
-          color-scheme: light dark;
+          color-scheme: normal;
           color: var(--eds-text);
           position: fixed;
           top: calc(
@@ -944,17 +944,17 @@ export default function ExcelImportSheet({
           .excel-import-close {
             width: 38px !important;
             height: 38px !important;
-            border: 1px solid rgba(15, 23, 42, 0.16) !important;
+            border: 1px solid var(--eds-border, #cbd5e1) !important;
             border-radius: 999px !important;
-            background: rgba(15, 23, 42, 0.06) !important;
-            color: #0f172a !important;
+            background: var(--eds-surface-soft, #f1f5f9) !important;
+            color: var(--eds-text, #172033) !important;
             box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08) !important;
             opacity: 1 !important;
             font-weight: 900 !important;
           }
 
           .excel-import-close:hover:not(:disabled) {
-            background: rgba(15, 23, 42, 0.1) !important;
+            background: var(--eds-accent-soft, #eaf0ff) !important;
             border-color: rgba(15, 23, 42, 0.24) !important;
           }
 
@@ -962,31 +962,7 @@ export default function ExcelImportSheet({
             opacity: 0.45 !important;
           }
 
-@media (prefers-color-scheme: dark) {
-          .excel-import-overlay {
-            background:
-              color-mix(
-                in srgb,
-                #020617 78%,
-                transparent
-              );
-          }
 
-          .excel-import-close {
-            background: rgba(255, 255, 255, 0.12) !important;
-            color: #f8fafc !important;
-            border-color: rgba(255, 255, 255, 0.22) !important;
-            box-shadow:
-              0 4px 16px rgba(0, 0, 0, 0.28),
-              inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
-            opacity: 1 !important;
-          }
-
-          .excel-import-close:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.18) !important;
-            border-color: rgba(255, 255, 255, 0.32) !important;
-          }
-        }
 
           /* Mobile tap reliability */
           .excel-import-overlay {
@@ -1057,6 +1033,99 @@ export default function ExcelImportSheet({
 
       `}</style>
 
+    <style jsx global>{`
+/* Scoped, theme-aware action controls shared by every Excel importer. */
+.excel-import-overlay .excel-import-footer {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px !important;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.excel-import-overlay .excel-import-footer > :not(button) {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px !important;
+  min-width: 0;
+  width: 100%;
+}
+.excel-import-overlay .excel-import-footer button,
+.excel-import-overlay .excel-import-body button,
+.excel-import-overlay .excel-import-close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--eds-border, #cbd5e1);
+  border-radius: 9px;
+  background: var(--eds-surface, #ffffff);
+  color: var(--eds-text, #172033);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+  cursor: pointer;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  opacity: 1;
+}
+.excel-import-overlay .excel-import-footer button.primary,
+.excel-import-overlay .excel-import-footer button[class*="primary"],
+.excel-import-overlay .excel-import-footer button[class*="Primary"],
+.excel-import-overlay .excel-import-footer button[class*="fh-primary"],
+.excel-import-overlay .excel-import-body button.primary,
+.excel-import-overlay .excel-import-body button[class*="fh-primary"] {
+  background: var(--eds-accent, var(--primary-color, #2563eb)) !important;
+  color: #ffffff !important;
+  border-color: var(--eds-accent, var(--primary-color, #2563eb)) !important;
+}
+.excel-import-overlay .excel-import-footer button:not(.primary):not([class*="primary"]),
+.excel-import-overlay .excel-import-footer button:not([class]) {
+  background: var(--eds-surface-soft, #f1f5f9);
+  color: var(--eds-text, #172033);
+}
+.excel-import-overlay button:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.excel-import-overlay button:focus-visible,
+.excel-import-overlay input:focus-visible,
+.excel-import-overlay select:focus-visible,
+.excel-import-overlay textarea:focus-visible {
+  outline: 3px solid var(--eds-accent, #2563eb);
+  outline-offset: 2px;
+}
+.excel-import-overlay .excel-file-selected-actions,
+.excel-import-overlay .excel-error-filters,
+.excel-import-overlay .excel-preview-head,
+.excel-import-overlay .excel-mapping-row {
+  column-gap: 9px;
+}
+.excel-import-overlay .excel-import-body select,
+.excel-import-overlay .excel-import-body input:not([type="checkbox"]),
+.excel-import-overlay .excel-import-body textarea {
+  background-color: var(--eds-surface, #fff);
+  color: var(--eds-text, #172033);
+  border-color: var(--eds-border, #cbd5e1);
+}
+@media(max-width:520px) {
+  .excel-import-overlay .excel-import-footer,
+  .excel-import-overlay .excel-import-footer > :not(button) {
+    gap: 9px !important;
+  }
+  .excel-import-overlay .excel-import-footer button {
+    flex: 1 1 125px;
+    min-width: 0;
+    min-height: 46px;
+  }
+}
+`}</style>
     </div>
     ),
     document.body,

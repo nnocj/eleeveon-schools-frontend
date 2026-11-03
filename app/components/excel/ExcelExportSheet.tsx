@@ -325,7 +325,7 @@ export default function ExcelExportSheet({
             var(--eds-accent) 12%,
             var(--eds-surface)
           );
-          color-scheme: light dark;
+          color-scheme: normal;
           color: var(--eds-text);
           position: fixed;
           top: calc(
@@ -600,17 +600,17 @@ export default function ExcelExportSheet({
           .excel-export-close {
             width: 38px !important;
             height: 38px !important;
-            border: 1px solid rgba(15, 23, 42, 0.16) !important;
+            border: 1px solid var(--eds-border, #cbd5e1) !important;
             border-radius: 999px !important;
-            background: rgba(15, 23, 42, 0.06) !important;
-            color: #0f172a !important;
+            background: var(--eds-surface-soft, #f1f5f9) !important;
+            color: var(--eds-text, #172033) !important;
             box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08) !important;
             opacity: 1 !important;
             font-weight: 900 !important;
           }
 
           .excel-export-close:hover:not(:disabled) {
-            background: rgba(15, 23, 42, 0.1) !important;
+            background: var(--eds-accent-soft, #eaf0ff) !important;
             border-color: rgba(15, 23, 42, 0.24) !important;
           }
 
@@ -618,31 +618,7 @@ export default function ExcelExportSheet({
             opacity: 0.45 !important;
           }
 
-@media (prefers-color-scheme: dark) {
-          .excel-export-overlay {
-            background:
-              color-mix(
-                in srgb,
-                #020617 76%,
-                transparent
-              );
-          }
 
-          .excel-export-close {
-            background: rgba(255, 255, 255, 0.12) !important;
-            color: #f8fafc !important;
-            border-color: rgba(255, 255, 255, 0.22) !important;
-            box-shadow:
-              0 4px 16px rgba(0, 0, 0, 0.28),
-              inset 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
-            opacity: 1 !important;
-          }
-
-          .excel-export-close:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.18) !important;
-            border-color: rgba(255, 255, 255, 0.32) !important;
-          }
-        }
 
           /* Mobile tap reliability */
           .excel-export-overlay {
@@ -693,6 +669,62 @@ export default function ExcelExportSheet({
 
       `}</style>
       </section>
+    <style jsx global>{`
+.excel-export-overlay .excel-export-footer {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px !important;
+  padding-top: 12px;
+}
+.excel-export-overlay .excel-export-footer > :not(button) {
+  display: flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px !important;
+  width: 100%;
+  min-width: 0;
+}
+.excel-export-overlay .excel-export-footer button,
+.excel-export-overlay .excel-export-close {
+  appearance: none;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid var(--eds-border, #cbd5e1);
+  border-radius: 9px;
+  color: var(--eds-text, #172033);
+  background: var(--eds-surface, #fff);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.excel-export-overlay .excel-export-footer button.primary,
+.excel-export-overlay .excel-export-footer button[class*="primary"] {
+  background: var(--eds-accent, #2563eb) !important;
+  color: #fff !important;
+  border-color: var(--eds-accent, #2563eb) !important;
+}
+.excel-export-overlay .excel-export-action {
+  color: var(--eds-text, #172033) !important;
+  background: var(--eds-surface, #fff) !important;
+  border: 1px solid var(--eds-border, #cbd5e1) !important;
+}
+.excel-export-overlay button:disabled {opacity:.55;cursor:not-allowed}
+.excel-export-overlay button:focus-visible,
+.excel-export-overlay select:focus-visible,
+.excel-export-overlay input:focus-visible {outline:3px solid var(--eds-accent,#2563eb);outline-offset:2px}
+@media(max-width:520px){
+  .excel-export-overlay .excel-export-footer,
+  .excel-export-overlay .excel-export-footer > :not(button) {gap:9px!important}
+  .excel-export-overlay .excel-export-footer button {flex:1 1 125px;min-width:0;min-height:46px}
+}
+`}</style>
     </div>
     ),
     document.body,

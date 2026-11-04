@@ -1200,10 +1200,35 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
-            <label htmlFor="school-student-count" className="text-sm font-semibold">How many students?</label>
-            <input id="school-student-count" type="number" min="1" max="1000000" step="1" value={studentCount} onChange={(e) => setStudentCount(Math.max(1,Math.min(1000000,Math.floor(Number(e.target.value)||1))))} className="w-32 rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-sm dark:border-white/20"/>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">See estimates for student-priced Cloud plans. The final invoice uses the verified student count.</span>
+          <div className="mt-8 grid gap-5 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start dark:border-white/10 dark:bg-zinc-900">
+            <div>
+              <label htmlFor="school-student-count" className="block text-sm font-semibold">How many students does your school have?</label>
+              <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Enter your school size to see your Cloud subscription estimate immediately. No need to scroll through packages.</p>
+              <input id="school-student-count" type="number" min="1" max="1000000" step="1" value={studentCount} onChange={(e) => setStudentCount(Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))))} className="mt-4 w-full max-w-60 rounded-xl border border-zinc-300 bg-transparent px-4 py-3 text-lg font-semibold outline-none focus:border-[#2f6fed] dark:border-white/20" />
+              <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Estimate only. Final invoice and student count are verified by Eleeveon.</p>
+            </div>
+            <div className="rounded-2xl border border-[#2f6fed]/20 bg-[#2f6fed]/5 p-5 dark:border-[#2f6fed]/30 dark:bg-[#2f6fed]/10" aria-live="polite" aria-atomic="true">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#2f6fed]">Your instant quotation</p>
+              {plansLoading ? (
+                <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Loading current subscription prices…</p>
+              ) : plansError ? (
+                <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">Live quotations are unavailable right now. {plansError}</p>
+              ) : (
+                (() => {
+                  const studentPricedPlans = plans.filter(plan => plan.licenseModel === "subscription" && ["per_student", "tiered"].includes(plan.metadata?.pricing?.mode || ""));
+                  if (!studentPricedPlans.length) return <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">No student-priced Cloud subscription is currently published. See the packages below for other options.</p>;
+                  return <div className="mt-3 space-y-3">{studentPricedPlans.map(plan => {
+                    const exceedsLimit = plan.maxStudents != null && studentCount > plan.maxStudents;
+                    const amount = exceedsLimit ? null : publicAmount(plan, billingCycle, studentCount);
+                    return <div key={plan.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200/70 pb-3 last:border-0 last:pb-0 dark:border-white/10">
+                      <div><p className="text-sm font-semibold">{plan.name}</p><p className="text-xs text-zinc-500 dark:text-zinc-400">{studentCount.toLocaleString()} students · {plan.metadata?.pricing?.billingPeriod || "termly"}</p></div>
+                      <strong className="text-2xl font-semibold tracking-tight">{amount === null ? "Over limit" : formatMoney(amount, plan.currency || "GHS")}</strong>
+                    </div>;
+                  })}</div>;
+                })()
+              )}
+              <a href="#published-packages" className="mt-4 inline-flex text-sm font-semibold text-[#2f6fed] hover:underline">Compare all package benefits ↓</a>
+            </div>
           </div>
 
           <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -1223,6 +1248,7 @@ export default function Home() {
             ))}
           </div>
 
+          <div id="published-packages" className="scroll-mt-24" />
           {plansLoading ? (
             <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({

@@ -38,6 +38,7 @@ import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
 import { apiRequest } from "../lib/platformApi";
 import { db } from "../lib/db/db";
+import { calculateStudentPrice, type StudentPricing } from "../lib/commercial/studentPricing";
 
 type InvoiceStatus = "draft" | "issued" | "part_paid" | "paid" | "overdue" | "cancelled" | "void" | string;
 type PaymentStatus = "pending" | "processing" | "paid" | "failed" | "cancelled" | "refunded" | string;
@@ -49,35 +50,14 @@ type AccountData = {
   status?: string;
   subscription?: {
     id?: string;
+    planId?: string | null;
     status?: string;
     billingCycle?: string;
     currentPeriodEnd?: string;
     nextBillingDate?: string;
     trialEndsAt?: string;
-    plan?: {
-      name?: string;
-      code?: string;
-      currency?: string;
-      priceMonthly?: number;
-      priceYearly?: number;
-      priceOneTime?: number | null;
-      deploymentMode?: string;
-      licenseModel?: string;
-      metadata?: { pricing?: { mode?: string; billingPeriod?: string; perStudentRate?: number; minimumAmount?: number; tiers?: Array<{ upTo:number|null; unitPrice:number }> } };
-      maxSchools?: number | null;
-      maxBranches?: number | null;
-      maxUsers?: number | null;
-      maxStudents?: number | null;
-      maxTeachers?: number | null;
-      cloudBackup?: boolean;
-      reports?: boolean;
-      finance?: boolean;
-      parentPortal?: boolean;
-      studentPortal?: boolean;
-      teacherPortal?: boolean;
-      advancedAnalytics?: boolean;
-      apiAccess?: boolean;
-    };
+    plan?: CommercialPlan;
+
   } | null;
   invoices?: Invoice[];
   payments?: Payment[];
@@ -113,7 +93,93 @@ type Payment = {
   createdAt?: string;
 };
 
-type ViewMode = "overview" | "invoices" | "payments" | "features";
+type ViewMode = "overview" | "packages" | "invoices" | "payments" | "features";
+
+type CommercialPlan = {
+  name?: string;
+  code?: string;
+  currency?: string;
+  priceMonthly?: number | null;
+  priceYearly?: number | null;
+  maxSchools?: number | null;
+  maxBranches?: number | null;
+  maxUsers?: number | null;
+  maxStudents?: number | null;
+  maxTeachers?: number | null;
+  cloudBackup?: boolean;
+  reports?: boolean;
+  finance?: boolean;
+  parentPortal?: boolean;
+  studentPortal?: boolean;
+  teacherPortal?: boolean;
+  advancedAnalytics?: boolean;
+  apiAccess?: boolean;
+  id?: string;
+  description?: string | null;
+  active?: boolean;
+  offlineSync?: boolean;
+  licenseModel?: string | null;
+  deploymentMode?: string | null;
+  priceTermly?: number | null;
+  priceOneTime?: number | null;
+  availableAcquisitionModes?: string[] | null;
+  features?: string[] | null;
+  metadata?: {
+    pricing?: StudentPricing;
+    visibility?: string;
+    publicVisible?: boolean;
+    trialDays?: number;
+    featureFlags?: Record<string, boolean>;
+    [key: string]: unknown;
+  } | null;
+};
+
+function commercialKind(plan?: CommercialPlan | null, status?: string | null) {
+  const model = String(plan?.licenseModel || "").toLowerCase();
+  const deployment = String(plan?.deploymentMode || "").toLowerCase();
+  if (model === "trial" || status === "trial") return "Free trial";
+  if (model === "complimentary" || String(plan?.code || "").startsWith("pilot_")) return "Complimentary access";
+  if (plan?.metadata?.visibility === "private" || plan?.code === "sp005") return "Private / pilot arrangement";
+  if (model === "perpetual" || deployment.startsWith("independent")) return "Independent licence";
+  if (deployment.includes("private") || deployment.includes("hosted")) return "Private deployment";
+  if (model === "subscription" || deployment === "connected" || deployment === "eleeveon_cloud") return "Cloud subscription";
+  return "Commercial package";
+}
+
+function paymentLabel(plan?: CommercialPlan | null) {
+  if (!plan) return "Pricing not available";
+  const kind = commercialKind(plan);
+  if (kind === "Free trial") return `${Number(plan.metadata?.trialDays || 14)}-day free trial`;
+  if (kind === "Complimentary access" || kind === "Private / pilot arrangement") return "Privately arranged access";
+  if (kind === "Independent licence") return plan.priceOneTime == null ? "Contact Eleeveon for pricing" : `${money(Number(plan.priceOneTime), plan.currency || "GHS")} once`;
+  const p = plan.metadata?.pricing;
+  if (p?.mode === "per_student") return `${money(Number(p.perStudentRate || 0), plan.currency || "GHS")} per student / ${p.billingPeriod || "term"}`;
+  if (p?.mode === "tiered") return `Student-based tiers / ${p.billingPeriod || "term"}`;
+  if (Number(plan.priceTermly) > 0) return `${money(Number(plan.priceTermly), plan.currency || "GHS")} / term`;
+  if (Number(plan.priceMonthly) > 0) return `${money(Number(plan.priceMonthly), plan.currency || "GHS")} / month`;
+  if (Number(plan.priceYearly) > 0) return `${money(Number(plan.priceYearly), plan.currency || "GHS")} / year`;
+  return "Pricing available on request";
+}
+
+function publicPlan(plan: CommercialPlan) {
+  const visibility = String(plan.metadata?.visibility || "public").toLowerCase();
+  const model = String(plan.licenseModel || "").toLowerCase();
+  const modes = plan.availableAcquisitionModes || [];
+  return plan.active !== false && visibility === "public" && plan.metadata?.publicVisible !== false &&
+    !["complimentary", "private"].includes(model) && !String(plan.code || "").startsWith("pilot_") &&
+    !modes.includes("private_offer");
+}
+
+function toPlans(response: unknown): CommercialPlan[] {
+  if (Array.isArray(response)) return response;
+  if (response && typeof response === "object") {
+    const obj = response as Record<string, unknown>;
+    for (const key of ["plans", "data", "items", "results"]) {
+      if (Array.isArray(obj[key])) return obj[key] as CommercialPlan[];
+    }
+  }
+  return [];
+}
 
 function money(amount?: number, currency = "GHS") {
   return new Intl.NumberFormat("en-GH", {
@@ -180,6 +246,9 @@ export default function BillingPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("overview");
   const [search, setSearch] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
+  const [publicPlans, setPublicPlans] = useState<CommercialPlan[]>([]);
+  const [catalogError, setCatalogError] = useState("");
+  const [studentCount, setStudentCount] = useState(200);
 
   useEffect(() => {
     if (accountLoading) return;
@@ -195,6 +264,15 @@ export default function BillingPage() {
     try {
       setLoading(true);
       setNotice("");
+      // A public listing is enough for pricing comparisons; it never grants access.
+      // Private/pilot packages are read from the account's own subscription only.
+      try {
+        const response = await apiRequest<unknown>("/billing/plans");
+        setPublicPlans(toPlans(response).filter(publicPlan));
+        setCatalogError("");
+      } catch {
+        setCatalogError("The current package catalogue is unavailable. Your account history is still accessible.");
+      }
 
       try {
         const remote = await apiRequest<AccountData>("/accounts/me");
@@ -234,7 +312,9 @@ export default function BillingPage() {
   }, [authenticated, accountId]);
 
   const currency = account?.subscription?.plan?.currency || invoices[0]?.currency || payments[0]?.currency || "GHS";
-  const plan = account?.subscription?.plan;
+  const subscriptionPlan = account?.subscription?.plan;
+  const catalogMatch = publicPlans.find((item) => item.id === account?.subscription?.planId || item.code === subscriptionPlan?.code);
+  const plan = (subscriptionPlan ? { ...catalogMatch, ...subscriptionPlan, metadata: subscriptionPlan.metadata || catalogMatch?.metadata } : catalogMatch) as CommercialPlan | undefined;
   const subscription = account?.subscription;
 
   const summary = useMemo(() => {
@@ -267,8 +347,8 @@ export default function BillingPage() {
     return payments.filter((row) => !q || `${row.receiptNumber} ${row.providerReference} ${row.status} ${row.method} ${row.provider}`.toLowerCase().includes(q));
   }, [payments, search]);
 
-  const features = [
-    ["Offline Sync", true],
+  const features: Array<[string, boolean | undefined]> = [
+    ["Offline Sync", plan?.offlineSync ?? plan?.metadata?.featureFlags?.offlineSync],
     ["Cloud Backup", plan?.cloudBackup],
     ["Reports", plan?.reports],
     ["Finance", plan?.finance],
@@ -279,7 +359,12 @@ export default function BillingPage() {
     ["API Access", plan?.apiAccess],
   ];
 
-  const activeCount = viewMode === "invoices" ? filteredInvoices.length : viewMode === "payments" ? filteredPayments.length : viewMode === "features" ? features.length : 4;
+  const activeCount = viewMode === "packages" ? publicPlans.length : viewMode === "invoices" ? filteredInvoices.length : viewMode === "payments" ? filteredPayments.length : viewMode === "features" ? features.length : 4;
+  const assignedKind = commercialKind(plan, subscription?.status);
+  const studentQuotes = publicPlans.filter((item) => {
+    const pricing = item.metadata?.pricing;
+    return pricing?.mode === "per_student" || pricing?.mode === "tiered";
+  });
 
   if (accountLoading || settingsLoading || loading) {
     return (
@@ -339,6 +424,7 @@ export default function BillingPage() {
         <button type="button" className={viewMode === "overview" ? "active" : ""} onClick={() => setViewMode("overview")}>
           Overview
         </button>
+        <button type="button" className={viewMode === "packages" ? "active" : ""} onClick={() => setViewMode("packages")}>Packages ({publicPlans.length})</button>
         <button type="button" className={viewMode === "invoices" ? "active" : ""} onClick={() => setViewMode("invoices")}>
           Invoices ({summary.invoices})
         </button>
@@ -351,63 +437,77 @@ export default function BillingPage() {
       </section>
 
       {viewMode === "overview" && (
-        <section className="billing-compact-grid">
-          <OverviewRow
-            icon="💳"
-            title={plan?.name || "No active plan"}
-            subtitle={`${subscription?.billingCycle || "No billing cycle"} · ${displayStatus(subscription?.status, "No subscription status")}`}
-            note={`Next billing: ${safeDate(subscription?.nextBillingDate || subscription?.currentPeriodEnd)}`}
-            tone={statusTone(subscription?.status)}
-          />
-          <OverviewRow
-            icon="🧾"
-            title="Total Invoiced"
-            subtitle={money(summary.totalInvoiced, currency)}
-            note={`${summary.invoices} invoice record(s)`}
-            tone="blue"
-          />
-          <OverviewRow
-            icon="✅"
-            title="Total Paid"
-            subtitle={money(summary.totalPaid, currency)}
-            note={`${summary.payments} payment record(s)`}
-            tone="green"
-          />
-          <OverviewRow
-            icon="⚠️"
-            title="Outstanding"
-            subtitle={money(summary.outstanding, currency)}
-            note={`${summary.unpaidInvoices} unpaid invoice(s)`}
-            tone={summary.outstanding > 0 ? "orange" : "green"}
-          />
-          {plan?.metadata?.pricing?.mode && plan.metadata.pricing.mode !== "fixed" ? <OverviewRow
-            icon="👥"
-            title="Student-based pricing"
-            subtitle={`${plan.metadata.pricing.mode === "tiered" ? "Progressive student tiers" : `${money(plan.metadata.pricing.perStudentRate, currency)} per student`} / ${plan.metadata.pricing.billingPeriod || "term"}`}
-            note="Your invoice uses the verified student count; these are package pricing rules."
-            tone="blue"
-          /> : null}
-          {(!plan?.metadata?.pricing?.mode || plan.metadata.pricing.mode === "fixed") && <OverviewRow
-            icon="📆"
-            title="Monthly Price"
-            subtitle={money(plan?.priceMonthly, currency)}
-            note="Current plan monthly value"
-            tone="gray"
-          /> }
-          {(!plan?.metadata?.pricing?.mode || plan.metadata.pricing.mode === "fixed") && <OverviewRow
-            icon="🗓️"
-            title="Yearly Price"
-            subtitle={money(plan?.priceYearly, currency)}
-            note="Current plan yearly value"
-            tone="gray"
-          /> }
-          <OverviewRow
-            icon="📦"
-            title="Plan Limits"
-            subtitle={`${plan?.maxSchools ?? "∞"} school(s)`}
-            note={`${plan?.maxBranches ?? "∞"} branches · ${plan?.maxUsers ?? "∞"} users`}
-            tone="blue"
-          />
+        <>
+          <section className="ba-list">
+            <article className="billing-row">
+              <span className="billing-row-icon">📦</span>
+              <span className="billing-row-main">
+                <strong>{plan?.name || "No package assigned"}</strong>
+                <small>{assignedKind} · {displayStatus(subscription?.status, "No arrangement")}</small>
+                <em>{subscription?.status === "trial"
+                  ? `Trial ends: ${safeDate(subscription.trialEndsAt || subscription.currentPeriodEnd)}`
+                  : subscription?.nextBillingDate
+                    ? `Next billing: ${safeDate(subscription.nextBillingDate)}`
+                    : "No automatic billing date shown"}</em>
+              </span>
+              <span className="billing-row-side"><span className={`status-dot-mini ${statusTone(subscription?.status)}`} /></span>
+            </article>
+            <article className="billing-row">
+              <span className="billing-row-icon">💰</span>
+              <span className="billing-row-main">
+                <strong>Package pricing</strong>
+                <small>{paymentLabel(plan)}</small>
+                <em>{plan?.maxStudents == null ? "No configured student cap" : `Up to ${plan.maxStudents} students`} · Quote is not an invoice</em>
+              </span>
+            </article>
+            <OverviewRow icon="🧾" title="Total invoiced" subtitle={money(summary.totalInvoiced, currency)} note={`${summary.invoices} invoice(s)`} tone="blue" />
+            <OverviewRow icon="✅" title="Payments received" subtitle={money(summary.totalPaid, currency)} note="Recorded paid transactions" tone="green" />
+            <OverviewRow icon="⚠️" title="Outstanding invoices" subtitle={money(summary.outstanding, currency)} note={`${summary.unpaidInvoices} unpaid invoice(s)`} tone={summary.outstanding > 0 ? "orange" : "green"} />
+          </section>
+          <section className="billing-quote-panel" aria-label="Instant student quotation">
+            <div>
+              <strong>Estimate a package</strong>
+              <p>Enter your school's student count to compare published student-based plans. This does not change your current package.</p>
+            </div>
+            <label className="billing-count-input">Students
+              <input type="number" min="1" max="1000000" value={studentCount} onChange={(e) => setStudentCount(Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))))} />
+            </label>
+            <div className="billing-quote-results">
+              {studentQuotes.length ? studentQuotes.map((item) => {
+                const pricing = item.metadata?.pricing;
+                const amount = pricing ? calculateStudentPrice(pricing, studentCount) : null;
+                return <div className="billing-quote-result" key={item.id || item.code}>
+                  <span>{item.name}<small>Estimated / {pricing?.billingPeriod || "term"}</small></span>
+                  <strong>{amount == null ? "Quote unavailable" : money(amount, item.currency || "GHS")}</strong>
+                </div>;
+              }) : <small>{catalogError || "No published student-based plan is available for an instant estimate."}</small>}
+            </div>
+            <small>Indicative quote only. The verified invoice or private offer determines what is payable.</small>
+          </section>
+        </>
+      )}
+
+      {viewMode === "packages" && (
+        <section className="ba-list" aria-label="Published packages">
+          {catalogError ? <section className="ba-slim-notice"><p>{catalogError}</p></section> : null}
+          {publicPlans.map((item) => {
+            const pricing = item.metadata?.pricing;
+            const isStudentPriced = pricing?.mode === "tiered" || pricing?.mode === "per_student";
+            const estimate = isStudentPriced && pricing ? calculateStudentPrice(pricing, studentCount) : null;
+            return <article className="billing-row" key={item.id || item.code}>
+              <span className="billing-row-icon">{commercialKind(item) === "Free trial" ? "🎁" : commercialKind(item) === "Independent licence" ? "💻" : "☁️"}</span>
+              <span className="billing-row-main">
+                <strong>{item.name}</strong>
+                <small>{commercialKind(item)} · {isStudentPriced && estimate != null ? `${money(estimate, item.currency || "GHS")} / ${pricing?.billingPeriod || "term"} estimated` : paymentLabel(item)}</small>
+                <em>{item.description || "Explore this package's included capabilities and limits."}</em>
+              </span>
+              <span className="billing-row-side">
+                <button type="button" className="billing-package-action" onClick={() => router.push(`/owner/subscription?planId=${encodeURIComponent(item.id || "")}`)}>View</button>
+              </span>
+            </article>;
+          })}
+          {!publicPlans.length && !catalogError ? <EmptyCard text="No published packages are available." /> : null}
+          <p className="billing-small-note">Private offers, complimentary pilots and unpublished packages do not appear in this catalogue. Viewing a package does not purchase or activate it.</p>
         </section>
       )}
 
@@ -433,10 +533,10 @@ export default function BillingPage() {
         <section className="feature-grid">
           {features.map(([label, enabled]) => (
             <article key={String(label)} className="feature-row">
-              <span className={enabled ? "on" : "off"}>{enabled ? "✓" : "×"}</span>
+              <span className={enabled === true ? "on" : "off"}>{enabled === true ? "✓" : enabled === false ? "×" : "·"}</span>
               <div>
                 <strong>{label}</strong>
-                <small>{enabled ? "Available on this plan" : "Not enabled on this plan"}</small>
+                <small>{enabled === true ? "Included" : enabled === false ? "Not included" : "Not specified in package details"}</small>
               </div>
             </article>
           ))}
@@ -454,8 +554,8 @@ export default function BillingPage() {
           currency={currency}
           planName={plan?.name || "No active plan"}
           subscriptionStatus={displayStatus(subscription?.status, "not set")}
-          billingCycle={subscription?.billingCycle || "not set"}
-          nextBillingDate={safeDate(subscription?.nextBillingDate || subscription?.currentPeriodEnd)}
+          billingCycle={assignedKind}
+          nextBillingDate={subscription?.status === "trial" ? safeDate(subscription?.trialEndsAt) : safeDate(subscription?.nextBillingDate)}
           onRefresh={async () => {
             setMoreOpen(false);
             await load();
@@ -559,7 +659,8 @@ function MoreSheet({
   onClose: () => void;
 }) {
   const views: { key: ViewMode; icon: string; label: string; note: string }[] = [
-    { key: "overview", icon: "◔", label: "Overview", note: "Plan, totals, outstanding and limits" },
+    { key: "overview", icon: "◔", label: "Overview", note: "Package, quotes, invoices and balances" },
+    { key: "packages", icon: "📦", label: "Packages", note: "Compare published arrangements" },
     { key: "invoices", icon: "🧾", label: "Invoices", note: `${summary.invoices} invoice record(s)` },
     { key: "payments", icon: "💰", label: "Payments", note: `${summary.payments} payment record(s)` },
     { key: "features", icon: "✓", label: "Features", note: "Enabled plan modules" },
@@ -579,8 +680,8 @@ function MoreSheet({
         <div className="billing-info-list">
           <InfoLine label="Plan" value={planName} />
           <InfoLine label="Status" value={subscriptionStatus} />
-          <InfoLine label="Billing" value={billingCycle} />
-          <InfoLine label="Next billing" value={nextBillingDate} />
+          <InfoLine label="Arrangement" value={billingCycle} />
+          <InfoLine label="Next billing / trial expiry" value={nextBillingDate} />
           <InfoLine label="Invoiced" value={money(summary.totalInvoiced, currency)} />
           <InfoLine label="Paid" value={money(summary.totalPaid, currency)} />
           <InfoLine label="Outstanding" value={money(summary.outstanding, currency)} />
@@ -1215,4 +1316,20 @@ const css = `
     display: none;
   }
 }
+
+.billing-quote-panel { margin-top:12px; background:var(--card-bg,var(--surface,#fff));border:1px solid var(--border,rgba(0,0,0,.1));border-radius:20px;padding:16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(130px,190px);gap:12px;align-items:center;}
+.billing-quote-panel p { margin:5px 0 0;color:var(--muted,#64748b);font-size:12px;line-height:1.5; }
+.billing-quote-panel > small { grid-column:1 / -1;color:var(--muted,#64748b);font-size:11px; }
+.billing-count-input {display:grid;gap:5px;font-size:12px;font-weight:700;}
+.billing-count-input input {width:100%;background:var(--bg,#f7f8fb);border:1px solid var(--border,#ddd);padding:11px;border-radius:12px;color:var(--text,#111827);}
+.billing-quote-results {grid-column:1 / -1;display:grid;gap:8px;}
+.billing-quote-result {display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;border-radius:12px;background:color-mix(in srgb,var(--ba-primary) 6%,transparent);}
+.billing-quote-result span {font-weight:750;font-size:13px;}
+.billing-quote-result small {display:block;font-weight:400;color:var(--muted,#64748b);margin-top:2px;}
+.billing-quote-result strong {font-size:20px;white-space:nowrap;}
+.billing-package-action {border-radius:10px;border:1px solid var(--border,#ddd);padding:8px 12px;background:var(--card-bg,#fff);font-weight:700;cursor:pointer;}
+.billing-small-note {font-size:12px;color:var(--muted,#64748b);padding:8px;line-height:1.5;}
+@media(max-width:450px){.billing-quote-panel{grid-template-columns:minmax(0,1fr) 120px;padding:12px;}.billing-quote-result strong{font-size:17px;}}
 `;
+
+

@@ -202,6 +202,41 @@ const eleeveonFullscreenOverlayCss = String.raw`
  margin-top:16px!important;background:var(--card-bg,var(--surface,#fff))!important;
  border-top:1px solid var(--border,rgba(148,163,184,.18))!important;
 }
+/* Shared footer actions: explicit layout and contrast in all branch-settings sheets. */
+.eleeveon-modal-root :is(.ba-sheet-footer,.ba-sheet-actions,.ba-modal-actions,.cs-sheet-actions,.cs-modal-actions){
+ display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;
+ align-items:center!important;justify-content:flex-end!important;gap:12px!important;
+ width:100%!important;box-sizing:border-box!important;
+}
+.eleeveon-modal-root :is(.ba-sheet-footer,.ba-sheet-actions,.ba-modal-actions,.cs-sheet-actions,.cs-modal-actions)>button{
+ appearance:none!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;
+ min-width:112px!important;min-height:44px!important;padding:10px 18px!important;
+ border:1px solid var(--border,#94a3b8)!important;border-radius:11px!important;
+ background:var(--input-bg,var(--card-bg,var(--surface,#fff)))!important;color:var(--text,#111827)!important;
+ font-size:13px!important;font-weight:800!important;line-height:1.25!important;
+ cursor:pointer!important;white-space:nowrap!important;
+}
+.eleeveon-modal-root :is(.ba-sheet-footer,.ba-sheet-actions,.ba-modal-actions,.cs-sheet-actions,.cs-modal-actions)>button.primary{
+ background:var(--ba-primary,var(--primary-color,#2563eb))!important;
+ border-color:var(--ba-primary,var(--primary-color,#2563eb))!important;
+ color:#fff!important;
+}
+.eleeveon-modal-root :is(.ba-sheet-footer,.ba-sheet-actions,.ba-modal-actions,.cs-sheet-actions,.cs-modal-actions)>button:disabled{
+ opacity:.55!important;cursor:not-allowed!important;
+}
+.eleeveon-modal-root .ba-sheet-head>button{
+ background:var(--card-bg,var(--surface,#fff))!important;
+ color:var(--text,#111827)!important;
+ border:1px solid var(--border,#94a3b8)!important;
+}
+.eleeveon-modal-root .admission-sequence-note{
+ display:grid;gap:6px;padding:13px 14px;border-radius:12px;
+ border:1px solid var(--border,#94a3b8);
+ background:var(--card-bg,var(--surface,#fff));color:var(--text,#111827);
+}
+.eleeveon-modal-root .admission-sequence-note strong{font-size:13px;line-height:1.4}
+.eleeveon-modal-root .admission-sequence-note span,
+.eleeveon-modal-root .admission-sequence-caption{font-size:12px;line-height:1.5;color:var(--muted,#64748b)}
 .eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input,select,textarea,button){max-width:100%}
 .eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet){font-family:var(--font-family,system-ui,sans-serif);font-size:13px}
 .eleeveon-modal-root :is(.ba-sheet,.ba-modal,.cs-modal,.cs-sheet) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),select,textarea){
@@ -2619,8 +2654,9 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       mode: cfg?.mode || "manual",
       prefix: cfg?.prefix || "",
       separator: cfg?.separator ?? "-",
-      nextSequence: Math.max(1, Number(cfg?.nextSequence) || 1),
-      padding: Math.max(1, Number(cfg?.padding) || 3),
+      // The browser must never reuse the old saved sequence as an allocation floor.
+      nextSequence: 1,
+      padding: Math.min(12, Math.max(3, Number(cfg?.padding) || 3)),
       scope: "branch",
     });
   }, [settingsRow]);
@@ -3142,6 +3178,29 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
       setSchool(currentSchool);
       setBranch(currentBranch);
       setSettingsRow(currentSetting);
+      // Some branches have duplicate settings rows. Read admission rules
+      // from the matching configured row, even if the newest settings row
+      // has no admissionNumbers object (as observed in the USOH account).
+      const admissionSettingsRow = settingRows
+        .filter((row: any) =>
+          !row.isDeleted &&
+          (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
+          sameId(row.schoolId, selectedSchoolId) &&
+          sameId(row.branchId, selectedBranchId) &&
+          !!row.admissionNumbers,
+        )
+        .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+      const savedAdmissionRules = (admissionSettingsRow as any)?.admissionNumbers;
+      if (savedAdmissionRules) {
+        setAdmissionDraft({
+          mode: savedAdmissionRules.mode || "manual",
+          prefix: savedAdmissionRules.prefix || "",
+          separator: savedAdmissionRules.separator ?? "-",
+          padding: Math.min(12, Math.max(3, Number(savedAdmissionRules.padding) || 3)),
+          nextSequence: 1,
+          scope: "branch",
+        });
+      }
       setReportTemplates(branchReportTemplates);
       setReportTemplateSettingsRow(currentReportTemplateSettings);
       setReportTemplateAssignmentRow(currentReportAssignment);
@@ -3994,8 +4053,13 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         {
           ...form,
           // Preserve independent admission/ID configuration during all other saves.
-          admissionNumbers: (latestSavedRow as any)?.admissionNumbers ??
-            (settingsRow as any)?.admissionNumbers,
+          admissionNumbers: (() => {
+            const saved = (latestSavedRow as any)?.admissionNumbers ??
+              (settingsRow as any)?.admissionNumbers;
+            return saved && typeof saved === "object"
+              ? { ...saved, padding: Math.min(12, Math.max(3, Number(saved.padding) || 3)), nextSequence: 1 }
+              : saved;
+          })(),
           identityIssuancePolicyCache: (latestSavedRow as any)?.identityIssuancePolicyCache ??
             (settingsRow as any)?.identityIssuancePolicyCache,
           identityIssuancePolicyPending: (latestSavedRow as any)?.identityIssuancePolicyPending ??
@@ -4619,21 +4683,33 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
     if (!requireTenant()) return false;
     try {
       setSavingAdmission(true);
-      const existing = (await db.schoolBranchSettings.toArray())
+      const settingsCandidates = (await db.schoolBranchSettings.toArray())
         .filter((row: any) => !row.isDeleted &&
           (!row.accountId || sameId(row.accountId, selectedAccountId)) &&
           sameId(row.schoolId, selectedSchoolId) &&
           sameId(row.branchId, selectedBranchId))
-        .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0];
+        .sort((a: any, b: any) => {
+          // A duplicate settings row without admission configuration must not
+          // replace the row that contains the school's actual numbering rules.
+          const aConfigured = !!(a as any).admissionNumbers;
+          const bConfigured = !!(b as any).admissionNumbers;
+          if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
+          return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+        });
+      const existing = settingsCandidates[0];
       if (!existing) throw new Error("Save Branch Settings once before configuring admission numbers.");
       const previous = (existing as any).admissionNumbers;
       const next = {
-        ...admissionDraft,
+        mode: admissionDraft.mode || previous?.mode || "manual",
         prefix: admissionDraft.prefix.trim().toUpperCase(),
-        nextSequence: Math.max(1, Number(previous?.nextSequence) || 1,
-          Number(admissionDraft.nextSequence) || 1),
-        padding: Math.min(12, Math.max(1, Math.floor(admissionDraft.padding))),
+        separator: admissionDraft.separator,
+        padding: Math.min(12, Math.max(3, Math.floor(Number(admissionDraft.padding) || 3))),
         scope: "branch" as const,
+        // Neutral starting floor: the server's AdmissionNumberSequence and
+        // StudentAdmissionIdentity determine the next free number. Keeping 82
+        // here would force Math.max(sequence.nextSequence, config.nextSequence)
+        // to skip valid numbers even after a registry repair.
+        nextSequence: 1,
       };
       await updateLocal("schoolBranchSettings", existing.id, { admissionNumbers: next } as any);
       const verified = await db.schoolBranchSettings.get(existing.id);
@@ -5132,7 +5208,7 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
         icon: "#",
         title: "Admission Numbers",
         subtitle: admissionDraft.mode === "manual" ? "Manual entry" : "Automatic numbering",
-        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${String(admissionDraft.nextSequence).padStart(admissionDraft.padding,"0")}`,
+        detail: `${admissionDraft.prefix || "No prefix"}${admissionDraft.separator}${"0".repeat(Math.max(3, Math.min(12, admissionDraft.padding)))} · Next number assigned by server`,
         tone: "blue",
       },
       {
@@ -5492,10 +5568,12 @@ export function BranchSettingsWorkspace({ view = "branch" }: { view?: "branch" |
               <Field label="Numbering mode"><select value={admissionDraft.mode} onChange={e => setAdmissionDraft(p => ({...p, mode: e.target.value as any}))}><option value="manual">Manual only</option><option value="automatic">Generate automatically</option><option value="automatic_or_manual">Automatic, allow manual entry</option></select></Field>
               <Field label="School prefix"><input value={admissionDraft.prefix} onChange={e => setAdmissionDraft(p => ({...p, prefix: e.target.value.toUpperCase()}))} placeholder="USOH" maxLength={32}/></Field>
                 <Field label="Separator"><select value={admissionDraft.separator} onChange={e => setAdmissionDraft(p => ({...p, separator: e.target.value}))}><option value="-">Hyphen (-)</option><option value="/">Slash (/)</option><option value="">None</option></select></Field>
-                <Field label="Minimum number of digits"><input type="number" min={1} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(1,Math.min(12,Number(e.target.value)||3))}))}/></Field>
-                <p>Last confirmed admission number (backend): <strong>Not connected to backend status endpoint</strong></p>
-                <p style={{fontSize:12,opacity:.76}}>Only the backend admission identity registry can provide this figure. Local student numbers and local nextSequence are deliberately not shown as confirmed values.</p>
-              <p>Existing admission numbers are preserved. Numbering does not reset when a student is deleted.</p>
+                <Field label="Minimum number of digits"><input type="number" min={3} max={12} value={admissionDraft.padding} onChange={e => setAdmissionDraft(p => ({...p,padding: Math.max(3,Math.min(12,Number(e.target.value)||3))}))}/></Field>
+                <div className="admission-sequence-note" role="status">
+                  <strong>Next number: controlled by backend registry</strong>
+                  <span>This screen saves the prefix, mode, separator and minimum digits. The server assigns the next available number; the old local counter is not used.</span>
+                </div>
+                <p className="admission-sequence-caption">Existing student IDs are not changed. New allocations use the server registry.</p>
             </div>
             <div className="ba-sheet-footer"><button type="button" onClick={() => setSectionOpen(null)}>Cancel</button><button type="button" className="primary" disabled={savingAdmission} onClick={() => void saveAdmissionNumbers()}>{savingAdmission ? "Saving..." : "Save"}</button></div>
           </section>

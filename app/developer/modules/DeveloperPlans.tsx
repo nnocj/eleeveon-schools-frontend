@@ -36,7 +36,23 @@ type Props = {
 };
 
 type ViewMode = "cards" | "table" | "analytics";
-type BillingPreview = "monthly" | "termly" | "yearly";
+type BillingPreview = "monthly" | "termly" | "yearly" | "one_time";
+type AcquisitionMode = "trial" | "self_service" | "private_offer" | "complimentary" | "outright" | "installments";
+const ACQUISITION_OPTIONS: { value: AcquisitionMode; title: string; description: string }[] = [
+  { value: "trial", title: "Public free trial", description: "Temporary, limited evaluation access" },
+  { value: "self_service", title: "Self-service purchase", description: "Public checkout for eligible customers" },
+  { value: "private_offer", title: "Private offer", description: "Individually negotiated package or quote" },
+  { value: "complimentary", title: "Complimentary / pilot", description: "Platform-controlled special access (not automatically granted)" },
+  { value: "outright", title: "Outright purchase", description: "One-time purchase, subject to issued licence" },
+  { value: "installments", title: "Flex installments", description: "Purchase agreement with scheduled payments" },
+];
+const DEPLOYMENT_OPTIONS = [
+  { value: "eleeveon_cloud", title: "Eleeveon Cloud" },
+  { value: "independent_essentials", title: "Independent Essentials" },
+  { value: "independent_multi_device", title: "Independent Multi-device" },
+  { value: "private_hosted", title: "Private / school hosted (future)" },
+] as const;
+
 type ToastTone = "success" | "error" | "info";
 
 type FeatureKey =
@@ -78,6 +94,17 @@ type PlanRow = {
   priceMonthly?: number;
   priceTermly?: number;
   priceYearly?: number;
+  priceOneTime?: number | null;
+  deploymentMode?: string;
+  licenseModel?: string;
+  syncPolicy?: string;
+  updatePolicy?: string;
+  deviceLimit?: number | null;
+  activationLimit?: number | null;
+  offlineGraceDays?: number | null;
+  validationIntervalDays?: number | null;
+  requiresPeriodicValidation?: boolean;
+  availableAcquisitionModes?: string[] | null;
 
   maxSchools?: number | null;
   maxBranches?: number | null;
@@ -131,6 +158,19 @@ type PlanFormState = {
   priceMonthly: string;
   priceTermly: string;
   priceYearly: string;
+  priceOneTime: string;
+  deploymentMode: string;
+  licenseModel: string;
+  syncPolicy: string;
+  updatePolicy: string;
+  deviceLimit: string;
+  activationLimit: string;
+  offlineGraceDays: string;
+  validationIntervalDays: string;
+  requiresPeriodicValidation: boolean;
+  trialDays: string;
+  acquisitionModes: AcquisitionMode[];
+  originalMetadata: Record<string, any>;
 
   maxSchools: string;
   maxBranches: string;
@@ -269,20 +309,20 @@ const FEATURE_DEFINITIONS: PlanFeatureDefinition[] = [
 
 const DEFAULT_FEATURES: PlanFeatureFlags = {
   offlineSync: true,
-  cloudBackup: true,
+  cloudBackup: false,
   reports: true,
-  finance: true,
-  attendance: true,
-  identityCards: true,
-  identitySafety: true,
-  transport: true,
-  schoolWebsites: true,
-  communications: true,
-  calendarScheduling: true,
-  parentPortal: true,
-  studentPortal: true,
+  finance: false,
+  attendance: false,
+  identityCards: false,
+  identitySafety: false,
+  transport: false,
+  schoolWebsites: false,
+  communications: false,
+  calendarScheduling: false,
+  parentPortal: false,
+  studentPortal: false,
   teacherPortal: true,
-  advancedAnalytics: true,
+  advancedAnalytics: false,
   apiAccess: false,
 };
 
@@ -294,6 +334,19 @@ const EMPTY_FORM: PlanFormState = {
   priceMonthly: "0",
   priceTermly: "0",
   priceYearly: "0",
+  priceOneTime: "",
+  deploymentMode: "eleeveon_cloud",
+  licenseModel: "subscription",
+  syncPolicy: "full",
+  updatePolicy: "continuous",
+  deviceLimit: "",
+  activationLimit: "",
+  offlineGraceDays: "",
+  validationIntervalDays: "",
+  requiresPeriodicValidation: false,
+  trialDays: "14",
+  acquisitionModes: ["self_service"],
+  originalMetadata: {},
   maxSchools: "",
   maxBranches: "",
   maxUsers: "",
@@ -418,6 +471,22 @@ const planToForm = (plan: PlanRow): PlanFormState => ({
   priceMonthly: String(plan.priceMonthly ?? 0),
   priceTermly: String(plan.priceTermly ?? 0),
   priceYearly: String(plan.priceYearly ?? 0),
+  priceOneTime: plan.priceOneTime == null ? "" : String(plan.priceOneTime),
+  deploymentMode: plan.deploymentMode || "eleeveon_cloud",
+  licenseModel: plan.licenseModel || "subscription",
+  syncPolicy: plan.syncPolicy || "full",
+  updatePolicy: plan.updatePolicy || "continuous",
+  deviceLimit: plan.deviceLimit == null ? "" : String(plan.deviceLimit),
+  activationLimit: plan.activationLimit == null ? "" : String(plan.activationLimit),
+  offlineGraceDays: plan.offlineGraceDays == null ? "" : String(plan.offlineGraceDays),
+  validationIntervalDays: plan.validationIntervalDays == null ? "" : String(plan.validationIntervalDays),
+  requiresPeriodicValidation: plan.requiresPeriodicValidation === true,
+  trialDays: String(plan.metadata?.trialDays ?? 14),
+  acquisitionModes: Array.isArray(plan.availableAcquisitionModes)
+    ? plan.availableAcquisitionModes.filter((mode): mode is AcquisitionMode =>
+        ACQUISITION_OPTIONS.some((option) => option.value === mode))
+    : plan.licenseModel === "trial" ? ["trial"] : plan.licenseModel === "complimentary" ? ["complimentary"] : ["self_service"],
+  originalMetadata: { ...(plan.metadata || {}) },
   maxSchools: plan.maxSchools == null ? "" : String(plan.maxSchools),
   maxBranches: plan.maxBranches == null ? "" : String(plan.maxBranches),
   maxUsers: plan.maxUsers == null ? "" : String(plan.maxUsers),
@@ -449,6 +518,17 @@ const formToPayload = (form: PlanFormState) => {
     priceMonthly: numberOrNull(form.priceMonthly) ?? 0,
     priceTermly: numberOrNull(form.priceTermly) ?? 0,
     priceYearly: numberOrNull(form.priceYearly) ?? 0,
+    priceOneTime: numberOrNull(form.priceOneTime),
+    deploymentMode: form.deploymentMode,
+    licenseModel: form.licenseModel,
+    syncPolicy: form.syncPolicy,
+    updatePolicy: form.updatePolicy,
+    deviceLimit: numberOrNull(form.deviceLimit),
+    activationLimit: numberOrNull(form.activationLimit),
+    offlineGraceDays: numberOrNull(form.offlineGraceDays),
+    validationIntervalDays: numberOrNull(form.validationIntervalDays),
+    requiresPeriodicValidation: form.requiresPeriodicValidation,
+    availableAcquisitionModes: form.acquisitionModes,
     maxSchools: numberOrNull(form.maxSchools),
     maxBranches: numberOrNull(form.maxBranches),
     maxUsers: numberOrNull(form.maxUsers),
@@ -460,6 +540,8 @@ const formToPayload = (form: PlanFormState) => {
 
     features: enabledFeatures,
     metadata: {
+      ...form.originalMetadata,
+      trialDays: numberOrNull(form.trialDays) ?? 14,
       featureFlags: { ...form.features },
       featureSchemaVersion: 2,
       featureKeys: enabledFeatures,
@@ -696,7 +778,8 @@ export default function DeveloperPlans({ navigate }: Props) {
         (plan) =>
           Number(plan.priceMonthly || 0) > 0 ||
           Number(plan.priceTermly || 0) > 0 ||
-          Number(plan.priceYearly || 0) > 0,
+          Number(plan.priceYearly || 0) > 0 ||
+          Number(plan.priceOneTime || 0) > 0,
       ),
     [plans],
   );
@@ -715,7 +798,7 @@ export default function DeveloperPlans({ navigate }: Props) {
     () =>
       subscriptions
         .filter((subscription) =>
-          ["active", "trial"].includes(
+          ["active"].includes(
             cleanText(subscription.status).toLowerCase(),
           ),
         )
@@ -761,6 +844,8 @@ export default function DeveloperPlans({ navigate }: Props) {
     setForm({
       ...EMPTY_FORM,
       features: { ...EMPTY_FORM.features },
+      acquisitionModes: [...EMPTY_FORM.acquisitionModes],
+      originalMetadata: {},
     });
     setFormOpen(true);
   };
@@ -790,6 +875,18 @@ export default function DeveloperPlans({ navigate }: Props) {
     event.preventDefault();
 
     const payload = formToPayload(form);
+    if (form.acquisitionModes.length === 0) {
+      setMessage({ tone: "error", text: "Select at least one acquisition option." });
+      return;
+    }
+    if (form.acquisitionModes.includes("trial") && (!Number.isInteger(Number(form.trialDays)) || Number(form.trialDays) < 1 || Number(form.trialDays) > 365)) {
+      setMessage({ tone: "error", text: "Trial duration must be between 1 and 365 days." });
+      return;
+    }
+    if (form.licenseModel === "perpetual" && form.priceOneTime.trim() === "") {
+      setMessage({ tone: "error", text: "Set the one-time price for perpetual packages (0 is permitted)." });
+      return;
+    }
 
     if (!payload.name || !payload.code) {
       setMessage({
@@ -989,7 +1086,7 @@ export default function DeveloperPlans({ navigate }: Props) {
         <article>
           <span>Potential MRR</span>
           <strong>{money(potentialMrr)}</strong>
-          <small>Active and trial subscriptions</small>
+          <small>Active subscriptions (list-price estimate)</small>
         </article>
       </section>
 
@@ -1002,6 +1099,7 @@ export default function DeveloperPlans({ navigate }: Props) {
               );
 
               const price =
+                billingPreview === "one_time" ? Number(plan.priceOneTime || 0) :
                 billingPreview === "monthly"
                   ? Number(plan.priceMonthly || 0)
                   : billingPreview === "termly"
@@ -1046,8 +1144,10 @@ export default function DeveloperPlans({ navigate }: Props) {
                   <div className="dp-price-row">
                     <strong>{money(price, plan.currency || "GHS")}</strong>
                     <span>
-                      /{billingPreview === "monthly"
-                        ? "month"
+                      {billingPreview === "one_time"
+                          ? "one-time"
+                          : billingPreview === "monthly"
+                          ? "month"
                         : billingPreview === "termly"
                           ? "4 months"
                           : "year"}
@@ -1087,7 +1187,7 @@ export default function DeveloperPlans({ navigate }: Props) {
                   </div>
 
                   <footer>
-                    <span>{dateText(plan.updatedAt)}</span>
+                    <span>{plan.deploymentMode || "eleeveon_cloud"} · {dateText(plan.updatedAt)}</span>
                     <div>
                       <button
                         type="button"
@@ -1402,20 +1502,18 @@ export default function DeveloperPlans({ navigate }: Props) {
                 type="button"
                 onClick={() => {
                   setBillingPreview((current) =>
-                    current === "monthly"
-                      ? "termly"
-                      : current === "termly"
-                        ? "yearly"
-                        : "monthly",
+                      current === "monthly" ? "termly" :
+                      current === "termly" ? "yearly" :
+                      current === "yearly" ? "one_time" : "monthly",
                   );
                   setMoreOpen(false);
                 }}
               >
                 <span>₵</span>
                 <div>
-                  <strong>
-                    Show{" "}
-                    {billingPreview === "monthly"
+                      <strong>
+                      Show{" "}
+                      {billingPreview === "one_time" ? "monthly" : billingPreview === "yearly" ? "one-time" : billingPreview === "monthly"
                       ? "termly"
                       : billingPreview === "termly"
                         ? "yearly"
@@ -1590,6 +1688,42 @@ export default function DeveloperPlans({ navigate }: Props) {
                 </div>
               </section>
 
+              <section className="dp-form-section">
+                <div className="dp-section-title">
+                  <h3>Deployment & ownership</h3>
+                  <p>Decide where the application runs and how the school owns access. This is separate from the acquisition route.</p>
+                </div>
+                <div className="dp-field-grid dp-three-columns">
+                  <label className="dp-field"><span>Deployment</span><select value={form.deploymentMode} onChange={(e) => setForm(s => ({...s, deploymentMode:e.target.value}))}>
+                    {DEPLOYMENT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.title}</option>)}
+                  </select></label>
+                  <label className="dp-field"><span>Licence model</span><select value={form.licenseModel} onChange={(e) => setForm(s => ({...s, licenseModel:e.target.value}))}>
+                    <option value="subscription">Subscription</option><option value="trial">Trial</option><option value="complimentary">Complimentary / pilot</option><option value="perpetual">Perpetual purchase</option>
+                  </select></label>
+                  <label className="dp-field"><span>Sync policy</span><select value={form.syncPolicy} onChange={(e) => setForm(s => ({...s, syncPolicy:e.target.value}))}>
+                    <option value="full">Full cloud sync</option><option value="platform_only">Platform only</option><option value="disabled">No cloud sync</option>
+                  </select></label>
+                  <label className="dp-field"><span>Update policy</span><select value={form.updatePolicy} onChange={(e) => setForm(s => ({...s, updatePolicy:e.target.value}))}>
+                    <option value="continuous">Continuous</option><option value="security_only">Security only</option><option value="version_locked">Version-locked</option>
+                  </select></label>
+                  <label className="dp-field"><span>One-time price (GHS)</span><input type="number" min="0" value={form.priceOneTime} onChange={(e) => setForm(s => ({...s,priceOneTime:e.target.value}))} placeholder="Not applicable" /></label>
+                  {([ ["deviceLimit", "Device limit"], ["activationLimit", "Activations"], ["offlineGraceDays", "Offline grace days"], ["validationIntervalDays", "Validation interval days"] ] as const).map(([key, title]) =>
+                    <label key={key} className="dp-field"><span>{title}</span><input type="number" min="0" value={form[key]} onChange={(e) => setForm(s => ({...s,[key]:e.target.value}))} placeholder="Not configured" /></label>)}
+                  <label className="dp-field"><span>Periodic licence validation</span><select value={form.requiresPeriodicValidation ? "yes" : "no"} onChange={(e) => setForm(s => ({...s,requiresPeriodicValidation:e.target.value === "yes"}))}>
+                    <option value="no">Not required</option><option value="yes">Required</option>
+                  </select></label>
+                </div>
+              </section>
+              <section className="dp-form-section">
+                <div className="dp-section-title"><h3>How schools can acquire this package</h3><p>These are catalogue options. Activating a pilot, taking payments, or issuing a licence requires separately authorized backend workflows.</p></div>
+                <div className="dp-feature-grid">
+                  {ACQUISITION_OPTIONS.map(option => <button key={option.value} type="button" className={`dp-feature-option ${form.acquisitionModes.includes(option.value) ? "enabled" : ""}`} onClick={() => setForm(current => ({ ...current, acquisitionModes:current.acquisitionModes.includes(option.value) ? current.acquisitionModes.filter(m => m !== option.value) : [...current.acquisitionModes, option.value] }))}>
+                    <span className="dp-feature-copy"><strong>{option.title}</strong><small>{option.description}</small></span><span className={`dp-toggle ${form.acquisitionModes.includes(option.value) ? "enabled" : ""}`}><i/></span>
+                  </button>)}
+                </div>
+                {form.acquisitionModes.includes("trial") && <div className="dp-field-grid"><label className="dp-field"><span>Trial duration (days)</span><input type="number" min="1" max="365" value={form.trialDays} onChange={(e) => setForm(s => ({...s,trialDays:e.target.value}))}/></label></div>}
+                <p style={{fontSize:12,opacity:.75,marginTop:10}}>Trial duration is saved in package metadata. Registration will use it only after the trial bootstrap integration is deployed. Complimentary access must be assigned explicitly to school account IDs.</p>
+              </section>
               <section className="dp-form-section">
                 <div className="dp-section-title">
                   <h3>Usage limits</h3>

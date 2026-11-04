@@ -169,6 +169,12 @@ type PlanFormState = {
   validationIntervalDays: string;
   requiresPeriodicValidation: boolean;
   trialDays: string;
+  pricingMode: "fixed" | "per_student" | "tiered";
+  pricingPeriod: "monthly" | "termly" | "yearly";
+  perStudentRate: string;
+  pricingMinimum: string;
+  pricingTiers: { upTo: string; unitPrice: string }[];
+  publicVisible: boolean;
   acquisitionModes: AcquisitionMode[];
   originalMetadata: Record<string, any>;
 
@@ -345,6 +351,12 @@ const EMPTY_FORM: PlanFormState = {
   validationIntervalDays: "",
   requiresPeriodicValidation: false,
   trialDays: "14",
+  pricingMode: "fixed",
+  pricingPeriod: "termly",
+  perStudentRate: "3",
+  pricingMinimum: "0",
+  pricingTiers: [{ upTo: "100", unitPrice: "3" }, { upTo: "", unitPrice: "2" }],
+  publicVisible: true,
   acquisitionModes: ["self_service"],
   originalMetadata: {},
   maxSchools: "",
@@ -482,6 +494,14 @@ const planToForm = (plan: PlanRow): PlanFormState => ({
   validationIntervalDays: plan.validationIntervalDays == null ? "" : String(plan.validationIntervalDays),
   requiresPeriodicValidation: plan.requiresPeriodicValidation === true,
   trialDays: String(plan.metadata?.trialDays ?? 14),
+  pricingMode: (["fixed","per_student","tiered"].includes(plan.metadata?.pricing?.mode) ? plan.metadata!.pricing.mode : "fixed"),
+  pricingPeriod: (["monthly","termly","yearly"].includes(plan.metadata?.pricing?.billingPeriod) ? plan.metadata!.pricing.billingPeriod : "termly"),
+  perStudentRate: String(plan.metadata?.pricing?.perStudentRate ?? 3),
+  pricingMinimum: String(plan.metadata?.pricing?.minimumAmount ?? 0),
+  pricingTiers: Array.isArray(plan.metadata?.pricing?.tiers)
+    ? plan.metadata!.pricing.tiers.map((tier: any) => ({ upTo: tier.upTo == null ? "" : String(tier.upTo), unitPrice: String(tier.unitPrice) }))
+    : [{ upTo: "100", unitPrice: "3" }, { upTo: "", unitPrice: "2" }],
+  publicVisible: plan.metadata?.publicVisible !== false && plan.metadata?.visibility !== "private",
   acquisitionModes: Array.isArray(plan.availableAcquisitionModes)
     ? plan.availableAcquisitionModes.filter((mode): mode is AcquisitionMode =>
         ACQUISITION_OPTIONS.some((option) => option.value === mode))
@@ -542,6 +562,16 @@ const formToPayload = (form: PlanFormState) => {
     metadata: {
       ...form.originalMetadata,
       trialDays: numberOrNull(form.trialDays) ?? 14,
+      publicVisible: form.publicVisible,
+      visibility: form.publicVisible ? "public" : "private",
+      pricing: form.pricingMode === "fixed" ? { mode: "fixed" } : {
+        mode: form.pricingMode,
+        billingPeriod: form.pricingPeriod,
+        minimumAmount: Number(form.pricingMinimum || 0),
+        ...(form.pricingMode === "per_student" ? { perStudentRate: Number(form.perStudentRate || 0) } : {
+          tiers: form.pricingTiers.map((tier) => ({ upTo: tier.upTo.trim() ? Number(tier.upTo) : null, unitPrice: Number(tier.unitPrice || 0) })),
+        }),
+      },
       featureFlags: { ...form.features },
       featureSchemaVersion: 2,
       featureKeys: enabledFeatures,
@@ -896,6 +926,21 @@ export default function DeveloperPlans({ navigate }: Props) {
       return;
     }
 
+    if (form.pricingMode !== "fixed") {
+      if (form.licenseModel !== "subscription") { setMessage({ tone: "error", text: "Student pricing is available for subscriptions. Use a fixed price for trial, complimentary and perpetual packages." }); return; }
+      if (form.pricingMode === "tiered") {
+        const tiers = form.pricingTiers;
+        let previous = 0;
+        for (let i = 0; i < tiers.length; i++) {
+          const t = tiers[i]; const upper = Number(t.upTo);
+          if (!Number.isFinite(Number(t.unitPrice)) || Number(t.unitPrice) < 0 || (t.upTo.trim() && (!Number.isSafeInteger(upper) || upper <= previous)) || (!t.upTo.trim() && i !== tiers.length - 1)) {
+            setMessage({ tone: "error", text: "Tier thresholds must increase, with an empty final threshold meaning unlimited." }); return;
+          }
+          if (t.upTo.trim()) previous = upper;
+        }
+        if (!tiers.length || tiers[tiers.length - 1].upTo.trim()) { setMessage({ tone: "error", text: "The final tier must have an empty upper limit (unlimited)." }); return; }
+      }
+    }
     try {
       setSaving(true);
       setMessage(null);
@@ -1723,6 +1768,31 @@ export default function DeveloperPlans({ navigate }: Props) {
                 </div>
                 {form.acquisitionModes.includes("trial") && <div className="dp-field-grid"><label className="dp-field"><span>Trial duration (days)</span><input type="number" min="1" max="365" value={form.trialDays} onChange={(e) => setForm(s => ({...s,trialDays:e.target.value}))}/></label></div>}
                 <p style={{fontSize:12,opacity:.75,marginTop:10}}>Trial duration is saved in package metadata. Registration will use it only after the trial bootstrap integration is deployed. Complimentary access must be assigned explicitly to school account IDs.</p>
+              </section>
+              <section className="dp-form-section">
+                <div className="dp-section-title"><h3>Subscription price calculation</h3><p>Keep the billing period separate from the amount calculation. Progressive tiers charge only additional students at the next rate.</p></div>
+                <div className="dp-field-grid dp-three-columns">
+                  <label className="dp-field"><span>Pricing model</span><select value={form.pricingMode} onChange={(e) => setForm(s => ({ ...s, pricingMode: e.target.value as PlanFormState["pricingMode"] }))}>
+                    <option value="fixed">Fixed package price</option><option value="per_student">Flat rate per student</option><option value="tiered">Progressive student tiers</option>
+                  </select></label>
+                  {form.pricingMode !== "fixed" && <>
+                    <label className="dp-field"><span>Rate applies per</span><select value={form.pricingPeriod} onChange={(e) => setForm(s => ({...s,pricingPeriod:e.target.value as PlanFormState["pricingPeriod"]}))}><option value="termly">Term</option><option value="monthly">Month</option><option value="yearly">Year</option></select></label>
+                    <label className="dp-field"><span>Minimum charge (GHS)</span><input type="number" min="0" step="0.01" value={form.pricingMinimum} onChange={(e) => setForm(s => ({...s,pricingMinimum:e.target.value}))}/></label>
+                  </>}
+                  {form.pricingMode === "per_student" && <label className="dp-field"><span>Rate per student (GHS)</span><input type="number" min="0" step="0.01" value={form.perStudentRate} onChange={(e) => setForm(s => ({...s,perStudentRate:e.target.value}))}/></label>}
+                </div>
+                {form.pricingMode === "tiered" && <div style={{display:"grid",gap:10,marginTop:12}}>
+                  {form.pricingTiers.map((tier,index) => <div key={index} className="dp-field-grid dp-three-columns">
+                    <label className="dp-field"><span>Through student # (blank = unlimited)</span><input type="number" min="1" value={tier.upTo} onChange={(e) => setForm(s => ({...s,pricingTiers:s.pricingTiers.map((t,i) => i===index ? {...t,upTo:e.target.value}:t)}))}/></label>
+                    <label className="dp-field"><span>Rate per student (GHS)</span><input type="number" min="0" step="0.01" value={tier.unitPrice} onChange={(e) => setForm(s => ({...s,pricingTiers:s.pricingTiers.map((t,i) => i===index ? {...t,unitPrice:e.target.value}:t)}))}/></label>
+                    <button type="button" className="dp-secondary-button" disabled={form.pricingTiers.length<=1} onClick={() => setForm(s => ({...s,pricingTiers:s.pricingTiers.filter((_,i)=>i!==index)}))}>Remove tier</button>
+                  </div>)}
+                  <button type="button" className="dp-secondary-button" onClick={() => setForm(s => ({...s,pricingTiers:[...s.pricingTiers,{upTo:"",unitPrice:"0"}]}))}>+ Add tier</button>
+                </div>}
+                <label className="dp-field" style={{marginTop:12}}><span>Public catalogue visibility</span><select value={form.publicVisible ? "public" : "private"} onChange={(e) => setForm(s => ({...s,publicVisible:e.target.value==="public"}))}>
+                  <option value="public">Publish for public visitors</option><option value="private">Private — developer only</option>
+                </select></label>
+                <p style={{opacity:.7,fontSize:12,marginTop:8}}>Complimentary/pilot and private-hosted plans are never listed publicly. Student-priced checkout remains disabled until verified enrollment billing is connected.</p>
               </section>
               <section className="dp-form-section">
                 <div className="dp-section-title">

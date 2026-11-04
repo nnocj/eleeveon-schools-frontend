@@ -13,6 +13,7 @@ import {
   setStoredActiveMembership,
 } from "./lib/auth/activeMembership";
 import type { UserMembership } from "./lib/auth/roleRedirect";
+import { calculateStudentPrice, type StudentPricing } from "./lib/commercial/studentPricing";
 
 type Capability = {
   icon: string;
@@ -50,6 +51,10 @@ type Plan = {
   priceMonthly?: number;
   priceTermly?: number;
   priceYearly?: number;
+  priceOneTime?: number | null;
+  deploymentMode?: string;
+  licenseModel?: string;
+  availableAcquisitionModes?: string[] | null;
   maxSchools?: number | null;
   maxBranches?: number | null;
   maxUsers?: number | null;
@@ -79,6 +84,9 @@ type Plan = {
     featureFlags?: Record<string, boolean>;
     featureKeys?: PlanFeatureKey[];
     recommended?: boolean;
+    pricing?: StudentPricing;
+    publicVisible?: boolean;
+    visibility?: "public" | "private";
     badge?: string | null;
     displayOrder?: number | null;
     [key: string]: unknown;
@@ -295,6 +303,21 @@ function planPrice(plan: Plan, cycle: BillingCycle): number {
   return Number(plan.priceMonthly || 0);
 }
 
+function publicAmount(plan: Plan, cycle: BillingCycle, students: number): number {
+  const pricing = plan.metadata?.pricing;
+  if (pricing && pricing.mode !== "fixed") return calculateStudentPrice(pricing, students) ?? 0;
+  if (plan.licenseModel === "perpetual") return Number(plan.priceOneTime || 0);
+  if (plan.licenseModel === "trial") return 0;
+  return planPrice(plan, cycle);
+}
+
+function packageLabel(plan: Plan): string {
+  if (plan.licenseModel === "trial") return "Free trial";
+  if (plan.deploymentMode === "independent_essentials") return "Independent Essentials";
+  if (plan.deploymentMode === "independent_multi_device") return "Independent Multi-device";
+  return "Eleeveon Cloud";
+}
+
 function billingCycleLabel(cycle: BillingCycle): string {
   if (cycle === "termly") return "4 months";
   if (cycle === "yearly") return "year";
@@ -451,6 +474,7 @@ export default function Home() {
   const [plansLoading, setPlansLoading] = useState(true);
   const [plansError, setPlansError] = useState("");
   const [billingCycle, setBillingCycle] = useState<BillingCycle>("termly");
+  const [studentCount, setStudentCount] = useState(200);
   const [pricingPage, setPricingPage] = useState(0);
   const [pricingCardsPerPage, setPricingCardsPerPage] = useState(1);
   const [signupPlan, setSignupPlan] = useState<Plan | null>(null);
@@ -539,7 +563,7 @@ export default function Home() {
         }
 
         const activePlans = normalizePlans(payload)
-          .filter((plan) => plan.active !== false)
+          .filter((plan) => plan.active !== false && plan.metadata?.publicVisible !== false && plan.metadata?.visibility !== "private" && plan.licenseModel !== "complimentary" && plan.deploymentMode !== "private_hosted" && (!plan.availableAcquisitionModes?.length || plan.availableAcquisitionModes.some(m => ["self_service","trial","outright","installments"].includes(m))))
           .sort((a, b) => {
             const aOrder = Number(a.metadata?.displayOrder ?? 999);
             const bOrder = Number(b.metadata?.displayOrder ?? 999);
@@ -598,6 +622,10 @@ export default function Home() {
 
   const submitPublicSignup = async () => {
     if (!signupPlan) return;
+    if (signupPlan.licenseModel !== "trial" && (signupPlan.metadata?.pricing?.mode && signupPlan.metadata.pricing.mode !== "fixed" || signupPlan.deploymentMode !== "eleeveon_cloud" || signupPlan.licenseModel === "perpetual")) {
+      setSignupError("This package requires a verified quote or installation arrangement. Online checkout is not enabled for it yet.");
+      return;
+    }
 
     if (!signupForm.fullName.trim()) {
       setSignupError("Enter your full name.");
@@ -747,6 +775,10 @@ export default function Home() {
       );
 
       destination.searchParams.set("planId", signupPlan.id);
+      if (signupPlan.licenseModel === "trial") {
+        window.location.replace(new URL("/owner", window.location.origin).toString());
+        return;
+      }
       destination.searchParams.set("billingCycle", billingCycle);
       destination.searchParams.set("checkout", "1");
       destination.searchParams.set("source", "public-pricing");
@@ -1168,6 +1200,12 @@ export default function Home() {
             </div>
           </div>
 
+          <div className="mt-8 flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-zinc-900">
+            <label htmlFor="school-student-count" className="text-sm font-semibold">How many students?</label>
+            <input id="school-student-count" type="number" min="1" max="1000000" step="1" value={studentCount} onChange={(e) => setStudentCount(Math.max(1,Math.min(1000000,Math.floor(Number(e.target.value)||1))))} className="w-32 rounded-xl border border-zinc-200 bg-transparent px-3 py-2 text-sm dark:border-white/20"/>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">See estimates for student-priced Cloud plans. The final invoice uses the verified student count.</span>
+          </div>
+
           <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {PLATFORM_BENEFITS.map((benefit, index) => (
               <article
@@ -1249,10 +1287,11 @@ export default function Home() {
                       (item) => item.id === plan.id,
                     );
                     const features = planFeatureLabels(plan);
-                    const price = planPrice(
-                      plan,
-                      billingCycle,
-                    );
+                    const price = publicAmount(plan, billingCycle, studentCount);
+                    const studentPriced = plan.metadata?.pricing?.mode && plan.metadata.pricing.mode !== "fixed";
+                    const specialPurchase = plan.licenseModel === "perpetual";
+                    const trial = plan.licenseModel === "trial";
+                    const availableOnline = plan.deploymentMode === "eleeveon_cloud" && !studentPriced && !specialPurchase;
                     const currency = plan.currency || "GHS";
                     const monthlyPrice = Number(
                       plan.priceMonthly || 0,
@@ -1289,7 +1328,7 @@ export default function Home() {
 
                         <div className="pr-20">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2f6fed]">
-                            {plan.code}
+                            {packageLabel(plan)} · {plan.code}
                           </p>
                           <h3 className="mt-3 text-2xl font-semibold tracking-tight">
                             {plan.name}
@@ -1322,11 +1361,11 @@ export default function Home() {
                               {formatMoney(price, currency)}
                             </strong>
                             <span className="pb-1 text-sm text-zinc-500 dark:text-zinc-400">
-                              /{billingCycleLabel(billingCycle)}
+                              {specialPurchase ? "one-time purchase" : trial ? "trial access" : studentPriced ? `/${plan.metadata?.pricing?.billingPeriod || "termly"}` : `/${billingCycleLabel(billingCycle)}`}
                             </span>
                           </div>
 
-                          {billingCycle === "termly" &&
+                          {!studentPriced && !specialPurchase && !trial && billingCycle === "termly" &&
                           termlySaving > 0 ? (
                             <p className="mt-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               Save{" "}
@@ -1336,7 +1375,7 @@ export default function Home() {
                               )}{" "}
                               compared with four monthly payments.
                             </p>
-                          ) : billingCycle === "yearly" &&
+                          ) : !studentPriced && !specialPurchase && !trial && billingCycle === "yearly" &&
                             yearlySaving > 0 ? (
                             <p className="mt-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               Save{" "}
@@ -1353,6 +1392,8 @@ export default function Home() {
                           )}
                         </div>
 
+                        {studentPriced ? <div className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400"><p>Estimate for {studentCount.toLocaleString()} students · {plan.metadata?.pricing?.mode === "tiered" ? "progressive tiers" : "flat student rate"}. Final amount is confirmed by Eleeveon.</p>{plan.metadata?.pricing?.mode === "per_student" ? <p>GH₵{plan.metadata.pricing.perStudentRate} per student · minimum GH₵{plan.metadata.pricing.minimumAmount || 0}</p> : <p>{(plan.metadata?.pricing?.tiers || []).map(t => `${t.upTo == null ? "Additional students" : `Up to ${t.upTo}`} at GH₵${t.unitPrice}`).join(" · ")}</p>}</div> : null}
+                        {trial ? <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Trial duration: {Number(plan.metadata?.trialDays || 14)} days. No upfront payment.</p> : null}
                         <div className="mt-6 grid grid-cols-3 gap-2">
                           <PlanLimit
                             value={plan.maxStudents}
@@ -1401,20 +1442,20 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() =>
-                              openPublicSignup(plan)
+                              availableOnline ? openPublicSignup(plan) : undefined
                             }
+                            disabled={!availableOnline}
                             className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-full px-5 text-sm font-semibold transition hover:-translate-y-0.5 ${
                               recommended
-                                ? "bg-[#2f6fed] text-white hover:bg-[#245ed0]"
-                                : "bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+                                ? "bg-[#2f6fed] text-white hover:bg-[#245ed0] disabled:opacity-50"
+                                : "bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
                             }`}
                           >
-                            Choose {plan.name}
+                            {availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Quotation only — checkout pending" : "Installation enquiry — coming soon")}
                             <ArrowIcon />
                           </button>
                           <p className="mt-3 text-center text-xs text-zinc-400">
-                            Create the owner account first. School and branch records
-                            can be added after payment.
+                            {availableOnline ? "Create an owner account to continue." : "This package is visible for comparison; online purchase is not yet enabled."}
                           </p>
                         </div>
                       </article>
@@ -1745,7 +1786,7 @@ export default function Home() {
                 </span>
                 <strong className="mt-1 block text-sm">
                   {formatMoney(
-                    planPrice(signupPlan, billingCycle),
+                    publicAmount(signupPlan, billingCycle, studentCount),
                     signupPlan.currency || "GHS",
                   )}
                 </strong>
@@ -1867,7 +1908,7 @@ export default function Home() {
             >
               {signupLoading
                 ? "Creating your account..."
-                : Number(planPrice(signupPlan, billingCycle)) > 0
+                : Number(publicAmount(signupPlan, billingCycle, studentCount)) > 0
                   ? "Create your Eleeveon owner account to payment"
                   : "Create account and activate package"}
               {!signupLoading ? <ArrowIcon /> : null}

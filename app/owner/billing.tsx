@@ -60,6 +60,10 @@ type AccountData = {
       currency?: string;
       priceMonthly?: number;
       priceYearly?: number;
+      priceOneTime?: number | null;
+      deploymentMode?: string;
+      licenseModel?: string;
+      metadata?: { pricing?: { mode?: string; billingPeriod?: string; perStudentRate?: number; minimumAmount?: number; tiers?: Array<{ upTo:number|null; unitPrice:number }> } };
       maxSchools?: number | null;
       maxBranches?: number | null;
       maxUsers?: number | null;
@@ -376,20 +380,27 @@ export default function BillingPage() {
             note={`${summary.unpaidInvoices} unpaid invoice(s)`}
             tone={summary.outstanding > 0 ? "orange" : "green"}
           />
-          <OverviewRow
+          {plan?.metadata?.pricing?.mode && plan.metadata.pricing.mode !== "fixed" ? <OverviewRow
+            icon="👥"
+            title="Student-based pricing"
+            subtitle={`${plan.metadata.pricing.mode === "tiered" ? "Progressive student tiers" : `${money(plan.metadata.pricing.perStudentRate, currency)} per student`} / ${plan.metadata.pricing.billingPeriod || "term"}`}
+            note="Your invoice uses the verified student count; these are package pricing rules."
+            tone="blue"
+          /> : null}
+          {(!plan?.metadata?.pricing?.mode || plan.metadata.pricing.mode === "fixed") && <OverviewRow
             icon="📆"
             title="Monthly Price"
             subtitle={money(plan?.priceMonthly, currency)}
             note="Current plan monthly value"
             tone="gray"
-          />
-          <OverviewRow
+          /> }
+          {(!plan?.metadata?.pricing?.mode || plan.metadata.pricing.mode === "fixed") && <OverviewRow
             icon="🗓️"
             title="Yearly Price"
             subtitle={money(plan?.priceYearly, currency)}
             note="Current plan yearly value"
             tone="gray"
-          />
+          /> }
           <OverviewRow
             icon="📦"
             title="Plan Limits"

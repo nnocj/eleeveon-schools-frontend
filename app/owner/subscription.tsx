@@ -2,818 +2,283 @@
 
 /**
  * app/owner/subscriptions.tsx
- * ---------------------------------------------------------
- * OWNER — SUBSCRIPTIONS
- * Golden compact rewrite
- * ---------------------------------------------------------
- *
- * Data/payment behavior preserved:
- * - Loads plans from /billing/plans.
- * - Loads current subscription from /billing/my-subscription.
- * - Verifies Paystack redirect reference.
- * - Uses PaymentCheckout with planId + billingCycle.
- * - A plan becomes Current only when backend confirms an active subscription
- *   with a paid payment or paid invoice.
- *
- * UI upgrade:
- * - Removed large hero/header block.
- * - Removed large current subscription card.
- * - Replaced all non-plan UI with the compact golden pattern:
- *   search + cycle + refresh + More top row.
- * - Current subscription, notices, loading and empty states are compact rows.
- * - More sheet holds billing cycle, current subscription details and refresh.
- * - Subscription plan cards remain as selling cards, as requested.
- * - Theme-safe variables are used for dark mode and local density support.
+ * Owner package selection — Cloud, trials, private pilots and Independent licences.
+ * Commercial quote is a preview, never a payment authorization.
  */
-
 import React, { useEffect, useMemo, useState } from "react";
 import PaymentCheckout from "../components/payments/PaymentCheckout";
-import {
-  authHeaders,
-  getApiBase,
-  money,
-  readJson,
-} from "../components/payments/payment-utils";
+import { authHeaders, getApiBase, money, readJson } from "../components/payments/payment-utils";
+import { calculateStudentPrice, type StudentPricing } from "../lib/commercial/studentPricing";
 
-type PlanFeatureKey =
-  | "offlineSync"
-  | "cloudBackup"
-  | "reports"
-  | "finance"
-  | "attendance"
-  | "identityCards"
-  | "identitySafety"
-  | "transport"
-  | "schoolWebsites"
-  | "communications"
-  | "calendarScheduling"
-  | "parentPortal"
-  | "studentPortal"
-  | "teacherPortal"
-  | "advancedAnalytics"
-  | "apiAccess"
-  | string;
-
+type Cycle = "monthly" | "termly" | "yearly";
+type Json = Record<string, unknown>;
 type Plan = {
-  id: string;
-  name: string;
-  code: string;
-  description?: string | null;
-  currency?: string | null;
-  priceMonthly?: number;
-  priceTermly?: number;
-  priceYearly?: number;
-  maxSchools?: number | null;
-  maxBranches?: number | null;
-  maxUsers?: number | null;
-  maxStudents?: number | null;
-  maxTeachers?: number | null;
-  maxStorageMb?: number | null;
-
-  offlineSync?: boolean;
-  cloudBackup?: boolean;
-  reports?: boolean;
-  finance?: boolean;
-
-  attendance?: boolean;
-  identityCards?: boolean;
-  identitySafety?: boolean;
-  transport?: boolean;
-  schoolWebsites?: boolean;
-  communications?: boolean;
-  calendarScheduling?: boolean;
-
-  parentPortal?: boolean;
-  studentPortal?: boolean;
-  teacherPortal?: boolean;
-  advancedAnalytics?: boolean;
-  apiAccess?: boolean;
-
-  features?: PlanFeatureKey[] | null;
-  metadata?: {
-    featureFlags?: Record<string, boolean>;
-    featureKeys?: PlanFeatureKey[];
-    featureSchemaVersion?: number;
-    [key: string]: unknown;
-  } | null;
-
-  active?: boolean;
+  id: string; name: string; code: string; description?: string|null;
+  currency?: string|null; active?: boolean; licenseModel?: string|null;
+  deploymentMode?: string|null; availableAcquisitionModes?: string[]|null;
+  priceMonthly?: number|null; priceTermly?: number|null; priceYearly?: number|null;
+  priceOneTime?: number|null; maxSchools?: number|null; maxBranches?: number|null;
+  maxUsers?: number|null; maxStudents?: number|null; maxTeachers?: number|null;
+  maxStorageMb?: number|null; features?: string[]|null;
+  metadata?: (Json & { pricing?: StudentPricing; visibility?: string; publicVisible?: boolean;
+    trialDays?: number; featureFlags?: Record<string,boolean>; featureKeys?: string[] })|null;
+  [key: string]: unknown;
 };
-
-type Invoice = {
-  id: string;
-  invoiceNumber: string;
-  total: number;
-  currency: string;
-  status: string;
-  dueDate?: string | null;
+type Payment = { status?: string|null };
+type Invoice = { status?: string|null; invoiceNumber?: string; total?: number; currency?: string };
+type Subscription = {
+  id?: string; planId?: string|null; plan?: Plan|null; status?: string|null;
+  billingCycle?: string|null; currentPeriodEnd?: string|null; trialEndsAt?: string|null;
+  invoices?: Invoice[]; payments?: Payment[];
 };
-
-type Payment = {
-  id: string;
-  amount: number;
-  currency: string;
-  method: string;
-  provider?: string | null;
-  status: string;
+const LABELS: Record<string,string> = {
+  offlineSync:"Offline-first synchronization", cloudBackup:"Cloud backup", reports:"Assessment and reports",
+  finance:"Finance", attendance:"Attendance", identityCards:"ID cards", identitySafety:"Identity and safety",
+  transport:"Transport", schoolWebsites:"School websites", communications:"Communication",
+  calendarScheduling:"Calendar and scheduling", teacherPortal:"Teacher workspace",
+  parentPortal:"Parent portal", studentPortal:"Student portal", advancedAnalytics:"Advanced analytics", apiAccess:"API access"
 };
-
-type CurrentSubscription = {
-  id?: string;
-  planId?: string;
-  status?: string;
-  billingCycle?: "monthly" | "termly" | "yearly" | string;
-  currentPeriodStart?: string | null;
-  currentPeriodEnd?: string | null;
-  nextBillingDate?: string | null;
-  plan?: Plan;
-  invoices?: Invoice[];
-  payments?: Payment[];
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase();
+const formatDate = (v?:string|null) => {
+  if (!v) return "No scheduled expiry";
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? "Not available" : d.toLocaleDateString("en-GH",{year:"numeric",month:"short",day:"numeric"});
 };
-
-type BillingCycle = "monthly" | "termly" | "yearly";
-
-function niceDate(value?: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString();
-}
-
-function normalizeArray(payload: any): any[] {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.items)) return payload.items;
-  if (Array.isArray(payload?.plans)) return payload.plans;
+const array = (v:any): any[] => {
+  if (Array.isArray(v)) return v;
+  for (const k of ["plans","data","items","results"]) if(Array.isArray(v?.[k])) return v[k];
   return [];
-}
-
-function normalizeStatus(value?: string | null) {
-  return String(value || "").trim().toLowerCase();
-}
-
-function hasConfirmedPayment(current: CurrentSubscription | null) {
-  if (!current) return false;
-
-  const hasPaidPayment = current.payments?.some(
-    (payment) => normalizeStatus(payment.status) === "paid"
-  );
-
-  const hasPaidInvoice = current.invoices?.some(
-    (invoice) => normalizeStatus(invoice.status) === "paid"
-  );
-
-  return Boolean(hasPaidPayment || hasPaidInvoice);
-}
-
-function isActiveConfirmedSubscription(current: CurrentSubscription | null) {
-  if (!current) return false;
-
-  return (
-    Boolean(current.id || current.planId || current.plan?.id) &&
-    normalizeStatus(current.status) === "active" &&
-    hasConfirmedPayment(current)
-  );
-}
-
-function isPendingSubscription(current: CurrentSubscription | null) {
-  if (!current) return false;
-  return Boolean(current.id || current.planId || current.plan?.id) && !isActiveConfirmedSubscription(current);
-}
-
-function subscriptionDisplayStatus(current: CurrentSubscription | null) {
-  if (!current) return "No subscription";
-
-  if (isActiveConfirmedSubscription(current)) {
-    return current.status || "active";
-  }
-
-  if (normalizeStatus(current.status) === "active" && !hasConfirmedPayment(current)) {
-    return "pending payment confirmation";
-  }
-
-  return current.status || "pending payment";
-}
-
-function planPrice(plan: Plan, cycle: BillingCycle) {
-  if (cycle === "yearly") return Number(plan.priceYearly || 0);
-  if (cycle === "termly") {
-    const configured = Number(plan.priceTermly || 0);
-    return configured > 0 ? configured : Number(plan.priceMonthly || 0) * 4;
-  }
-  return Number(plan.priceMonthly || 0);
-}
-
-function billingCycleLabel(cycle: BillingCycle) {
-  if (cycle === "termly") return "4 months";
-  if (cycle === "yearly") return "year";
-  return "month";
-}
-
-const PLAN_FEATURE_LABELS: Record<string, string> = {
-  offlineSync: "Offline-first sync",
-  cloudBackup: "Cloud backup",
-  reports: "Assessments & reports",
-  finance: "Finance",
-  attendance: "Attendance",
-  identityCards: "ID cards & passes",
-  identitySafety: "Identity & safety",
-  transport: "School transport",
-  schoolWebsites: "School websites",
-  communications: "Communication",
-  calendarScheduling: "Calendar & scheduling",
-  parentPortal: "Parent portal",
-  studentPortal: "Student portal",
-  teacherPortal: "Teacher portal",
-  advancedAnalytics: "Advanced analytics",
-  apiAccess: "API access",
 };
-
-const PLAN_FEATURE_ORDER: PlanFeatureKey[] = [
-  "offlineSync",
-  "cloudBackup",
-  "reports",
-  "finance",
-  "attendance",
-  "identityCards",
-  "identitySafety",
-  "transport",
-  "schoolWebsites",
-  "communications",
-  "calendarScheduling",
-  "parentPortal",
-  "studentPortal",
-  "teacherPortal",
-  "advancedAnalytics",
-  "apiAccess",
-];
-
-function planFeatureEnabled(plan: Plan, key: PlanFeatureKey) {
-  const topLevelValue = plan[key as keyof Plan];
-
-  if (typeof topLevelValue === "boolean") {
-    return topLevelValue;
-  }
-
-  const metadataFlag = plan.metadata?.featureFlags?.[key];
-  if (typeof metadataFlag === "boolean") {
-    return metadataFlag;
-  }
-
-  if (Array.isArray(plan.features)) {
-    return plan.features.includes(key);
-  }
-
-  return false;
+function mode(plan:Plan):"trial"|"complimentary"|"perpetual"|"subscription" {
+  const m=norm(plan.licenseModel);
+  if(m==="trial") return "trial";
+  if(m==="complimentary" || m==="pilot") return "complimentary";
+  if(m==="perpetual") return "perpetual";
+  return "subscription";
 }
-
-function humanizeFeatureKey(key: string) {
-  return (
-    PLAN_FEATURE_LABELS[key] ||
-    key
-      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-      .replace(/[_-]+/g, " ")
-      .replace(/\b\w/g, (character) => character.toUpperCase())
-  );
+function privatePlan(p:Plan) {
+  const meta=p.metadata;
+  return meta?.publicVisible===false || ["private","internal","hidden"].includes(norm(meta?.visibility)) ||
+    (Array.isArray(p.availableAcquisitionModes) && p.availableAcquisitionModes.length>0 &&
+       p.availableAcquisitionModes.every(a=>["private_offer","complimentary","pilot","internal"].includes(norm(a))));
 }
-
-function planFeatures(plan: Plan) {
-  const limits = [
-    plan.maxSchools ? `${plan.maxSchools} school(s)` : "Flexible schools",
-    plan.maxBranches ? `${plan.maxBranches} branch(es)` : "Flexible branches",
-    plan.maxUsers ? `${plan.maxUsers} users` : "Flexible users",
-    plan.maxStudents ? `${plan.maxStudents} students` : "Flexible students",
-    plan.maxTeachers ? `${plan.maxTeachers} teachers` : "Flexible teachers",
-    plan.maxStorageMb ? `${plan.maxStorageMb} MB storage` : null,
+function deploy(p:Plan) {
+  const d=norm(p.deploymentMode);
+  if(d.includes("multi_device"))return "Independent Multi-device";
+  if(d.includes("essentials"))return "Independent Essentials";
+  if(d.includes("private")||d.includes("hosted"))return "Private deployment";
+  return "Eleeveon Cloud";
+}
+function kind(p:Plan) {
+  if(mode(p)==="trial")return "Free trial";
+  if(mode(p)==="complimentary"||privatePlan(p))return "Private arrangement";
+  if(mode(p)==="perpetual")return "One-time licence";
+  return "Cloud subscription";
+}
+function pricing(p:Plan): StudentPricing {
+  const v=p.metadata?.pricing;
+  return v && ["fixed","per_student","tiered"].includes(v.mode) ? v : {mode:"fixed"};
+}
+function fixedPrice(p:Plan,c:Cycle) {
+  if(c==="yearly")return Number(p.priceYearly||0);
+  if(c==="termly")return Number(p.priceTermly||0) || Number(p.priceMonthly||0)*4;
+  return Number(p.priceMonthly||0);
+}
+function quote(p:Plan,studentCount:number,cycle:Cycle) {
+  if(mode(p)==="trial"||mode(p)==="complimentary")return {amount:0,period:"trial",estimated:false};
+  if(mode(p)==="perpetual")return {amount:Number(p.priceOneTime||0),period:"one-time",estimated:false};
+  const conf=pricing(p);
+  if(conf.mode!=="fixed")return {amount:calculateStudentPrice(conf,studentCount),period:conf.billingPeriod||"termly",estimated:true};
+  return {amount:fixedPrice(p,cycle),period:cycle,estimated:false};
+}
+function paidEvidence(s:Subscription|null) {
+  return !!s?.payments?.some(p=>norm(p.status)==="paid") || !!s?.invoices?.some(i=>norm(i.status)==="paid");
+}
+function currentAccess(s:Subscription|null) {
+  if(!s)return false;
+  const st=norm(s.status);
+  const type=s.plan?mode(s.plan):"subscription";
+  if(st==="trial")return true;
+  if(st!=="active")return false;
+  if(type==="trial"||type==="complimentary")return true;
+  if(s.plan && (privatePlan(s.plan) || norm(s.plan.code).startsWith("pilot_")))return true;
+  // The backend subscription status is authoritative for an active subscription.
+  // Payments can belong to another invoice; lack of one here is not proof of pending status.
+  return true;
+}
+function features(p:Plan) {
+  const flags=p.metadata?.featureFlags||{};
+  const keys = new Set<string>([...(p.features||[]),...(p.metadata?.featureKeys||[]),
+    ...Object.keys(flags).filter(k=>flags[k]===true)]);
+  const output = [
+    p.maxSchools==null?"Flexible schools":`${p.maxSchools} schools`,
+    p.maxBranches==null?"Flexible branches":`${p.maxBranches} branches`,
+    p.maxUsers==null?"Flexible users":`${p.maxUsers} users`,
+    p.maxStudents==null?"Flexible students":`${p.maxStudents} students`,
+    p.maxTeachers==null?"Flexible teachers":`${p.maxTeachers} teachers`,
   ];
-
-  const knownFeatures = PLAN_FEATURE_ORDER.filter((key) =>
-    planFeatureEnabled(plan, key),
-  ).map((key) => humanizeFeatureKey(key));
-
-  const extraFeatureKeys = Array.from(
-    new Set([
-      ...(Array.isArray(plan.features) ? plan.features : []),
-      ...(Array.isArray(plan.metadata?.featureKeys)
-        ? plan.metadata.featureKeys
-        : []),
-      ...Object.keys(plan.metadata?.featureFlags || {}).filter(
-        (key) => plan.metadata?.featureFlags?.[key] === true,
-      ),
-    ]),
-  ).filter((key) => !PLAN_FEATURE_ORDER.includes(key));
-
-  const extraFeatures = extraFeatureKeys.map((key) =>
-    humanizeFeatureKey(String(key)),
-  );
-
-  return [...limits, ...knownFeatures, ...extraFeatures].filter(
-    (value): value is string => Boolean(value),
-  );
+  for(const key of keys) if(flags[key]!==false && p[key]!==false) output.push(LABELS[key]||key.replace(/([a-z])([A-Z])/g,"$1 $2"));
+  return Array.from(new Set(output));
 }
-
 export default function OwnerSubscriptionPage() {
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [current, setCurrent] = useState<CurrentSubscription | null>(null);
-  const [cycle, setCycle] = useState<BillingCycle>("termly");
-  const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [plans,setPlans]=useState<Plan[]>([]);
+  const [current,setCurrent]=useState<Subscription|null>(null);
+  const [cycle,setCycle]=useState<Cycle>("termly");
+  const [count,setCount]=useState(200);
+  const [search,setSearch]=useState("");
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  const [moreOpen,setMoreOpen]=useState(false);
+  const [selectedPlan,setSelectedPlan]=useState<Plan|null>(null);
+  const apiBase=getApiBase();
 
-  const apiBase = getApiBase();
-
-  async function load(options?: { preserveNotice?: boolean }) {
+  async function load(preserveNotice=false) {
     try {
-      setLoading(true);
-      setError("");
-      if (!options?.preserveNotice) setNotice("");
-
-      const [plansRes, currentRes] = await Promise.all([
-        fetch(`${apiBase}/billing/plans`, { headers: authHeaders() }),
-        fetch(`${apiBase}/billing/my-subscription`, { headers: authHeaders() }),
+      setLoading(true);setError("");if(!preserveNotice)setNotice("");
+      const [pr,sr]=await Promise.all([
+        fetch(`${apiBase}/billing/plans`,{headers:authHeaders()}),
+        fetch(`${apiBase}/billing/my-subscription`,{headers:authHeaders()})
       ]);
-
-      const plansJson = await readJson(plansRes);
-      const currentJson = await readJson(currentRes);
-
-      const activePlans = normalizeArray(plansJson).filter(
-        (plan) => plan.active !== false
-      );
-
-      setPlans(activePlans);
-      setCurrent(currentJson?.id || currentJson?.planId ? currentJson : null);
-
-      const params = new URLSearchParams(window.location.search);
-      const requestedPlanId = params.get("planId");
-      const requestedCycle = params.get("billingCycle");
-      const shouldOpenCheckout = params.get("checkout") === "1";
-
-      if (
-        requestedCycle === "monthly" ||
-        requestedCycle === "termly" ||
-        requestedCycle === "yearly"
-      ) {
-        setCycle(requestedCycle);
+      if(!pr.ok)throw new Error(`Unable to load packages (${pr.status}).`);
+      const pj=await readJson(pr);
+      const active=array(pj).filter((p:Plan)=>p.active!==false) as Plan[];
+      setPlans(active);
+      if(sr.ok){const sj=await readJson(sr);setCurrent(sj?.subscription||sj?.data||sj||null);}
+      else if(sr.status===404)setCurrent(null);
+      else throw new Error(`Unable to load your current package (${sr.status}).`);
+      const params=new URLSearchParams(window.location.search);
+      const c=params.get("billingCycle");
+      if(c==="monthly"||c==="termly"||c==="yearly")setCycle(c);
+      const requested=params.get("planId");
+      if(requested && params.get("checkout")==="1"){
+        const selected=active.find(p=>p.id===requested);
+        // Never auto-open an unsupported commercial checkout.
+        if(selected && mode(selected)==="subscription" && pricing(selected).mode==="fixed" && fixedPrice(selected,(c==="monthly"||c==="termly"||c==="yearly")?c:"termly")>0) setSelectedPlan(selected);
+        else setNotice("Your package is available for review. Activation or checkout is not yet available here for this package type.");
+        const url=new URL(window.location.href);
+        ["planId","checkout","billingCycle","source"].forEach(k=>url.searchParams.delete(k));
+        window.history.replaceState({},"",url.toString());
       }
-
-      if (requestedPlanId && shouldOpenCheckout) {
-        const requestedPlan = activePlans.find(
-          (plan) => plan.id === requestedPlanId,
-        );
-
-        if (requestedPlan) {
-          setSelectedPlan(requestedPlan);
-
-          const cleanUrl = new URL(window.location.href);
-          cleanUrl.searchParams.delete("planId");
-          cleanUrl.searchParams.delete("billingCycle");
-          cleanUrl.searchParams.delete("checkout");
-          cleanUrl.searchParams.delete("source");
-          window.history.replaceState({}, "", cleanUrl.toString());
-        }
-      }
-
-      // Keep the pricing view on the user's selected/default cycle.
-      // The current subscription's billing cycle is shown in the status details,
-      // but it must not override the package-view selector after plans load.
-    } catch (err: any) {
-      setError(err?.message || "Unable to load subscription plans.");
-    } finally {
-      setLoading(false);
-    }
+    }catch(e){setError(e instanceof Error?e.message:"Could not load packages.");}
+    finally{setLoading(false);}
   }
-
-  useEffect(() => {
-    load();
-
-    const params = new URLSearchParams(window.location.search);
-    const reference = params.get("reference");
-
-    if (reference) {
-      verifyAfterRedirect(reference);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function verifyAfterRedirect(reference: string) {
+  async function verifyRedirect(reference:string){
     try {
-      setError("");
-      setNotice("Verifying payment...");
-
-      const res = await fetch(
-        `${apiBase}/billing/payments/verify/${reference}?provider=paystack`,
-        { headers: authHeaders() }
-      );
-
+      setNotice("Verifying payment with the server...");
+      const res=await fetch(`${apiBase}/billing/payments/verify/${encodeURIComponent(reference)}?provider=paystack`,{headers:authHeaders()});
       await readJson(res);
-      await load({ preserveNotice: true });
-
-      setNotice(
-        "Payment verification completed. Your package will show as Current only after the backend confirms the payment as paid and activates the subscription."
-      );
-
-      const url = new URL(window.location.href);
-      url.searchParams.delete("reference");
-      window.history.replaceState({}, "", url.toString());
-    } catch (err: any) {
-      setError(err?.message || "Unable to verify payment.");
-    }
+      if(!res.ok)throw new Error("Payment could not be verified.");
+      await load(true);
+      setNotice("Verification request completed. Check your current package and invoice status.");
+      const url=new URL(window.location.href);url.searchParams.delete("reference");window.history.replaceState({},"",url.toString());
+    }catch(e){setError(e instanceof Error?e.message:"Verification failed.");}
   }
+  useEffect(()=>{
+    void load();
+    const reference=new URLSearchParams(window.location.search).get("reference");
+    if(reference)void verifyRedirect(reference);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
 
-  const confirmedSubscriptionActive = isActiveConfirmedSubscription(current);
-  const pendingSubscription = isPendingSubscription(current);
-
-  const sortedPlans = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    return [...plans]
-      .filter((plan) => {
-        if (!query) return true;
-        const features = planFeatures(plan).join(" ");
-        return `${plan.name} ${plan.code} ${plan.description || ""} ${features}`.toLowerCase().includes(query);
-      })
-      .sort((a, b) => Number(a.priceMonthly || 0) - Number(b.priceMonthly || 0));
-  }, [plans, search]);
-
-  const currentInvoice = current?.invoices?.[0];
-  const currentPlanName = current?.plan?.name || "Selected Plan";
-  const currentStatus = subscriptionDisplayStatus(current);
-
+  const allPlans=useMemo(()=>{
+    const q=norm(search);
+    const owned=current?.plan;
+    const available=plans.filter(p=>!privatePlan(p)||p.id===owned?.id||p.id===current?.planId);
+    if(owned && !available.some(p=>p.id===owned.id))available.unshift(owned);
+    return available.filter(p=>!q||[p.name,p.code,p.description,kind(p),deploy(p),...features(p)].join(" ").toLowerCase().includes(q))
+      .sort((a,b)=>Number(a.metadata?.displayOrder??999)-Number(b.metadata?.displayOrder??999));
+  },[plans,current,search]);
+  const quotedPlans=useMemo(()=>allPlans.filter(p=>mode(p)==="subscription" && pricing(p).mode!=="fixed" && !privatePlan(p)),[allPlans]);
+  const active=currentAccess(current);
+  const currentId=current?.planId||current?.plan?.id;
+  const currentPlan=current?.plan || plans.find(p=>p.id===currentId);
+  const st=norm(current?.status);
+  const trial=st==="trial";
+  const pending=!!current && ["pending","pending_payment","unpaid","processing"].includes(st);
+  const displayCurrency=(p:Plan)=>p.currency||"GHS";
+  function buttonLabel(p:Plan,isCurrent:boolean) {
+    if(isCurrent)return "Current package";
+    if(mode(p)==="trial")return "Trial activation coming soon";
+    if(mode(p)==="perpetual")return "Licence checkout coming soon";
+    if(pricing(p).mode!=="fixed")return "Student-priced checkout coming soon";
+    if(mode(p)==="complimentary")return "Managed by Eleeveon";
+    return fixedPrice(p,cycle)>0?"Choose payment":"Contact Eleeveon";
+  }
+  function canCheckout(p:Plan) {
+    return mode(p)==="subscription"&&pricing(p).mode==="fixed"&&fixedPrice(p,cycle)>0&&!privatePlan(p);
+  }
   return (
     <main className="ba-page subscription-page">
       <style>{css}</style>
-
-      <section className="ba-search-card" aria-label="Subscription search and actions">
-        <label className="ba-search">
-          <span>⌕</span>
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search packages..."
-            aria-label="Search subscription plans"
-          />
-        </label>
-
-        <button
-          type="button"
-          className="ba-add-inline"
-          onClick={() =>
-            setCycle((value) =>
-              value === "monthly" ? "termly" : value === "termly" ? "yearly" : "monthly",
-            )
-          }
-          aria-label="Toggle billing cycle"
-          title="Toggle billing cycle"
-        >
-          {cycle === "monthly" ? "Month" : cycle === "termly" ? "Term" : "Year"}
-        </button>
-
-        <button
-          type="button"
-          className="ba-filter-button"
-          onClick={() => load()}
-          disabled={loading}
-          aria-label="Refresh subscriptions"
-          title="Refresh"
-        >
-          ↻
-        </button>
-
-        <button type="button" className="ba-icon-button" onClick={() => setMoreOpen(true)} aria-label="More options">
-          ⋯
-        </button>
+      <section className="ba-search-card" aria-label="Package search and actions">
+        <label className="ba-search"><span>⌕</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search packages..." aria-label="Search packages"/></label>
+        <button type="button" className="ba-add-inline" onClick={()=>setCycle(v=>v==="monthly"?"termly":v==="termly"?"yearly":"monthly")} title="Change fixed subscription billing period">{cycle==="monthly"?"Month":cycle==="termly"?"Term":"Year"}</button>
+        <button type="button" className="ba-filter-button" onClick={()=>void load()} disabled={loading} aria-label="Refresh">↻</button>
+        <button type="button" className="ba-icon-button" onClick={()=>setMoreOpen(true)} aria-label="More options">⋯</button>
       </section>
-
-      <section className="ba-list compact-status-list" aria-label="Subscription status">
-        {current ? (
-          <button type="button" className="status-row" onClick={() => setMoreOpen(true)}>
-            <span className="status-icon">{confirmedSubscriptionActive ? "✓" : "!"}</span>
-
-            <span className="status-main">
-              <strong>{currentPlanName}</strong>
-              <small>
-                {confirmedSubscriptionActive ? "Current subscription" : "Pending subscription"} · {current.billingCycle || "termly"}
-              </small>
-              <em>
-                {currentStatus} · Ends {confirmedSubscriptionActive ? niceDate(current.currentPeriodEnd) : "after confirmation"}
-              </em>
-            </span>
-
-            <span className="status-side">
-              <span className={`status-dot-mini ${confirmedSubscriptionActive ? "green" : "orange"}`} />
-              <i>⋯</i>
-            </span>
-          </button>
-        ) : (
-          <button type="button" className="status-row" onClick={() => setMoreOpen(true)}>
-            <span className="status-icon">○</span>
-            <span className="status-main">
-              <strong>No active subscription</strong>
-              <small>Choose a package below</small>
-              <em>Plans are available in monthly, four-month termly and yearly billing.</em>
-            </span>
-            <span className="status-side">
-              <span className="status-dot-mini gray" />
-              <i>⋯</i>
-            </span>
-          </button>
-        )}
-
-        {pendingSubscription ? (
-          <SlimNotice tone="orange">
-            Your selected package is waiting for payment confirmation. It will not be marked as Current until the backend confirms a paid payment or paid invoice.
-          </SlimNotice>
-        ) : null}
-
-        {notice ? <SlimNotice tone="green">{notice}</SlimNotice> : null}
-        {error ? <SlimNotice tone="red">{error}</SlimNotice> : null}
-        {loading ? <SlimNotice tone="gray">Loading subscription plans...</SlimNotice> : null}
+      <section className="ba-list compact-status-list" aria-label="Current commercial arrangement">
+        <button type="button" className="status-row" onClick={()=>setMoreOpen(true)}>
+          <span className="status-icon">{active?"✓":pending?"!":"○"}</span>
+          <span className="status-main"><strong>{currentPlan?.name || "Choose your package"}</strong>
+            <small>{currentPlan?kind(currentPlan):"No active package"} · {current?.status||"Not selected"}</small>
+            <em>{trial?`Trial ends ${formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}`:pending?"Awaiting confirmation":active?`Access active · ${formatDate(current?.currentPeriodEnd)}`:"Explore available packages"}</em>
+          </span>
+          <span className="status-side"><span className={`status-dot-mini ${active?"green":pending?"orange":"gray"}`}/><i>⋯</i></span>
+        </button>
+        {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation.</SlimNotice>:null}
+        {notice?<SlimNotice tone="green">{notice}</SlimNotice>:null}
+        {error?<SlimNotice tone="red">{error}</SlimNotice>:null}
+        {loading?<SlimNotice tone="gray">Loading packages...</SlimNotice>:null}
       </section>
-
-      {!loading && !sortedPlans.length ? (
-        <section className="ba-empty">
-          <div className="ba-empty-icon">💳</div>
-          <h3>No active subscription plans found</h3>
-          <p>{search ? "No package matches your search." : "The developer must create and activate subscription plans first."}</p>
-        </section>
-      ) : null}
-
-      <section className="plans-grid" aria-label="Subscription plans">
-        {sortedPlans.map((plan) => {
-          const currency = plan.currency || "GHS";
-          const monthlyPrice = Number(plan.priceMonthly || 0);
-          const configuredTermlyPrice = Number(plan.priceTermly || 0);
-          const termlyPrice =
-            configuredTermlyPrice > 0 ? configuredTermlyPrice : monthlyPrice * 4;
-          const yearlyPrice = Number(plan.priceYearly || 0);
-
-          const expectedTermlyCost = monthlyPrice * 4;
-          const termlyDifference = expectedTermlyCost - termlyPrice;
-          const hasTermlySaving = cycle === "termly" && termlyDifference > 0;
-          const hasTermlyIncrease = cycle === "termly" && termlyDifference < 0;
-
-          const expectedYearlyCost = monthlyPrice * 12;
-          const yearlyDifference = expectedYearlyCost - yearlyPrice;
-          const hasYearlySaving = cycle === "yearly" && yearlyDifference > 0;
-          const hasYearlyIncrease = cycle === "yearly" && yearlyDifference < 0;
-
-          const price = planPrice(plan, cycle);
-
-          const planMatchesCurrent =
-            current?.planId === plan.id || current?.plan?.id === plan.id;
-
-          const isCurrent = confirmedSubscriptionActive && planMatchesCurrent;
-          const isWaitingConfirmation = !confirmedSubscriptionActive && planMatchesCurrent;
-          const features = planFeatures(plan);
-
-          return (
-            <article
-              key={plan.id}
-              className={isCurrent ? "plan current" : isWaitingConfirmation ? "plan waiting" : "plan"}
-            >
-              {isCurrent ? <div className="ribbon">Current</div> : null}
-              {isWaitingConfirmation ? <div className="ribbon waiting-ribbon">Pending</div> : null}
-
-              <div>
-                <span className="badge">{plan.code}</span>
-                <h2>{plan.name}</h2>
-                <p>{plan.description || "A flexible package for your school."}</p>
-              </div>
-
-              <div className="price">
-                <div>
-                  <strong>{money(price, currency)}</strong>
-                  <span>/{billingCycleLabel(cycle)}</span>
-                </div>
-
-                {cycle === "termly" ? (
-                  <small>
-                    Four monthly payments would cost:{" "}
-                    <b>{money(expectedTermlyCost, currency)}</b>
-                  </small>
-                ) : null}
-
-                {cycle === "yearly" ? (
-                  <small>
-                    Twelve monthly payments would cost:{" "}
-                    <b>{money(expectedYearlyCost, currency)}</b>
-                  </small>
-                ) : null}
-              </div>
-
-              {hasTermlySaving ? (
-                <div className="saving-pill">
-                  Save {money(termlyDifference, currency)} every 4 months
-                </div>
-              ) : null}
-
-              {hasTermlyIncrease ? (
-                <div className="saving-pill warning">
-                  Termly is {money(Math.abs(termlyDifference), currency)} higher
-                </div>
-              ) : null}
-
-              {hasYearlySaving ? (
-                <div className="saving-pill">
-                  Save {money(yearlyDifference, currency)} yearly
-                </div>
-              ) : null}
-
-              {hasYearlyIncrease ? (
-                <div className="saving-pill warning">
-                  Yearly is {money(Math.abs(yearlyDifference), currency)} higher
-                </div>
-              ) : null}
-
-              {isWaitingConfirmation ? (
-                <div className="saving-pill warning">
-                  Waiting for confirmed payment
-                </div>
-              ) : null}
-
-              <ul>
-                {features.slice(0, 16).map((feature) => (
-                  <li key={String(feature)}>✓ {feature}</li>
-                ))}
-              </ul>
-
-              {features.length > 16 ? (
-                <small className="feature-count">
-                  +{features.length - 16} more included
-                </small>
-              ) : null}
-
-              <button
-                type="button"
-                disabled={isCurrent}
-                onClick={() => setSelectedPlan(plan)}
-              >
-                {isCurrent
-                  ? "Current plan"
-                  : isWaitingConfirmation
-                  ? Number(price || 0) > 0
-                    ? "Retry or complete payment"
-                    : "Complete activation"
-                  : Number(price || 0) > 0
-                  ? "Choose payment"
-                  : "Activate free plan"}
-              </button>
-            </article>
-          );
+      <section className="quote-panel" aria-label="Instant student quotation">
+        <div className="quote-heading"><strong>Get an instant student quote</strong><small>Enter the number of students. Estimated prices appear here, regardless of the package cards below.</small></div>
+        <div className="quote-layout">
+          <label className="quote-field"><span>Number of students</span><input type="number" min="1" max="1000000" value={count} onChange={e=>setCount(Math.min(1000000,Math.max(1,Math.floor(Number(e.target.value)||1))))}/></label>
+          <div className="quote-results">
+            {quotedPlans.length?quotedPlans.map(p=>{
+              const q=quote(p,count,cycle);
+              return <div className="quote-result" key={p.id}><div><strong>{p.name}</strong><small>{deploy(p)} · /{q.period}</small></div><b>{q.amount==null?"Quote unavailable":money(q.amount,displayCurrency(p))}</b></div>;
+            }):<div className="quote-result"><span>No published per-student pricing available.</span></div>}
+          </div>
+        </div>
+        <small className="quote-disclaimer">Estimates only. Your invoice and payment amount must be confirmed by the server. No payment is initiated by entering a student count.</small>
+      </section>
+      {!loading&&!allPlans.length?<section className="ba-empty"><h3>No packages found</h3><p>Try adjusting your search.</p></section>:null}
+      <section className="plans-grid" aria-label="Commercial packages">
+        {allPlans.map(p=>{
+          const q=quote(p,count,cycle);
+          const isCurrent=!!currentId&&currentId===p.id&&active;
+          const waiting=!!currentId&&currentId===p.id&&pending;
+          const disabled=isCurrent||!canCheckout(p);
+          return <article key={p.id} className={isCurrent?"plan current":waiting?"plan waiting":"plan"}>
+            {isCurrent?<div className="ribbon">Current</div>:waiting?<div className="ribbon waiting-ribbon">Pending</div>:null}
+            <div><span className="badge">{p.code} · {kind(p)}</span><h2>{p.name}</h2><p>{p.description||"An Eleeveon Schools package."}</p></div>
+            <div className="price"><div><strong>{mode(p)==="trial"||mode(p)==="complimentary"?"Included":q.amount==null?"Request quote":money(q.amount,displayCurrency(p))}</strong>
+              <span>{mode(p)==="trial"?`· ${Number(p.metadata?.trialDays||14)}-day trial`:mode(p)==="perpetual"?"· one-time licence":mode(p)==="complimentary"?"· complimentary":`/${q.period}`}</span></div>
+              <small>{q.estimated?`Estimate for ${count.toLocaleString()} students`:mode(p)==="perpetual"?deploy(p):mode(p)==="trial"?"No upfront payment":"Price is configured by the package"}</small>
+            </div>
+            <ul>{features(p).slice(0,16).map(f=><li key={f}>✓ {f}</li>)}</ul>
+            <button type="button" disabled={disabled} onClick={()=>setSelectedPlan(p)}>{buttonLabel(p,isCurrent)}</button>
+          </article>;
         })}
       </section>
-
-      {moreOpen ? (
-        <MoreSheet
-          cycle={cycle}
-          setCycle={setCycle}
-          current={current}
-          currentInvoice={currentInvoice}
-          confirmedSubscriptionActive={confirmedSubscriptionActive}
-          currentStatus={currentStatus}
-          loading={loading}
-          onRefresh={async () => {
-            setMoreOpen(false);
-            await load();
-          }}
-          onClose={() => setMoreOpen(false)}
-        />
-      ) : null}
-
-      {selectedPlan ? (
-        <PaymentCheckout
-          open={Boolean(selectedPlan)}
-          onClose={() => setSelectedPlan(null)}
-          title={selectedPlan.name}
-          description={selectedPlan.description || "Complete your subscription payment."}
-          amount={planPrice(selectedPlan, cycle)}
-          currency={selectedPlan.currency || "GHS"}
-          planId={selectedPlan.id}
-          billingCycle={cycle}
-          onSuccess={async (result) => {
-            setNotice(
-              result.message ||
-                "Payment started. Your package will become Current only after payment is confirmed."
-            );
-            setSelectedPlan(null);
-            await load({ preserveNotice: true });
-          }}
-          onError={(message) => setError(message)}
-        />
-      ) : null}
+      {moreOpen?<div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
+        <div className="ba-sheet-head"><div><h2>Package details</h2><p>Your current commercial arrangement</p></div><button type="button" onClick={()=>setMoreOpen(false)}>✕</button></div>
+        <div className="sub-info-list"><InfoLine label="Package" value={currentPlan?.name||"None"}/><InfoLine label="Type" value={currentPlan?kind(currentPlan):"Not selected"}/><InfoLine label="Deployment" value={currentPlan?deploy(currentPlan):"—"}/><InfoLine label="Status" value={current?.status||"None"}/><InfoLine label="Access until" value={formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}/><InfoLine label="Payment recorded" value={paidEvidence(current)?"Yes":"No paid record in this response"}/></div>
+        <div className="cycle-sheet">{(["termly","monthly","yearly"] as Cycle[]).map(c=><button key={c} type="button" className={cycle===c?"active":""} onClick={()=>setCycle(c)}>{c}</button>)}</div>
+        <div className="ba-menu-list"><button type="button" onClick={()=>{setMoreOpen(false);void load()}}><span>↻</span><b>Refresh</b><small>Reload account and catalogue</small></button></div>
+      </section></div>:null}
+      {selectedPlan?<PaymentCheckout open={true} onClose={()=>setSelectedPlan(null)} title={selectedPlan.name}
+        description={selectedPlan.description||"Complete your subscription payment."}
+        amount={fixedPrice(selectedPlan,cycle)} currency={displayCurrency(selectedPlan)} planId={selectedPlan.id} billingCycle={cycle}
+        onSuccess={async result=>{setNotice(result.message||"Payment request received. Awaiting verification.");setSelectedPlan(null);await load(true)}}
+        onError={msg=>setError(msg)}/>:null}
     </main>
   );
 }
-
-function SlimNotice({ tone, children }: { tone: "green" | "red" | "orange" | "gray"; children: React.ReactNode }) {
-  return (
-    <section className={`slim-notice ${tone}`}>
-      <span className={`status-dot-mini ${tone === "red" ? "red" : tone === "orange" ? "orange" : tone === "green" ? "green" : "gray"}`} />
-      <p>{children}</p>
-    </section>
-  );
-}
-
-function MoreSheet({
-  cycle,
-  setCycle,
-  current,
-  currentInvoice,
-  confirmedSubscriptionActive,
-  currentStatus,
-  loading,
-  onRefresh,
-  onClose,
-}: {
-  cycle: BillingCycle;
-  setCycle: (cycle: BillingCycle) => void;
-  current: CurrentSubscription | null;
-  currentInvoice?: Invoice;
-  confirmedSubscriptionActive: boolean;
-  currentStatus: string;
-  loading: boolean;
-  onRefresh: () => void | Promise<void>;
-  onClose: () => void;
-}) {
-  return (
-    <div className="ba-sheet-backdrop" role="dialog" aria-modal="true">
-      <section className="ba-sheet small">
-        <div className="ba-sheet-head">
-          <div>
-            <h2>More</h2>
-            <p>Billing cycle, subscription state and quick refresh.</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close menu">✕</button>
-        </div>
-
-        <div className="cycle-sheet">
-          <button
-            type="button"
-            className={cycle === "termly" ? "active" : ""}
-            onClick={() => setCycle("termly")}
-          >
-            Termly
-            <small>4 months</small>
-          </button>
-          <button
-            type="button"
-            className={cycle === "monthly" ? "active" : ""}
-            onClick={() => setCycle("monthly")}
-          >
-            Monthly
-          </button>
-          <button
-            type="button"
-            className={cycle === "yearly" ? "active" : ""}
-            onClick={() => setCycle("yearly")}
-          >
-            Yearly
-          </button>
-        </div>
-
-        <div className="sub-info-list">
-          <InfoLine label="Plan" value={current?.plan?.name || "No subscription"} />
-          <InfoLine label="Status" value={currentStatus} />
-          <InfoLine label="Billing" value={current?.billingCycle || "termly"} />
-          <InfoLine label="Current" value={confirmedSubscriptionActive ? "Confirmed" : current ? "Pending" : "None"} />
-          <InfoLine label="Ends" value={confirmedSubscriptionActive ? niceDate(current?.currentPeriodEnd) : "After confirmation"} />
-          {currentInvoice ? (
-            <InfoLine
-              label="Invoice"
-              value={`${currentInvoice.invoiceNumber} · ${money(currentInvoice.total, currentInvoice.currency)} · ${currentInvoice.status}`}
-            />
-          ) : null}
-        </div>
-
-        <div className="ba-menu-list">
-          <button type="button" onClick={onRefresh} disabled={loading}>
-            <span>↻</span>
-            <b>{loading ? "Refreshing..." : "Refresh subscription"}</b>
-            <small>Reload plans, invoices and current package</small>
-          </button>
-
-          <button type="button" onClick={onClose}>
-            <span>✓</span>
-            <b>Close</b>
-            <small>Return to package cards</small>
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function InfoLine({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
+function SlimNotice({tone,children}:{tone:"green"|"red"|"orange"|"gray";children:React.ReactNode}){return <section className={`slim-notice ${tone}`}><span className={`status-dot-mini ${tone}`}/><p>{children}</p></section>}
+function InfoLine({label,value}:{label:string;value:string}){return <div><span>{label}</span><strong>{value}</strong></div>}
 
 const css = `
 @keyframes spin{to{transform:rotate(360deg)}}

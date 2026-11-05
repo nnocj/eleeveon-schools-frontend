@@ -33,6 +33,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import TrialAccountSummary from "./components/TrialAccountSummary";
 
 import { useAccount } from "../context/account-context";
 import { useSettings } from "../context/settings-context";
@@ -419,6 +420,8 @@ export default function BillingPage() {
           <p>{notice}</p>
         </section>
       ) : null}
+
+      <TrialAccountSummary />
 
       <section className="ba-filter-chips" aria-label="Billing views">
         <button type="button" className={viewMode === "overview" ? "active" : ""} onClick={() => setViewMode("overview")}>

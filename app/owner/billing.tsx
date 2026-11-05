@@ -421,7 +421,7 @@ export default function BillingPage() {
         </section>
       ) : null}
 
-      <TrialAccountSummary />
+      <TrialAccountSummary onExplorePackages={() => router.push("/owner/subscription")} />
 
       <section className="ba-filter-chips" aria-label="Billing views">
         <button type="button" className={viewMode === "overview" ? "active" : ""} onClick={() => setViewMode("overview")}>

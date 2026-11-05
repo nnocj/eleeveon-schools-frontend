@@ -122,6 +122,8 @@ import {
 import { genericEntityToMarker, type MapMarker } from "../../lib/maps";
 
 import { resolveAdmissionNumber } from "../../lib/students/admissionNumbers";
+import { assertLocalStudentCapacity } from "../../lib/commercial/studentCapacity";
+import StudentCapacityStrip from "../../components/commercial/StudentCapacityStrip";
 import { processStudentPromotions, type StudentPromotionDraft } from "./Promotion";
 import ExcelFilePicker from "../../components/excel/ExcelFilePicker";
 import ExcelColumnMappingEditor from "../../components/excel/ExcelColumnMapping";
@@ -2552,6 +2554,12 @@ export default function StudentsPage() {
         throw new Error("This admission number is confirmed. Use the authorized admission-number correction workflow; ordinary student edits cannot change it.");
       }
 
+      // Admission capacity applies only to a NEW student. Editing an existing
+      // student never consumes another place. The server remains authoritative.
+      if (!form.id) {
+        await assertLocalStudentCapacity(accountId, 1);
+      }
+
       const resolvedAdmission = !form.id
         ? await resolveAdmissionNumber({ accountId, schoolId, branchId, supplied: form.admissionNumber })
         : { admissionNumber: form.admissionNumber.trim() || undefined, provisional: false };
@@ -2983,6 +2991,10 @@ export default function StudentsPage() {
           </button>
         </section>
       )}
+
+      {/* Account-wide entitlement capacity; independent of branch filters.
+          Refresh after local student changes and synchronization revisions. */}
+      <StudentCapacityStrip key={`${accountId}:${dataRevision}`} accountId={accountId} />
 
       {viewMode === "summary" && (
         <section className="ba-analysis-grid">

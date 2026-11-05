@@ -29,6 +29,7 @@ import {
 
 import { resolveAdmissionNumber, readAdmissionConfiguration } from "../../students/admissionNumbers";
 import { calculateStudentAge } from "../../students/studentAge";
+import { assertLocalStudentCapacity } from "../../commercial/studentCapacity";
 
 import type {
   ExcelValidationIssue,
@@ -695,6 +696,9 @@ export async function importValidatedStudents(
         action =
           "updated";
       } else {
+        // A new student consumes one place; updates and duplicate skips do not.
+        // Import continues to report failures per row, without losing earlier rows.
+        await assertLocalStudentCapacity(context.accountId, 1);
         const payload =
           buildStudentPayload(
             row,

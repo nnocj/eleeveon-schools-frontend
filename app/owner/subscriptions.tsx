@@ -26,6 +26,17 @@ type Plan = {
   [key: string]: unknown;
 };
 type Payment = { status?: string|null };
+type ServerQuote = {
+  id: string; accountId?: string; toPlanId: string; status: string;
+  currency: string; amountDue: number; quoteExpiresAt: string;
+  calculation?: { studentCount?: number; studentPricingMode?: string };
+  payment?: { providerReference?: string; authorizationUrl?: string; status?: string };
+};
+const STUDENT_CHECKOUT_ENABLED = ["test", "live"].includes(
+  (process.env.NEXT_PUBLIC_STUDENT_PRICED_CHECKOUT_MODE || "off").toLowerCase()
+);
+const PENDING_QUOTE_KEY = "eleeveon_owner_student_checkout_quote";
+
 type Invoice = { status?: string|null; invoiceNumber?: string; total?: number; currency?: string };
 type Subscription = {
   id?: string; planId?: string|null; plan?: Plan|null; status?: string|null;
@@ -95,11 +106,19 @@ function quote(p:Plan,studentCount:number,cycle:Cycle) {
 function paidEvidence(s:Subscription|null) {
   return !!s?.payments?.some(p=>norm(p.status)==="paid") || !!s?.invoices?.some(i=>norm(i.status)==="paid");
 }
+function trialWindow(s: Subscription | null) {
+  const trial = norm(s?.status) === "trial";
+  const timestamp = s?.trialEndsAt ? Date.parse(s.trialEndsAt) : NaN;
+  const known = Number.isFinite(timestamp);
+  const expired = trial && known && timestamp <= Date.now();
+  const days = trial && known ? Math.max(0, Math.ceil((timestamp - Date.now()) / 86400000)) : null;
+  return { trial, known, expired, days, endsAt: s?.trialEndsAt || null };
+}
 function currentAccess(s:Subscription|null) {
   if(!s)return false;
   const st=norm(s.status);
   const type=s.plan?mode(s.plan):"subscription";
-  if(st==="trial")return true;
+  if(st==="trial")return !trialWindow(s).expired;
   if(st!=="active")return false;
   if(type==="trial"||type==="complimentary")return true;
   if(s.plan && (privatePlan(s.plan) || norm(s.plan.code).startsWith("pilot_")))return true;
@@ -132,6 +151,13 @@ export default function OwnerSubscriptionPage() {
   const [notice,setNotice]=useState("");
   const [moreOpen,setMoreOpen]=useState(false);
   const [selectedPlan,setSelectedPlan]=useState<Plan|null>(null);
+  const [studentCheckoutPlan,setStudentCheckoutPlan]=useState<Plan|null>(null);
+  const [serverQuote,setServerQuote]=useState<ServerQuote|null>(null);
+  const [checkoutBusy,setCheckoutBusy]=useState(false);
+  const [payerEmail,setPayerEmail]=useState("");
+  const [checkoutError,setCheckoutError]=useState("");
+  const [recoveredCheckoutUrl,setRecoveredCheckoutUrl]=useState<string|null>(null);
+
   const apiBase=getApiBase();
 
   async function load(preserveNotice=false) {
@@ -164,6 +190,93 @@ export default function OwnerSubscriptionPage() {
     }catch(e){setError(e instanceof Error?e.message:"Could not load packages.");}
     finally{setLoading(false);}
   }
+  async function quoteRequest(path:string, body?:Record<string,unknown>):Promise<any> {
+    const response=await fetch(`${apiBase}${path}`, {
+      method:body?"POST":"GET",
+      headers:{...authHeaders(),...(body?{"Content-Type":"application/json"}:{})},
+      ...(body?{body:JSON.stringify(body)}:{}),
+    });
+    const payload=await readJson(response);
+    if(!response.ok) throw new Error(String(payload?.message || payload?.error || `Request failed (${response.status}).`));
+    return payload;
+  }
+  function openStudentCheckout(plan:Plan){
+    setStudentCheckoutPlan(plan);setServerQuote(null);setCheckoutError("");setRecoveredCheckoutUrl(null);
+    try{if(sessionStorage.getItem(PENDING_QUOTE_KEY))setCheckoutError("A previous checkout was started. Select 'Check existing quotation / payment status' before preparing another payment.");}catch{}
+  }
+  async function requestServerQuote(){
+    if(!studentCheckoutPlan||checkoutBusy)return;
+    try{if(sessionStorage.getItem(PENDING_QUOTE_KEY)){setCheckoutError("Review the previous quotation first. Do not create another payment request until it is resolved.");return;}}catch{}
+    setCheckoutBusy(true);setCheckoutError("");
+    try {
+      const result=await quoteRequest("/billing/subscription-quotes", {
+        toPlanId:studentCheckoutPlan.id,billingCycle:cycle,
+        changeType:current?.id && !["trial","expired","cancelled","suspended"].includes(norm(current.status))?"upgrade":"new",effectiveMode:"immediate",
+      }) as ServerQuote;
+      if(!result.id || result.toPlanId!==studentCheckoutPlan.id ||
+         !Number.isFinite(result.amountDue) || result.amountDue<=0 ||
+         result.currency!=="GHS" || result.status!=="quoted" ||
+         !result.calculation?.studentCount ||
+         new Date(result.quoteExpiresAt).getTime()<=Date.now()) {
+        throw new Error("The server did not return a valid payable student quotation.");
+      }
+      setServerQuote(result);
+      try{sessionStorage.setItem(PENDING_QUOTE_KEY,result.id);}catch{}
+    }catch(error){setCheckoutError(error instanceof Error?error.message:"Unable to prepare quotation.");}
+    finally{setCheckoutBusy(false);}
+  }
+  async function refreshQuoteStatus(){
+    const quoteId=serverQuote?.id || (()=>{try{return sessionStorage.getItem(PENDING_QUOTE_KEY)}catch{return null}})();
+    if(!quoteId||checkoutBusy)return;
+    setCheckoutBusy(true);setCheckoutError("");
+    try{
+      const recovery=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}/recover`) as {
+        status:string; applied:boolean; authorizationUrl?:string|null; requiresManualReview?:boolean; verification?:string;
+      };
+      const result=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}`) as ServerQuote;
+      setServerQuote(result);
+      if(recovery.authorizationUrl){
+        setCheckoutError("Your existing Paystack checkout is available. Open that same session below; do not create a second payment.");
+        setRecoveredCheckoutUrl(recovery.authorizationUrl);
+      } else {
+        setRecoveredCheckoutUrl(null);
+      }
+      if(recovery.requiresManualReview){
+        setCheckoutError("The earlier payment attempt is not resolved. Please contact support with the quotation ID. Do not pay again.");
+      }
+      if(["cancelled","expired"].includes(result.status)){try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}}
+      if(result.status==="applied"){
+        try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}
+        await load(true);setNotice("The server confirms your subscription was activated.");
+      } else if(["payment_pending","checkout_initializing","paid"].includes(result.status)){
+        setCheckoutError("Payment is being processed. Verify its status before any new checkout; do not pay twice.");
+      }
+    }catch(error){setCheckoutError(error instanceof Error?error.message:"Could not refresh payment status.");}
+    finally{setCheckoutBusy(false);}
+  }
+  async function beginStudentPayment(){
+    if(!studentCheckoutPlan||!serverQuote||checkoutBusy)return;
+    const email=payerEmail.trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){setCheckoutError("Enter a valid payer email address.");return;}
+    if(serverQuote.status!=="quoted" || Date.parse(serverQuote.quoteExpiresAt)<=Date.now()){
+      setCheckoutError("This quotation is no longer payable. Refresh the quotation status.");return;
+    }
+    setCheckoutBusy(true);setCheckoutError("");
+    setServerQuote(previous=>previous?{...previous,status:"checkout_initializing"}:previous);
+    try{
+      const result=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(serverQuote.id)}/pay`,{
+        paymentMethod:"card",provider:"paystack",payerEmail:email,
+      });
+      const url=String(result.authorizationUrl||result.providerResponse?.authorizationUrl||"");
+      if(!url || !url.startsWith("https://") || !(new URL(url).hostname === "paystack.com" || new URL(url).hostname.endsWith(".paystack.com"))){
+        throw new Error("No valid Paystack checkout link was returned. Check payment status; do not attempt another charge.");
+      }
+      window.location.assign(url);
+    }catch(error){
+      setCheckoutError(`${error instanceof Error?error.message:"Checkout could not start."} Check the quotation status before trying again.`);
+      // Do not automatically allow another payment attempt: the server may already have initialized checkout.
+    }finally{setCheckoutBusy(false);}
+  }
   async function verifyRedirect(reference:string){
     try {
       setNotice("Verifying payment with the server...");
@@ -191,7 +304,20 @@ export default function OwnerSubscriptionPage() {
       .sort((a,b)=>Number(a.metadata?.displayOrder??999)-Number(b.metadata?.displayOrder??999));
   },[plans,current,search]);
   const quotedPlans=useMemo(()=>allPlans.filter(p=>mode(p)==="subscription" && pricing(p).mode!=="fixed" && !privatePlan(p)),[allPlans]);
+  const windowStatus = trialWindow(current);
   const active=currentAccess(current);
+  const subscriptionRestricted = ["expired", "suspended", "cancelled"].includes(norm(current?.status)) || windowStatus.expired;
+  const trialEndingSoon = windowStatus.trial && windowStatus.known && !windowStatus.expired && windowStatus.days !== null && windowStatus.days <= 7;
+  const paidOptions = allPlans.filter(canPayForPlan);
+  function canPayForPlan(p:Plan) {
+    return mode(p)==="subscription" && !privatePlan(p) &&
+      (pricing(p).mode==="fixed" ? fixedPrice(p,cycle)>0 : STUDENT_CHECKOUT_ENABLED);
+  }
+  function jumpToPaidPlans() {
+    setSearch("");
+    window.requestAnimationFrame(()=>document.getElementById("owner-commercial-packages")?.scrollIntoView({behavior:"smooth",block:"start"}));
+  }
+
   const currentId=current?.planId||current?.plan?.id;
   const currentPlan=current?.plan || plans.find(p=>p.id===currentId);
   const st=norm(current?.status);
@@ -202,12 +328,12 @@ export default function OwnerSubscriptionPage() {
     if(isCurrent)return "Current package";
     if(mode(p)==="trial")return "Trial activation coming soon";
     if(mode(p)==="perpetual")return "Licence checkout coming soon";
-    if(pricing(p).mode!=="fixed")return "Student-priced checkout coming soon";
+    if(pricing(p).mode!=="fixed")return STUDENT_CHECKOUT_ENABLED?"Get verified quote":"Student checkout not yet enabled";
     if(mode(p)==="complimentary")return "Managed by Eleeveon";
     return fixedPrice(p,cycle)>0?"Choose payment":"Contact Eleeveon";
   }
   function canCheckout(p:Plan) {
-    return mode(p)==="subscription"&&pricing(p).mode==="fixed"&&fixedPrice(p,cycle)>0&&!privatePlan(p);
+    return canPayForPlan(p);
   }
   return (
     <main className="ba-page subscription-page">
@@ -218,21 +344,24 @@ export default function OwnerSubscriptionPage() {
         <button type="button" className="ba-filter-button" onClick={()=>void load()} disabled={loading} aria-label="Refresh">↻</button>
         <button type="button" className="ba-icon-button" onClick={()=>setMoreOpen(true)} aria-label="More options">⋯</button>
       </section>
+      <style>{`.trial-conversion-notice{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:15px;border:1px solid var(--border,rgba(148,163,184,.3));background:var(--card-bg,var(--surface,#fff))}.trial-conversion-notice>div{flex:1 1 240px;min-width:0}.trial-conversion-notice strong{font-size:14px}.trial-conversion-notice p{margin:4px 0;font-size:12px;line-height:1.45}.trial-conversion-notice small{display:block;color:var(--muted,#64748b);font-size:11px}.trial-conversion-notice button{border:0;border-radius:12px;background:var(--primary-color,#2563eb);color:white;padding:10px 13px;font-weight:800;cursor:pointer}.trial-conversion-notice button:focus-visible{outline:2px solid currentColor;outline-offset:3px}`}</style>
       <section className="ba-list compact-status-list" aria-label="Current commercial arrangement">
         <button type="button" className="status-row" onClick={()=>setMoreOpen(true)}>
           <span className="status-icon">{active?"✓":pending?"!":"○"}</span>
           <span className="status-main"><strong>{currentPlan?.name || "Choose your package"}</strong>
             <small>{currentPlan?kind(currentPlan):"No active package"} · {current?.status||"Not selected"}</small>
-            <em>{trial?`Trial ends ${formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}`:pending?"Awaiting confirmation":active?`Access active · ${formatDate(current?.currentPeriodEnd)}`:"Explore available packages"}</em>
+            <em>{windowStatus.expired?`Trial ended ${formatDate(windowStatus.endsAt)}`:trial?`Trial ends ${formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}`:pending?"Awaiting confirmation":active?`Access active · ${formatDate(current?.currentPeriodEnd)}`:"Explore available packages"}</em>
           </span>
           <span className="status-side"><span className={`status-dot-mini ${active?"green":pending?"orange":"gray"}`}/><i>⋯</i></span>
         </button>
-        {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation.</SlimNotice>:null}
+        {subscriptionRestricted ? <section className="trial-conversion-notice" role="status"><div><strong>Your package needs attention</strong><p>{windowStatus.expired ? `Your trial ended on ${formatDate(windowStatus.endsAt)}.` : `Your subscription status is ${current?.status || "restricted"}.`} Your school records are not deleted. Access and permitted actions depend on the server's effective entitlement.</p><small>{paidOptions.length ? "Select a supported paid cloud package below to begin checkout. A package is activated only after the server confirms payment." : "No self-service paid package is currently available. Please contact Eleeveon for conversion."}</small></div><button type="button" onClick={jumpToPaidPlans}>View paid packages</button></section> : null}
+        {trialEndingSoon ? <section className="trial-conversion-notice" role="status"><div><strong>{windowStatus.days === 0 ? "Trial ends today" : `${windowStatus.days} day${windowStatus.days === 1 ? "" : "s"} left in your trial`}</strong><p>Your trial ends {formatDate(windowStatus.endsAt)}. Choose a supported paid package before it ends to avoid an interruption.</p></div><button type="button" onClick={jumpToPaidPlans}>Explore paid packages</button></section> : null}
+        {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation. Do not make a duplicate payment until the invoice and provider status have been checked.</SlimNotice>:null}
         {notice?<SlimNotice tone="green">{notice}</SlimNotice>:null}
         {error?<SlimNotice tone="red">{error}</SlimNotice>:null}
         {loading?<SlimNotice tone="gray">Loading packages...</SlimNotice>:null}
       </section>
-      <TrialAccountSummary onExplorePackages={()=>document.getElementById("owner-commercial-packages")?.scrollIntoView({behavior:"smooth",block:"start"})}/>
+      <TrialAccountSummary refreshKey={`${current?.id || ""}:${current?.status || ""}:${current?.trialEndsAt || ""}`} onExplorePackages={jumpToPaidPlans}/>
       <section className="quote-panel" aria-label="Instant student quotation">
         <div className="quote-heading"><strong>Get an instant student quote</strong><small>Enter the number of students. Estimated prices appear here, regardless of the package cards below.</small></div>
         <div className="quote-layout">
@@ -261,7 +390,7 @@ export default function OwnerSubscriptionPage() {
               <small>{q.estimated?`Estimate for ${count.toLocaleString()} students`:mode(p)==="perpetual"?deploy(p):mode(p)==="trial"?"No upfront payment":"Price is configured by the package"}</small>
             </div>
             <ul>{features(p).slice(0,16).map(f=><li key={f}>✓ {f}</li>)}</ul>
-            <button type="button" disabled={disabled} onClick={()=>setSelectedPlan(p)}>{buttonLabel(p,isCurrent)}</button>
+            <button type="button" disabled={disabled} onClick={()=>pricing(p).mode==="fixed"?setSelectedPlan(p):openStudentCheckout(p)}>{buttonLabel(p,isCurrent)}</button>
           </article>;
         })}
       </section>
@@ -271,10 +400,30 @@ export default function OwnerSubscriptionPage() {
         <div className="cycle-sheet">{(["termly","monthly","yearly"] as Cycle[]).map(c=><button key={c} type="button" className={cycle===c?"active":""} onClick={()=>setCycle(c)}>{c}</button>)}</div>
         <div className="ba-menu-list"><button type="button" onClick={()=>{setMoreOpen(false);void load()}}><span>↻</span><b>Refresh</b><small>Reload account and catalogue</small></button></div>
       </section></div>:null}
+      {studentCheckoutPlan?<div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
+        <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);}}>✕</button></div>
+        <div className="student-checkout-content">
+          <p>The amount shown on package cards is an estimate. Your school's enrolled student count and amount are verified by the backend before payment.</p>
+          {serverQuote?<div className="student-checkout-quote">
+            <strong>{money(serverQuote.amountDue,serverQuote.currency)}</strong>
+            <span>{serverQuote.calculation?.studentCount ?? "—"} students · expires {formatDate(serverQuote.quoteExpiresAt)}</span>
+            <small>Quotation status: {serverQuote.status}</small>
+          </div>:null}
+          {checkoutError?<p role="alert" className="student-checkout-error">{checkoutError}</p>:null}
+          {!serverQuote?<button type="button" className="student-checkout-primary" disabled={checkoutBusy} onClick={()=>void requestServerQuote()}>{checkoutBusy?"Preparing quotation…":"Get server quotation"}</button>:null}
+          {serverQuote?.status==="quoted"?<>
+            <label className="student-checkout-email">Payer email<input type="email" autoComplete="email" value={payerEmail} onChange={e=>setPayerEmail(e.target.value)} placeholder="name@example.com" /></label>
+            <button type="button" className="student-checkout-primary" disabled={checkoutBusy || new Date(serverQuote.quoteExpiresAt).getTime()<=Date.now()} onClick={()=>void beginStudentPayment()}>{checkoutBusy?"Connecting…":"Continue securely with Paystack"}</button>
+          </>:null}
+          <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>Check existing quotation / payment status</button>
+          {recoveredCheckoutUrl && <a href={recoveredCheckoutUrl} rel="noopener noreferrer" target="_blank" className="ba-btn">Continue existing Paystack checkout</a>}
+          <small>Never pay twice for an unconfirmed order. Your subscription only activates after verified settlement.</small>
+        </div>
+      </section></div>:null}
       {selectedPlan?<PaymentCheckout open={true} onClose={()=>setSelectedPlan(null)} title={selectedPlan.name}
         description={selectedPlan.description||"Complete your subscription payment."}
         amount={fixedPrice(selectedPlan,cycle)} currency={displayCurrency(selectedPlan)} planId={selectedPlan.id} billingCycle={cycle}
-        onSuccess={async result=>{setNotice(result.message||"Payment request received. Awaiting verification.");setSelectedPlan(null);await load(true)}}
+        onSuccess={async result=>{setNotice(result.message||"Payment request received. Verify payment and refresh your package status. Your plan is not active until confirmed by the backend.");setSelectedPlan(null);await load(true)}}
         onError={msg=>setError(msg)}/>:null}
     </main>
   );
@@ -283,6 +432,15 @@ function SlimNotice({tone,children}:{tone:"green"|"red"|"orange"|"gray";children
 function InfoLine({label,value}:{label:string;value:string}){return <div><span>{label}</span><strong>{value}</strong></div>}
 
 const css = `
+.student-checkout-content{padding:16px;display:grid;gap:12px;}
+.student-checkout-content p,.student-checkout-content small{color:var(--muted,#64748b);line-height:1.5;}
+.student-checkout-quote{display:grid;gap:4px;padding:14px;border:1px solid var(--border,#cbd5e1);border-radius:12px;}
+.student-checkout-quote strong{font-size:24px;color:var(--text,inherit);}
+.student-checkout-email{display:grid;gap:6px;font-size:13px;font-weight:600;}
+.student-checkout-email input{width:100%;padding:12px;border:1px solid var(--border,#cbd5e1);border-radius:9px;background:var(--input-bg,var(--card-bg,#fff));color:var(--text,inherit);}
+.student-checkout-primary{padding:12px;border-radius:10px;background:var(--ba-primary,var(--primary-color,#2563eb));color:#fff;font-weight:700;}
+.student-checkout-error{color:#b91c1c!important;}
+
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .ba-page{
@@ -971,3 +1129,4 @@ const css = `
   .plan:hover{transform:none!important}
 }
 `;
+/* Stage 5: compact expiry and paid-conversion guidance, matching existing Owner theme. */

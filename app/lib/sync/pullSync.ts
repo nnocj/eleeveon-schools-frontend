@@ -490,10 +490,15 @@ async function applyPulledRecord(input: {
       ) {
         return { pulled: 0, skipped: 1, cacheUpdated: 0, errors };
       }
-      const winner = resolveConflict(
-        existing,
-        incoming,
-      ) as any;
+      // A server-confirmed admission number is authoritative once local edits
+      // have been uploaded. Do not let an older local timestamp win this field.
+      // Pending/error/conflict rows were already skipped above.
+      const authoritativeAdmission = record.tableName === "students" &&
+        incoming.admissionNumberConfirmed === true &&
+        !!String(incoming.admissionNumber || "").trim();
+      const winner = authoritativeAdmission
+        ? incoming
+        : resolveConflict(existing, incoming) as any;
 
       if (winner === existing) {
         return {

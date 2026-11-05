@@ -64,7 +64,10 @@ export default function TrialAccountSummary({onExplorePackages,refreshKey}:Props
   const used = numberValue(usage?.students);
   const remaining = limit !== null && used !== null ? Math.max(0,limit-used) : null;
   const unlimited = snapshot.limits.students === null;
-  const expired = status === "expired" || status === "cancelled" || status === "suspended";
+  // The scheduled reconciliation may still be in observe mode. An elapsed
+  // authoritative validUntil must never be displayed as an active trial.
+  const elapsed = !!expires && Number.isFinite(Date.parse(expires)) && Date.parse(expires) <= Date.now();
+  const expired = elapsed || status === "expired" || status === "cancelled" || status === "suspended";
   const missingExpiry = !expires;
   const usageDate = usage?.calculatedAt && !Number.isNaN(Date.parse(usage.calculatedAt)) ? dateLabel(usage.calculatedAt) : null;
 
@@ -80,10 +83,10 @@ export default function TrialAccountSummary({onExplorePackages,refreshKey}:Props
       <Metric title="Places remaining" value={unlimited?"Unlimited":remaining===null?"Not available":remaining.toLocaleString("en-GH")} sub={remaining===0?"No remaining places under this snapshot":"Calculated from the latest usage snapshot"}/>
     </div>
     {missingExpiry?<p style={{...muted,margin:0}}>Your trial expiry is missing from the entitlement response. Please contact Eleeveon support; an unknown expiry is not unlimited access.</p>:null}
-    {expired?<p style={{...muted,margin:0}}>Your existing records should be preserved. Package activation and any restrictions are controlled by the backend.</p>:null}
+    {expired?<p style={{...muted,margin:0}}>Your trial period has ended. Your existing records are not erased by this notice. Choose a supported paid package to request conversion; activation and any access restrictions are determined by the backend.</p>:null}
     <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",justifyContent:"space-between"}}>
       <span style={muted}>Usage figures can lag behind recently synchronized admissions. Server limits remain authoritative.</span>
-      {onExplorePackages?<button type="button" style={button} onClick={onExplorePackages}>Explore packages</button>:<span style={{...muted,fontWeight:700}}>Open My Subscription to explore packages</span>}
+      {onExplorePackages?<button type="button" style={button} onClick={onExplorePackages}>{expired ? "View paid packages" : "Explore packages"}</button>:<span style={{...muted,fontWeight:700}}>Open My Subscription to explore packages</span>}
     </div>
   </section>;
 }

@@ -1,1 +1,27 @@
-[]
+[
+  {
+    "id": "public:clean-beach.avif",
+    "name": "clean beach",
+    "url": "/chat-backgroundimages/clean-beach.avif"
+  },
+  {
+    "id": "public:hub-garden.png",
+    "name": "hub garden",
+    "url": "/chat-backgroundimages/hub-garden.png"
+  },
+  {
+    "id": "public:hub-pier.png",
+    "name": "hub pier",
+    "url": "/chat-backgroundimages/hub-pier.png"
+  },
+  {
+    "id": "public:nature-surprise.webp",
+    "name": "nature surprise",
+    "url": "/chat-backgroundimages/nature-surprise.webp"
+  },
+  {
+    "id": "public:water-city.jpg",
+    "name": "water city",
+    "url": "/chat-backgroundimages/water-city.jpg"
+  }
+]

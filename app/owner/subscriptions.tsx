@@ -157,6 +157,10 @@ export default function OwnerSubscriptionPage() {
   const [payerEmail,setPayerEmail]=useState("");
   const [checkoutError,setCheckoutError]=useState("");
   const [recoveredCheckoutUrl,setRecoveredCheckoutUrl]=useState<string|null>(null);
+  // A pending payment must remain recoverable after returning from Paystack,
+  // closing the sheet, or refreshing the Owner portal. This ID is only a UI hint:
+  // every recovery request is independently authorized by the backend.
+  const [pendingQuoteId,setPendingQuoteId]=useState<string|null>(null);
 
   const apiBase=getApiBase();
 
@@ -202,7 +206,7 @@ export default function OwnerSubscriptionPage() {
   }
   function openStudentCheckout(plan:Plan){
     setStudentCheckoutPlan(plan);setServerQuote(null);setCheckoutError("");setRecoveredCheckoutUrl(null);
-    try{if(sessionStorage.getItem(PENDING_QUOTE_KEY))setCheckoutError("A previous checkout was started. Select 'Check existing quotation / payment status' before preparing another payment.");}catch{}
+    try{if(sessionStorage.getItem(PENDING_QUOTE_KEY))setCheckoutError("A previous checkout was started. Check its status before requesting another payment.");}catch{}
   }
   async function requestServerQuote(){
     if(!studentCheckoutPlan||checkoutBusy)return;
@@ -222,11 +226,12 @@ export default function OwnerSubscriptionPage() {
       }
       setServerQuote(result);
       try{sessionStorage.setItem(PENDING_QUOTE_KEY,result.id);}catch{}
+      setPendingQuoteId(result.id);
     }catch(error){setCheckoutError(error instanceof Error?error.message:"Unable to prepare quotation.");}
     finally{setCheckoutBusy(false);}
   }
   async function refreshQuoteStatus(){
-    const quoteId=serverQuote?.id || (()=>{try{return sessionStorage.getItem(PENDING_QUOTE_KEY)}catch{return null}})();
+    const quoteId=pendingQuoteId || serverQuote?.id || (()=>{try{return sessionStorage.getItem(PENDING_QUOTE_KEY)}catch{return null}})();
     if(!quoteId||checkoutBusy)return;
     setCheckoutBusy(true);setCheckoutError("");
     try{
@@ -235,6 +240,9 @@ export default function OwnerSubscriptionPage() {
       };
       const result=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}`) as ServerQuote;
       setServerQuote(result);
+      if(result.id!==quoteId || recovery.changeOrderId!==quoteId){
+        throw new Error("The server returned an inconsistent quotation reference. Please contact support.");
+      }
       if(recovery.authorizationUrl){
         setCheckoutError("Your existing Paystack checkout is available. Open that same session below; do not create a second payment.");
         setRecoveredCheckoutUrl(recovery.authorizationUrl);
@@ -244,14 +252,22 @@ export default function OwnerSubscriptionPage() {
       if(recovery.requiresManualReview){
         setCheckoutError("The earlier payment attempt is not resolved. Please contact support with the quotation ID. Do not pay again.");
       }
-      if(["cancelled","expired"].includes(result.status)){try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}}
+      if(["cancelled","expired"].includes(result.status)){
+        try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}
+        setPendingQuoteId(null);
+      }
       if(result.status==="applied"){
         try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}
+        setPendingQuoteId(null);
         await load(true);setNotice("The server confirms your subscription was activated.");
       } else if(["payment_pending","checkout_initializing","paid"].includes(result.status)){
         setCheckoutError("Payment is being processed. Verify its status before any new checkout; do not pay twice.");
       }
-    }catch(error){setCheckoutError(error instanceof Error?error.message:"Could not refresh payment status.");}
+    }catch(error){
+      const message=error instanceof Error?error.message:"Could not refresh payment status.";
+      setCheckoutError(message);
+      setNotice(`Payment status could not be confirmed. Keep your payment reference and contact support if necessary. ${message}`);
+    }
     finally{setCheckoutBusy(false);}
   }
   async function beginStudentPayment(){
@@ -284,11 +300,14 @@ export default function OwnerSubscriptionPage() {
       await readJson(res);
       if(!res.ok)throw new Error("Payment could not be verified.");
       await load(true);
-      setNotice("Verification request completed. Check your current package and invoice status.");
+      setNotice("The provider verification request completed. Your paid access is confirmed only when your subscription and entitlement are active.");
+      // Even after provider verification, the change order might require
+      // asynchronous entitlement reconciliation. Do not erase its recovery ID. 
       const url=new URL(window.location.href);url.searchParams.delete("reference");window.history.replaceState({},"",url.toString());
     }catch(e){setError(e instanceof Error?e.message:"Verification failed.");}
   }
   useEffect(()=>{
+    try { setPendingQuoteId(sessionStorage.getItem(PENDING_QUOTE_KEY)); } catch {}
     void load();
     const reference=new URLSearchParams(window.location.search).get("reference");
     if(reference)void verifyRedirect(reference);
@@ -356,6 +375,11 @@ export default function OwnerSubscriptionPage() {
         </button>
         {subscriptionRestricted ? <section className="trial-conversion-notice" role="status"><div><strong>Your package needs attention</strong><p>{windowStatus.expired ? `Your trial ended on ${formatDate(windowStatus.endsAt)}.` : `Your subscription status is ${current?.status || "restricted"}.`} Your school records are not deleted. Access and permitted actions depend on the server's effective entitlement.</p><small>{paidOptions.length ? "Select a supported paid cloud package below to begin checkout. A package is activated only after the server confirms payment." : "No self-service paid package is currently available. Please contact Eleeveon for conversion."}</small></div><button type="button" onClick={jumpToPaidPlans}>View paid packages</button></section> : null}
         {trialEndingSoon ? <section className="trial-conversion-notice" role="status"><div><strong>{windowStatus.days === 0 ? "Trial ends today" : `${windowStatus.days} day${windowStatus.days === 1 ? "" : "s"} left in your trial`}</strong><p>Your trial ends {formatDate(windowStatus.endsAt)}. Choose a supported paid package before it ends to avoid an interruption.</p></div><button type="button" onClick={jumpToPaidPlans}>Explore paid packages</button></section> : null}
+        {pendingQuoteId?<section className="trial-conversion-notice" role="status">
+          <div><strong>Unresolved subscription quotation</strong><p>A previous checkout or quotation is recorded on this device. Check it before starting another payment. A status check does not charge you.</p><small>Reference: {pendingQuoteId}</small></div>
+          <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>{checkoutBusy?"Checking…":"Check pending payment"}</button>
+          {recoveredCheckoutUrl?<a href={recoveredCheckoutUrl} target="_blank" rel="noopener noreferrer">Continue existing Paystack session</a>:null}
+        </section>:null}
         {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation. Do not make a duplicate payment until the invoice and provider status have been checked.</SlimNotice>:null}
         {notice?<SlimNotice tone="green">{notice}</SlimNotice>:null}
         {error?<SlimNotice tone="red">{error}</SlimNotice>:null}

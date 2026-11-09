@@ -236,7 +236,7 @@ export default function OwnerSubscriptionPage() {
     setCheckoutBusy(true);setCheckoutError("");
     try{
       const recovery=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}/recover`) as {
-        status:string; applied:boolean; authorizationUrl?:string|null; requiresManualReview?:boolean; verification?:string;
+        changeOrderId:string; status:string; applied:boolean; authorizationUrl?:string|null; requiresManualReview?:boolean; verification?:string;
       };
       const result=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}`) as ServerQuote;
       setServerQuote(result);

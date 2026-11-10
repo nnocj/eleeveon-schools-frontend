@@ -348,6 +348,31 @@ export default function OwnerSubscriptionPage() {
       setNotice("");
     }finally{setCheckoutBusy(false);}
   }
+  async function reconcilePaidQuote(){
+    const quoteId=pendingQuoteId;
+    if(!quoteId || checkoutBusy || recoveryStatus!=="paid" || recoveryPaymentStatus!=="paid")return;
+    setCheckoutBusy(true);
+    setRecoveryFeedback({kind:"info",text:"Verifying the existing Paystack payment and applying your subscription. No new payment will be created."});
+    try{
+      const response=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/reconcile`,{
+        method:"POST",headers:authHeaders(),
+      });
+      const payload=await readJson(response);
+      if(!response.ok)throw new Error(String(payload?.message || payload?.error || `Reconciliation failed (${response.status}).`));
+      if(payload?.changeOrderId!==quoteId)throw new Error("The server returned a different order reference.");
+      if(payload.applied===true && payload.status==="applied"){
+        clearResolvedQuote();setServerQuote(null);setStudentCheckoutPlan(null);
+        setRecoveryStatus("applied");
+        await load(true);
+        setRecoveryFeedback({kind:"success",text:"Paystack payment verified. Your paid subscription has been activated and the subscription details have been refreshed."});
+      }else{
+        setRecoveryStatus(String(payload.status||"paid"));
+        setRecoveryFeedback({kind:"warning",text:"Payment is recorded but subscription activation is not yet complete. The original payment is preserved. Please request reconciliation again or contact Eleeveon support; do not pay twice."});
+      }
+    }catch(error){
+      setRecoveryFeedback({kind:"error",text:`Unable to complete reconciliation: ${error instanceof Error?error.message:"Unknown error"}. Your paid record is preserved. Do not pay again.`});
+    }finally{setCheckoutBusy(false);}
+  }
   async function beginStudentPayment(){
     if(!studentCheckoutPlan||!serverQuote||checkoutBusy)return;
     const email=payerEmail.trim();
@@ -455,10 +480,11 @@ export default function OwnerSubscriptionPage() {
         {trialEndingSoon ? <section className="trial-conversion-notice" role="status"><div><strong>{windowStatus.days === 0 ? "Trial ends today" : `${windowStatus.days} day${windowStatus.days === 1 ? "" : "s"} left in your trial`}</strong><p>Your trial ends {formatDate(windowStatus.endsAt)}. Choose a supported paid package before it ends to avoid an interruption.</p></div><button type="button" onClick={jumpToPaidPlans}>Explore paid packages</button></section> : null}
         {pendingQuoteId?<section className="trial-conversion-notice" role="status">
           <div><strong>Unresolved subscription quotation</strong><p>A previous checkout or quotation is recorded on this device. Check it before starting another payment. A status check does not charge you.</p><small>Reference: {pendingQuoteId}</small></div>
-          <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>{checkoutBusy?"Checking…":"Check pending payment"}</button>
+          <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>{checkoutBusy?"Checking…":"Check payment / subscription status"}</button>
           {recoveryFeedback?<p role="status" aria-live="polite" className={`recovery-feedback ${recoveryFeedback.kind}`}>{recoveryFeedback.text}</p>:null}
           {recoveryStatus==="quoted" && serverQuote?.id===pendingQuoteId && Date.parse(serverQuote.quoteExpiresAt)>Date.now()?<button type="button" disabled={checkoutBusy} onClick={resumeExistingQuote}>Resume quotation</button>:null}
           {(recoveryStatus==="quoted" || (recoveryStatus==="payment_pending" && recoveryPaymentStatus==="failed")) && serverQuote?.id===pendingQuoteId?<button type="button" className="cancel-quote-button" disabled={checkoutBusy} onClick={()=>void cancelUnusedQuote()}>{recoveryStatus==="quoted"?"Cancel unused quotation":"Cancel failed checkout"}</button>:null}
+          {recoveryStatus==="paid" && recoveryPaymentStatus==="paid" && serverQuote?.id===pendingQuoteId?<button type="button" disabled={checkoutBusy} onClick={()=>void reconcilePaidQuote()}>Reconcile paid payment & activate subscription</button>:null}
           {recoveredCheckoutUrl?<a href={recoveredCheckoutUrl} target="_blank" rel="noopener noreferrer">Continue existing Paystack session</a>:null}
         </section>:null}
         {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation. Do not make a duplicate payment until the invoice and provider status have been checked.</SlimNotice>:null}

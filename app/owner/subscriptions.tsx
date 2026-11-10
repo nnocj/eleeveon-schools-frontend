@@ -221,6 +221,7 @@ export default function OwnerSubscriptionPage() {
         changeType: current?.id && norm(current.status)==="active" && current.planId===studentCheckoutPlan.id
           ? "renewal" : "new",
         effectiveMode:"immediate",
+        requestedStudentCount:count,
       }) as ServerQuote;
       if(!result.id || result.toPlanId!==studentCheckoutPlan.id ||
          !Number.isFinite(result.amountDue) || result.amountDue<=0 ||
@@ -391,7 +392,7 @@ export default function OwnerSubscriptionPage() {
         {loading?<SlimNotice tone="gray">Loading packages...</SlimNotice>:null}
       </section>
       {!loading && current ? <TrialAccountSummary refreshKey={`${current?.id || ""}:${current?.status || ""}:${current?.trialEndsAt || ""}`} onExplorePackages={jumpToPaidPlans}/> : null}
-      {!loading && !current ? <SlimNotice tone="orange">No subscription is assigned to this account. New account trial provisioning is being corrected; an existing account must be reviewed separately. You can explore packages, but server quotations require synchronized students.</SlimNotice> : null}
+      {!loading && !current ? <SlimNotice tone="orange">No subscription is assigned to this account. You can prepay for a new Standard subscription before enrolling students; your purchased places are assigned after verified payment.</SlimNotice> : null}
       <section className="quote-panel" aria-label="Instant student quotation">
         <div className="quote-heading"><strong>Get an instant student quote</strong><small>Enter the number of students. Estimated prices appear here, regardless of the package cards below.</small></div>
         <div className="quote-layout">
@@ -433,10 +434,11 @@ export default function OwnerSubscriptionPage() {
       {studentCheckoutPlan?<div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
         <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);setQuotePaymentOpen(false);}}>✕</button></div>
         <div className="student-checkout-content">
-          <p>The amount shown on package cards is an estimate. Your school's enrolled student count and amount are verified by the backend before payment.</p>
+          <p>Prepay for the student places your school needs this term, even if you have not admitted anyone yet. The backend verifies your selected allowance against current enrollment and calculates the final payable amount.</p>
+          {!serverQuote?<label className="quote-field"><span>Student places to purchase</span><input type="number" min="1" max="1000000" value={count} disabled={checkoutBusy} onChange={e=>setCount(Math.min(1000000,Math.max(1,Math.floor(Number(e.target.value)||1))))}/></label>:null}
           {serverQuote?<div className="student-checkout-quote">
             <strong>{money(serverQuote.amountDue,serverQuote.currency)}</strong>
-            <span>{serverQuote.calculation?.studentCount ?? "—"} students · expires {formatDate(serverQuote.quoteExpiresAt)}</span>
+            <span>{serverQuote.calculation?.studentCount ?? "—"} prepaid student places · expires {formatDate(serverQuote.quoteExpiresAt)}</span>
             <small>Quotation status: {serverQuote.status}</small>
           </div>:null}
           {checkoutError?<p role="alert" className="student-checkout-error">{checkoutError}</p>:null}
@@ -456,7 +458,7 @@ export default function OwnerSubscriptionPage() {
         purpose="subscription_quote"
         quoteId={serverQuote.id}
         title={`Pay for ${studentCheckoutPlan.name}`}
-        description={`Server-verified quote for ${serverQuote.calculation?.studentCount ?? "your"} students. Payment does not activate your account until confirmed.`}
+        description={`Prepaid allowance for ${serverQuote.calculation?.studentCount ?? "your"} student places. Access activates only after verified payment.`}
         amount={serverQuote.amountDue}
         currency={serverQuote.currency}
         onClose={()=>setQuotePaymentOpen(false)}

@@ -6,10 +6,16 @@
  * Commercial quote is a preview, never a payment authorization.
  */
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import PaymentCheckout from "../components/payments/PaymentCheckout";
 import TrialAccountSummary from "./components/TrialAccountSummary";
 import { authHeaders, getApiBase, money, readJson } from "../components/payments/payment-utils";
 import { calculateStudentPrice, type StudentPricing } from "../lib/commercial/studentPricing";
+
+function FullViewportOverlay({ children }: { children: React.ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
 
 type Cycle = "monthly" | "termly" | "yearly";
 type Json = Record<string, unknown>;
@@ -425,13 +431,13 @@ export default function OwnerSubscriptionPage() {
           </article>;
         })}
       </section>
-      {moreOpen?<div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
+      {moreOpen?<FullViewportOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
         <div className="ba-sheet-head"><div><h2>Package details</h2><p>Your current commercial arrangement</p></div><button type="button" onClick={()=>setMoreOpen(false)}>✕</button></div>
         <div className="sub-info-list"><InfoLine label="Package" value={currentPlan?.name||"None"}/><InfoLine label="Type" value={currentPlan?kind(currentPlan):"Not selected"}/><InfoLine label="Deployment" value={currentPlan?deploy(currentPlan):"—"}/><InfoLine label="Status" value={current?.status||"None"}/><InfoLine label="Access until" value={formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}/><InfoLine label="Payment recorded" value={paidEvidence(current)?"Yes":"No paid record in this response"}/></div>
         <div className="cycle-sheet">{(["termly","monthly","yearly"] as Cycle[]).map(c=><button key={c} type="button" className={cycle===c?"active":""} onClick={()=>setCycle(c)}>{c}</button>)}</div>
         <div className="ba-menu-list"><button type="button" onClick={()=>{setMoreOpen(false);void load()}}><span>↻</span><b>Refresh</b><small>Reload account and catalogue</small></button></div>
-      </section></div>:null}
-      {studentCheckoutPlan?<div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
+      </section></div></FullViewportOverlay>:null}
+      {studentCheckoutPlan?<FullViewportOverlay><div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
         <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);setQuotePaymentOpen(false);}}>✕</button></div>
         <div className="student-checkout-content">
           <p>Prepay for the student places your school needs this term, even if you have not admitted anyone yet. The backend verifies your selected allowance against current enrollment and calculates the final payable amount.</p>
@@ -452,7 +458,7 @@ export default function OwnerSubscriptionPage() {
           {recoveredCheckoutUrl && <a href={recoveredCheckoutUrl} rel="noopener noreferrer" target="_blank" className="ba-btn">Continue existing Paystack checkout</a>}
           <small>Never pay twice for an unconfirmed order. Your subscription only activates after verified settlement.</small>
         </div>
-      </section></div>:null}
+      </section></div></FullViewportOverlay>:null}
       {quotePaymentOpen && serverQuote && studentCheckoutPlan ? <PaymentCheckout
         open={true}
         purpose="subscription_quote"
@@ -979,61 +985,69 @@ const css = `
   box-shadow:none;
 }
 
+/* Modal surfaces live in document.body, outside sticky portal headers. */
 .ba-sheet-backdrop{
   position:fixed;
   inset:0;
-  z-index:80;
-  background:rgba(2,6,23,.46);
-  display:grid;
-  align-items:end;
-  padding:10px;
+  width:100%;
+  height:100vh;
+  height:100dvh;
+  z-index:10000;
+  display:flex;
+  align-items:stretch;
+  justify-content:center;
+  padding:0;
+  overflow:hidden;
+  background:rgba(2,6,23,.72);
+  backdrop-filter:blur(7px);
 }
-
-.ba-sheet{
-  width:min(540px,100%);
+.ba-sheet,
+.ba-sheet.small{
+  box-sizing:border-box;
+  width:min(100%,760px);
+  max-width:760px;
+  height:100%;
+  max-height:100%;
+  min-height:0;
   margin:0 auto;
-  border-radius:28px 28px 20px 20px;
-  padding:14px;
+  padding:clamp(14px,2.2vw,24px);
+  border-radius:0;
+  border-inline:1px solid var(--border,rgba(148,163,184,.28));
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
   background:var(--card-bg,var(--card,var(--surface,#fff)));
   color:var(--text,#0f172a);
 }
-
-.ba-sheet.small{
-  width:min(440px,100%);
-}
-
 .ba-sheet-head{
+  position:sticky;
+  top:0;
+  z-index:2;
+  flex-shrink:0;
   display:flex;
+  align-items:center;
   justify-content:space-between;
-  align-items:flex-start;
   gap:12px;
-  margin-bottom:12px;
+  min-height:56px;
+  margin:-4px 0 0;
+  padding:8px 0 12px;
+  background:var(--card-bg,var(--card,var(--surface,#fff)));
+  border-bottom:1px solid var(--border,rgba(148,163,184,.22));
 }
-
-.ba-sheet-head h2{
-  margin:0;
-  font-size:20px;
-  font-weight:1000;
-  letter-spacing:-.04em;
-}
-
-.ba-sheet-head p{
-  margin:3px 0 0;
-  color:var(--muted,#64748b);
-  font-size:12px;
-  font-weight:750;
-  line-height:1.45;
-}
-
+.ba-sheet-head>div{min-width:0;flex:1;}
+.ba-sheet-head h2{margin:0;font-size:20px;font-weight:900;letter-spacing:-.03em;overflow-wrap:anywhere;}
+.ba-sheet-head p{margin:4px 0 0;color:var(--muted,#64748b);font-size:12px;font-weight:650;line-height:1.45;white-space:normal;}
 .ba-sheet-head button{
-  width:38px;
-  height:38px;
+  flex-shrink:0;width:42px;height:42px;
   border:1px solid var(--border,rgba(0,0,0,.10));
-  border-radius:999px;
-  background:var(--card-bg,var(--surface,#fff));
-  color:var(--text,#0f172a);
-  font-weight:1000;
-  cursor:pointer;
+  border-radius:999px;background:var(--card-bg,var(--surface,#fff));
+  color:var(--text,#0f172a);font-size:19px;font-weight:800;cursor:pointer;
+}
+@media(max-width:600px){
+  .ba-sheet,.ba-sheet.small{width:100%;max-width:none;border-inline:0;padding:14px;}
 }
 
 .cycle-sheet{

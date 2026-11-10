@@ -22,6 +22,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   MomoNetwork,
@@ -197,7 +198,7 @@ export default function PaymentCheckout(props: Props) {
     };
   }, [open, loading, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
   async function handleSubmit() {
     try {
@@ -306,7 +307,7 @@ export default function PaymentCheckout(props: Props) {
     }
   }
 
-  return (
+  return createPortal(
     <div
       className="payment-backdrop"
       role="presentation"
@@ -446,30 +447,37 @@ export default function PaymentCheckout(props: Props) {
           inset: 0;
           z-index: 9999;
           display: grid;
-          align-items: end;
+          align-items: stretch;
           justify-items: center;
-          min-height: 100dvh;
-          padding: 10px;
-          overflow-y: auto;
+          width: 100%;
+          height: 100vh;
+          height: 100dvh;
+          min-height: 0;
+          padding: 0;
+          overflow: hidden;
           background: rgba(2, 6, 23, 0.58);
           backdrop-filter: blur(12px);
           -webkit-overflow-scrolling: touch;
         }
 
         .payment-modal {
-          width: min(100%, 560px);
+          width: min(100%, 760px);
+          height: 100%;
+          min-height: 0;
           margin: 0;
           outline: none;
         }
 
         .payment-shell {
           width: 100%;
-          max-height: min(92dvh, 760px);
+          height: 100%;
+          min-height: 0;
+          max-height: 100%;
           display: flex;
           flex-direction: column;
           overflow: hidden;
           border: 1px solid var(--border, rgba(226, 232, 240, 0.9));
-          border-radius: 28px 28px 20px 20px;
+          border-radius: 0;
           background: var(--card-bg, var(--surface, #ffffff));
           color: var(--text, #0f172a);
           box-shadow: 0 30px 90px rgba(2, 6, 23, 0.28);
@@ -572,6 +580,7 @@ export default function PaymentCheckout(props: Props) {
 
         .payment-body {
           flex: 1 1 auto;
+          min-height: 0;
           overflow-y: auto;
           display: grid;
           gap: 8px;
@@ -936,7 +945,7 @@ export default function PaymentCheckout(props: Props) {
 
         @media (min-width: 640px) {
           .payment-backdrop {
-            align-items: center;
+            align-items: stretch;
           }
 
           .method-list {
@@ -958,11 +967,12 @@ export default function PaymentCheckout(props: Props) {
           }
 
           .payment-shell {
-            max-height: 94dvh;
+            height: 100%;
+            max-height: 100%;
             border-right: 0;
             border-bottom: 0;
             border-left: 0;
-            border-radius: 26px 26px 0 0;
+            border-radius: 0;
           }
 
           .payment-header {
@@ -992,6 +1002,7 @@ export default function PaymentCheckout(props: Props) {
           }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -229,7 +229,7 @@ export default function PaymentCheckout(props: Props) {
             momoNetwork: payload.momoNetwork,
             payerName: payload.payerName,
             payerPhone: payload.payerPhone,
-            payerEmail: payload.payerEmail.trim(),
+            payerEmail: (payload.payerEmail ?? "").trim(),
           }),
         });
       } else if (props.purpose === "student_fee") {

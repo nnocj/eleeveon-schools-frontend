@@ -445,7 +445,7 @@ export default function PaymentCheckout(props: Props) {
         .payment-backdrop {
           position: fixed;
           inset: 0;
-          z-index: 9999;
+          z-index: 20000;
           display: grid;
           align-items: stretch;
           justify-items: center;

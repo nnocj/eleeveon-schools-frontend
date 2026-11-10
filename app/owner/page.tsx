@@ -16,7 +16,7 @@ import OwnerDashboardPage from "./OwnerDashboard";
 import OwnerBranchesPage from "./branches";
 import Ownerusers from "./OwnerUsers";
 import BillingPage from "./billing";
-import SubscriptionPage from "./subscription";
+import SubscriptionPage from "./subscriptions";
 import InvoicesPage from "./invoices";
 import PaymentsPage from "./payments";
 import AccountProfilePage from "./AccountProfile";

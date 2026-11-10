@@ -41,7 +41,7 @@ import {
   getPaymentRedirectUrl,
 } from "./payment-utils";
 
-export type PaymentCheckoutPurpose = "subscription" | "student_fee";
+export type PaymentCheckoutPurpose = "subscription" | "subscription_quote" | "student_fee";
 
 type CommonProps = {
   open: boolean;
@@ -70,6 +70,17 @@ type SubscriptionProps = CommonProps & {
   branchId?: never;
 };
 
+type SubscriptionQuoteProps = CommonProps & {
+  purpose: "subscription_quote";
+  quoteId: string;
+  planId?: never;
+  billingCycle?: never;
+  invoiceId?: never;
+  studentId?: never;
+  schoolId?: never;
+  branchId?: never;
+};
+
 type StudentFeeProps = CommonProps & {
   purpose: "student_fee";
   invoiceId: string;
@@ -80,7 +91,7 @@ type StudentFeeProps = CommonProps & {
   billingCycle?: never;
 };
 
-type Props = SubscriptionProps | StudentFeeProps;
+type Props = SubscriptionProps | SubscriptionQuoteProps | StudentFeeProps;
 
 const methods: PaymentChannel[] = ["momo", "card", "bank", "cash", "manual"];
 
@@ -102,16 +113,19 @@ function methodIcon(item: PaymentChannel) {
 
 function purposeLabel(purpose: PaymentCheckoutPurpose) {
   if (purpose === "student_fee") return "student fee";
+  if (purpose === "subscription_quote") return "verified subscription quotation";
   return "subscription";
 }
 
 function purposeTitle(purpose: PaymentCheckoutPurpose) {
   if (purpose === "student_fee") return "Pay School Fee";
+  if (purpose === "subscription_quote") return "Pay Verified Subscription";
   return "Complete Subscription";
 }
 
 function purposeDescription(purpose: PaymentCheckoutPurpose) {
   if (purpose === "student_fee") return "Choose a payment option and pay this invoice securely.";
+  if (purpose === "subscription_quote") return "Your quotation and student count will be checked again by the server before Paystack opens.";
   return "Choose a payment option and confirm your subscription securely.";
 }
 
@@ -136,7 +150,7 @@ export default function PaymentCheckout(props: Props) {
   } = props;
 
   const purpose = props.purpose || "subscription";
-  const billingCycle = purpose === "subscription" ? props.billingCycle || "monthly" : undefined;
+  const billingCycle = props.purpose === "subscription" || !props.purpose ? props.billingCycle || "monthly" : undefined;
 
   const apiBase = getApiBase();
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -149,6 +163,8 @@ export default function PaymentCheckout(props: Props) {
   const [payerEmail, setPayerEmail] = useState(props.payerEmailDefault || "");
 
   const provider = useMemo(() => providerForMethod(method), [method]);
+  const quotePayment = props.purpose === "subscription_quote";
+  const availableMethods = quotePayment ? methods.filter(m => m === "momo" || m === "card" || m === "bank") : methods;
 
   useEffect(() => {
     if (!open) return;
@@ -198,7 +214,25 @@ export default function PaymentCheckout(props: Props) {
 
       let res: Response;
 
-      if (purpose === "student_fee") {
+      if (props.purpose === "subscription_quote") {
+        if (!props.quoteId?.trim()) throw new Error("A verified quotation is required.");
+        if (provider !== "paystack") throw new Error("This subscription must be paid through Paystack.");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payerEmail.trim())) {
+          throw new Error("Enter a valid payer email for Paystack checkout.");
+        }
+        res = await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(props.quoteId)}/pay`, {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            paymentMethod: payload.method,
+            provider: "paystack",
+            momoNetwork: payload.momoNetwork,
+            payerName: payload.payerName,
+            payerPhone: payload.payerPhone,
+            payerEmail: payload.payerEmail.trim(),
+          }),
+        });
+      } else if (props.purpose === "student_fee") {
         const callbackUrl =
           props.callbackUrl ||
           `${window.location.origin}${window.location.pathname}?invoiceId=${encodeURIComponent(String(props.invoiceId))}`;
@@ -246,6 +280,18 @@ export default function PaymentCheckout(props: Props) {
       const json: PaymentCheckoutResult = await readJson(res);
       const redirectUrl = getPaymentRedirectUrl(json);
 
+      if (quotePayment) {
+        // An uncertain checkout must remain recoverable; never claim activation.
+        if (!redirectUrl) throw new Error("Paystack did not return a checkout URL. Check the existing quotation before trying again.");
+        let target: URL;
+        try { target = new URL(redirectUrl); } catch { throw new Error("Paystack returned an invalid checkout URL."); }
+        const host = target.hostname.toLowerCase();
+        if (target.protocol !== "https:" || (host !== "paystack.com" && !host.endsWith(".paystack.com"))) {
+          throw new Error("The payment provider returned an unrecognized checkout URL.");
+        }
+        window.location.assign(target.toString());
+        return;
+      }
       if (redirectUrl) {
         window.location.href = redirectUrl;
         return;
@@ -313,7 +359,7 @@ export default function PaymentCheckout(props: Props) {
               </div>
 
               <div className="method-list" role="radiogroup">
-                {methods.map((item) => (
+                {availableMethods.map((item) => (
                   <button
                     key={item}
                     type="button"

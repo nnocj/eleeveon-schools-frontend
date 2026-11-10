@@ -155,6 +155,7 @@ export default function OwnerSubscriptionPage() {
   const [serverQuote,setServerQuote]=useState<ServerQuote|null>(null);
   const [checkoutBusy,setCheckoutBusy]=useState(false);
   const [payerEmail,setPayerEmail]=useState("");
+  const [quotePaymentOpen,setQuotePaymentOpen]=useState(false);
   const [checkoutError,setCheckoutError]=useState("");
   const [recoveredCheckoutUrl,setRecoveredCheckoutUrl]=useState<string|null>(null);
   // A pending payment must remain recoverable after returning from Paystack,
@@ -214,8 +215,12 @@ export default function OwnerSubscriptionPage() {
     setCheckoutBusy(true);setCheckoutError("");
     try {
       const result=await quoteRequest("/billing/subscription-quotes", {
-        toPlanId:studentCheckoutPlan.id,billingCycle:cycle,
-        changeType:current?.id && !["trial","expired","cancelled","suspended"].includes(norm(current.status))?"upgrade":"new",effectiveMode:"immediate",
+        toPlanId:studentCheckoutPlan.id,billingCycle:pricing(studentCheckoutPlan).billingPeriod || "termly",
+        // Student-priced checkout currently supports new and renewal orders only.
+        // A trial, pending or expired account must start a new paid subscription.
+        changeType: current?.id && norm(current.status)==="active" && current.planId===studentCheckoutPlan.id
+          ? "renewal" : "new",
+        effectiveMode:"immediate",
       }) as ServerQuote;
       if(!result.id || result.toPlanId!==studentCheckoutPlan.id ||
          !Number.isFinite(result.amountDue) || result.amountDue<=0 ||
@@ -385,7 +390,8 @@ export default function OwnerSubscriptionPage() {
         {error?<SlimNotice tone="red">{error}</SlimNotice>:null}
         {loading?<SlimNotice tone="gray">Loading packages...</SlimNotice>:null}
       </section>
-      <TrialAccountSummary refreshKey={`${current?.id || ""}:${current?.status || ""}:${current?.trialEndsAt || ""}`} onExplorePackages={jumpToPaidPlans}/>
+      {!loading && current ? <TrialAccountSummary refreshKey={`${current?.id || ""}:${current?.status || ""}:${current?.trialEndsAt || ""}`} onExplorePackages={jumpToPaidPlans}/> : null}
+      {!loading && !current ? <SlimNotice tone="orange">No subscription is assigned to this account. New account trial provisioning is being corrected; an existing account must be reviewed separately. You can explore packages, but server quotations require synchronized students.</SlimNotice> : null}
       <section className="quote-panel" aria-label="Instant student quotation">
         <div className="quote-heading"><strong>Get an instant student quote</strong><small>Enter the number of students. Estimated prices appear here, regardless of the package cards below.</small></div>
         <div className="quote-layout">
@@ -425,7 +431,7 @@ export default function OwnerSubscriptionPage() {
         <div className="ba-menu-list"><button type="button" onClick={()=>{setMoreOpen(false);void load()}}><span>↻</span><b>Refresh</b><small>Reload account and catalogue</small></button></div>
       </section></div>:null}
       {studentCheckoutPlan?<div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
-        <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);}}>✕</button></div>
+        <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);setQuotePaymentOpen(false);}}>✕</button></div>
         <div className="student-checkout-content">
           <p>The amount shown on package cards is an estimate. Your school's enrolled student count and amount are verified by the backend before payment.</p>
           {serverQuote?<div className="student-checkout-quote">
@@ -436,14 +442,26 @@ export default function OwnerSubscriptionPage() {
           {checkoutError?<p role="alert" className="student-checkout-error">{checkoutError}</p>:null}
           {!serverQuote?<button type="button" className="student-checkout-primary" disabled={checkoutBusy} onClick={()=>void requestServerQuote()}>{checkoutBusy?"Preparing quotation…":"Get server quotation"}</button>:null}
           {serverQuote?.status==="quoted"?<>
-            <label className="student-checkout-email">Payer email<input type="email" autoComplete="email" value={payerEmail} onChange={e=>setPayerEmail(e.target.value)} placeholder="name@example.com" /></label>
-            <button type="button" className="student-checkout-primary" disabled={checkoutBusy || new Date(serverQuote.quoteExpiresAt).getTime()<=Date.now()} onClick={()=>void beginStudentPayment()}>{checkoutBusy?"Connecting…":"Continue securely with Paystack"}</button>
+            <button type="button" className="student-checkout-primary"
+              disabled={checkoutBusy || new Date(serverQuote.quoteExpiresAt).getTime()<=Date.now()}
+              onClick={()=>setQuotePaymentOpen(true)}>Continue to secure payment</button>
           </>:null}
           <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>Check existing quotation / payment status</button>
           {recoveredCheckoutUrl && <a href={recoveredCheckoutUrl} rel="noopener noreferrer" target="_blank" className="ba-btn">Continue existing Paystack checkout</a>}
           <small>Never pay twice for an unconfirmed order. Your subscription only activates after verified settlement.</small>
         </div>
       </section></div>:null}
+      {quotePaymentOpen && serverQuote && studentCheckoutPlan ? <PaymentCheckout
+        open={true}
+        purpose="subscription_quote"
+        quoteId={serverQuote.id}
+        title={`Pay for ${studentCheckoutPlan.name}`}
+        description={`Server-verified quote for ${serverQuote.calculation?.studentCount ?? "your"} students. Payment does not activate your account until confirmed.`}
+        amount={serverQuote.amountDue}
+        currency={serverQuote.currency}
+        onClose={()=>setQuotePaymentOpen(false)}
+        onError={message=>{setCheckoutError(`${message} Check the quotation before trying again.`);setQuotePaymentOpen(false);}}
+      /> : null}
       {selectedPlan?<PaymentCheckout open={true} onClose={()=>setSelectedPlan(null)} title={selectedPlan.name}
         description={selectedPlan.description||"Complete your subscription payment."}
         amount={fixedPrice(selectedPlan,cycle)} currency={displayCurrency(selectedPlan)} planId={selectedPlan.id} billingCycle={cycle}

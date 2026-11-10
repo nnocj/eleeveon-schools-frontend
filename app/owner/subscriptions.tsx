@@ -166,6 +166,7 @@ export default function OwnerSubscriptionPage() {
   const [recoveredCheckoutUrl,setRecoveredCheckoutUrl]=useState<string|null>(null);
   const [recoveryFeedback,setRecoveryFeedback]=useState<{text:string; kind:"info"|"success"|"warning"|"error"}|null>(null);
   const [recoveryStatus,setRecoveryStatus]=useState<string|null>(null);
+  const [recoveryPaymentStatus,setRecoveryPaymentStatus]=useState<string|null>(null);
   // A pending payment must remain recoverable after returning from Paystack,
   // closing the sheet, or refreshing the Owner portal. This ID is only a UI hint:
   // every recovery request is independently authorized by the backend.
@@ -255,6 +256,7 @@ export default function OwnerSubscriptionPage() {
     try{sessionStorage.removeItem(PENDING_QUOTE_KEY);}catch{}
     setPendingQuoteId(null);
     setRecoveredCheckoutUrl(null);
+    setRecoveryPaymentStatus(null);
   }
   function resumeExistingQuote(){
     if(!serverQuote || serverQuote.status!=="quoted")return;
@@ -273,8 +275,11 @@ export default function OwnerSubscriptionPage() {
   }
   async function cancelUnusedQuote(){
     const quoteId=pendingQuoteId;
-    if(!quoteId || checkoutBusy || recoveryStatus!=="quoted" || !serverQuote || serverQuote.id!==quoteId)return;
-    if(!window.confirm("Cancel this unused quotation on the server? This will not cancel a Paystack payment or refund a transaction."))return;
+    const failedCheckout = recoveryStatus === "payment_pending" && recoveryPaymentStatus === "failed";
+    if(!quoteId || checkoutBusy || !serverQuote || serverQuote.id!==quoteId || !(recoveryStatus === "quoted" || failedCheckout))return;
+    if(!window.confirm(failedCheckout
+      ? "Request cancellation of this failed Paystack checkout? The server will independently re-verify the payment status with Paystack. If it is pending, paid, or uncertain, cancellation will be refused. This does not issue a refund."
+      : "Cancel this unused quotation on the server? This will not cancel a Paystack payment or refund a transaction."))return;
     setCheckoutBusy(true);
     setRecoveryFeedback({kind:"info",text:"Checking cancellation with the server…"});
     try {
@@ -287,7 +292,7 @@ export default function OwnerSubscriptionPage() {
       setServerQuote(null);
       setRecoveryStatus("cancelled");
       setStudentCheckoutPlan(null);
-      setRecoveryFeedback({kind:"success",text:"The server cancelled this unused quotation. You may request a new quotation now."});
+      setRecoveryFeedback({kind:"success",text:failedCheckout?"The backend confirmed a terminal failed Paystack transaction and cancelled this quotation. You may start another quotation.":"The server cancelled this unused quotation. You may request a new quotation now."});
     }catch(error){
       setRecoveryFeedback({kind:"error",text:`Cancellation was not confirmed: ${error instanceof Error?error.message:"Unknown error"}. Do not initiate a duplicate payment.`});
     }finally{setCheckoutBusy(false);}
@@ -309,6 +314,7 @@ export default function OwnerSubscriptionPage() {
       }
       setServerQuote(result);
       setRecoveryStatus(result.status);
+      setRecoveryPaymentStatus(recovery.paymentStatus ?? null);
       const url=safePaystackUrl(recovery.authorizationUrl);
       setRecoveredCheckoutUrl(url);
       if(result.status==="applied" && recovery.applied){
@@ -327,7 +333,9 @@ export default function OwnerSubscriptionPage() {
       }else if(url){
         setRecoveryFeedback({kind:"info",text:"Your earlier Paystack session is available. Select Continue existing Paystack session below. Do not create a second payment."});
       }else if(recovery.requiresManualReview || ["payment_pending","checkout_initializing","paid"].includes(result.status)){
-        setRecoveryFeedback({kind:"warning",text:`The order is ${result.status.replace(/_/g," ")}${recovery.paymentStatus?` (payment: ${recovery.paymentStatus})`:""}. No resumable Paystack link is available. Keep the reference and request reconciliation; do not pay again.`});
+        setRecoveryFeedback({kind:"warning",text:result.status==="payment_pending" && recovery.paymentStatus==="failed"
+          ? "The locally recorded payment is failed. You can request cancellation below. The server must independently verify a terminal failure with Paystack before releasing this quotation; no payment or refund is initiated by the check."
+          : `The order is ${result.status.replace(/_/g," ")}${recovery.paymentStatus?` (payment: ${recovery.paymentStatus})`:""}. No resumable Paystack link is available. Keep the reference and request reconciliation; do not pay again.`});
       }else if(["cancelled","expired"].includes(result.status)){
         clearResolvedQuote();
         setRecoveryFeedback({kind:"info",text:`The server confirms this quotation is ${result.status}. You may request a new quotation.`});
@@ -450,7 +458,7 @@ export default function OwnerSubscriptionPage() {
           <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>{checkoutBusy?"Checking…":"Check pending payment"}</button>
           {recoveryFeedback?<p role="status" aria-live="polite" className={`recovery-feedback ${recoveryFeedback.kind}`}>{recoveryFeedback.text}</p>:null}
           {recoveryStatus==="quoted" && serverQuote?.id===pendingQuoteId && Date.parse(serverQuote.quoteExpiresAt)>Date.now()?<button type="button" disabled={checkoutBusy} onClick={resumeExistingQuote}>Resume quotation</button>:null}
-          {recoveryStatus==="quoted" && serverQuote?.id===pendingQuoteId?<button type="button" disabled={checkoutBusy} onClick={()=>void cancelUnusedQuote()}>Cancel unused quotation</button>:null}
+          {(recoveryStatus==="quoted" || (recoveryStatus==="payment_pending" && recoveryPaymentStatus==="failed")) && serverQuote?.id===pendingQuoteId?<button type="button" className="cancel-quote-button" disabled={checkoutBusy} onClick={()=>void cancelUnusedQuote()}>{recoveryStatus==="quoted"?"Cancel unused quotation":"Cancel failed checkout"}</button>:null}
           {recoveredCheckoutUrl?<a href={recoveredCheckoutUrl} target="_blank" rel="noopener noreferrer">Continue existing Paystack session</a>:null}
         </section>:null}
         {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation. Do not make a duplicate payment until the invoice and provider status have been checked.</SlimNotice>:null}
@@ -463,7 +471,7 @@ export default function OwnerSubscriptionPage() {
       <section className="quote-panel" aria-label="Instant student quotation">
         <div className="quote-heading"><strong>Get an instant student quote</strong><small>Enter the number of students. Estimated prices appear here, regardless of the package cards below.</small></div>
         <div className="quote-layout">
-          <label className="quote-field"><span>Number of students</span><input type="number" min="1" max="1000000" value={count} onChange={e=>setCount(Math.min(1000000,Math.max(1,Math.floor(Number(e.target.value)||1))))}/></label>
+          <StudentPlaceSelector value={count} onChange={setCount} label="Student places"/>
           <div className="quote-results">
             {quotedPlans.length?quotedPlans.map(p=>{
               const q=quote(p,count,cycle);
@@ -502,7 +510,7 @@ export default function OwnerSubscriptionPage() {
         <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);setQuotePaymentOpen(false);}}>✕</button></div>
         <div className="student-checkout-content">
           <p>Prepay for the student places your school needs this term, even if you have not admitted anyone yet. The backend verifies your selected allowance against current enrollment and calculates the final payable amount.</p>
-          {!serverQuote?<label className="quote-field"><span>Student places to purchase</span><input type="number" min="1" max="1000000" value={count} disabled={checkoutBusy} onChange={e=>setCount(Math.min(1000000,Math.max(1,Math.floor(Number(e.target.value)||1))))}/></label>:null}
+          {!serverQuote?<StudentPlaceSelector value={count} onChange={setCount} label="Places to prepay" disabled={checkoutBusy}/>:null}
           {serverQuote?<div className="student-checkout-quote">
             <strong>{money(serverQuote.amountDue,serverQuote.currency)}</strong>
             <span>{serverQuote.calculation?.studentCount ?? "—"} prepaid student places · expires {formatDate(serverQuote.quoteExpiresAt)}</span>
@@ -539,10 +547,57 @@ export default function OwnerSubscriptionPage() {
     </main>
   );
 }
+function StudentPlaceSelector({value,onChange,label,disabled=false}:{value:number;onChange:(value:number)=>void;label:string;disabled?:boolean}){
+  const update=(raw:number)=>onChange(Math.min(1000000,Math.max(1,Math.floor(Number.isFinite(raw)?raw:1))));
+  return <div className="places-picker" aria-label={label}>
+    <div className="places-picker-top"><div><span className="places-picker-eyebrow">PREPAID CAPACITY</span><strong>{label}</strong><small>Choose your allowance before enrolling students</small></div><span className="places-picker-term">Per term</span></div>
+    <div className="places-picker-controls">
+      <button type="button" disabled={disabled||value<=1} aria-label="Reduce places by ten" onClick={()=>update(value-10)}>−</button>
+      <label className="places-picker-input"><input type="number" min="1" max="1000000" step="1" value={value} disabled={disabled} onChange={e=>update(Number(e.target.value))} aria-label={label}/><span>student places</span></label>
+      <button type="button" disabled={disabled||value>=1000000} aria-label="Add ten places" onClick={()=>update(value+10)}>+</button>
+    </div>
+    <div className="places-picker-presets" aria-label="Quick student-place choices">
+      {[50,100,200,500].map(q=><button type="button" key={q} disabled={disabled} className={q===value?"selected":""} aria-pressed={q===value} onClick={()=>update(q)}>{q.toLocaleString()}</button>)}
+    </div>
+  </div>;
+}
 function SlimNotice({tone,children}:{tone:"green"|"red"|"orange"|"gray";children:React.ReactNode}){return <section className={`slim-notice ${tone}`}><span className={`status-dot-mini ${tone}`}/><p>{children}</p></section>}
 function InfoLine({label,value}:{label:string;value:string}){return <div><span>{label}</span><strong>{value}</strong></div>}
 
 const css = `
+.quote-panel{display:grid;gap:14px;padding:clamp(14px,2vw,22px);border:1px solid var(--border,rgba(148,163,184,.25));border-radius:22px;background:var(--card-bg,var(--surface,#fff));box-shadow:0 12px 30px rgba(15,23,42,.04)}
+.quote-heading{display:grid;gap:4px}
+.quote-heading strong{font-size:19px;font-weight:900;letter-spacing:-.02em}
+.quote-heading small,.quote-disclaimer{color:var(--muted,#64748b);font-size:12px;line-height:1.55}
+.quote-layout{display:grid;grid-template-columns:minmax(240px,.9fr) minmax(220px,1fr);gap:14px;align-items:stretch}
+.quote-results{display:grid;align-content:center;gap:8px;min-width:0}
+.quote-result{display:flex;justify-content:space-between;align-items:center;gap:14px;min-height:66px;padding:12px 15px;border-radius:17px;background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--card-bg,#fff));border:1px solid var(--border,rgba(148,163,184,.2))}
+.quote-result>div{display:grid;gap:4px}
+.quote-result strong{font-size:14px}
+.quote-result small{font-size:11px;color:var(--muted,#64748b)}
+.quote-result b{font-size:clamp(18px,2.2vw,23px);font-weight:900;white-space:nowrap;color:var(--primary-color,#2563eb)}
+@media(max-width:620px){.quote-layout{grid-template-columns:minmax(0,1fr)}.quote-result{min-height:58px}}
+.places-picker{display:grid;gap:14px;padding:16px;border:1px solid var(--border,rgba(148,163,184,.3));border-radius:20px;background:var(--card-bg,var(--surface,#fff));box-shadow:0 8px 25px rgba(15,23,42,.04)}
+.places-picker-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.places-picker-top>div{display:grid;gap:3px}
+.places-picker-top strong{font-size:17px;font-weight:850;line-height:1.2}
+.places-picker-eyebrow{font-size:10px;font-weight:850;color:var(--primary-color,#2563eb);letter-spacing:.1em}
+.places-picker-top small{font-size:11px;line-height:1.5;color:var(--muted,#64748b)}
+.places-picker-term{font-size:11px;font-weight:750;white-space:nowrap;color:var(--muted,#64748b);border:1px solid var(--border,#cbd5e1);border-radius:30px;padding:6px 9px}
+.places-picker-controls{display:grid;grid-template-columns:46px minmax(0,1fr) 46px;gap:9px;align-items:stretch}
+.places-picker-controls>button{display:grid;place-items:center;border:1px solid var(--border,#cbd5e1);border-radius:14px;font-size:24px;font-weight:500;background:var(--card-bg,var(--surface,#fff));color:var(--text,#0f172a);cursor:pointer}
+.places-picker-controls>button:disabled{opacity:.4;cursor:not-allowed}
+.places-picker-input{display:grid;justify-items:center;gap:1px;padding:8px 6px;border:1.5px solid var(--primary-color,#2563eb);border-radius:14px;background:color-mix(in srgb,var(--primary-color,#2563eb) 5%,var(--card-bg,#fff))}
+.places-picker-input:focus-within{outline:2px solid var(--primary-color,#2563eb);outline-offset:2px}
+.places-picker-input input{width:100%;min-width:0;border:0!important;outline:0!important;background:transparent!important;box-shadow:none!important;color:var(--text,#0f172a);font-size:26px!important;font-weight:850!important;line-height:1.15;text-align:center;appearance:textfield;-moz-appearance:textfield}
+.places-picker-input input::-webkit-outer-spin-button,.places-picker-input input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.places-picker-input span{font-size:11px;color:var(--muted,#64748b);font-weight:650}
+.places-picker-presets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
+.places-picker-presets button{padding:9px 4px;border-radius:11px;border:1px solid var(--border,#cbd5e1);background:var(--card-bg,var(--surface,#fff));color:var(--text,#0f172a);font-weight:750;cursor:pointer}
+.places-picker-presets button.selected{border-color:var(--primary-color,#2563eb);color:var(--primary-color,#2563eb);background:color-mix(in srgb,var(--primary-color,#2563eb) 10%,var(--card-bg,#fff))}
+.cancel-quote-button{background:transparent!important;border:1px solid #dc2626!important;color:#dc2626!important;box-shadow:none!important}
+.cancel-quote-button:hover:not(:disabled){background:rgba(220,38,38,.08)!important}
+
 .student-checkout-content{padding:16px;display:grid;gap:12px;}
 .student-checkout-content p,.student-checkout-content small{color:var(--muted,#64748b);line-height:1.5;}
 .student-checkout-quote{display:grid;gap:4px;padding:14px;border:1px solid var(--border,#cbd5e1);border-radius:12px;}

@@ -164,6 +164,8 @@ export default function OwnerSubscriptionPage() {
   const [quotePaymentOpen,setQuotePaymentOpen]=useState(false);
   const [checkoutError,setCheckoutError]=useState("");
   const [recoveredCheckoutUrl,setRecoveredCheckoutUrl]=useState<string|null>(null);
+  const [recoveryFeedback,setRecoveryFeedback]=useState<{text:string; kind:"info"|"success"|"warning"|"error"}|null>(null);
+  const [recoveryStatus,setRecoveryStatus]=useState<string|null>(null);
   // A pending payment must remain recoverable after returning from Paystack,
   // closing the sheet, or refreshing the Owner portal. This ID is only a UI hint:
   // every recovery request is independently authorized by the backend.
@@ -242,45 +244,101 @@ export default function OwnerSubscriptionPage() {
     }catch(error){setCheckoutError(error instanceof Error?error.message:"Unable to prepare quotation.");}
     finally{setCheckoutBusy(false);}
   }
+  function safePaystackUrl(value:unknown):string|null {
+    if(typeof value!=="string" || !value.startsWith("https://"))return null;
+    try {
+      const host=new URL(value).hostname.toLowerCase();
+      return host==="paystack.com" || host.endsWith(".paystack.com") ? value : null;
+    }catch{return null;}
+  }
+  function clearResolvedQuote(){
+    try{sessionStorage.removeItem(PENDING_QUOTE_KEY);}catch{}
+    setPendingQuoteId(null);
+    setRecoveredCheckoutUrl(null);
+  }
+  function resumeExistingQuote(){
+    if(!serverQuote || serverQuote.status!=="quoted")return;
+    if(Date.parse(serverQuote.quoteExpiresAt)<=Date.now()){
+      setRecoveryFeedback({kind:"warning",text:"This quotation has expired. Check its status and cancel it on the server before requesting a replacement."});
+      return;
+    }
+    const plan=plans.find(p=>p.id===serverQuote.toPlanId);
+    if(!plan){
+      setRecoveryFeedback({kind:"warning",text:"This quotation's plan is not available in the current catalogue. Refresh and contact support before paying."});
+      return;
+    }
+    setStudentCheckoutPlan(plan);
+    setCheckoutError("");
+    setQuotePaymentOpen(false);
+  }
+  async function cancelUnusedQuote(){
+    const quoteId=pendingQuoteId;
+    if(!quoteId || checkoutBusy || recoveryStatus!=="quoted" || !serverQuote || serverQuote.id!==quoteId)return;
+    if(!window.confirm("Cancel this unused quotation on the server? This will not cancel a Paystack payment or refund a transaction."))return;
+    setCheckoutBusy(true);
+    setRecoveryFeedback({kind:"info",text:"Checking cancellation with the server…"});
+    try {
+      const response=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/cancel`, {
+        method:"POST",headers:authHeaders(),
+      });
+      await readJson(response);
+      if(!response.ok)throw new Error("The server did not confirm cancellation.");
+      clearResolvedQuote();
+      setServerQuote(null);
+      setRecoveryStatus("cancelled");
+      setStudentCheckoutPlan(null);
+      setRecoveryFeedback({kind:"success",text:"The server cancelled this unused quotation. You may request a new quotation now."});
+    }catch(error){
+      setRecoveryFeedback({kind:"error",text:`Cancellation was not confirmed: ${error instanceof Error?error.message:"Unknown error"}. Do not initiate a duplicate payment.`});
+    }finally{setCheckoutBusy(false);}
+  }
   async function refreshQuoteStatus(){
     const quoteId=pendingQuoteId || serverQuote?.id || (()=>{try{return sessionStorage.getItem(PENDING_QUOTE_KEY)}catch{return null}})();
     if(!quoteId||checkoutBusy)return;
     setCheckoutBusy(true);setCheckoutError("");
+    setRecoveryFeedback({kind:"info",text:"Checking the quotation and Paystack status with the server. No new payment will be initiated."});
+    setRecoveredCheckoutUrl(null);
     try{
       const recovery=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}/recover`) as {
-        changeOrderId:string; status:string; applied:boolean; authorizationUrl?:string|null; requiresManualReview?:boolean; verification?:string;
+        changeOrderId:string; status:string; paymentStatus?:string|null; applied:boolean;
+        authorizationUrl?:string|null; requiresManualReview?:boolean; verification?:string;
       };
       const result=await quoteRequest(`/billing/subscription-quotes/${encodeURIComponent(quoteId)}`) as ServerQuote;
-      setServerQuote(result);
       if(result.id!==quoteId || recovery.changeOrderId!==quoteId){
         throw new Error("The server returned an inconsistent quotation reference. Please contact support.");
       }
-      if(recovery.authorizationUrl){
-        setCheckoutError("Your existing Paystack checkout is available. Open that same session below; do not create a second payment.");
-        setRecoveredCheckoutUrl(recovery.authorizationUrl);
-      } else {
-        setRecoveredCheckoutUrl(null);
-      }
-      if(recovery.requiresManualReview){
-        setCheckoutError("The earlier payment attempt is not resolved. Please contact support with the quotation ID. Do not pay again.");
-      }
-      if(["cancelled","expired"].includes(result.status)){
-        try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}
-        setPendingQuoteId(null);
-      }
-      if(result.status==="applied"){
-        try{sessionStorage.removeItem(PENDING_QUOTE_KEY)}catch{}
-        setPendingQuoteId(null);
-        await load(true);setNotice("The server confirms your subscription was activated.");
-      } else if(["payment_pending","checkout_initializing","paid"].includes(result.status)){
-        setCheckoutError("Payment is being processed. Verify its status before any new checkout; do not pay twice.");
+      setServerQuote(result);
+      setRecoveryStatus(result.status);
+      const url=safePaystackUrl(recovery.authorizationUrl);
+      setRecoveredCheckoutUrl(url);
+      if(result.status==="applied" && recovery.applied){
+        clearResolvedQuote();
+        setStudentCheckoutPlan(null);
+        setQuotePaymentOpen(false);
+        await load(true);
+        setRecoveryFeedback({kind:"success",text:"The server confirms this subscription change was applied. Your package and entitlements should now be refreshed."});
+        setNotice("The server confirms your subscription was activated.");
+      }else if(result.status==="quoted"){
+        const expired=Date.parse(result.quoteExpiresAt)<=Date.now();
+        setRecoveryFeedback({kind:expired?"warning":"info",text:expired
+          ? "This quotation has expired without a confirmed payment. You may cancel it on the server, then request a fresh one."
+          : "This quotation has not started payment. Choose Resume quotation to continue with the existing verified amount, or cancel it on the server."});
+        if(studentCheckoutPlan && studentCheckoutPlan.id===result.toPlanId)setCheckoutError("");
+      }else if(url){
+        setRecoveryFeedback({kind:"info",text:"Your earlier Paystack session is available. Select Continue existing Paystack session below. Do not create a second payment."});
+      }else if(recovery.requiresManualReview || ["payment_pending","checkout_initializing","paid"].includes(result.status)){
+        setRecoveryFeedback({kind:"warning",text:`The order is ${result.status.replace(/_/g," ")}${recovery.paymentStatus?` (payment: ${recovery.paymentStatus})`:""}. No resumable Paystack link is available. Keep the reference and request reconciliation; do not pay again.`});
+      }else if(["cancelled","expired"].includes(result.status)){
+        clearResolvedQuote();
+        setRecoveryFeedback({kind:"info",text:`The server confirms this quotation is ${result.status}. You may request a new quotation.`});
+      }else{
+        setRecoveryFeedback({kind:"warning",text:`The server reports quotation status: ${result.status}. No new payment was started. Keep the reference and contact support if this does not resolve.`});
       }
     }catch(error){
       const message=error instanceof Error?error.message:"Could not refresh payment status.";
-      setCheckoutError(message);
-      setNotice(`Payment status could not be confirmed. Keep your payment reference and contact support if necessary. ${message}`);
-    }
-    finally{setCheckoutBusy(false);}
+      setRecoveryFeedback({kind:"error",text:`Status check failed: ${message}. Keep your quotation reference; do not start another payment until its status is confirmed.`});
+      setNotice("");
+    }finally{setCheckoutBusy(false);}
   }
   async function beginStudentPayment(){
     if(!studentCheckoutPlan||!serverQuote||checkoutBusy)return;
@@ -375,7 +433,7 @@ export default function OwnerSubscriptionPage() {
         <button type="button" className="ba-filter-button" onClick={()=>void load()} disabled={loading} aria-label="Refresh">↻</button>
         <button type="button" className="ba-icon-button" onClick={()=>setMoreOpen(true)} aria-label="More options">⋯</button>
       </section>
-      <style>{`.trial-conversion-notice{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:15px;border:1px solid var(--border,rgba(148,163,184,.3));background:var(--card-bg,var(--surface,#fff))}.trial-conversion-notice>div{flex:1 1 240px;min-width:0}.trial-conversion-notice strong{font-size:14px}.trial-conversion-notice p{margin:4px 0;font-size:12px;line-height:1.45}.trial-conversion-notice small{display:block;color:var(--muted,#64748b);font-size:11px}.trial-conversion-notice button{border:0;border-radius:12px;background:var(--primary-color,#2563eb);color:white;padding:10px 13px;font-weight:800;cursor:pointer}.trial-conversion-notice button:focus-visible{outline:2px solid currentColor;outline-offset:3px}`}</style>
+      <style>{`.trial-conversion-notice{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:15px;border:1px solid var(--border,rgba(148,163,184,.3));background:var(--card-bg,var(--surface,#fff))}.trial-conversion-notice>div{flex:1 1 240px;min-width:0}.trial-conversion-notice strong{font-size:14px}.trial-conversion-notice p{margin:4px 0;font-size:12px;line-height:1.45}.trial-conversion-notice small{display:block;color:var(--muted,#64748b);font-size:11px}.trial-conversion-notice button{border:0;border-radius:12px;background:var(--primary-color,#2563eb);color:white;padding:10px 13px;font-weight:800;cursor:pointer}.trial-conversion-notice button:focus-visible{outline:2px solid currentColor;outline-offset:3px}.trial-conversion-notice .recovery-feedback{flex:1 1 100%;margin:0;padding:10px 12px;border:1px solid var(--border,rgba(148,163,184,.3));border-radius:10px;line-height:1.5;font-size:12px;overflow-wrap:anywhere}.recovery-feedback.info{color:var(--text,#334155)}.recovery-feedback.success{color:#15803d}.recovery-feedback.warning{color:#b45309}.recovery-feedback.error{color:#b91c1c}.trial-conversion-notice a{display:inline-flex;align-items:center;justify-content:center;padding:10px 13px;border-radius:12px;border:1px solid var(--border,rgba(148,163,184,.3));color:var(--text,#334155);font-weight:800;text-decoration:underline}`}</style>
       <section className="ba-list compact-status-list" aria-label="Current commercial arrangement">
         <button type="button" className="status-row" onClick={()=>setMoreOpen(true)}>
           <span className="status-icon">{active?"✓":pending?"!":"○"}</span>
@@ -390,6 +448,9 @@ export default function OwnerSubscriptionPage() {
         {pendingQuoteId?<section className="trial-conversion-notice" role="status">
           <div><strong>Unresolved subscription quotation</strong><p>A previous checkout or quotation is recorded on this device. Check it before starting another payment. A status check does not charge you.</p><small>Reference: {pendingQuoteId}</small></div>
           <button type="button" disabled={checkoutBusy} onClick={()=>void refreshQuoteStatus()}>{checkoutBusy?"Checking…":"Check pending payment"}</button>
+          {recoveryFeedback?<p role="status" aria-live="polite" className={`recovery-feedback ${recoveryFeedback.kind}`}>{recoveryFeedback.text}</p>:null}
+          {recoveryStatus==="quoted" && serverQuote?.id===pendingQuoteId && Date.parse(serverQuote.quoteExpiresAt)>Date.now()?<button type="button" disabled={checkoutBusy} onClick={resumeExistingQuote}>Resume quotation</button>:null}
+          {recoveryStatus==="quoted" && serverQuote?.id===pendingQuoteId?<button type="button" disabled={checkoutBusy} onClick={()=>void cancelUnusedQuote()}>Cancel unused quotation</button>:null}
           {recoveredCheckoutUrl?<a href={recoveredCheckoutUrl} target="_blank" rel="noopener noreferrer">Continue existing Paystack session</a>:null}
         </section>:null}
         {pending?<SlimNotice tone="orange">A pending package requires confirmation before activation. Do not make a duplicate payment until the invoice and provider status have been checked.</SlimNotice>:null}

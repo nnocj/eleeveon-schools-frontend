@@ -489,6 +489,12 @@ export default function Home() {
     password: "",
   });
 
+  // Preserve a quantity chosen on another Eleeveon public page.
+  useEffect(() => {
+    const count = Number(new URLSearchParams(window.location.search).get("students"));
+    if (Number.isSafeInteger(count) && count >= 1 && count <= 1000000) setStudentCount(count);
+  }, []);
+
   useEffect(() => {
     const saved = window.localStorage.getItem("eleeveon-public-theme");
     const initial: ThemeMode =
@@ -622,8 +628,8 @@ export default function Home() {
 
   const submitPublicSignup = async () => {
     if (!signupPlan) return;
-    if (signupPlan.licenseModel !== "trial" && (signupPlan.metadata?.pricing?.mode && signupPlan.metadata.pricing.mode !== "fixed" || signupPlan.deploymentMode !== "eleeveon_cloud" || signupPlan.licenseModel === "perpetual")) {
-      setSignupError("This package requires a verified quote or installation arrangement. Online checkout is not enabled for it yet.");
+    if (signupPlan.licenseModel !== "trial" && ( !["eleeveon_cloud", "connected"].includes(signupPlan.deploymentMode || "") || signupPlan.licenseModel === "perpetual")) {
+      setSignupError("This package needs a separate installation or purchase arrangement.");
       return;
     }
 
@@ -779,7 +785,8 @@ export default function Home() {
         window.location.replace(new URL("/owner", window.location.origin).toString());
         return;
       }
-      destination.searchParams.set("billingCycle", billingCycle);
+      destination.searchParams.set("billingCycle", signupPlan.metadata?.pricing?.billingPeriod || billingCycle);
+      destination.searchParams.set("students", String(studentCount));
       destination.searchParams.set("checkout", "1");
       destination.searchParams.set("source", "public-pricing");
 
@@ -1202,10 +1209,17 @@ export default function Home() {
 
           <div className="mt-8 grid gap-5 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start dark:border-white/10 dark:bg-zinc-900">
             <div>
-              <label htmlFor="school-student-count" className="block text-sm font-semibold">How many students does your school have?</label>
-              <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Enter your school size to see your Cloud subscription estimate immediately. No need to scroll through packages.</p>
-              <input id="school-student-count" type="number" min="1" max="1000000" step="1" value={studentCount} onChange={(e) => setStudentCount(Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))))} className="mt-4 w-full max-w-60 rounded-xl border border-zinc-300 bg-transparent px-4 py-3 text-lg font-semibold outline-none focus:border-[#2f6fed] dark:border-white/20" />
-              <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Estimate only. Final invoice and student count are verified by Eleeveon.</p>
+              <label htmlFor="school-student-count" className="block text-sm font-semibold">How many student places would you like to prepay?</label>
+              <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Choose the student capacity you want to purchase, even before enrolling your first student. The server confirms the final amount at checkout.</p>
+              <div className="mt-4 flex max-w-sm items-center gap-2 rounded-2xl border border-zinc-300 bg-white p-2 shadow-sm dark:border-white/20 dark:bg-zinc-950">
+                <button type="button" aria-label="Remove ten student places" onClick={() => setStudentCount(n => Math.max(1, n - 10))} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-zinc-100 text-xl font-semibold hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/15">−</button>
+                <input id="school-student-count" inputMode="numeric" type="number" min="1" max="1000000" step="1" value={studentCount} onChange={(e) => setStudentCount(Math.max(1, Math.min(1000000, Math.floor(Number(e.target.value) || 1))))} className="min-w-0 flex-1 bg-transparent text-center text-2xl font-semibold outline-none" />
+                <button type="button" aria-label="Add ten student places" onClick={() => setStudentCount(n => Math.min(1000000, n + 10))} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-zinc-100 text-xl font-semibold hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/15">+</button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2" aria-label="Popular student capacities">
+                {[50, 100, 200, 500].map(quantity => <button type="button" key={quantity} onClick={() => setStudentCount(quantity)} className={`rounded-full border px-4 py-2 text-xs font-semibold transition ${studentCount === quantity ? "border-[#2f6fed] bg-[#2f6fed] text-white" : "border-zinc-200 hover:border-[#2f6fed] dark:border-white/15"}`}>{quantity}</button>)}
+              </div>
+              <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Indicative price only. You can prepay before enrolling students. Your allowance activates only after the backend verifies payment.</p>
             </div>
             <div className="rounded-2xl border border-[#2f6fed]/20 bg-[#2f6fed]/5 p-5 dark:border-[#2f6fed]/30 dark:bg-[#2f6fed]/10" aria-live="polite" aria-atomic="true">
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#2f6fed]">Your instant quotation</p>
@@ -1317,7 +1331,7 @@ export default function Home() {
                     const studentPriced = plan.metadata?.pricing?.mode && plan.metadata.pricing.mode !== "fixed";
                     const specialPurchase = plan.licenseModel === "perpetual";
                     const trial = plan.licenseModel === "trial";
-                    const availableOnline = plan.deploymentMode === "eleeveon_cloud" && !studentPriced && !specialPurchase;
+                    const availableOnline = ["eleeveon_cloud", "connected"].includes(plan.deploymentMode || "") && !specialPurchase && (plan.maxStudents == null || studentCount <= plan.maxStudents);
                     const currency = plan.currency || "GHS";
                     const monthlyPrice = Number(
                       plan.priceMonthly || 0,
@@ -1477,7 +1491,7 @@ export default function Home() {
                                 : "bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
                             }`}
                           >
-                            {availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Quotation only — checkout pending" : "Installation enquiry — coming soon")}
+                            {availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Contact Eleeveon for capacity" : "Installation enquiry — coming soon")}
                             <ArrowIcon />
                           </button>
                           <p className="mt-3 text-center text-xs text-zinc-400">
@@ -1774,9 +1788,7 @@ export default function Home() {
                   Start with {signupPlan.name}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                  We will create the owner account, attach the selected package and
-                  {` ${billingCycle}`} billing choice, then continue to secure
-                  payment. School and branch records can be created afterward.
+                  We will create your Owner account and carry your package and prepaid capacity selection into the secured Owner checkout. Your subscription becomes active only after verified payment. School and branch setup can follow.
                 </p>
               </div>
 
@@ -1803,7 +1815,7 @@ export default function Home() {
                   Billing
                 </span>
                 <strong className="mt-1 block text-sm capitalize">
-                  {billingCycle}
+                  {signupPlan.metadata?.pricing?.billingPeriod || billingCycle}
                 </strong>
               </div>
               <div>
@@ -1818,6 +1830,14 @@ export default function Home() {
                 </strong>
               </div>
             </div>
+
+            {signupPlan.metadata?.pricing && signupPlan.metadata.pricing.mode !== "fixed" ? (
+              <div className="mt-4 rounded-2xl border border-[#2f6fed]/20 bg-[#2f6fed]/5 p-4 dark:bg-[#2f6fed]/10">
+                <p className="text-xs font-semibold text-[#2f6fed]">Prepaid student allowance</p>
+                <p className="mt-1 text-2xl font-semibold">{studentCount.toLocaleString()} places</p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">This is an estimate. The Owner checkout creates the payable server quotation. Registration alone does not activate paid access.</p>
+              </div>
+            ) : null}
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1.5">
@@ -1935,8 +1955,8 @@ export default function Home() {
               {signupLoading
                 ? "Creating your account..."
                 : Number(publicAmount(signupPlan, billingCycle, studentCount)) > 0
-                  ? "Create your Eleeveon owner account to payment"
-                  : "Create account and activate package"}
+                  ? "Create Owner account and continue to checkout"
+                  : "Create Owner account and continue"}
               {!signupLoading ? <ArrowIcon /> : null}
             </button>
 

@@ -46,8 +46,8 @@ const PENDING_QUOTE_KEY = "eleeveon_owner_student_checkout_quote";
 type Invoice = { status?: string|null; invoiceNumber?: string; total?: number; currency?: string };
 type Subscription = {
   id?: string; planId?: string|null; plan?: Plan|null; status?: string|null;
-  metadata?: {prepaidStudentLimit?: number; prepaidSourceOrderId?: string; [key:string]:unknown}|null;
-  currentPeriodStart?: string|null; metadata?: { prepaidStudentLimit?: number; [key:string]:unknown }|null; currentPeriodStart?:string|null;
+  metadata?: { prepaidStudentLimit?: number; prepaidSourceOrderId?: string; [key: string]: unknown } | null;
+  currentPeriodStart?: string | null;
   billingCycle?: string|null; currentPeriodEnd?: string|null; trialEndsAt?: string|null;
   invoices?: Invoice[]; payments?: Payment[];
 };

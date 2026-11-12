@@ -110,7 +110,7 @@ function DatabaseReadyRuntime() {
   );
 }
 
-export default function Providers({
+function CloudProviders({
   children,
 }: {
   children: ReactNode;
@@ -148,4 +148,15 @@ export default function Providers({
       </AccountProvider>
     </DatabaseBootstrap>
   );
+}
+
+
+// Independent builds never mount Cloud AccountProvider, SubscriptionBootstrap,
+// RealtimeProvider, SyncBootstrap, or the cloud update manager.
+import { IS_INDEPENDENT_RUNTIME } from './lib/independent/runtimeMode';
+import IndependentRuntimeShell from './components/independent/IndependentRuntimeShell';
+
+export default function Providers({children}:{children: ReactNode}) {
+  if (IS_INDEPENDENT_RUNTIME) return <IndependentRuntimeShell>{children}</IndependentRuntimeShell>;
+  return <CloudProviders>{children}</CloudProviders>;
 }

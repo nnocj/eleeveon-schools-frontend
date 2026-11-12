@@ -35,7 +35,7 @@ type Payment = { status?: string|null };
 type ServerQuote = {
   id: string; accountId?: string; toPlanId: string; status: string;
   currency: string; amountDue: number; quoteExpiresAt: string;
-  calculation?: { studentCount?: number; studentPricingMode?: string };
+  calculation?: { studentCount?: number; studentPricingMode?: string; upgradeFromSeats?: number; upgradeToSeats?: number; upgradePeriodEnd?: string; upgradeUnroundedGhs?: number; upgradeRounding?: string };
   payment?: { providerReference?: string; authorizationUrl?: string; status?: string };
 };
 const STUDENT_CHECKOUT_ENABLED = ["test", "live"].includes(
@@ -46,6 +46,8 @@ const PENDING_QUOTE_KEY = "eleeveon_owner_student_checkout_quote";
 type Invoice = { status?: string|null; invoiceNumber?: string; total?: number; currency?: string };
 type Subscription = {
   id?: string; planId?: string|null; plan?: Plan|null; status?: string|null;
+  metadata?: {prepaidStudentLimit?: number; prepaidSourceOrderId?: string; [key:string]:unknown}|null;
+  currentPeriodStart?: string|null; metadata?: { prepaidStudentLimit?: number; [key:string]:unknown }|null; currentPeriodStart?:string|null;
   billingCycle?: string|null; currentPeriodEnd?: string|null; trialEndsAt?: string|null;
   invoices?: Invoice[]; payments?: Payment[];
 };
@@ -158,6 +160,7 @@ export default function OwnerSubscriptionPage() {
   const [moreOpen,setMoreOpen]=useState(false);
   const [selectedPlan,setSelectedPlan]=useState<Plan|null>(null);
   const [studentCheckoutPlan,setStudentCheckoutPlan]=useState<Plan|null>(null);
+  const [capacityUpgradePlan,setCapacityUpgradePlan]=useState<Plan|null>(null); // ELEV_CAPACITY_UPGRADE_V1
   const [serverQuote,setServerQuote]=useState<ServerQuote|null>(null);
   const [checkoutBusy,setCheckoutBusy]=useState(false);
   const [payerEmail,setPayerEmail]=useState("");
@@ -194,11 +197,14 @@ export default function OwnerSubscriptionPage() {
       const requested=params.get("planId");
       if(requested && params.get("checkout")==="1"){
         const selected=active.find(p=>p.id===requested);
-        // Never auto-open an unsupported commercial checkout.
-        if(selected && mode(selected)==="subscription" && pricing(selected).mode==="fixed" && fixedPrice(selected,(c==="monthly"||c==="termly"||c==="yearly")?c:"termly")>0) setSelectedPlan(selected);
-        else setNotice("Your package is available for review. Activation or checkout is not yet available here for this package type.");
+        if(selected && mode(selected)==="subscription" && pricing(selected).mode!=="fixed" && STUDENT_CHECKOUT_ENABLED) {
+          const seats=Number(params.get("students"));
+          if(Number.isSafeInteger(seats)&&seats>0)setCount(seats);
+          setStudentCheckoutPlan(selected);
+        } else if(selected && mode(selected)==="subscription" && pricing(selected).mode==="fixed" && fixedPrice(selected,(c==="monthly"||c==="termly"||c==="yearly")?c:"termly")>0) setSelectedPlan(selected);
+        else setNotice("This package is not currently available for online checkout.");
         const url=new URL(window.location.href);
-        ["planId","checkout","billingCycle","source"].forEach(k=>url.searchParams.delete(k));
+        ["planId","checkout","billingCycle","students","source"].forEach(k=>url.searchParams.delete(k));
         window.history.replaceState({},"",url.toString());
       }
     }catch(e){setError(e instanceof Error?e.message:"Could not load packages.");}
@@ -225,10 +231,8 @@ export default function OwnerSubscriptionPage() {
     try {
       const result=await quoteRequest("/billing/subscription-quotes", {
         toPlanId:studentCheckoutPlan.id,billingCycle:pricing(studentCheckoutPlan).billingPeriod || "termly",
-        // Student-priced checkout currently supports new and renewal orders only.
-        // A trial, pending or expired account must start a new paid subscription.
         changeType: current?.id && norm(current.status)==="active" && current.planId===studentCheckoutPlan.id
-          ? "renewal" : "new",
+          ? (current?.metadata?.prepaidStudentLimit && count>current.metadata.prepaidStudentLimit ? "upgrade" : "renewal") : "new",
         effectiveMode:"immediate",
         requestedStudentCount:count,
       }) as ServerQuote;
@@ -447,6 +451,7 @@ export default function OwnerSubscriptionPage() {
   const pending=!!current && ["pending","pending_payment","unpaid","processing"].includes(st);
   const displayCurrency=(p:Plan)=>p.currency||"GHS";
   function buttonLabel(p:Plan,isCurrent:boolean) {
+    if(isCurrent && mode(p)==="subscription" && pricing(p).mode!=="fixed")return "Increase student capacity";
     if(isCurrent)return "Current package";
     if(mode(p)==="trial")return "Trial activation coming soon";
     if(mode(p)==="perpetual")return "Licence checkout coming soon";
@@ -513,7 +518,8 @@ export default function OwnerSubscriptionPage() {
           const q=quote(p,count,cycle);
           const isCurrent=!!currentId&&currentId===p.id&&active;
           const waiting=!!currentId&&currentId===p.id&&pending;
-          const disabled=isCurrent||!canCheckout(p);
+          const upgradeAvailable=isCurrent && mode(p)==="subscription" && pricing(p).mode!=="fixed";
+          const disabled=!upgradeAvailable && (isCurrent||!canCheckout(p));
           return <article key={p.id} className={isCurrent?"plan current":waiting?"plan waiting":"plan"}>
             {isCurrent?<div className="ribbon">Current</div>:waiting?<div className="ribbon waiting-ribbon">Pending</div>:null}
             <div><span className="badge">{p.code} · {kind(p)}</span><h2>{p.name}</h2><p>{p.description||"An Eleeveon Schools package."}</p></div>
@@ -522,10 +528,36 @@ export default function OwnerSubscriptionPage() {
               <small>{q.estimated?`Estimate for ${count.toLocaleString()} students`:mode(p)==="perpetual"?deploy(p):mode(p)==="trial"?"No upfront payment":"Price is configured by the package"}</small>
             </div>
             <ul>{features(p).slice(0,16).map(f=><li key={f}>✓ {f}</li>)}</ul>
-            <button type="button" disabled={disabled} onClick={()=>pricing(p).mode==="fixed"?setSelectedPlan(p):openStudentCheckout(p)}>{buttonLabel(p,isCurrent)}</button>
+            <button type="button" disabled={disabled} onClick={()=>upgradeAvailable?(setCount(Math.max(count,Number(current?.metadata?.prepaidStudentLimit||0)+1)),setCapacityUpgradePlan(p)):pricing(p).mode==="fixed"?setSelectedPlan(p):openStudentCheckout(p)}>{buttonLabel(p,isCurrent)}</button>
           </article>;
         })}
       </section>
+      {capacityUpgradePlan?<FullViewportOverlay><div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Increase purchased student capacity">
+        <div className="ba-sheet-head"><div><h2>Increase student capacity</h2><p>Existing Standard subscription · keep the same expiry date</p></div><button type="button" onClick={()=>setCapacityUpgradePlan(null)} aria-label="Close upgrade panel">✕</button></div>
+        <div className="student-checkout-content">
+          {(()=>{
+            const previous=Number(current?.metadata?.prepaidStudentLimit);
+            const start=current?.currentPeriodStart?new Date(current.currentPeriodStart).getTime():NaN;
+            const end=current?.currentPeriodEnd?new Date(current.currentPeriodEnd).getTime():NaN;
+            const now=Date.now();
+            const remaining=Number.isFinite(start)&&Number.isFinite(end)&&end>start&&end>now?Math.max(0,Math.min(1,(end-now)/(end-start))):null;
+            const oldPrice=Number.isSafeInteger(previous)&&previous>0?quote(capacityUpgradePlan,previous,cycle).amount:null;
+            const newPrice=Number.isSafeInteger(previous)&&previous>0&&count>previous?quote(capacityUpgradePlan,count,cycle).amount:null;
+            const delta=oldPrice!==null&&newPrice!==null?Math.max(0,newPrice-oldPrice):null;
+            const estimate=remaining!==null&&delta!==null?Math.round(delta*remaining*100)/100:null;
+            return <>
+              <div className="student-checkout-quote"><strong>Current paid allowance: {Number.isSafeInteger(previous)&&previous>0?previous.toLocaleString():"Not available"}</strong><span>Subscription ends: {formatDate(current?.currentPeriodEnd)}</span></div>
+              <StudentPlaceSelector value={count} onChange={setCount} label="New TOTAL student allowance (not additional places)" />
+              {Number.isSafeInteger(previous)&&previous>0&&count<=previous?<p role="alert" className="student-checkout-error">Enter a total greater than your existing allowance of {previous}.</p>:null}
+              {estimate!==null&&count>previous?<div className="student-checkout-quote"><strong>Indicative remaining-term difference: GHS {estimate.toFixed(2)}</strong><span>{count-previous} additional places · {Math.round((remaining??0)*100)}% of the existing period remaining</span><small>For illustration only: not a payable quotation or an invoice.</small></div>:<p>Once the server confirms your existing allowance and remaining term, it will calculate the upgrade balance.</p>}
+              <p role="status">The backend will calculate your remaining-term charge and round up to the next whole GH₵ because the current billing records store whole cedis. The original expiry date will not change.</p>
+              <button type="button" className="student-checkout-primary" disabled={!STUDENT_CHECKOUT_ENABLED||!Number.isSafeInteger(previous)||previous<1||count<=previous||!remaining||checkoutBusy}
+                onClick={()=>{setCapacityUpgradePlan(null);openStudentCheckout(capacityUpgradePlan);}}>Get verified upgrade quote & pay</button>
+              <button type="button" onClick={()=>setCapacityUpgradePlan(null)}>Not now</button>
+            </>;
+          })()}
+        </div>
+      </section></div></FullViewportOverlay>:null}
       {moreOpen?<FullViewportOverlay><div className="ba-sheet-backdrop" role="dialog" aria-modal="true"><section className="ba-sheet small">
         <div className="ba-sheet-head"><div><h2>Package details</h2><p>Your current commercial arrangement</p></div><button type="button" onClick={()=>setMoreOpen(false)}>✕</button></div>
         <div className="sub-info-list"><InfoLine label="Package" value={currentPlan?.name||"None"}/><InfoLine label="Type" value={currentPlan?kind(currentPlan):"Not selected"}/><InfoLine label="Deployment" value={currentPlan?deploy(currentPlan):"—"}/><InfoLine label="Status" value={current?.status||"None"}/><InfoLine label="Access until" value={formatDate(current?.trialEndsAt||current?.currentPeriodEnd)}/><InfoLine label="Payment recorded" value={paidEvidence(current)?"Yes":"No paid record in this response"}/></div>
@@ -535,12 +567,14 @@ export default function OwnerSubscriptionPage() {
       {studentCheckoutPlan?<FullViewportOverlay><div className="ba-sheet-backdrop" role="presentation"><section className="ba-sheet small" role="dialog" aria-modal="true" aria-label="Verified student subscription checkout">
         <div className="ba-sheet-head"><div><h2>{studentCheckoutPlan.name}</h2><p>Verified server quotation · Paystack</p></div><button type="button" disabled={checkoutBusy} onClick={()=>{setStudentCheckoutPlan(null);setServerQuote(null);setQuotePaymentOpen(false);}}>✕</button></div>
         <div className="student-checkout-content">
-          <p>Prepay for the student places your school needs this term, even if you have not admitted anyone yet. The backend verifies your selected allowance against current enrollment and calculates the final payable amount.</p>
+          <p>{current?.planId===studentCheckoutPlan.id && current?.status==="active" && count>Number(current?.metadata?.prepaidStudentLimit||0)
+            ? `Increase your existing allowance from ${current?.metadata?.prepaidStudentLimit||"—"} to ${count} places. You will pay only the rounded remaining-term difference. Expiry: ${formatDate(current?.currentPeriodEnd)}.`
+            : "Prepay for student places. The backend verifies your allowance and calculates the payable amount."}</p>
           {!serverQuote?<StudentPlaceSelector value={count} onChange={setCount} label="Places to prepay" disabled={checkoutBusy}/>:null}
           {serverQuote?<div className="student-checkout-quote">
             <strong>{money(serverQuote.amountDue,serverQuote.currency)}</strong>
             <span>{serverQuote.calculation?.studentCount ?? "—"} prepaid student places · expires {formatDate(serverQuote.quoteExpiresAt)}</span>
-            <small>Quotation status: {serverQuote.status}</small>
+            <small>Quotation status: {serverQuote.status}{serverQuote.calculation?.upgradeFromSeats?` · Upgrade ${serverQuote.calculation.upgradeFromSeats} → ${serverQuote.calculation.upgradeToSeats} places · Expiry unchanged: ${formatDate(serverQuote.calculation.upgradePeriodEnd)} · Rounded up to whole GH₵`:""}</small>
           </div>:null}
           {checkoutError?<p role="alert" className="student-checkout-error">{checkoutError}</p>:null}
           {!serverQuote?<button type="button" className="student-checkout-primary" disabled={checkoutBusy} onClick={()=>void requestServerQuote()}>{checkoutBusy?"Preparing quotation…":"Get server quotation"}</button>:null}

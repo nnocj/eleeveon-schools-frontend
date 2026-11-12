@@ -29,6 +29,12 @@ const b64 = (bytes: Uint8Array): string => {
   return btoa(result);
 };
 const unb64 = (text: string): Uint8Array => Uint8Array.from(atob(text), c => c.charCodeAt(0));
+/** WebCrypto requires an ArrayBuffer-backed BufferSource, not ArrayBufferLike. */
+const webCryptoBytes = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
+  const copy = new Uint8Array(new ArrayBuffer(bytes.byteLength));
+  copy.set(bytes);
+  return copy;
+};
 const bytesOf = (v: ArrayBuffer | ArrayBufferView): Uint8Array => v instanceof ArrayBuffer
   ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
 
@@ -61,8 +67,8 @@ export async function encodeIDB(value: unknown, seen = new WeakSet<object>()): P
 
 async function keyFromPassphrase(passphrase: string, salt: Uint8Array, usage: KeyUsage): Promise<CryptoKey> {
   if (passphrase.length < 12) throw new Error("Backup passphrase must contain at least 12 characters");
-  const raw = await crypto.subtle.importKey("raw", encoder.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations: ITERATIONS }, raw, { name: "AES-GCM", length: 256 }, false, [usage]);
+  const raw = await crypto.subtle.importKey("raw", webCryptoBytes(encoder.encode(passphrase)), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: webCryptoBytes(salt), iterations: ITERATIONS }, raw, { name: "AES-GCM", length: 256 }, false, [usage]);
 }
 export async function encryptSchoolArchive(snapshot: SchoolArchive, passphrase: string): Promise<EncryptedArchive> {
   if (!crypto?.subtle) throw new Error("Secure WebCrypto is required for encrypted backups");
@@ -70,13 +76,13 @@ export async function encryptSchoolArchive(snapshot: SchoolArchive, passphrase: 
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await keyFromPassphrase(passphrase, salt, "encrypt");
   const plaintext = encoder.encode(JSON.stringify(snapshot));
-  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: webCryptoBytes(iv) }, key, webCryptoBytes(plaintext));
   return { format: "eleeveon-independent-encrypted", version: 1, cipher: "AES-256-GCM", kdf: "PBKDF2-SHA256", iterations: ITERATIONS, salt: b64(salt), iv: b64(iv), payload: b64(new Uint8Array(encrypted)) };
 }
 export async function decryptSchoolArchive(archive: EncryptedArchive, passphrase: string): Promise<SchoolArchive> {
   if (archive?.format !== "eleeveon-independent-encrypted" || archive.version !== 1 || archive.iterations !== ITERATIONS) throw new Error("Unsupported Eleeveon encrypted backup format");
   const key = await keyFromPassphrase(passphrase, unb64(archive.salt), "decrypt");
-  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(archive.iv) }, key, unb64(archive.payload));
+  const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: webCryptoBytes(unb64(archive.iv)) }, key, webCryptoBytes(unb64(archive.payload)));
   const snapshot = JSON.parse(decoder.decode(plaintext)) as SchoolArchive;
   if (snapshot.format !== "eleeveon-independent-snapshot" || snapshot.version !== 1 || !Array.isArray(snapshot.tables)) throw new Error("Invalid decrypted school archive");
   return snapshot;

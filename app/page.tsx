@@ -628,8 +628,10 @@ export default function Home() {
 
   const submitPublicSignup = async () => {
     if (!signupPlan) return;
-    if (signupPlan.licenseModel !== "trial" && ( !["eleeveon_cloud", "connected"].includes(signupPlan.deploymentMode || "") || signupPlan.licenseModel === "perpetual")) {
-      setSignupError("This package needs a separate installation or purchase arrangement.");
+    // A perpetual licence may be SELECTED here, but is not issued during registration.
+    // The dedicated independent workflow must verify purchase and activation.
+    if (signupPlan.licenseModel !== "trial" && signupPlan.licenseModel !== "subscription" && signupPlan.licenseModel !== "perpetual") {
+      setSignupError("This package cannot be selected through public registration.");
       return;
     }
 
@@ -783,6 +785,10 @@ export default function Home() {
       destination.searchParams.set("planId", signupPlan.id);
       if (signupPlan.licenseModel === "trial") {
         window.location.replace(new URL("/owner", window.location.origin).toString());
+        return;
+      }
+      if (signupPlan.licenseModel === "perpetual") {
+        window.location.replace(`/independent/start?planId=${encodeURIComponent(signupPlan.id)}`);
         return;
       }
       destination.searchParams.set("billingCycle", signupPlan.metadata?.pricing?.billingPeriod || billingCycle);
@@ -1482,10 +1488,8 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (specialPurchase) {
-                                // Website selection only: permanent-license payment is not yet supported here.
-                                window.location.assign(`/independent/start?planId=${encodeURIComponent(plan.id)}`);
-                              } else if (availableOnline) {
+                              if (specialPurchase || availableOnline) {
+                                // Collect an account first; the selected plan is passed to the correct checkout.
                                 openPublicSignup(plan);
                               }
                             }}
@@ -1496,11 +1500,11 @@ export default function Home() {
                                 : "bg-zinc-950 text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
                             }`}
                           >
-                            {specialPurchase ? `Explore ${plan.name}` : availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Contact Eleeveon for capacity" : "Installation enquiry — coming soon")}
+                            {specialPurchase ? `Choose ${plan.name}` : availableOnline ? (trial ? "Start free trial" : `Choose ${plan.name}`) : (studentPriced ? "Contact Eleeveon for capacity" : "Installation enquiry — coming soon")}
                             <ArrowIcon />
                           </button>
                           <p className="mt-3 text-center text-xs text-zinc-400">
-                            {specialPurchase ? "Review the one-time licence and sign in. Payment is not enabled yet." : availableOnline ? "Create an owner account to continue." : "This package is visible for comparison; online purchase is not yet enabled."}
+                            {specialPurchase ? "Create an Owner account to review independent activation. Licence purchase requires verified checkout." : availableOnline ? "Create an owner account to continue." : "This package is visible for comparison; online purchase is not yet enabled."}
                           </p>
                         </div>
                       </article>
@@ -1793,7 +1797,7 @@ export default function Home() {
                   Start with {signupPlan.name}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                  We will create your Owner account and carry your package and prepaid capacity selection into the secured Owner checkout. Your subscription becomes active only after verified payment. School and branch setup can follow.
+                  Your selected package will be kept when creating your Owner account. Paid subscriptions require confirmed payment; independent licences require their own verified purchase and activation. You do not have to activate a Free Trial first.
                 </p>
               </div>
 
@@ -1820,7 +1824,7 @@ export default function Home() {
                   Billing
                 </span>
                 <strong className="mt-1 block text-sm capitalize">
-                  {signupPlan.metadata?.pricing?.billingPeriod || billingCycle}
+                  {signupPlan.licenseModel === "perpetual" ? "One-time" : signupPlan.metadata?.pricing?.billingPeriod || billingCycle}
                 </strong>
               </div>
               <div>
@@ -1959,7 +1963,9 @@ export default function Home() {
             >
               {signupLoading
                 ? "Creating your account..."
-                : Number(publicAmount(signupPlan, billingCycle, studentCount)) > 0
+                : signupPlan.licenseModel === "perpetual"
+                  ? "Create Owner account and review licence"
+                  : Number(publicAmount(signupPlan, billingCycle, studentCount)) > 0
                   ? "Create Owner account and continue to checkout"
                   : "Create Owner account and continue"}
               {!signupLoading ? <ArrowIcon /> : null}
@@ -1967,7 +1973,7 @@ export default function Home() {
 
             <p className="mt-3 text-center text-xs leading-5 text-zinc-400">
               Already registered?{" "}
-              <Link href="/login" className="font-semibold text-[#2f6fed]">
+              <Link href={signupPlan.licenseModel === "perpetual" ? `/login?independentPlanId=${encodeURIComponent(signupPlan.id)}` : "/login"} className="font-semibold text-[#2f6fed]">
                 Sign in
               </Link>{" "}
               and choose the package from your owner workspace.

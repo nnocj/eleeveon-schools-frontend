@@ -202,6 +202,10 @@ export default function OwnerSubscriptionPage() {
           if(Number.isSafeInteger(seats)&&seats>0)setCount(seats);
           setStudentCheckoutPlan(selected);
         } else if(selected && mode(selected)==="subscription" && pricing(selected).mode==="fixed" && fixedPrice(selected,(c==="monthly"||c==="termly"||c==="yearly")?c:"termly")>0) setSelectedPlan(selected);
+        else if(selected && mode(selected)==="perpetual" && !privatePlan(selected)) {
+          window.location.replace(`/independent/start?planId=${encodeURIComponent(selected.id)}`);
+          return;
+        }
         else setNotice("This package is not currently available for online checkout.");
         const url=new URL(window.location.href);
         ["planId","checkout","billingCycle","students","source"].forEach(k=>url.searchParams.delete(k));
@@ -436,8 +440,8 @@ export default function OwnerSubscriptionPage() {
   const trialEndingSoon = windowStatus.trial && windowStatus.known && !windowStatus.expired && windowStatus.days !== null && windowStatus.days <= 7;
   const paidOptions = allPlans.filter(canPayForPlan);
   function canPayForPlan(p:Plan) {
-    return mode(p)==="subscription" && !privatePlan(p) &&
-      (pricing(p).mode==="fixed" ? fixedPrice(p,cycle)>0 : STUDENT_CHECKOUT_ENABLED);
+    return !privatePlan(p) && (mode(p)==="perpetual" ||
+      (mode(p)==="subscription" && (pricing(p).mode==="fixed" ? fixedPrice(p,cycle)>0 : STUDENT_CHECKOUT_ENABLED)));
   }
   function jumpToPaidPlans() {
     setSearch("");
@@ -454,7 +458,7 @@ export default function OwnerSubscriptionPage() {
     if(isCurrent && mode(p)==="subscription" && pricing(p).mode!=="fixed")return "Increase student capacity";
     if(isCurrent)return "Current package";
     if(mode(p)==="trial")return "Trial activation coming soon";
-    if(mode(p)==="perpetual")return "Licence checkout coming soon";
+    if(mode(p)==="perpetual")return "Select independent licence";
     if(pricing(p).mode!=="fixed")return STUDENT_CHECKOUT_ENABLED?"Get verified quote":"Student checkout not yet enabled";
     if(mode(p)==="complimentary")return "Managed by Eleeveon";
     return fixedPrice(p,cycle)>0?"Choose payment":"Contact Eleeveon";
@@ -528,7 +532,7 @@ export default function OwnerSubscriptionPage() {
               <small>{q.estimated?`Estimate for ${count.toLocaleString()} students`:mode(p)==="perpetual"?deploy(p):mode(p)==="trial"?"No upfront payment":"Price is configured by the package"}</small>
             </div>
             <ul>{features(p).slice(0,16).map(f=><li key={f}>✓ {f}</li>)}</ul>
-            <button type="button" disabled={disabled} onClick={()=>upgradeAvailable?(setCount(Math.max(count,Number(current?.metadata?.prepaidStudentLimit||0)+1)),setCapacityUpgradePlan(p)):pricing(p).mode==="fixed"?setSelectedPlan(p):openStudentCheckout(p)}>{buttonLabel(p,isCurrent)}</button>
+            <button type="button" disabled={disabled} onClick={()=>upgradeAvailable?(setCount(Math.max(count,Number(current?.metadata?.prepaidStudentLimit||0)+1)),setCapacityUpgradePlan(p)):selectCommercialPlan(p)}>{buttonLabel(p,isCurrent)}</button>
           </article>;
         })}
       </section>

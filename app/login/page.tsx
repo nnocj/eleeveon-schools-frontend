@@ -356,9 +356,18 @@ export default function LoginPage() {
       // Explicit public Independent-plan handoff. Only a selected plan ID is accepted;
       // never accept a caller-supplied return URL or bypass membership authorization.
       const independentPlanId = new URLSearchParams(window.location.search).get("independentPlanId");
-      if (independentPlanId && /^[a-zA-Z0-9_-]{1,80}$/.test(independentPlanId) &&
-          (role === "super_admin" || role === "owner" || memberships.some(m =>
-            ["super_admin", "owner"].includes(String(m.role || "")) && m.active !== false))) {
+      if (
+        independentPlanId &&
+        /^[a-zA-Z0-9_-]{1,80}$/.test(independentPlanId) &&
+        (
+          role === "super_admin" ||
+          memberships.some(
+            (m) =>
+              ["super_admin", "owner"].includes(String(m.role ?? "")) &&
+              m.active !== false
+          )
+        )
+      ) {
         const ownerMembership = memberships.find(m => ["super_admin", "owner"].includes(String(m.role || ""))) ||
           createFallbackMembership({role:"super_admin",user:res.user});
         setStoredActiveMembership(ownerMembership);

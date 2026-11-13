@@ -4,8 +4,9 @@ function requestResult<T>(req: IDBRequest<T>): Promise<T> { return new Promise((
 function transactionFinished(tx: IDBTransaction): Promise<void> { return new Promise((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = () => reject(tx.error || new Error("IndexedDB snapshot aborted")); tx.onerror = () => reject(tx.error || new Error("IndexedDB snapshot failed")); }); }
 
 /** Reads all stores from ONE readonly IndexedDB transaction, then serializes after transaction close. */
-export async function captureSchoolDatabase(databaseName: string): Promise<SchoolArchive> {
-  if (!databaseName || !indexedDB) throw new Error("A local IndexedDB database is required");
+export async function captureSchoolDatabase(databaseName: string, accountId?: string): Promise<SchoolArchive> {
+  if (accountId !== undefined && (!/^[\w.:-]{1,160}$/.test(accountId))) throw new Error("Invalid verified account identity");
+  if (!databaseName || typeof indexedDB === "undefined") throw new Error("A local IndexedDB database is required");
   if (typeof indexedDB.databases === "function") {
     const known = await indexedDB.databases();
     if (!known.some(db => db.name === databaseName)) throw new Error("Local school database does not exist");
@@ -36,7 +37,7 @@ export async function captureSchoolDatabase(databaseName: string): Promise<Schoo
       for (let i = 0; i < table.keys.length; i++) rows.push({ key: await encodeIDB(table.keys[i]), value: await encodeIDB(table.values[i]) });
       tables.push({ name: table.name, keyPath: table.keyPath, autoIncrement: table.autoIncrement, rows });
     }
-    return { format: "eleeveon-independent-snapshot", version: 1, createdAt: new Date().toISOString(), database: databaseName, indexedDBVersion: db.version, tables,
+    return { format: "eleeveon-independent-snapshot", version: 1, createdAt: new Date().toISOString(), database: databaseName, accountId, indexedDBVersion: db.version, tables,
       notes: ["Full local IndexedDB store snapshot including mediaBlobs if stored in IndexedDB", "Does not include external native files or uploaded server-only media", "Restore requires separate validated restore workflow"] };
   } finally { db.close(); }
 }

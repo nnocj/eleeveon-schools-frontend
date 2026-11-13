@@ -1,12 +1,16 @@
 import { encryptSchoolArchive, type EncryptedArchive } from "./archive";
 import { captureSchoolDatabase } from "./databaseSnapshot";
+import { inspectEncryptedBackup, validateSnapshot } from "./backupVerification";
 
-type DirectoryHandle = { getFileHandle(name: string, options: { create: true }): Promise<{ createWritable(): Promise<{ write(data: string): Promise<void>; close(): Promise<void>; abort(): Promise<void> }> }> };
-export type BackupResult = { filename: string; tables: number; records: number; createdAt: string; bytes: number };
+type Writable = { write(data: string): Promise<void>; close(): Promise<void>; abort(): Promise<void> };
+type FileHandle = { createWritable(): Promise<Writable>; getFile(): Promise<{ text(): Promise<string> }> };
+type DirectoryHandle = { getFileHandle(name: string, options?: { create: true }): Promise<FileHandle> };
+export type BackupResult = { filename: string; tables: number; records: number; createdAt: string; bytes: number; verified: true };
 
-/** User-selected local/Google Drive Desktop folder. The browser never receives Google credentials. */
-export async function backupIndependentToFolder(options: { databaseName: string; passphrase: string; folder: DirectoryHandle }): Promise<BackupResult> {
-  const snapshot = await captureSchoolDatabase(options.databaseName);
+/** Read, encrypt, save, reopen and decrypt the actual saved bytes before claiming success. */
+export async function backupIndependentToFolder(options: { databaseName: string; accountId: string; passphrase: string; folder: DirectoryHandle }): Promise<BackupResult> {
+  const snapshot = await captureSchoolDatabase(options.databaseName, options.accountId);
+  const expected = validateSnapshot(snapshot, options.databaseName);
   const encrypted: EncryptedArchive = await encryptSchoolArchive(snapshot, options.passphrase);
   const content = JSON.stringify(encrypted);
   const timestamp = snapshot.createdAt.replace(/[:.]/g, "-");
@@ -15,10 +19,20 @@ export async function backupIndependentToFolder(options: { databaseName: string;
   const writable = await handle.createWritable();
   try { await writable.write(content); await writable.close(); }
   catch (error) { try { await writable.abort(); } catch {} throw error; }
-  return { filename, tables: snapshot.tables.length, records: snapshot.tables.reduce((n, table) => n + table.rows.length, 0), createdAt: snapshot.createdAt, bytes: new Blob([content]).size };
+  // Never report success merely because the write promise completed.
+  const savedText = await (await (await options.folder.getFileHandle(filename)).getFile()).text();
+  if (savedText !== content) throw new Error("Written backup did not match the encrypted source. Backup is NOT verified.");
+  const actual = await inspectEncryptedBackup(savedText, options.passphrase, options.databaseName);
+  if (actual.records !== expected.records || actual.tables !== expected.tables || actual.createdAt !== expected.createdAt) throw new Error("Backup verification failed: snapshot metadata differs");
+  return { filename, ...actual, bytes: new Blob([savedText]).size, verified: true };
 }
+
 export async function chooseBackupFolder(): Promise<DirectoryHandle> {
   const picker = (globalThis as typeof globalThis & { showDirectoryPicker?: (opts?: { mode: "readwrite" }) => Promise<DirectoryHandle> }).showDirectoryPicker;
-  if (!picker) throw new Error("Folder selection is unavailable in this browser/native shell. Use a supported desktop browser until the native filesystem adapter is installed.");
+  if (!picker) throw new Error("Folder selection is not available in this runtime. A native filesystem adapter is required for this device.");
   return picker({ mode: "readwrite" });
+}
+
+export async function inspectBackupFile(file: { text(): Promise<string> }, passphrase: string, databaseName: string) {
+  return inspectEncryptedBackup(await file.text(), passphrase, databaseName);
 }

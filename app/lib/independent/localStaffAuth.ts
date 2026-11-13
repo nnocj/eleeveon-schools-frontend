@@ -57,11 +57,29 @@ export async function provisionFirstLocalOwner(args:{accountId:string;displayNam
   if(!args.licenseVerified) throw new Error('Verified offline license required');
   if(!args.accountId || !args.displayName.trim()) throw new Error('Missing account or staff name');
   if(!validPassword(args.password)) throw new Error('Use a password between 12 and 256 characters');
-  if(await isLocalOwnerProvisioned(args.accountId)) throw new Error('Local owner already provisioned');
   const salt=crypto.getRandomValues(new Uint8Array(24));
-  const user:StaffRecord={id:crypto.randomUUID(),accountId:args.accountId,displayName:args.displayName.trim(),role:'owner',active:true,salt:[...salt],verifier:[...await derive(args.password,salt)],iterations:ITERATIONS,failed:0,lockedUntil:0,createdAt:Date.now()};
-  // Not safe for concurrent first-owner provisioning without a native process lock.
-  await write(user);return publicStaff(user);
+  // Stable ID plus an atomic readwrite transaction prevents concurrent first-owner
+  // registrations from granting two owner credentials for the same account.
+  const user:StaffRecord={id:`owner:${args.accountId}`,accountId:args.accountId,displayName:args.displayName.trim(),role:'owner',active:true,salt:[...salt],verifier:[...await derive(args.password,salt)],iterations:ITERATIONS,failed:0,lockedUntil:0,createdAt:Date.now()};
+  const db=await openDb();
+  try {
+    await new Promise<void>((resolve,reject)=>{
+      const tx=db.transaction(STORE,'readwrite');
+      const store=tx.objectStore(STORE);
+      const existing=store.getAll();
+      existing.onsuccess=()=>{
+        if ((existing.result as StaffRecord[]).some(r=>r.accountId===args.accountId && r.role==='owner')) {
+          tx.abort(); return;
+        }
+        store.add(user);
+      };
+      existing.onerror=()=>{tx.abort();};
+      tx.oncomplete=()=>resolve();
+      tx.onerror=()=>reject(tx.error ?? new Error('Local owner provisioning failed'));
+      tx.onabort=()=>reject(new Error('Local owner already provisioned or registration was interrupted'));
+    });
+  } finally {db.close();}
+  return publicStaff(user);
 }
 export async function listLocalStaff(accountId:string):Promise<LocalStaffPublic[]> {
   return (await readAll()).filter(u=>u.accountId===accountId).map(publicStaff);

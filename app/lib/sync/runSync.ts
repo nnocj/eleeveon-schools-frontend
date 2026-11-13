@@ -18,6 +18,8 @@
  */
 
 import { pullSync } from "./pullSync";
+import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
+import { persistIndependentDatabase } from "../independent/persistIndependentDatabase";
 import { pushSync } from "./pushSync";
 
 import {
@@ -312,6 +314,20 @@ async function executeSync(job: SyncJob): Promise<RunOutcome> {
       value: report({ ok: false, startedAt, errors: ["Account changed before queued sync began."] }),
       yielded: false,
     };
+  }
+  // Independent has NO cloud transport. The same Dexie CRUD remains intact;
+  // a sync request commits a verified, encrypted native snapshot instead.
+  if (IS_INDEPENDENT_RUNTIME) {
+    try {
+      const stored = await persistIndependentDatabase(accountId);
+      setLastSyncError(null);
+      setLastSyncOkAt(Date.now());
+      return { value: report({ ok: true, startedAt, errors: [], pushed: 0, pulled: 0 }), yielded: false };
+    } catch (error) {
+      const message = `Independent local persistence failed: ${error instanceof Error ? error.message : String(error)}`;
+      setLastSyncError(message);
+      return { value: report({ ok: false, startedAt, errors: [message] }), yielded: false };
+    }
   }
   if (!registryAudited) {
     assertSyncRegistryMatchesDatabase();

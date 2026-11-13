@@ -42,6 +42,9 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig = {
+  // Only the Independent native desktop build uses a bundled Node server.
+  // Cloud builds retain their existing deployment mode.
+  ...(process.env.ELEEVEON_INDEPENDENT_DESKTOP_BUILD === "1" ? { output: "standalone" as const } : {}),
   reactStrictMode: true,
   env: {
     NEXT_PUBLIC_ELEEVEON_BUILD_ID:

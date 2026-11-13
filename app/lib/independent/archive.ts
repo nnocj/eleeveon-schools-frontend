@@ -6,6 +6,8 @@ export type SchoolArchive = {
   version: 1;
   createdAt: string;
   database: string;
+  /** The verified license account; old backups without this remain inspect-only. */
+  accountId?: string;
   indexedDBVersion: number;
   tables: TableArchive[];
   notes: string[];

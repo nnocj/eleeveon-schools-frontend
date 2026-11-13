@@ -1,0 +1,782 @@
+{
+  "generatedAt": "2026-11-13T00:44:21.830Z",
+  "sourceRoot": "app",
+  "purpose": "Locate network and startup dependencies before Independent release",
+  "warning": "Text matches are review candidates, not proof that a request executes at runtime. No files changed.",
+  "counts": {
+    "Cloud API identifier": 36,
+    "Remote request": 77,
+    "Sync bootstrap": 13,
+    "Realtime transport": 2
+  },
+  "matches": [
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 2,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../../lib/platformApi\";"
+    },
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 29,
+      "category": "Remote request",
+      "snippet": "apiRequest<IdentityPolicy>(`/identity/policy?schoolId=${encode(schoolId)}&branchId=${encode(branchId)}`),"
+    },
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 31,
+      "category": "Remote request",
+      "snippet": "apiRequest<IdentityPolicy>(\"/identity/policy\", {method:\"POST\",body:JSON.stringify(data)}),"
+    },
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 33,
+      "category": "Remote request",
+      "snippet": "apiRequest<IdentityCardResult>(`/identity/card?subjectType=${encode(p.subjectType)}&subjectId=${encode(p.subjectId)}&schoolId=${encode(p.schoolId)}&branchId=${encode(p.br"
+    },
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 35,
+      "category": "Remote request",
+      "snippet": "apiRequest<IdentityCardResult>(\"/identity/card/issue\",{method:\"POST\",body:JSON.stringify({...p, replace})}),"
+    },
+    {
+      "file": "app/branch-admin/modules/identity/identityApi.ts",
+      "line": 37,
+      "category": "Remote request",
+      "snippet": "apiRequest<{status:\"revoked\"}>(\"/identity/card/revoke\",{method:\"POST\",body:JSON.stringify(p)}),"
+    },
+    {
+      "file": "app/branch-admin/modules/Teachers.tsx",
+      "line": 59,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/branch-admin/modules/Teachers.tsx",
+      "line": 455,
+      "category": "Remote request",
+      "snippet": "remote = await apiRequest<any>("
+    },
+    {
+      "file": "app/branch-admin/modules/Teachers.tsx",
+      "line": 1535,
+      "category": "Remote request",
+      "snippet": "await apiRequest("
+    },
+    {
+      "file": "app/branch-admin/modules/Usersroles.tsx",
+      "line": 29,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/branch-admin/modules/Usersroles.tsx",
+      "line": 419,
+      "category": "Remote request",
+      "snippet": "return await apiRequest<T>(endpoint, {"
+    },
+    {
+      "file": "app/branch-admin/modules/WithdrawMoney.tsx",
+      "line": 43,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/branch-admin/modules/WithdrawMoney.tsx",
+      "line": 531,
+      "category": "Remote request",
+      "snippet": "const result: any = await apiRequest(\"/finance/withdrawals/initiate\", {"
+    },
+    {
+      "file": "app/components/maps/inputs/LocationPicker.tsx",
+      "line": 171,
+      "category": "Remote request",
+      "snippet": "const response = await fetch("
+    },
+    {
+      "file": "app/components/payments/payment-utils.ts",
+      "line": 9,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/components/payments/PaymentCheckout.tsx",
+      "line": 224,
+      "category": "Remote request",
+      "snippet": "res = await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(props.quoteId)}/pay`, {"
+    },
+    {
+      "file": "app/components/payments/PaymentCheckout.tsx",
+      "line": 241,
+      "category": "Remote request",
+      "snippet": "res = await fetch(`${apiBase}/finance/student-fees/payments/initiate`, {"
+    },
+    {
+      "file": "app/components/payments/PaymentCheckout.tsx",
+      "line": 265,
+      "category": "Remote request",
+      "snippet": "res = await fetch(`${apiBase}/billing/subscribe`, {"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 7,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 65,
+      "category": "Remote request",
+      "snippet": "apiRequest<ProfilePayload>(\"/accounts/me/profile\")"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 114,
+      "category": "Remote request",
+      "snippet": "const response = await apiRequest<ProfilePayload>(\"/accounts/me/profile\", {"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 135,
+      "category": "Remote request",
+      "snippet": "const result = await apiRequest<ProfilePayload>(\"/accounts/me/profile\", { method: \"PATCH\", body: JSON.stringify({ fullName: form.fullName.trim(), phone: form.phone.trim()"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 150,
+      "category": "Remote request",
+      "snippet": "const response = await apiRequest<ProfilePayload>(\"/accounts/me/email\", { method: \"PATCH\", body: JSON.stringify({ newEmail: email.newEmail.trim().toLowerCase(), currentPa"
+    },
+    {
+      "file": "app/components/profile/WorkspaceAppUserProfile.tsx",
+      "line": 164,
+      "category": "Remote request",
+      "snippet": "await apiRequest(\"/accounts/me/password\", { method: \"PATCH\", body: JSON.stringify({ currentPassword: password.currentPassword, newPassword: password.newPassword }) } as a"
+    },
+    {
+      "file": "app/components/role-portals/CrudToolkit.tsx",
+      "line": 16,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiCreate, apiDelete, apiList, apiUpdate } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/components/role-portals/EleeveonSupportChat.tsx",
+      "line": 1184,
+      "category": "Remote request",
+      "snippet": "const upload=await fetch(reserved.signedUrl,{method:\"PUT\",headers:{\"Content-Type\":\"application/octet-stream\"},body:safeFile});"
+    },
+    {
+      "file": "app/components/subscription/SubscriptionBootstrap.tsx",
+      "line": 7,
+      "category": "Sync bootstrap",
+      "snippet": "export function SubscriptionBootstrap({"
+    },
+    {
+      "file": "app/components/SyncBootstrap.tsx",
+      "line": 55,
+      "category": "Sync bootstrap",
+      "snippet": "export default function SyncBootstrap() {"
+    },
+    {
+      "file": "app/context/realtime-context.tsx",
+      "line": 97,
+      "category": "Sync bootstrap",
+      "snippet": "export function RealtimeProvider({"
+    },
+    {
+      "file": "app/context/realtime-context.tsx",
+      "line": 252,
+      "category": "Sync bootstrap",
+      "snippet": "\"useRealtime must be used inside RealtimeProvider.\","
+    },
+    {
+      "file": "app/independent/start/page.tsx",
+      "line": 4,
+      "category": "Cloud API identifier",
+      "snippet": "import { API_BASE_URL } from '../../lib/platformApi';"
+    },
+    {
+      "file": "app/independent/start/page.tsx",
+      "line": 10,
+      "category": "Remote request",
+      "snippet": "useEffect(()=>{const abort=new AbortController();(async()=>{try{const r=await fetch(`${API_BASE_URL.replace(/\\/$/,'')}/billing/plans`,{signal:abort.signal,cache:'no-store"
+    },
+    {
+      "file": "app/independent/start/page.tsx",
+      "line": 10,
+      "category": "Cloud API identifier",
+      "snippet": "useEffect(()=>{const abort=new AbortController();(async()=>{try{const r=await fetch(`${API_BASE_URL.replace(/\\/$/,'')}/billing/plans`,{signal:abort.signal,cache:'no-store"
+    },
+    {
+      "file": "app/lib/api/apiClient.ts",
+      "line": 1,
+      "category": "Cloud API identifier",
+      "snippet": "const API_BASE_URL = ("
+    },
+    {
+      "file": "app/lib/api/apiClient.ts",
+      "line": 3,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/lib/api/apiClient.ts",
+      "line": 43,
+      "category": "Cloud API identifier",
+      "snippet": "return `${API_BASE_URL}${"
+    },
+    {
+      "file": "app/lib/api/apiClient.ts",
+      "line": 128,
+      "category": "Cloud API identifier",
+      "snippet": "return API_BASE_URL;"
+    },
+    {
+      "file": "app/lib/api/apiClient.ts",
+      "line": 242,
+      "category": "Remote request",
+      "snippet": "response = await fetch(url, {"
+    },
+    {
+      "file": "app/lib/media/mediaUpload.ts",
+      "line": 734,
+      "category": "Remote request",
+      "snippet": "await fetch("
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 9,
+      "category": "Cloud API identifier",
+      "snippet": "export const API_BASE_URL ="
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 10,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 39,
+      "category": "Remote request",
+      "snippet": "export async function apiRequest<T = any>("
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 44,
+      "category": "Cloud API identifier",
+      "snippet": "const url = `${API_BASE_URL}${path.startsWith(\"/\") ? path : `/${path}`}`;"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 55,
+      "category": "Remote request",
+      "snippet": "const response = await fetch(url, {"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 81,
+      "category": "Remote request",
+      "snippet": "return apiRequest<T[]>(path);"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 85,
+      "category": "Remote request",
+      "snippet": "return apiRequest<T>(path, {"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 92,
+      "category": "Remote request",
+      "snippet": "return apiRequest<T>(path, {"
+    },
+    {
+      "file": "app/lib/platformApi.ts",
+      "line": 99,
+      "category": "Remote request",
+      "snippet": "return apiRequest<T>(path, { method: \"DELETE\" });"
+    },
+    {
+      "file": "app/lib/pwa/appVersion.ts",
+      "line": 114,
+      "category": "Remote request",
+      "snippet": "const response = await fetch("
+    },
+    {
+      "file": "app/lib/realtime/realtimeClient.ts",
+      "line": 191,
+      "category": "Cloud API identifier",
+      "snippet": ".NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/lib/realtime/realtimeClient.ts",
+      "line": 605,
+      "category": "Realtime transport",
+      "snippet": "socket = io("
+    },
+    {
+      "file": "app/lib/realtime/realtimeClient.ts",
+      "line": 677,
+      "category": "Realtime transport",
+      "snippet": "socket.emit("
+    },
+    {
+      "file": "app/lib/subscription/subscriptionApi.ts",
+      "line": 3,
+      "category": "Cloud API identifier",
+      "snippet": "const API_BASE=process.env.NEXT_PUBLIC_API_URL?.replace(/\\/+$/,'')??'';"
+    },
+    {
+      "file": "app/lib/subscription/subscriptionApi.ts",
+      "line": 10,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${API_BASE}${path}`,{method,headers:{Accept:'application/json','Content-Type':'application/json',...(auth?{Authorization:`Bearer ${auth}`}:{})"
+    },
+    {
+      "file": "app/lib/support/supportApi.ts",
+      "line": 14,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${base}${path}`,{...init,headers:{Authorization:`Bearer ${token}`,...(!(init.body instanceof FormData)?{\"Content-Type\":\"application/json\"}:{})"
+    },
+    {
+      "file": "app/lib/support/supportCrypto.ts",
+      "line": 205,
+      "category": "Remote request",
+      "snippet": "try { response = await fetch(url, { cache: \"no-store\" }); }"
+    },
+    {
+      "file": "app/lib/support/useHubAppearance.ts",
+      "line": 19,
+      "category": "Remote request",
+      "snippet": "const response=await fetch('/api/hub/backgrounds',{cache:'no-store'});"
+    },
+    {
+      "file": "app/lib/sync/syncConfig.ts",
+      "line": 245,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/lib/sync/syncHttp.ts",
+      "line": 20,
+      "category": "Remote request",
+      "snippet": "const response = await fetch(url, {"
+    },
+    {
+      "file": "app/login/page.tsx",
+      "line": 28,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest, extractToken, saveAuthToken } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/login/page.tsx",
+      "line": 330,
+      "category": "Remote request",
+      "snippet": "const res = await apiRequest<LoginResponse>(\"/auth/login\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 28,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest, saveAuthToken } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 608,
+      "category": "Remote request",
+      "snippet": "apiRequest<AccountData>(\"/accounts/me\"),"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 609,
+      "category": "Remote request",
+      "snippet": "apiRequest<MyProfileResponse>(\"/accounts/me/profile\"),"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 610,
+      "category": "Remote request",
+      "snippet": "apiRequest<any>(\"/accounts/me/settings\"),"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 979,
+      "category": "Remote request",
+      "snippet": "const result = await apiRequest<MyProfileResponse>(\"/accounts/me/profile\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1032,
+      "category": "Remote request",
+      "snippet": "const updated = await apiRequest<AccountData>(\"/accounts/me\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1093,
+      "category": "Remote request",
+      "snippet": "const updatedAccount = await apiRequest<AccountData>(\"/accounts/me\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1103,
+      "category": "Remote request",
+      "snippet": "await apiRequest<any>(\"/accounts/me/settings\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1130,
+      "category": "Remote request",
+      "snippet": "await apiRequest<any>(\"/accounts/me/settings\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1155,
+      "category": "Remote request",
+      "snippet": "await apiRequest<any>(\"/accounts/me/settings\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1203,
+      "category": "Remote request",
+      "snippet": "const result = await apiRequest<MyProfileResponse>(\"/accounts/me/email\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1268,
+      "category": "Remote request",
+      "snippet": "await apiRequest<any>(\"/accounts/me/ownership/transfer\", {"
+    },
+    {
+      "file": "app/owner/AccountProfile.tsx",
+      "line": 1312,
+      "category": "Remote request",
+      "snippet": "const result = await apiRequest<any>(\"/accounts/me/password\", {"
+    },
+    {
+      "file": "app/owner/billing.tsx",
+      "line": 40,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/billing.tsx",
+      "line": 271,
+      "category": "Remote request",
+      "snippet": "const response = await apiRequest<unknown>(\"/billing/plans\");"
+    },
+    {
+      "file": "app/owner/billing.tsx",
+      "line": 279,
+      "category": "Remote request",
+      "snippet": "const remote = await apiRequest<AccountData>(\"/accounts/me\");"
+    },
+    {
+      "file": "app/owner/invoices.tsx",
+      "line": 39,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/invoices.tsx",
+      "line": 224,
+      "category": "Remote request",
+      "snippet": "const remote = await apiRequest<any>(\"/billing/invoices\");"
+    },
+    {
+      "file": "app/owner/invoices.tsx",
+      "line": 362,
+      "category": "Remote request",
+      "snippet": "? await apiRequest<any>(`/billing/invoices/${encodeURIComponent(form.id)}`, {"
+    },
+    {
+      "file": "app/owner/invoices.tsx",
+      "line": 366,
+      "category": "Remote request",
+      "snippet": ": await apiRequest<any>(\"/billing/invoices\", {"
+    },
+    {
+      "file": "app/owner/Messages.tsx",
+      "line": 43,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/Messages.tsx",
+      "line": 234,
+      "category": "Remote request",
+      "snippet": "const payload = await apiRequest(path);"
+    },
+    {
+      "file": "app/owner/OwnerUsers.tsx",
+      "line": 43,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/OwnerUsers.tsx",
+      "line": 392,
+      "category": "Remote request",
+      "snippet": "return await apiRequest<T>(endpoint, {"
+    },
+    {
+      "file": "app/owner/payments.tsx",
+      "line": 40,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/payments.tsx",
+      "line": 278,
+      "category": "Remote request",
+      "snippet": "const remote = await apiRequest<any>(\"/billing/payments\");"
+    },
+    {
+      "file": "app/owner/payments.tsx",
+      "line": 423,
+      "category": "Remote request",
+      "snippet": "const response = await apiRequest<any>("
+    },
+    {
+      "file": "app/owner/subscription.tsx",
+      "line": 140,
+      "category": "Remote request",
+      "snippet": "fetch(`${apiBase}/billing/plans`,{headers:authHeaders()}),"
+    },
+    {
+      "file": "app/owner/subscription.tsx",
+      "line": 141,
+      "category": "Remote request",
+      "snippet": "fetch(`${apiBase}/billing/my-subscription`,{headers:authHeaders()})"
+    },
+    {
+      "file": "app/owner/subscription.tsx",
+      "line": 169,
+      "category": "Remote request",
+      "snippet": "const res=await fetch(`${apiBase}/billing/payments/verify/${encodeURIComponent(reference)}?provider=paystack`,{headers:authHeaders()});"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 184,
+      "category": "Remote request",
+      "snippet": "fetch(`${apiBase}/billing/plans`,{headers:authHeaders()}),"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 185,
+      "category": "Remote request",
+      "snippet": "fetch(`${apiBase}/billing/my-subscription`,{headers:authHeaders()})"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 214,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${apiBase}${path}`, {"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 290,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/cancel`, {"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 361,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/reconcile`,{"
+    },
+    {
+      "file": "app/owner/subscriptions.tsx",
+      "line": 406,
+      "category": "Remote request",
+      "snippet": "const res=await fetch(`${apiBase}/billing/payments/verify/${encodeURIComponent(reference)}?provider=paystack`,{headers:authHeaders()});"
+    },
+    {
+      "file": "app/owner/syncBackup.tsx",
+      "line": 25,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/owner/syncBackup.tsx",
+      "line": 544,
+      "category": "Remote request",
+      "snippet": "await apiRequest<any>(\"/sync/push\", { method: \"POST\", body: JSON.stringify({ accountId }) } as any);"
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 9,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest, extractToken, saveAuthToken } from \"./lib/platformApi\";"
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 98,
+      "category": "Cloud API identifier",
+      "snippet": "const API_BASE_URL = ("
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 100,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 542,
+      "category": "Remote request",
+      "snippet": "const response = await fetch(`${API_BASE_URL}/billing/plans`, {"
+    },
+    {
+      "file": "app/page.tsx",
+      "line": 542,
+      "category": "Cloud API identifier",
+      "snippet": "const response = await fetch(`${API_BASE_URL}/billing/plans`, {"
+    },
+    {
+      "file": "app/payment/confirmation/page.tsx",
+      "line": 29,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/recover`,{headers:authHeaders()});"
+    },
+    {
+      "file": "app/payment/confirmation/page.tsx",
+      "line": 37,
+      "category": "Remote request",
+      "snippet": "const settle=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/reconcile`,{method:\"POST\",headers:authHeaders()});"
+    },
+    {
+      "file": "app/payment/confirmation/page.tsx",
+      "line": 49,
+      "category": "Remote request",
+      "snippet": "const response=await fetch(`${apiBase}/billing/payments/verify/${encodeURIComponent(reference)}?provider=paystack`,{headers:authHeaders()});"
+    },
+    {
+      "file": "app/payment/confirmation/page.tsx",
+      "line": 54,
+      "category": "Remote request",
+      "snippet": "const statusResponse=await fetch(`${apiBase}/billing/subscription-quotes/${encodeURIComponent(quoteId)}/recover`,{headers:authHeaders()});"
+    },
+    {
+      "file": "app/platform-team/components/PlatformTeamKit.tsx",
+      "line": 238,
+      "category": "Remote request",
+      "snippet": "else response = await fetch(url).then((r) => r.json());"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 11,
+      "category": "Sync bootstrap",
+      "snippet": "import SyncBootstrap from \"./components/SyncBootstrap\";"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 16,
+      "category": "Sync bootstrap",
+      "snippet": "SubscriptionBootstrap,"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 17,
+      "category": "Sync bootstrap",
+      "snippet": "} from \"./components/subscription/SubscriptionBootstrap\";"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 34,
+      "category": "Sync bootstrap",
+      "snippet": "RealtimeProvider,"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 88,
+      "category": "Sync bootstrap",
+      "snippet": "<SubscriptionBootstrap"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 93,
+      "category": "Sync bootstrap",
+      "snippet": "</SubscriptionBootstrap>"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 108,
+      "category": "Sync bootstrap",
+      "snippet": "<SyncBootstrap />"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 132,
+      "category": "Sync bootstrap",
+      "snippet": "<RealtimeProvider>"
+    },
+    {
+      "file": "app/providers.tsx",
+      "line": 139,
+      "category": "Sync bootstrap",
+      "snippet": "</RealtimeProvider>"
+    },
+    {
+      "file": "app/register/page.tsx",
+      "line": 13,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest, extractToken, saveAuthToken } from \"../lib/platformApi\";"
+    },
+    {
+      "file": "app/school-admin/modules/SchoolPayrollOverview.tsx",
+      "line": 954,
+      "category": "Remote request",
+      "snippet": "const res = await fetch("
+    },
+    {
+      "file": "app/school-admin/modules/SchoolPayrollOverview.tsx",
+      "line": 1078,
+      "category": "Remote request",
+      "snippet": "const res = await fetch(`${apiBase}/payroll/staff-payments/confirm`, {"
+    },
+    {
+      "file": "app/school-admin/modules/Schoolusers.tsx",
+      "line": 45,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/school-admin/modules/Schoolusers.tsx",
+      "line": 379,
+      "category": "Remote request",
+      "snippet": "return await apiRequest<T>(endpoint, {"
+    },
+    {
+      "file": "app/student/modules/StudentPayments.tsx",
+      "line": 46,
+      "category": "Cloud API identifier",
+      "snippet": "import { apiRequest } from \"../../lib/platformApi\";"
+    },
+    {
+      "file": "app/student/modules/StudentPayments.tsx",
+      "line": 337,
+      "category": "Remote request",
+      "snippet": "await apiRequest(`/finance/student-fees/payments/verify/${encodeURIComponent(reference)}${suffix}`);"
+    },
+    {
+      "file": "app/verify/[token]/page.tsx",
+      "line": 32,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.API_BASE_URL ||"
+    },
+    {
+      "file": "app/verify/[token]/page.tsx",
+      "line": 34,
+      "category": "Cloud API identifier",
+      "snippet": "process.env.NEXT_PUBLIC_API_URL ||"
+    },
+    {
+      "file": "app/verify/[token]/page.tsx",
+      "line": 46,
+      "category": "Remote request",
+      "snippet": "const response = await fetch(url, {"
+    }
+  ]
+}

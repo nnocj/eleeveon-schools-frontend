@@ -5,6 +5,7 @@
  */
 
 import { getApiBaseUrl, getAuthToken } from "./syncConfig";
+import { IS_INDEPENDENT_RUNTIME } from "../independent/runtimeMode";
 
 type SyncHttpOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -13,6 +14,7 @@ type SyncHttpOptions = {
 };
 
 export async function syncHttp<T>(endpoint: string, options: SyncHttpOptions = {}): Promise<T> {
+  if (IS_INDEPENDENT_RUNTIME) throw new Error(`Cloud sync endpoint ${endpoint} is prohibited in Independent mode`);
   const baseUrl = getApiBaseUrl();
   const token = getAuthToken();
   const url = `${baseUrl}${endpoint}`;

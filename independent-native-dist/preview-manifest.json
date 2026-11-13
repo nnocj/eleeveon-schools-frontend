@@ -1,0 +1,10 @@
+{
+  "kind": "eleeveon-independent-native-preview",
+  "releaseReady": false,
+  "generatedAt": "2026-11-12T21:52:52.006Z",
+  "files": {
+    "index.html": "b2bad5dea3f42942c2db3c5492e598764dc9f17322c9b4d14902d80c768af69c",
+    "app.css": "085f423c8c09ea90cbd78b22fc20380d038f031dd892832d7ec6fc8e7000a7e9",
+    "app.js": "aa75ff571d3e371fb59fbc90ac9fe51d0a30bd4e73dea8d35059ff8873bc90f0"
+  }
+}

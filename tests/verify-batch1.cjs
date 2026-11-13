@@ -1,0 +1,8 @@
+const fs=require('node:fs');const ts=require('/opt/nvm/versions/node/v22.16.0/lib/node_modules/typescript');const path=require('node:path');
+const root=path.join(__dirname,'work');
+const files=['app/lib/independent/localStaffAuth.ts','app/components/independent/IndependentFirstOwnerSetup.tsx','app/components/independent/IndependentRuntimeShell.tsx'];
+let bad=0;
+for(const file of files){const code=fs.readFileSync(path.join(root,file),'utf8');const result=ts.transpileModule(code,{fileName:file,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext,jsx:ts.JsxEmit.ReactJSX},reportDiagnostics:true});const errors=(result.diagnostics||[]).filter(d=>d.category===ts.DiagnosticCategory.Error);console.log(file,errors.length?'FAIL':'syntax passed');if(errors.length){bad++;for(const e of errors)console.error(ts.flattenDiagnosticMessageText(e.messageText,'\n'));}}
+const auth=fs.readFileSync(path.join(root,files[0]),'utf8');const shell=fs.readFileSync(path.join(root,files[2]),'utf8');
+const checks=[['atomic owner transaction',auth.includes("db.transaction(STORE,'readwrite')")&&auth.includes('store.add(user)')&&auth.includes('tx.abort()')],['license before provisioning',shell.indexOf('verifyOfflineLicense(')<shell.indexOf('isLocalOwnerProvisioned(')],['provision only after license',shell.includes('installationVerified={true}')&&shell.includes('state.license.accountId')],['cloud providers untouched',fs.readFileSync(path.join(root,'app/providers.tsx'),'utf8').includes('<CloudProviders>{children}</CloudProviders>')]];
+for(const [name,ok] of checks){console.log(name,ok?'passed':'FAILED');if(!ok)bad++;}if(bad)process.exit(1);

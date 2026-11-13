@@ -8,6 +8,8 @@ export interface IndependentNativeBridge {
   loadOfflineLicense(): Promise<OfflineLicenseEnvelope | null>; // signed envelope, no issuer private key
   loadPinnedIssuerPublicKeys(): Promise<Record<string, string>>; // bundled trusted public key list
   getLicensedAccountId(): Promise<string>; // provisioned via owner-controlled installation process
+  storeEncryptedDatabaseSnapshot?(input: {accountId:string;database:string;snapshot:string}): Promise<{saved:boolean;sha256:string;bytes:number;accountId:string;database:string}>;
+  loadEncryptedDatabaseSnapshot?(options: {previous:boolean}): Promise<{accountId:string;database:string;sha256:string;bytes:number;previous:boolean;createdAt:string;indexedDBVersion:number;stores:number;records:number}>;
 }
 export function getIndependentNativeBridge(): IndependentNativeBridge | null {
   if (typeof window === 'undefined') return null;

@@ -466,6 +466,31 @@ export default function OwnerSubscriptionPage() {
   function canCheckout(p:Plan) {
     return canPayForPlan(p);
   }
+
+  // Route each commercial product through its supported purchase workflow.
+  // Do not activate a plan here: the backend must verify payment first.
+  function selectCommercialPlan(p: Plan) {
+    if (!canCheckout(p)) {
+      setNotice("This package is not currently available for online checkout.");
+      return;
+    }
+
+    setError("");
+    setNotice("");
+
+    if (mode(p) === "perpetual") {
+      window.location.assign(`/independent/start?planId=${encodeURIComponent(p.id)}`);
+      return;
+    }
+
+    if (mode(p) === "subscription") {
+      if (pricing(p).mode !== "fixed") {
+        openStudentCheckout(p);
+      } else {
+        setSelectedPlan(p);
+      }
+    }
+  }
   return (
     <main className="ba-page subscription-page">
       <style>{css}</style>

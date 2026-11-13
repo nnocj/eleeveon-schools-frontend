@@ -22,10 +22,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useAccount } from "../context/account-context";
-import { useSettings } from "../context/settings-context";
-import { db } from "../lib/db/db";
-import { apiRequest, saveAuthToken } from "../lib/platformApi";
+import { useAccount } from "../../context/account-context";
+import { useSettings } from "../../context/settings-context";
+import { db } from "../../lib/db/db";
+import { apiRequest, saveAuthToken } from "../../lib/platformApi";
 import {
   MediaFieldKeys,
   attachCameraStreamToVideo,
@@ -41,7 +41,7 @@ import {
   saveImageAsset,
   stopCameraStream,
   type CameraFacingMode,
-} from "../lib/media/mediaAssetUtils";
+} from "../../lib/media/mediaAssetUtils";
 
 type ToastTone = "success" | "error" | "info";
 type Tone = "green" | "red" | "blue" | "gray" | "orange" | "purple";
